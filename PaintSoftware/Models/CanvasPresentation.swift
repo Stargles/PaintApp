@@ -38,9 +38,16 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
 
     // MARK: - The timeline
 
-    /// The one popover behind `AnimationTimeline.timelineMenu`, whichever of its three cases
+    /// The one menu behind `AnimationTimeline.timelineMenu`, whichever of its three cases
     /// (block / gap / loop) is showing. **This is the presentation the owner's original freeze report
     /// was about**, and the one 8ae8613 fixed by hand.
+    ///
+    /// **This and the three below are `AnchoredMenu`s rather than `.popover`s as of 2026-09-06 —
+    /// TODO (39).** A `.popover` presents behind a screen-covering
+    /// `_UIPassthroughGateGestureRecognizer` that swallowed every drag on the timeline whole: the
+    /// track did not scroll, the ruler did not scrub, and the popover did not dismiss. They are still
+    /// cases here, and still `true` below, because everything this type promises is unchanged — only
+    /// who draws them moved. `View.canvasPresentationRegistration` is the modifier they use.
     case timelineSlotMenu
 
     /// `OnionSkinPanel`, hung off the timeline's onion-skin button. Symptom 2 of the 2026-08-18
@@ -58,10 +65,12 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// The graph editor's channel list, hung off the button that appears beside the graph editor
     /// toggle while the band is open — KEYFRAMES.md §11.5.
     ///
-    /// **A `.popover` and therefore a case here, rather than an inline panel or an `ActivePanel`.**
-    /// It is `onionSkinOptions` and `interpolateOptions` line for line: a list of controls presented
-    /// from the timeline's own toolbar over a mounted, touchable `CanvasView`, with its openness held
-    /// in a `Binding`. An inline docked panel would not be a presentation at all and a case for one
+    /// **A registered presentation and therefore a case here, rather than an inline docked panel or
+    /// an `ActivePanel`.** It is `onionSkinOptions` and `interpolateOptions` line for line: a list of
+    /// controls raised from the timeline's own toolbar over a mounted, touchable `CanvasView`, with
+    /// its openness held in a `Binding`. (It is drawn inline *within the timeline's own hierarchy*
+    /// since TODO (39), which is a different thing from being docked: it still floats over the canvas
+    /// and still closes on a canvas touch.) An inline docked panel would not be a presentation at all and a case for one
     /// would be wrong; `ActivePanel` is the canvas's settings rail and answers a different question
     /// (`CanvasTouchOwner` reads it to decide who owns a touch), which this list has no part in.
     case graphChannelList
@@ -129,9 +138,11 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour:
-            // All nine are `.popover`s presented from chrome that sits over a mounted, touchable
-            // `CanvasView`. A `.popover` left to its own dismissal is dismissed *by* the touch that
-            // lands outside it, and this repo has observed twice that the touch is not swallowed:
+            // All nine are raised from chrome that sits over a mounted, touchable `CanvasView` —
+            // five of them `.popover`s, and the timeline's four `AnchoredMenu`s since TODO (39).
+            // **The rule is the same for both and that is the point of the type**: a presentation
+            // left to its own dismissal is dismissed *by* the touch that lands outside it, and this
+            // repo has observed twice that the touch is not swallowed:
             // the stroke begins, and the presentation's teardown lands in the middle of the touch
             // sequence. The five hung off the layer rail look protected because `activePanel = .none`
             // deletes their host — but deleting the host *is* a teardown, caused by the same touch

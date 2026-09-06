@@ -131,21 +131,33 @@ pans at once, and clear the instant the owner taps the toolbar.) `grNames` is `t
 *offered* set, and the passthrough gate is what prunes it — that is the whole of the column both
 readings above were built on.
 
-## What a fix would take, and why none is on this branch
+## What the fix turned out to be — built 2026-09-06
 
-There is no in-app seam. The touch reaches `hitTest` and is then routed to the popover's dismissal
-machinery, so nothing in `TimelineTrackView` can see it. Measured dead ends:
+There is no in-app seam *while it is a popover*: the touch reaches `hitTest` and is then routed to the
+popover's dismissal machinery, so nothing in `TimelineTrackView` can see it. Two measured dead ends,
+kept because each is a plausible fix somebody will otherwise try again:
 
 - **`.presentationBackgroundInteraction(.enabled)` on the menu content changes nothing.** It is a
   sheet API; a popover ignores it. Applied to `AnimationTimeline.menuList` and re-measured: identical
   numbers to the table above.
 - `UIPopoverPresentationController.passthroughViews` is what would actually do it, and SwiftUI's
-  `.popover` does not expose it. Reaching it means walking out of the presented content to the
-  presenting controller, and passthrough alone would leave the menu standing over a scrolling track
-  unless the timeline also dismissed it explicitly — which it could, since with passthrough the touch
-  *does* arrive.
+  `.popover` does not expose it. **The owner ruled against it anyway** on 2026-09-06: passthrough lets
+  the drag through but leaves the menu standing while the track scrolls out from under it, and a cel
+  menu names a *specific block*. That is a worse bug than the one being fixed.
 
-So the real options are (a) that plumbing, or (b) stop presenting the four timeline menus as
-`.popover` at all and draw them as an overlay inside the timeline panel, where the panel owns its own
-outside-touch dismissal. Both are design changes with a visible surface, which is the owner's call
-rather than a worker's.
+**So the four timeline menus stopped being presentations.** `PaintSoftware/Views/AnchoredMenu.swift`
+draws them inside the timeline's own hierarchy, sized to their content and positioned by
+`AnchoredMenuPlacement`, so they capture exactly what they cover and nothing else. Dismissal is a
+`PassiveTouchDownObserver` — a `UIGestureRecognizer` on the window that reports the touch-down location
+and then immediately fails, with `cancelsTouchesInView = false`, so it delays nothing, cancels nothing
+and competes with nothing. The touch it reported goes on to reach whatever was under it.
+
+**One drag therefore does both**, which is the requirement the passthrough option could not meet.
+MEASURED in the simulator at the fix, from a new document: with the block menu up, a single 250 pt drag
+on the track dismissed the menu **and** scrolled the ruler from frames 1–28 to 18–45. The same gesture
+before the fix moved the cel block 0.0 pt and left the menu standing.
+
+All four were converted — `timelineSlotMenu`, `onionSkinOptions`, `interpolateOptions`,
+`graphChannelList` — and each keeps its `CanvasPresentation` case and its registration, so the central
+canvas-touch rule, the `onDismiss`-on-host-deletion guarantee and the `ActionRecorder` capture are all
+unchanged. Only who draws them moved.

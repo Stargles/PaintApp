@@ -77,6 +77,11 @@ struct AnimationTimeline: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var dragOffsetRows: Int = 0
 
+    /// Where each of the three button-hung menus should appear, in global coordinates, reported by
+    /// the buttons themselves through `AnchoredMenuAnchorKey`. The slot menu is not in here — its
+    /// anchor is the tapped block, which arrives with the menu request.
+    @State private var menuAnchors: [CanvasPresentation: CGRect] = [:]
+
     var body: some View {
         // The interpolate bar sits *outside* the height-constrained timeline rather than inside it,
         // so turning the mode on adds a strip above the panel instead of eating rows out of it.
@@ -138,7 +143,14 @@ struct AnimationTimeline: View {
         }
         .frame(height: timelineHeight)
         .background(Color.black)
-        .overlay(alignment: .topLeading) { menuAnchorLayer }
+        // Collected from the controls themselves rather than computed here, so a menu cannot end up
+        // hanging off a position layout no longer agrees with.
+        .onPreferenceChange(AnchoredMenuAnchorKey.self) { menuAnchors = $0 }
+        // The slot menu's registration. Attached to the panel because the panel is its host: the
+        // menu may not outlive the timeline, and `.onDisappear` in the registration is what says so.
+        .canvasPresentationRegistration(.timelineSlotMenu, isPresented: isTimelineMenuPresented,
+                                        canvasManager: canvasManager)
+        .overlay(alignment: .bottom) { anchoredMenuLayer }
         .alert("Rasterize this block?",
                isPresented: Binding(get: { pendingRasterizeDrop != nil },
                                     set: { if !$0 { pendingRasterizeDrop = nil } })) {
@@ -200,49 +212,110 @@ struct AnimationTimeline: View {
 
     // MARK: - Menus
 
-    /// One zero-content view parked exactly where the tapped block / slot / ruler column is,
-    /// carrying the single popover for whichever menu `timelineMenu` says is open. SwiftUI can only
-    /// anchor a popover to a view, so the anchor has to exist as a view; it's transparent and takes
-    /// no touches, so nothing about the timeline changes while no menu is up. When `timelineMenu`
-    /// is nil the rect falls back to `.zero` — harmless, since `isPresented` is false at the same
-    /// time and a popover with no content presented has nothing to anchor.
-    private var menuAnchorLayer: some View {
-        GeometryReader { proxy in
-            let origin = proxy.frame(in: .global).origin
-            menuAnchor(timelineMenu?.anchor ?? .zero, relativeTo: origin, isPresented: isTimelineMenuPresented) {
-                timelineMenuContent
+    /// **All four of this panel's menus, drawn inside the app's own hierarchy — TODO (39).**
+    ///
+    /// They were four `.popover`s until 2026-09-06, and a `.popover` presents behind a
+    /// screen-covering `_UIPassthroughGateGestureRecognizer`: `hitTest` still returned the timeline
+    /// row, but `touchesBegan` never fired, so **every drag on the timeline was swallowed whole**
+    /// while a menu was up. The track did not scroll, the ruler did not scrub, and the popover did
+    /// not even go away — only a tap dismissed it. MEASURED at the time: menu up, a drag moved the
+    /// cel block 0.0 pt; menu gone, the same drag moved it 369 pt.
+    ///
+    /// The owner ruled against the smaller fix (`UIPopoverPresentationController.passthroughViews`)
+    /// on 2026-09-06: passthrough lets the drag through but leaves the menu standing while the track
+    /// scrolls out from under it, and a cel menu names a *specific block*. So the menus stop being
+    /// presentations. `AnchoredMenu` captures exactly what it covers, and its window observer closes
+    /// this **without** consuming the gesture that closed it — one drag dismisses the menu and
+    /// scrolls the track.
+    ///
+    /// **One layer for four menus rather than a modifier at each of the four sites**, because the
+    /// menus have to be drawn over the canvas above this panel, and an overlay sized to the whole
+    /// screen once is clearer than four views each escaping their own container. Each site keeps its
+    /// own binding and its own `canvasPresentationRegistration`, so every rule those already carried
+    /// — the central canvas-touch dismissal, `onDismiss` on host deletion, the `ActionRecorder`
+    /// capture — is untouched. Only who draws the thing has changed.
+    @ViewBuilder
+    private var anchoredMenuLayer: some View {
+        if let open = openAnchoredMenu {
+            AnchoredMenu(anchor: open.anchor,
+                         toggleControl: open.toggleControl,
+                         identifier: "timeline.anchoredMenu.\(open.presentation.rawValue)",
+                         onDismiss: { closeAnchoredMenu(open.presentation) }) {
+                anchoredMenuContent(open.presentation)
             }
+            // As tall as the screen and bottom-aligned to this panel, so a menu can be drawn above
+            // the timeline over the canvas and still be **inside its own container** — which is what
+            // makes it hit-testable there. `availableHeight` is the parent `GeometryReader`'s, which
+            // is the whole editor.
+            .frame(maxWidth: .infinity)
+            .frame(height: availableHeight, alignment: .bottom)
         }
-        .allowsHitTesting(false)
     }
 
-    /// `.popover(isPresented:)` wants a `Bool`, but `timelineMenu` is the one piece of state that
-    /// answers both "is a menu open" and "which one" — this derives the former from the latter. The
-    /// setter is what makes the system's *own* dismissal (tap outside the popover, swipe down on
-    /// iPhone's compact presentation) clear `timelineMenu` too, rather than leaving a stale payload
-    /// behind a `Bool` that had already gone false.
+    /// Which menu is up, where it hangs from, and which control (if any) governs its openness.
+    ///
+    /// **Only one is rendered even if two flags are somehow true**, and in practice they cannot be:
+    /// opening any of these touches somewhere the open one does not cover, which closes it on the
+    /// way. The order below is therefore a tiebreak nobody should reach rather than a policy —
+    /// stated so it is deterministic instead of dependent on which `if` a future edit puts first.
+    private var openAnchoredMenu: (presentation: CanvasPresentation, anchor: CGRect, toggleControl: CGRect?)? {
+        // The slot menu's anchor is the tapped block, which is **not** a control that toggles it —
+        // so no exemption, and a drag that starts on the block dismisses like any other.
+        if let menu = timelineMenu { return (.timelineSlotMenu, menu.anchor, nil) }
+        // The other three hang off buttons that toggle them. The button is passed as the toggle
+        // control so the observer leaves it alone; without that, its touch-down dismissal and the
+        // button's touch-up `toggle()` would compose into a menu that can never be closed from the
+        // button that opened it. See `AnchoredMenuDismissal.shouldDismiss`.
+        if showOnionSkinOptions, let rect = menuAnchors[.onionSkinOptions] {
+            return (.onionSkinOptions, rect, rect)
+        }
+        if showInterpolateOptions, let rect = menuAnchors[.interpolateOptions] {
+            return (.interpolateOptions, rect, rect)
+        }
+        if canvasManager.isGraphChannelListOpen, let rect = menuAnchors[.graphChannelList] {
+            return (.graphChannelList, rect, rect)
+        }
+        return nil
+    }
+
+    /// The content of whichever menu is up. `default` is unreachable — `openAnchoredMenu` only ever
+    /// returns these four — and returns `EmptyView` rather than trapping because a menu that fails
+    /// to draw is a better failure than a crash in front of the artist.
+    @ViewBuilder
+    private func anchoredMenuContent(_ presentation: CanvasPresentation) -> some View {
+        switch presentation {
+        case .timelineSlotMenu:
+            timelineMenuContent
+        case .onionSkinOptions:
+            OnionSkinPanel(canvasManager: canvasManager).frame(width: 380, height: 640)
+        case .interpolateOptions:
+            InterpolatePanel(canvasManager: canvasManager).frame(width: 260)
+        case .graphChannelList:
+            graphChannelList.frame(width: 250)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// Writes the site's own binding, which is what the registration observes — so closing an
+    /// anchored menu goes through exactly the path a popover's own dismissal went through.
+    private func closeAnchoredMenu(_ presentation: CanvasPresentation) {
+        switch presentation {
+        case .timelineSlotMenu:   timelineMenu = nil
+        case .onionSkinOptions:   showOnionSkinOptions = false
+        case .interpolateOptions: showInterpolateOptions = false
+        case .graphChannelList:   canvasManager.isGraphChannelListOpen = false
+        default:                  break
+        }
+    }
+
+    /// `canvasPresentationRegistration` wants a `Bool`, but `timelineMenu` is the one piece of state
+    /// that answers both "is a menu open" and "which one" — this derives the former from the latter.
+    /// The setter is what makes a dismissal that comes from anywhere else — the central canvas-touch
+    /// rule, `AnchoredMenu`'s observer — clear `timelineMenu` too, rather than leaving a stale
+    /// payload behind a `Bool` that had already gone false.
     private var isTimelineMenuPresented: Binding<Bool> {
         Binding(get: { timelineMenu != nil }, set: { if !$0 { timelineMenu = nil } })
-    }
-
-    /// Two things about this order are load-bearing.
-    ///
-    /// `.position`, not `.offset`: a popover attaches to its anchor view's *layout* frame, and
-    /// `.offset` is a render-time translation that leaves that frame where it started — every menu
-    /// came up in the panel's top-left corner regardless of what had been tapped.
-    ///
-    /// And `.popover` goes *before* `.position`, because `.position` returns a view that fills all
-    /// the space offered to it. Attaching the popover after it anchors the menu to the whole overlay
-    /// and it comes up centred on the timeline — the very thing being fixed here.
-    private func menuAnchor<Content: View>(_ rect: CGRect,
-                                           relativeTo origin: CGPoint,
-                                           isPresented: Binding<Bool>,
-                                           @ViewBuilder content: @escaping () -> Content) -> some View {
-        Color.clear
-            .frame(width: max(rect.width, 1), height: max(rect.height, 1))
-            .canvasPresentation(.timelineSlotMenu, isPresented: isPresented,
-                                canvasManager: canvasManager, content: content)
-            .position(x: rect.midX - origin.x, y: rect.midY - origin.y)
     }
 
     /// The one menu's content, resolved from whichever case `timelineMenu` currently holds.
@@ -486,7 +559,6 @@ struct AnimationTimeline: View {
         VStack(alignment: .leading, spacing: 0) { content() }
             .padding(.vertical, 6)
             .frame(minWidth: 190)
-            .presentationCompactAdaptation(.popover)
     }
 
     private func menuButton(_ title: String, icon: String, role: ButtonRole? = nil,
@@ -617,19 +689,14 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
         .accessibilityIdentifier("timeline.onionSkinToggle")
-        .canvasPresentation(.onionSkinOptions, isPresented: $showOnionSkinOptions,
-                            canvasManager: canvasManager) {
-            OnionSkinPanel(canvasManager: canvasManager)
-                .frame(width: 380, height: 640)
-                .presentationCompactAdaptation(.popover)
-                // **A popover's default background is a light system material, and every label in
-                // this app's chrome is white.** Without this the panel renders white-on-white and is
-                // legible only where a control paints its own background — which a screenshot of the
-                // first build showed exactly. Stated here rather than inside the panel because the
-                // material is the *presentation's*, not the content's: a `.background` on the content
-                // leaves the arrow and the inset light.
-                .presentationBackground(Color.black.opacity(0.96))
-        }
+        // The panel itself is drawn by `anchoredMenuLayer`, over the canvas above this bar; this
+        // button contributes the anchor it hangs from and the registration that keeps every rule a
+        // `.popover` here used to carry. **The near-black card `AnchoredMenu` draws is what replaces
+        // this site's old `.presentationBackground(Color.black.opacity(0.96))`** — every label in
+        // this panel is white, and on a popover's default light material it rendered white-on-white.
+        .anchoredMenuAnchor(.onionSkinOptions)
+        .canvasPresentationRegistration(.onionSkinOptions, isPresented: $showOnionSkinOptions,
+                                        canvasManager: canvasManager)
         // "Turn Off Onion Skin" lives inside the panel, so the panel has to close itself when it is
         // used — otherwise it stays up describing something that is no longer drawing.
         .onChange(of: canvasManager.isOnionSkinEnabled) { _, on in
@@ -707,12 +774,10 @@ struct AnimationTimeline: View {
         // returns. That rule belongs where it can be pinned: `CanvasManager.isGraphChannelListOpen`,
         // cleared by `isGraphEditorOpen`'s `didSet` beside the filter it is the twin of. The other
         // popovers here are `@State` because they have no such rule.
-        .canvasPresentation(.graphChannelList, isPresented: $canvasManager.isGraphChannelListOpen,
-                            canvasManager: canvasManager) {
-            graphChannelList
-                .frame(width: 250)
-                .presentationCompactAdaptation(.popover)
-        }
+        .anchoredMenuAnchor(.graphChannelList)
+        .canvasPresentationRegistration(.graphChannelList,
+                                        isPresented: $canvasManager.isGraphChannelListOpen,
+                                        canvasManager: canvasManager)
     }
 
     /// The popup itself: one section per group, each a whole-group box over its channels' boxes.
@@ -942,12 +1007,9 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isInterpolateMode ? .blue : .white)
         .accessibilityIdentifier("timeline.interpolateButton")
-        .canvasPresentation(.interpolateOptions, isPresented: $showInterpolateOptions,
-                            canvasManager: canvasManager) {
-            InterpolatePanel(canvasManager: canvasManager)
-                .frame(width: 260)
-                .presentationCompactAdaptation(.popover)
-        }
+        .anchoredMenuAnchor(.interpolateOptions)
+        .canvasPresentationRegistration(.interpolateOptions, isPresented: $showInterpolateOptions,
+                                        canvasManager: canvasManager)
         // Exit Interpolate Mode is inside the popover, so the popover has to close itself when the
         // mode goes off — otherwise it stays up over a bar that is no longer there.
         .onChange(of: canvasManager.isInterpolateMode) { _, on in

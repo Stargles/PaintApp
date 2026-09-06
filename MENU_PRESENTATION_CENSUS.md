@@ -199,3 +199,34 @@ wiring, not end to end; its CALayer canvas decorations (`ShapeOverlayView`, `Gui
 `SelectionOverlayView`, `FloatingPieceOverlayView`, `ObjectTransformOverlayView`) were confirmed by grep
 to have no dismiss-on-outside-touch behaviour but not read fully. The `PaintSoftwareUITests` target was
 excluded.
+
+## The other half of the failure mode — MEASURED 2026-09-06, and four of the seven are no longer popovers
+
+This census measured what a popover does to a **stroke on the canvas**: the outside touch is not
+swallowed, so the stroke begins and the teardown lands mid-sequence. It never measured what a popover
+does to a **drag on other chrome**, and that turned out to be a different and worse answer.
+
+**A `.popover` swallows a drag outside it whole.** The surface underneath does not scroll, and the
+popover does not dismiss either — only a tap gets out. Traced from the owner's ActionRecorder capture
+in [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
+and reproduced: `hitTest` still returns the view under the finger and the whole ancestor chain of
+recognizers is intact, but `_UIPassthroughGateGestureRecognizer` means `touchesBegan` never fires.
+MEASURED: menu up, a drag moved the cel block **0.0 pt**; menu gone, the same drag moved it **369 pt**.
+
+That is TODO (39), and it is why **the timeline's four presentations are no longer popovers** as of
+2026-09-06 — `timelineSlotMenu`, `onionSkinOptions`, `interpolateOptions` and `graphChannelList` are
+`AnchoredMenu`s drawn inside the timeline's own hierarchy. They are still `CanvasPresentation` cases
+and still registered (through `View.canvasPresentationRegistration`), so everything this census argued
+for is unchanged; `tools/presentation-census.sh` counts both modifiers for that reason.
+
+**The five that are still popovers are still exposed to this**, and the exposure is proportional to how
+much dragging there is under them: `layerViewSelector`, `canvasBackgroundColour`, `valueLayerColour`,
+`effectOutlineColour`, `effectGradientStopColour`. Nothing here has measured a drag under any of them.
+
+**And it re-opens a question this file recorded as closed.** The twelve `Menu`/`.contextMenu` sites were
+resolved SAFE on the strength of `testDrawingStraightThroughAnOpenBlendModeMenu`, whose finding was that
+a `Menu`'s dismiss region "absorbs the whole touch sequence, so the drag neither reaches the canvas nor
+even closes the menu". Read against the canvas that is safety — no stroke, nothing to interrupt. Read
+against a **scrollable** surface it is the identical symptom as the popover's: the drag does nothing and
+the menu stays up. SAFE was the right verdict for the question asked and is not a verdict about
+scrolling. See BUGS.md.

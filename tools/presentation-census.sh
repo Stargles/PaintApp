@@ -37,13 +37,18 @@ echo "none — every popover in the app goes through the modifier."
 
 echo
 echo "== 2. Registered presentations =="
-# Anchored to the start of the line, so the several doc comments naming the modifier do not count as
-# uses of it.
-sites=$(grep -rncE '^[[:space:]]*\.canvasPresentation\(' --include='*.swift' "$app" | grep -v ':0$')
+# Anchored to the start of the line, so the several doc comments naming the modifiers do not count as
+# uses of them. **Two modifiers, not one, since TODO (39)**: `canvasPresentation` declares a
+# `.popover` and registers it; `canvasPresentationRegistration` registers a presentation this app
+# draws itself, which is what the timeline's four `AnchoredMenu`s use. Both register into the same
+# `CanvasManager.openPresentations`, so both belong in this count — a census that listed only the
+# popovers would report the four timeline menus as unregistered, which is the exact false alarm this
+# script exists to avoid raising.
+sites=$(grep -rncE '^[[:space:]]*\.canvasPresentation(Registration)?\(' --include='*.swift' "$app" | grep -v ':0$')
 cases=$(grep -cE '^    case [a-z]' $app/Models/CanvasPresentation.swift)
 echo "$sites"
 echo "$(echo "$sites" | awk -F: '{n += $2} END {print n}') call sites, $cases cases in CanvasPresentation" \
-     "(8 over a live canvas + 2 on the gallery screen, which registers nothing)."
+     "(9 over a live canvas — 5 popovers + 4 anchored menus — plus 2 on the gallery screen, which registers nothing)."
 
 echo
 echo "== 3. Presentations with no binding to register — MENU_PRESENTATION_CENSUS.md's 12 =="

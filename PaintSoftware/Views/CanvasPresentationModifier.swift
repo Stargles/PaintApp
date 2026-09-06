@@ -50,6 +50,31 @@ extension View {
                                             presentedContent: content))
     }
 
+    /// The contract above **without** the `.popover` — for a presentation this app draws itself.
+    ///
+    /// Everything `canvasPresentation` promises is promised here too: the case is registered while
+    /// it is up, `CanvasManager.dismissPresentationsOverLiveCanvas()` still closes it, `onDismiss`
+    /// still runs however it ends including host deletion, and `ActionRecorder` still sees it. What
+    /// is different is only *who draws the thing*, and that is the whole of TODO (39): the
+    /// timeline's four menus are anchored inside the app's own hierarchy (`AnchoredMenu`) because a
+    /// `.popover` presents behind a screen-covering `_UIPassthroughGateGestureRecognizer` that
+    /// swallows every drag on the timeline whole.
+    ///
+    /// **A site using this owes the drawing.** The four timeline menus are rendered by one layer in
+    /// `AnimationTimeline`, which is why the content closure is absent rather than optional: there
+    /// is nothing sensible for a modifier to do with content it is not going to present.
+    func canvasPresentationRegistration(_ presentation: CanvasPresentation,
+                                        isPresented: Binding<Bool>,
+                                        canvasManager: CanvasManager,
+                                        onPresent: (() -> Void)? = nil,
+                                        onDismiss: (() -> Void)? = nil) -> some View {
+        modifier(CanvasPresentationRegistration(presentation: presentation,
+                                                isPresented: isPresented,
+                                                canvasManager: canvasManager,
+                                                onPresent: onPresent,
+                                                onDismiss: onDismiss))
+    }
+
 }
 
 /// The one implementation of the contract above. Private on purpose: `canvasPresentation` is the
@@ -65,6 +90,27 @@ private struct CanvasPresentationModifier<PresentedContent: View>: ViewModifier 
     func body(content: Content) -> some View {
         content
             .popover(isPresented: $isPresented) { presentedContent() }
+            .modifier(CanvasPresentationRegistration(presentation: presentation,
+                                                     isPresented: $isPresented,
+                                                     canvasManager: canvasManager,
+                                                     onPresent: onPresent,
+                                                     onDismiss: onDismiss))
+    }
+}
+
+/// The bookkeeping half, with no opinion about how the presentation is drawn — a `.popover` above,
+/// an `AnchoredMenu` in `AnimationTimeline`. Factored out rather than written twice so that "what a
+/// registered presentation guarantees" has exactly one implementation and the two presenters cannot
+/// drift apart.
+private struct CanvasPresentationRegistration: ViewModifier {
+    let presentation: CanvasPresentation
+    @Binding var isPresented: Bool
+    @ObservedObject var canvasManager: CanvasManager
+    let onPresent: (() -> Void)?
+    let onDismiss: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        content
             .onChange(of: isPresented) { _, showing in
                 if showing {
                     canvasManager.presentationDidAppear(presentation)

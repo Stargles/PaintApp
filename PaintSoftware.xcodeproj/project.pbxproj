@@ -31,6 +31,8 @@
 		7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */; };
 		0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */; };
 		4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */; };
+		AC81597BCB670B7074038991 /* PaintSoftware/Views/AnchoredMenuGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */; };
+		A294C0D1404FCC75CF0BE14F /* AnchoredMenuLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */; };
 		99D1EA5B5A7EEE8F514A763E /* PaintSoftware/Engine/LassoFillMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */; };
 		7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */; };
 		C1CD1F052FA075DAED11D29E /* LassoMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7130AC5DE1A80DC1E0BAE062 /* LassoMoveLogicTests.swift */; };
@@ -381,6 +383,8 @@
 		C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleCodingLogicTests.swift; sourceTree = "<group>"; };
 		CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeInterruptionLogicTests.swift; sourceTree = "<group>"; };
 		37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuInterruptionUITests.swift; sourceTree = "<group>"; };
+		1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/AnchoredMenuGeometry.swift; sourceTree = "<group>"; };
+		E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnchoredMenuLogicTests.swift; sourceTree = "<group>"; };
 		EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LassoFillMask.swift"; sourceTree = "<group>"; };
 		0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+LassoMove.swift"; sourceTree = "<group>"; };
 		7130AC5DE1A80DC1E0BAE062 /* LassoMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LassoMoveLogicTests.swift; sourceTree = "<group>"; };
@@ -809,6 +813,7 @@
 				C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */,
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
+				E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				83948202EDBA65AEB06FD0A5 /* BrushTableLogicTests.swift */,
 				355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */,
@@ -968,6 +973,7 @@
 				83228C9D6C066AEBE8B60A01 /* PaintSoftware/Models/CanvasManager+Text.swift */,
 				0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */,
 				B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */,
+				1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */,
 				31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */,
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
@@ -1289,6 +1295,8 @@
 				7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */,
 				0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */,
 				4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */,
+				AC81597BCB670B7074038991 /* PaintSoftware/Views/AnchoredMenuGeometry.swift in Sources */,
+				A294C0D1404FCC75CF0BE14F /* AnchoredMenuLogicTests.swift in Sources */,
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,
 				043A4C1856CFB84247FD383E /* VectorCanvasDataLogicTests.swift in Sources */,
 				A5AE05B50FA1839D2B60FB53 /* FillBoundaryLogicTests.swift in Sources */,

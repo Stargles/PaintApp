@@ -138,27 +138,26 @@ final class MenuInterruptionUITests: PaintUITestCase {
             """)
     }
 
-    /// **TODO (39)(c), the timeline freeze — this is what the owner's trace is, and it is a
-    /// characterization of a defect that is still open.** It goes red when somebody fixes it, and
-    /// that is the point: the fix has to be a deliberate one, and this is the note that says so.
+    /// **TODO (39), the timeline freeze — this is the regression test, and it was inverted on
+    /// 2026-09-06 when the defect was fixed.**
     ///
-    /// The touch measurement is the same one this class exists for, taken on the *other* family. A
-    /// `.popover` swallows a **drag** that lands outside it completely — the timeline does not
-    /// scroll, the ruler does not scrub, and the popover does not go away — while it dismisses on a
-    /// **tap**. So an artist who raises a timeline menu by accident (a second tap where the playhead
-    /// already is, which is `handleTapOnCel`'s own two-stage design) and then reacts by swiping the
-    /// track gets a timeline that is dead for as long as they keep swiping.
+    /// It used to be a *characterization* of the bug: it asserted `cel.frame.minX == parked` and
+    /// `copy.exists`, i.e. that the drag did nothing and the menu survived, and its own doc comment
+    /// said "it goes red when somebody fixes it". So it was **green against the broken app**, which
+    /// is worth stating because a brief that calls it "the regression test" gets the polarity
+    /// backwards — MEASURED green at `7006e72` with the defect fully present.
     ///
-    /// MEASURED against the owner's `docs/bug-evidence/timeline-freeze-2026-09-06.jsonl`, which
-    /// carries exactly this: a `_UIPassthroughGateGestureRecognizer` appears at t=21.02, every
-    /// touch after it is a swipe of 6–200 pt that changes nothing (including one drag on the ruler
-    /// at t=21.98 that is carrying the ruler's own recogniser), and the app comes back the moment
-    /// the owner *taps* the toolbar at t=26.57.
+    /// The defect: `.popover` presents behind a screen-covering
+    /// `_UIPassthroughGateGestureRecognizer`. `hitTest` still returned the timeline row — the
+    /// hierarchy was intact — but `touchesBegan` never fired, so every drag on the timeline was
+    /// swallowed whole and only a tap dismissed the menu. MEASURED then: menu up, the drag moved the
+    /// cel block 0.0 pt; menu gone, the same drag moved it 369 pt.
     ///
-    /// **The last two steps are the control**, and without them `cel.frame.minX == parked` would be
-    /// true of a drag that never scrolls anything. They are what make "nothing moved" a fact about
-    /// the popover rather than about this test's gesture.
-    func testADragOnTheTimelineWhileABlockMenuIsUpIsSwallowedWhole() {
+    /// The owner ruled on 2026-09-06 that these menus stop being `.popover`s rather than that the
+    /// gate get a hole punched in it, so what this now pins is the whole point of that ruling: **one
+    /// drag both dismisses the menu and scrolls the track.** Two gestures where one should do is the
+    /// bug being fixed, not an acceptable outcome.
+    func testADragOnTheTimelineWhileABlockMenuIsUpDismissesItAndScrollsTheTrack() {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let cel = app.otherElements["timeline.cel.0.0"]
@@ -173,25 +172,134 @@ final class MenuInterruptionUITests: PaintUITestCase {
         XCTAssertTrue(copy.waitForExistence(timeout: 5),
                       "PREMISE: a second tap where the playhead already is raises the block menu")
 
+        // **Drawn, not merely stored.** The menu is a view in the app's own hierarchy now, and this
+        // is the assertion that fails if it stops being on screen while `timelineMenu` stays set.
+        XCTAssertTrue(anchoredMenu(app, "timelineSlotMenu").exists, """
+            The block menu has to be an `AnchoredMenu` in the app's hierarchy. If this is missing \
+            while `Copy` is present, the menu is being presented some other way again.
+            """)
+        // And the mechanism itself is gone: a popover always installs one of these behind it, and
+        // it is the thing that ate the drag.
+        XCTAssertFalse(app.otherElements["PopoverDismissRegion"].exists, """
+            A `PopoverDismissRegion` is up while a timeline menu is open, so the menu is a \
+            `.popover` again and the passthrough gate is back with it — which is TODO (39) exactly.
+            """)
+
         let parked = cel.frame.minX
         dragTimelineLeft(app, y: trackY)
-        XCTAssertEqual(cel.frame.minX, parked,
-                       "the track did not scroll — the popover ate the drag whole")
-        XCTAssertTrue(copy.exists,
-                      "and the drag did not dismiss the popover either, so the next one is eaten too")
 
-        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: 700, dy: trackY)).tap()
+        XCTAssertLessThan(cel.frame.minX, parked - 50, """
+            THE FIX: one drag on the track has to scroll it even with a menu up. With the popover \
+            this measured 0.0 pt of movement.
+            """)
+        XCTAssertFalse(copy.exists, """
+            …and the same drag has to dismiss the menu. Letting the gesture through but leaving the \
+            menu standing is the `passthroughViews` outcome the owner ruled against on 2026-09-06: \
+            a cel menu names a specific block, and the track has just scrolled out from under it.
+            """)
+    }
+
+    /// The other half of the requirement, and the half the popover already did: a **tap** outside
+    /// closes the menu. Kept separate from the drag because they are different gestures and the
+    /// popover got one of them right — a single test covering both would pass on a fix that only
+    /// restored the half that already worked.
+    func testATapOutsideAnAnchoredTimelineMenuDismissesIt() {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let cel = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(cel.waitForExistence(timeout: 10))
+        let copy = app.buttons["Copy"]
+
+        let spot = cel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        spot.tap()
+        _ = app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 2)
+        spot.tap()
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "PREMISE: the block menu has to be up")
+
+        app.staticTexts["timeline.frameLabel"].tap()
+
         XCTAssertTrue(copy.waitForNonExistence(timeout: 5),
-                      "CONTROL: the same place, tapped rather than dragged, does dismiss it")
+                      "a tap on chrome away from the menu closes it")
+        XCTAssertFalse(anchoredMenu(app, "timelineSlotMenu").exists,
+                       "and the anchored view goes with it, rather than lingering empty")
+    }
 
-        dragTimelineLeft(app, y: trackY)
-        XCTAssertNotEqual(cel.frame.minX, parked,
-                          "CONTROL: and with the popover gone that identical drag scrolls the track, "
-                          + "so the assertion above is about the popover and not about the gesture")
+    /// **All four of them — TODO (39) says "there are four; find them all", and this is the list.**
+    ///
+    /// `timelineSlotMenu` (a cel block), `onionSkinOptions`, `interpolateOptions` and
+    /// `graphChannelList`. Every one was a `.popover` and carried the same defect; three were never
+    /// reported only because they are opened less often than the block menu.
+    ///
+    /// Driven from a **cold start** rather than from constructed state: each menu is opened the way
+    /// an artist opens it, from a document that has just been created. That is the reachability
+    /// check this repo added to its bar on 2026-09-05, after three features shipped whose models
+    /// were correct and whose entry points could not be reached.
+    func testAllFourTimelineMenusAreAnchoredViewsRatherThanPopovers() {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(app.otherElements["timeline.cel.0.0"].waitForExistence(timeout: 10))
+
+        // 1 — the cel block's menu, which is the one the owner's trace caught.
+        let cel = app.otherElements["timeline.cel.0.0"]
+        let spot = cel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        spot.tap()
+        _ = app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 2)
+        spot.tap()
+        assertAnchored(app, "timelineSlotMenu", opener: "a second tap on a cel block")
+
+        // 2, 3 — the two-stage buttons. The first tap turns the mode on; the tap that follows opens
+        // the panel, and `openTwoStage` does not assume which state the button started in.
+        openTwoStage(app, button: "timeline.onionSkinToggle", menu: "onionSkinOptions")
+        assertAnchored(app, "onionSkinOptions", opener: "the onion-skin button")
+
+        openTwoStage(app, button: "timeline.interpolateButton", menu: "interpolateOptions")
+        assertAnchored(app, "interpolateOptions", opener: "the interpolate button")
+
+        // 4 — the graph editor's channel list, which only exists while the band is open, so this
+        // also proves the button that raises it is reachable from a fresh document.
+        app.buttons["timeline.graphEditorButton"].tap()
+        let channels = app.buttons["timeline.graphChannelsButton"]
+        XCTAssertTrue(channels.waitForExistence(timeout: 5),
+                      "PREMISE: opening the graph band puts the channel-list button beside its toggle")
+        openTwoStage(app, button: "timeline.graphChannelsButton", menu: "graphChannelList")
+        assertAnchored(app, "graphChannelList", opener: "the graph channels button")
     }
 
     // MARK: - Fixture
+
+    /// An `AnchoredMenu` by the case it carries. Queried across every element type rather than as
+    /// `otherElements`, because what XCUITest calls an accessibility container is SwiftUI's business
+    /// and not something this test should be pinning.
+    private func anchoredMenu(_ app: XCUIApplication, _ presentation: String) -> XCUIElement {
+        app.descendants(matching: .any)["timeline.anchoredMenu.\(presentation)"].firstMatch
+    }
+
+    /// One menu's two findings: it is on screen **as an anchored view**, and there is no popover
+    /// dismiss region behind it. The second is the one that matters — `PopoverDismissRegion` is the
+    /// tell for `UIPopoverPresentationController`, whose passthrough gate is what swallowed the
+    /// drags in the owner's trace.
+    private func assertAnchored(_ app: XCUIApplication, _ presentation: String, opener: String) {
+        XCTAssertTrue(anchoredMenu(app, presentation).waitForExistence(timeout: 5), """
+            \(opener) did not put `timeline.anchoredMenu.\(presentation)` on screen. Either the menu \
+            is unreachable from a fresh document, or it is being presented some way other than \
+            `AnchoredMenu` — both of which are TODO (39).
+            """)
+        XCTAssertFalse(app.otherElements["PopoverDismissRegion"].exists, """
+            `\(presentation)` is up with a `PopoverDismissRegion` behind it, so it is a `.popover` \
+            again — and with it comes the screen-covering gate that eats every drag on the timeline.
+            """)
+    }
+
+    /// Opens a menu hung off a two-stage button — onion skin and interpolate each turn their mode on
+    /// with the first tap and open their panel with the next — without assuming which state the
+    /// button starts in. `graphChannelsButton` is single-stage and takes the first branch.
+    private func openTwoStage(_ app: XCUIApplication, button id: String, menu presentation: String) {
+        let button = app.buttons[id]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "PREMISE: \(id) has to be on screen")
+        button.tap()
+        if anchoredMenu(app, presentation).waitForExistence(timeout: 2) { return }
+        button.tap()
+    }
 
     /// A 200 pt leftward drag across the cel row, well clear of the block itself. `press(forDuration:
     /// thenDragTo:)` rather than `swipeLeft()` because a swipe needs an element and the point of this

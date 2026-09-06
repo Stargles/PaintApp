@@ -50,8 +50,9 @@ rather than assuming it still holds.
 
 ## (39) The timeline freeze — a menu popover eats every drag
 
-**Status** — reproduced and measured; the fix is chosen and unbuilt. (a) the pinch anchor and (b) the
-dead area below the last row are fixed and gone from this item.
+**Status** — **built on `tmp/menufix`, awaiting merge.** (a) the pinch anchor and (b) the dead area
+below the last row were fixed earlier and are gone from this item. Delete this whole entry when the
+branch lands.
 
 **While a timeline menu popover is up, every drag on the timeline is swallowed whole** — the track does
 not scroll, the ruler does not scrub, and the popover does not dismiss. Only a tap dismisses it.
@@ -77,14 +78,21 @@ from under it leaves the menu pointing at something else. That is a worse bug th
 Reaching the presentation controller from SwiftUI is fragile too, and this way fixes the class rather
 than one instance.
 
-**Left to build**
-- [ ] Replace the timeline menus with a view anchored **inside the app's own hierarchy** — no
-      full-screen presentation, so it captures nothing it does not cover.
-- [ ] Dismiss on a tap outside **and** on any gesture starting elsewhere, **letting that gesture
-      through**: one drag should dismiss the menu and scroll the track, not cost two.
-- [ ] There are four of them; find them all. `MenuInterruptionUITests` reproduces the defect and is the
-      regression test.
-- [ ] Sweep for the same shape: any other `.popover` over a scrollable surface has this defect.
+**Built 2026-09-06 on `tmp/menufix`.** `AnchoredMenu` draws all four inside the timeline's own
+hierarchy; a `PassiveTouchDownObserver` on the window hears the touch that dismisses them **without
+consuming it**, so one drag dismisses the menu and scrolls the track. MEASURED in the simulator: with
+the block menu up, one 250 pt drag both closed it and scrolled the ruler from frames 1–28 to 18–45.
+- [x] Anchored inside the app's own hierarchy — no full-screen presentation.
+- [x] Dismiss on a tap outside and on any gesture starting elsewhere, letting that gesture through.
+- [x] All four found and converted: `timelineSlotMenu`, `onionSkinOptions`, `interpolateOptions`,
+      `graphChannelList` — each driven and screenshotted.
+- [x] Sweep done; see the note below.
+
+**`MenuInterruptionUITests`' third test was a *characterization* of the defect, not a regression test
+for it** — it asserted the drag moved the block 0 pt and the menu survived, so it was **green against
+the broken app** (MEASURED at `7006e72`). Its own doc comment said so: *"it goes red when somebody
+fixes it"*. It is inverted now, and joined by a tap-outside test and one that opens all four menus
+from a cold start.
 
 ---
 
