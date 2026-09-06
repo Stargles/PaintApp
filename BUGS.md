@@ -578,7 +578,6 @@ trusting the rest of a list assembled by reading code.
    entries** before and holds 96 MB in 12 after — the entry ceiling still binds at the owner's canvas, which is
    the point, and at 4096² the same twelve go from 768 MB to 192. **And the per-tick evictor is deleted**: it
    MEASURED **0.168 ms a tick at 300 cels**, against 0.028 ms for a whole tick now. PERFORMANCE §13.1 and §13.7.
-
 6. ~~**Every eviction signal is a `UIApplication` notification**~~ **CLOSED 2026-09-06.**
    `Engine/MemoryPressure.swift` is the seam: five responders register by name, `signal(_:)` is the whole
    platform surface, and `startObservingSystemEvents()` is the only place in the app that names a
@@ -596,8 +595,8 @@ trusting the rest of a list assembled by reading code.
    Nothing reports the hit rate outside `PerfBaselineTests`.
 8. ~~**Vector element undo charges a flat 512 bytes per element**~~ **CLOSED 2026-09-06.** `VectorUndoCost` charges
    `max(from.count, to.count) × MemoryLayout<VectorElement>.stride` plus the heap of the elements that differ.
-   **The magnitude this list gave elsewhere was wrong in the direction it named**: the entry below said 3–6×
-   *over*, and MEASURED it is 1.8× over on a long list of short strokes and **265× under** on one long stroke.
+   **The magnitude this file gave elsewhere was wrong in the direction it named**: the standalone entry of
+   2026-09-04 said 3–6× *over*, and MEASURED it is 1.8× over on a long list of short strokes and **265× under** on one long stroke.
    The stride is 576 bytes today, so the flat 512 was a guess at exactly that number — written in three places,
    including `VectorCanvas.vacatedInkLimit`'s divisor — and the type outgrew it. PERFORMANCE §13.4.
 9. **`OnionSkinRasterCache` computes its limit from the newest entry's size** (`OnionSkinSource.swift:918-923`), so
