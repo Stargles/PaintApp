@@ -24,8 +24,10 @@ reconciled against a static count of instance `func test` across the 143 selecte
 name differs from its file (`LayerUITests.swift`) — **passed clean in isolation in 25 s** and is
 environmental. The class table is re-taken in CLAUDE.md.
 
-**The iPad build is `c23f37f` and is now many commits stale** — provisioning valid until 2026-09-12.
-Ship a new one early; almost everything below is invisible to the owner until you do.
+**A Release build of `7ad5a9f` is on the owner's iPad**, installed 2026-09-06, provisioning valid
+until 2026-09-12. It carries everything below. **The owner has not yet used it** — the fill fix and the
+undo/redo work they confirmed were on the previous build; the merge, Distort-on-ink, the scene end, the
+panels and the onion skin are all unseen.
 
 ## Start here: three things are ruled and unbuilt, and one of them is the owner's worst bug
 
