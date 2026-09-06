@@ -2894,20 +2894,19 @@ term on this path is still Mode 3's per-sample intersection resolve (§11.10's c
 This bench sees that term as `cutOnce`, and in Debug it is enormous — **7.66 s for one Mode 3 sample
 at 2,000 strokes** against Mode 2's 1.03 s for the whole flick. Nothing here touches it.
 
-**The honest limit: a redone *append* still pays the full walk, and it always will.** The ink coming
-back has never been drawn on that canvas, so no footprint exists for it and the gesture that recorded
-the step declared `.appended`, not a region. Deriving a box from the brush instead is what BRUSH.md
-§12 stage 8 refuted — `ResponseCurve` does not clamp, so no size-derived number bounds what a dab
-paints — and `restoreDamage` therefore returns `.everything` rather than guessing.
-`UndoRepairLogicTests.testRedoingAnAppendCannotBeBoundedAndSaysEverything` pins that it says so.
+**The limit this section claimed was permanent, and was not: a redone *append* paid the full walk.**
+The paragraph that stood here read *"and it always will"*, on the grounds that the ink coming back has
+never been drawn on that canvas, so no footprint exists for it — BRUSH.md §12 stage 8 having refuted
+deriving a box from the brush. **The first clause was true of the canvas and false of the history.**
+That ink *was* drawn, immediately before, by the walk that measured it; what was missing was somewhere
+to keep the measurement across the round trip. `VectorCanvas.vacatedInk` is that place and the numbers
+are below. Nothing about §12 stage 8 changed: this is the measurement, not a derivation from the brush.
 
-**Which eraser modes that limit touches:** **neither cut mode**. Modes 2 and 3 *replace* strokes with
-pieces, so both directions of their undo have something departing and something arriving, and both
-are bounded — which is the whole table above. **Mode 1 (`.erase`, the eraser-is-a-stroke mode)
-appends a `destinationOut` punch**, so its undo is cheap (the punch departs and is measured) and its
-**redo is the full walk**. That is the one press on this path that this change does not help, and it
-is the cheapest of the three modes to begin with, since an appended punch costs one stroke rather
-than a re-walk.
+**Which eraser modes that limit touched:** **neither cut mode**. Modes 2 and 3 *replace* strokes with
+pieces, so both directions of their undo have something departing and something arriving, and both were
+bounded — which is the whole table above. **Mode 1 (`.erase`, the eraser-is-a-stroke mode) appends a
+`destinationOut` punch**, so its undo was cheap (the punch departs and is measured) and its redo was
+the full walk. It is bounded now for the same reason a brush stroke's redo is, and by the same table.
 
 **And one trap in the harness, because it is the kind that reads as a result.** `StrokeDensityBench`'s
 `medianSeconds(runs:)` times the same body three times over, which is right for `bumpVersion()` — it
@@ -2917,6 +2916,134 @@ departing, declares `.region(.null)`, and `repairClip` refuses a null rectangle,
 to a full walk: the median of three would have been a full walk, and the after arm would have measured
 as no improvement at all. `UndoRepairBench.alternatingUndoRedo` alternates instead, which is what the
 artist does anyway.
+
+### 11.11a Everything above was about the eraser, and the owner did not mean the eraser (2026-09-06)
+
+The correction, in full, because the reading above cost a pass:
+
+> *"why erase? My bit about the undo/redo being slow was just it being slow in general, not
+> specifically tied to an undo/redo of an erase. … Undoing and redoing while there are a lot of
+> strokes can be laggy, a few hundred milliseconds sluggish."*
+
+**Before generalising anything, the first question is which of two things "laggy" names**, because the
+answer decides whether a cheaper render helps at all. The render an undo triggers is dispatched off the
+main thread (`StrokeCanvasView.refreshDisplay`, RENDER.md §2.13), so the app either freezes for a few
+hundred milliseconds or it keeps responding and shows the *previous* picture for that long. §11.11
+asserted the second from reading the code. **MEASURED, and it is the second, decisively** —
+`UndoRepairBench.testWhatAnUndoPressSpendsOnTheMainThreadAgainstWhatTheRenderCosts`, driving
+`CanvasManager.undo()`/`redo()` end to end (the finalize, the closure, the notice,
+`refreshUndoRedoState`, the thumbnail schedule) with only the two lines that live on a `UIView` left
+out. **Release**, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048x1024, §11's fixture, median of
+five presses on an idle machine, one stroke drawn then undone and redone:
+
+| n strokes | undo press | redo press | undo render | redo render | press as % of the wait |
+|---|---|---|---|---|---|
+| 200 | 0.44 ms | 0.44 ms | 5.2 ms | 116.1 ms | 7.9% / **0.37%** |
+| 1000 | 1.94 ms | 1.89 ms | 60.5 ms | 571.2 ms | 3.1% / **0.33%** |
+| 2000 | 3.89 ms | 3.80 ms | 127.5 ms | 1135.6 ms | 3.0% / **0.33%** |
+| 4000 | 7.84 ms | 7.33 ms | 201.8 ms | 2275.1 ms | 3.7% / **0.32%** |
+
+**So 96–99.7% of the wait is a render that is not on the main thread, and the owner's "few hundred
+milliseconds" is the redo row at 1,000 strokes.** `canvas.rasterizations` does not move across a press,
+which is the operand that says the split is real rather than assumed. The press itself is ~2 µs an
+element — six passes over the display list building id sets and diffing survivors — which is under a
+frame everywhere up to 2,000 and about half a frame at 4,000; it is worth knowing and it is not the bug.
+
+**Two other main-thread terms an undo causes, measured because they would not be fixed by anything
+cheaper in the render.** The debounced thumbnail regen costs 3.9–8.0 ms when it fires 400 ms later at
+2048x1024 and **21.7 ms at 4096²**. And the **raster** arm — a texture-snapshot undo, which none of this
+work touches — is **0.02 ms a press and 0.00 ms to display, at both 2048x1024 and 4096²**: it swaps one
+`RasterLayerTexture` reference and `renderIfNonEmpty` hands back a memoized image. There is nothing to
+fix there.
+
+**The asymmetry in that table is the whole finding.** A redo costs 5.6–11.3x its own undo, on the same
+one stroke, because the undo bounds itself off the departing stroke's measured footprint and the redo
+declared `.everything`. That is not an eraser story at all — it is the commonest pair of presses in the
+app, and it is what §11.11's *"and it always will"* paragraph had written off.
+
+**`VectorCanvas.vacatedInk` is the fix — one table and two small methods.** `restoreElements` already forgets the
+footprints of the elements leaving the list; it now hands them to a small table on the way out, keyed by
+id, and `restoreDamage` uses an arriving id's remembered rectangle when the caller has none. It is a
+**hint, not a promise**, and that distinction is the safety argument: a `paintedBounds` entry lets the
+walk *skip* an element, while this is spent only on sizing the rectangle. The arriving element still has
+no `paintedBounds` entry, so `renderLocalContent` draws it, measures it, and widens the clip if it
+escaped — a stale rectangle costs a retry and cannot draw a wrong picture. Only strokes are ever in it,
+because only strokes are ever measured, and `rememberedInk` asks each arrival for its `stroke` rather
+than looking the id up and hoping.
+
+**Entries live until their id comes back, not for one round trip.** Keeping only the last restore's
+would make the first redo of a run cheap and leave the rest at `.everything` — and the owner's sentence
+is a run of presses, not a pair. The table is therefore sized by what is *out* of the display list and
+pruned when an id returns. What the prune does not reach is a step `UndoHistory.trim()` has evicted, so
+there is a cap, and it is derived rather than picked: every swap that feeds the table charges the
+history 512 bytes an element against `UndoBudget.maxCostBytes`, so that quotient bounds how many ids
+the whole history can name, and past it the surplus is dead by arithmetic. On the 64 MiB floor that is
+~131k entries at 48 bytes each — under a tenth of what the history is holding for the same ids.
+
+**The same Release table taken again after the fix, on the same machine in the same configuration** —
+the headline of the pass, because it is the whole press-to-picture wait:
+
+| n strokes | undo press | redo press | undo render | redo render | redo render before |
+|---|---|---|---|---|---|
+| 200 | 0.46 ms | 0.45 ms | 4.9 ms | **4.9 ms** | 116.1 ms |
+| 1000 | 1.91 ms | 2.09 ms | 59.4 ms | **51.0 ms** | 571.2 ms |
+| 2000 | 3.76 ms | 4.10 ms | 124.4 ms | **103.4 ms** | 1135.6 ms |
+| 4000 | 7.56 ms | 8.25 ms | 199.3 ms | **171.3 ms** | 2275.1 ms |
+
+**11.2x at 1,000 strokes and 13.3x at 4,000, and the redo is now slightly *cheaper* than the undo it
+mirrors** — it stamps the one arriving stroke where the undo re-stamps every survivor whose footprint
+reached the vacated rectangle. **The press span did not move** (0.46/1.91/3.76/7.56 against
+0.44/1.94/3.89/7.84), which is the operand that says the table this added costs nothing measurable —
+`rememberVacatedInk` walks the table rather than the arrivals for exactly that reason. The thumbnail
+flush and the raster arm are unchanged.
+
+**And the two arms side by side on a drawn stroke, which is what says the whole-cel walk is what went
+away** — `UndoRepairBench.testUndoAndRedoAfterADrawnStroke`, both arms alternating in one process,
+**Debug** (so comparable to §11.11's tables and not to the Release table just above):
+
+| n strokes | undo dabs before | after | redo dabs before | after | undo ms before | after | redo ms before | after | rectangle |
+|---|---|---|---|---|---|---|---|---|---|
+| 200 | 47,200 | **3,304** | 47,436 | **3,068** | 189.4 | **12.9** | 212.7 | **15.4** | 2.0% |
+| 500 | 118,000 | **24,780** | 118,236 | **24,308** | 640.2 | **78.0** | 784.1 | **78.1** | 4.2% |
+| 1000 | 236,000 | **50,740** | 236,236 | **47,436** | 1202.0 | **140.6** | 1243.2 | **122.7** | 3.6% |
+| 2000 | 472,000 | **119,888** | 472,236 | **106,200** | 1848.3 | **289.4** | 1821.5 | **251.9** | 3.2% |
+
+`repairsWidened` and `repairsAbandoned` are **0 at every row**, which is what says the remembered
+rectangle bound rather than merely ran — a redone stroke is the same `VectorStroke` value that left, so
+unlike a cut piece it does not re-anchor its dab walk and needs no margin.
+
+**Read the redo columns as this pass's and the undo columns as §11.11's.** The `before` arm is
+`bumpVersion()`, which is the state of the code before *either* pass, so the undo column is §11.11's
+improvement re-measured on a drawn stroke rather than an eraser cut — and it is much larger there
+(6.4–14.7x, against the cut's 1.8–6.7x) for the reason that section already gives: one stroke's
+footprint is **2–4% of the canvas** where a cut's union of parents is 10–36%. The redo column,
+**7.2–13.8x**, is the half that did not exist before today.
+
+**The 200-stroke row is not the interesting one.** At the density the owner reported the honest
+sentence is: **a redo at 2,000 strokes went from 1.82 s to 0.25 s in Debug**, and by §12's 1.86x
+CoreGraphics ratio and §11.2's 1.32 device ratio, INFERRED at roughly **1.29 s → 0.18 s on the owner's
+iPad 9**. Unlike the cut's prize this one does *not* shrink much with density — the rectangle is one
+stroke's footprint, which does not grow when the cel gets busier — so the 7.2x row and the 13.8x row
+are the same story rather than two.
+
+**What is still `.everything`, honestly.** A departing fill, image, text object or video: the walk
+measures no footprint for them (`renderLocalContent` says why), so `restoreDamage` cannot bound what
+leaves and returns `.everything` however good the caller's rectangle is. That is the undo of a fill and
+the undo of a text commit. A **rewrite in place** — recolour, Apply Brush, a text object re-edited under
+its own id, a video's crop fields, a motion-group retag, a transform key's pose — must stay at
+`.everything` and now says so through `CanvasManager.ElementSwap.rewritesInPlace`: the footprints
+`restoreElements` drops are chosen by id difference, so a rewritten element would keep a measurement
+that is no longer true of it and a later region edit could skip it on that measurement. That is the one
+case where a bound is a wrong picture rather than a slow one, and it is why the parameter has no
+default. The lasso move is in it: `VectorCanvas.drawn(_:through:widthScale:)` preserves an element's id
+by explicit design, so every nudge is a rewrite.
+
+**And a property of chaining repairs that no single-repair test could see.** A redo repairs from the
+base the *undo's* repair produced, so it inherits that press's seam wherever it is not redrawing.
+MEASURED in `testTheRedoneAppendDrawsWhatAFullReWalkDraws`: 15 bytes, **worst by 1 out of 255**, in a
+3x5 box two points outside the redo's clip and inside the undo's. Repairs compose and so do their
+seams, so the honest bound on a chain is the union of its clips rather than the last one. It cannot
+grow past a rounding unit — each press redraws its own clip from the bottom of the stack.
 
 ---
 

@@ -42,48 +42,43 @@ rather than assuming it still holds.
 
 ---
 
-## (41) Undo, redo and mid-list edits re-stamp the whole cel
+## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
-**Status** — partly built, and **actively in flight**. The two eraser cuts and the undo of a drawing
-gesture are bounded; every other edit and every redo still re-walks the cel.
+**Status** — partly built. **The general undo/redo work shipped 2026-09-06** (PERFORMANCE.md §11.11a);
+what is left is two cases that are blocked on something a rectangle cannot fix.
 
-> *"The want is that they all stand reasonably real time in terms of performance no matter the amount
-> of strokes for UX."*
->
 > *"Undoing and redoing while there are a lot of strokes can be laggy, a few hundred milliseconds
-> sluggish."* — 2026-09-06, restating it after a first fix landed too narrowly
+> sluggish."* — 2026-09-06, after a first fix landed too narrowly
 
-A vector cel re-stamps every dab it holds whenever its render memo is missed — MEASURED at 3.16 µs a
-dab with **no per-stroke term at all**, so ~142 ms at the owner's own 190-stroke density, 745 ms at
-1,000 and 2.98 s at 4,000. Appending a stroke is incremental and free. Everything that is *not* an
-append pays the whole cel.
+**What the artist is waiting for was measured rather than reasoned about, and it settles the shape of
+the complaint.** The main-thread span of an undo press is **0.44–7.84 ms** across 200–4,000 strokes;
+the render it causes is **5–2,275 ms**, 96–99.7% of the wait, and off the main thread. So the app
+never stops responding — "laggy" is the old picture standing there. The **raster** arm is 0.02 ms a
+press at both 2048x1024 and 4096² and needs nothing at all.
 
-The seam exists and works. `VectorCanvas.Damage.region` plus `repairableBase(quality:)` repairs a
-rectangle in the standing picture; `regionDamage(replacing:)` derives that rectangle from what the
-replaced strokes last painted. `restoreElements(_:changedInk:)` is the same idea for a wholesale list
-swap — **one rectangle serves undo and redo both**, because it bounds every pixel where the two lists
-differ. **What is left is wiring, not design**, except where noted.
+**The redo was 5.6–11.3x its own undo on the same one stroke**, which is the commonest pair of presses
+in the app, and this item had written that off as permanent. It was wrong: the ink coming back *had*
+been drawn, immediately before, by the walk that measured it. `VectorCanvas.vacatedInk` keeps that
+measurement while the id is out of the list. MEASURED in Release: a redo at 1,000 strokes **571 →
+51 ms**, at 4,000 **2,275 → 171 ms**.
 
-**The honest guarantee is that cost scales with the area touched**, not that it is always small. A
-selection dragged across the canvas has a canvas-sized rectangle and pays for it.
+**Left to build — and note this item's earlier "there is no design left to do" was wrong twice.**
+- [ ] **A departing fill, image, text object or video forces `.everything`** whatever rectangle the
+      caller passes, because `renderLocalContent` measures no footprint for those kinds. So the undo of
+      a fill and the undo of a text commit still pay the whole cel, while their redos no longer do.
+      The fix is to measure a fill's path bounds into `paintedBounds` — exact, unlike a dab walk — and
+      teach `restoreDamage`'s departing loop to accept it. A text object's glyph extent and a placed
+      image's quad are the same question.
+- [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
+      re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
+      lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
+      These declare `.rewritesInPlace` now instead of saying nothing, which is the honest state and not
+      a fix. Bounding them needs a different idea: an id whose *content* changed needs its old
+      footprint forgotten and its new one bounded, and no rectangle from a caller supplies that.
+- [ ] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
+      strokes**, which is why the "measure what was replaced" recipe never reached them.
 
-**Left to build**
-- [ ] **Redo of an append.** Currently unbounded — the returning ink "has never been drawn", so no
-      footprint exists. It has been drawn, immediately before; a one-round-trip memory of what the last
-      restore vacated fixes it, bounded to one edit's worth so it cannot grow. The escape check makes a
-      stale remembered rectangle cost a retry, never a wrong picture.
-- [ ] **`registerVectorElementsUndo`** — the fill, text and Clear-on-selection path. Each call site
-      names its own rectangle or passes nil honestly.
-- [ ] **Select-and-move** (`CanvasManager+LassoMove`), **recolour** and **Clear** (`SelectionModels`),
-      **shape** (`CanvasManager+Shape`). 38 `bumpVersion()` sites remain across these.
-- [ ] **Confirm what the artist is actually waiting for.** The render is dispatched *off* the main
-      thread, so a slow undo should be the old picture standing there rather than a freeze — that is
-      reasoned, not measured. Measure the main-thread span of a press, and check the thumbnail regen
-      and the save-damage/bake invalidation, which are not the display-list walk.
-- [ ] **Raster-layer undo is a different mechanism** (texture snapshots) and nothing here touches it.
-      Measure it; if it is slow at the owner's canvas size it earns its own item.
-
-**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11.
+**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a.
 
 ---
 
