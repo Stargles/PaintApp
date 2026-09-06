@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-09-05)
 
 ## Corpus Check
-- 396 files · ~2,017,245 words
+- 397 files · ~2,029,598 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `0ef4e2a9`
+- Built from commit: `02825130`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -799,7 +799,7 @@ Nodes (17): Editing, handles, none, spacing, Grip, Guide, GuideOverlayView, Bool
 
 ### Community 115 - "Handoff"
 Cohesion: 0.25
-Nodes (8): Ask the owner these, Do this first — two branches are finished-but-unverified and must land before anything else, Filed rather than fixed, Handoff, State, The brush engine is built — §12 stages 0 through 11 are DONE, Traps this pass paid for, What today cost, MEASURED
+Nodes (8): Ask the owner these, Do this first — two things about measurement, before any feature, Filed rather than fixed, Handoff, State, The brush engine is built — §12 stages 0 through 11 are DONE, Traps this pass paid for, What TODO (41) did and did not fix
 
 ### Community 116 - "LassoFillLogicTests"
 Cohesion: 0.17
@@ -1662,7 +1662,7 @@ Nodes (12): DabProbe, SandwichPresentation, disengaged, midStroke, rest, RestSpa
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1573 isolated node(s):** `Do this first — two branches are finished-but-unverified and must land before anything else`, `State`, `The brush engine is built — §12 stages 0 through 11 are DONE`, `Ask the owner these`, `Filed rather than fixed` (+1568 more)
+- **1573 isolated node(s):** `Do this first — two things about measurement, before any feature`, `State`, `The brush engine is built — §12 stages 0 through 11 are DONE`, `Ask the owner these`, `What TODO (41) did and did not fix` (+1568 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **34 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

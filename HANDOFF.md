@@ -18,11 +18,13 @@ Release on this project's alpha-mask path, so those numbers are sound as *ratios
 absolutes. Fixing the module error is small, unglamorous, and makes every future measurement mean
 something.
 
-**2. A full suite was started at `c26efc9` and its result is not in this file.** It is the first full
-run since `032efa1` (**2482 tests, 21.7 min**) and roughly forty merges have landed since, including the
-render path and the walk. **Read `/tmp/fullsuite.log` and the newest xcresult under
-`build/DerivedData/Logs/Test/` before trusting the tree**, and take the per-class table *immediately* —
-CLAUDE.md records that later triage runs evict the bundle that holds it.
+**2. The full suite is green and the tree is verified.** MEASURED at `c26efc9` on an erased simulator:
+**3363 tests, 3342 passed, 0 failed, 21 skipped, 36.5 min** — the third run in CLAUDE.md's history with no
+environmental red at all, after a pass that rewrote the dab alpha, the modulation walk, the scatter output
+and the whole library. The class table is re-taken in CLAUDE.md, and it carries a finding: **`BrushEditorUITests`
+did not exist this morning and is now the suite's second-heaviest class at 516 s across 11 tests.** It is
+the split candidate, and ~120 new tests cost +1,190 class-seconds, which ends the "a new test is close to
+free" run that section had recorded five times — UI tests that drive a full-screen editor are not free.
 
 ## State
 

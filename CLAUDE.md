@@ -386,6 +386,40 @@ which classes a clone is co-scheduled with**, so at 160 classes across four clon
 a source of variance — which means this table's individual rows are noisier than they look and only the
 total is worth trending. Read a single class's rise as a signal only when it repeats.
 
+**MEASURED at `c26efc9` on an idle machine with the simulator erased first — 3363 tests, 3342 passed,
+**0 failed**, 21 skipped, 36.5 min.** A full run with no environmental red at all is the **third** in this
+file's history, and it followed a pass that rewrote the dab alpha (a per-stroke transparency layer), the
+modulation walk (ordered module chains), the scatter output and the whole brush library.
+
+| class | seconds | tests |
+|---|---|---|
+| `SelectionAndMoveUITests` | 524 | 10 |
+| **`BrushEditorUITests`** | **516** | **11** |
+| `SandwichCompositingUITests` | 440 | 10 |
+| `BlendModesAndCompositorUITests` | 275 | 8 |
+| `GraphEditorGestureUITests` | 256 | 4 |
+| `PerfBaselineTests` | 236 | 57 |
+| `BrushMenuUITests` | 219 | 8 |
+| `LayerPanelControlsUITests` | 218 | 8 |
+| `CuttingModesUITests` | 200 | 4 |
+| `EraserAndPersistenceUITests` | 196 | 7 |
+
+**5,727 class-seconds across 168 classes**, against 4,537 across 160 at `032efa1` — so ~120 new tests cost
+**+1,190 class-seconds**, which decisively ends the "a new test is close to free" run this section recorded
+five times. The reason is visible in the table rather than inferred: **the new tests are UI tests that
+drive a full-screen editor**, and a class of those costs what the old table's heavy classes cost.
+
+**`BrushEditorUITests` is this file's own warning coming true inside one day.** It did not exist at
+breakfast; it is 516 s across 11 tests by night, second on the board, and it grew the way this section has
+twice recorded a graph-editor class growing — two or three tests added to the obvious place per pass, each
+paying a fixture cost nobody priced. **It is the split candidate**, and unlike the classes this file has
+argued about, splitting it actually buys something: the top three are 524 / 516 / 440, so cutting the
+second still leaves the first as the floor, but four clones hold 23.9 min of ideal work against 36.5 min of
+wall clock and that gap is now the largest it has been.
+
+**The wall clock is not comparable to the 21.7 min at `032efa1`** and this is worth saying plainly rather
+than reading as a regression: the suite grew from 2482 to 3363 tests. Per-test it is flat.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
