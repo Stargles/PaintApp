@@ -162,6 +162,18 @@ extension CanvasManager {
                     guard case .video(let posedVideo) = element else {
                         return Self.reidentified(element)
                     }
+                    // **`atDocumentFrame: frame` collapses to `elapsedDocumentFrames == 0` here,
+                    // always** — every cel is one document frame by now, so the only frame
+                    // `activeCelIndex` could have found this one at is its own `startFrame`. The
+                    // general formula is kept anyway rather than reading `posedVideo.sourceStart`
+                    // directly: it stays correct if a future change ever revisits a cel more than
+                    // once, where a shortcut would silently start reading the wrong instant. MEASURED
+                    // by mutation: substituting the outer `startFrame` constant here (which makes
+                    // `elapsedDocumentFrames` negative instead of zero on every cel but the first)
+                    // does not redden anything, because `SourceTime.clamped` floors both to the same
+                    // `sourceStart` — the real guarantee that each cel gets its own picture lives in
+                    // the crop `splitCel`/`writeVideoCrop` anchored during the split above, which the
+                    // cel-selection mutation just below this one pins directly.
                     let time = VideoFrameMap.sourceTime(of: posedVideo, atDocumentFrame: frame,
                                                         celStartFrame: bakedCel.startFrame,
                                                         documentFPS: documentFPS)
