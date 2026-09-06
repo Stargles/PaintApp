@@ -70,11 +70,7 @@ enum VectorRenderCache {
         let bytes = canvas.cachedImageBytes
         lock.lock()
         clock += 1
-        if bytes > 0 {
-            entries[ObjectIdentifier(canvas)] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock)
-        } else {
-            entries.removeValue(forKey: ObjectIdentifier(canvas))
-        }
+        setLocked(ObjectIdentifier(canvas), canvas: canvas, bytes: bytes, touching: true)
         let victims = victimsLocked(keeping: ObjectIdentifier(canvas))
         lock.unlock()
         for victim in victims { victim.dropCachedImage() }
@@ -88,19 +84,9 @@ enum VectorRenderCache {
     /// (`VectorCanvas.invalidateRenderOnly`), so taking another canvas's lock from here would be the
     /// nesting the ordering rule forbids. The bytes are corrected now; the next render evicts.
     static func noteBytes(_ canvas: VectorCanvas, _ bytes: Int) {
-        let key = ObjectIdentifier(canvas)
         lock.lock()
         defer { lock.unlock() }
-        if bytes > 0 {
-            if entries[key] != nil {
-                entries[key]?.bytes = bytes
-            } else {
-                clock += 1
-                entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock)
-            }
-        } else {
-            entries.removeValue(forKey: key)
-        }
+        setLocked(ObjectIdentifier(canvas), canvas: canvas, bytes: bytes, touching: false)
     }
 
     /// **A memo was read rather than made** — moves the canvas to the head of the use order without
@@ -120,7 +106,7 @@ enum VectorRenderCache {
     static func noteDropped(_ canvas: VectorCanvas) {
         lock.lock()
         defer { lock.unlock() }
-        entries.removeValue(forKey: ObjectIdentifier(canvas))
+        removeLocked(ObjectIdentifier(canvas))
     }
 
     /// Bytes of memoized vector render the app is holding, across every live canvas that has
@@ -129,7 +115,7 @@ enum VectorRenderCache {
         lock.lock()
         defer { lock.unlock() }
         pruneLocked()
-        return entries.values.reduce(0) { $0 + $1.bytes }
+        return residentTotal
     }
 
     /// How many canvases are holding a memoized render.
@@ -146,6 +132,7 @@ enum VectorRenderCache {
         lock.lock()
         let all = entries.values.compactMap(\.canvas)
         entries.removeAll()
+        residentTotal = 0
         lock.unlock()
         for canvas in all { canvas.dropCachedImage() }
     }
@@ -171,6 +158,13 @@ enum VectorRenderCache {
     private static var entries: [ObjectIdentifier: Entry] = [:]
     private static var clock: UInt64 = 0
 
+    /// **The sum of `entries`' bytes, maintained rather than recomputed** — and that is a performance
+    /// decision rather than tidiness. `noteRendered` runs on **every** call to `VectorCanvas.render`,
+    /// including the memo hits that are most of them, so the common case has to be O(1): one dictionary
+    /// write and one comparison against the budget. Summing the values there instead, as the first
+    /// version of this did, put an O(entries) walk plus a dictionary rebuild on the display path.
+    private static var residentTotal = 0
+
     /// Registered once, lazily, by the first canvas to memoize anything — there is no instance here
     /// whose initialiser could do it. A warning halves and a background clears, exactly as the two
     /// caches either side of this one; see `MemoryPressurePolicy`.
@@ -181,30 +175,55 @@ enum VectorRenderCache {
         }
     }()
 
+    /// Inserts or updates one entry, keeping `residentTotal` right. Caller must hold `lock`.
+    /// `touching` moves it to the head of the use order; `noteBytes` does not, because correcting a
+    /// figure is not a use.
+    private static func setLocked(_ key: ObjectIdentifier, canvas: VectorCanvas, bytes: Int,
+                                  touching: Bool) {
+        guard bytes > 0 else { return removeLocked(key) }
+        if var existing = entries[key] {
+            residentTotal += bytes - existing.bytes
+            existing.bytes = bytes
+            if touching { existing.lastUsed = clock }
+            entries[key] = existing
+        } else {
+            if !touching { clock += 1 }
+            entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock)
+            residentTotal += bytes
+        }
+    }
+
+    /// Caller must hold `lock`.
+    private static func removeLocked(_ key: ObjectIdentifier) {
+        if let removed = entries.removeValue(forKey: key) { residentTotal -= removed.bytes }
+    }
+
     /// Forgets entries whose canvas has been deallocated. A deleted cel must not hold a slot, and a
     /// weak reference is what makes that automatic rather than something `deleteCel` has to remember.
+    ///
+    /// **Called only when the budget looks full**, never on the hot path: a dead entry's bytes are
+    /// charged until then, which can only make eviction *earlier* than it needs to be, and the one
+    /// moment that matters — being about to evict a live cel — is exactly when this runs.
     private static func pruneLocked() {
-        entries = entries.filter { $0.value.canvas != nil }
+        for (key, entry) in entries where entry.canvas == nil { removeLocked(key) }
     }
 
     private static func victimsLocked(keeping keep: ObjectIdentifier?,
                                       budgetBytes: Int? = nil,
                                       entryLimit: Int? = nil) -> [VectorCanvas] {
         _ = pressureToken
-        pruneLocked()
         let budget = budgetBytes ?? Self.budgetBytes
         let limit = entryLimit ?? Self.entryLimit
-        var total = entries.values.reduce(0) { $0 + $1.bytes }
-        var count = entries.count
-        guard total > budget || count > limit else { return [] }
+        // The O(1) gate. Everything below it is O(entries) and runs only at the bound.
+        guard residentTotal > budget || entries.count > limit else { return [] }
+        pruneLocked()
+        guard residentTotal > budget || entries.count > limit else { return [] }
         var victims: [VectorCanvas] = []
         for (key, entry) in entries.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }) {
-            guard total > budget || count > limit else { break }
+            guard residentTotal > budget || entries.count > limit else { break }
             guard key != keep, let canvas = entry.canvas else { continue }
             victims.append(canvas)
-            entries.removeValue(forKey: key)
-            total -= entry.bytes
-            count -= 1
+            removeLocked(key)
         }
         return victims
     }

@@ -790,31 +790,45 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// would have said almost the same thing during a scrub; this is the case where it does not — an
     /// onion skin, or a cel the artist keeps coming back to, is *read* rather than re-rendered, and
     /// under insertion order it would age out behind cels rendered once and never looked at again.
+    ///
+    /// **Both ways of reading a memo, because they are two entry points and only one of them was
+    /// covered.** `cachedRender()` is what `StrokeCanvasView.refreshDisplay` asks before it decides
+    /// whether to dispatch, and `render()` on a hit is what every other caller does; they reach
+    /// `VectorRenderCache` through `noteUsed` and through `noteRendered`'s update path respectively,
+    /// and a mutation sweep found the second one untested.
     @MainActor
     func testAMemoReadKeepsACelAheadOfOneRenderedMoreRecently() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
-        let entryBytes = 2048 * 1024 * 4
-        VectorRenderCache.removeAll()
-        CompositorBudget.budgetOverrideBytes = entryBytes * 3
+        for readsThroughRender in [false, true] {
+            defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+            let entryBytes = 2048 * 1024 * 4
+            VectorRenderCache.removeAll()
+            CompositorBudget.budgetOverrideBytes = entryBytes * 3
 
-        let canvases = (0..<3).map { _ in ownersCanvasCel() }
-        for canvas in canvases { _ = canvas.render() }
-        XCTAssertEqual(VectorRenderCache.entryCount, 3, "control: the cache is exactly full")
+            let canvases = (0..<3).map { _ in ownersCanvasCel() }
+            for canvas in canvases { _ = canvas.render() }
+            XCTAssertEqual(VectorRenderCache.entryCount, 3, "control: the cache is exactly full")
 
-        // Read the oldest one's memo. Nothing is rendered; the only thing that changes is use order.
-        guard case .ready = canvases[0].cachedRender() else {
-            return XCTFail("control: the oldest entry must still be memoized before the read")
+            // Read the oldest one's memo. Nothing is rasterized either way — the second arm is a memo
+            // *hit*, which is what makes it a use rather than a store.
+            let rasterizationsBefore = canvases[0].rasterizations
+            if readsThroughRender {
+                _ = canvases[0].render()
+            } else if case .ready = canvases[0].cachedRender() {} else {
+                XCTFail("control: the oldest entry must still be memoized before the read")
+            }
+            XCTAssertEqual(canvases[0].rasterizations, rasterizationsBefore,
+                           "control: the read must be a hit, or this is measuring a store")
+
+            // One more render, so exactly one entry has to go.
+            let newcomer = ownersCanvasCel()
+            _ = newcomer.render()
+
+            XCTAssertTrue(canvases[0].hasCachedImage,
+                          "the cel that was read must survive — under insertion order it would be the victim (readsThroughRender: \(readsThroughRender))")
+            XCTAssertFalse(canvases[1].hasCachedImage, "and the least recently used one is what goes")
+            withExtendedLifetime(canvases) {}
+            withExtendedLifetime(newcomer) {}
         }
-
-        // One more render, so exactly one entry has to go.
-        let newcomer = ownersCanvasCel()
-        _ = newcomer.render()
-
-        XCTAssertTrue(canvases[0].hasCachedImage,
-                      "the cel that was read must survive — under insertion order it would be the victim")
-        XCTAssertFalse(canvases[1].hasCachedImage, "and the least recently used one is what goes")
-        withExtendedLifetime(canvases) {}
-        withExtendedLifetime(newcomer) {}
     }
 
     /// **A canvas holding both a full and a preview render is charged for both.** `hasCachedImage`
