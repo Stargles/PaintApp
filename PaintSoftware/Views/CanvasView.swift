@@ -2073,6 +2073,11 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func updateFloatingOverlay() {
+            // Mirrored down every pass, same as `updateSelectionOverlay` mirrors it to
+            // `SelectionOverlayView.pencilOnlyDrawing` — see that property's doc comment. Before
+            // `.update(...)`: `handleTapOutside` can fire from the touch that this very pass is
+            // reacting to, so the flag has to be current before the recognizer might ask for it.
+            floatingOverlay?.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
             floatingOverlay?.update(canvasManager.floatingPiece,
                                     isInteractive: canvasTouchInputs().floatingOverlayIsInteractive)
             guard let overlay = floatingOverlay, let container = containerView else { return }
@@ -2951,6 +2956,16 @@ struct CanvasView: UIViewRepresentable {
         ///    they put down — a state they then paint with. Pencil-only mode is a promise that a hand
         ///    on the glass changes nothing about drawing, and the colour about to be drawn with is
         ///    part of that.
+        ///  * `textPress` — **gated,** in `handleTextPress`, for the reason stated there: placing text
+        ///    changes what the artist's next action does.
+        ///  * `moveBoxCommit` — **gated since TODO (47),** in `handleMoveBoxCommit`, the same shape as
+        ///    the eyedropper's: committing a float edits no pixels either, but it ends the piece's
+        ///    adjustable state, which a resting hand must not decide. The raster tap-outside
+        ///    (`FloatingPieceOverlayView.handleTapOutside`, not one of this view's own recognizers)
+        ///    carries the identical gate for the identical reason.
+        ///  * Both `textPress` and `moveBoxCommit` post-date this list and had gone unlisted here —
+        ///    see each one's own doc comment rather than trusting this summary to stay current the
+        ///    next time a recognizer is added.
         ///
         /// The per-layer stroke recognizer is not created here — `StrokeCanvasView` owns it and
         /// `reconcileLayers` mirrors the preference down to it. That was the *only* consumer of
@@ -3101,12 +3116,17 @@ struct CanvasView: UIViewRepresentable {
             // so the canvas keeps panning and pinching while the box is up. A tap recognizer added to
             // it would therefore never fire off the box, which is precisely the tap this is for.
             //
-            // A plain `UITapGestureRecognizer` and **not** a `TouchTypePressRecognizer`, unlike the
-            // four above: settling a float writes nothing and records nothing (every nudge is already
-            // its own undo step — LASSO_MOVE.md §5), so "would this input have drawn?" answers no and
-            // pencil-only mode has no stake in it. The raster tap-outside is a plain tap for the same
-            // reason, and matching it is the point.
-            let moveBoxCommit = UITapGestureRecognizer(target: self, action: #selector(handleMoveBoxCommit(_:)))
+            // **A `TouchTypeTapGestureRecognizer`, not a plain `UITapGestureRecognizer` — TODO (47).**
+            // This used to read the other way: settling a float writes nothing and records nothing
+            // (every nudge is already its own undo step — LASSO_MOVE.md §5), so by "would this input
+            // have drawn?" alone pencil-only mode has no stake here. The owner's report is the
+            // eyedropper's exemption read from the other side: a pick edits nothing either and is
+            // gated anyway because of what it *leads to* (`handleEyedropperPress`'s doc comment).
+            // Committing a float ends its adjustable state the same way — a resting hand mid-Move
+            // must not decide that a nudge is final. The raster tap-outside
+            // (`FloatingPieceOverlayView.handleTapOutside`) carries the identical fix for the
+            // identical reason, via its own mirrored `pencilOnlyDrawing` property.
+            let moveBoxCommit = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleMoveBoxCommit(_:)))
             moveBoxCommit.numberOfTouchesRequired = 1
             moveBoxCommit.delegate = self
             moveBoxCommit.cancelsTouchesInView = false
@@ -3141,11 +3161,18 @@ struct CanvasView: UIViewRepresentable {
         /// are already on the stack one apiece (LASSO_MOVE.md §5). The second arm settled a whole-layer
         /// transform with `isVectorTransforming = false`; TODO item (12) stage 2 deleted it, because
         /// Move with no selection lifts a float now and takes the first branch.
-        @objc func handleMoveBoxCommit(_ recognizer: UITapGestureRecognizer) {
+        ///
+        /// **Gated on pencil-only drawing since TODO (47)** — owner: *"when you are moving an object
+        /// with pen only draw on and then tap somewhere else on the canvas with your hand, it bakes
+        /// the move... it should only do that when the pen is tapped."* Read straight off
+        /// `recognizer.lastTouchType`, the same `TouchTypeTapGestureRecognizer` spelling
+        /// `SelectionOverlayView` uses, rather than a third copy of the flag.
+        @objc func handleMoveBoxCommit(_ recognizer: TouchTypeTapGestureRecognizer) {
             guard recognizer.state == .ended, let container = containerView else { return }
-            // Before the ownership guard, as every canvas touch is: a tap that this handler declines
+            // Before the pencil-only guard, as every canvas touch is: a tap that this handler declines
             // still closes an open top-bar dropdown.
             canvasManager.canvasInteractionBegan()
+            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             let canvasPoint = recognizer.location(in: container)
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             guard CanvasTouchOwner.owner(in: touch) == .moveBoxCommit else { return }

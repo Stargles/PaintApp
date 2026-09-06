@@ -424,37 +424,7 @@ final class SelectionOverlayView: UIView {
     }
 }
 
-/// A pan recognizer that remembers what kind of touch started it.
-///
-/// Same shape and same reason as `CanvasView.TouchTypePressRecognizer` — see that type's doc
-/// comment for the full argument, including why `UIGestureRecognizerDelegate.shouldReceive` (which
-/// *does* get the `UITouch`) was rejected in favor of a subclass. Not literally reused because it
-/// subclasses `UILongPressGestureRecognizer`, and the lasso/rectangle drag needs a real
-/// `UIPanGestureRecognizer` for its `.began`/`.changed`/`.ended` states and `location(in:)` — there
-/// is no common ancestor below `UIGestureRecognizer` to hang one shared implementation on, so the
-/// `touchesBegan` override is duplicated rather than abstracted; only the tie-break
-/// (`resolvedLastTouchType`) is shared.
-final class TouchTypePanGestureRecognizer: UIPanGestureRecognizer {
-    /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
-    /// conservative initial value, same reasoning as `TouchTypePressRecognizer.lastTouchType`.
-    private(set) var lastTouchType: UITouch.TouchType = .direct
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
-            lastTouchType = type
-        }
-        super.touchesBegan(touches, with: event)
-    }
-}
-
-/// Same idea as `TouchTypePanGestureRecognizer`, for the automatic-selection tap.
-final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
-    private(set) var lastTouchType: UITouch.TouchType = .direct
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
-            lastTouchType = type
-        }
-        super.touchesBegan(touches, with: event)
-    }
-}
+// `TouchTypePanGestureRecognizer` and `TouchTypeTapGestureRecognizer` moved to
+// `TouchTypeResolution.swift` (TODO 47): `FloatingPieceOverlayView` needed the tap recognizer too,
+// and that file — not this one — is the app source already shared into `PaintSoftwareUITests`'s
+// compilation for exactly this reason. See its doc comment.

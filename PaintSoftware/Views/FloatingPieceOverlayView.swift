@@ -12,6 +12,14 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
     var onPoseChange: ((FloatingTransform, Quad?) -> Void)?
     var onRequestCommit: (() -> Void)?
 
+    /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
+    /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
+    /// the tap-outside commit below used to run unconditionally, on the theory that settling a float
+    /// writes nothing so pencil-only mode had no stake in it. The owner's report is the eyedropper's
+    /// exemption read the other way — committing ends the piece's adjustable state, and a resting
+    /// hand mid-Move must not decide that for the artist.
+    var pencilOnlyDrawing: Bool = false
+
     private var piece: FloatingPiece?
 
     private let pieceImageView = UIImageView()
@@ -89,7 +97,9 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
         rotate.maximumNumberOfTouches = 1
         rotateHandle.addGestureRecognizer(rotate)
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTapOutside(_:)))
+        // `TouchTypeTapGestureRecognizer`, not a plain `UITapGestureRecognizer` — see
+        // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47).
+        let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTapOutside(_:)))
         addGestureRecognizer(tap)
     }
 
@@ -339,8 +349,15 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
 
     // MARK: - Commit (tap outside the box)
 
-    @objc private func handleTapOutside(_ recognizer: UITapGestureRecognizer) {
+    /// **Gated on pencil-only drawing since TODO (47)** — owner: *"when you are moving an object with
+    /// pen only draw on and then tap somewhere else on the canvas with your hand, it bakes the
+    /// move... it should only do that when the pen is tapped."* Read straight off
+    /// `recognizer.lastTouchType`, ahead of the bounds check: a finger elsewhere on the canvas must do
+    /// whatever a finger does outside a Move (nothing, here — the piece stays exactly as adjustable as
+    /// it was), not commit.
+    @objc private func handleTapOutside(_ recognizer: TouchTypeTapGestureRecognizer) {
         guard let piece else { return }
+        guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
         let location = recognizer.location(in: self)
         if !piece.transformedBounds.insetBy(dx: -8, dy: -8).contains(location) {
             onRequestCommit?()

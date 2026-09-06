@@ -6,7 +6,7 @@ import UIKit
 /// which member of the set UIKit happened to store first. An artist's off-hand can rest on the
 /// glass while the pencil draws, and that resting contact must not flip `lastTouchType` to `.direct`.
 ///
-/// Used by `SelectionOverlayView`'s `TouchTypePanGestureRecognizer`/`TouchTypeTapGestureRecognizer`.
+/// Used by `TouchTypePanGestureRecognizer`/`TouchTypeTapGestureRecognizer` below.
 /// `TouchTypePressRecognizer.touchesBegan` in CanvasView.swift applies the identical rule inline;
 /// not shared with it because that recognizer predates this pair and touching it is out of scope
 /// for the lasso pencil-only-mode fix this exists for.
@@ -29,4 +29,46 @@ func resolvedLastTouchType<S: Sequence>(from types: S) -> UITouch.TouchType? whe
         if type == .pencil { return type }
     }
     return first
+}
+
+/// A pan recognizer that remembers what kind of touch started it.
+///
+/// Same shape and same reason as `CanvasView.TouchTypePressRecognizer` — see that type's doc
+/// comment for the full argument, including why `UIGestureRecognizerDelegate.shouldReceive` (which
+/// *does* get the `UITouch`) was rejected in favor of a subclass. Not literally reused because it
+/// subclasses `UILongPressGestureRecognizer`, and the lasso/rectangle drag needs a real
+/// `UIPanGestureRecognizer` for its `.began`/`.changed`/`.ended` states and `location(in:)` — there
+/// is no common ancestor below `UIGestureRecognizer` to hang one shared implementation on, so the
+/// `touchesBegan` override is duplicated rather than abstracted; only the tie-break
+/// (`resolvedLastTouchType`) is shared.
+///
+/// Originally declared in `SelectionOverlayView.swift`, alongside its one call site there. Moved
+/// here (TODO 47) once `FloatingPieceOverlayView` needed `TouchTypeTapGestureRecognizer` too and
+/// that file is not part of the "app sources shared with PaintSoftwareUITests" group this one is —
+/// see this file's own header for why that group has to stay UIKit-only.
+final class TouchTypePanGestureRecognizer: UIPanGestureRecognizer {
+    /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
+    /// conservative initial value, same reasoning as `TouchTypePressRecognizer.lastTouchType`.
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
+            lastTouchType = type
+        }
+        super.touchesBegan(touches, with: event)
+    }
+}
+
+/// Same idea as `TouchTypePanGestureRecognizer`, for a plain tap — `SelectionOverlayView`'s
+/// automatic-selection tap, and since TODO (47) the vector and raster Move box's tap-away commit
+/// (`CanvasView.Coordinator.handleMoveBoxCommit`, `FloatingPieceOverlayView.handleTapOutside`).
+final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
+            lastTouchType = type
+        }
+        super.touchesBegan(touches, with: event)
+    }
 }
