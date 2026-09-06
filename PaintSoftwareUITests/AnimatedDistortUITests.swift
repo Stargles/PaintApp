@@ -13,10 +13,10 @@ import XCTest
 ///    Every step is a different view and the model cannot see whether an artist can get from one to
 ///    the next;
 ///  * that a **scrubbed in-between shows a keystone on the canvas**. That is the whole feature, and
-///    the measurement is one an affine cannot fake: a constant-width line becomes a **wedge**, and no
-///    affine map of a constant-width line is a wedge. If the blend dropped the perspective row, or if
-///    a render read went back to the linearisation, the in-between would be a straight line of one
-///    width and this goes red.
+///    the measurement is one an affine cannot fake: two lines of the same length end up **different
+///    lengths**, which every affine map there is leaves equal. If the blend dropped the perspective
+///    row, or if a render read went back to the linearisation, the in-between would show two lines
+///    of one length and this goes red.
 ///
 /// A small class on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
 final class AnimatedDistortUITests: PaintUITestCase {

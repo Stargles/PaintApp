@@ -232,6 +232,14 @@ enum PoseMap: Equatable {
     ///
     /// A key that stored only the affine six would hand every keystone of an animated Distort the
     /// same digest, which is §4.5's trap arriving through stage 5b's door.
+    ///
+    /// **A homography is defined up to scale and this does not normalise it**, so two spellings of
+    /// one map — a solved `Homography(rect:to:)` and the same map arrived at by `concatenating` —
+    /// can encode differently. That is safe in the direction it fails, which is the argument
+    /// `PosedCelIdentity.inherited` already makes for its own field: two descriptions of one value
+    /// cost a re-bake, and one description of two values costs a wrong picture. Every *stored* pose
+    /// reaches this through `PoseQuad.homography`, which is one deterministic solve, so the only
+    /// place it can bite is a chain of two container poses.
     var encoded: [CGFloat] {
         switch self {
         case .affine(let t): return [t.a, t.b, t.c, t.d, t.tx, t.ty]
