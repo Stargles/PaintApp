@@ -367,11 +367,20 @@ re-litigate any of them.**
 - [ ] **(b) Dead area below the last row.** `AnimationTimeline` sizes the track host to
       `rowLayout.contentHeight`, so the horizontal scroll view does not exist below the last row, and
       the gridlines get the same extent. One cause, both symptoms.
-- [ ] **(c) The timeline freezes.** Needs an ActionRecorder trace from the owner — the reset idiom is
-      intact and paired, so the filed suspicion is wrong. **A second suspect to check first:**
-      `scrollView.panGestureRecognizer.require(toFail:)` against the row and ruler long-presses, which
-      have `minimumPressDuration = 0`. An unresolved one blocks panning *and* taps while playback keeps
-      running — the reported symptom set verbatim.
+- [ ] **(c) The timeline freezes — traced, and it is a detached view rather than a gesture fight.**
+      The owner captured it: [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
+      is the analysis and the `.jsonl` beside it is the trace. In the freeze window **14 of 34
+      touch-downs on a `TimelineRowView` carry no scroll-view recognizer at all** — system gates only —
+      where before it 17 of 17 carry the full set. The row is on screen and hit-testable but its
+      ancestor chain no longer contains the scroll views, so nothing can respond; the ~40% that still
+      land on live rows are why it reads as intermittent. **Both filed suspicions are refuted** — the
+      reset idiom is intact, and the recognizers are not losing a `require(toFail:)` arbitration, they
+      are not attached. It begins immediately after a cel is created at frame 20 with `sceneFrameCount`
+      defaulting to 12 (see (50)), which forces a track re-layout — the moment a row view would be
+      rebuilt and a stale one left behind.
+- [ ] **Instrument the timeline's recognizers** the way the canvas's already are. Every `recognizer`
+      and `requireFailure` line in the trace is a `canvas.*` one, so the recorder is currently blind to
+      exactly the gestures this item is about. Cheap, and it makes the next trace decisive.
 
 ---
 
