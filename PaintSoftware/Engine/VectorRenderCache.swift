@@ -67,6 +67,12 @@ enum VectorRenderCache {
     /// lock is held, and the one nesting that does exist (`dropCachedImage` → `noteDropped`) runs the
     /// other way round.
     static func noteRendered(_ canvas: VectorCanvas) {
+        // Before the lock. Touching a lazy `static let` runs its initialiser, which registers with
+        // `MemoryPressure` and takes *that* type's lock; doing it while holding this one would put a
+        // `swift_once` inside a critical section for no reason. There is no cycle either way —
+        // `MemoryPressure.signal` releases its lock before calling a responder — but the shorter
+        // holding time is free and the reasoning is one step simpler.
+        _ = pressureToken
         let bytes = canvas.cachedImageBytes
         lock.lock()
         clock += 1
@@ -211,7 +217,6 @@ enum VectorRenderCache {
     private static func victimsLocked(keeping keep: ObjectIdentifier?,
                                       budgetBytes: Int? = nil,
                                       entryLimit: Int? = nil) -> [VectorCanvas] {
-        _ = pressureToken
         let budget = budgetBytes ?? Self.budgetBytes
         let limit = entryLimit ?? Self.entryLimit
         // The O(1) gate. Everything below it is O(entries) and runs only at the bound.

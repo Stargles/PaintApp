@@ -634,7 +634,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         _ = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
         _ = PixelOps.rasterizeCacheBytes
         _ = MaskResolver.cacheEntryCount
-        VectorRenderCache.trim(toBytes: Int.max)
+        // Through a render, which is the path the app takes — `VectorRenderCache` registers lazily
+        // from `noteRendered` because there is no instance whose initialiser could do it, and warming
+        // it any other way would assert that a seam nothing reaches is nonetheless wired.
+        _ = ownersCanvasCel().render()
         _ = OnionSkinRasterCache.image(for: manager.layers[0].cels[0],
                                        canvasSize: CanvasFixture.canvasSize,
                                        at: CGSize(width: 16, height: 16))
