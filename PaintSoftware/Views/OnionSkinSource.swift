@@ -89,6 +89,9 @@ enum OnionSkinClip {
     ///   mask is the BUGS.md entry "The onion skin renders unmasked".
     /// - `ink` is what Behind takes back out. Nil is In Front and is also "Behind over a drawing with
     ///   nothing on it", which are the same picture and rightly the same code path.
+    /// - `opacity` is the current layer's own opacity, folded into the cut proportionally — the
+    ///   owner's 2026-09-06 ruling. Defaulted to 1 so every other caller (every test but the one that
+    ///   pins this) keeps asking for a full cut without naming it.
     ///
     /// **The placement setting is not read here**, deliberately: `CanvasManager.onionSkinInkToSubtract`
     /// is the one place in the app that consults it, so there is a single answer to "does this pass
@@ -101,7 +104,8 @@ enum OnionSkinClip {
     /// The combined image is built at `size` — the *skin's* resolution, not the canvas's. The thing
     /// being masked is already soft at that size (`OnionSkinBudget` argues why a ghost may be), so a
     /// cut edge sharper than the ghost it cuts would buy nothing and cost the square of the ratio.
-    static func mask(layerMask: CGImage?, subtracting ink: UIImage?, size: CGSize) -> CGImage? {
+    static func mask(layerMask: CGImage?, subtracting ink: UIImage?, size: CGSize,
+                     opacity: CGFloat = 1) -> CGImage? {
         guard let ink, size.width > 0, size.height > 0 else { return layerMask }
 
         let bounds = CGRect(origin: .zero, size: size)
@@ -117,11 +121,13 @@ enum OnionSkinClip {
                     UIColor.white.setFill()
                     ctx.cgContext.fill(bounds)
                 }
-                // …and then the artist's own ink is taken back out of it. `.destinationOut` is
-                // dst x (1 - src alpha), which *is* "the inverse of the current drawing layer as an
-                // alpha mask" — no separate inversion pass, and it composes with the coverage above
-                // by construction rather than by a second multiply.
-                ink.draw(in: bounds, blendMode: .destinationOut, alpha: 1)
+                // …and then the artist's own ink is taken back out of it, at `opacity` rather than
+                // unconditionally at full strength. `.destinationOut` is dst x (1 - src alpha), and
+                // the `alpha:` draw parameter scales the source's own alpha before that subtraction
+                // runs — so a 30%-opacity layer leaves dst x 0.7 behind at every ink pixel instead of
+                // dst x 0, which is "the inverse of the current drawing layer as an alpha mask,
+                // proportional to how much of it is actually there."
+                ink.draw(in: bounds, blendMode: .destinationOut, alpha: opacity)
             }
         return combined.cgImage
     }
@@ -154,9 +160,14 @@ extension CanvasManager {
     /// It falls out of the cel lookup below; the guard is here so it is a decision rather than an
     /// accident.
     ///
-    /// **Layer opacity is deliberately not folded in.** The ruling's stated purpose is *"giving the
-    /// animator a clear view at their art"*, and a proportional cut puts the ghost back under
-    /// half-opacity ink, which is the muddle Behind exists to remove. Full cut wherever there is ink.
+    /// **Layer opacity is folded in, proportionally — the owner's 2026-09-06 reversal of this
+    /// paragraph's old ruling.** A full cut wherever there is any ink at all defeated the ruling's
+    /// own stated purpose, *"giving the animator a clear view at their art"*: a stroke too faint to
+    /// see still blanked the ghost as completely as a solid one, so faint work vanished the ghost for
+    /// no visible reason. 30% layer opacity now cuts 30% of the ghost; solid ink still hides it.
+    /// `onionSkinInkOpacity`, just below, is the other half — this function's own return value is
+    /// unchanged so `OnionSkinRasterCache`'s identity survives and `CanvasView`'s clip memo still
+    /// sees the same object when only the drawing, not the slider, has moved.
     ///
     /// Not `@MainActor`, matching `OnionSkinSettingsSource.frames(for:)` next to it: everything it
     /// reads is ordinary document state and the only caller is a SwiftUI pass.
@@ -182,6 +193,16 @@ extension CanvasManager {
         let derived = derivedCelContent(for: cel, atFrame: currentFrame)
         guard derived != nil || !cel.isCertainlyBlank else { return nil }
         return OnionSkinRasterCache.image(for: cel, canvasSize: canvasSize, at: size, derived: derived)
+    }
+
+    /// **The proportion of the ghost `onionSkinInkToSubtract`'s ink actually cuts** — `OnionSkinClip.
+    /// mask`'s `opacity` parameter, resolved the same way `onionSkinInkToSubtract` resolves which
+    /// layer is asking. Kept separate from that function rather than bundled into its return value
+    /// so the ink image's own identity — and with it `CanvasView`'s clip memo — does not change on
+    /// every call; nothing here is ever read except alongside a non-nil ink, so an out-of-range index
+    /// answers the harmless "no cut" value instead of trapping.
+    var onionSkinInkOpacity: CGFloat {
+        layers.indices.contains(currentLayerIndex) ? CGFloat(layers[currentLayerIndex].opacity) : 1
     }
 }
 

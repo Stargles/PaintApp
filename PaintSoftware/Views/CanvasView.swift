@@ -2521,9 +2521,11 @@ struct CanvasView: UIViewRepresentable {
 
         /// The Behind clip's inputs, held strongly so identity is a sound comparison — the same ABA
         /// argument `onionSkinKeyImages` makes, and here the references *are* the key rather than a
-        /// side-car to it.
+        /// side-car to it. `opacity` rides beside them as a plain value: it cannot change the `ink`
+        /// object's identity (`onionSkinInkOpacity` is resolved separately from the cached raster), so
+        /// without it in the key a layer-opacity slider drag would keep serving a stale cut.
         private var onionSkinClipInputs: (layerMask: CGImage?, ink: UIImage?,
-                                          width: Int, height: Int)?
+                                          opacity: CGFloat, width: Int, height: Int)?
         /// What those inputs built. Nil is a legitimate answer (no clip at all), so this is not a
         /// "have we built one yet" flag — `onionSkinClipInputs` is.
         private var onionSkinClipImage: CGImage?
@@ -2531,18 +2533,21 @@ struct CanvasView: UIViewRepresentable {
         /// `OnionSkinClip.mask` behind a memo, because this runs on every SwiftUI pass and the two
         /// canvas-reduced draws inside it must not.
         ///
-        /// The inputs move on exactly two things: the current layer's ink (once per stroke, since a
+        /// The inputs move on exactly three things: the current layer's ink (once per stroke, since a
         /// dab publishes nothing — so the cut is static for a stroke's duration, which is the same
-        /// guarantee §6.4 gives the live mask and for the same reason) and the placement picker.
-        private func onionSkinClip(layerMask: CGImage?, ink: UIImage?, size: CGSize) -> CGImage? {
+        /// guarantee §6.4 gives the live mask and for the same reason), its opacity, and the placement
+        /// picker.
+        private func onionSkinClip(layerMask: CGImage?, ink: UIImage?, opacity: CGFloat,
+                                   size: CGSize) -> CGImage? {
             let width = Int(size.width.rounded()), height = Int(size.height.rounded())
             if let held = onionSkinClipInputs,
-               held.layerMask === layerMask, held.ink === ink,
+               held.layerMask === layerMask, held.ink === ink, held.opacity == opacity,
                held.width == width, held.height == height {
                 return onionSkinClipImage
             }
-            let clip = OnionSkinClip.mask(layerMask: layerMask, subtracting: ink, size: size)
-            onionSkinClipInputs = (layerMask, ink, width, height)
+            let clip = OnionSkinClip.mask(layerMask: layerMask, subtracting: ink, size: size,
+                                          opacity: opacity)
+            onionSkinClipInputs = (layerMask, ink, opacity, width, height)
             onionSkinClipImage = clip
             return clip
         }
@@ -2627,13 +2632,16 @@ struct CanvasView: UIViewRepresentable {
             // comment above it said the opposite was happening.
             if view.alpha != 1 { view.alpha = 1 }
 
-            // **Behind, in one line: subtract the artist's own ink from the clip.**
-            // `onionSkinInkToSubtract` is what reads the placement setting — In Front answers nil and
-            // `OnionSkinClip.mask` hands §6.4's coverage straight back, so that placement is
-            // byte-for-byte what it was before the ruling. No branch here: this coordinator is not
-            // reachable from a headless test, so the decision lives where one can hold it.
+            // **Behind, in one line: subtract the artist's own ink from the clip, at its own
+            // opacity.** `onionSkinInkToSubtract` is what reads the placement setting — In Front
+            // answers nil and `OnionSkinClip.mask` hands §6.4's coverage straight back, so that
+            // placement is byte-for-byte what it was before the ruling. No branch here: this
+            // coordinator is not reachable from a headless test, so the decision lives where one can
+            // hold it. `onionSkinInkOpacity` is read unconditionally and costs nothing when there is
+            // no ink — `OnionSkinClip.mask` never multiplies by it unless `ink` is non-nil.
             applyOnionSkinMask(onionSkinClip(layerMask: mask,
                                              ink: canvasManager.onionSkinInkToSubtract(at: size),
+                                             opacity: canvasManager.onionSkinInkOpacity,
                                              size: size),
                                to: view, canvasSize: canvasSize)
             if view.isHidden { view.isHidden = false }

@@ -997,6 +997,49 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(alpha(grid, 10, 50), 0, "outside the coverage and under the ink: still hidden")
     }
 
+    /// **TODO (51), the owner's 2026-09-06 reversal: Behind cuts by how much ink is there, not
+    /// merely whether any is.** Pinned at two opacities on purpose — a single assertion at 100%
+    /// cannot distinguish this from the old rule, since a full-opacity layer cuts fully either way.
+    /// Only comparing 30% against 100% catches the defect this closes: the old code cut the ghost
+    /// completely at *any* opacity above zero, so "faint ink barely dents the ghost, solid ink still
+    /// hides it" could not have been true of it.
+    ///
+    /// Driven through `onionSkinInkToSubtract` and `onionSkinInkOpacity` exactly as
+    /// `CanvasView.updateOnionSkin` calls them, rather than only `OnionSkinClip.mask`'s own
+    /// parameter — a manager that computed the right opacity and never handed it to the mask would
+    /// still be caught here, and would not be caught by a test that only called `mask` directly.
+    func testBehindsCutIsProportionalToLayerOpacityAtTwoOpacities() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8      // inside cel 1, the blue diagonal stroke
+        let size = CanvasFixture.canvasSize
+
+        func cutAlphaUnderInk(opacity: CGFloat) -> UInt8 {
+            manager.layers[0].opacity = Double(opacity)
+            guard let ink = manager.onionSkinInkToSubtract(at: size) else {
+                XCTFail("premise: this layer has ink to subtract"); return 255
+            }
+            XCTAssertEqual(manager.onionSkinInkOpacity, opacity,
+                           "premise: the accessor reads the opacity just set")
+            guard let clip = OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size,
+                                                opacity: manager.onionSkinInkOpacity) else {
+                XCTFail("Behind with ink present must produce a clip"); return 255
+            }
+            // (25, 25) is the blue stroke's own midpoint, well inside its 5 pt radius — see
+            // `testTheGhostIsErasedWhereTheCurrentDrawingCoversItAndSurvivesElsewhere`, which uses
+            // the same point for the same reason.
+            return alpha(alphaGrid(clip), 25, 25)
+        }
+
+        let full = cutAlphaUnderInk(opacity: 1)
+        let faint = cutAlphaUnderInk(opacity: 0.3)
+
+        XCTAssertEqual(full, 0, "100% opacity still cuts the ghost fully — unchanged from before the ruling")
+        XCTAssertGreaterThan(faint, 150, "30% opacity must leave most of the ghost visible under faint ink")
+        XCTAssertLessThan(faint, 255, "…but still cut some of it, or opacity isn't reaching the mask at all")
+        XCTAssertNotEqual(faint, full,
+                          "30% and 100% must cut differently — the bug this pins made every opacity cut fully")
+    }
+
     /// The empty-layer case, which is the one an animator meets first: a blank drawing has no ink,
     /// so there is nothing for the ghost to be behind and Behind must look exactly like In Front.
     func testAnEmptyCurrentLayerLeavesTheGhostWhole() {
