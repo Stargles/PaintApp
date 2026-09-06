@@ -33,6 +33,29 @@ final class AnchoredMenuLogicTests: XCTestCase {
                        "1126 - 6 - 640 = 480, stated as a number so a changed gap is visible here")
     }
 
+    /// **Added because a mutation survived without it.** Reordering `verticalOrigin` to try *below*
+    /// first passed all thirteen of the tests that existed at the time: the two that name a side each
+    /// use a fixture where only one side fits, so both orderings agree on them. Nothing pinned the
+    /// preference itself — which is the one sentence `AnchoredMenuPlacement`'s doc comment spends a
+    /// paragraph on, and the reason all four timeline menus open upward instead of off the bottom of
+    /// the screen. So this is the case where **both** sides fit and the answer is a choice.
+    func testAMenuThatWouldFitEitherSidePrefersAbove() {
+        let anchor = CGRect(x: 480, y: 600, width: 40, height: 24)
+        let menuSize = CGSize(width: 200, height: 100)
+        let frame = AnchoredMenuPlacement.frame(anchor: anchor, menuSize: menuSize, bounds: screen)
+
+        // PREMISE, stated rather than assumed: this fixture really does have room on both sides, so
+        // the assertion below is about the preference and not about the other side being impossible.
+        XCTAssertGreaterThanOrEqual(anchor.minY - AnchoredMenuPlacement.gap - menuSize.height,
+                                    screen.minY + AnchoredMenuPlacement.margin, "room above")
+        XCTAssertLessThanOrEqual(anchor.maxY + AnchoredMenuPlacement.gap + menuSize.height,
+                                 screen.maxY - AnchoredMenuPlacement.margin, "and room below")
+
+        XCTAssertEqual(frame.maxY, anchor.minY - AnchoredMenuPlacement.gap, accuracy: 0.001,
+                       "with both sides open the menu goes above, which is what puts every timeline "
+                       + "menu over the canvas rather than off the bottom of the screen")
+    }
+
     func testAMenuIsCentredOnItsAnchorWhenThereIsRoomEitherSide() {
         let anchor = CGRect(x: 480, y: 1126, width: 40, height: 24)
         let frame = AnchoredMenuPlacement.frame(anchor: anchor,
@@ -58,6 +81,9 @@ final class AnchoredMenuLogicTests: XCTestCase {
             Centred on x=100 a 380-wide menu starts at -90. It has to be clamped to the margin \
             instead, or the artist reads a panel with its left third off the screen.
             """)
+        // Against the constant above *and* against a number, because the first assertion alone
+        // survives `margin` being changed to anything — it is comparing the value to itself.
+        XCTAssertEqual(frame.minX, 8, accuracy: 0.001, "and the margin is 8")
     }
 
     func testAMenuOverhangingTheTrailingEdgeIsClampedInside() {

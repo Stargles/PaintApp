@@ -3,6 +3,54 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The five remaining `.popover`s eat drags the same way the timeline's four did (2026-09-06)
+
+**INFERRED from a code sweep, not measured.** TODO (39) fixed the timeline's four menus by making them
+`AnchoredMenu`s, because a `.popover` presents behind a screen-covering
+`_UIPassthroughGateGestureRecognizer` that swallows every drag outside it — the surface underneath does
+not scroll and the popover does not dismiss; only a tap gets out. **That gate is a property of
+`UIPopoverPresentationController`, not of the timeline**, so the app's five remaining popovers have it
+too. What varies is how much dragging there is under each.
+
+Three sit beside the layer rail, which is a real `UITableView`
+(`LayerStackListView.swift:19-36`) and is scroll-enabled except during a reorder drag (`:672`, `:908`).
+Each of its rows also carries an opacity drag (`:168-175`), swipe actions (`:501-536`), a long-press
+reorder (`:574-642`) and a two-finger pinch-to-merge (`:375-443`) — every one of them a drag:
+
+- `.layerViewSelector` — `LayerPanel.swift:90`, the "Views" button in the rail's header, a sibling of
+  the table one divider above it.
+- `.canvasBackgroundColour` — `LayerPanel.swift:201`, the background row, a sibling one divider below.
+- `.valueLayerColour` — `LayerPanel.swift:573`, in `LayerOptionsPanel`, which is laid out *beside* the
+  rail (`DrawingView.swift:645-665`) precisely so the stack stays visible while it is open.
+
+Two sit **inside** the surface they would block, which is worse:
+
+- `.effectOutlineColour` — `EffectSection.swift:548`. Its anchor is a descendant of the effect bar's
+  own knob `ScrollView` (`:213-217`), and the two `outline.width` / `outline.threshold` sliders
+  (`:360-361`) are the rows immediately above it.
+- `.effectGradientStopColour` — `EffectSection.swift:995`. Same scroll view, and the stop's position
+  `Slider` (`:1018-1029`) is in the *same `HStack` row* as the swatch that opens the popover.
+
+**Nothing has measured a drag under any of the five**, and no UI test attempts one — that is the gap,
+and it is why this is INFERRED. The cheap first move is `MenuInterruptionUITests`' shape pointed at
+one of them: open it, drag the surface beside or under it, read whether anything moved.
+
+**Not fixed with the timeline's four on purpose.** `AnchoredMenu` is reusable, but each of these lives
+in a different view tree (the rail's header, `LayerOptionsPanel`, `EffectSettingsBar`) and would need
+its own host layer, and three of the five are colour pickers whose chrome would visibly change. The
+owner ruled on the timeline's four specifically (TODO (39), 2026-09-06); this is the same class of
+decision and theirs to make. Note the two effect-bar ones only reach a *scrolling* container with
+Curves or a many-stop Gradient Map (`EffectSection.swift:130-134`), so their exposure is narrower.
+
+**And it re-opens a verdict `MENU_PRESENTATION_CENSUS.md` recorded as closed.** Its twelve
+`Menu`/`.contextMenu` sites were resolved SAFE on the strength of
+`testDrawingStraightThroughAnOpenBlendModeMenu`, whose measured finding was that a `Menu`'s dismiss
+region *"absorbs the whole touch sequence, so the drag neither reaches the canvas nor even closes the
+menu"*. Against a canvas that is safety — no stroke begins, so nothing is interrupted. Against a
+**scrollable** surface it is the popover's symptom word for word. Four of those twelve are in
+`LayerPanel.swift` (`:95`, `:455`, `:668`, `:1077`), beside the same scrollable rail. SAFE was the
+right answer to the question that was asked and is not an answer about scrolling.
+
 ## The auto-resign daemon counts its own runs, not the profile's expiry (2026-09-05)
 
 **MEASURED.** The owner's app died with *"PaintSoftware is no longer available"*, which they reported as
