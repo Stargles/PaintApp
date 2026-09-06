@@ -561,6 +561,20 @@ enum InterpolationEvaluator {
             }
         }
         result.size *= options.thicknessFade.scale(weight: weight)
+        // **A committed Distort (`VectorStroke.distort`) is carried through untouched, and that is
+        // the answer rather than the absence of one.** The obvious move is to clear it — the map says
+        // *"my samples are the image of these others"* and a lattice warp has just moved the samples
+        // by something that is not a homography, so the claim is no longer literally true. Clearing it
+        // is **worse**, and measurably so: that stroke's `size` is the *footprint envelope* of its
+        // keystone, so a stroke with no map draws at its widest point along its whole length, and an
+        // interpolated frame of a keystoned line would come out visibly fatter than either keyframe.
+        //
+        // Carried, the round trip cancels where it matters. `effectiveWalk` walks `H^-1` of the
+        // *warped* samples and re-poses through `H`, so every dab centre lands exactly on the warped
+        // spine; what is approximate is only *where along the keystone* each width is read, and for
+        // the small lattice displacements this feature uses that is within a sample of the right
+        // place. Widening the stroke arm to a genuine per-point width is `InterpolationEvaluator`'s
+        // own open question (BRUSH.md §13), and it would subsume this.
         return result
     }
 

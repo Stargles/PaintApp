@@ -33,11 +33,12 @@ import SwiftUI
 /// transformed"*) and the placed image, the last kind either refusal named, on stage 3c. The picker
 /// is live for every float there is.
 ///
-/// **Distort shipped 2026-09-02 (stage 5) and it reaches the raster piece only**, so the caption slot
-/// has a second tenant rather than an empty one: `CanvasManager.distortUnavailableReason` refuses
-/// Distort on a lassoed *vector* float and says what would unblock it. That is a refusal about one
-/// piece, where the caption it replaced — `TransformMode.isImplemented`'s *"Coming soon"* — was a
-/// statement about the whole mode.
+/// **Distort shipped 2026-09-02 for a raster piece and 2026-09-06 for a lassoed drawing**, so the
+/// caption slot has a second tenant rather than an empty one: `CanvasManager.distortUnavailableReason`
+/// refuses a float carrying a placed image or a video — six numbers and a mirror bit where a
+/// homography needs eight — and names the kind in the way. That is a refusal about one piece, where
+/// the caption it replaced — `TransformMode.isImplemented`'s *"Coming soon"* — was a statement about
+/// the whole mode.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
@@ -45,9 +46,10 @@ struct MoveTransformBottomBar: View {
     ///
     /// **Stage 5 shipped Distort and this caption changed subject rather than going away.** It used
     /// to read *"Coming soon — acts like Uniform for now"* off `TransformMode.isImplemented`, which
-    /// was true of every float; both are deleted. What is left is a refusal about one *piece* —
-    /// Distort on a lassoed vector selection — and `CanvasManager.distortUnavailableReason` is where
-    /// the sentence and the measurement behind it live.
+    /// was true of every float; both are deleted. It then said a lassoed *drawing* was refused, which
+    /// TODO item (12) made false. What is left is a refusal about one *kind* — a placed image or a
+    /// video, which cannot hold a projective residue at all — and
+    /// `CanvasManager.distortUnavailableReason` is where the sentence and the argument behind it live.
     private var caption: String? { canvasManager.distortUnavailableReason }
 
     /// **Two rows, not four** — TODO item (49), the owner: *"too tall and obstructs your view. Make

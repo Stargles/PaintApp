@@ -167,25 +167,83 @@ an empty one: `CanvasManager.distortUnavailableReason` refuses Distort on a lass
 and says so. That is a statement about one piece where the old one was a statement about the whole
 mode, and it is §5.14's tell-"not yet" from "never" applied to a sentence.
 
-**Why the vector float is refused, and it is a measurement.** A homography's local scale varies across
-the plane — MEASURED at **1.3x on a mild keystone and 8.5x with one corner dragged in**, where the best
-single scalar for `VectorStroke.size` is wrong by **15% and 315%** (KEYFRAMES.md §8). Distorting ink now
-would ship a visible width error on every line in the selection. The prerequisite is KEYFRAMES.md
-§4.2's rest-space dab bake, which is not built. **Text and a placed image would each survive a
-homography** — a `TextFrame` is four free corners already, and stage 3c gave an image a stored shape —
-but a float carrying one almost always carries ink beside it, and a per-kind refusal is exactly what
-stage 3c deleted, so the refusal is per float and costs one sentence.
+**A lassoed vector float was refused here, and it is not any more — see the section below.** The
+refusal was a measurement: a homography's local scale varies across the plane, MEASURED at **1.3x on a
+mild keystone and 8.5x with one corner dragged in**, where the best single scalar for
+`VectorStroke.size` is wrong by **15% and 315%** (KEYFRAMES.md §8). Its stated prerequisite was
+KEYFRAMES.md §4.2's rest-space dab bake, and that **merged on 2026-09-02, the same day this stage
+shipped** — so the sentence in `CanvasManager.distortUnavailableReason` was already false when it was
+written and stayed in the shipped source for four days.
 
-**And text is not actually waiting on this.** A text box has had a real Distort since ADD_TEXT.md
+**Nothing about the raster piece is persisted.** A floating piece is transient by construction, so
+Distort on it owes no file-format change at all — the same position stage 3a reached for `aspect`. The
+ink tier below is the one that does.
+
+### Distort, on a lassoed drawing — shipped 2026-09-06 (TODO item (12))
+
+Four corners on the **Move box** rather than on a bitmap, and the ink follows per **dab**. The owner's
+ask was one sentence: *"The distort in move feature must still be built and integrated with
+keyframes."* This is the first half; the keyed half is KEYFRAMES.md §8 stage 5b and is not built.
+
+| what | where |
+|---|---|
+| the stored shape, while the float is up — four corners in the box's own local space, **with the box they are measured against** | `BoxDistort` (`ObjectTransformFrame.swift`) on `VectorFloat.distort`. The box travels with the quad because §5.22's re-fit makes `contentSize` a live function of `boxAngle`: a quad is four corners *in units of* some box, and re-expressing it against a different one moves the ink |
+| the map one nudge builds | `CanvasManager.distortMap` — `base⁻¹ · B · residue · B⁻¹ · A · mirror`, read right to left, for the box's affine `A`, the box as drawn `B` and the layer's own transform `base`. It reduces to the pre-Distort `localDelta` **exactly** when the residue is the identity, which is what keeps every affine gesture bit-for-bit what it was |
+| the projective entry point | `VectorCanvas.mapping(_:through: Homography)` and its memoising twin `posing(_:through:)`. A stroke's spine and lattice are mapped point for point; a fill is **flattened first**, because a projective image of a cubic is not a cubic; text's four corners are exact, since a homography is determined by four correspondences |
+| the per-dab width | `BrushStamper.DabPose.scale(at:)`/`rotation(at:)`, which answer per dab exactly when the map is projective. There is no single scalar on this path to be wrong |
+| the live drag, rasterizing nothing | `Homography.catransform3D` on the float's latched bitmap (`CanvasView.showDistortedVectorFloat` → `StrokeCanvasView.updateVectorFloat(projective:)`), with `LiveLayerTransform.viewMap` doing the anchor-point conjugation |
+| one corner, dragged | `ObjectTransformDrag.distorted(to:)` — `TextFrameDrag.distortedFrame`'s three rules again, sharing `Homography.isValidQuad` with it and with `FloatingDistortDrag` and nothing else |
+| the commit | `VectorStroke.distort` — the **map** plus the artist's own width, ten numbers. See below |
+| Reset | clears the quad with the transform; `canResetFloating` gains it as a fourth term |
+
+**What a projective float commits to was the one genuinely open design question, and it is settled
+here: the stroke stores the *map*, not the pre-image walk.** `StrokeRestWalk` is the obvious thing to
+persist and it is the wrong one. The centre line has to be stored **posed**, because that is what
+every geometry reader asks for — bounds, the spatial index, lasso membership, the eraser's candidacy
+test, damage rectangles, thumbnails. What is left over is each dab's radius and angle, and that is
+exactly a homography plus one width. Storing the walk instead would put a second copy of every sample
+on disk **and** need a rest-space arm in `piece(of:samples:parameters:)`, in `detachedPiece`, and a
+second `precise` flag beside them; storing the map needs **none** of that, because a cut piece's
+lattice is the parent's posed walk and pulling it back through the map the piece inherited *is* the
+parent's rest walk. `VectorStroke.effectiveWalk` is where the pre-image is rebuilt, once, at render —
+one inverse and two array maps, paid only by a distorted stroke.
+
+**Re-sampling was the alternative and it is not available.** `VectorStroke` holds one width, and
+per-sample pressure drives alpha and flow as well as radius, so smuggling the width into pressure
+changes the picture rather than the weight. Splitting into runs of near-constant scale needs about
+sixty-four pieces at 5% tolerance over §8's 8.5x span, and it destroys the stroke's identity for undo,
+recolour, Apply Brush and the eraser, each of which addresses a stroke by id.
+
+**§5.17's `sqrt(|det|)` has a counterpart here and it is the same rule, not a new one.**
+`Homography.localScale(at:)` *is* the area root; what changed is that it is no longer constant, so it
+is asked per dab instead of once. For an affine it returns `sqrt(|det|)` at every point, which is why
+`mapping(_:through:)` delegates to the affine arm the moment `Homography.affine()` answers — exact
+zero tolerance, so a Distort dragged back to a parallelogram is bit-for-bit the Freeform document it
+would have been.
+
+**Two things the box does while a distort stands, and both are §5.21 rather than convenience.** The
+§5.22 re-fit **freezes** — a keystoned box is not a rectangle in any frame, so there is no
+axis-aligned hull left to hug — and the yellow box knob is **withdrawn from `allowedHandles`** with
+it. Freezing the box's angle inside `BoxDistort` is what keeps a box turn free of ink: read live, the
+knob would sit inside the map and drag the artist's drawing with nothing on the undo stack to give it
+back.
+
+**Mirror flips the content inside the frame and leaves the frame alone**, which falls out of the
+ordering rather than being a rule bolted on: the reflection is the first factor of the map, so the
+residue warps whatever arrives. The box the artist keystoned stays keystoned and the drawing in it
+turns over — the only reading under which the drawn corners and the baked ink cannot disagree.
+
+**What is still refused is a *kind*, and it is a placed image or a video.** Both store six numbers
+plus a mirror bit where a homography needs eight; there is nowhere for the projective residue to live
+and no amount of composing invents one. The refusal is per **float**, once, with one sentence
+(`distortUnavailableReason`), because a float carrying a photo almost always carries ink beside it and
+a per-kind refusal is what stage 3c deleted.
+
+**And text is not waiting on any of this.** A text box has had a real Distort since ADD_TEXT.md
 stage 5, through its own control: the Text panel's **Corners** picker (`TextCornerMode.distort`,
 `TextSettingsPanel.cornerModePicker`), dragging `TextFrame.corners` through `TextFrameDrag` and
-baking through the same `ImageWarp`. What a lassoed text box lacks is Distort *from the Move box* —
-which is the vector-float path above, not a missing capability. A **placed image** is the one kind
-with no door at all: it stores six numbers plus a mirror bit, and a homography needs eight, so it
-would want a stored quad of its own before this could reach it.
-
-**Nothing is persisted.** A floating piece is transient by construction, so Distort owes no
-file-format change at all — the same position stage 3a reached for `aspect`.
+baking through the same `ImageWarp`. What it gained here is Distort *from the Move box*, through the
+same four corners.
 
 ### Three membership rules — shipped 2026-08-28 (TODO item (20)), moved to Select 2026-09-02 (item (23))
 
@@ -1041,14 +1099,14 @@ about makes the pair a *general affine* and still not a homography.
   Mirror as well as Freeform, since both wanted the same field. Text reached both Mirror and Freeform
   on 2026-08-27 (stage 3d) without needing 3c's stored field, because a `TextFrame` already carries
   four free corners.
-- ~~**Distort**~~ (stage 5) — **done for the raster floating piece, 2026-09-02**, over the shared
-  `Homography`/`ImageWarp` pair; see §0. It is the one member of this list that really did need a
-  quad, and it stores one. **A lassoed vector float is still refused, out loud**, and the boundary is
-  KEYFRAMES.md §8's measurement rather than a policy: a homography's local scale spans 1.3x-8.5x
-  across one quad, so `VectorStroke.size` — a scalar — has no right value, and the best available one
-  is wrong by 15%-315%. What unblocks it is KEYFRAMES.md §4.2's rest-space dab bake, and
-  `CanvasManager.distortUnavailableReason` is where the refusal and the unblocking condition are
-  written down.
+- ~~**Distort**~~ (stage 5) — **done for the raster floating piece 2026-09-02 and for a lassoed
+  drawing 2026-09-06**; see §0 for both. It is the one member of this list that really did need a
+  quad, and it stores one. The ink tier's boundary was KEYFRAMES.md §8's measurement — a homography's
+  local scale spans 1.3x-8.5x across one quad, so a scalar `VectorStroke.size` has no right value —
+  and §4.2's rest-space dab bake discharged it on the same day the raster tier shipped, which is why
+  the refusal outlived its own argument by four days. **What is refused now is a placed image or a
+  video**, per float, with one sentence. **A projective quad keyed across frames is still not built**:
+  that is KEYFRAMES.md §8 stage 5b, and `PoseQuad.affineOrLinearised` is what stands in the way.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.

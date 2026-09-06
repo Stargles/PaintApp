@@ -384,6 +384,32 @@ final class InkDistortLogicTests: XCTestCase {
                              "which the un-flattened one does not — this is what the flatten buys")
     }
 
+    /// **A mapped fill keeps its animation group** — under the projective arm and under the affine one
+    /// alike.
+    ///
+    /// **Found in passing, and it was a pre-existing defect rather than a new one.**
+    /// `drawn(_:through:widthScale:)` rebuilds a fill from its mapped `CGPath` through a four-field
+    /// initialiser and carried the id across; `animationGroupID` was not among the four, so every
+    /// lasso nudge and every canvas resize silently un-tagged a grouped fill and it stopped
+    /// travelling with its group at the first Move. KEYFRAMES.md §3.4 rules membership onto every
+    /// element kind, a fill included. The new projective arm had copied the same shape.
+    func testAMappedFillKeepsItsAnimationGroupOnBothArms() throws {
+        let group = UUID()
+        var fill = VectorFillElement(path: CGPath(rect: CGRect(x: 40, y: 40, width: 120, height: 80),
+                                                  transform: nil), color: Self.ink)
+        fill.animationGroupID = group
+
+        guard case .fill(let keystoned) = try XCTUnwrap(VectorCanvas.mapping(.fill(fill),
+                                                                             through: keystone()))
+        else { return XCTFail("a fill maps to a fill") }
+        XCTAssertEqual(keystoned.animationGroupID, group, "the projective arm")
+
+        guard case .fill(let moved) = VectorCanvas.mapping(.fill(fill),
+                                                           throughSimilarity: CGAffineTransform(translationX: 5, y: 7))
+        else { return XCTFail("a fill maps to a fill") }
+        XCTAssertEqual(moved.animationGroupID, group, "and the affine one, which is where it was lost")
+    }
+
     /// **Text corners are carried exactly**, and that is a theorem rather than a tolerance: a
     /// homography is determined by four correspondences, so the box→corners map of the mapped quad is
     /// identically this map composed with the box→corners map of the original.
@@ -417,6 +443,244 @@ final class InkDistortLogicTests: XCTestCase {
         let viaSolve = try XCTUnwrap(solvedAfter.map(probe))
         XCTAssertEqual(viaSolve.x, viaProduct.x, accuracy: 1e-6)
         XCTAssertEqual(viaSolve.y, viaProduct.y, accuracy: 1e-6)
+    }
+
+    // MARK: - The commit: a keystone that survives a save
+
+    /// **A committed keystone survives a save and a reload, dab for dab.**
+    ///
+    /// This is the whole of stage B. The design question it settles was open and named nowhere: what
+    /// a projective float *commits* to. `StrokeRestWalk` is transient and absent from
+    /// `VectorCanvasData`, so the nudge cannot leave the answer there — and `VectorStroke.size` is one
+    /// scalar, so it cannot leave it in the geometry either. The answer is `VectorStroke.distort`:
+    /// the **map** and the artist's own width, ten numbers, with the pre-image rebuilt at render
+    /// (`effectiveWalk`). Its own doc comment carries why that beats persisting the walk and why
+    /// re-sampling is not available at all.
+    ///
+    /// Asserted on the **dabs the renderer stamps**, not on the fields, so a round trip that decoded
+    /// every number and drew a different picture would still fail.
+    func testACommittedKeystoneSurvivesASaveAndReloadDabForDab() throws {
+        let ink = stroke()
+        let map = keystone()
+        let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: map))
+        let before = stamped([committed])
+        XCTAssertGreaterThan(before.count, 20, "setup: a walk worth comparing")
+
+        // Through `VectorStroke`'s own coder, which is the one `VectorCanvasData` uses for a stroke —
+        // packed samples, quantisation origin off the encoder, and all.
+        let stored = try XCTUnwrap(committed.stroke)
+        let decoded = try JSONDecoder().decode(VectorStroke.self,
+                                               from: try JSONEncoder().encode(stored))
+        let after = stamped([.stroke(decoded)])
+
+        XCTAssertEqual(after.count, before.count)
+        for (a, b) in zip(before, after) {
+            XCTAssertEqual(b.center.x, a.center.x, accuracy: 0.5, "a dab moved across the save")
+            XCTAssertEqual(b.center.y, a.center.y, accuracy: 0.5)
+            XCTAssertEqual(b.radius, a.radius, accuracy: 0.05, "a dab changed width across the save")
+        }
+        // Non-vacuous: without the stored map the reload would draw one width everywhere.
+        let radii = after.map(\.radius)
+        XCTAssertGreaterThan(try XCTUnwrap(radii.max()) / (try XCTUnwrap(radii.min())), 1.15,
+                             "the reloaded ink is still a wedge, not a constant-width line")
+    }
+
+    /// **What a nudge writes is persistable and carries no memo**, which is the whole difference
+    /// between `mapping(_:through:)` and `posing(_:through:)` at the one call site that matters.
+    ///
+    /// **The mutation sweep found this gap, and the landmine it guards is quiet.** Swapping the nudge
+    /// to `posing` reddened nothing: the picture is identical, because `posing` *is* `mapping` plus a
+    /// memoised walk. What it plants is a stored stroke carrying a `restWalk` — and `effectiveWalk`
+    /// prefers the memo, while `piece(of:samples:parameters:)` copies it wholesale onto a cut piece
+    /// whose own lattice is in posed space. The piece then walks a posed lattice into a
+    /// `PosedDabTarget` and every dab is posed **twice**, which is a stroke that looks distorted and
+    /// is drawn somewhere the artist's ink is not.
+    func testTheNudgeWritesAPersistableKeystoneAndNoTransientMemo() throws {
+        let manager = try Self.managerWithFloat()
+        let float = try XCTUnwrap(manager.vectorFloat)
+        manager.nudgeVectorFloat(to: float.frame.transform,
+                                 distort: .some(BoxDistort(quad: Self.pulled(float.frame),
+                                                           boxSize: float.contentSize,
+                                                           boxOffset: .zero, boxAngle: 0)))
+        let strokes = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat)))
+            .elements.compactMap(\.stroke)
+        XCTAssertFalse(strokes.isEmpty, "setup: the float carries ink")
+        for stroke in strokes {
+            XCTAssertNotNil(stroke.distort, "a nudge writes the keystone where a save can find it")
+            XCTAssertNil(stroke.restWalk,
+                         "and not as a per-frame memo, which a cut piece would copy into a double pose")
+        }
+    }
+
+    /// **An undistorted stroke's payload does not gain a byte**, which is what `encodeIfPresent` buys
+    /// and what makes the format change free for every document nobody has distorted.
+    func testAnUndistortedStrokeWritesNoDistortKey() throws {
+        let data = try JSONEncoder().encode(stroke())
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(json.contains("distort"), "an ordinary stroke is byte-for-byte what it was")
+
+        let keystoned = try XCTUnwrap(VectorCanvas.mapping(.stroke(stroke()), through: keystone()))
+        guard case .stroke(let out) = keystoned else { return XCTFail("a stroke maps to a stroke") }
+        let carried = try XCTUnwrap(String(data: try JSONEncoder().encode(out), encoding: .utf8))
+        XCTAssertTrue(carried.contains("distort"), "and a keystoned one carries the key it needs")
+    }
+
+    /// **The commit and the pose draw the same picture** — the same claim the raster tier makes about
+    /// its preview and its bake, one tier over: `mapping(_:through:)` writes the map into the stroke
+    /// and `posing(_:through:)` memoises the walk, and `effectiveWalk` is what makes those the same
+    /// arrangement rather than two that agree.
+    func testTheCommitFormAndThePoseFormStampTheSameDabs() throws {
+        let ink = stroke()
+        let map = keystone()
+        let committed = stamped([try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: map))])
+        let posed = stamped([try XCTUnwrap(VectorCanvas.posing(.stroke(ink), through: map))])
+        XCTAssertEqual(committed.count, posed.count)
+        // **To floating point rather than to the bit, and the gap is exactly one round trip.** The
+        // pose path memoises the artist's samples; the commit path rebuilds them as `H^-1(H(x))`,
+        // which is `x` to about 1e-13 and not to the last bit. MEASURED below 1e-6 pt on every dab —
+        // a ten-thousandth of a pixel — which is what "the same picture" can honestly mean when one
+        // side inverts a matrix the other side never had to.
+        for (a, b) in zip(committed, posed) {
+            XCTAssertEqual(b.center.x, a.center.x, accuracy: 1e-6)
+            XCTAssertEqual(b.center.y, a.center.y, accuracy: 1e-6)
+            XCTAssertEqual(b.radius, a.radius, accuracy: 1e-6)
+        }
+    }
+
+    /// **A Move after a committed Distort carries the dabs with the ink.**
+    ///
+    /// The one line in `drawn(_:through:widthScale:)` that composes the stored map, asserted where it
+    /// would fail: without it the spine travels and every dab is pulled back through a stale matrix,
+    /// so the ink is stamped where the stroke used to be. Compared against distorting by the composed
+    /// map in one step, which is the same picture by construction and the only right answer.
+    func testAnAffineAfterACommittedKeystoneComposesRatherThanStranding() throws {
+        let ink = stroke()
+        let map = keystone()
+        let move = CGAffineTransform(translationX: 25, y: -13).rotated(by: 0.21).scaledBy(x: 1.3, y: 1.3)
+        let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: map))
+        let moved = VectorCanvas.mapping(committed, throughSimilarity: move)
+        let inOneStep = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: Homography(move) * map))
+
+        let two = stamped([moved]), one = stamped([inOneStep])
+        XCTAssertEqual(two.count, one.count, "the walk is still the artist's, so the dab count is fixed")
+        for (a, b) in zip(one, two) {
+            XCTAssertEqual(b.center.x, a.center.x, accuracy: 1e-6)
+            XCTAssertEqual(b.center.y, a.center.y, accuracy: 1e-6)
+            XCTAssertEqual(b.radius, a.radius, accuracy: 1e-6)
+        }
+        guard case .stroke(let out) = moved else { return XCTFail("a stroke maps to a stroke") }
+        XCTAssertEqual(try XCTUnwrap(out.distort).restSize, ink.size, accuracy: 1e-9,
+                       "and the artist's own width did **not** move: the similarity is in the map, and "
+                       + "scaling it here as well stamps 1.3x-wide dabs on a 1.3x-coarser walk")
+    }
+
+    /// **A piece cut out of a keystoned stroke keeps stamping its parent's dabs**, at the parent's
+    /// own places and widths — which is `DabLattice`'s whole purpose surviving the format change.
+    ///
+    /// **This is the test that pays for storing the map rather than the walk.** A piece's lattice
+    /// holds the parent's *posed* samples; pulling them back through the map the piece inherited by
+    /// being a copy of its parent is the parent's rest walk, so no cutter needed a rest-space arm.
+    /// Persisting `StrokeRestWalk` instead would have needed one in `piece(of:samples:parameters:)`,
+    /// in `detachedPiece`, and a second `precise` flag beside them.
+    func testAPieceCutFromAKeystonedStrokeStampsItsParentsOwnDabs() throws {
+        let ink = stroke(from: CGPoint(x: 60, y: 100), to: CGPoint(x: 340, y: 320), count: 31, size: 18)
+        let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: keystone()))
+        let whole = stamped([committed])
+
+        let canvas = VectorCanvas(size: CGSize(width: 400, height: 400), elements: [committed])
+        // **Mode 1**, which is the mode that splits *preserving* the lattice — Modes 2 and 3 remove
+        // geometry and re-anchor the walk by design, and the arm below is theirs.
+        let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
+        XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
+                                   brush: TestBrushes.hardRound, size: 40, opacity: 1, mode: .erase),
+                      "setup: the sweep cut the line")
+        let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
+        XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
+        XCTAssertTrue(pieces.allSatisfy { $0.distort != nil },
+                      "every piece inherited the keystone by being a copy of its parent")
+
+        // Every dab a piece stamps is one the whole stroke stamped, at the same place and width.
+        for dab in stamped(pieces.map(VectorElement.stroke)) {
+            let match = whole.first { hypot($0.center.x - dab.center.x, $0.center.y - dab.center.y) < 1e-6 }
+            let parent = try XCTUnwrap(match, "a piece stamped a dab at \(dab.center), which the "
+                                       + "whole stroke never did — the walk was re-anchored or double-posed")
+            XCTAssertEqual(dab.radius, parent.radius, accuracy: 1e-9)
+        }
+    }
+
+    /// **A piece that *left* its parent's walk still has per-dab width.**
+    ///
+    /// The eraser's Modes 2 and 3 remove geometry, so a piece cannot keep replaying the parent's march
+    /// — it re-anchors, by design (`detachedPiece`). What it must not lose with the walk is the
+    /// keystone: it inherits `distort` by being a copy of its parent, and `effectiveWalk` rebuilds the
+    /// pre-image from *its own* samples, so each dab is still `restSize × localScale` at its own rest
+    /// centre. Persisting `StrokeRestWalk` instead of the map would have needed a rest-space arm here
+    /// — the parent's whole walk is the wrong pre-image for a piece that has left it.
+    func testADetachedPieceOfAKeystonedStrokeStillHasPerDabWidth() throws {
+        let ink = stroke(from: CGPoint(x: 60, y: 100), to: CGPoint(x: 340, y: 320), count: 31, size: 18)
+        let map = keystone()
+        let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: map))
+        let canvas = VectorCanvas(size: CGSize(width: 400, height: 400), elements: [committed])
+        let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
+        XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
+                                   brush: TestBrushes.hardRound, size: 40, mode: .cutPoints),
+                      "setup: Mode 2 cut the line and re-anchored the survivors")
+        let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
+        XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
+        XCTAssertTrue(pieces.allSatisfy { $0.lattice == nil },
+                      "setup: a detached piece has left its parent's lattice, which is Mode 2's rule")
+
+        let inverse = try XCTUnwrap(map.inverse)
+        var radii: [CGFloat] = []
+        for dab in stamped(pieces.map(VectorElement.stroke)) {
+            let rest = try XCTUnwrap(inverse.map(dab.center))
+            let scale = try XCTUnwrap(map.localScale(at: rest))
+            XCTAssertEqual(dab.radius / scale, ink.size / 2, accuracy: 0.02,
+                           "a detached dab at \(dab.center) lost the keystone's width")
+            radii.append(dab.radius)
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(radii.max()) / (try XCTUnwrap(radii.min())), 1.1,
+                             "and the pieces together still span the map's range of widths")
+    }
+
+    /// **A second Distort's stored width is the true envelope of the composition**, not the product of
+    /// two maxima. The two agree on a first keystone and part company on a second, because two maxima
+    /// attained in different places multiply to something no dab ever reaches — which would over-pad
+    /// every bounds reader a little more with every gesture.
+    func testASecondKeystonesStoredWidthIsTheEnvelopeOfTheComposition() throws {
+        let ink = stroke()
+        // **Two keystones that magnify at *opposite* ends**, which is what makes the contrast below
+        // real. MEASURED: with both magnifying the same way the product of the two maxima and the
+        // maximum of the composition agree to 1e-9, because a straight stroke's extreme is the same
+        // sample for both and `localScale(B∘A)(x) == localScale(B)(A(x)) · localScale(A)(x)` at that
+        // sample exactly. This fixture was vacuous twice before it separated the two.
+        let first = keystone(inset: 60)
+        let second = try XCTUnwrap(Homography(rect: CGRect(x: 0, y: 0, width: 400, height: 400),
+                                              to: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 400, y: 0),
+                                                       CGPoint(x: 280, y: 400), CGPoint(x: 120, y: 400))))
+        let once = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: first))
+        let twice = try XCTUnwrap(VectorCanvas.mapping(once, through: second))
+        guard case .stroke(let out) = twice, case .stroke(let middle) = once
+        else { return XCTFail("a stroke maps to a stroke") }
+
+        let composed = second * first
+        var widest: CGFloat = 0
+        for point in ink.samples.positions {
+            widest = max(widest, try XCTUnwrap(composed.localScale(at: point)))
+        }
+        XCTAssertEqual(out.size, ink.size * widest, accuracy: 1e-9)
+        // The naive answer, for contrast: the first envelope times the second's over the moved spine.
+        var secondWidest: CGFloat = 0
+        for point in middle.samples.positions {
+            secondWidest = max(secondWidest, try XCTUnwrap(second.localScale(at: point)))
+        }
+        XCTAssertGreaterThan(middle.size * secondWidest, out.size + 1e-6,
+                             "setup: multiplying the two envelopes really does over-state it")
+        // And it is still an upper bound, which is the property the readers actually need.
+        for point in ink.samples.positions {
+            XCTAssertGreaterThanOrEqual(out.size + 1e-9,
+                                        ink.size * (try XCTUnwrap(composed.localScale(at: point))))
+        }
     }
 
     // MARK: - The box and the drag

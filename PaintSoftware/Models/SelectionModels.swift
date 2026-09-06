@@ -41,9 +41,11 @@ enum SelectionMode: String, CaseIterable, Identifiable {
 /// ADD_TEXT.md stage 5. `isImplemented` and the bar's *"Coming soon — acts like Uniform for now"*
 /// caption went with it — there is no half-live case here any more.
 ///
-/// **It reaches the raster floating piece and not a lassoed *vector* float**, and that boundary is a
-/// measurement rather than an omission — see `CanvasManager.distortUnavailableReason`, which is where
-/// the bar says so and where what would unblock it is written down.
+/// **It reached the raster floating piece only until 2026-09-06**, on a measurement that had already
+/// expired — a lassoed drawing takes a Distort now, through `VectorCanvas.mapping(_:through:)`'s
+/// `Homography` overload and `VectorStroke.distort` (TODO item (12)). What is still refused is a float
+/// carrying a placed image or a video; `CanvasManager.distortUnavailableReason` is where the bar says
+/// so and where the argument is written down.
 enum TransformMode: String, CaseIterable, Identifiable {
     case freeform
     case uniform

@@ -268,49 +268,37 @@ ghosts themselves do not follow would be worse than the gap.
 
 ---
 
-## (12) Distort on ink, and Distort keyed across frames
+## (12) Distort keyed across frames
 
-**Status** — partly built. The raster tier ships. **The ink tier's stated blocker has lifted and the
-code has not noticed.**
+**Status** — partly built. **The raster tier and the ink tier both ship.** What is left is the
+*animated* one: a projective quad keyed over time, which is KEYFRAMES.md §8 stage 5b.
 
 > *"The distort in move feature must still be built and integrated with keyframes."* — 2026-09-06
 
-A four-corner drag on the raster floating piece works in both `.move` and `.duplicate`, previewed
-through `CATransform3D` so the drag rasterizes nothing, and MEASURED at 0.0 disagreement between what
-the finger sees and what bakes. **Ink is refused** — `distortUnavailableReason` still says *"Distort
-needs a pixel selection"* — on the stated grounds that under a homography the local scale spans 1.3x
-to 8.5x across one quad and no single scalar for `VectorStroke.size` is right.
-
-**That reason is out of date.** KEYFRAMES §8 stage 4, the rest-space dab bake, merged 2026-09-02:
-`BrushStamper.DabPose` holds a `Homography` and answers `localScale` and rotation **per dab** exactly
-when the map is projective, and `PosedDabTarget` is wired into the shipped render. The machinery is
-built and running; the refusal is unjustified by its own argument, and the stale sentence is in the
-shipped source as well as in the spec.
-
-**One design question is genuinely open and is named nowhere yet: what a projective float *commits*
-to.** `restWalk` is transient and absent from `VectorCanvasData`, so baking cannot go through
-`mapping(…)`'s one-scalar-into-`size` path. Either persist a per-stroke projective pose or re-sample
-the geometry — that is a decision, not wiring.
+A four-corner drag works on the raster floating piece (2026-09-02) and on a **lassoed drawing**
+(2026-09-06). The ink tier's refusal — *"Distort needs a pixel selection"* — was a measurement that
+had already expired: `VectorStroke.size` is a scalar and a homography's local scale spans 1.3x-8.5x
+across one quad, but KEYFRAMES §8 stage 4's rest-space dab bake merged on 2026-09-02 and
+`BrushStamper.DabPose` answers `localScale` and `rotation` **per dab**, so there is no single scalar on
+that path to be wrong. `VectorCanvas.mapping(_:through: Homography)` is the entry point;
+`VectorStroke.distort` is what a commit stores — the **map** plus the artist's own width, with the
+pre-image rebuilt at render by `effectiveWalk`, which is why no cutter needed a rest-space arm.
+What is refused now is a *kind*: a placed image or a video stores six numbers and a mirror bit where a
+homography needs eight, so a float carrying one says so in a sentence.
 
 **Left to build**
-- [ ] A projective entry point: `posing(_:through:)` and `mapping(_:throughStretch:)` take
-      `CGAffineTransform` only, and the app's sole `DabPose` construction is from an affine.
-- [ ] `VectorFloat.poses` carries a `Homography`; `FloatingDistortDrag` stops refusing the delta; both
-      arms of `distortUnavailableReason` go.
-- [ ] **Decide and build the commit** — persist a projective pose, or re-sample. See above.
-- [ ] Non-stroke arms: a fill is a `CGPath` and Béziers are not homography-closed; a placed image has
-      no Distort door at all (six numbers plus a mirror bit where a homography needs eight). Text
-      already has one by its own door.
-- [ ] **Keyed across frames — KEYFRAMES §8 stage 5b.** `TransformKeyframes` only ever writes a
-      `PoseQuad` built from an affine, and `PoseQuad.affineOrLinearised` linearises a projective pose
-      at the box centre — wrong by up to 315% at a strong keystone. Store a genuinely projective quad,
-      route the two render reads through `DabPose(Homography)`, blend two projective quads, and lift
-      the container-pose Distort refusal.
+- [ ] **Keyed across frames — KEYFRAMES.md §8 stage 5b.** `TransformKeyframes` only ever writes a
+      `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` linearises a
+      projective pose at the box centre — wrong by up to 315% at a strong keystone. Store a genuinely
+      projective quad, route the two render reads in `TransformTrack` through `DabPose(Homography)`
+      instead of `affineOrLinearised`, blend two projective quads (`PoseInterpolation`), and lift
+      `distortUnavailableReason`'s container-pose arm. The engine below it is done: `posing`'s
+      `Homography` overload, `restDelta`'s projective twin and `composedWalk` all exist and are tested.
 - [ ] Port `FloatingPieceOverlayView` onto the stage 4 handle pattern (this one is a BUGS.md entry and
       may belong there instead).
 
-**Spec** LASSO_MOVE.md §3 stage 4 · KEYFRAMES.md §8 stage 5b. **§5 is twenty-six owner rulings; do not
-re-litigate any of them.**
+**Spec** LASSO_MOVE.md §0 *"Distort, on a lassoed drawing"* · KEYFRAMES.md §8 stage 5b. **§5 is
+twenty-six owner rulings; do not re-litigate any of them.**
 
 ---
 

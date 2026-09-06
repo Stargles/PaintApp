@@ -1150,7 +1150,11 @@ extension CanvasManager {
             // artist can reach that, so this is the guard rather than a case anything walks into.
             if let projected {
                 let map = Self.restDelta(projected, pose: float.poses[element.id])
-                guard let moved = VectorCanvas.posing(lifted, through: map) else { return element }
+                // **`mapping`, not `posing`** — a nudge writes the artist's own geometry, so the
+                // keystone lands in `VectorStroke.distort`, which is persisted, rather than in a rest
+                // walk, which is a per-frame view and is not. Same three arms, same composition, one
+                // fewer memo.
+                guard let moved = VectorCanvas.mapping(lifted, through: map) else { return element }
                 guard preserveMovePrecision, case .stroke(let stroke) = moved else { return moved }
                 return .stroke(stroke.markedPrecise())
             }

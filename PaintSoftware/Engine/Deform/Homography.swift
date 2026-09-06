@@ -28,7 +28,11 @@ import QuartzCore
 ///
 /// `g` and `h` are the whole of the perspective: with both zero the divide is by the constant `i`
 /// and the map is affine. That is what `affine()` reports and why it is not a heuristic.
-struct Homography: Equatable {
+/// **`Codable` because a Distort committed into a drawing is persisted** (TODO item (12), LASSO_MOVE.md
+/// §3 stage 5): `VectorStroke.distort` stores exactly this matrix, and the synthesized coder writes
+/// its nine numbers by name. A homography is defined only up to scale, so the nine are not minimal —
+/// eight would do — and writing all nine is the smaller code and the one that round-trips to the bit.
+struct Homography: Equatable, Codable {
 
     let a: CGFloat, b: CGFloat, c: CGFloat
     let d: CGFloat, e: CGFloat, f: CGFloat

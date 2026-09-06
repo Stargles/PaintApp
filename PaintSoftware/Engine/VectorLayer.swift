@@ -125,7 +125,49 @@ struct VectorStroke: Identifiable, Codable {
     /// the cheap one: a pose is re-resolved from `Cel.transformTracks` on every render, so a stored
     /// walk could only ever be a second copy of something the tracks already say — `precise`'s
     /// argument about derivable data, one level up.
+    ///
+    /// **A committed Distort is the case that looks like an exception and is not**: it is the
+    /// artist's own edit rather than a per-frame view, so it has to survive a save — and it is stored
+    /// as `distort` below, the *map* rather than the walk, precisely so that this field can stay
+    /// transient. `effectiveWalk` is where the two meet, and it is what every reader asks.
     var restWalk: StrokeRestWalk? = nil
+
+    /// **The projective warp the artist committed into this stroke** — TODO item (12), and the one
+    /// thing on a stroke that `samples` plus one `size` cannot say.
+    ///
+    /// **Why anything is stored at all.** A Distort's local scale varies across the plane, so the ink
+    /// is a different width at each end of one line and `size` — a scalar — has no right value. The
+    /// centre line *is* expressible and is stored **posed**, because that is what every geometry
+    /// reader asks for: `localContentBounds`, `StrokeSpatialIndex`, lasso membership, the eraser's
+    /// candidacy test, damage rectangles and thumbnails all want to know where the ink *is*. What is
+    /// left over is each dab's radius and tip angle, and that is exactly a map: nine numbers, plus the
+    /// width the artist actually drew at.
+    ///
+    /// **Why the map and not the pre-image walk.** `StrokeRestWalk` is the same information and the
+    /// obvious thing to persist, and it is the wrong one: it would put a second copy of every sample
+    /// on disk, and it would need its own `precise` flag, its own `DabLattice`, and rest-space arms in
+    /// `piece(of:samples:parameters:)` and `detachedPiece`. The map costs ten numbers and **no change
+    /// to any of those**: a cut piece's lattice is the parent's posed walk, and pulling it back
+    /// through this map is the parent's rest walk, so a piece inherits the whole arrangement by being
+    /// a copy of its parent. `effectiveWalk` is where the pre-image is rebuilt, once, at render.
+    ///
+    /// **Why re-sampling is not an option**, which is the other half of the decision. `VectorStroke`
+    /// holds one width, and per-sample pressure drives alpha and flow as well as radius — so
+    /// smuggling the width into pressure changes the picture, not just the weight. Splitting into runs
+    /// of near-constant scale needs about sixty-four pieces at 5% tolerance over the 8.5× span
+    /// KEYFRAMES.md §8 measured, and it destroys the stroke's identity for undo, recolour, Apply Brush
+    /// and the eraser, every one of which addresses a stroke by id.
+    ///
+    /// **It composes, which is what keeps the stroke editable.** A later Move, rotate, scale,
+    /// Freeform or canvas resize pre-multiplies `map` (`drawn(_:through:widthScale:)`, one line) and a
+    /// second Distort pre-multiplies its own homography; a keyframe pose composes on top of it in
+    /// `composedWalk` without touching it. LASSO_MOVE.md §5.17's `sqrt(|det|)` rule is unchanged by
+    /// any of it — its counterpart here is `Homography.localScale(at:)`, the same quantity asked per
+    /// dab because it is no longer constant.
+    ///
+    /// Nil on every stroke nobody has distorted, which is every stroke in every document today; the
+    /// key is absent from the wire for those, so their bytes are unchanged.
+    var distort: StrokeDistort? = nil
 
     /// The brush `brushRef` names. A `BrushPool` entry is never mutated, so this is a read of a value
     /// that cannot change underneath a caller holding it; the setter interns, which is where a brush
@@ -152,7 +194,7 @@ struct VectorStroke: Identifiable, Codable {
          lattice: DabLattice? = nil, seed: UInt64 = DabRandom.freshSeed(), arcOffset: CGFloat = 0,
          motionGroupID: UUID? = nil, animationGroupID: UUID? = nil,
          visibilityThreshold: CGFloat? = nil, sampleVisibilityThresholds: [Int: CGFloat]? = nil,
-         restWalk: StrokeRestWalk? = nil) {
+         restWalk: StrokeRestWalk? = nil, distort: StrokeDistort? = nil) {
         self.id = id
         self.brushRef = BrushPool.intern(brush)
         self.color = color
@@ -169,6 +211,7 @@ struct VectorStroke: Identifiable, Codable {
         self.visibilityThreshold = visibilityThreshold
         self.sampleVisibilityThresholds = sampleVisibilityThresholds
         self.restWalk = restWalk
+        self.distort = distort
     }
 
     var uiColor: UIColor { color.uiColor }
@@ -182,6 +225,7 @@ struct VectorStroke: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, brush, color, size, opacity, samples, composite, lattice, seed, arcOffset
         case motionGroupID, animationGroupID, visibilityThreshold, sampleVisibilityThresholds
+        case distort
     }
 }
 
@@ -264,6 +308,23 @@ struct StrokeRestWalk {
     var pose: BrushStamper.DabPose
 }
 
+/// **A projective warp committed into a stroke's own geometry** — see `VectorStroke.distort`, which
+/// carries the whole argument for why this is the stored form and `StrokeRestWalk` is not.
+///
+/// Ten numbers: the map, and the width the artist drew at. Both are needed, and the second is not
+/// derivable from `VectorStroke.size`: that scalar is the *footprint envelope* under this map (the
+/// maximum local scale over the stroke), which is what every bounds reader pads by and which a later
+/// affine multiplies by its own factor — so recovering the artist's width from it would mean
+/// re-deriving an envelope that has since been composed with something else.
+struct StrokeDistort: Codable, Equatable {
+    /// The artist's own geometry onto `VectorStroke.samples`. Nine numbers, and a homography is
+    /// defined up to scale, so two maps that differ by a factor are the same warp.
+    var map: Homography
+    /// `VectorStroke.size` before this map's envelope was multiplied into it — the width
+    /// `BrushStamper.stampStroke` walks with, in the space the artist drew in.
+    var restSize: CGFloat
+}
+
 extension DabLattice {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -284,6 +345,44 @@ extension DabLattice {
 }
 
 extension VectorStroke {
+
+    /// **The walk this stroke's dabs are laid on, whatever put it there** — the transient one a
+    /// keyframe pose attached, or the one rebuilt from a committed `distort`, or nil for the
+    /// overwhelming majority of strokes, which have neither.
+    ///
+    /// **One accessor rather than two call sites asking two questions.** `stamp` and
+    /// `VectorCanvas.composedWalk` both need "what is the pre-image of this ink, and by what map", and
+    /// they would otherwise each have to know that there are two ways for a stroke to have one — which
+    /// is how a keyframe pose on top of a committed Distort comes to drop the Distort.
+    ///
+    /// **Rebuilding costs one inverse and two array maps, and only a distorted stroke pays it.** That
+    /// is the price of storing the map instead of the pre-image, and it is the right side of the
+    /// trade: the alternative doubles every distorted stroke's bytes on disk and puts a rest-space arm
+    /// in every cutter. INFERRED, not measured — the walk it feeds already costs a pass over the same
+    /// arrays, so this is a constant factor on a path that is already O(samples).
+    ///
+    /// **The lattice is pulled back too**, and that is what makes a cut piece work with no change to
+    /// `piece(of:samples:parameters:)`: a piece's lattice holds the parent's *posed* walk, and the
+    /// same inverse turns it into the parent's rest walk. The parameters are indices into that array
+    /// and are the same numbers in either space.
+    ///
+    /// Nil when the map has no inverse or the ink lands on the vanishing line — neither of which a
+    /// drag can produce (`Homography.isValidQuad` refuses the delta), so it is the guard rather than a
+    /// case anything reaches. The stroke then draws on its own posed samples at its own `size`, which
+    /// is the honest fallback: the ink is in the right place and its width is the envelope.
+    var effectiveWalk: StrokeRestWalk? {
+        if let restWalk { return restWalk }
+        guard let distort, let inverse = distort.map.inverse,
+              let rest = samples.mapped(through: inverse) else { return nil }
+        var pulled: DabLattice?
+        if var lattice = self.lattice {
+            guard let walked = lattice.samples.mapped(through: inverse) else { return nil }
+            lattice.samples = walked
+            pulled = lattice
+        }
+        return StrokeRestWalk(samples: rest, lattice: pulled, size: distort.restSize,
+                              pose: BrushStamper.DabPose(distort.map))
+    }
 
     /// This stroke marked as stored at full precision — **and the lattice it walks with it**.
     ///
@@ -337,6 +436,10 @@ extension VectorStroke {
         visibilityThreshold = try c.decodeIfPresent(CGFloat.self, forKey: .visibilityThreshold)
         sampleVisibilityThresholds = try c.decodeIfPresent([Int: CGFloat].self,
                                                            forKey: .sampleVisibilityThresholds)
+        // Absent on every stroke nobody has distorted, which is every stroke written before TODO item
+        // (12). `restWalk` is deliberately *not* here and never will be — it is a view of a stroke
+        // that a keyframe pose mints per frame, and this is the artist's own edit.
+        distort = try c.decodeIfPresent(StrokeDistort.self, forKey: .distort)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -380,6 +483,8 @@ extension VectorStroke {
         try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
         try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
         try c.encodeIfPresent(sampleVisibilityThresholds, forKey: .sampleVisibilityThresholds)
+        // Written only when present, so an undistorted stroke's payload is byte-for-byte what it was.
+        try c.encodeIfPresent(distort, forKey: .distort)
     }
 }
 
@@ -3508,7 +3613,7 @@ final class VectorCanvas {
     /// composition is with `Homography.identity`, whose product leaves every entry as `x·1 + y·0 +
     /// z·0`, and `DabPose(_ : CGAffineTransform)` is defined as `DabPose(Homography(transform))`.
     private static func composedWalk(over rest: VectorStroke, under map: Homography) -> StrokeRestWalk {
-        guard let existing = rest.restWalk else {
+        guard let existing = rest.effectiveWalk else {
             return StrokeRestWalk(samples: rest.samples, lattice: rest.lattice,
                                   size: rest.size, pose: BrushStamper.DabPose(map))
         }
@@ -3556,7 +3661,36 @@ final class VectorCanvas {
     /// Nil is therefore two different things and both mean "do not write this": a kind that cannot
     /// hold the map, and geometry that lands on the vanishing line where it has no image.
     static func posing(_ element: VectorElement, through map: Homography) -> VectorElement? {
-        if let affine = map.affine() { return posing(element, through: affine) }
+        // **No affine short-circuit of its own, deliberately** — `mapping` below owns that decision and
+        // a second copy here was measurably dead: disabling it changed no test, because every call
+        // fell through to the identical guard one function down. The affine arm still ends at
+        // `mapping(_:throughStretch:)` either way, and the walk this attaches is the same one, so what
+        // the duplicate bought was a second place for the tolerance to drift.
+        guard var moved = mapping(element, through: map) else { return nil }
+        guard case .stroke(let rest) = element, case .stroke(var posed) = moved else { return moved }
+        // The memo. `effectiveWalk` would rebuild exactly this from `distort` — one inverse and two
+        // array maps — and a pose is re-resolved every frame, so the pose path keeps the answer it
+        // already has. `mapping` below deliberately does not: a committed stroke is read far more
+        // often than it is written, and the memo would be a second copy of the artist's samples in
+        // memory for every distorted stroke in the document.
+        posed.restWalk = Self.composedWalk(over: rest, under: map)
+        moved = .stroke(posed)
+        return moved
+    }
+
+    /// **`posing(_:through:)`'s commit form** — the same geometry, written into the artist's own
+    /// stroke rather than into a throwaway copy of it.
+    ///
+    /// The pair is `mapping`/`posing` one currency wider, and the split is the one the affine pair
+    /// already states: *a pose is a view of a stroke; a commit is a new stroke.* What differs here is
+    /// only the memo — both write `VectorStroke.distort`, because with the map persisted the pre-image
+    /// is derivable and there is nothing for the two to disagree about.
+    ///
+    /// **`distort` composes rather than replaces**, through `composedWalk`, so a second Distort on an
+    /// already-keystoned stroke is the product of the two maps over the artist's original samples and
+    /// not a keystone of a keystone's picture.
+    static func mapping(_ element: VectorElement, through map: Homography) -> VectorElement? {
+        if let affine = map.affine() { return mapping(element, throughStretch: affine) }
         switch element {
         case .stroke(let stroke):
             return distorted(stroke, through: map).map(VectorElement.stroke)
@@ -3585,20 +3719,29 @@ final class VectorCanvas {
     /// midpoint linearisation are both under-estimates somewhere on a keystone by construction.
     private static func distorted(_ stroke: VectorStroke, through map: Homography) -> VectorStroke? {
         guard let moved = stroke.samples.mapped(through: map) else { return nil }
+        let walk = Self.composedWalk(over: stroke, under: map)
         var out = stroke
         out.samples = moved
+        out.restWalk = nil
         if var lattice = stroke.lattice {
             guard let walked = lattice.samples.mapped(through: map) else { return nil }
             lattice.samples = walked
             out.lattice = lattice
         }
+        // **The envelope is taken over the artist's own samples through the *whole* composed map**,
+        // not over this stroke's current samples through this one map. The two agree on a first
+        // Distort and part company on a second: composing envelopes multiplies two maxima that are
+        // attained at different places, which over-states the footprint a little more with every
+        // keystone. Asked of the composition once, it is the true maximum however many there have
+        // been.
         var widest: CGFloat = 0
-        for point in stroke.samples.positions {
-            guard let scale = map.localScale(at: point) else { return nil }
+        for point in walk.samples.positions {
+            guard let scale = walk.pose.map.localScale(at: point) else { return nil }
             widest = max(widest, scale)
         }
-        if widest > 0 { out.size = stroke.size * widest }
-        out.restWalk = Self.composedWalk(over: stroke, under: map)
+        guard widest > 0 else { return nil }
+        out.size = walk.size * widest
+        out.distort = StrokeDistort(map: walk.pose.map, restSize: walk.size)
         return out
     }
 
@@ -3620,8 +3763,10 @@ final class VectorCanvas {
         var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
                                        evenOddFill: fill.evenOddFill)
         // Identity, not geometry — `drawn(_:through:widthScale:)`'s reason, restated: a nudge moves
-        // an element, it does not mint a new one, and the float tracks its pieces by id.
+        // an element, it does not mint a new one, and the float tracks its pieces by id. The
+        // animation group is the same kind of thing and travels for the same reason.
         mapped.id = fill.id
+        mapped.animationGroupID = fill.animationGroupID
         return mapped
     }
 
@@ -3792,6 +3937,24 @@ final class VectorCanvas {
             // translation leaves the stored number bit-identical rather than multiplied by a 1.0 that
             // rounding might not be.
             if k != 1 { stroke.size *= k }
+            // **A committed Distort composes on the left and is not re-derived** — the one line that
+            // keeps a keystoned stroke editable by every later tool. `samples` above are the *image*
+            // of the artist's own geometry under `distort.map`, and this affine has just moved them,
+            // so the map from the artist's geometry to where the ink now is is `t · map`.
+            //
+            // **`restSize` is deliberately *not* scaled by `k`, and scaling it double-counts.** It is
+            // the width in the artist's own space, and the whole of the scaling now lives in the map:
+            // `BrushStamper` walks at `restSize` and each dab is then multiplied by
+            // `localScale(at:)` of the composed map, which already carries this `k`. Multiplying here
+            // as well made a 1.3× Move stamp 1.3× wide dabs on a walk that was itself 1.3× coarser —
+            // MEASURED at 8.63 pt against the 6.64 pt the same map applied in one step produces, and
+            // a dab count of 274 against 357, which is what
+            // `testAnAffineAfterACommittedKeystoneComposesRatherThanStranding` was written to catch.
+            // Untouched on the overwhelming majority of strokes, which carry no distort at all.
+            if var distort = stroke.distort {
+                distort.map = Homography(t) * distort.map
+                stroke.distort = distort
+            }
             return .stroke(stroke)
         case .fill(let fill):
             // A `CGPath` carries the whole affine, scale and rotation included, so a fill needs no
@@ -3803,6 +3966,12 @@ final class VectorCanvas {
             // The id is identity, not geometry: a nudge moves an element, it does not mint a new one,
             // and the float tracks its pieces by id.
             mapped.id = fill.id
+            // **And so is the animation group**, which this arm dropped until 2026-09-06. The
+            // initialiser above takes four fields, so every path that rebuilds a fill from a mapped
+            // `CGPath` — every lasso nudge, every canvas resize — silently un-tagged it, and a fill
+            // the artist had put in a group stopped travelling with the group at the first Move.
+            // KEYFRAMES.md §3.4 rules membership onto every element kind for exactly that reason.
+            mapped.animationGroupID = fill.animationGroupID
             return .fill(mapped)
         case .image, .text, .video:
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
@@ -5246,7 +5415,10 @@ final class VectorCanvas {
     /// floors; and the random field is addressed at the rest walk's arc lengths, so a posed dab draws
     /// what the artist's own dab drew.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
-        let rest = stroke.restWalk
+        // **`effectiveWalk`, not `restWalk`**: a Distort the artist committed is stored as a map on
+        // the stroke rather than as a walk, and the two have to reach this line the same way or a
+        // saved keystone would draw at one width the moment it was reloaded.
+        let rest = stroke.effectiveWalk
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.
         let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
