@@ -312,6 +312,7 @@
 		A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */; };
 		E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */; };
 		D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */; };
+		23A3A6AD0FD2B1CB2EB676BC /* AnimatedDistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D29AB2368795155752F8517B /* AnimatedDistortLogicTests.swift */; };
 		A07B4C2827E82488E52F71D2 /* TransformTrackLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2ED1A2678A3EE4C47CF505 /* TransformTrackLogicTests.swift */; };
 		A24F83767A3696CF0041096F /* TransformChannelLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAC3D959147126CB37A8E35 /* TransformChannelLogicTests.swift */; };
 		B8A5DD0102BDACA3A23BC250 /* TransformLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02EE822138323F2A3396ECDA /* TransformLayerLogicTests.swift */; };
@@ -670,6 +671,7 @@
 		EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformChannel.swift; sourceTree = "<group>"; };
 		636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformKeyframes.swift; sourceTree = "<group>"; };
 		D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseInterpolationLogicTests.swift; sourceTree = "<group>"; };
+		D29AB2368795155752F8517B /* AnimatedDistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimatedDistortLogicTests.swift; sourceTree = "<group>"; };
 		0A2ED1A2678A3EE4C47CF505 /* TransformTrackLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformTrackLogicTests.swift; sourceTree = "<group>"; };
 		EFAC3D959147126CB37A8E35 /* TransformChannelLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformChannelLogicTests.swift; sourceTree = "<group>"; };
 		02EE822138323F2A3396ECDA /* TransformLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformLayerLogicTests.swift; sourceTree = "<group>"; };
@@ -810,6 +812,7 @@
 				421945649EEC2FF716D56C0D /* RestSpaceDabBakeLogicTests.swift */,
 				0A2ED1A2678A3EE4C47CF505 /* TransformTrackLogicTests.swift */,
 				D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */,
+				D29AB2368795155752F8517B /* AnimatedDistortLogicTests.swift */,
 				26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */,
 				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
@@ -1285,6 +1288,7 @@
 				FE657AE13CD7BCA9E8958121 /* RestSpaceDabBakeLogicTests.swift in Sources */,
 				A07B4C2827E82488E52F71D2 /* TransformTrackLogicTests.swift in Sources */,
 				D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */,
+				23A3A6AD0FD2B1CB2EB676BC /* AnimatedDistortLogicTests.swift in Sources */,
 				26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */,
 				55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */,
 				9503DF989F335799429B8002 /* PaintSoftware/Engine/FontLibrary.swift in Sources */,
