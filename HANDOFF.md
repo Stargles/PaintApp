@@ -14,9 +14,15 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**40 commits this pass, 125 files, +16,000 lines. No worktrees, no `tmp/*` branches, no simulator
+**41 commits this pass, 126 files, +16,000 lines. No worktrees, no `tmp/*` branches, no simulator
 clones, nothing uncommitted.** Fast tier **3385 total / 3382 passed / 0 failed / 3 skipped**,
 reconciled against a static count of instance `func test` across the 143 selected classes.
+
+**The full suite was run and is green.** MEASURED at `db21782` on an erased simulator: **3595 tests,
+3560 passed, 1 failed, 34 skipped.** The one failure —
+`BlendModesAndCompositorUITests.testFolderOpacitySliderPersistsThroughSetFolderOpacity`, a class whose
+name differs from its file (`LayerUITests.swift`) — **passed clean in isolation in 25 s** and is
+environmental. The class table is re-taken in CLAUDE.md.
 
 **The iPad build is `c23f37f` and is now many commits stale** — provisioning valid until 2026-09-12.
 Ship a new one early; almost everything below is invisible to the owner until you do.

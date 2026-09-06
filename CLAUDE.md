@@ -431,6 +431,33 @@ wall clock and that gap is now the largest it has been.
 **The wall clock is not comparable to the 21.7 min at `032efa1`** and this is worth saying plainly rather
 than reading as a regression: the suite grew from 2482 to 3363 tests. Per-test it is flat.
 
+**MEASURED at `db21782` on an idle machine with the simulator erased first — 3595 tests, 3560 passed,
+1 failed, 34 skipped.** The one failure,
+`BlendModesAndCompositorUITests`' `testFolderOpacitySliderPersistsThroughSetFolderOpacity`, **passed
+clean in isolation in 25 s** and is environmental; note it is again a class whose name differs from its
+file. That run followed a pass of 41 commits touching the fill trace, undo damage, the layer merge, ink
+Distort, the timeline, the onion skin and the whole memory audit.
+
+| class | seconds | tests |
+|---|---|---|
+| `SelectionAndMoveUITests` | 371 | 10 |
+| `BrushEditorUITests` | 319 | 11 |
+| `SandwichCompositingUITests` | 259 | 10 |
+| `BlendModesAndCompositorUITests` | 256 | 8 |
+| `PerfBaselineTests` | 232 | 57 |
+| `BrushMenuUITests` | 223 | 8 |
+| `LayerPanelControlsUITests` | 215 | 8 |
+| `EraserAndPersistenceUITests` | 203 | 7 |
+| `LayerFolderAndMaskMenuUITests` | 180 | 7 |
+| `LayerStackUITests` | 162 | 5 |
+
+**5,162 class-seconds across 182 classes**, against 4,238 across 149 at `8a4f156`. **`BrushEditorUITests`
+has come *down* from 516 s to 319 s across 11 tests** without being split, which is the first time this
+table has recorded a heavy class shrinking on its own — read it as evidence that a single run's
+per-class seconds are noisier than they look, exactly as the `032efa1` entry warned, rather than as
+something having been fixed. The top four are spread across 115 s, so there is still no single long
+class to split and the 2026-08-15 lever remains dead.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
