@@ -95,9 +95,9 @@ struct CelContentProvider {
     /// The frame every `content(for:)` answer is for.
     let frame: Int
 
-    private let derive: (Cel, Int, CGAffineTransform?) -> DerivedCelContent?
+    private let derive: (Cel, Int, PoseMap?) -> DerivedCelContent?
 
-    init(frame: Int, derive: @escaping (Cel, Int, CGAffineTransform?) -> DerivedCelContent?) {
+    init(frame: Int, derive: @escaping (Cel, Int, PoseMap?) -> DerivedCelContent?) {
         self.frame = frame
         self.derive = derive
     }
@@ -111,7 +111,7 @@ struct CelContentProvider {
     /// provider answers for the whole stack, and `CanvasManager.renderNodes` resolves a different
     /// pose for each leaf in it. Nil is every cel under no transformation layer, which is every cel
     /// in every document that has not used the feature.
-    func content(for cel: Cel, inheriting pose: CGAffineTransform? = nil) -> DerivedCelContent? {
+    func content(for cel: Cel, inheriting pose: PoseMap? = nil) -> DerivedCelContent? {
         derive(cel, frame, pose)
     }
 

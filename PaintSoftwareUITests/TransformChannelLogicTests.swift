@@ -202,7 +202,7 @@ final class TransformChannelLogicTests: XCTestCase {
         let elements: [VectorElement] = [.stroke(stroke([CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0)],
                                                         size: 8))]
         let stretch = CGAffineTransform(scaleX: 4, y: 1)
-        let posed = CanvasManager.posed(elements, through: [(.cel, stretch)])
+        let posed = CanvasManager.posed(elements, through: [(.cel, PoseMap(stretch))])
         let after = try XCTUnwrap(posed.first?.stroke)
         XCTAssertEqual(after.size, 8 * 2, accuracy: 1e-9, "sqrt(|det|) of a 4:1 stretch is 2")
         XCTAssertEqual(after.samples.last?.point.x ?? 0, 40, accuracy: 1e-6, "and the spine follows the map")
@@ -215,7 +215,7 @@ final class TransformChannelLogicTests: XCTestCase {
         let elements: [VectorElement] = [.stroke(stroke([CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0)],
                                                         size: 7.3))]
         let posed = CanvasManager.posed(elements, through:
-            [(.cel, CGAffineTransform(translationX: 5, y: -2))])
+            [(.cel, PoseMap(CGAffineTransform(translationX: 5, y: -2)))])
         XCTAssertEqual(try XCTUnwrap(posed.first?.stroke).size, 7.3)
     }
 
@@ -227,7 +227,7 @@ final class TransformChannelLogicTests: XCTestCase {
             .taggedForAnimation(group)
         let untagged = VectorElement.stroke(stroke([CGPoint(x: 0, y: 8), CGPoint(x: 4, y: 8)]))
         let posed = CanvasManager.posed([tagged, untagged],
-                                        through: [(.group(group), CGAffineTransform(translationX: 10, y: 0))])
+                                        through: [(.group(group), PoseMap(CGAffineTransform(translationX: 10, y: 0)))])
         XCTAssertEqual(try XCTUnwrap(posed[0].stroke).samples.first?.point.x, 10)
         XCTAssertEqual(try XCTUnwrap(posed[1].stroke).samples.first?.point.x, 0)
     }
@@ -311,7 +311,7 @@ final class TransformChannelLogicTests: XCTestCase {
                        .storedValue)
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
-                                                map: CGAffineTransform(translationX: 9, y: 0),
+                                                map: PoseMap(CGAffineTransform(translationX: 9, y: 0)),
                                                 restElements: manager.layers[1].cels[0].vector?.elements ?? [],
                                                 atFrame: 4)
         XCTAssertEqual(route, .storedValue)
@@ -329,7 +329,7 @@ final class TransformChannelLogicTests: XCTestCase {
 
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
-                                                map: CGAffineTransform(translationX: 20, y: 0),
+                                                map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
                                                 restElements: [], atFrame: 8)
         XCTAssertEqual(route, .storedValueHoldingBaseline)
         XCTAssertEqual(manager.layers[1].cels[0].pendingPoseBaselines.count, 1,

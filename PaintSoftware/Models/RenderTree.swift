@@ -822,8 +822,8 @@ extension CanvasManager {
     /// a compositor can do with one is resample the pixels it was handed — *"the owner wants crisp
     /// lines, not a bitmap magnify"*. Ink is stamped at the posed position instead, which happens at
     /// rasterisation, so this map's consumer is `leafSnapshots` and not `Compositor.draw`.
-    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: CGAffineTransform]) {
-        var poses: [Int: CGAffineTransform] = [:]
+    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: PoseMap]) {
+        var poses: [Int: PoseMap] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame,
                                inheriting: nil, poses: &poses)
         return (tree, poses)
@@ -831,7 +831,7 @@ extension CanvasManager {
 
     /// §4.4's map on its own, for the two callers that want the poses without the nodes —
     /// `leafSnapshots` and `CanvasView.makeSandwichKey`'s content versions.
-    func layerPoses(atFrame frame: Int) -> [Int: CGAffineTransform] {
+    func layerPoses(atFrame frame: Int) -> [Int: PoseMap] {
         renderTreeAndPoses(atFrame: frame).poses
     }
 
@@ -848,8 +848,8 @@ extension CanvasManager {
     /// and at every container no transformation layer or posed folder reaches. `poses` collects
     /// §4.4's per-leaf map on the way down.
     private func renderNodes(inContainer container: UUID?, atFrame frame: Int,
-                             inheriting inherited: CGAffineTransform?,
-                             poses: inout [Int: CGAffineTransform]) -> [RenderNode] {
+                             inheriting inherited: PoseMap?,
+                             poses: inout [Int: PoseMap]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
         // **Whether these entries are a node's operands rather than an ordinary stack.** Three rules
@@ -884,7 +884,7 @@ extension CanvasManager {
         // suppressed here for the same reason the clip-to-below source is suppressed below, and a
         // transform layer dropped into a Mix as an operand simply reaches nothing. `inherited` still
         // flows through untouched: whatever poses the node poses everything the node is built from.
-        var carried = [CGAffineTransform?](repeating: inherited, count: stack.count)
+        var carried = [PoseMap?](repeating: inherited, count: stack.count)
         var accumulated = inherited
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
             carried[position] = accumulated

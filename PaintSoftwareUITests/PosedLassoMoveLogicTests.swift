@@ -125,8 +125,10 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     /// precondition failure instead of as a mysterious off-by-a-few somewhere downstream.
     private func celMap(_ manager: CanvasManager, _ layerIndex: Int) throws -> CGAffineTransform {
         let cel = manager.layers[layerIndex].cels[0]
+        // **`.affine`, not an approximation of a keystone.** Every pose this file authors is affine,
+        // so a nil here is a fixture that stopped being what it says it is rather than a limitation.
         return try XCTUnwrap(cel.transformTracks[TransformChannelID.cel.id]?
-            .mapping(atCelLocalFrame: manager.currentFrame - cel.startFrame))
+            .mapping(atCelLocalFrame: manager.currentFrame - cel.startFrame)?.affine)
     }
 
     // MARK: - The refusal that is gone

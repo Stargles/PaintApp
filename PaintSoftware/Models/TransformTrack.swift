@@ -252,7 +252,7 @@ struct TransformTrack: Equatable {
         return PoseInterpolation.blend(keys[lower].pose, keys[lower + 1].pose, t: t)
     }
 
-    /// The affine a renderer maps ink through at a cel-local frame, or nil when this channel shows
+    /// The map a renderer carries ink through at a cel-local frame, or nil when this channel shows
     /// the drawing where it rests.
     ///
     /// **Nil for a resting pose is load-bearing rather than an optimisation.** It is what decides
@@ -260,11 +260,18 @@ struct TransformTrack: Equatable {
     /// render and a second entry in two caches (§4.5). A track whose keys all hold the rest pose —
     /// which is exactly what §2.27's seeding writes before the artist has moved anything — must
     /// therefore cost the document nothing.
-    func mapping(atCelLocalFrame frame: Int) -> CGAffineTransform? {
+    ///
+    /// **A `PoseMap` rather than a `CGAffineTransform`, which is KEYFRAMES.md §8 stage 5b** — the
+    /// first of this file's two render reads. It read `PoseQuad.affineOrLinearised`, which answered a
+    /// keystone with the linearisation at the box centre: MEASURED 218% wrong in local scale and
+    /// 164 px out at the far corner of a 400x300 box pulled to a 120 pt top edge. A `PoseMap` is the
+    /// affine when the pose is one — bit for bit, so every stage-5 document is the document it was —
+    /// and the homography when it is not.
+    func mapping(atCelLocalFrame frame: Int) -> PoseMap? {
         guard let pose = pose(atCelLocalFrame: frame), !pose.isIdentity,
-              let transform = pose.affineOrLinearised, !transform.isIdentity
+              let map = pose.map, !map.isIdentity
         else { return nil }
-        return transform
+        return map
     }
 
     /// **The same two evaluations, spelled for a track whose base is not a cel's.**
@@ -277,7 +284,7 @@ struct TransformTrack: Equatable {
     /// is not there.
     func pose(atDocumentFrame frame: Int) -> PoseQuad? { pose(atCelLocalFrame: frame) }
 
-    func mapping(atDocumentFrame frame: Int) -> CGAffineTransform? { mapping(atCelLocalFrame: frame) }
+    func mapping(atDocumentFrame frame: Int) -> PoseMap? { mapping(atCelLocalFrame: frame) }
 }
 
 // MARK: - The container pose (§2.3, §4.4)
@@ -366,7 +373,7 @@ struct LayerPose: Equatable {
         track.pose(atDocumentFrame: frame) ?? pose
     }
 
-    /// **The affine this container maps its contents through at `frame`, or nil when it shows them
+    /// **The map this container carries its contents through at `frame`, or nil when it shows them
     /// where they are.**
     ///
     /// Nil for a resting pose is load-bearing rather than an optimisation, for
@@ -374,11 +381,14 @@ struct LayerPose: Equatable {
     /// whether the leaves underneath have a derivation at all, and a derivation costs a canvas-sized
     /// render plus an entry in each of three caches (§4.5). A transformation layer the artist has
     /// added and not yet moved must therefore cost the document nothing.
-    func mapping(atFrame frame: Int) -> CGAffineTransform? {
+    ///
+    /// **This is the second of stage 5b's two render reads**, and widening it is what let
+    /// `distortUnavailableReason` stop refusing a container float: the sentence it said named this
+    /// accessor's linearisation as the reason, so the refusal ended when the linearisation did.
+    func mapping(atFrame frame: Int) -> PoseMap? {
         let resolved = resolvedPose(atFrame: frame)
-        guard !resolved.isIdentity, let transform = resolved.affineOrLinearised,
-              !transform.isIdentity else { return nil }
-        return transform
+        guard !resolved.isIdentity, let map = resolved.map, !map.isIdentity else { return nil }
+        return map
     }
 }
 

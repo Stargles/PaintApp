@@ -119,7 +119,7 @@ final class PoseInterpolationLogicTests: XCTestCase {
         for map in [rotation(37), scale(x: 3, y: 1), scale(x: 0.4, y: 0.4),
                     rotation(20).concatenating(scale(x: 2, y: 0.5))] {
             let pose = PoseQuad(box: box, mappedBy: map)
-            let recovered = try? XCTUnwrap(pose.affineOrLinearised)
+            let recovered = try? XCTUnwrap(pose.affine)
             guard let recovered = recovered ?? nil else { return XCTFail("A parallelogram is affine") }
             XCTAssertEqual(recovered.a, map.a, accuracy: 1e-9)
             XCTAssertEqual(recovered.b, map.b, accuracy: 1e-9)
@@ -202,7 +202,7 @@ final class PoseInterpolationLogicTests: XCTestCase {
         let rest = PoseQuad(restingIn: box)
         let stretched = PoseQuad(box: box, mappedBy: scale(x: 3, y: 1))
         let mid = try XCTUnwrap(PoseInterpolation.blend(rest, stretched, t: 0.5))
-        let map = try XCTUnwrap(mid.affineOrLinearised)
+        let map = try XCTUnwrap(mid.affine)
         XCTAssertEqual(map.a, 2, accuracy: 1e-9)
         XCTAssertEqual(map.d, 1, accuracy: 1e-9)
         XCTAssertEqual(widthScale(map), sqrt(2), accuracy: 1e-9)
@@ -217,7 +217,7 @@ final class PoseInterpolationLogicTests: XCTestCase {
         let rest = PoseQuad(restingIn: box)
         let turned = PoseQuad(box: box, mappedBy: rotation(190))
         let mid = try XCTUnwrap(PoseInterpolation.blend(rest, turned, t: 0.5))
-        let map = try XCTUnwrap(mid.affineOrLinearised)
+        let map = try XCTUnwrap(mid.affine)
         // 190° reads as −170° through `atan2`, so the midpoint is **−85°** rather than +95°. Written
         // out as the arithmetic rather than as a number, because the number on its own reads like a
         // typo for +95 and is the whole point of the test.
@@ -230,7 +230,7 @@ final class PoseInterpolationLogicTests: XCTestCase {
         let rest = PoseQuad(restingIn: box)
         let moved = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 400, y: -120))
         let mid = try XCTUnwrap(PoseInterpolation.blend(rest, moved, t: 0.25))
-        let map = try XCTUnwrap(mid.affineOrLinearised)
+        let map = try XCTUnwrap(mid.affine)
         XCTAssertEqual(map.tx, 100, accuracy: 1e-9)
         XCTAssertEqual(map.ty, -30, accuracy: 1e-9)
         XCTAssertEqual(widthScale(map), 1, accuracy: 1e-12, "A move must not change ink weight")

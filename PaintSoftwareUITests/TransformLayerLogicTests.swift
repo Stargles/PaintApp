@@ -178,7 +178,7 @@ final class TransformLayerLogicTests: XCTestCase {
 
         XCTAssertEqual(Set(poses.keys), [stack.inner],
                        "Only the entry beneath the transform layer *in its own container* is posed")
-        XCTAssertEqual(poses[stack.inner]?.tx, 12)
+        XCTAssertEqual(poses[stack.inner]?.affine?.tx, 12)
     }
 
     /// **The containment §4.4 says nothing downstream can enforce.** The pose lives in a local of the
@@ -231,7 +231,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let composed = try XCTUnwrap(manager.layerPoses(atFrame: 0)[ink])
         // Slide then turn: (0,0) → (10,0) → (0,10). The other order would put it at (0,0) → (0,0) →
         // (10,0), which is a different picture and the same two matrices.
-        let landed = CGPoint.zero.applying(composed)
+        let landed = try XCTUnwrap(composed.applied(to: .zero))
         XCTAssertEqual(landed.x, 0, accuracy: 1e-9)
         XCTAssertEqual(landed.y, 10, accuracy: 1e-9)
     }
@@ -320,7 +320,7 @@ final class TransformLayerLogicTests: XCTestCase {
 
         XCTAssertNil(manager.layerPoses(atFrame: 0)[drawn], "Frame 0 holds the resting key")
         let atEight = try XCTUnwrap(manager.layerPoses(atFrame: 8)[drawn])
-        XCTAssertEqual(atEight.tx, 24, accuracy: 1e-6,
+        XCTAssertEqual(try XCTUnwrap(atEight.affine).tx, 24, accuracy: 1e-6,
                        "Frame 8 is the second key's own frame — not frame 8 minus the cel's start")
     }
 
@@ -381,7 +381,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let elements: [VectorElement] = [.stroke(stroke([CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0)],
                                                         size: 8))]
         let posed = CanvasManager.posed(elements, through: [],
-                                        inheriting: CGAffineTransform(scaleX: 4, y: 1))
+                                        inheriting: PoseMap(CGAffineTransform(scaleX: 4, y: 1)))
         let after = try XCTUnwrap(posed.first?.stroke)
         XCTAssertEqual(after.size, 16, accuracy: 1e-9, "sqrt(|det|) of a 4:1 stretch is 2")
         XCTAssertEqual(after.samples.last?.point.x ?? 0, 40, accuracy: 1e-6)
@@ -404,7 +404,7 @@ final class TransformLayerLogicTests: XCTestCase {
                                             size: CGSize(width: 6, height: 6)),
             transform: LayerTransform(position: CGPoint(x: 10, y: 10), scale: 1, rotation: 0))
         let posed = CanvasManager.posed([.image(placed)], through: [],
-                                        inheriting: CGAffineTransform(translationX: 20, y: 0))
+                                        inheriting: PoseMap(CGAffineTransform(translationX: 20, y: 0)))
         guard case .image(let moved)? = posed.first else {
             return XCTFail("A placed image under a transformation layer is still a placed image")
         }
@@ -417,8 +417,8 @@ final class TransformLayerLogicTests: XCTestCase {
     func testACelsOwnChannelAndItsContainerPoseCompose() throws {
         let elements: [VectorElement] = [.stroke(stroke([CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0)]))]
         let posed = CanvasManager.posed(elements,
-                                        through: [(.cel, CGAffineTransform(translationX: 5, y: 0))],
-                                        inheriting: CGAffineTransform(scaleX: 2, y: 2))
+                                        through: [(.cel, PoseMap(CGAffineTransform(translationX: 5, y: 0)))],
+                                        inheriting: PoseMap(CGAffineTransform(scaleX: 2, y: 2)))
         let after = try XCTUnwrap(posed.first?.stroke)
         // Channel first: 0 → 5, then the container's 2× → 10. The other order gives 0 → 0 → 5.
         XCTAssertEqual(after.samples.first?.point.x ?? -1, 10, accuracy: 1e-6)

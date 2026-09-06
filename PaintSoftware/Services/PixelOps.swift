@@ -140,7 +140,7 @@ enum PixelOps {
     /// entry. KEYFRAMES §4.5, "pin this on day one".
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
                           memoize: Bool = true, derived: DerivedCelContent? = nil,
-                          pose: CGAffineTransform? = nil) -> UIImage {
+                          pose: PoseMap? = nil) -> UIImage {
         let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity, pose: pose)
         guard memoize else {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
@@ -230,8 +230,9 @@ enum PixelOps {
             /// should have to learn either list. `AnyHashable` compares unequal across types, so two
             /// derivations can never collide on one entry.
             let derived: AnyHashable?
-            /// **KEYFRAMES §4.4's container pose, as six numbers** — what a transformation layer
-            /// above this leaf, or a posed folder around it, resolved to at this frame.
+            /// **KEYFRAMES §4.4's container pose, as `PoseMap.encoded`** — what a transformation
+            /// layer above this leaf, or a posed folder around it, resolved to at this frame. Six
+            /// numbers for an affine pose and nine for a keystone (§8 stage 5b).
             ///
             /// **`derived` does not imply it, which is why this is here.** A vector cel folds the
             /// same pose into its derivation identity; a cel whose ink is in the raster tier has no
@@ -242,9 +243,9 @@ enum PixelOps {
             /// from the stale entry.
             let pose: [CGFloat]?
 
-            init(cel: Cel, derived: AnyHashable?, pose: CGAffineTransform? = nil) {
+            init(cel: Cel, derived: AnyHashable?, pose: PoseMap? = nil) {
                 self.derived = derived
-                self.pose = pose.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] }
+                self.pose = pose.map(\.encoded)
                 celID = cel.id
                 // **Identity *and* version, for both tiers, and the identity is the load-bearing
                 // half.** A version alone is monotonic only within one object's lifetime, while a
@@ -277,10 +278,10 @@ enum PixelOps {
         let derived: DerivedCelContent?
         /// **§4.4's container pose, applied to the *stored* tiers** — see `Identity.pose` for why it
         /// is not implied by `derived`, and `rasterizeUncached` for where it is spent.
-        let pose: CGAffineTransform?
+        let pose: PoseMap?
 
         init(cel: Cel, identity: Identity, derived: DerivedCelContent?,
-             pose: CGAffineTransform? = nil, quality: RenderQuality) {
+             pose: PoseMap? = nil, quality: RenderQuality) {
             self.identity = identity
             self.derived = derived
             self.pose = pose
@@ -292,7 +293,7 @@ enum PixelOps {
             vector = cel.vector?.freeze(quality: quality)
         }
 
-        init(cel: Cel, derived: DerivedCelContent?, pose: CGAffineTransform? = nil,
+        init(cel: Cel, derived: DerivedCelContent?, pose: PoseMap? = nil,
              quality: RenderQuality) {
             self.init(cel: cel, identity: Identity(cel: cel, derived: derived?.identity, pose: pose),
                       derived: derived, pose: pose, quality: quality)
@@ -443,6 +444,47 @@ enum PixelOps {
     /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
     static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
+    /// **A container pose's raster tiers, rasterised flat and carried onto the pose's quad** —
+    /// KEYFRAMES.md §2.12's *"a transform layer resamples raster content below it"* with the resample
+    /// spelled projectively, since §8 stage 5b lets that pose be a keystone.
+    ///
+    /// **Two allocations rather than one, and that is inherent rather than sloppy.** An affine pose
+    /// is a CTM, so CoreGraphics resamples straight into the destination context; a homography has no
+    /// CTM, so the tiers have to exist as pixels *before* they can be warped. That is the same
+    /// trade-off `TextLayout.warpedGlyphs` accepts, and it is paid only by a cel actually underneath
+    /// a keystoned transformation layer.
+    ///
+    /// **The destination is clipped to the frame first**, `render(floatingPiece:into:)`'s own rule:
+    /// pixels outside are the ones the caller's context is about to clip away, and allocating them
+    /// was never anything but cost. `maximumFloatingWarpTexels` is what bounds the rest.
+    ///
+    /// The caller has already applied the strip window's shift to the CTM, so both the source frame
+    /// and the returned destination are in the *frame's* own coordinates.
+    private static func warpedPosedTiers(frame: CGRect, through homography: Homography,
+                                         drawing draw: () -> Void) -> (image: UIImage, destination: CGRect)? {
+        guard frame.width >= 1, frame.height >= 1,
+              let quad = PoseInterpolation.mapped(Quad.rect(frame), through: homography) else { return nil }
+        let destination = quad.boundingBox.integral.intersection(frame.integral)
+        guard destination.width >= 1, destination.height >= 1 else { return nil }
+        // Scale 1, which is the format the caller's own renderer uses — the raster tiers are bitmaps
+        // that carry their own resolution and `RenderQuality` reaches only the vector tier, so a
+        // second scale here would resample the tiers twice.
+        let flat = UIGraphicsImageRenderer(bounds: frame, format: transparentFormat())
+            .image { _ in draw() }
+        guard let source = flat.cgImage, source.width > 0 else { return nil }
+        // Source **texels per frame point**, measured off the bitmap rather than assumed to be the
+        // format's scale — the renderer rounds its pixel size, so the two differ by up to a texel on a
+        // frame whose points are not whole texels. `render(floatingPiece:into:)` measures it the same
+        // way and for the same reason.
+        let sourceScale = CGFloat(source.width) / frame.width
+        guard let warped = ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
+                                                 boxSize: frame.size, homography: homography,
+                                                 destination: destination,
+                                                 maximumDestinationTexels: maximumFloatingWarpTexels)
+        else { return nil }
+        return (UIImage(cgImage: warped, scale: 1, orientation: .up), destination)
+    }
+
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality,
                                           window: StripWindow? = nil) -> UIImage {
@@ -488,12 +530,30 @@ enum PixelOps {
             // pose(p) − origin, so the shift goes on the CTM outside the pose and the draw is into
             // the frame's own rect. With no pose this branch is not taken at all, so every existing
             // caller's bytes are the bytes they were.
+            //
+            // **The projective arm is a warp and not a CTM, which is KEYFRAMES.md §8 stage 5b's raster
+            // half.** CoreGraphics has no projective CTM at all, so a keystoned container pose is
+            // rasterised flat and carried onto its quad by `ImageWarp` — the same call
+            // `render(floatingPiece:into:)` and `TextLayout.warpedGlyphs` already make. The affine arm
+            // below is untouched and stays a `concatenate`, so **every document that has never held a
+            // keystone renders byte for byte what it rendered**: `PoseMap` demotes an affine
+            // homography before it gets here, so `.projective` is a fact about the pose rather than
+            // about which initialiser ran.
             let posedTiers: (() -> Void) -> Void = { draw in
                 guard let pose = cel.pose else { return draw() }
                 context.cgContext.saveGState()
                 if let window { context.cgContext.translateBy(x: -window.origin.x, y: -window.origin.y) }
-                context.cgContext.concatenate(pose)
-                draw()
+                switch pose {
+                case .affine(let transform):
+                    context.cgContext.concatenate(transform)
+                    draw()
+                case .projective(let homography):
+                    let frame = CGRect(origin: .zero, size: window?.frameSize ?? canvasSize)
+                    if let warped = Self.warpedPosedTiers(frame: frame, through: homography,
+                                                          drawing: draw) {
+                        warped.image.draw(in: warped.destination)
+                    }
+                }
                 context.cgContext.restoreGState()
             }
             // The rect the posed tiers draw into: the frame in its own coordinates, since the shift

@@ -282,8 +282,8 @@ extension LayerFolder {
         effect?.resolved(atFrame: frame, through: effectTracks)
     }
 
-    /// **The affine this folder maps its contents through at `frame`, or nil when it shows them where
-    /// they are** — `resolvedEffect(atFrame:)`'s twin, and the accessor
+    /// **The map this folder carries its contents through at `frame`, or nil when it shows them
+    /// where they are** — `resolvedEffect(atFrame:)`'s twin, and the accessor
     /// `CanvasManager.renderNodes(inContainer:atFrame:)` reads when it descends into this folder.
     ///
     /// **Read this, never `transform` directly**, for the reason `resolvedEffect` gives at length one
@@ -294,7 +294,7 @@ extension LayerFolder {
     ///
     /// Named for `resolvedEffect`'s reason as well: `transform(atFrame:)` would differ from the
     /// stored `transform` by an argument label alone.
-    func resolvedPoseMapping(atFrame frame: Int) -> CGAffineTransform? {
+    func resolvedPoseMapping(atFrame frame: Int) -> PoseMap? {
         transform?.mapping(atFrame: frame)
     }
 }

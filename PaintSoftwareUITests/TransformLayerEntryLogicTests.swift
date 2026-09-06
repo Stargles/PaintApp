@@ -196,7 +196,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// `TransformLayerLogicTests`' scope test: the pose is not assigned, it is committed by the box.
     /// A writer that put the pose on the wrong layer, or wrote a field the accessor does not read,
     /// goes red here and nowhere else.
-    func testAMoveBoxOnATransformationLayerPosesItsContainerAndNothingOutsideIt() {
+    func testAMoveBoxOnATransformationLayerPosesItsContainerAndNothingOutsideIt() throws {
         let stack = makeStack()
         enterTransformMode(stack.manager, layerIndex: stack.mover)
         XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty,
@@ -207,7 +207,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let poses = stack.manager.layerPoses(atFrame: 0)
         XCTAssertEqual(Set(poses.keys), [stack.inner],
                        "Everything beneath it inside its own container, and only that")
-        let map = poses[stack.inner] ?? .identity
+        let map = try XCTUnwrap(poses[stack.inner]?.affine)
         XCTAssertEqual(Double(map.tx), 12, accuracy: 1e-9)
         XCTAssertEqual(Double(map.ty), 0, accuracy: 1e-9)
     }
@@ -229,7 +229,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         moveBox(manager, by: CGVector(dx: 10, dy: 0))
         moveBox(manager, by: CGVector(dx: 0, dy: 7))
 
-        let map = manager.layers[at].layerTransform?.pose.affineOrLinearised ?? .identity
+        let map = manager.layers[at].layerTransform?.pose.affine ?? .identity
         XCTAssertEqual(Double(map.tx), 10, accuracy: 1e-9)
         XCTAssertEqual(Double(map.ty), 7, accuracy: 1e-9)
     }
@@ -393,7 +393,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let track = manager.layers[at].transform?.track
         XCTAssertEqual(track?.key(atFrame: 0)?.pose, PoseQuad(restingIn: canvasBox),
                        "The held pose reached keyframe A")
-        let atB = track?.key(atFrame: 4)?.pose.affineOrLinearised ?? .identity
+        let atB = track?.key(atFrame: 4)?.pose.affine ?? .identity
         XCTAssertEqual(Double(atB.tx), 9, accuracy: 1e-9, "…and the new one is on B")
         XCTAssertNil(manager.layers[at].transform?.baseline, "The held value is discarded once spent")
         XCTAssertTrue(manager.layers[at].transform?.isAnimated ?? false,
@@ -761,7 +761,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
         let posed = manager.layerPoses(atFrame: 20)[0]
         XCTAssertNotNil(posed, "The commit has to reach the leaf beneath")
-        XCTAssertEqual(posed?.tx ?? 0, 40, accuracy: 0.5,
+        XCTAssertEqual(posed?.affine?.tx ?? 0, 40, accuracy: 0.5,
                        "…carrying the drag, in canvas points")
         XCTAssertNil(manager.floatingPiece, "…and the box is down again")
     }

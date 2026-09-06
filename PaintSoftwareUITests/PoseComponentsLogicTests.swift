@@ -203,18 +203,24 @@ final class PoseComponentsLogicTests: XCTestCase {
     // MARK: - What is refused
 
     /// **A projective pose is declined rather than linearised** — §11.7's ruling, and the whole
-    /// reason `decompose` asks `Homography.affine()` instead of `PoseQuad.affineOrLinearised`.
+    /// reason `decompose` asks `Homography.affine()` rather than reaching for an approximation.
     ///
     /// The second half is the one that makes this a test rather than a tautology: the same pose
-    /// **does** answer `affineOrLinearised`, so the refusal is a deliberate narrowing and not the
-    /// absence of an answer. Swap `affine()` for `affineOrLinearised` in `decompose` and this goes
-    /// red while every other test in the file stays green.
+    /// **is rendered**, exactly, since KEYFRAMES §8 stage 5b — `PoseQuad.map` answers `.projective`
+    /// and `VectorCanvas.posing(_:through: Homography)` carries it — so the refusal is a deliberate
+    /// narrowing of *this* surface and not the absence of an answer anywhere. Give `decompose` the
+    /// linearisation instead and this goes red while every other test in the file stays green.
+    ///
+    /// **It read `affineOrLinearised` until stage 5b and asserted that accessor was non-nil.** That
+    /// accessor is gone: it answered a keystone with the linearisation at the box centre, MEASURED
+    /// 218% wrong in local scale at the far end, and nothing renders through it any more.
     func testAProjectivePoseIsDeclinedRatherThanLinearised() {
         let keystone = PoseQuad(box: box,
                                 corners: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),
                                               CGPoint(x: 80, y: 100), CGPoint(x: 20, y: 100)))
-        XCTAssertNotNil(keystone.affineOrLinearised,
-                        "Fixture: rendering has an answer for this pose, so the refusal is a choice")
+        XCTAssertNil(keystone.affine, "Fixture: this pose is genuinely projective")
+        XCTAssertEqual(keystone.map?.isProjective, true,
+                       "Fixture: rendering carries it exactly, so the refusal below is a choice")
         XCTAssertNil(PoseComponents.decompose(keystone),
                      "…and the six curves do not, because a homography has eight freedoms")
     }

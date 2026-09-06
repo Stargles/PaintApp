@@ -184,8 +184,9 @@ struct LayerContentVersion: Hashable {
     /// flatten underneath. Nil for a cel with no derivation, which is every cel in a document using
     /// neither animation system.
     let derived: AnyHashable?
-    /// **KEYFRAMES §4.4's container pose, as six numbers** — the transformation layer above this
-    /// leaf, or the folder around it, resolved at this frame.
+    /// **KEYFRAMES §4.4's container pose, as `PoseMap.encoded`** — the transformation layer above
+    /// this leaf, or the folder around it, resolved at this frame. Six numbers for an affine pose and
+    /// nine for a keystone (§8 stage 5b), and the count is itself the tag.
     ///
     /// **Not implied by `derived`, which is the whole reason it is a field of its own.** A *vector*
     /// cel folds the same pose into `PosedCelIdentity.inherited`, so for that tier this is redundant;
@@ -200,12 +201,12 @@ struct LayerContentVersion: Hashable {
     let pose: [CGFloat]?
 
     init(cel: Cel, valueFill: ValueFill? = nil, effect: Effect? = nil, derived: AnyHashable? = nil,
-         pose: CGAffineTransform? = nil) {
+         pose: PoseMap? = nil) {
         celID = cel.id
         self.valueFill = valueFill
         self.effect = effect
         self.derived = derived
-        self.pose = pose.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] }
+        self.pose = pose.map(\.encoded)
         raster = ObjectIdentifier(cel.raster)
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
@@ -976,7 +977,7 @@ extension CanvasManager {
     /// map once outside its loop and hands it in; a caller asking about one layer can leave it off.
     @MainActor
     func contentVersion(ofLayer index: Int, atFrame frame: Int,
-                        poses: [Int: CGAffineTransform]? = nil) -> LayerContentVersion? {
+                        poses: [Int: PoseMap]? = nil) -> LayerContentVersion? {
         guard layers.indices.contains(index),
               let celIndex = activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
         let layer = layers[index]
@@ -992,7 +993,7 @@ extension CanvasManager {
     /// `self` — can use it without reaching back into the document.
     static func contentVersion(of layer: Layer, celIndex: Int, atFrame frame: Int,
                                derived: DerivedCelContent?,
-                               pose: CGAffineTransform? = nil) -> LayerContentVersion {
+                               pose: PoseMap? = nil) -> LayerContentVersion {
         LayerContentVersion(cel: layer.cels[celIndex],
                             valueFill: layer.valueFill,
                             effect: layer.layerEffect(atFrame: frame),
@@ -1032,7 +1033,7 @@ extension CanvasManager {
     /// stays on the main actor and the canvas-sized fill does not.
     @MainActor
     private func leafSnapshots(atFrame frame: Int, quality: RenderQuality,
-                               poses: [Int: CGAffineTransform] = [:],
+                               poses: [Int: PoseMap] = [:],
                                alsoIncluding maskSourceLayers: Set<Int> = []) -> [LeafSnapshot?] {
         var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
         // **`derived` is resolved here rather than in `resolve()`, and that placement is

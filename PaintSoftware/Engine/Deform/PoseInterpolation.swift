@@ -51,6 +51,23 @@ struct PoseQuad: Equatable {
         self.init(box: box, corners: Quad.rect(box).mapped(by: transform))
     }
 
+    /// **A box carried by a homography — how a *Distort* commit turns a gesture into a key**, and the
+    /// whole of KEYFRAMES.md §8 stage 5b's *"store a genuinely projective quad"*.
+    ///
+    /// **Four corners are the exact currency of a homography and not an approximation of one**: a
+    /// projective map of the plane is determined by four correspondences, so mapping the box's own
+    /// corners loses nothing that `Homography(rect:to:)` cannot recover — `homography` above is this
+    /// initialiser's exact inverse over every quad `Homography.isValidQuad` accepts. That is what
+    /// makes §2.14's *"a transform key stores a quad from day one"* cost no migration: the field that
+    /// held a parallelogram since stage 5 holds a keystone with no format change at all.
+    ///
+    /// **Nil where the map has no image**, which for a corner is the vanishing line — `map(_:)`
+    /// answering nil, the one failure a projective map has that an affine one does not.
+    init?(box: CGRect, mappedThrough map: Homography) {
+        guard let corners = PoseInterpolation.mapped(Quad.rect(box), through: map) else { return nil }
+        self.init(box: box, corners: corners)
+    }
+
     /// True when this pose shows the drawing where it rests, to the bit.
     ///
     /// **Exact rather than epsilon**, for `AnimationCurve.isAnimated`'s reason one type over: this
@@ -64,26 +81,175 @@ struct PoseQuad: Equatable {
     /// three collinear corners.
     var homography: Homography? { Homography(rect: box, to: corners) }
 
-    /// **The `CGAffineTransform` this pose is, when it is one** — which is every pose stage 5 can
-    /// author, Uniform and Freeform alike, because both are affine and `homography` above turns an
-    /// affine quad's perspective row into exact zeros.
+    /// **The `CGAffineTransform` this pose is, or nil because it is a keystone** — which is every
+    /// pose stage 5 can author, Uniform and Freeform alike, because both are affine and `homography`
+    /// above turns an affine quad's perspective row into exact zeros.
     ///
-    /// **Falls back to the linearisation at the box's centre for a projective pose**, which stage 5
-    /// can only meet in a document stage 5b wrote or a hand-edited file. That is the same
-    /// approximation `TextLayout.warpSourceScale` already makes and KEYFRAMES §4.2 names as one of its
-    /// three honest artifacts — a sub-pixel error at a mild keystone and a visibly wrong one at a
-    /// strong one, where the local scale spans 8.5x across a single stroke (§8). Drawing nothing
-    /// instead would make one frame of an animation vanish; drawing it linearised puts the ink in
-    /// roughly the right place until §4.2's point map lands.
-    var affineOrLinearised: CGAffineTransform? {
-        guard let homography else { return nil }
-        return homography.affine() ?? homography.linearised(at: CGPoint(x: box.midX, y: box.midY))
-    }
+    /// **It used to fall back to the linearisation at the box's centre and does not any more**, which
+    /// is KEYFRAMES.md §8 stage 5b. `affineOrLinearised` was the honest answer while nothing could
+    /// render a keystone: drawing the ink roughly where it belongs beat making a frame vanish. Now
+    /// `PoseMap` carries the keystone all the way to `VectorCanvas.posing(_:through: Homography)` and
+    /// the fallback has no caller left, so keeping it would leave a lossy accessor beside the exact
+    /// one for the next reader to pick by accident. MEASURED on a 400x300 box whose top edge is
+    /// pulled to 120 pt: the linearisation displaces the bottom corners by **164 px** and its single
+    /// scale is **218%** wrong against the true local scale at the far end (§8's own quad reports
+    /// 8.5x and 315%). `Homography.linearised(at:)` is still there for the callers that genuinely
+    /// want an approximation — `TextLayout.warpSourceScale` is one.
+    var affine: CGAffineTransform? { homography?.affine() }
+
+    /// **The map a renderer is handed** — the affine when this pose is one and the homography when it
+    /// is a keystone, so the two currencies are one value and neither caller has to ask twice.
+    var map: PoseMap? { PoseMap(self) }
 
     /// Whether this pose is one the renderer can be handed — `Homography.isValidQuad`, which is
     /// convexity, simplicity, a floor on area and all four box corners on the near side of the
     /// vanishing line.
     var isValid: Bool { Homography.isValidQuad(corners, boxSize: box.size) }
+}
+
+// MARK: - The map a pose resolves to
+
+/// **A pose's map, which is an affine when it can be and a homography when it must be** —
+/// KEYFRAMES.md §8 stage 5b, and the currency every reader of a transform channel now takes.
+///
+/// ## Why a two-case value and not just a `Homography`
+///
+/// `Homography` can hold any affine, so a single-case answer compiles. It is wrong for one measured
+/// reason: **composing two affines as 3×3 matrices is not bit-identical to `CGAffineTransform`'s own
+/// `concatenating`.** MEASURED over 200,000 random pairs, 78.5% of products differ in at least one
+/// component, by up to 3.6e-11 relative — CoreGraphics fuses its multiply-adds and this file's `*`
+/// does not. Every existing document is affine, `posed(_:through:)` composes a group channel onto a
+/// cel channel onto a container pose, and the repo already pins
+/// `testAPureMoveLeavesInkWeightBitIdentical`; drifting all of that to buy a case that no stage-5
+/// document contains would be a change to the shipped picture with nothing to show for it.
+///
+/// So the invariant is: **`.affine` composes with `.affine` through `CGAffineTransform`, and nothing
+/// else in the app is allowed to notice that stage 5b happened.** A keystone anywhere in a chain
+/// takes the whole chain projective, which is arithmetic rather than policy — a homography composed
+/// with an affine is a homography.
+///
+/// **`.projective` is never secretly affine.** Every constructor asks `Homography.affine()` at its
+/// exact-zero tolerance and demotes, so `isProjective` is a fact about the map and not about which
+/// initialiser happened to be called. That is what lets `isIdentity` answer `false` for `.projective`
+/// without a second test, and what keeps `encoded` unambiguous: six numbers or nine, and one map
+/// never has both spellings.
+enum PoseMap: Equatable {
+
+    /// Every pose stage 5 can author, and every pose a Distort dragged back to a parallelogram
+    /// becomes again.
+    case affine(CGAffineTransform)
+
+    /// A keystone: `g` or `h` genuinely non-zero, so no `CGAffineTransform` holds it.
+    case projective(Homography)
+
+    static let identity = PoseMap.affine(.identity)
+
+    /// **The one funnel, so the demotion rule is stated once.** Nil for a degenerate box or a quad
+    /// with three collinear corners — `PoseQuad.homography`'s own refusal, carried through.
+    init?(_ pose: PoseQuad) {
+        guard let homography = pose.homography else { return nil }
+        self.init(homography)
+    }
+
+    init(_ homography: Homography) {
+        if let affine = homography.affine() { self = .affine(affine) } else { self = .projective(homography) }
+    }
+
+    init(_ affine: CGAffineTransform) { self = .affine(affine) }
+
+    var homography: Homography {
+        switch self {
+        case .affine(let t): return Homography(t)
+        case .projective(let h): return h
+        }
+    }
+
+    /// The affine this map is, or nil because it is a keystone. `PoseComponents.decompose` and the
+    /// graph editor's six curves are the callers that must see the nil.
+    var affine: CGAffineTransform? {
+        switch self {
+        case .affine(let t): return t
+        case .projective: return nil
+        }
+    }
+
+    var isProjective: Bool {
+        switch self {
+        case .affine: return false
+        case .projective: return true
+        }
+    }
+
+    /// **False for every `.projective`, by the demotion invariant rather than by a comparison.** A
+    /// homography whose perspective row is exactly zero is `.affine` before it gets here, so a
+    /// keystone can never be the identity and asking costs one branch.
+    var isIdentity: Bool {
+        switch self {
+        case .affine(let t): return t.isIdentity
+        case .projective: return false
+        }
+    }
+
+    /// **This map, then `other`** — `CGAffineTransform.concatenating`'s own reading order, so a call
+    /// site converted from an affine chain keeps the order it had.
+    ///
+    /// Affine onto affine stays in CoreGraphics, which is the whole reason this type exists.
+    func concatenating(_ other: PoseMap) -> PoseMap {
+        if case .affine(let a) = self, case .affine(let b) = other { return .affine(a.concatenating(b)) }
+        return PoseMap(other.homography * homography)
+    }
+
+    /// Nil for a singular map — a pose that has collapsed its content to a line, which every consumer
+    /// treats as "there is nothing on screen to measure against".
+    var inverse: PoseMap? {
+        switch self {
+        case .affine(let t): return invertedAffine(t).map(PoseMap.affine)
+        case .projective(let h): return h.inverse.map(PoseMap.init)
+        }
+    }
+
+    func applied(to point: CGPoint) -> CGPoint? {
+        switch self {
+        case .affine(let t): return point.applying(t)
+        case .projective(let h): return h.map(point)
+        }
+    }
+
+    /// A path through this map. **Flattened first on the projective arm**, because a projective image
+    /// of a cubic is not a cubic — `Homography.mapped(_:)`'s own requirement of its callers.
+    func mapped(_ path: CGPath) -> CGPath? {
+        switch self {
+        case .affine(let t):
+            var t = t
+            return path.copy(using: &t)
+        case .projective(let h):
+            return h.mapped(path)
+        }
+    }
+
+    /// **What a cache key stores** — six numbers for an affine and nine for a keystone, and the count
+    /// is itself the tag because the demotion invariant forbids one map having both spellings.
+    ///
+    /// A key that stored only the affine six would hand every keystone of an animated Distort the
+    /// same digest, which is §4.5's trap arriving through stage 5b's door.
+    var encoded: [CGFloat] {
+        switch self {
+        case .affine(let t): return [t.a, t.b, t.c, t.d, t.tx, t.ty]
+        case .projective(let h): return [h.a, h.b, h.c, h.d, h.e, h.f, h.g, h.h, h.i]
+        }
+    }
+}
+
+/// `CanvasManager.invertedAffine`'s arithmetic, spelled where `Engine/Deform` can reach it. The two
+/// are deliberately the same four lines and the same `Quad.epsilon` floor: this file compiles
+/// standalone under `swiftc` (CLAUDE.md's ~5 s engine loop) and cannot name `CanvasManager` at all.
+private func invertedAffine(_ t: CGAffineTransform) -> CGAffineTransform? {
+    let determinant = t.a * t.d - t.b * t.c
+    guard determinant.isFinite, abs(determinant) > Quad.epsilon else { return nil }
+    let inverse = t.inverted()
+    guard inverse.a.isFinite, inverse.b.isFinite, inverse.c.isFinite,
+          inverse.d.isFinite, inverse.tx.isFinite, inverse.ty.isFinite else { return nil }
+    return inverse
 }
 
 // MARK: - Codable
@@ -285,7 +451,10 @@ enum PoseInterpolation {
                height: a.size.height + (b.size.height - a.size.height) * t)
     }
 
-    private static func mapped(_ quad: Quad, through map: Homography) -> Quad? {
+    /// A quad through a projective map, or nil when any corner lands on the vanishing line.
+    /// Internal rather than private because `PoseQuad(box:mappedThrough:)` is the same question
+    /// asked from the other side of this file and a second copy would be a second tolerance.
+    static func mapped(_ quad: Quad, through map: Homography) -> Quad? {
         guard let p0 = map.map(quad.p0), let p1 = map.map(quad.p1),
               let p2 = map.map(quad.p2), let p3 = map.map(quad.p3),
               p0.x.isFinite, p0.y.isFinite, p1.x.isFinite, p1.y.isFinite,

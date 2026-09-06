@@ -43,9 +43,11 @@ enum SelectionMode: String, CaseIterable, Identifiable {
 ///
 /// **It reached the raster floating piece only until 2026-09-06**, on a measurement that had already
 /// expired — a lassoed drawing takes a Distort now, through `VectorCanvas.mapping(_:through:)`'s
-/// `Homography` overload and `VectorStroke.distort` (TODO item (12)). What is still refused is a float
-/// carrying a placed image or a video; `CanvasManager.distortUnavailableReason` is where the bar says
-/// so and where the argument is written down.
+/// `Homography` overload and `VectorStroke.distort` (TODO item (12)). A **transformation layer**'s box
+/// followed on 2026-09-06 with KEYFRAMES §8 stage 5b, which removed the linearisation its refusal
+/// named. What is still refused is a float carrying a placed image or a video;
+/// `CanvasManager.distortUnavailableReason` is where the bar says so and where the argument is
+/// written down.
 enum TransformMode: String, CaseIterable, Identifiable {
     case freeform
     case uniform
@@ -817,22 +819,37 @@ extension CanvasManager {
     /// **The pose a container float is showing right now** — the rest pose it came up on, carried
     /// through the delta the box has travelled.
     ///
-    /// **The affine delta, so the projective residue of a Distort drag is dropped rather than stored.**
-    /// A container pose can hold a projective quad — `PoseQuad` is four corners — but nothing renders
-    /// one properly yet: `PoseQuad.affineOrLinearised` falls back to the linearisation at the box
-    /// centre, which KEYFRAMES §4.2 names as an honest artifact and §8 measures as wrong by 315% at
-    /// the far end of a strong keystone. Stage 5b is where a projective container pose belongs, and
-    /// `distortUnavailableReason` is where the bar says so.
     /// **The delta acts on the corners, not on the box**, which is what makes composition a
     /// one-liner: a pose *is* "these four corners for that box", so carrying the corners through the
     /// gesture's canvas-space delta and leaving the box alone is exactly "what was posed here is now
     /// posed there". Nothing has to be decomposed and nothing is re-derived, so a second Move on an
     /// already-posed layer cannot lose the first one to a factoring step.
+    ///
+    /// **The delta is projective when the artist has pulled a corner, which is KEYFRAMES.md §8 stage
+    /// 5b.** It took the *affine* delta until then and dropped the residue, because
+    /// `PoseQuad.affineOrLinearised` would have linearised it at the box centre — and the visible
+    /// result was worse than the refusal that named it: the picker stayed live, the corner drag
+    /// wrote `distortQuad`, the outline foreshortened under the finger and **the canvas did not
+    /// follow**. That is this repo's "a refusal with no notice" wearing a caption. Both halves are
+    /// gone: the residue is carried, and `distortUnavailableReason` no longer names the container.
+    ///
+    /// **The affine arm is kept rather than folded into the projective one**, `antsMap`'s own
+    /// reason one type over: a box resting at its lift has to produce **exactly** the pose it came
+    /// up on, because `PoseQuad.isIdentity` is an exact comparison that decides whether the leaves
+    /// beneath get a derivation at all.
     static func containerPose(_ rest: PoseQuad, movedBy piece: FloatingPiece) -> PoseQuad? {
         guard let liftInverse = CanvasManager.invertedAffine(piece.liftTransform.affineTransform)
         else { return nil }
-        let delta = liftInverse.concatenating(piece.transform.affineTransform)
-        return PoseQuad(box: rest.box, corners: rest.corners.mapped(by: delta))
+        // The projective residue on its own, in the box's local space — `antsMap`'s expression, and
+        // nil for every gesture that is not a Distort.
+        guard piece.distortQuad != nil,
+              let residue = Homography(rect: piece.localBox, to: piece.localQuad) else {
+            let delta = liftInverse.concatenating(piece.transform.affineTransform)
+            return PoseQuad(box: rest.box, corners: rest.corners.mapped(by: delta))
+        }
+        let delta = Homography(piece.transform.affineTransform) * residue * Homography(liftInverse)
+        guard let corners = PoseInterpolation.mapped(rest.corners, through: delta) else { return nil }
+        return PoseQuad(box: rest.box, corners: corners)
     }
 
     /// One clear pixel, made once. `UIGraphicsImageRenderer` is the app's usual way to a bitmap and
@@ -976,17 +993,14 @@ extension CanvasManager {
     /// exactly the two kinds that cannot, and it is per *float* with one sentence: a float carrying a
     /// photo almost always carries ink beside it, and a per-kind refusal is what stage 3c deleted.
     var distortUnavailableReason: String? {
-        // **The container float refuses it for a different reason and says a different sentence.**
-        // Nothing here is missing a pixel selection — a container pose is four corners and could hold
-        // a keystone perfectly well. What cannot hold one is the *render*: `PoseQuad.affineOrLinearised`
-        // falls back to the linearisation at the box centre, which §8 measures as wrong by 315% at the
-        // far end of a strong keystone, so a Distort here would look right in the box and wrong on the
-        // canvas. That is KEYFRAMES §2.13's *"keyframes ship with Uniform and Freeform working and
-        // Distort still greyed exactly as it is today"*, arriving at the one surface that could have
-        // offered it early.
-        if transformMode == .distort, floatingPiece?.kind == .containerPose {
-            return "Distort is not available on a transformation layer yet — Move, scale and turn are."
-        }
+        // **The container float's arm is gone, and it was the last "not yet" this sentence held.**
+        // It read *"Distort is not available on a transformation layer yet"* and named the reason
+        // exactly: `PoseQuad.affineOrLinearised` linearised a keystone at the box centre, MEASURED
+        // 218% wrong in local scale and 164 px out at the far corner. KEYFRAMES §8 stage 5b removed
+        // that accessor — `LayerPose.mapping(atFrame:)` answers a `PoseMap`, the vector tier goes
+        // through `VectorCanvas.posing(_:through: Homography)` and the raster tier through
+        // `ImageWarp` — so the refusal ended when the linearisation did, and `containerPose(_:
+        // movedBy:)` carries the residue the drag was already writing.
         guard transformMode == .distort, let float = vectorFloat else { return nil }
         // **Named in the artist's own vocabulary, and it says what to do rather than what is wrong.**
         // §5.14's rule is that a reader must be able to tell a deferral from a refusal, and the artist

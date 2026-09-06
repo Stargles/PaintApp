@@ -31,12 +31,14 @@ import Foundation
 /// ## The projective case is declined, not approximated
 ///
 /// A homography with a live perspective row **cannot** be expressed as these six curves: it has
-/// eight degrees of freedom and they have six. `PoseQuad.affineOrLinearised` answers such a pose with
-/// the linearisation at the box centre, which is the right call for *rendering* (§4.2 names it as one
-/// of three honest artifacts, and drawing nothing would make a frame of an animation vanish) and the
-/// wrong one for a graph editor: a band drawn from it would show six curves that are not what the
+/// eight degrees of freedom and they have six. Since KEYFRAMES §8 stage 5b *rendering* carries such a
+/// pose exactly — `PoseQuad.map` answers `.projective` and `VectorCanvas.posing(_:through:
+/// Homography)` maps the ink point for point — so declining it here is a narrowing of this surface
+/// alone: a band drawn from any six-number approximation would show six curves that are not what the
 /// pose does, with nothing saying so, and a write-back through them would silently flatten the
-/// keystone the artist authored.
+/// keystone the artist authored. (It said "`affineOrLinearised` answers it, and that is right for
+/// rendering" until stage 5b, which is no longer true in either half: the accessor is gone and
+/// rendering is exact.)
 ///
 /// So `decompose(_:)` returns **nil** for a projective pose, `TimelineGraphBand` declines the whole
 /// channel and names it (`Content.declinedChannelIDs`), and the band says `declined:<ids>` rather
@@ -239,8 +241,8 @@ enum PoseComponents {
               // **`affine()` at its default tolerance of exact zero, which is the projective test.**
               // `Homography.init(rect:to:)` has already applied the box-scaled epsilon and zeroed
               // `g`/`h` outright for a quad inside it, so a non-zero perspective row here is a pose
-              // that genuinely is not affine. `affineOrLinearised` is what rendering uses and is
-              // deliberately not what this uses — see the header.
+              // that genuinely is not affine. `PoseQuad.map` is what rendering uses, and it carries
+              // such a pose rather than approximating it — see the header.
               let affine = homography.affine()
         else { return nil }
         return decompose(affine, box: pose.box)

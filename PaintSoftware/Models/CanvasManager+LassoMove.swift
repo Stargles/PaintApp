@@ -258,7 +258,7 @@ struct VectorFloat {
     /// **Frozen at the lift, like `liftedInside` and `baseTransform`.** The playhead cannot move while
     /// a float is up without settling it (`handleActiveContextChanged`), and re-reading the pose per
     /// nudge would make a scrub silently re-interpret gestures already on the undo stack.
-    let poses: [UUID: CGAffineTransform]
+    let poses: [UUID: PoseMap]
 
     /// The centre of the lifted content's local bounding box — the fixed point the box's transform is
     /// expressed about. `contentSize` is that box's size. The convention `updateTransformOverlay`
@@ -847,7 +847,7 @@ extension CanvasManager {
     /// because every line of it is a decision with a reason recorded above and two copies would be
     /// two places to keep them.
     private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
-                                           poses: [UUID: CGAffineTransform]),
+                                           poses: [UUID: PoseMap]),
                                   lift: (elements: [VectorElement], insideIDs: Set<UUID>,
                                          mayDiverge: Bool)) -> Bool {
         let vector = target.vector
@@ -1154,7 +1154,7 @@ extension CanvasManager {
                 // keystone lands in `VectorStroke.distort`, which is persisted, rather than in a rest
                 // walk, which is a per-frame view and is not. Same three arms, same composition, one
                 // fewer memo.
-                guard let moved = VectorCanvas.mapping(lifted, through: map) else { return element }
+                guard let moved = VectorCanvas.mapping(lifted, through: map.homography) else { return element }
                 guard preserveMovePrecision, case .stroke(let stroke) = moved else { return moved }
                 return .stroke(stroke.markedPrecise())
             }
@@ -1162,9 +1162,22 @@ extension CanvasManager {
             // box, the finger and the latched bitmap are all in the *posed* space; `vector.elements`
             // is at rest, and the layer's own render poses what it draws — so storing the raw delta
             // would move the piece by `D` and then have the pose move it again.
+            //
+            // **A keystoned pose makes an affine delta projective, and the arm follows the delta
+            // rather than the gesture** — KEYFRAMES.md §8 stage 5b. `P·D·P⁻¹` with `P` a homography is
+            // a homography whatever `D` was, so a plain drag on a cel scrubbed to an in-between of a
+            // keyed Distort has to be written through the projective mapper; handing it to
+            // `throughStretch` would drop the keystone the artist can see. `restDelta` answers a
+            // `PoseMap`, so the question is asked of the composition and not of which button is lit.
             let delta = Self.restDelta(localDelta, pose: float.poses[element.id])
-            let moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: delta)
-                                    : VectorCanvas.mapping(lifted, throughSimilarity: delta)
+            let moved: VectorElement?
+            if let affine = delta.affine {
+                moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: affine)
+                                    : VectorCanvas.mapping(lifted, throughSimilarity: affine)
+            } else {
+                moved = VectorCanvas.mapping(lifted, through: delta.homography)
+            }
+            guard let moved else { return element }
             // **TODO item (14): the Move marks what it wrote, here and nowhere else.** This is the
             // one function a vector Move writes geometry from — both arms lift into the same float
             // and every nudge, Rotate press, Mirror and Reset comes back through it — so one line
@@ -1291,10 +1304,22 @@ extension CanvasManager {
         guard float.nudges > 0 else { return }
         // The same expression `applyToVectorFloat` builds, at the pose the box finished on — so the
         // key holds exactly the map the geometry was baked through and the two cannot disagree.
-        let map = float.mirror.concatenating(
-            VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
-                                stretchAxis: float.frame.stretchAxis, pivot: float.pivot)
-                .concatenating(float.baseTransform.inverted()))
+        //
+        // **Including its projective factor, which is KEYFRAMES.md §8 stage 5b's writer half.** Until
+        // this line the commit rebuilt the *affine* half alone, so a Distort committed on a keyframed
+        // cel keyed the drag's translation and rotation and silently dropped the keystone the artist
+        // had just pulled — the `.key` arm then took the bake back and left a drawing with no
+        // keystone anywhere. `distortMap` is the identical call `applyToVectorFloat` makes, off the
+        // float's own final state, and it answers nil for every gesture that is not a Distort — so an
+        // ordinary Move takes `PoseMap(localDelta)` and is bit-for-bit the commit it was.
+        let placement = VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
+                                            stretchAxis: float.frame.stretchAxis, pivot: float.pivot)
+        let localDelta = float.mirror.concatenating(placement.concatenating(float.baseTransform.inverted()))
+        let projected = Self.distortMap(float.distort, transform: float.frame.transform,
+                                        aspect: float.frame.aspect,
+                                        stretchAxis: float.frame.stretchAxis, placement: placement,
+                                        mirror: float.mirror, base: float.baseTransform)
+        let map = projected.map(PoseMap.init) ?? PoseMap(localDelta)
         guard !map.isIdentity else { return }
         // **Ask before creating anything.** The route is a function of the *existing* channel, and on a
         // document with no keyframes it is `.storedValue` — so minting a group here would tag ink and
@@ -1329,7 +1354,7 @@ extension CanvasManager {
                                  atFrame: currentFrame)
         let current = resolvedPoseMap(layerID: float.layerID, celID: float.celID, channel: channel,
                                       atFrame: currentFrame)
-        guard let outerInverse = Self.invertedAffine(outer) else { return }
+        guard let outerInverse = outer.inverse else { return }
         let keyed = current.concatenating(outer).concatenating(map).concatenating(outerInverse)
         commitTransformPose(layerID: float.layerID, celID: float.celID, channel: channel,
                             restBox: restBox, map: keyed, restElements: float.elementsBeforeLift,
@@ -1431,7 +1456,7 @@ extension CanvasManager {
     /// **The maps are taken against the pre-split display list**, which is what the lasso's membership
     /// test needs. A lift re-takes them against the post-split one, because a cut mints fresh ids.
     private func activeVectorMoveTarget() -> (layerID: UUID, celID: UUID, vector: VectorCanvas,
-                                              poses: [UUID: CGAffineTransform])? {
+                                              poses: [UUID: PoseMap])? {
         guard layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector else { return nil }
         guard !activeCelIsInBetween else {

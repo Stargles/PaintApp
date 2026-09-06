@@ -70,9 +70,9 @@ extension CanvasManager {
     /// `TransformTrack.mapping(atCelLocalFrame:)` for why that distinction decides whether the cel has
     /// a derivation at all.
     static func poseMappings(_ tracks: [String: TransformTrack],
-                             atCelLocalFrame frame: Int) -> [(TransformChannelID, CGAffineTransform)] {
+                             atCelLocalFrame frame: Int) -> [(TransformChannelID, PoseMap)] {
         guard !tracks.isEmpty else { return [] }
-        var resolved: [(TransformChannelID, CGAffineTransform)] = []
+        var resolved: [(TransformChannelID, PoseMap)] = []
         for (id, track) in tracks {
             guard let channel = TransformChannelID(id: id),
                   let map = track.mapping(atCelLocalFrame: frame) else { continue }
@@ -124,11 +124,11 @@ extension CanvasManager {
     /// moving something within it — the reading `poseMappings`' ordering note already gives for a
     /// group channel under a cel channel, taken one level further out.
     static func posed(_ elements: [VectorElement],
-                      through mappings: [(TransformChannelID, CGAffineTransform)],
-                      inheriting inherited: CGAffineTransform? = nil) -> [VectorElement] {
+                      through mappings: [(TransformChannelID, PoseMap)],
+                      inheriting inherited: PoseMap? = nil) -> [VectorElement] {
         guard !mappings.isEmpty || inherited != nil else { return elements }
         return elements.map { element in
-            var composed = CGAffineTransform.identity
+            var composed = PoseMap.identity
             var carried = false
             for (channel, map) in mappings where element.isMoved(by: channel) {
                 composed = composed.concatenating(map)
@@ -139,7 +139,13 @@ extension CanvasManager {
                 carried = true
             }
             guard carried, !composed.isIdentity else { return element }
-            return VectorCanvas.posing(element, through: composed)
+            // **An element a keystone cannot carry is left where it rests**, which is
+            // `applyToVectorFloat`'s own answer to the same question one tier over: a placed image and
+            // a video store six numbers and a mirror bit, and `distortUnavailableReason` refuses the
+            // float before an artist can key a projective pose over one. This is therefore the guard
+            // and not a case anything walks into — and it is nil only on the projective arm, since
+            // `posing(_:through: CGAffineTransform)` always answers.
+            return VectorCanvas.posing(element, through: composed) ?? element
         }
     }
 
@@ -166,18 +172,18 @@ extension CanvasManager {
     /// reachable only through a *composition* of two channels that is singular without either being
     /// so.
     static func poseMaps(_ elements: [VectorElement],
-                         through mappings: [(TransformChannelID, CGAffineTransform)])
-        -> [UUID: CGAffineTransform] {
+                         through mappings: [(TransformChannelID, PoseMap)])
+        -> [UUID: PoseMap] {
         guard !mappings.isEmpty else { return [:] }
-        var maps: [UUID: CGAffineTransform] = [:]
+        var maps: [UUID: PoseMap] = [:]
         for element in elements {
-            var composed = CGAffineTransform.identity
+            var composed = PoseMap.identity
             var carried = false
             for (channel, map) in mappings where element.isMoved(by: channel) {
                 composed = composed.concatenating(map)
                 carried = true
             }
-            guard carried, !composed.isIdentity, Self.invertedAffine(composed) != nil else { continue }
+            guard carried, !composed.isIdentity, composed.inverse != nil else { continue }
             maps[element.id] = composed
         }
         return maps
@@ -193,7 +199,7 @@ extension CanvasManager {
     /// halves — but `piece(of:)` copies the parent whole and `splitForLassoMove` carries a fill's
     /// group onto both halves, so a map built after it can.
     func celPoseMaps(_ elements: [VectorElement], layerID: UUID, celID: UUID,
-                     atFrame frame: Int) -> [UUID: CGAffineTransform] {
+                     atFrame frame: Int) -> [UUID: PoseMap] {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return [:] }
         let cel = layers[at.layer].cels[at.cel]
         guard !cel.transformTracks.isEmpty else { return [:] }
@@ -205,11 +211,11 @@ extension CanvasManager {
     /// id instead of by channel. What the Move box is measured on at a posed frame, and what the
     /// float's latched bitmap is rendered from.
     static func posed(_ elements: [VectorElement],
-                      by poses: [UUID: CGAffineTransform]) -> [VectorElement] {
+                      by poses: [UUID: PoseMap]) -> [VectorElement] {
         guard !poses.isEmpty else { return elements }
         return elements.map { element in
             guard let pose = poses[element.id], !pose.isIdentity else { return element }
-            return VectorCanvas.posing(element, through: pose)
+            return VectorCanvas.posing(element, through: pose) ?? element
         }
     }
 
@@ -220,21 +226,27 @@ extension CanvasManager {
     /// Rest geometry `r` is shown at `r·P`. Dropping it at `r·P·D` means storing `r' = r·P·D·P⁻¹`,
     /// because `r'·P = r·P·D`. With no pose it is `D` unchanged, which is why an unkeyframed document
     /// takes exactly the map it always did.
-    static func restDelta(_ delta: CGAffineTransform, pose: CGAffineTransform?) -> CGAffineTransform {
-        guard let pose, !pose.isIdentity, let inverse = invertedAffine(pose) else { return delta }
-        return pose.concatenating(delta).concatenating(inverse)
+    ///
+    /// **It answers a `PoseMap` because the pose can now be a keystone (stage 5b), and an affine
+    /// delta conjugated by a keystone is not affine.** The affine-by-affine case still composes
+    /// through `CGAffineTransform` — `PoseMap.concatenating`'s invariant — so a nudge on an
+    /// affinely-posed cel is bit-for-bit the nudge it was.
+    static func restDelta(_ delta: CGAffineTransform, pose: PoseMap?) -> PoseMap {
+        guard let pose, !pose.isIdentity, let inverse = pose.inverse else { return PoseMap(delta) }
+        return pose.concatenating(PoseMap(delta)).concatenating(inverse)
     }
 
     /// The same conjugation for a **projective** delta — a lasso Distort at a posed frame.
     ///
     /// `P·D·P⁻¹` is the same expression with the same argument: the box, the finger and the latched
     /// bitmap are all in the posed space and `vector.elements` is at rest, so a screen delta has to be
-    /// pulled back through the pose or the piece moves twice. Conjugating a homography by an affine is
+    /// pulled back through the pose or the piece moves twice. Conjugating a homography by anything is
     /// a homography, so nothing about the shape of the answer changes — which is why this is an
-    /// overload rather than a second idea.
-    static func restDelta(_ delta: Homography, pose: CGAffineTransform?) -> Homography {
-        guard let pose, !pose.isIdentity, let inverse = invertedAffine(pose) else { return delta }
-        return Homography(inverse) * delta * Homography(pose)
+    /// overload rather than a second idea. The two bodies are now identical and the overload is kept
+    /// only so a caller holding a `Homography` need not wrap it at the call site.
+    static func restDelta(_ delta: Homography, pose: PoseMap?) -> PoseMap {
+        guard let pose, !pose.isIdentity, let inverse = pose.inverse else { return PoseMap(delta) }
+        return pose.concatenating(PoseMap(delta)).concatenating(inverse)
     }
 
     /// **The loop as drawn, plus the loop as each posed element has to be asked about it.**
@@ -242,19 +254,24 @@ extension CanvasManager {
     /// One `CGPath` per *distinct* pose rather than one per element — a cel channel carries every
     /// element through the same map, so the common posed cel maps the loop once however much ink is
     /// on it, and `LassoLoops` memoizes its bounding boxes on the same object identity.
-    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: CGAffineTransform]) -> LassoLoops {
+    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: PoseMap]) -> LassoLoops {
         guard !poses.isEmpty else { return LassoLoops(loop) }
         var byMap: [[CGFloat]: CGPath] = [:]
         var perElement: [UUID: CGPath] = [:]
         for (id, pose) in poses {
-            let key = [pose.a, pose.b, pose.c, pose.d, pose.tx, pose.ty]
+            // **`PoseMap.encoded`, so the memo distinguishes a keystone from its own affine part.**
+            // Six numbers for an affine and nine for a homography, and the demotion invariant says one
+            // map never has both spellings — so two genuinely different pull-backs cannot collide on
+            // one entry, which is `RENDER.md` §3.8's size-keyed memo trap asked of this one.
+            let key = pose.encoded
             if let cached = byMap[key] {
                 perElement[id] = cached
                 continue
             }
-            guard let inverse = invertedAffine(pose) else { continue }
-            var map = inverse
-            guard let pulled = loop.copy(using: &map) else { continue }
+            // **A projective loop is flattened by `PoseMap.mapped`**, since the projective image of a
+            // cubic is not a cubic. A lasso loop is already a polyline the finger drew, so nothing is
+            // lost; the flattening matters for the memo's other callers, not for this one.
+            guard let inverse = pose.inverse, let pulled = inverse.mapped(loop) else { continue }
             byMap[key] = pulled
             perElement[id] = pulled
         }
@@ -273,7 +290,7 @@ extension CanvasManager {
     /// cel channel — so on a document nobody has keyframed the whole expression reduces to `D` and the
     /// commit is byte-for-byte what it was.
     func outerPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
-                      atFrame frame: Int) -> CGAffineTransform {
+                      atFrame frame: Int) -> PoseMap {
         switch channel {
         case .cel: return .identity
         case .group:
@@ -287,7 +304,7 @@ extension CanvasManager {
     /// The affine one channel maps its members through at an absolute frame, or the identity when it
     /// has no track — the loose reading every commit-side caller wants.
     func resolvedPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
-                         atFrame frame: Int) -> CGAffineTransform {
+                         atFrame frame: Int) -> PoseMap {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
         let cel = layers[at.layer].cels[at.cel]
         return cel.transformTracks[channel.id]?.mapping(atCelLocalFrame: frame - cel.startFrame)
@@ -356,7 +373,7 @@ extension CanvasManager {
     /// under a push-in while the vector layer beside it stays sharp"*. **So a cel with no vector tier
     /// answers nil here and is still posed** — by the other half.
     func posedCelContent(for cel: Cel, atFrame frame: Int,
-                         inheriting inherited: CGAffineTransform? = nil) -> DerivedCelContent? {
+                         inheriting inherited: PoseMap? = nil) -> DerivedCelContent? {
         let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
         guard !cel.transformTracks.isEmpty || container != nil,
               let vector = cel.vector, let canvasSize else { return nil }
@@ -378,15 +395,13 @@ extension CanvasManager {
             vectorVersion: version,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
-            maps: Dictionary(uniqueKeysWithValues: mappings.map {
-                ($0.0.id, [$0.1.a, $0.1.b, $0.1.c, $0.1.d, $0.1.tx, $0.1.ty])
-            }),
+            maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
             // **§4.5, reached from the transformation layer's door.** The container pose is an input
             // `render` reads and nothing else in this identity carries it: two frames of a cel with
             // *no channels of its own*, moved only by a transform layer above it, are identical in
             // every other field — so without this the flatten memo hands the first frame's pixels to
             // every frame of the move, and `SandwichKey` rebuilds the composite dutifully from it.
-            inherited: container.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] },
+            inherited: container.map(\.encoded),
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
@@ -424,7 +439,8 @@ private struct PosedCelIdentity: Hashable {
     let suppressed: [String]
     let carried: [CGFloat]
     let maps: [String: [CGFloat]]
-    /// §4.4's container pose, six numbers or nil. **An array rather than a second dictionary**, and
+    /// §4.4's container pose — `PoseMap.encoded`, so six numbers for an affine and nine for a
+    /// keystone, or nil. **An array rather than a second dictionary**, and
     /// that is about `FrameBakeKey` rather than about this type: `BakeKeyEncoder.derived(_:)` falls
     /// back to `String(reflecting:)` for an identity that is not `BakeKeyEncodable`, and a dictionary
     /// prints in per-process hash order — which is safe in the direction it fails (two descriptions

@@ -286,15 +286,20 @@ extension CanvasManager {
     /// **One committed Move, routed** — §2.5's write-at-commit, and the whole of the transform
     /// channel's authoring path.
     ///
-    /// `restBox` is the box the pose is measured against and `map` is the canvas-space affine the
+    /// `restBox` is the box the pose is measured against and `map` is the canvas-space map the
     /// gesture applied to the ink inside it. `restElements` is the display list as it stood *before*
     /// the lift, which the `.key` arm restores.
+    ///
+    /// **`map` is a `PoseMap` since KEYFRAMES.md §8 stage 5b**, so a Distort's keystone reaches the
+    /// key rather than being flattened to its affine part on the way in. Every arm below is written
+    /// against `PoseQuad`, which has held four free corners since stage 5 (§2.14, *"from day one"*) —
+    /// so this is one initialiser and an inverse that answers a `PoseMap`, and no storage changed.
     ///
     /// - Returns: the arm taken, so the caller can decide whether it still owes a bake. `.storedValue`
     ///   means "this was an ordinary Move; leave everything alone".
     @discardableResult
     func commitTransformPose(layerID: UUID, celID: UUID, channel: TransformChannelID,
-                             restBox: CGRect, map: CGAffineTransform,
+                             restBox: CGRect, map: PoseMap,
                              restElements: [VectorElement],
                              atFrame frame: Int) -> KeyframeControl.Write {
         guard let at = celIndices(forCel: celID, inLayer: layerID),
@@ -309,12 +314,17 @@ extension CanvasManager {
         let route = transformWrite(layerID: layerID, celID: celID, channel: channel, atFrame: frame)
 
         guard route != .storedValue else { return .storedValue }
-        guard let inverse = invertedIfPossible(map) else { return .storedValue }
+        guard let inverse = map.inverse else { return .storedValue }
         let local = frame - cel.startFrame
         // Where the drawing *was*, expressed against the geometry as it now stands. `restBox` is only
-        // a reference frame — `Homography(rect:to:)` recovers the same affine from any non-degenerate
+        // a reference frame — `Homography(rect:to:)` recovers the same map from any non-degenerate
         // one — so using the pre-move box keeps the number the artist can reason about.
-        let wasAt = PoseQuad(box: restBox, mappedBy: inverse)
+        //
+        // **Nil where a corner of the box has no image**, which is the vanishing line and is the one
+        // failure a projective map has that an affine one does not. Refusing the whole commit beats
+        // writing a key nothing can render; the geometry is already baked and the artist sees their
+        // drag stand, which is exactly what the `.storedValue` arm means.
+        guard let wasAt = PoseQuad(box: restBox, mappedThrough: inverse.homography) else { return .storedValue }
         let resting = PoseQuad(restingIn: restBox)
 
         switch route {
@@ -334,9 +344,11 @@ extension CanvasManager {
             // The one arm that takes the bake back: the cel holds one drawing in its rest position and
             // the keys hold the poses. Both halves in one step, so an undo cannot leave the geometry
             // restored and the key written.
+            guard let posed = PoseQuad(box: restBox, mappedThrough: map.homography) else {
+                return .storedValue
+            }
             keyPoseRestoringRest(layerID: layerID, celID: celID, channel: channel,
-                                 atCelLocalFrame: local,
-                                 pose: PoseQuad(box: restBox, mappedBy: map),
+                                 atCelLocalFrame: local, pose: posed,
                                  restElements: restElements)
         }
         return route

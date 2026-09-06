@@ -1293,7 +1293,7 @@ extension CanvasManager {
     /// so an interpolated cel's stored raster tiers do follow the move. It is only the evaluated
     /// in-between that does not.
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
-                           inheriting inherited: CGAffineTransform? = nil,
+                           inheriting inherited: PoseMap? = nil,
                            overridingT overrideT: CGFloat? = nil) -> DerivedCelContent? {
         // **Two derivation sources, and they are alternatives rather than a composition** —
         // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
@@ -1400,7 +1400,7 @@ extension CanvasManager {
     /// standing rather than a gap: `InterpolationEvaluator` passes a video through unwarped and
     /// answers with an image, so there is no element left for a frame map to resolve.
     func videoCelContent(for cel: Cel, atFrame frame: Int,
-                         inheriting inherited: CGAffineTransform? = nil) -> DerivedCelContent? {
+                         inheriting inherited: PoseMap? = nil) -> DerivedCelContent? {
         guard let vector = cel.vector, vector.holdsVideo, let canvasSize else { return nil }
         let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
         let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
@@ -1432,10 +1432,8 @@ extension CanvasManager {
             vectorVersion: vector.version,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
-            maps: Dictionary(uniqueKeysWithValues: mappings.map {
-                ($0.0.id, [$0.1.a, $0.1.b, $0.1.c, $0.1.d, $0.1.tx, $0.1.ty])
-            }),
-            inherited: container.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] },
+            maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
+            inherited: container.map(\.encoded),
             cuts: cuts,
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
@@ -1482,7 +1480,7 @@ extension CanvasManager {
     /// layer above it has no derivation of its own, so a caller that omits the pose draws the resting
     /// ink at every frame of a move the composite and the export are both animating.
     func livePreview(forCel cel: Cel, atFrame frame: Int,
-                     inheriting inherited: CGAffineTransform? = nil) -> LiveCelPreview {
+                     inheriting inherited: PoseMap? = nil) -> LiveCelPreview {
         if let derived = derivedCelContent(for: cel, atFrame: frame, inheriting: inherited) {
             return .derived(derived)
         }

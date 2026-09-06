@@ -3808,6 +3808,25 @@ final class VectorCanvas {
         return moved
     }
 
+    /// **`posing`'s two arms behind one argument** — KEYFRAMES.md §8 stage 5b's currency, so a reader
+    /// of a transform channel asks once instead of switching at every call site.
+    ///
+    /// **The affine arm is the *affine* overload and not the homography one taking its short-circuit**,
+    /// which is a deliberate two lines rather than one. The two agree today — `mapping(_:through:)`
+    /// delegates an affine map to `mapping(_:throughStretch:)` and `Homography(t).affine()` returns `t`
+    /// bit for bit — but routing every stage-5 document through the projective entry point would make
+    /// that agreement load-bearing for every existing picture, and it is an agreement between two
+    /// functions in different files that nothing pins. Sending `.affine` to the affine overload means
+    /// a stage-5 document does not reach the projective code at all.
+    ///
+    /// Nil only on the projective arm, and only for a placed image or a video — see that overload.
+    static func posing(_ element: VectorElement, through map: PoseMap) -> VectorElement? {
+        switch map {
+        case .affine(let t): return posing(element, through: t)
+        case .projective(let h): return posing(element, through: h)
+        }
+    }
+
     /// **`posing(_:through:)`'s commit form** — the same geometry, written into the artist's own
     /// stroke rather than into a throwaway copy of it.
     ///
@@ -5102,14 +5121,14 @@ final class VectorCanvas {
     /// piece where the artist dropped it. This bitmap bypasses that render, so it has to apply the same
     /// pose itself or the latched piece would be drawn at the rest position while the hole it came out
     /// of is at the posed one.
-    func renderIsolated(ids: Set<UUID>, posedBy: [UUID: CGAffineTransform] = [:]) -> UIImage? {
+    func renderIsolated(ids: Set<UUID>, posedBy: [UUID: PoseMap] = [:]) -> UIImage? {
         lock.lock()
         defer { lock.unlock() }
         var isolated = _elements.filter { ids.contains($0.id) }
         if !posedBy.isEmpty {
             isolated = isolated.map { element in
                 guard let pose = posedBy[element.id], !pose.isIdentity else { return element }
-                return Self.posing(element, through: pose)
+                return Self.posing(element, through: pose) ?? element
             }
         }
         guard !isolated.isEmpty else { return nil }
