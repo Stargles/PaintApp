@@ -722,6 +722,39 @@ enum VectorElement: Identifiable {
         return nil
     }
 
+    /// **A copy of this element fit to live in a different cel** — a fresh `id`, and no group tags.
+    ///
+    /// **Element ids are unique within a cel, not within a document**, so copying a display list from
+    /// one cel into another without minting new ones can put two elements with one id in a single
+    /// list. Everything that resolves an element by id — the eraser's split, a lasso's membership
+    /// set, a text re-edit, `suppressedElementIDs` — then finds whichever comes first.
+    ///
+    /// **The group tags go for a second reason and it is the quieter one.** `motionGroupID` says which
+    /// strokes an interpolation puts in correspondence and `animationGroupID` says which ones a
+    /// transform channel carries; both name groups belonging to the cel the element came *from*. Kept,
+    /// they would silently enrol the incoming ink in whatever the destination cel's groups of the same
+    /// id happen to be, or leave a tag pointing at a group that no longer exists anywhere. Untagged is
+    /// what a drawing that has just arrived actually is.
+    func adoptedByAnotherCel() -> VectorElement {
+        switch self {
+        case .stroke(var stroke):
+            stroke.id = UUID(); stroke.motionGroupID = nil; stroke.animationGroupID = nil
+            return .stroke(stroke)
+        case .fill(var fill):
+            fill.id = UUID(); fill.animationGroupID = nil
+            return .fill(fill)
+        case .image(var image):
+            image.id = UUID(); image.animationGroupID = nil
+            return .image(image)
+        case .text(var text):
+            text.id = UUID(); text.motionGroupID = nil; text.animationGroupID = nil
+            return .text(text)
+        case .video(var video):
+            video.id = UUID(); video.animationGroupID = nil
+            return .video(video)
+        }
+    }
+
     /// The element's placement when it *has* one — the two kinds that are a rectangle of pixels under
     /// an affine, and nil for the three that are ink.
     ///
@@ -4420,8 +4453,10 @@ final class VectorCanvas {
     ///   anywhere in the merged run isolates the whole of it, the earlier strokes included.
     ///
     /// So an appended paint stroke is safe exactly when the whole merged run is `.normal` —
-    /// source-over, which is associative, which is `renderLocalContent`'s own rule 2. **All five
-    /// shipped brushes are `.normal`**, so this is the answer essentially always.
+    /// source-over, which is associative, which is `renderLocalContent`'s own rule 2. The five brushes
+    /// the app ships with are all `.normal`, so this is the answer very nearly always — but **not by
+    /// construction**, and this comment claimed otherwise until the brush editor shipped: `stroke.blendMode`
+    /// is a per-brush setting an artist can change, so the check is load-bearing rather than a formality.
     ///
     /// **An appended element that is *not* a paint stroke needs no condition at all, and that
     /// includes the eraser.** A fill, image, video, text object or `.erase` stroke *ends* a paint
@@ -4439,16 +4474,35 @@ final class VectorCanvas {
     ///
     /// Caller must hold `lock`.
     private func appendPreservesTheWalk(after prefixCount: Int) -> Bool {
-        guard prefixCount > 0, prefixCount < _elements.count else { return false }
+        Self.splitPreservesTheWalk(_elements, after: prefixCount)
+    }
+
+    /// **Whether one display list drawn in two halves gives the same pixels as walking it whole** —
+    /// the question above, asked of a list nobody has to own.
+    ///
+    /// A merge of two vector cels asks it backwards from an append: it *has* the two halves and wants
+    /// to know whether concatenating them draws the same picture as compositing their two renders
+    /// (`CanvasManager.vectorMergeIsExact`). That is the same cut at the same index, so it is the same
+    /// predicate — spelled once, over the elements, rather than derived a second time from the
+    /// compositing rules and left to drift out of step with `renderLocalContent`.
+    ///
+    /// **Conservative in one direction and it is worth naming.** When the prefix ends in something
+    /// that is *not* a paint stroke — a fill, an image, a text object, an eraser — the run at the seam
+    /// begins at `prefixCount` either way, so a non-`.normal` stroke in the tail's leading run is
+    /// harmless; the forward scan rejects it all the same. A caller told "no" there loses a fast path
+    /// or falls back to pixels, which is the safe direction, and tightening it would change the
+    /// incremental append this predicate also answers for.
+    static func splitPreservesTheWalk(_ elements: [VectorElement], after prefixCount: Int) -> Bool {
+        guard prefixCount > 0, prefixCount < elements.count else { return false }
         // Nothing but a `.paint` stroke at the head of the tail can join the prefix's last run.
-        guard Self.paintStroke(at: prefixCount, in: _elements) != nil else { return true }
+        guard Self.paintStroke(at: prefixCount, in: elements) != nil else { return true }
         var index = prefixCount
-        while let stroke = Self.paintStroke(at: index, in: _elements) {
+        while let stroke = Self.paintStroke(at: index, in: elements) {
             if stroke.brush.stroke.blendMode != .normal { return false }
             index += 1
         }
         index = prefixCount - 1
-        while index >= 0, let stroke = Self.paintStroke(at: index, in: _elements) {
+        while index >= 0, let stroke = Self.paintStroke(at: index, in: elements) {
             if stroke.brush.stroke.blendMode != .normal { return false }
             index -= 1
         }

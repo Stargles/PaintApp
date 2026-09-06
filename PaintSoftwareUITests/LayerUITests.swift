@@ -898,9 +898,19 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                        "Closing the menu closes the session, and the rows go back to being rows")
     }
 
-    /// Merge Down flattens a layer into the one below it, leaving a single layer behind. Same model
-    /// call the two-finger pinch gesture makes.
-    func testMergeDownFlattensTwoLayersIntoOne() throws {
+    /// **Can an artist actually get a vector merge, starting from a new document?** — TODO item (43),
+    /// and CLAUDE.md's "prove the artist can use it" rule, which exists because three features shipped
+    /// with correct models and no reachable path to them.
+    ///
+    /// Everything here is a gesture: draw, add a layer through the panel's own "+", draw again, tap
+    /// Merge Down. Nothing constructs the pre-state in a fixture. What it pins is the whole of the
+    /// owner's ask — *"the merged layer turns out as a raster layer. Make it vector compatible."* — as
+    /// the panel reports it: one layer left, still flagged vector, holding **both** strokes.
+    ///
+    /// `readLayerStrokeCount` is the *raster* tier's count and is deliberately still asserted, at
+    /// **zero**: it is what caught this test before the vector arm existed, and it is the difference
+    /// between a survivor that kept its strokes and one that baked them.
+    func testMergeDownOfTwoVectorLayersKeepsTheStrokesOfBoth() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -912,10 +922,20 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addVectorLayerFromOpenPanel(app) // layers: [Vector 1 (drawn on), Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Vector 1 (drawn on), Vector 2 (active)]
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "Setup: both layers are vector")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true)
+        app.buttons["toolbar.layersButton"].tap() // close the panel to reach the canvas
 
+        // A second stroke, on the new layer, well clear of the first — so "both strokes are here" is
+        // a claim about two marks rather than about one drawn twice.
+        let second = CGVector(dx: point.dx, dy: point.dy + 0.2)
+        drawLine(on: canvas, from: second, to: CGVector(dx: second.dx + 0.12, dy: second.dy))
+
+        openLayerPanel(app)
         let top = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(top.waitForExistence(timeout: 5))
         top.tap()
         top.tap()
         let mergeDown = app.buttons["layerOptions.mergeDown"]
@@ -925,17 +945,31 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 5),
                       "Merging should leave exactly one layer")
         XCTAssertTrue(app.staticTexts["layerPanel.row.0"].waitForExistence(timeout: 5))
+        let marker = readVectorMarker(app, layerIndex: 0)
+        XCTAssertEqual(marker?.isVector, true,
+                       "Two vector layers merge to a vector layer — the whole of TODO (43)")
+        XCTAssertEqual(marker?.strokes, 2, "…holding both layers' strokes, not a picture of them")
+        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 0,
+                       "Nothing was baked into the raster tier — the strokes are still strokes")
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false,
-                       "The surviving layer should hold the flattened pixels in the raster tier, not a separate baked-image tier")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 0), 1,
-                       "The flattened pixels of both layers should register as raster content")
+                       "…and nothing landed in the separate baked-image tier either")
+        app.buttons["toolbar.layersButton"].tap() // close the panel to see the canvas
+
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: point.dx + 0.06, dy: point.dy)),
-                       "The merged artwork should still be on the canvas")
+                       "The lower layer's mark should still be on the canvas")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: second.dx + 0.06, dy: second.dy)),
+                       "…and so should the mark that came down from the layer above")
     }
 
-    /// Merging a vector layer must leave the survivor as a genuine `.raster` layer, not `.vector`
-    /// with emptied-out geometry — the inconsistency `rasterizeLayer` exists to prevent.
-    func testMergeDownFromVectorLayerRasterizesTheSurvivor() throws {
+    /// **A raster layer on either side of the pair still bakes**, and the survivor comes out a genuine
+    /// `.raster` layer rather than `.vector` with emptied-out geometry.
+    ///
+    /// This test used to caption that as the rule for every merge involving a vector layer, which is
+    /// what TODO (43) reopened. It is now the *other* half of the same predicate: pixels on one side
+    /// settle it, because a display list cannot hold them. `vectorMergeIsExact` is where the line is
+    /// drawn and `VectorMergeLogicTests` is where every case of it is pinned; what is left here is the
+    /// end-to-end proof that the fallback still runs, and still leaves a consistent layer behind.
+    func testMergeDownFromRasterOntoVectorRasterizesTheSurvivor() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 

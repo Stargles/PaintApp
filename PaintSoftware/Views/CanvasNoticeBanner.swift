@@ -89,6 +89,9 @@ struct CanvasNoticeBanner: View {
         // Not a warning: the resize did what was asked and this is the honest footnote about what
         // undoing it will and will not give back. The canvas glyph, because that is what changed.
         case .resizeResampled:  return "square.resize"
+        // Not a warning either: the merge happened and gave the artist a layer. What the glyph says
+        // is *which kind* of layer came back, which is the whole content of the message.
+        case .mergedAsPixels:   return "square.on.square"
         }
     }
 }

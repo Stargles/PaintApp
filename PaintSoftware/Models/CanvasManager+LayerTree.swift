@@ -478,13 +478,21 @@ extension CanvasManager {
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer
-    /// panel, and "Merge Down". The lower of the two survives (keeping its name and folder) as a
-    /// `.raster` layer; the upper is removed and **its whole contribution is baked down** — its
-    /// pixels, its blend mode, or its grade — with both layers' opacities applied. If either layer is
-    /// `.vector`, it's fully rasterized first (every cel, not just the merged one — see
-    /// `rasterizeLayer`) so it never comes out of this still labeled `.vector`. One undo step
-    /// covering the rasterize(s) + the flatten + the deletion together (nested `withStructureUndo`
-    /// calls, including the one inside `deleteLayer`, all coalesce into this outer scope).
+    /// panel, and "Merge Down". The lower of the two survives, keeping its name and folder; the upper
+    /// is removed and **its whole contribution is baked down** — its pixels, its blend mode, or its
+    /// grade — with both layers' opacities applied. One undo step covering the whole operation (nested
+    /// `withStructureUndo` calls, including the one inside `deleteLayer`, all coalesce into this outer
+    /// scope).
+    ///
+    /// **There are two arms, and which one runs is `vectorMergeIsExact`'s answer** — TODO item (43),
+    /// the owner's *"when you merge two layers it doesnt work for vector layers, the merged layer turns
+    /// out as a raster layer."* Where two vector cels concatenate to the same picture their composite
+    /// makes, the survivor stays `.vector` and keeps every stroke; everywhere else the pixel bake below
+    /// runs exactly as it always has, and a `CanvasNotice.mergedAsPixels` says so rather than leaving
+    /// the artist to find out by reaching for the eraser.
+    ///
+    /// The pixel arm rasterizes both layers first (every cel, not just the merged one — see
+    /// `rasterizeLayer`) so a layer never comes out of it still labeled `.vector` with stale geometry.
     ///
     /// **The blend and the grade are baked, and until EFFECT_BACKDROP.md §2.3's ruling neither was.**
     /// The old pixel side of this method composited `.normal` unconditionally and read a layer's
@@ -511,7 +519,30 @@ extension CanvasManager {
               activeCelIndex(inLayer: topIndex, atFrame: currentFrame) != nil else { return false }
 
         let survivorID = layers[bottomIndex].id
+        let bothVector = layers[bottomIndex].kind == .vector && layers[topIndex].kind == .vector
+        var stayedVector = false
         withStructureUndo(label: .mergeLayers) {
+            // **The float settle, said here rather than inherited from `rasterizeLayer`.** That method
+            // does it for the pixel arm's reason — a suppressed id whose canvas is about to be
+            // replaced is ink flattened away with no way back — and the vector arm never calls it, so
+            // without this line a merge would bake away a lifted lasso selection in silence. Both
+            // layers, because either one of them may be the float's own.
+            commitVectorFloatIfLifted(fromLayer: layers[bottomIndex].id)
+            commitVectorFloatIfLifted(fromLayer: layers[topIndex].id)
+            // Asked after the settle, because settling writes the float's ink back into the display
+            // list this is about to read.
+            if let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
+               let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame),
+               vectorMergeIsExact(bottomIndex: bottomIndex, bottomCel: bottomCel,
+                                  topIndex: topIndex, topCel: topCel) {
+                concatenateVectorCels(bottomIndex: bottomIndex, bottomCel: bottomCel,
+                                      topIndex: topIndex, topCel: topCel)
+                stayedVector = true
+                deleteLayer(at: topIndex)
+                repointActiveLayer(at: survivorID)
+                return
+            }
+
             rasterizeLayer(layerIndex: bottomIndex)
             rasterizeLayer(layerIndex: topIndex)
             // Re-resolve the current-frame cels post-rasterize: rasterizeLayer doesn't reorder
@@ -553,14 +584,119 @@ extension CanvasManager {
             layers[bottomIndex].pendingBaselines = [:]
 
             deleteLayer(at: topIndex)
-            if let survivor = layers.firstIndex(where: { $0.id == survivorID }) {
-                currentLayerIndex = survivor
-                if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
-                    scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
-                }
-            }
+            repointActiveLayer(at: survivorID)
         }
+        // **Only when both sides were vector.** A merge that involves a raster layer produces pixels
+        // because one side already is pixels, and a banner on every ordinary merge is noise.
+        if bothVector && !stayedVector { raise(.mergedAsPixels) }
         return true
+    }
+
+    /// Puts the selection back on the survivor and refreshes its thumbnail — the tail both arms share.
+    private func repointActiveLayer(at survivorID: UUID) {
+        guard let survivor = layers.firstIndex(where: { $0.id == survivorID }) else { return }
+        currentLayerIndex = survivor
+        if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
+            scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
+        }
+    }
+
+    /// **Whether concatenating these two cels' display lists draws what compositing their two renders
+    /// draws** — the predicate that decides which arm of `mergeLayers` runs, and the whole of the
+    /// design for TODO item (43).
+    ///
+    /// The claim it has to be right about is exact: `walk(A ++ B)` equals `render(B) over render(A)`,
+    /// byte for byte, for the pair in front of it. Everything below is a case where that is provably
+    /// so; every other shape falls back to the pixel bake, which is why this reads as a wall of guards
+    /// rather than as a policy. `A` is the lower layer and survives; `B` is the upper and is consumed.
+    ///
+    /// **What each guard is actually about**, since none of them is arbitrary:
+    ///
+    /// * *Both `.vector`.* One side already being pixels settles it. It also disposes of every `.value`
+    ///   shape at once — a grade and a flat colour are both `kind == .value`.
+    /// * *Both opaque.* `(A over B)·p ≠ (A·p) over (B·p)` wherever the two overlap, so a layer opacity
+    ///   below 1 is not something a concatenated list can carry.
+    /// * *B composites `.normal`.* B's mode blends B's **rendered image** against A's; a display list
+    ///   has no way to say "these elements, as a group, multiply". `.clipToBelow` fails the same test
+    ///   by being neither `.normal` nor expressible. A's own mode is untouched and rides on the
+    ///   survivor, exactly as it does through the pixel arm.
+    /// * *B carries no `AlphaMask`.* Same reason, and the same one `mergeLossKind` warns about. A's
+    ///   mask stays on the survivor and keeps applying, so it is not asked about here.
+    /// * *Neither cel derives its picture.* `derivedCelContent` answers non-nil for the three ways a
+    ///   cel can show something other than what it stores — an interpolated in-between, a pose channel,
+    ///   a video's current frame — and a display list is what the cel *stores*. One call covers all
+    ///   three, which is the point of asking it rather than testing `interpolation` by hand.
+    /// * *Neither cel holds pixels.* A vector cel still has the raster, fill and baked tiers, and
+    ///   `rasterizeUncached` draws them **under** the vector ink. Two cels with pixel tiers do not
+    ///   concatenate into one.
+    /// * *Both transforms identity.* `render()` applies `_transform` by resampling the finished
+    ///   content, so two differently-transformed lists are not one list. Nothing in the app writes
+    ///   `VectorCanvas.setTransform`, so this is a guard against a state only a test can build.
+    /// * *No `.erase` stroke in B.* `renderLocalContent`'s rule 3: a punch composites `destinationOut`
+    ///   against everything beneath it **in its own list**. Concatenated, B's erasers start eating A's
+    ///   ink — which is not a kind mismatch, it is a hole through the artist's drawing. An `.erase` in
+    ///   *A* is fine and is deliberately allowed: it punches only what precedes it, and concatenation
+    ///   moves nothing before it.
+    /// * *The seam preserves the walk.* `VectorCanvas.splitPreservesTheWalk` — rule 2's paint-run
+    ///   isolation is the one thing an element reads from its neighbours, and joining A's trailing run
+    ///   to B's leading one can change **A's own** pixels.
+    ///
+    /// **A hidden layer contributes nothing and this arm honours that**, which is why visibility
+    /// appears in the element lists rather than in the guards: it is the rule `mergeContribution` has
+    /// always applied on the pixel side, and `mergeLossKind` states outright is not a loss to warn
+    /// about. A hidden B leaves its ink behind; a hidden A does too, and the survivor comes back
+    /// visible either way.
+    func vectorMergeIsExact(bottomIndex: Int, bottomCel: Int, topIndex: Int, topCel: Int) -> Bool {
+        guard layers.indices.contains(bottomIndex), layers.indices.contains(topIndex) else { return false }
+        let below = layers[bottomIndex], above = layers[topIndex]
+        guard below.kind == .vector, above.kind == .vector,
+              below.opacity == 1, above.opacity == 1,
+              above.blendMode == .normal, above.alphaMask == nil,
+              below.cels.indices.contains(bottomCel), above.cels.indices.contains(topCel) else { return false }
+
+        let belowCel = below.cels[bottomCel], aboveCel = above.cels[topCel]
+        guard let belowCanvas = belowCel.vector, let aboveCanvas = aboveCel.vector,
+              holdsOnlyVectorInk(belowCel), holdsOnlyVectorInk(aboveCel),
+              belowCanvas.transform.isIdentity, aboveCanvas.transform.isIdentity,
+              derivedCelContent(for: belowCel, atFrame: currentFrame) == nil,
+              derivedCelContent(for: aboveCel, atFrame: currentFrame) == nil else { return false }
+
+        let head = below.isVisible ? belowCanvas.elements : []
+        let tail = above.isVisible ? aboveCanvas.elements : []
+        guard !tail.contains(where: { $0.stroke?.composite == .erase }) else { return false }
+        // A cut at the very start or the very end is not a cut: one side is the whole list.
+        guard !head.isEmpty, !tail.isEmpty else { return true }
+        return VectorCanvas.splitPreservesTheWalk(head + tail, after: head.count)
+    }
+
+    /// **A cel whose picture is its display list and nothing else.** The three pixel tiers
+    /// `rasterizeUncached` draws around the vector ink, asked for emptiness — `Cel.isCertainlyBlank`'s
+    /// test with the vector clause taken out, and conservative in the same direction: `raster.version`
+    /// having moved means the tier may hold pixels this cannot see without scanning them.
+    private func holdsOnlyVectorInk(_ cel: Cel) -> Bool {
+        cel.fillImage == nil && cel.bakedImage == nil
+            && cel.raster.strokeCount == 0 && cel.raster.version == 0
+    }
+
+    /// Writes `A ++ B` into the survivor's cel. Only ever called behind `vectorMergeIsExact`.
+    ///
+    /// **A brand-new `VectorCanvas`, never an in-place `elements =`, and it is the difference between
+    /// a working undo and a silent no-op.** `VectorCanvas` is a `final class` and `captureStructure`
+    /// snapshots `layers` by value, so the before and after snapshots would hold *the same object* and
+    /// undo would restore the merged list over itself. `duplicateLayer` reaches for `makeCopy()` for
+    /// the same reason. A fresh object also gives `LayerContentVersion` and `PixelOps.RasterizeKey` a
+    /// new `ObjectIdentifier`, so nothing above serves the pre-merge picture out of a memo.
+    private func concatenateVectorCels(bottomIndex: Int, bottomCel: Int, topIndex: Int, topCel: Int) {
+        guard let belowCanvas = layers[bottomIndex].cels[bottomCel].vector,
+              let aboveCanvas = layers[topIndex].cels[topCel].vector else { return }
+        let head = layers[bottomIndex].isVisible ? belowCanvas.elements : []
+        let tail = layers[topIndex].isVisible ? aboveCanvas.elements : []
+        layers[bottomIndex].cels[bottomCel].vector =
+            VectorCanvas(size: belowCanvas.size, elements: head + tail.map { $0.adoptedByAnotherCel() })
+        // The survivor's own opacity and visibility, settled the way the pixel arm settles them: both
+        // were 1 or the predicate would have refused, and a merge always hands back something visible.
+        layers[bottomIndex].opacity = 1
+        layers[bottomIndex].isVisible = true
     }
 
     /// **What one layer of a merging pair contributes, resolved exactly as `leafSnapshots` resolves a

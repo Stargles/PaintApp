@@ -153,6 +153,19 @@ struct CanvasNotice: Identifiable, Equatable {
         /// the owner's own packages measure as (PERFORMANCE.md item 14), resizes exactly in both
         /// directions and is told nothing.
         case resizeResampled
+        /// **Two vector layers merged, and the survivor came out as pixels** — TODO item (43).
+        ///
+        /// Concatenating two display lists is the same picture for plain strokes, and that is the
+        /// merge the artist gets. `CanvasManager.vectorMergeIsExact` is the list of shapes where it is
+        /// *not*, and each of them falls back to the pixel bake that has always run. This is that
+        /// fallback announced, because the artist's next act depends on it: a vector survivor can
+        /// still be erased stroke-wise, recoloured, interpolated and resized exactly, and a raster one
+        /// cannot, so silently handing back pixels is a capability disappearing with nothing said.
+        ///
+        /// **Raised only when both layers were `.vector`.** Merging anything into a raster layer, or a
+        /// raster layer into anything, produces pixels because one side already is pixels; saying so
+        /// would be a banner on every ordinary merge in the app.
+        case mergedAsPixels
     }
 
     init(_ kind: Kind) {
@@ -177,6 +190,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeRefused(let refusal):
             return "Couldn't resize — \(refusal.phrase) on this canvas can't be moved. Nothing was changed."
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
+        case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         }
     }
 
@@ -227,6 +241,9 @@ struct CanvasNotice: Identifiable, Equatable {
         // rather than a tap; the resample one reports what already happened, and undo is on the top
         // toolbar where it always is.
         case .resizeRefused, .resizeResampled: return nil
+        // Nor this one. It reports what already happened, and the one thing a button could offer —
+        // undo — is on the top toolbar where it always is.
+        case .mergedAsPixels:   return nil
         }
     }
 
@@ -250,6 +267,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .saveFailed:       return "saveFailed"
         case .resizeRefused:    return "resizeRefused"
         case .resizeResampled:  return "resizeResampled"
+        case .mergedAsPixels:   return "mergedAsPixels"
         }
     }
 
