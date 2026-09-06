@@ -313,6 +313,15 @@ final class MaskParityLogicTests: XCTestCase {
     /// Written as a pair — a control that must hit, then the notification, then a miss — because
     /// either half alone proves nothing. Without the control, a resolver that never cached at all
     /// would pass; without the miss, an observer that was never registered would.
+    ///
+    /// **The budget is armed to nothing, and that is a change of 2026-09-06.** A memory *warning* now
+    /// trims this cache to half its budget rather than emptying it (RENDER.md §5 stage 7, and
+    /// `MemoryPressurePolicy` for why: dropping the current frame's own masks costs a re-resolve on
+    /// the exact turn the device is struggling). So one small entry under a device-sized budget
+    /// survives a warning, correctly, and this test would have become a test of the fixture's size.
+    /// A budget of zero makes half of it zero, which is the one arrangement in which "the warning
+    /// reached this cache" and "the entry is gone" are the same statement — and that is what this
+    /// test has always been about. `MemoryBudgetLogicTests` asserts the halving itself.
     func testAMemoryWarningDropsTheResolvedMaskCache() {
         let manager = clippedManager()
         guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
@@ -327,13 +336,15 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertTrue(first === cached,
                       "Control: an unchanged document resolves to the same object, so identity reads the cache")
 
+        CompositorBudget.budgetOverrideBytes = 0
+        defer { CompositorBudget.budgetOverrideBytes = nil }
         NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
 
         guard let afterWarning = MaskResolver.coverage(for: masks, of: request) else {
             return XCTFail("A dropped cache re-resolves rather than failing")
         }
         XCTAssertFalse(first === afterWarning,
-                       "A memory warning drops the entry — this is what `clearCache`'s doc comment promised and nothing delivered until 2026-08-20")
+                       "A memory warning reaches this cache — what `clearCache`'s doc comment promised and nothing delivered until 2026-08-20")
         XCTAssertEqual(afterWarning.coverage, first.coverage,
                        "…and re-resolving is correctness-neutral: the same coverage, byte for byte")
     }
