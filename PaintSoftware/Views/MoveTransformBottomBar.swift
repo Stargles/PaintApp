@@ -50,8 +50,13 @@ struct MoveTransformBottomBar: View {
     /// the sentence and the measurement behind it live.
     private var caption: String? { canvasManager.distortUnavailableReason }
 
+    /// **Two rows, not four** — TODO item (49), the owner: *"too tall and obstructs your view. Make
+    /// all of them wider and flatter."* The mode picker used to be a line of its own under the icons
+    /// and the precision help a third line under its toggle; at `BottomDock.preferredWidth` the
+    /// picker fits beside the icons and the help beside the switch, which is most of the height
+    /// gone. Nothing was removed and no identifier moved.
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 14) {
                 iconButton("arrow.left.and.right") {
                     canvasManager.mirrorFloating(horizontal: true)
@@ -92,24 +97,26 @@ struct MoveTransformBottomBar: View {
 
                 divider
 
+                Picker("Mode", selection: Binding(
+                    get: { canvasManager.transformMode },
+                    set: { canvasManager.setTransformMode($0) }
+                )) {
+                    ForEach(TransformMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(minWidth: 200)
+
+                divider
+
                 Button("Done") { canvasManager.commitAnyFloatingPiece() }
                     .foregroundColor(.blue)
                     .fontWeight(.semibold)
                     .accessibilityIdentifier("moveBar.doneButton")
             }
 
-            Picker("Mode", selection: Binding(
-                get: { canvasManager.transformMode },
-                set: { canvasManager.setTransformMode($0) }
-            )) {
-                ForEach(TransformMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
-
-            precisionToggle
+            precisionRow
 
             if let caption {
                 Text(caption)
@@ -120,8 +127,6 @@ struct MoveTransformBottomBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.black.opacity(0.9))
-        .cornerRadius(14)
     }
 
     private var divider: some View {
@@ -139,12 +144,13 @@ struct MoveTransformBottomBar: View {
     ///
     /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
     /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
-    private var precisionToggle: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private var precisionRow: some View {
+        HStack(alignment: .center, spacing: 16) {
             Toggle(isOn: $canvasManager.preserveMovePrecision) {
                 Text("Keep Full Precision").foregroundColor(.white)
             }
             .tint(.blue)
+            .fixedSize()
             .accessibilityIdentifier("moveBar.keepFullPrecisionToggle")
 
             Text("Strokes you move are stored exactly, so shrinking them now and growing them back "
@@ -153,8 +159,8 @@ struct MoveTransformBottomBar: View {
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: 360)
     }
 
     /// `enabled: false` uses `.disabled` rather than dropping the button, so the row does not reflow

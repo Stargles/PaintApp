@@ -129,19 +129,16 @@ func effectMenuSlug(_ effect: Effect) -> String {
 /// losing it, and ceilinged in height so it can never grow to eat the canvas it was moved to uncover.
 /// Sobel, which has no controls at all, is a header and a caption; Levels' five sliders land exactly on
 /// the ceiling; Curves and a many-stop Gradient Map reach it and scroll. It shipped as a *fixed* card
-/// at that ceiling and the owner asked for this the same day — see `maxRowsHeight`. The alternative —
+/// at that ceiling and the owner asked for this the same day — see `BottomDock.maxScrollHeight`. The alternative —
 /// reflowing the rows into columns to use the extra width — is a change to the controls themselves and
 /// was deliberately not made here.
 struct EffectSettingsBar: View {
-    /// Wide enough that a slider has real travel (the rail gave it 212pt; this gives 532) and narrow
-    /// enough that the canvas either side of it stays visible. Public so `DrawingView` docks it at the
-    /// same width the text bar uses.
-    static let width: CGFloat = 560
 
-    /// The scroll's cap — a **ceiling now, not a height**. Sized so Levels, five slider rows and the
-    /// tallest all-slider effect, fits with nothing to scroll; everything taller scrolls rather than
-    /// growing, and everything shorter (nine of the thirteen have two controls or fewer) ends up as
-    /// short as its own rows. The owner asked for exactly that, 2026-08-27: *"Try to make that menu
+    /// The scroll's cap — a **ceiling now, not a height**, and since TODO item (49) it is
+    /// `BottomDock.maxScrollHeight`, shared with the text panel. Sized so Levels, five slider rows
+    /// and the tallest all-slider effect, fits with nothing to scroll; everything taller scrolls
+    /// rather than growing, and everything shorter (nine of the thirteen have two controls or
+    /// fewer) ends up as short as its own rows. The owner asked for exactly that, 2026-08-27: *"Try to make that menu
     /// shorter vertically because alot of them contain only 1 or 2 sliders which covers like half of
     /// it."*
     ///
@@ -162,7 +159,6 @@ struct EffectSettingsBar: View {
     /// test: a clipped view's accessibility frame does not reflect what painted, so the sliders
     /// reported plausible differing positions over a bar that rendered nothing. A screenshot is this
     /// bar's acceptance test; `testEffectSettingsBarIsShorterForFewerSliders` is a regression net.
-    private static let maxRowsHeight: CGFloat = 300
 
     let effect: Effect
     /// Carried purely so the two colour popovers below can be declared through
@@ -212,8 +208,8 @@ struct EffectSettingsBar: View {
             // Bounded rather than free: Curves and Gradient Map are the tall ones, and a bar that grew
             // with its content would climb the canvas it was moved here to uncover. Bounded is not the
             // same as fixed, though, which is what `.frame(maxHeight:)` alone gave — see
-            // `maxRowsHeight` and `ContentHeightCap`.
-            ContentHeightCap(cap: Self.maxRowsHeight) {
+            // `BottomDock.maxScrollHeight` and `ContentHeightCap`.
+            ContentHeightCap(cap: BottomDock.maxScrollHeight) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         rows
@@ -221,12 +217,11 @@ struct EffectSettingsBar: View {
                 }
             }
         }
-        .frame(width: Self.width)
-        .background(Color.black.opacity(0.9))
-        .cornerRadius(14)
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
-        // **No identifier on this card.** An accessibility identifier on a container propagates to its
+        // **The width and the card chrome are `DrawingView`'s** — `BottomDock.width(in:)` and
+        // `.bottomDockCard(width:)`, one definition for the four docked panels (TODO item (49)).
+        // This file used to spell a 560 of its own and paint its own rounded rectangle.
+        //
+        // **No identifier on that card.** An accessibility identifier on a container propagates to its
         // descendants and beats their own — the mistake `MaskTuningSection` records at the foot of its
         // body, and the reason `slider` below puts its name on the `Slider` rather than the row — so
         // one here would rename every control in the bar after the bar. `layerOptions.subMenuTitle` in
@@ -407,8 +402,13 @@ struct EffectSettingsBar: View {
         return parameter
     }
 
-    /// One tunable number. `MaskTuningSection`'s row idiom — label, live readout, slider — with the
-    /// undo bracket the mask harness never needed, since that one wrote statics rather than the model.
+    /// One tunable number, on **one line** — label, slider, readout — with the undo bracket the mask
+    /// harness never needed, since that one wrote statics rather than the model.
+    ///
+    /// **It was two lines until TODO item (49), and the fold cost the slider nothing.** The bar is
+    /// `BottomDock.preferredWidth` now rather than 560, and the extra width pays for exactly the
+    /// label and the readout that used to occupy their own line: the travel is the same ~532 points
+    /// it was, and the row is a little over half as tall.
     ///
     /// **The identifier rides the `Slider`, never the enclosing `VStack`.** An identifier on a
     /// container propagates to its descendants and beats their own (see CLAUDE.md, and the comment at
@@ -418,12 +418,12 @@ struct EffectSettingsBar: View {
                            _ identifier: String, format: String = "%.2f",
                            isAnimated: Bool = false,
                            onChange change: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                // The channel marker, and it is the whole of what this stage shows about a track: the
-                // channel *list* is stage 3b. It earns its place here rather than there because the
-                // readout above it is the value **resolved at the playhead**, and a number that moves
-                // while nobody touches it needs something on screen saying why.
+        HStack(spacing: BottomDock.rowSpacing) {
+            // The channel marker, and it is the whole of what this stage shows about a track: the
+            // channel *list* is stage 3b. It earns its place here rather than there because the
+            // readout beside it is the value **resolved at the playhead**, and a number that moves
+            // while nobody touches it needs something on screen saying why.
+            HStack(spacing: 4) {
                 if isAnimated {
                     Image(systemName: "diamond.fill")
                         .font(.system(size: 8))
@@ -432,21 +432,28 @@ struct EffectSettingsBar: View {
                 Text(label)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.85))
-                Spacer()
-                Text(String(format: format, value))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
+            .frame(width: BottomDock.sliderLabelWidth, alignment: .leading)
+
             Slider(value: Binding(get: { value }, set: change), in: range) { editing in
                 if editing { onEditBegan() } else { onEditEnded() }
             }
             .accessibilityIdentifier("effectSettings.\(identifier)")
             // The number, not the label — a test asserting a drag landed reads this rather than
-            // parsing the formatted readout above, which carries units and a locale-formatted point.
+            // parsing the formatted readout beside it, which carries units and a locale-formatted
+            // point.
             .accessibilityValue(String(format: "%.4f", value))
+
+            Text(String(format: format, value))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .frame(width: BottomDock.sliderReadoutWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, BottomDock.rowHorizontalPadding)
+        .padding(.vertical, 4)
     }
 
     private func toggleRow(_ label: String, isOn: Bool, identifier: String,
@@ -580,7 +587,7 @@ struct EffectSettingsBar: View {
 /// **It is deliberately not a measurement.** The obvious alternative reads the rows' resolved size
 /// through a `GeometryReader` and feeds it back into a `@State` that drives the frame; that is a
 /// layout cycle, and on this exact view it settled at zero and clipped the bar away entirely
-/// (`EffectSettingsBar.maxRowsHeight` records it, `785f3f7` reverted it). Nothing here stores a size
+/// (`BottomDock.maxScrollHeight` records it, `785f3f7` reverted it). Nothing here stores a size
 /// or invalidates on one, so there is no cycle to settle: `sizeThatFits` asks, answers, and forgets.
 ///
 /// The `cap` fallback for a measurement that comes back as zero or non-finite is not defensive

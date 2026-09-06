@@ -42,30 +42,43 @@ struct SelectPanel: View {
     /// independently non-nil; reading both is what keeps that a fact rather than an assumption.
     private var applyBrushReason: String? { canvasManager.applyBrushUnavailableReason }
 
+    /// **Three bands, not six** — TODO item (49), the owner: *"too tall and obstructs your view. Make
+    /// all of them wider and flatter."* At `BottomDock.preferredWidth` the mode tabs sit beside the
+    /// membership picker and the tolerance slider is one line instead of two; the panel's order —
+    /// how you select, what the loop then catches, what to do with it — is unchanged, it is just
+    /// read left-to-right in the first band instead of top-to-bottom over three.
     var body: some View {
         VStack(spacing: 0) {
             if canvasManager.selectionMode == .automatic {
-                VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) {
                     Text("Tolerance: \(Int(canvasManager.magicWandTolerance * 100))%")
                         .font(.caption)
                         .foregroundColor(.white)
+                        .fixedSize()
                     Slider(value: $canvasManager.magicWandTolerance, in: 0.02...1)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.top, 10)
             }
 
-            HStack(spacing: 6) {
-                ForEach(SelectionMode.allCases) { mode in
-                    modeTab(mode)
+            HStack(alignment: .top, spacing: 12) {
+                HStack(spacing: 6) {
+                    ForEach(SelectionMode.allCases) { mode in
+                        modeTab(mode)
+                    }
                 }
+                .fixedSize()
+
+                // **A height as well as a width, and that is not tidiness.** A `Rectangle` given
+                // only a width is greedy in the other axis, so this one grew to fill the screen and
+                // took the whole panel with it — a card 1,580 points tall over the artwork, which
+                // every assertion about the dock's *bottom* edge stayed green through.
+                Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
+
+                membershipPicker
             }
             .padding(.horizontal, 10)
-            .padding(.top, 12)
-
-            divider
-
-            membershipPicker
+            .padding(.top, 10)
 
             divider
 
@@ -85,7 +98,7 @@ struct SelectPanel: View {
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
                     .accessibilityIdentifier("selectPanel.deselectButton")
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
 
             divider
 
@@ -115,14 +128,9 @@ struct SelectPanel: View {
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 8)
             }
         }
-        .frame(width: 360)
-        .background(Color.black.opacity(0.95))
-        .cornerRadius(16)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
     }
 
     /// **TODO item (23) — "What the loop catches".** `Enclosed · Cut · Touching`, ordered by how much
@@ -172,8 +180,8 @@ struct SelectPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("selectPanel.membershipCaption")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 6)
     }
 
     /// A plain iOS-switch look-alike (capsule track + circular knob) purely for display — the
@@ -205,7 +213,10 @@ struct SelectPanel: View {
                     .font(.caption2)
             }
             .foregroundColor(isActive ? .blue : .white)
-            .frame(maxWidth: .infinity)
+            // A fixed width rather than `maxWidth: .infinity`: the three tabs now share a row with
+            // the membership picker instead of a band of their own, so there is no width for them
+            // to divide, and ragged tabs would read as three different controls.
+            .frame(width: 74)
             .padding(.vertical, 8)
             .background(isActive ? Color.white.opacity(0.15) : Color.clear)
             .cornerRadius(8)

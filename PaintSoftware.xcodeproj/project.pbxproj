@@ -206,6 +206,9 @@
 		D62FAE8F71BC30C12D10EC5A /* PaintSoftware/Views/FloatingPieceOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60C513BC271E6279063C95B /* PaintSoftware/Views/FloatingPieceOverlayView.swift */; };
 		3CC4C75F63CCF35C12C138D2 /* PaintSoftwareUITests/OffCanvasHandleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/OffCanvasHandleLogicTests.swift */; };
 		FA8161A5ABE50770492CD941 /* PaintSoftwareUITests/OffCanvasHandleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OffCanvasHandleUITests.swift */; };
+		58F73341CCB3328E7357555E /* PaintSoftware/Views/BottomDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */; };
+		A633B8E531389FD6277046A7 /* PaintSoftwareUITests/BottomDockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */; };
+		A00501CFB960B8301956C44C /* PaintSoftwareUITests/OptionsPanelUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB10DC3CAF9BDA1C9D33FB2 /* PaintSoftwareUITests/OptionsPanelUITests.swift */; };
 		BB993A02114E685AFB894AD9 /* PaintSoftware/Views/ObjectTransformOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */; };
 		BFB117E1158C2E0407562617 /* PaintSoftware/Views/ShapeOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3D54B7A3A528717F247380 /* PaintSoftware/Views/ShapeOverlayView.swift */; };
 		6BE64D8ECF9CA7BB2B01663E /* PaintSoftware/Models/ObjectTransformFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */; };
@@ -547,6 +550,9 @@
 		A60C513BC271E6279063C95B /* PaintSoftware/Views/FloatingPieceOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/FloatingPieceOverlayView.swift; sourceTree = "<group>"; };
 		A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/OffCanvasHandleLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/OffCanvasHandleLogicTests.swift; sourceTree = "<group>"; };
 		745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OffCanvasHandleUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/OffCanvasHandleUITests.swift; sourceTree = "<group>"; };
+		561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/BottomDock.swift; sourceTree = "<group>"; };
+		E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/BottomDockLogicTests.swift; sourceTree = "<group>"; };
+		6EB10DC3CAF9BDA1C9D33FB2 /* PaintSoftwareUITests/OptionsPanelUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/OptionsPanelUITests.swift; sourceTree = "<group>"; };
 		29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/ObjectTransformOverlayView.swift; sourceTree = "<group>"; };
 		5E3D54B7A3A528717F247380 /* PaintSoftware/Views/ShapeOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/ShapeOverlayView.swift; sourceTree = "<group>"; };
 		A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ObjectTransformFrame.swift; sourceTree = "<group>"; };
@@ -1033,6 +1039,9 @@
 				A60C513BC271E6279063C95B /* PaintSoftware/Views/FloatingPieceOverlayView.swift */,
 				A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/OffCanvasHandleLogicTests.swift */,
 				745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OffCanvasHandleUITests.swift */,
+				561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */,
+				E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */,
+				6EB10DC3CAF9BDA1C9D33FB2 /* PaintSoftwareUITests/OptionsPanelUITests.swift */,
 				29E17EB45B4B517284BD5AC6 /* PaintSoftware/Views/ObjectTransformOverlayView.swift */,
 				5E3D54B7A3A528717F247380 /* PaintSoftware/Views/ShapeOverlayView.swift */,
 				A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */,
@@ -1448,6 +1457,9 @@
 				D62FAE8F71BC30C12D10EC5A /* PaintSoftware/Views/FloatingPieceOverlayView.swift in Sources */,
 				3CC4C75F63CCF35C12C138D2 /* PaintSoftwareUITests/OffCanvasHandleLogicTests.swift in Sources */,
 				FA8161A5ABE50770492CD941 /* PaintSoftwareUITests/OffCanvasHandleUITests.swift in Sources */,
+				58F73341CCB3328E7357555E /* PaintSoftware/Views/BottomDock.swift in Sources */,
+				A633B8E531389FD6277046A7 /* PaintSoftwareUITests/BottomDockLogicTests.swift in Sources */,
+				A00501CFB960B8301956C44C /* PaintSoftwareUITests/OptionsPanelUITests.swift in Sources */,
 				BB993A02114E685AFB894AD9 /* PaintSoftware/Views/ObjectTransformOverlayView.swift in Sources */,
 				BFB117E1158C2E0407562617 /* PaintSoftware/Views/ShapeOverlayView.swift in Sources */,
 				6BE64D8ECF9CA7BB2B01663E /* PaintSoftware/Models/ObjectTransformFrame.swift in Sources */,

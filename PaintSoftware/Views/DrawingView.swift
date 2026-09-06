@@ -48,6 +48,15 @@ struct DrawingView: View {
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
+    /// How much of the canvas area the timeline currently occupies, reported by `AnimationTimeline`
+    /// through `TimelineOccupiedHeightKey` — the whole of what makes the bottom dock ride up when
+    /// the artist drags the timeline taller (TODO item (49)).
+    ///
+    /// **Read rather than owned**, which is the point: the panel's height is still decided in one
+    /// place, by the drag gesture on `AnimationTimeline`'s own `@State`, and this is the rendered
+    /// result of that decision. The initial value is a first-frame guess only — the preference
+    /// arrives on the first layout pass — and it is the timeline's own default so nothing jumps.
+    @State private var timelineOccupiedHeight: CGFloat = 250
 
     var body: some View {
         HStack(spacing: 0) {
@@ -151,7 +160,15 @@ struct DrawingView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                bottomDock
+                // The card's width is a function of the canvas area (`BottomDock.width(in:)`), so
+                // the dock needs that area's width — and it is not the screen's: the side toolbar
+                // and Split View both take from it. The `GeometryReader` is filled explicitly
+                // because it is otherwise top-leading and the column below relies on being the
+                // full height.
+                GeometryReader { proxy in
+                    bottomDock(width: BottomDock.width(in: proxy.size.width))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
 
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
                 // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
@@ -189,6 +206,12 @@ struct DrawingView: View {
         // before anything can be drawn, so it is the last moment at which "the brush the artist
         // edited last session" can still be made the brush the first stroke uses.
         .onAppear { canvasManager.adoptLibrarySelections() }
+        // The dock's anchor. It arrives from `AnimationTimeline`, two ZStack layers away, which is
+        // why it travels as a preference rather than as a binding: the timeline is a sibling of the
+        // dock, not its parent, and neither owns the other.
+        .onPreferenceChange(TimelineOccupiedHeightKey.self) { height in
+            timelineOccupiedHeight = height
+        }
         .background(Color.black)
         // **Above everything, including the side toolbar** — which is why it is an overlay on the
         // `HStack` rather than another layer of the canvas `ZStack`. See below for what it is for.
@@ -362,7 +385,7 @@ struct DrawingView: View {
     }
 
     @ViewBuilder
-    private var bottomDock: some View {
+    private func bottomDock(width: CGFloat) -> some View {
         VStack(spacing: 10) {
             Spacer()
 
@@ -409,6 +432,7 @@ struct DrawingView: View {
                     },
                     onBack: { showingEffectSettings = false },
                     onClose: { layerOptionsID = nil })
+                .bottomDockCard(width: width)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -420,12 +444,8 @@ struct DrawingView: View {
             // `.select` is a term in any of the fourteen gates.
             if activePanel == .text {
                 TextSettingsPanel(canvasManager: canvasManager)
-                    .frame(width: EffectSettingsBar.width)
-                    .frame(maxHeight: Self.textBarHeight)
-                    .background(Color.black.opacity(0.9))
-                    .cornerRadius(14)
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                    .frame(maxHeight: BottomDock.maxScrollHeight)
+                    .bottomDockCard(width: width)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -438,6 +458,7 @@ struct DrawingView: View {
             // default layer kind — came up with a transform box, six grips and no menu at all.
             if canvasManager.isAnyPieceFloating {
                 MoveTransformBottomBar(canvasManager: canvasManager)
+                    .bottomDockCard(width: width)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -459,17 +480,31 @@ struct DrawingView: View {
             // since it was written).
             if activePanel == .select && !canvasManager.isAnyPieceFloating {
                 SelectPanel(canvasManager: canvasManager)
+                    .bottomDockCard(width: width)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .padding(.bottom, 100)
+        // A one-point marker on the dock's own bottom edge, **before** the padding below it so it
+        // lands on the column rather than on the screen. SwiftUI containers are not accessibility
+        // elements, so the column's frame is not otherwise queryable, and "the dock sits above the
+        // timeline" is the whole feature — `OptionsPanelUITests` reads this against
+        // `timeline.collapseButton`. Same device as `sizePreview.raiseCount` in the body above, and
+        // for the same reason. It never takes a touch.
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("bottomDock.floor")
+                .allowsHitTesting(false)
+        }
+        // **The timeline's top edge, not a constant** — TODO item (49), and the constant it replaces
+        // was 100 against a timeline whose default is 250, so the dock started 150 points *inside*
+        // the timeline and every drag of the grab handle buried it further. `timelineOccupiedHeight`
+        // is what the timeline actually rendered at, and the Move menu is precisely the one an artist
+        // has open while editing a Move's keyframes in the graph band underneath it.
+        .padding(.bottom, BottomDock.bottomInset(clearing: timelineOccupiedHeight))
     }
-
-    /// The text bar's cap. Taller than `EffectSettingsBar`'s scroll because this panel is one fixed
-    /// list of eleven controls rather than one of thirteen shapes, and shorter than the 420pt dropdown
-    /// it replaces because it is now sitting on the artwork rather than beside it — the same trade the
-    /// effect bar makes, and the reason both scroll.
-    private static let textBarHeight: CGFloat = 360
 
     /// The grade whose knobs are docked, and where an edit to it goes — nil whenever the effect bar
     /// should not be on screen at all.

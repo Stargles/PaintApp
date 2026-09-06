@@ -600,7 +600,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     /// an empty card. **A screenshot is the acceptance test.** What is checkable from here is the
     /// arithmetic either side of it — the rows' own content span differs by effect, and the scroll
     /// container the fix resizes is neither zero nor identical between a two-slider effect and a
-    /// five-slider one. That second assertion is new with the fix (`EffectSettingsBar.maxRowsHeight`,
+    /// five-slider one. That second assertion is new with the fix (`BottomDock.maxScrollHeight`,
     /// `ContentHeightCap`) and is the one that goes red on the specific way it broke last time.
     /// Relative rather than exact-pt, matching the coarse style of the geometry assertion above, so it
     /// survives a padding or font tweak.
@@ -664,7 +664,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertTrue(tallScroll.exists)
         XCTAssertGreaterThan(tallScroll.frame.height, shortRowsHeight + 40, """
             The rows are the same height for two sliders as for five, so the card is a fixed cap \
-            again rather than a ceiling — see `EffectSettingsBar.maxRowsHeight` and `ContentHeightCap`.
+            again rather than a ceiling — see `BottomDock.maxScrollHeight` and `ContentHeightCap`.
             """)
     }
 

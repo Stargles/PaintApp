@@ -176,30 +176,6 @@ a finger tap does *outside* a Move (pan, or nothing), never commit.
 
 ---
 
-## (49) The bottom options panel is too tall and does not follow the timeline
-
-**Status** — not started. Affects Lasso, Move, Add Text and the compositor effect settings — one panel
-style, so one fix.
-
-> *"the options panel that pops up on the bottom of the screen in lasso, move, add text, effect
-> settings for compositor effects (that type of options panel UI) is too tall and obstructs your view.
-> Make all of them wider and flatter. Additionally, make it move with the timeline expansion. If the
-> timeline gets expanded vertically, then the menu should follow it up to always be on top of the
-> timeline. This is required because the move menu for example blocks my timeline graphs when I want to
-> edit the move's keyframe."*
-
-The second half is the load-bearing one: the panel is positioned against the screen rather than against
-the timeline, so expanding the timeline slides the graph band *under* it — and the Move panel is
-exactly the one an artist has open while editing a Move's keyframes, so the two features fight.
-
-**Left to build**
-- [ ] Re-lay the shared panel wider and flatter — this is one style used four places, so do it once.
-- [ ] Anchor the panel's bottom to the **timeline's top edge** rather than to the safe area, so it
-      rides up as the timeline expands.
-- [ ] Check it against the graph editor open at full height, which is the case that motivated it.
-
----
-
 ## (50) `sceneFrameCount` is a high-water mark that never falls
 
 **Status** — not started. Diagnosed by the owner from behaviour, and the code agrees exactly.

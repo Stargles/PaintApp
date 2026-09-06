@@ -86,6 +86,13 @@ struct AnimationTimeline: View {
             }
             timelinePanel
         }
+        // **What the bottom dock rides on** — TODO item (49). The *rendered* height rather than
+        // `timelineHeight`, deliberately: that state stays the one place the panel's size is
+        // decided, and this reports what the whole timeline actually came to, so the interpolate
+        // strip above the panel is included without `BottomDock` having to know it exists.
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: TimelineOccupiedHeightKey.self, value: geometry.size.height)
+        })
     }
 
     private var timelinePanel: some View {

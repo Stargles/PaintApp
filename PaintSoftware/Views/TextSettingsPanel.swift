@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The text tool's settings panel — `ADD_TEXT.md` stage 1, in `StrokeSettingsPanel`'s shape inside
-/// the same 300×420 scrolling card every other tool panel uses.
+/// the scrolling card the other three bottom-docked panels use (`BottomDock`, which owns its width,
+/// its chrome and its height ceiling).
 ///
 /// **Opening it bakes nothing.** The way in is `ActionsMenu`'s "Add Text" row, which calls
 /// `enterTextMode()` and `$activePanel.toggleSettingsPanel(.text)` — and that binding method
@@ -24,11 +25,16 @@ struct TextSettingsPanel: View {
     /// stated here because this panel drives one fixed set of properties and so needs no spec.
     private static let idPrefix = "textPanel"
 
+    /// The label column of a one-line slider row — the label and its live readout sit beside the
+    /// slider rather than above it (TODO item (49)). Wide enough for "Paragraph Spacing: 000",
+    /// which is the longest of the five.
+    private static let labelWidth: CGFloat = 190
+
     private var typography: Typography { canvasManager.textRecipe.typography }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Text")
                     .font(.headline)
                     .foregroundColor(.white)
@@ -62,7 +68,9 @@ struct TextSettingsPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.black.opacity(0.9))
+        // **No card chrome and no width here** — `DrawingView` wears both for all four docked
+        // panels (`BottomDock`, TODO item (49)). This used to carry its own `Color.black.opacity(0.9)`
+        // under the one the call site painted over it.
         .accessibilityIdentifier("panel.textSettings")
     }
 
@@ -276,9 +284,11 @@ struct TextSettingsPanel: View {
     /// the two panels' layouts for no gain.
     private func sliderRow(title: String, valueText: String, value: Binding<Double>,
                            range: ClosedRange<CGFloat>, idSuffix: String) -> some View {
-        VStack(alignment: .leading) {
+        HStack(spacing: 10) {
             Text("\(title): \(valueText)")
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .frame(width: Self.labelWidth, alignment: .leading)
             Slider(value: value, in: Double(range.lowerBound)...Double(range.upperBound))
                 .accessibilityIdentifier("\(Self.idPrefix).\(idSuffix)")
         }
