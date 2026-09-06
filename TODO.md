@@ -354,33 +354,56 @@ re-litigate any of them.**
 
 ---
 
-## (39) Three timeline defects, all reported from the device
+## (39) The timeline freeze
 
-**Status** — not started. Two of the three causes are now located exactly and are small fixes.
+**Status** — (a) and (b) are fixed; the recorder now watches the timeline's own recognizers. **(c) is the whole of what is left, it did not reproduce, and the analysis it was filed
+under is wrong** — see below before spending anything on it.
+
+The pinch anchors on the frame it started on at any scroll offset
+(`TimelineKeyMarkers.PinchAnchor`), and the track fills its viewport rather than stopping at the last
+row (`TimelineRowLayout.contentHeight(filling:)`), so there is no dead strip and the gridlines rule to
+the bottom of the panel.
 
 **Left to build**
-- [ ] **(a) Pinch-zoom anchors to the wrong frame once scrolled.** `TimelineTrackView` takes
-      `location(in: scrollView).x`, which is *already* content-space, then adds `contentOffset.x` and
-      later subtracts it as if it were viewport-space. The error is `contentOffset.x · (scale − 1)` —
-      zero at frame 0, growing with scroll. The variable's own doc describes the correct quantity. One
-      line, plus a test at a non-zero offset.
-- [ ] **(b) Dead area below the last row.** `AnimationTimeline` sizes the track host to
-      `rowLayout.contentHeight`, so the horizontal scroll view does not exist below the last row, and
-      the gridlines get the same extent. One cause, both symptoms.
-- [ ] **(c) The timeline freezes — traced, and it is a detached view rather than a gesture fight.**
-      The owner captured it: [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
-      is the analysis and the `.jsonl` beside it is the trace. In the freeze window **14 of 34
-      touch-downs on a `TimelineRowView` carry no scroll-view recognizer at all** — system gates only —
-      where before it 17 of 17 carry the full set. The row is on screen and hit-testable but its
-      ancestor chain no longer contains the scroll views, so nothing can respond; the ~40% that still
-      land on live rows are why it reads as intermittent. **Both filed suspicions are refuted** — the
-      reset idiom is intact, and the recognizers are not losing a `require(toFail:)` arbitration, they
-      are not attached. It begins immediately after a cel is created at frame 20 with `sceneFrameCount`
-      defaulting to 12 (see (50)), which forces a track re-layout — the moment a row view would be
-      rebuilt and a stale one left behind.
-- [ ] **Instrument the timeline's recognizers** the way the canvas's already are. Every `recognizer`
-      and `requireFailure` line in the trace is a `canvas.*` one, so the recorder is currently blind to
-      exactly the gestures this item is about. Cheap, and it makes the next trace decisive.
+- [ ] **(c) The timeline stops responding.** The owner captured it:
+      [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
+      is the analysis and the `.jsonl` beside it is the trace. In the fifteen seconds they describe as
+      frozen, 34 touch-downs land on a `TimelineRowView` and `currentFrame` moves twice. That much
+      holds. **What that document concludes from it does not.**
+
+      **The "detached row view" reading is refuted by its own data.** It says the row is on screen but
+      its ancestor chain no longer holds the scroll views. Three things in the same trace say
+      otherwise. `TimelineRowView.tapRecognizer` has **no delegate** and is added in `init`, so a live
+      row offers it to every touch — MEASURED present in 100% of row touch-downs in a clean simulator
+      capture — and it is **missing from 9 of the 14 dead touches**. Re-parenting a view cannot remove
+      *its own* recogniser from `touch.gestureRecognizers`; it can only remove its ancestors'. At
+      t=21.98 a `TimelineRulerView` keeps its own long press while carrying none of its ancestors'
+      recognizers, so the ruler is affected too and it is not a recycled row. And the recogniser set
+      already drifts *inside* the healthy window — one scroll pan at t=5.80, two at t=8.23; no
+      delayed-touches at t=6.45, two at t=8.23 — so `grNames` is a noisier signal than the 17/17
+      table implies. **What all of that does fit is the timeline's recognizers wedged in a
+      non-`.possible` state**, which is why they stop being offered touches while the views stay
+      hit-testable; a clean capture shows `timeline.scroll` sitting in `.failed` for seconds at a time
+      between sweeps, so the state is reachable in the ordinary course of events.
+
+      **The `sceneFrameCount` lead is refuted too.** Driven in the simulator — scrub to frame 20 with
+      the scene still 12 long, draw there, then tap rows — the timeline keeps scrubbing. Five driven
+      sequences in all (plain taps; a cel past the scene end; a gap menu raised and dismissed; repeated
+      two-finger swipes across the track; a pinch), and none froze. `relayout` cannot orphan a row
+      either: `rowViews` is only appended to, or truncated from the end when the layer count drops.
+
+      **The concrete suspect worth starting from** is `scrollView.panGestureRecognizer.require(toFail:)`,
+      which `relayout` calls once per row view **ever created** and never undoes — there is no
+      un-require API. A pool that grows, shrinks and grows again therefore leaves the scroll pan
+      requiring recognizers whose view is gone. Unproven, and it is a different shape of bug from the
+      one this item was filed as.
+
+      **The next capture is decisive and the instrument for it is in.** `timeline.scroll`,
+      `timeline.pinch`, `timeline.rulerScrub`, `timeline.graphBand` and every row's
+      `timeline.row<N>.tap` / `.press` / `.resize` are named for `ActionRecorder`, so a recording now
+      carries their state transitions per touch instead of only the `grNames` column. Ask the owner
+      for one capture of the freeze with the recorder on; it will say in one line whether a recogniser
+      is stuck and which.
 
 ---
 

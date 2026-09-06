@@ -58,3 +58,43 @@ is recorded per touch from the touch itself.
 
 Instrumenting the timeline's recognizers the way the canvas's are would make the next trace of this
 much sharper, and is cheap.
+
+---
+
+## Correction, 2026-09-06 — the conclusion above does not follow from the table above
+
+Everything down to "What the trace says" holds: 34 touch-downs on a `TimelineRowView` in fifteen
+seconds, `currentFrame` moved twice. **"The row view is on screen but its ancestor chain no longer
+contains the scroll views" is wrong**, and three things in this same file say so.
+
+**The row's own tap recogniser is missing too, and re-parenting cannot do that.**
+`TimelineRowView.tapRecognizer` is added in `init` and — unlike the pan and the long press — carries
+**no delegate**, so a live row is offered it on every touch. MEASURED in a clean simulator capture
+(iPad Pro 13-inch M4, iOS 26.5, 2026-09-06): present in **100 %** of row touch-downs. In the freeze
+window here it is absent from **9 of the 14** dead touches. Moving a view changes which *ancestors'*
+recognizers a touch sees; it cannot take away the view's own.
+
+**The ruler is affected as well, and it kept its own recogniser.** At t=21.98 a `TimelineRulerView`
+touch carries `UILongPressGestureRecognizer` — the ruler's own scrub — and none of its ancestors'.
+The ruler and the rows are siblings in one `contentView`, so whatever this is reaches the whole
+subtree; it is not one recycled row left behind by a re-layout.
+
+**And `grNames` drifts inside the healthy window too.** t=5.80 has one `UIScrollViewPanGestureRecognizer`
+and no delayed-touches; t=8.23 has two of each. So "before it, 17 of 17 carry the full set" overstates
+what the column can support — the *set* varies with recogniser state, not only with parenting.
+
+**What does fit is the timeline's recognizers wedged in a non-`.possible` state.** A recogniser that
+has failed for a sequence is not offered later touches while the views stay perfectly hit-testable,
+which is the exact signature here. The clean capture shows `timeline.scroll` sitting in `.failed` for
+seconds at a stretch between sweeps, so the state is ordinary; what is not known is what holds it
+there.
+
+**Not reproduced.** Five sequences driven in the simulator on 2026-09-06 — plain row taps; a cel
+created at frame 20 with `sceneFrameCount` still 12, then taps; the gap menu raised and dismissed;
+repeated two-finger swipes across the track; a pinch — and the timeline scrubbed after every one. The
+cel-past-the-scene-end lead this document offers is therefore refuted as a trigger on its own.
+
+**The next capture will settle it.** The timeline's recognizers are now named for `ActionRecorder`
+(`timeline.scroll`, `timeline.pinch`, `timeline.rulerScrub`, `timeline.graphBand`, and
+`timeline.row<N>.tap` / `.press` / `.resize`), so a recording of the freeze now carries their state
+transitions rather than only the per-touch `grNames`. That is the one thing this trace could not say.

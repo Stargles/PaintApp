@@ -69,6 +69,14 @@ struct TimelineTrackView: UIViewRepresentable {
         scrollView.isDirectionalLockEnabled = true
         scrollView.delaysContentTouches = false
         scrollView.delegate = context.coordinator
+        // **Named for `ActionRecorder`, and that is the only thing a name does here** — nothing in
+        // the app reads `UIGestureRecognizer.name`, and `WindowEventTap.rescanRecognizers` discovers
+        // recognizers by walking the window for named ones. Naming them is a stored-property write
+        // at creation and free when the recorder is off, and without it a capture of the timeline is
+        // blind to exactly the gestures the timeline's own bugs are about: TODO (39)(c)'s trace
+        // carries `grNames` per touch and not one recogniser transition, because every named
+        // recogniser in this app was a `canvas.*` one.
+        scrollView.panGestureRecognizer.name = "timeline.scroll"
 
         let content = UIView()
         scrollView.addSubview(content)
@@ -77,6 +85,7 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.contentView = content
 
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.name = "timeline.pinch"
         content.addGestureRecognizer(pinch)
 
         context.coordinator.relayout()
@@ -303,6 +312,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 rulerView.onNumberTap = { [weak self] frame, columnRect in
                     self?.onRequestMenu?(.loop(frame: frame), columnRect)
                 }
+                rulerView.panRecognizer.name = "timeline.rulerScrub"
                 contentView.addSubview(rulerView)
                 scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
             }
@@ -337,6 +347,12 @@ struct TimelineTrackView: UIViewRepresentable {
             while rowViews.count < layerEntries.count {
                 let row = TimelineRowView()
                 row.coordinator = self
+                // **By pool slot, not by layer**, and deliberately: the pool slot is the one thing
+                // about a row view that never moves, so a capture can say *which view* a touch
+                // reached and whether the same view is still there a minute later. Which layer that
+                // slot is currently showing changes on every reorder, and naming it that would make
+                // two lines in a trace incomparable. See `makeUIView` for what a name buys.
+                row.nameRecognizers(poolSlot: rowViews.count)
                 contentView.addSubview(row)
                 scrollView.panGestureRecognizer.require(toFail: row.panRecognizer)
                 rowViews.append(row)
@@ -556,6 +572,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
             if graphBandView.superview == nil {
                 contentView.addSubview(graphBandView)
+                graphBandView.panRecognizer.name = "timeline.graphBand"
                 graphBandView.panRecognizer.addTarget(self, action: #selector(handleGraphBandTouch(_:)))
                 scrollView?.panGestureRecognizer.require(toFail: graphBandView.panRecognizer)
             }
@@ -2362,6 +2379,9 @@ private final class TimelineRowView: UIView {
         return gr
     }()
 
+    /// **No delegate, unlike the other two**, and that is the difference between them: the pan and
+    /// the long press are only offered a touch that landed in the zone they act on, and the tap is
+    /// offered every touch on the row and decides in `handleTap` instead.
     lazy var tapRecognizer: UITapGestureRecognizer = {
         let gr = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         return gr
@@ -2388,6 +2408,14 @@ private final class TimelineRowView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Names this row's three recognizers so `ActionRecorder` can see them. Free when the recorder
+    /// is off — see `TimelineTrackView.makeUIView` for what a name is and is not.
+    func nameRecognizers(poolSlot: Int) {
+        panRecognizer.name = "timeline.row\(poolSlot).resize"
+        tapRecognizer.name = "timeline.row\(poolSlot).tap"
+        longPressRecognizer.name = "timeline.row\(poolSlot).press"
+    }
 
     func update(cels: [Cel], sceneFrameCount: Int, markers: [Int]) {
         var result: [Segment] = []
@@ -2694,10 +2722,6 @@ extension TimelineRowView: UIGestureRecognizerDelegate {
             case .leftHandle, .rightHandle, .gap:
                 return false
             }
-        }
-
-        if gestureRecognizer === tapRecognizer {
-            return true
         }
 
         return true
