@@ -276,6 +276,93 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
                        "The capping diamonds are inside the rect, so the bar between them is exactly centre-to-centre")
     }
 
+    // MARK: - The pinch anchor (TODO 39a)
+
+    /// **The reported defect, and the assertion has to be taken at a non-zero scroll offset or it
+    /// cannot see it.** `TimelineTrackView` read the fingers' x out of the scroll view — which is
+    /// content space, since a scroll view's `bounds.origin` *is* its `contentOffset` — and then
+    /// added `contentOffset.x` to it as though it were viewport space. The anchor therefore landed
+    /// `contentOffset.x · (scale − 1)` points out, which is **exactly zero at frame 0** and grows
+    /// with the scroll. A pinch test written at the left edge of the track is green against the bug
+    /// and against the fix alike, which is why the offsets below start at 300.
+    ///
+    /// **The conversion is done by UIKit rather than restated here**, because "is `location(in:)`
+    /// content space or viewport space" is the whole question and a test that answers it by
+    /// re-typing `offset + x` would be pinning the same mistake it exists to catch.
+    /// `UIGestureRecognizer.location(in:)` is `convert(_:to:)` from the window; this asks a real
+    /// `UIScrollView` at a real `contentOffset` the same thing.
+    func testAPinchKeepsTheFrameUnderTheFingersAtAnyScrollOffset() {
+        let viewportWidth: CGFloat = 400
+        // Fingers 120 pt in from the track's left edge — the thing that must not move.
+        let fingerInViewport: CGFloat = 120
+        for contentOffsetX in [CGFloat(600), 750, 1234.5] {
+            for (startZoom, endZoom) in [(CGFloat(30), CGFloat(60)), (30, 10.5), (120, 30)] {
+                let container = UIView(frame: CGRect(x: 0, y: 0, width: viewportWidth, height: 100))
+                let scrollView = UIScrollView(frame: container.bounds)
+                container.addSubview(scrollView)
+                scrollView.contentOffset.x = contentOffsetX
+
+                let locationInContent = container
+                    .convert(CGPoint(x: fingerInViewport, y: 50), to: scrollView).x
+                // Derived from the fixture, not from the code under test: content x over zoom.
+                let expectedFrame = (contentOffsetX + fingerInViewport) / startZoom
+
+                let anchor = TimelineKeyMarkers.PinchAnchor(locationInContent: locationInContent,
+                                                            contentOffsetX: contentOffsetX,
+                                                            pixelsPerFrame: startZoom)
+                // Wide enough at every zoom in the table that nothing here is clamped — the clamp is
+                // the next test's subject, and letting it fire in this one would hide the anchor.
+                // The right edge is bought with a huge `contentWidth`; the **left** edge is bought by
+                // the offsets in the table, and this is the assertion that says so rather than
+                // leaving the next person to lower one and get a mystery red.
+                XCTAssertGreaterThanOrEqual(expectedFrame * endZoom - fingerInViewport, 0, """
+                    Fixture: at \(contentOffsetX)/\(startZoom)→\(endZoom) the anchor wants a negative \
+                    offset, so the track stops at its left edge and cannot honour it. That is right, \
+                    and it is `testThePinchOffsetIsClampedToWhatTheTrackCanScrollTo`'s subject.
+                    """)
+                let contentWidth: CGFloat = 100_000
+                let newOffset = anchor.contentOffsetX(pixelsPerFrame: endZoom,
+                                                      contentWidth: contentWidth,
+                                                      viewportWidth: viewportWidth)
+                let frameUnderFingersNow = (newOffset + fingerInViewport) / endZoom
+                XCTAssertEqual(frameUnderFingersNow, expectedFrame, accuracy: 0.0001, """
+                    Pinching \(startZoom)→\(endZoom) pt/frame at content offset \(contentOffsetX) \
+                    must leave frame \(expectedFrame) under the fingers
+                    """)
+            }
+        }
+    }
+
+    /// The anchor can ask for an offset the track cannot reach — pinch out far enough and the frame
+    /// under the fingers would need the content to start left of zero. Both ends are clamped, and
+    /// the far end is clamped to the same `contentSize − bounds` a scroll view would stop at itself.
+    func testThePinchOffsetIsClampedToWhatTheTrackCanScrollTo() {
+        let anchor = TimelineKeyMarkers.PinchAnchor(locationInContent: 400,
+                                                    contentOffsetX: 300,
+                                                    pixelsPerFrame: 30)
+        XCTAssertEqual(anchor.contentOffsetX(pixelsPerFrame: 1, contentWidth: 5_000, viewportWidth: 400), 0,
+                       "Pinched right out, the anchor wants a negative offset and the track stops at its left edge")
+        XCTAssertEqual(anchor.contentOffsetX(pixelsPerFrame: 400, contentWidth: 1_000, viewportWidth: 400), 600,
+                       "Pinched right in, it stops where the scroll view itself would: contentSize − bounds")
+        XCTAssertEqual(anchor.contentOffsetX(pixelsPerFrame: 30, contentWidth: 200, viewportWidth: 400), 0,
+                       "A track narrower than its viewport has nowhere to scroll to at all")
+    }
+
+    /// A pinch that does not change the scale must not move the track, at any offset — the identity
+    /// case, and the one that says the two spaces are being crossed in both directions consistently
+    /// rather than merely cancelling for one particular zoom ratio.
+    func testAPinchThatChangesNothingLeavesTheOffsetWhereItWas() {
+        for contentOffsetX in [CGFloat(0), 300, 1234.5] {
+            let anchor = TimelineKeyMarkers.PinchAnchor(locationInContent: contentOffsetX + 120,
+                                                        contentOffsetX: contentOffsetX,
+                                                        pixelsPerFrame: 30)
+            XCTAssertEqual(anchor.contentOffsetX(pixelsPerFrame: 30,
+                                                 contentWidth: 100_000,
+                                                 viewportWidth: 400),
+                           contentOffsetX, accuracy: 0.0001)
+        }
+    }
+
     // MARK: - Gridlines (TODO 38a): the timeline and the graph editor share one column x
 
     /// **The load-bearing relationship, and the reason `columnX` is not just `centerX` minus a

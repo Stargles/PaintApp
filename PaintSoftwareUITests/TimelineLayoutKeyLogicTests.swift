@@ -24,6 +24,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                      pixelsPerFrame: CGFloat = 30,
                      displayedFrameCount: Int = 24,
                      contentWidth: CGFloat = 720,
+                     contentHeight: CGFloat = 200,
                      rowHeight: CGFloat = 34,
                      rulerHeight: CGFloat = 18,
                      drag: TimelineLayoutKey.DragKey? = nil) -> TimelineLayoutKey {
@@ -32,6 +33,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                                pixelsPerFrame: pixelsPerFrame,
                                displayedFrameCount: displayedFrameCount,
                                contentWidth: contentWidth,
+                               contentHeight: contentHeight,
                                rowHeight: rowHeight,
                                rulerHeight: rulerHeight,
                                drag: drag).key
@@ -171,6 +173,8 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         let m = manager()
         XCTAssertNotEqual(key(m, contentWidth: 720), key(m, contentWidth: 900),
                           "A rotation or a Split View resize changes every row's width")
+        XCTAssertNotEqual(key(m, contentHeight: 200), key(m, contentHeight: 260),
+                          "Dragging the panel's grab handle changes how far the content fills, and nothing else moves with it")
         XCTAssertNotEqual(key(m, rowHeight: 34), key(m, rowHeight: 40))
         XCTAssertNotEqual(key(m, rulerHeight: 18), key(m, rulerHeight: 24))
     }

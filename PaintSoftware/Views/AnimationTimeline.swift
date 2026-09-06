@@ -117,9 +117,16 @@ struct AnimationTimeline: View {
                             }
                         )
                     }
-                    .frame(height: contentHeight)
+                    // **The host fills the viewport when the rows fall short of it, and the track's
+                    // own content keeps its natural height inside that.** Sized to `contentHeight`
+                    // alone, the UIKit track simply did not exist below the last row: the strip
+                    // between it and the bottom of the panel took no touch, so there was no
+                    // horizontal scroll and no pinch there, and the gridlines stopped at the same
+                    // edge. `max` keeps the other direction untouched — a stack taller than the
+                    // panel still scrolls vertically, which is what this `ScrollView` is for.
+                    .frame(height: rowLayout.contentHeight(filling: trackViewportHeight))
                 }
-                .frame(height: max(0, timelineHeight - topBarHeight - dividerHeight))
+                .frame(height: trackViewportHeight)
             }
         }
         .frame(height: timelineHeight)
@@ -179,7 +186,10 @@ struct AnimationTimeline: View {
                                expansion: canvasManager.graphBandExpansion)
     }
 
-    private var contentHeight: CGFloat { rowLayout.contentHeight }
+    /// How much of the panel is left for the tracks once the chrome above them has taken its share.
+    private var trackViewportHeight: CGFloat {
+        max(0, timelineHeight - topBarHeight - dividerHeight)
+    }
 
     // MARK: - Menus
 

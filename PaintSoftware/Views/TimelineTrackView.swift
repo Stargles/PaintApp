@@ -58,11 +58,11 @@ struct TimelineTrackView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = TimelineScrollView()
-        // How far the track has to reach depends on how wide it is, and on the first `relayout` it
-        // has no width yet — so re-lay-out the moment one arrives (and again on rotation or a Split
-        // View resize), or the timeline would stop dead at the last frame until something else
-        // happened to trigger an update.
-        scrollView.onWidthChange = { [weak coordinator = context.coordinator] in coordinator?.relayout() }
+        // How far the track has to reach depends on how big it is — wide, for the endless track;
+        // tall, because the content fills the viewport when the rows do not (see `relayout`). On the
+        // first `relayout` it has neither, so re-lay-out the moment a size arrives, and again on
+        // rotation, a Split View resize or a drag of the panel's own grab handle.
+        scrollView.onSizeChange = { [weak coordinator = context.coordinator] in coordinator?.relayout() }
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
         scrollView.alwaysBounceVertical = false
@@ -115,11 +115,13 @@ struct TimelineTrackView: UIViewRepresentable {
         private let zoomRange: ClosedRange<CGFloat> = TimelineKeyMarkers.pixelsPerFrameRange
         private(set) var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
         private var pinchStartPixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-        /// The frame under the fingers at pinch-began, and where those fingers sat in the scroll
-        /// view's own bounds — held fixed for the gesture's life so the content under the pinch
-        /// stays put as `pixelsPerFrame` changes, instead of the view always zooming from frame 0.
-        private var pinchAnchorFrame: CGFloat = 0
-        private var pinchAnchorLocationInScrollView: CGFloat = 0
+        /// The frame under the fingers at pinch-began and where those fingers sat in the viewport,
+        /// held fixed for the gesture's life so the content under the pinch stays put as
+        /// `pixelsPerFrame` changes. See `TimelineKeyMarkers.PinchAnchor`, which is where the
+        /// arithmetic lives and is testable.
+        private var pinchAnchor = TimelineKeyMarkers.PinchAnchor(locationInContent: 0,
+                                                                 contentOffsetX: 0,
+                                                                 pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame)
 
         private let rulerView = TimelineRulerView()
         /// TODO (38)(a)'s frame gridlines. `contentView`'s first subview — see its own doc for why
@@ -161,16 +163,19 @@ struct TimelineTrackView: UIViewRepresentable {
             switch gr.state {
             case .began:
                 pinchStartPixelsPerFrame = pixelsPerFrame
-                let locationInScrollView = gr.location(in: scrollView).x
-                pinchAnchorLocationInScrollView = locationInScrollView
-                pinchAnchorFrame = (scrollView.contentOffset.x + locationInScrollView) / pixelsPerFrame
+                // `location(in:)` on a scroll view answers in the scroll view's own bounds, whose
+                // origin *is* `contentOffset` — so this is content space already.
+                pinchAnchor = TimelineKeyMarkers.PinchAnchor(
+                    locationInContent: gr.location(in: scrollView).x,
+                    contentOffsetX: scrollView.contentOffset.x,
+                    pixelsPerFrame: pixelsPerFrame)
             case .changed:
                 pixelsPerFrame = min(max(pinchStartPixelsPerFrame * gr.scale, zoomRange.lowerBound), zoomRange.upperBound)
                 relayout()
-                let newContentX = pinchAnchorFrame * pixelsPerFrame
-                let newOffsetX = newContentX - pinchAnchorLocationInScrollView
-                let maxOffsetX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
-                scrollView.contentOffset.x = min(max(newOffsetX, 0), maxOffsetX)
+                scrollView.contentOffset.x = pinchAnchor.contentOffsetX(
+                    pixelsPerFrame: pixelsPerFrame,
+                    contentWidth: scrollView.contentSize.width,
+                    viewportWidth: scrollView.bounds.width)
             default:
                 break
             }
@@ -229,7 +234,14 @@ struct TimelineTrackView: UIViewRepresentable {
             let layout = TimelineRowLayout.make(rows: stackRows, rulerHeight: rulerHeight,
                                                 rowHeight: rowHeight,
                                                 expansion: canvasManager.graphBandExpansion)
-            let totalHeight = layout.contentHeight
+            // **The content fills the viewport when the rows do not reach the bottom of it**, and
+            // that one line is both halves of the reported dead area. The scroll view's own subview
+            // is what a touch below the last row lands on, so sizing it to `contentHeight` left the
+            // panel's lower strip outside the track entirely — no horizontal scroll, no pinch — and
+            // `gridlinesView`, which takes this same extent, stopped ruling at the same edge. The
+            // *rows* keep their natural positions either way: they are placed from `layout`, which
+            // knows nothing about this.
+            let totalHeight = layout.contentHeight(filling: scrollView.bounds.height)
 
             let built = TimelineLayoutKey.make(
                 canvasManager: canvasManager,
@@ -237,6 +249,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 pixelsPerFrame: pixelsPerFrame,
                 displayedFrameCount: sceneFrameCount,
                 contentWidth: totalWidth,
+                contentHeight: totalHeight,
                 rowHeight: rowHeight,
                 rulerHeight: rulerHeight,
                 drag: blockDrag.map {
@@ -1357,17 +1370,17 @@ extension TimelineTrackView.Coordinator: UIScrollViewDelegate {
     }
 }
 
-/// A scroll view that reports when its width changes, which is what the endless track's extent is
-/// computed from.
+/// A scroll view that reports when its size changes, which is what the endless track's extent and
+/// the height its content fills are both computed from.
 private final class TimelineScrollView: UIScrollView {
-    var onWidthChange: (() -> Void)?
-    private var lastWidth: CGFloat = 0
+    var onSizeChange: (() -> Void)?
+    private var lastSize: CGSize = .zero
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width != lastWidth else { return }
-        lastWidth = bounds.width
-        onWidthChange?()
+        guard bounds.size != lastSize else { return }
+        lastSize = bounds.size
+        onSizeChange?()
     }
 }
 

@@ -40,6 +40,43 @@ enum TimelineKeyMarkers {
     static let pixelsPerFrameRange: ClosedRange<CGFloat> =
         (basePixelsPerFrame * 0.35)...(basePixelsPerFrame * 4.0)
 
+    /// **What a pinch holds fixed: the frame that was under the fingers when it began.**
+    ///
+    /// Two quantities, and the whole defect this type exists to remove was writing one of them down
+    /// in the other's units. A scroll view's coordinate system *is* its content — `bounds.origin` is
+    /// `contentOffset` — so `UIGestureRecognizer.location(in: scrollView).x` is already content
+    /// space, and adding `contentOffset.x` to it counts the scroll twice. Subtracting it again at
+    /// the far end then leaves the anchor `contentOffset.x · (scale − 1)` points out: exact at frame
+    /// 0, and wrong by a whole screenful once the artist has scrolled a screenful. Naming the two
+    /// fields for the spaces they are in is what stops the arithmetic re-crossing them.
+    ///
+    /// Lives here rather than in `TimelineTrackView.Coordinator` for this file's standing reason:
+    /// that file is not compiled into `PaintSoftwareUITests`, so the same arithmetic written there
+    /// is a pin against nothing.
+    struct PinchAnchor: Equatable {
+        /// The frame the fingers were over, in content space. Fractional — it is a position on the
+        /// track, not a cel index.
+        let frame: CGFloat
+        /// Where the fingers sat measured from the scroll view's **left edge**, which is the thing
+        /// that has to stay put as `pixelsPerFrame` changes.
+        let viewportX: CGFloat
+
+        /// - Parameter locationInContent: `gr.location(in: scrollView).x` — content space, as above.
+        init(locationInContent: CGFloat, contentOffsetX: CGFloat, pixelsPerFrame: CGFloat) {
+            frame = pixelsPerFrame > 0 ? locationInContent / pixelsPerFrame : 0
+            viewportX = locationInContent - contentOffsetX
+        }
+
+        /// The content offset that puts `frame` back under the fingers at a new scale, clamped to
+        /// what the track can actually scroll to.
+        func contentOffsetX(pixelsPerFrame: CGFloat,
+                            contentWidth: CGFloat,
+                            viewportWidth: CGFloat) -> CGFloat {
+            let wanted = frame * pixelsPerFrame - viewportX
+            return min(max(wanted, 0), max(0, contentWidth - viewportWidth))
+        }
+    }
+
     // MARK: - How big a marker is
 
     /// The diamond's width and height in points. 9 pt is the ruler's own font size one type over, so

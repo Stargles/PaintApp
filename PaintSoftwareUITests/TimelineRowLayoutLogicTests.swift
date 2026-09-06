@@ -344,6 +344,43 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         XCTAssertEqual(strip.minY, layout.y(ofRow: 1) - 1)
     }
 
+    // MARK: - Filling the viewport (TODO 39b)
+
+    /// **The dead area below the last row.** Two rows in a 400 pt panel left ~330 pt of the panel
+    /// with no track under it at all: the SwiftUI host and the UIKit content view were both sized to
+    /// the rows, so a touch down there reached neither the horizontal scroll nor the pinch, and the
+    /// gridlines — which take the same extent — stopped at the last row's edge. The content fills the
+    /// viewport instead.
+    func testShortStacksFillTheViewportSoTheTrackReachesTheBottomOfThePanel() {
+        let layout = uniform(2)
+        XCTAssertLessThan(layout.contentHeight, 400, "Fixture: two rows must be shorter than the panel")
+        XCTAssertEqual(layout.contentHeight(filling: 400), 400)
+    }
+
+    /// The other direction, which is what stops the fill being a cap: a stack taller than the panel
+    /// keeps its own height, because that surplus is exactly what the enclosing vertical scroll view
+    /// exists to scroll through.
+    func testATallStackKeepsItsOwnHeightSoTheStackStillScrolls() {
+        let layout = uniform(20)
+        XCTAssertGreaterThan(layout.contentHeight, 400, "Fixture: twenty rows must overflow the panel")
+        XCTAssertEqual(layout.contentHeight(filling: 400), layout.contentHeight)
+    }
+
+    /// Filling moves no row. The strip that grows is below the last one, so every origin, every drop
+    /// band and the reorder walk are measured from the same places they were.
+    func testFillingTheViewportLeavesEveryRowWhereItWas() {
+        let layout = uniform(3)
+        let filled = layout.contentHeight(filling: 900)
+        XCTAssertGreaterThan(filled, layout.contentHeight)
+        for position in 0...layout.rowCount {
+            XCTAssertEqual(layout.y(ofRow: position),
+                           rulerHeight + CGFloat(min(position, layout.rowCount)) * (rowHeight + 2) + 4,
+                           "row \(position) moved when the track filled its viewport")
+        }
+        XCTAssertLessThan(layout.y(ofRow: layout.rowCount), filled,
+                          "…and the last row still ends above the bottom of the filled content")
+    }
+
     /// A reorder drag past an expanded row has to walk its real pitch — the exact failure
     /// `rowsCrossed` was written for, now with the input that actually produces it.
     func testADragPastTheOpenBandCountsItsRealHeight() {

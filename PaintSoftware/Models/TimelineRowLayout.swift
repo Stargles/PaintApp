@@ -161,6 +161,24 @@ struct TimelineRowLayout {
         return rulerHeight + Self.verticalInset * 2 + heights.reduce(0) { $0 + $1 + Self.gap }
     }
 
+    /// **The height the track's host takes inside a viewport of `viewportHeight`** — its own content,
+    /// or the whole viewport when the rows fall short of it.
+    ///
+    /// The rows themselves do not move: `y(ofRow:)` is measured from the top and knows nothing about
+    /// this. What fills is the strip below the last row, and the reason it has to is that the strip
+    /// is *where the track is not*. `AnimationTimeline` sizes the SwiftUI host with this and
+    /// `TimelineTrackView` sizes its scrolling content view and its gridlines with it, so a touch
+    /// below the last row lands on the track rather than on nothing, and the frame gridlines rule to
+    /// the bottom of the panel rather than stopping at the last row's edge. Both were one reported
+    /// defect, TODO (39)(b).
+    ///
+    /// **Here rather than as a `max` written twice** for this type's whole reason: two files lay the
+    /// timeline out from one derivation, and a rule spelled in both is a rule that can be changed in
+    /// one.
+    func contentHeight(filling viewportHeight: CGFloat) -> CGFloat {
+        max(contentHeight, viewportHeight)
+    }
+
     /// How many slots a row lifted from `position` has been dragged, for a finger that has travelled
     /// `distance` points — positive down the stack.
     ///

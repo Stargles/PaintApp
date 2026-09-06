@@ -122,6 +122,13 @@ struct TimelineLayoutKey: Equatable {
     let pixelsPerFrame: CGFloat
     let displayedFrameCount: Int
     let contentWidth: CGFloat
+    /// **How tall the laid-out content is, which is not the same as how tall the rows are.** The
+    /// track fills its viewport when the rows fall short of it, so this is
+    /// `max(rowLayout.contentHeight, viewportHeight)` — and it has to be in the key because the
+    /// second term moves without any of the others: dragging the panel's grab handle changes the
+    /// viewport and nothing else, and the gate would otherwise leave the gridlines ruling to the old
+    /// edge with nothing on screen saying why.
+    let contentHeight: CGFloat
     /// **The height every *unexpanded* row is, which is no longer the whole story.** It was
     /// sufficient on its own while heights were a pure function of `(rows, rowHeight)` and `rows` was
     /// already in the key; `graphBand` below is the input that broke that, and it is in the key for
@@ -181,6 +188,7 @@ extension TimelineLayoutKey {
                      pixelsPerFrame: CGFloat,
                      displayedFrameCount: Int,
                      contentWidth: CGFloat,
+                     contentHeight: CGFloat,
                      rowHeight: CGFloat,
                      rulerHeight: CGFloat,
                      drag: DragKey?) -> (key: TimelineLayoutKey, retainedThumbnails: [UIImage]) {
@@ -232,6 +240,7 @@ extension TimelineLayoutKey {
             pixelsPerFrame: pixelsPerFrame,
             displayedFrameCount: displayedFrameCount,
             contentWidth: contentWidth,
+            contentHeight: contentHeight,
             rowHeight: rowHeight,
             rulerHeight: rulerHeight,
             loopRange: loopRange,
