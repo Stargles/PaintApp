@@ -57,7 +57,7 @@ enum UITestSeeds {
     /// the real writers store: `addValueLayer` then `Layer.transform`, which is what
     /// `transformMoveRow` and `setContainerPoseKey` end at.
     ///
-    /// The ink is one diagonal stroke, thick enough that a single pixel probe finds it, and the move
+    /// The ink is one horizontal stroke, thick enough that a single pixel probe finds it, and the move
     /// is a translation large enough that the probe point which is ink at frame 0 is paper at the last
     /// frame. That is what lets a test tell "the pose is on screen" from "the pose is anywhere".
     static func seedKeyframedMoveIfRequested(into canvasManager: CanvasManager) {
