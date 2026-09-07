@@ -213,5 +213,30 @@ final class PlaybackTickBench: XCTestCase {
         }
         print(String(format: "PLAYBACK | sandwich halves: %.1f ms total (%.1f/frame)",
                      halves, halves / Double(Self.frameCount)))
+
+        // **And what the canvas the owner is actually looking at pays** — the Core Animation path's
+        // `CanvasView.updateInterpolationPreviews`, which is the only thing on that path that knows
+        // a pose exists. It runs on the main actor on every SwiftUI pass, its memo holds one key per
+        // layer, and a keyframed pose mints a new identity at every frame.
+        let cel = manager.layers[0].cels[0]
+        var previews: [Double] = []
+        for frame in 0..<Self.frameCount {
+            autoreleasepool {
+                manager.currentFrame = frame
+                let poses = manager.layerPoses(atFrame: frame)
+                previews.append(ms {
+                    if case .derived(let derived) = manager.livePreview(forCel: cel, atFrame: frame,
+                                                                        inheriting: poses[0]) {
+                        _ = derived.render(.full)
+                    }
+                })
+            }
+        }
+        let preview = previews.reduce(0, +)
+        print(String(format: "PLAYBACK | live posed preview: %.1f ms total (%.1f/frame) → %.1f fps ceiling",
+                     preview, preview / Double(Self.frameCount),
+                     1000 * Double(Self.frameCount) / max(preview, 0.001)))
+        print("PLAYBACK | per-frame preview ms: " +
+              previews.map { String(format: "%.0f", $0) }.joined(separator: " "))
     }
 }

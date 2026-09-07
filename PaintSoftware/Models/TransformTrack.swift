@@ -390,6 +390,25 @@ struct LayerPose: Equatable {
         guard !resolved.isIdentity, let map = resolved.map, !map.isIdentity else { return nil }
         return map
     }
+
+    /// **Whether this container moves its contents at *any* frame** — `mapping(atFrame:)` asked
+    /// without a frame, which is what a decision that must not flip mid-playback has to ask.
+    ///
+    /// `CanvasManager.sandwichEngagesOnCanvas` is the caller and the frame-invariance is its whole
+    /// requirement: a predicate that answered per frame would swap the live canvas between Core
+    /// Animation's flat hosts and the compositor as the playhead crossed the frame where a move
+    /// starts, which is the failure `RenderNode.needsCompositorOnCanvas` refuses one line up when it
+    /// declines to consult visibility.
+    ///
+    /// **It follows `resolvedPose`'s precedence exactly rather than testing both halves**, so a
+    /// container whose stored base is posed but whose track holds only resting keys answers false —
+    /// which is what it renders as. The one direction it is deliberately loose in is the segment
+    /// between two keys: two resting keys cannot interpolate to anything but rest, so testing the
+    /// keys is exact for every curve `TransformTrack` can hold.
+    var movesItsContents: Bool {
+        guard !track.isEmpty else { return !pose.isIdentity }
+        return track.keys.contains { !$0.pose.isIdentity }
+    }
 }
 
 extension LayerPose: Codable {

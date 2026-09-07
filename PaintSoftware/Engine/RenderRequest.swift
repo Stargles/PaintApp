@@ -949,9 +949,35 @@ extension CanvasManager {
     /// this path never matters" would delete this clause. It is about a *gesture tracking a finger*,
     /// which no prebake can help with, because the frame being asked for does not exist until the
     /// finger asks for it.
+    /// ## The container-pose clause, and why it is here rather than in `needsCompositorOnCanvas`
+    ///
+    /// **A posed leaf is the mask clause's argument reached through KEYFRAMES §4.4**: Core Animation
+    /// draws a flat row of hosts and has no way to move one sibling by a transformation layer above
+    /// it, so a document with a container pose left on that path shows the pose nowhere — except by
+    /// the one thing that path does do, which is `CanvasView.updateInterpolationPreviews`
+    /// rasterizing the posed ink into the host's own slot. That is a **canvas-sized main-thread
+    /// render per distinct pose**, and a keyframed move mints a distinct pose at every frame: TODO
+    /// (53), MEASURED at **71.9 ms a frame** on the owner's own `AnimationTest` against **3.7 ms** to
+    /// read the same frame back off the bake (PERFORMANCE.md §14). Engaging is what puts the baked
+    /// frame on screen instead, which is RENDER.md §2.2 — *"the baker replaces live compositing"*.
+    ///
+    /// **It cannot live in `needsCompositorOnCanvas` because the tree carries no pose**, by design:
+    /// `renderTreeAndPoses` emits the map alongside the nodes precisely so that a pose never reaches
+    /// the compositor, where the only thing that could be done with one is resample (§2.3's *"crisp
+    /// lines, not a bitmap magnify"*). So the question is asked of the document here.
+    ///
+    /// **Asked without a frame** — `LayerPose.movesItsContents`, which carries the argument: a
+    /// predicate that answered per frame would swap the canvas between two rendering paths as the
+    /// playhead crossed the first key of a move.
+    @MainActor
+    var hasContainerPoseInForce: Bool {
+        layers.contains { $0.layerTransform?.movesItsContents == true }
+            || folders.contains { $0.transform?.movesItsContents == true }
+    }
+
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
-        guard tree.needsCompositorOnCanvas else { return false }
+        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce else { return false }
         guard floatingPiece == nil, vectorFloat == nil else { return false }
         return !isScrubbingInterpolation
     }

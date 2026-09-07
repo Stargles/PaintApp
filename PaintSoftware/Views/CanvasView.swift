@@ -2344,6 +2344,25 @@ struct CanvasView: UIViewRepresentable {
                 switch canvasManager.livePreview(forCel: cel, atFrame: canvasManager.currentFrame,
                                                  inheriting: poses[layerIndex]) {
                 case .derived(let derived):
+                    // **A blanked host renders nothing, so the picture would be thrown away** — TODO
+                    // (53), and it is the whole of the fix rather than a saving on the margin.
+                    // `derived.render` is a canvas-sized rasterize of posed or interpolated ink on
+                    // the main actor, and a keyframed move mints a distinct derivation at *every*
+                    // frame, so this memo misses every tick of playback: MEASURED at 71.9 ms a frame
+                    // on the owner's own `AnimationTest` against 3.7 ms to read the same frame off
+                    // the bake (PERFORMANCE.md §14). Blanked is exactly "the composite is drawing
+                    // this layer", and at rest the composite *is* the baked frame — which already
+                    // carries the pose, because `FrameBakeKey` encodes it and `leafSnapshots` poses
+                    // the leaf. So this is RENDER.md §2.2 on the one path that was still
+                    // compositing on the main thread.
+                    //
+                    // **Before the key check, and the ordering is load-bearing.** Skipping without
+                    // recording the key leaves the memo naming whatever was last *rendered*, so the
+                    // pass on which the host un-blanks — a stroke starting, the sandwich disengaging
+                    // — finds the key moved and repaints. Recording it here instead would leave the
+                    // host holding a picture from a frame nobody is on, with the memo insisting it
+                    // is current.
+                    guard !host.isBlanked else { continue }
                     // **The derivation is resolved before the key, and it is what the key is made
                     // of** — see `InterpolationPreviewKey`. That covers a pose with no extra work:
                     // `PosedCelIdentity` carries the resolved maps, so scrubbing to a frame the

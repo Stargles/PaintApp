@@ -85,6 +85,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedVideo` — see `UITestSeeds` for why a video
         // has to land here rather than through the picker every real import uses.
         UITestSeeds.seedVideoIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedKeyframedMove` — TODO (53)'s document, which
+        // takes a dozen gestures across three panels to author and one call to state.
+        UITestSeeds.seedKeyframedMoveIfRequested(into: canvasManager)
         onCreated()
     }
 }

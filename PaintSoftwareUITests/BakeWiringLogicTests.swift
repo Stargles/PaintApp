@@ -346,4 +346,114 @@ final class BakeWiringLogicTests: XCTestCase {
                       + "swap here would leave whatever installed itself as the old instance's "
                       + "`onFrameFinished` never told the new one's frames landed")
     }
+
+    // MARK: - 6. Whether the canvas reads the bake at all — TODO (53)
+
+    /// A vector layer that holds for the whole scene with a **transformation layer** above it
+    /// carrying two pose keys: the owner's own `AnimationTest`, whose manifest was read off their
+    /// iPad on 2026-09-06. Nothing else — no folder, no mask, no blend mode, no effect — because
+    /// that absence is exactly what the defect turned on.
+    private func keyframedMoveDocument(moving: Bool = true) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        let size = CanvasFixture.canvasSize
+        manager.addVectorLayer()
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                      raster: .empty(size: size), vector: .empty(size: size))
+        cel.vector?.addStroke(VectorStroke(
+            id: UUID(), brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            size: 8, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 8, y: 32, pressure: 1),
+                                    VectorSample(x: 24, y: 32, pressure: 1)],
+                                   channels: .pressureOnly)))
+        manager.layers[0].cels = [cel]
+
+        manager.addValueLayer()
+        let box = CGRect(origin: .zero, size: size)
+        manager.layers[1].fill = nil
+        manager.layers[1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                                      raster: .empty(size: size))]
+        let far = moving ? PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 24, y: 0))
+                         : PoseQuad(restingIn: box)
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(restingIn: box),
+            track: TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(restingIn: box)),
+                                         .init(frame: 11, pose: far)]))
+        manager.currentLayerIndex = 0
+        return manager
+    }
+
+    /// **A keyframed transformation layer is a document Core Animation cannot draw, and the
+    /// engagement predicate has to say so** — TODO (53), and the whole of the owner's 8 fps.
+    ///
+    /// `needsCompositorOnCanvas` is about blend modes, masks, effects and nodes, and it cannot learn
+    /// about a pose: `renderTreeAndPoses` emits the pose map *alongside* the tree precisely so that a
+    /// pose never reaches the compositor (KEYFRAMES §4.4, RENDER §2.3 — *"crisp lines, not a bitmap
+    /// magnify"*). So this document answered false, the canvas stayed on the flat row of hosts, and
+    /// the only thing on that path that knows a pose exists —
+    /// `CanvasView.updateInterpolationPreviews` — rasterized the posed ink into the host's own slot
+    /// on the main actor, once per distinct pose, which a keyframed move mints at **every frame**.
+    ///
+    /// **The two arms are the two operands**, and without the second this test would pass against a
+    /// clause that engaged on any transformation layer at all — including one the artist has added
+    /// and not yet moved, which `LayerPose.mapping(atFrame:)` documents as having to cost the
+    /// document nothing.
+    ///
+    /// **MEASURED red** with `hasContainerPoseInForce` removed from `sandwichEngagesOnCanvas`.
+    func testAKeyframedTransformationLayerEngagesTheSandwichAndAStillOneDoesNot() {
+        let moving = keyframedMoveDocument()
+        XCTAssertFalse(moving.renderTree(atFrame: 0).needsCompositorOnCanvas,
+                       "Setup: nothing in this document is a blend, a mask, an effect or a node — "
+                       + "which is why the pose had to be asked about separately")
+        XCTAssertTrue(moving.sandwichEngagesOnCanvas(tree: moving.renderTree(atFrame: 0)),
+                      "A move that moves something must put the canvas on the composite, which is "
+                      + "the only thing that reads the bake")
+
+        let still = keyframedMoveDocument(moving: false)
+        XCTAssertFalse(still.sandwichEngagesOnCanvas(tree: still.renderTree(atFrame: 0)),
+                       "A transformation layer whose every key is the resting pose moves nothing, "
+                       + "renders as nothing, and must not pull a flat document onto the compositor")
+    }
+
+    /// **Playing a keyframed move a second time composites nothing at all** — item (53)'s third
+    /// checkbox, pinned as a *count* rather than as a duration for CLAUDE.md's reason.
+    ///
+    /// This is the claim the owner's report was about: *"it should automatically bake and store
+    /// frames in disk"*. One lap bakes twelve distinct frames — distinct because `FrameBakeKey`
+    /// encodes the container pose, which `FrameBakeKeyLogicTests.testAContainerPoseMovesTheDigest`
+    /// pins — and every lap after it is twelve reads and **zero** composites.
+    ///
+    /// **`dedupedCount` is the second operand and it is what makes the zero mean something.** A
+    /// baker that had marked nothing dirty would also composite zero times, and so would one that
+    /// answered nil for every frame; the image assertion and the bake count are what tell those
+    /// apart from a store that is serving.
+    func testASecondLapOfAKeyframedMoveIsTwelveReadsAndNoComposites() {
+        let manager = keyframedMoveDocument()
+        let baker = manager.frameBaker
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        XCTAssertEqual(baker.bakedCount, 12,
+                       "Setup: a keyframed move makes every frame a different picture, so twelve "
+                       + "frames are twelve files — a dedupe here would mean the pose is not in the key")
+
+        let bakedBefore = baker.bakedCount
+        var served = 0
+        let count = composites {
+            for lap in 0..<2 {
+                for frame in 0..<12 {
+                    autoreleasepool {
+                        manager.currentFrame = frame
+                        manager.syncFrameBake(suspended: false)
+                        if baker.image(atFrame: frame) != nil, lap == 1 { served += 1 }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(count, 0,
+                       "Playback recomposites nothing: every frame's key already has a file, which "
+                       + "is what RENDER §2.2's \"the baker replaces live compositing\" means at the "
+                       + "one moment it is visible")
+        XCTAssertEqual(served, 12, "…and every one of the twelve frames comes back as a picture")
+        XCTAssertEqual(baker.bakedCount, bakedBefore, "…without the baker writing a thing")
+    }
 }

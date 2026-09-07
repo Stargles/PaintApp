@@ -45,6 +45,52 @@ enum UITestSeeds {
         canvasManager.insertVideo(at: url, consumingSource: true)
     }
 
+    /// **TODO (53)'s document, which is the owner's own `AnimationTest`**: ink on a vector layer that
+    /// holds for the whole scene, and a transformation layer above it carrying two pose keys, so
+    /// every frame of playback is a different picture of the same strokes.
+    ///
+    /// **Seeded rather than authored, for `seedVideoIfRequested`'s reason applied to gestures rather
+    /// than to a system picker.** Reaching this state by hand is a dozen taps across the layer panel,
+    /// its options menu and the graph editor's keyframe marks, and a UI test that spent them would be
+    /// testing those three surfaces rather than the one thing it is for — whether the canvas serves a
+    /// keyframed move off the bake instead of rasterizing it per tick. Every field below is the value
+    /// the real writers store: `addValueLayer` then `Layer.transform`, which is what
+    /// `transformMoveRow` and `setContainerPoseKey` end at.
+    ///
+    /// The ink is one diagonal stroke, thick enough that a single pixel probe finds it, and the move
+    /// is a translation large enough that the probe point which is ink at frame 0 is paper at the last
+    /// frame. That is what lets a test tell "the pose is on screen" from "the pose is anywhere".
+    static func seedKeyframedMoveIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedKeyframedMove"),
+              let size = canvasManager.canvasSize else { return }
+        guard let celIndex = canvasManager.activeCelIndex(inLayer: canvasManager.layers.count - 1,
+                                                          atFrame: 0),
+              let vector = canvasManager.layers[canvasManager.layers.count - 1].cels[celIndex].vector
+        else { return }
+        var brush = canvasManager.selectedBrush
+        brush.size = size.height / 8
+        vector.addStroke(VectorStroke(
+            id: UUID(), brush: brush,
+            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            size: brush.size, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: size.width * 0.2, y: size.height * 0.5, pressure: 1),
+                                    VectorSample(x: size.width * 0.5, y: size.height * 0.5, pressure: 1)],
+                                   channels: .pressureOnly)))
+
+        canvasManager.addValueLayer()
+        let box = CGRect(origin: .zero, size: size)
+        let mover = canvasManager.layers.count - 1
+        canvasManager.layers[mover].fill = nil
+        canvasManager.layers[mover].transform = LayerPose(
+            pose: PoseQuad(restingIn: box),
+            track: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: box)),
+                .init(frame: 11, pose: PoseQuad(box: box,
+                                                mappedBy: CGAffineTransform(translationX: size.width * 0.4,
+                                                                            y: 0)))]))
+        canvasManager.currentLayerIndex = 0
+    }
+
     /// One flat frame in `DecodedFrame`'s own layout (BGRA, premultiplied, opaque) — the same
     /// construction `PaintSoftwareUITests/CanvasManagerTestSupport.swift`'s `writeGreyClip` uses for
     /// the logic tier, duplicated rather than shared because that file is test-only and this one

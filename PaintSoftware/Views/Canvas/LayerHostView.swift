@@ -116,6 +116,18 @@ final class LayerHostView: UIView {
         }
     }
 
+    /// **Whether this host is currently rendering nothing because the composite is drawing it** —
+    /// the state `setBlanked` last put it in, read off the same field rather than mirrored into a
+    /// `Bool` beside it.
+    ///
+    /// `CanvasView.updateInterpolationPreviews` is the reader: a derived cel's picture costs a
+    /// canvas-sized rasterize, and producing one for a host that renders nothing is the whole of
+    /// TODO (53). Asking the mask rather than a cached flag is what stops the two answers drifting —
+    /// "this host draws itself" and "this host needs a picture" are one condition, and a second copy
+    /// of it is what would go stale on the pass where blanking is declined (`updateSandwich`'s trap
+    /// 1 returns before blanking when nothing has landed to blank in favour of).
+    var isBlanked: Bool { layer.mask === blankingMask }
+
     // MARK: - The alpha mask, for §6.4's live stroke
 
     /// The three views that hold this layer's own pixels, and therefore the three that a mask has to
