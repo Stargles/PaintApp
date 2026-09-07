@@ -239,4 +239,51 @@ final class PlaybackTickBench: XCTestCase {
         print("PLAYBACK | per-frame preview ms: " +
               previews.map { String(format: "%.0f", $0) }.joined(separator: " "))
     }
+
+    /// **The same defect through the second door: a cel's own pose channel** — KEYFRAMES stage 5's
+    /// graph-editor band rather than §4.4's transformation layer.
+    ///
+    /// `posedCelContent` derives on `!cel.transformTracks.isEmpty || container != nil`, so the two
+    /// produce the identical picture by the identical route; the only difference is which field the
+    /// artist put the keys in. This measures whether that difference costs anything, because the fix
+    /// for TODO (53) engages the compositor on the *container* half only — and if the numbers match,
+    /// the second half is a live defect with a known fix and an unmeasured consequence.
+    func testTheSameTickOnACelsOwnPoseChannel() {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.canvas
+        manager.addVectorLayer()
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: Self.frameCount,
+                      raster: .empty(size: Self.canvas), vector: .empty(size: Self.canvas))
+        for index in 0..<Self.strokeCount { cel.vector?.addStroke(Self.ink(index)) }
+        let box = CGRect(origin: .zero, size: Self.canvas)
+        cel.transformTracks = [TransformChannelID.cel.id: TransformTrack(keys: [
+            .init(frame: 0, pose: PoseQuad(restingIn: box)),
+            .init(frame: 11, pose: PoseQuad(box: box,
+                                            mappedBy: CGAffineTransform(translationX: 535, y: -239)))])]
+        manager.layers[0].cels = [cel]
+        manager.currentLayerIndex = 0
+
+        let tree = manager.renderTree(atFrame: 0)
+        print("PLAYBACK | cel channel: needsCompositorOnCanvas=\(tree.needsCompositorOnCanvas) " +
+              "sandwichEngages=\(manager.sandwichEngagesOnCanvas(tree: tree))")
+
+        var previews: [Double] = []
+        for frame in 0..<Self.frameCount {
+            autoreleasepool {
+                manager.currentFrame = frame
+                previews.append(ms {
+                    if case .derived(let derived) = manager.livePreview(forCel: cel, atFrame: frame) {
+                        _ = derived.render(.full)
+                    }
+                })
+            }
+        }
+        let preview = previews.reduce(0, +)
+        print(String(format: "PLAYBACK | cel-channel live posed preview: %.1f ms total (%.1f/frame) → %.1f fps ceiling",
+                     preview, preview / Double(Self.frameCount),
+                     1000 * Double(Self.frameCount) / max(preview, 0.001)))
+        print("PLAYBACK | cel-channel per-frame preview ms: " +
+              previews.map { String(format: "%.0f", $0) }.joined(separator: " "))
+    }
 }

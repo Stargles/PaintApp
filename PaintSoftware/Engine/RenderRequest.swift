@@ -949,7 +949,23 @@ extension CanvasManager {
     /// this path never matters" would delete this clause. It is about a *gesture tracking a finger*,
     /// which no prebake can help with, because the frame being asked for does not exist until the
     /// finger asks for it.
-    /// ## The container-pose clause, and why it is here rather than in `needsCompositorOnCanvas`
+    ///
+    /// ## The second clause is `hasContainerPoseInForce`, added 2026-09-06
+    ///
+    /// `needsCompositorOnCanvas` is a property of the tree and **the tree carries no pose**, by
+    /// design — see that property below for the whole argument, and PERFORMANCE.md §14 for the
+    /// 71.9 ms a frame it was costing.
+    @MainActor
+    func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
+        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce else { return false }
+        guard floatingPiece == nil, vectorFloat == nil else { return false }
+        return !isScrubbingInterpolation
+    }
+
+    /// **Whether a transformation layer or a posed folder anywhere in this document moves anything**
+    /// — KEYFRAMES §4.4's container pose, asked of the whole document and without a frame.
+    ///
+    /// ## Why the engagement predicate has to ask this separately
     ///
     /// **A posed leaf is the mask clause's argument reached through KEYFRAMES §4.4**: Core Animation
     /// draws a flat row of hosts and has no way to move one sibling by a transformation layer above
@@ -969,17 +985,18 @@ extension CanvasManager {
     /// **Asked without a frame** — `LayerPose.movesItsContents`, which carries the argument: a
     /// predicate that answered per frame would swap the canvas between two rendering paths as the
     /// playhead crossed the first key of a move.
+    ///
+    /// **A cel's *own* pose channel is deliberately not in here, and it reaches the same defect.**
+    /// `Cel.transformTracks` produces the identical derivation, so a document whose only unusual
+    /// feature is a keyed cel channel still rasterizes a posed picture per tick — MEASURED at 73.6 ms
+    /// a frame, PERFORMANCE.md §14.6. It is left out because that is the graph editor's own authoring
+    /// case, where the consequence of engaging is a *drag* showing a stale composite rather than
+    /// tracking the finger, and nobody has measured that drag. Widening this predicate is the fix;
+    /// measuring the drag is what has to come first.
     @MainActor
     var hasContainerPoseInForce: Bool {
         layers.contains { $0.layerTransform?.movesItsContents == true }
             || folders.contains { $0.transform?.movesItsContents == true }
-    }
-
-    @MainActor
-    func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
-        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce else { return false }
-        guard floatingPiece == nil, vectorFloat == nil else { return false }
-        return !isScrubbingInterpolation
     }
 
     /// One layer's `LayerContentVersion` at `frame`, resolving its derivation — what

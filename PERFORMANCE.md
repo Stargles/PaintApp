@@ -3385,3 +3385,56 @@ holds it; MEASURED red at **6 against 0** with the blanked-host guard removed.
 so an app playing at 8 fps still reaches the right frame at the right second and *"Frame 7/12"* looks
 perfect the whole way. Every honest instrument for this defect is a count or a millisecond; none of them
 is the timeline.
+
+### 14.6 The same defect through a second door, MEASURED and deliberately not fixed
+
+`posedCelContent` derives on `!cel.transformTracks.isEmpty || container != nil`. A **cel's own pose
+channel** — KEYFRAMES stage 5's graph-editor band — therefore produces the identical picture by the
+identical route, and differs from a transformation layer only in which field the artist put the keys in.
+
+MEASURED, same bench, same canvas, same 63 strokes, only the keys moved from `Layer.transform` to
+`Cel.transformTracks`:
+
+| | engages the sandwich | live posed render, per frame | fps ceiling |
+|---|---|---|---|
+| transformation layer (§4.4 container pose) | **yes**, as of this section | 0 (the composite carries it) | — |
+| a cel's own pose channel | **no** | **73.6 ms** | **13.6** |
+
+So this is a live defect with a known one-line fix — widen `hasContainerPoseInForce` to ask
+`cel.transformTracks` too — and it is **not** taken in this pass, for a reason rather than for scope.
+
+**What has to be measured first is a drag, not a playback.** A cel channel is what the graph editor
+authors, and engaging the compositor changes what the canvas does *while a node is being dragged*: today
+it re-renders the posed ink per drag sample (73.6 ms of main actor, so the gesture itself is already at
+~14 fps); engaged, the main thread is free and the canvas shows the previous baked frame until the bake
+catches up (≈140 ms a frame cold, from §14.2's 1.7–2.4 s for twelve). **Which of those feels better to an
+artist is a question about a gesture, and this file has no measurement of it.** The owner's own rulings
+lean toward engaging — RENDER §2.13, *"a canvas that shows the previous composite for a split second is
+acceptable, provided the main thread never freezes"* — but §2.13 was ruled about pen-up, not about a
+tracking drag, and `sandwichEngagesOnCanvas`'s existing `!isScrubbingInterpolation` clause is the
+precedent for the opposite answer: *"a gesture tracking a finger, which no prebake can help with"*.
+
+**And the graph editor is live work in another worktree** (`tmp/kfui`, 2026-09-06), so changing what its
+canvas does underneath it would confuse a diagnosis as well as a merge.
+
+The measurement that settles it: drive a graph-editor node drag on a cel pose channel, with and without
+the clause, and compare what the canvas shows against the finger. `derived:<n>` on `canvas.host` and the
+existing `waitForSandwich` are both already there to do it with.
+
+### 14.7 Two things that did not turn out to be the problem
+
+**The baker, the key, the store, the ring and the sweep were all correct**, and each was checked rather
+than assumed:
+
+- **`FrameBakeKey` does encode the pose**, twice over — `LayerContentVersion.pose` for the raster tiers
+  and `PosedCelIdentity.inherited` inside `derived` for the vector ones. Twelve frames of a move bake as
+  twelve distinct files with **zero** dedupes. Removing *either* carrier alone leaves the count at 12;
+  it took removing **both** to collapse it (to 2), which is belt-and-braces working as designed.
+- **The sweep does not dirty anything on a playhead move.** `StructuralStamp` probes frame 0 on purpose
+  and `CelStamp` carries no frame, so a second lap of playback marks nothing, composites nothing, and
+  costs 0.08 ms a frame.
+
+**And the 8 fps is not the ink density.** The owner's document is 63 strokes at brush size 36 — modest,
+and it stalls anyway, because the cost is per *frame* and not per stroke: one canvas-sized rasterize of
+whatever is there. A document with ten times the ink would be worse, but a document with a tenth of it
+would still miss 24 fps at 2048².
