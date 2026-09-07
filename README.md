@@ -258,10 +258,9 @@ reasoning for all of it is in `Services/SaveDamageGate.swift`.
 
 See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinch/rotate is reported
 dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
-square/custom brush stamps are approximated as tiled round dabs (not true shaped stamps yet);
-Distort works on a raster floating piece and on a text box but not on lassoed vector ink, where it
-goes on gesturing as Uniform and the Move bar says so; Cut/Copy/Paste and Drawing Guide are still
-"Coming soon" stubs.
+Distort works on a raster floating piece, a text box and lassoed vector ink, but not yet on a floating
+placed image or video — six numbers and a mirror bit have nowhere to keep a projective residue; and
+Cut/Copy/Paste and Drawing Guide are still stubs with an "isn't available yet" notice.
 
 ## License
 
