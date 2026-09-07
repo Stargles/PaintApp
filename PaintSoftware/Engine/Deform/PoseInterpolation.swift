@@ -86,15 +86,15 @@ struct PoseQuad: Equatable {
     /// above turns an affine quad's perspective row into exact zeros.
     ///
     /// **It used to fall back to the linearisation at the box's centre and does not any more**, which
-    /// is KEYFRAMES.md §8 stage 5b. `affineOrLinearised` was the honest answer while nothing could
-    /// render a keystone: drawing the ink roughly where it belongs beat making a frame vanish. Now
-    /// `PoseMap` carries the keystone all the way to `VectorCanvas.posing(_:through: Homography)` and
-    /// the fallback has no caller left, so keeping it would leave a lossy accessor beside the exact
-    /// one for the next reader to pick by accident. MEASURED on a 400x300 box whose top edge is
-    /// pulled to 120 pt: the linearisation displaces the bottom corners by **164 px** and its single
-    /// scale is **218%** wrong against the true local scale at the far end (§8's own quad reports
-    /// 8.5x and 315%). `Homography.linearised(at:)` is still there for the callers that genuinely
-    /// want an approximation — `TextLayout.warpSourceScale` is one.
+    /// is KEYFRAMES.md §8 stage 5b. Falling back to that linearisation was the honest answer while
+    /// nothing could render a keystone: drawing the ink roughly where it belongs beat making a frame
+    /// vanish. Now `PoseMap` carries the keystone all the way to `VectorCanvas.posing(_:through:
+    /// Homography)` and the fallback has no caller left, so keeping it would leave a lossy accessor
+    /// beside the exact one for the next reader to pick by accident. MEASURED on a 400x300 box whose
+    /// top edge is pulled to 120 pt: the linearisation displaces the bottom corners by **164 px** and
+    /// its single scale is **218%** wrong against the true local scale at the far end (§8's own quad
+    /// reports 8.5x and 315%). `Homography.linearised(at:)` is still there for the callers that
+    /// genuinely want an approximation — `TextLayout.warpSourceScale` is one.
     var affine: CGAffineTransform? { homography?.affine() }
 
     /// **The map a renderer is handed** — the affine when this pose is one and the homography when it

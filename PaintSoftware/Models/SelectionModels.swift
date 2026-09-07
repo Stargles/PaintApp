@@ -826,8 +826,8 @@ extension CanvasManager {
     /// already-posed layer cannot lose the first one to a factoring step.
     ///
     /// **The delta is projective when the artist has pulled a corner, which is KEYFRAMES.md §8 stage
-    /// 5b.** It took the *affine* delta until then and dropped the residue, because
-    /// `PoseQuad.affineOrLinearised` would have linearised it at the box centre — and the visible
+    /// 5b.** It took the *affine* delta until then and dropped the residue, because the only
+    /// approximation available was linearising the keystone at the box centre — and the visible
     /// result was worse than the refusal that named it: the picker stayed live, the corner drag
     /// wrote `distortQuad`, the outline foreshortened under the finger and **the canvas did not
     /// follow**. That is this repo's "a refusal with no notice" wearing a caption. Both halves are
@@ -995,9 +995,9 @@ extension CanvasManager {
     var distortUnavailableReason: String? {
         // **The container float's arm is gone, and it was the last "not yet" this sentence held.**
         // It read *"Distort is not available on a transformation layer yet"* and named the reason
-        // exactly: `PoseQuad.affineOrLinearised` linearised a keystone at the box centre, MEASURED
-        // 218% wrong in local scale and 164 px out at the far corner. KEYFRAMES §8 stage 5b removed
-        // that accessor — `LayerPose.mapping(atFrame:)` answers a `PoseMap`, the vector tier goes
+        // exactly: rendering only had a keystone's linearisation at the box centre to fall back on,
+        // MEASURED 218% wrong in local scale and 164 px out at the far corner. KEYFRAMES §8 stage 5b
+        // removed that fallback — `LayerPose.mapping(atFrame:)` answers a `PoseMap`, the vector tier goes
         // through `VectorCanvas.posing(_:through: Homography)` and the raster tier through
         // `ImageWarp` — so the refusal ended when the linearisation did, and `containerPose(_:
         // movedBy:)` carries the residue the drag was already writing.

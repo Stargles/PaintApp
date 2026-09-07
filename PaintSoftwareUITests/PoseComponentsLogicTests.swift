@@ -211,9 +211,10 @@ final class PoseComponentsLogicTests: XCTestCase {
     /// narrowing of *this* surface and not the absence of an answer anywhere. Give `decompose` the
     /// linearisation instead and this goes red while every other test in the file stays green.
     ///
-    /// **It read `affineOrLinearised` until stage 5b and asserted that accessor was non-nil.** That
-    /// accessor is gone: it answered a keystone with the linearisation at the box centre, MEASURED
-    /// 218% wrong in local scale at the far end, and nothing renders through it any more.
+    /// **This test used to assert that the pre-stage-5b fallback was non-nil for the same pose.**
+    /// That fallback is gone: it answered a keystone with the linearisation at the box centre,
+    /// MEASURED 218% wrong in local scale at the far end, and nothing renders through it any more
+    /// (KEYFRAMES.md §8 stage 5b).
     func testAProjectivePoseIsDeclinedRatherThanLinearised() {
         let keystone = PoseQuad(box: box,
                                 corners: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),

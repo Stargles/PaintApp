@@ -36,9 +36,9 @@ import Foundation
 /// Homography)` maps the ink point for point — so declining it here is a narrowing of this surface
 /// alone: a band drawn from any six-number approximation would show six curves that are not what the
 /// pose does, with nothing saying so, and a write-back through them would silently flatten the
-/// keystone the artist authored. (It said "`affineOrLinearised` answers it, and that is right for
-/// rendering" until stage 5b, which is no longer true in either half: the accessor is gone and
-/// rendering is exact.)
+/// keystone the artist authored. (This comment used to defend the refusal by pointing at the
+/// box-centre linearisation rendering fell back to — that defence is gone since stage 5b, because
+/// rendering carries the keystone exactly now instead of approximating it.)
 ///
 /// So `decompose(_:)` returns **nil** for a projective pose, `TimelineGraphBand` declines the whole
 /// channel and names it (`Content.declinedChannelIDs`), and the band says `declined:<ids>` rather

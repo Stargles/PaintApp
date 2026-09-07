@@ -262,8 +262,8 @@ struct TransformTrack: Equatable {
     /// therefore cost the document nothing.
     ///
     /// **A `PoseMap` rather than a `CGAffineTransform`, which is KEYFRAMES.md §8 stage 5b** — the
-    /// first of this file's two render reads. It read `PoseQuad.affineOrLinearised`, which answered a
-    /// keystone with the linearisation at the box centre: MEASURED 218% wrong in local scale and
+    /// first of this file's two render reads. It used to answer a keystone with its linearisation at
+    /// the box centre: MEASURED 218% wrong in local scale and
     /// 164 px out at the far corner of a 400x300 box pulled to a 120 pt top edge. A `PoseMap` is the
     /// affine when the pose is one — bit for bit, so every stage-5 document is the document it was —
     /// and the homography when it is not.

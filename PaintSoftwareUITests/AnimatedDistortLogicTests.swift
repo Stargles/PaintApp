@@ -18,8 +18,8 @@ import CoreGraphics
 ///
 /// A 400x300 box whose top edge is pulled in to 120 pt — `keystone` below. On it:
 ///
-///  * the linearisation at the box centre, which is what `PoseQuad.affineOrLinearised` answered until
-///    this stage, puts the two **bottom corners 164.4 px** from where the homography puts them;
+///  * the linearisation at the box centre, which is what rendering fell back to before this stage,
+///    puts the two **bottom corners 164.4 px** from where the homography puts them;
 ///  * local scale spans **0.300 to 1.826** across the box, a **6.09x** range, against a single scalar
 ///    of 0.572 at the centre — 218% wrong at the far end (§8 reports 8.5x and 315% on its own,
 ///    harder quad, which is the same phenomenon measured somewhere else);
@@ -108,10 +108,11 @@ final class AnimatedDistortLogicTests: XCTestCase {
 
     /// **`TransformTrack.mapping(atCelLocalFrame:)`, the first of stage 5b's two render reads.**
     ///
-    /// It answered `PoseQuad.affineOrLinearised`, so a keystoned channel rendered as its linearisation
-    /// at the box centre. The second assertion is the one that makes this a measurement: the map the
-    /// channel now answers disagrees with that linearisation by **164.4 px** at the box's own bottom
-    /// corner, so a reader that quietly went back to it cannot pass.
+    /// Before KEYFRAMES.md §8 stage 5b, this render read answered the linearisation of a keystone at
+    /// the box centre rather than the keystone itself. The second assertion is the one that makes
+    /// this a measurement: the map the channel now answers disagrees with that linearisation by
+    /// **164.4 px** at the box's own bottom corner, so a reader that quietly went back to it cannot
+    /// pass.
     func testTheCelChannelsRenderReadAnswersTheKeystoneAndNotItsLinearisation() throws {
         let track = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: keystonePose)])
         let map = try XCTUnwrap(track.mapping(atCelLocalFrame: 3), "A single key holds at every frame")
@@ -369,9 +370,9 @@ final class AnimatedDistortLogicTests: XCTestCase {
     /// **Distort is no longer refused on a transformation layer, and it is still refused for a
     /// photo.** Both halves, because deleting the whole accessor would satisfy the first.
     ///
-    /// The refusal it replaces named `PoseQuad.affineOrLinearised` as its reason and was worse than
-    /// it read: the mode picker stayed live, the corner drag wrote `distortQuad`, the outline
-    /// foreshortened under the finger and the canvas did not follow.
+    /// The refusal it replaces named the linearisation-at-the-box-centre fallback as its reason and
+    /// was worse than it read: the mode picker stayed live, the corner drag wrote `distortQuad`, the
+    /// outline foreshortened under the finger and the canvas did not follow.
     func testDistortIsNoLongerRefusedOnATransformationLayerAndIsStillRefusedForAPhoto() throws {
         let manager = transformLayerFixture()
         manager.setTransformMode(.distort)
