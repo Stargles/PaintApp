@@ -3511,12 +3511,19 @@ on a canvas that was not running the compositor.
 
 ---
 
-## 15. TODO item (31) — `maxCanvasExtent` is INFERRED from a 3 GB device budget, not measured (2026-09-07)
+## 15. TODO item (31) — `maxCanvasExtent` is MEASURED on the owner's own iPad (2026-09-07)
 
 The owner reopened item (31): *"the app is crashing on brushstroke input at 16k."* The arithmetic
-settles what to do — `CanvasManager.maxCanvasExtent` drops from 16383 to **4200**, INFERRED below —
-and this section is that derivation, in full, because the owner delegated the decision (*"I don't
-know, you take the reigns"*) and a delegated number needs its working shown more, not less.
+said what to do — `CanvasManager.maxCanvasExtent` drops from 16383 to **4200**, INFERRED in §15.3 —
+and §15.5 then went and **measured it on the owner's iPad**, which moved the answer to **6000** and
+showed the arithmetic was pessimistic by a factor this section can now name. Both halves are kept:
+§15.1-§15.4 are the derivation as it was written, §15.5 is the run, and **§15.6 is how far off the
+derivation was and in which direction**, which is the part that calibrates every future estimate on
+this hardware.
+
+The owner delegated the decision (*"I don't know, you take the reigns"*), and a delegated number
+needs its working shown more, not less — so the working is all still here, including the parts the
+device contradicted.
 
 **The device's own numbers, so nothing here has to assume them** — MEASURED, §9, owner's iPad 9
 (`iPad12,1`, A13, 3 GB), 2026-09-02: `physicalMemory` **2939 MiB**; `os_proc_available_memory()` at
@@ -3621,7 +3628,8 @@ undo history, UIKit — since 1837 MiB was measured with **nothing open at all**
 | **D** | **+ half the headroom reserved for what's already resident — CHOSEN BASIS** | **918.5 MiB** | **5486 px** |
 | E | + reserving three quarters instead of half (extra conservative) | 459.2 MiB | 3879 px |
 
-**Chosen: `maxCanvasExtent = 4200`, not the rounder 4096.** 4200 sits comfortably inside row D — the
+**Chosen at the time: `maxCanvasExtent = 4200`, not the rounder 4096. Superseded by §15.5's
+measurement, which raised it to 6000; kept here because the reasoning below is what §15.6 grades.** 4200 sits comfortably inside row D — the
 scenario this section argues is the right one for the bug being fixed, a **fresh document's first
 stroke**, which is exactly the owner's report and exactly BUGS.md's crash scene — spending 538 MiB of
 the 918.5 MiB row D allows and leaving the other 41%. It is below row C outright, so the choice does
@@ -3649,6 +3657,11 @@ headroom free, and 4200 does not clear row E's tighter 3879 px floor. This secti
 row D is the right scenario for *this* bug (a blank canvas, one brushstroke) rather than that row E
 never applies — see the open checkbox below, which asks the device check to cover both.
 
+> **The device refuted this paragraph, 2026-09-07.** §15.5 measured both cases, and the *worked*
+> document is not the weaker one: it costs more at small extents and the two converge by 11000, so
+> the binding boundary belongs to the fresh single-layer document after all. Row E was aimed at a
+> hazard that is real at 4200 and gone by 10000.
+
 **An independent cross-check on the margin itself, from a different accounting.** BUGS.md's
 memory-allocation audit — a census of this app's *declared budgets and caches*, not of one composite
 — separately estimates that *"the five declared budgets sum to 656 MiB at 2048x1024... add the
@@ -3662,25 +3675,132 @@ picked for convenience.
 
 ### 15.4 What this costs the owner: nothing measurable
 
-The owner's own working canvas is 2048×1024 (§1) — 2,097,152 px against 4200²'s 17,640,000, an **8.4×**
-headroom in pixel count, or roughly 2–4× per dimension depending how the aspect is read. Nothing they
+The owner's own working canvas is 2048×1024 (§1) — 2,097,152 px against 6000²'s 36,000,000, a **17×**
+headroom in pixel count, or roughly 3–6× per dimension depending how the aspect is read. Nothing they
 have described doing is within an order of magnitude of this cap, which is the same shape of argument
 TODO item (31) itself makes (*"the owner works at 2048x1024... three orders of magnitude below the
 cap, so nothing they do is affected by a lower ceiling"*) — three orders of magnitude against the
-retired 16383, and still nearly one against the new 4200.
+retired 16383, and still more than one against the measured 6000. The bound moving 4200 → 6000 in
+§15.5 costs the owner nothing either; it is the same argument with more room in it.
 
-### 15.5 Open — the device measurement that would confirm or correct this
+### 15.5 The device measurement — MEASURED, and it moves the number to 6000
 
-- [ ] **On the owner's iPad**, with `maxCanvasExtent` temporarily raised past 4200 in a local,
-      uncommitted build (the picker enforces the shipped cap, so a tester needs their own build to
-      offer a larger size at all) — create a **fresh, single-layer** document at a sequence of sizes
-      (suggested: 4200, 5486 [row D's own ceiling], 6500, 8000, 16383) and draw one brushstroke that
-      crosses the whole canvas at each, noting the largest that survives without the app dying to the
-      home screen. Binary-search between the largest survivor and the smallest failure.
-- [ ] **Repeat on a document that is not fresh** — a handful of layers, a longer undo history — at
-      sizes around row D and row E's two floors (5486 and 3879) specifically, to settle §15.3's own
-      open question of which row is the realistic one once a document has some history behind it.
-- [ ] Set `maxCanvasExtent` from whichever of the two runs above is smaller, with a safety margin
-      below the observed crash boundary rather than at it — do not set it to the exact boundary a
-      single run finds, for the reason CLAUDE.md's own triage sections give repeatedly: one run on
-      one device is a data point, not a guarantee.
+**MEASURED on the owner's own iPad — iPad (9th generation), `iPad12,1`, A13, 3 GB, iOS 26.5.2 —
+2026-09-07, Release, over nineteen labelled app launches.** Driven by XCUITest against the device
+(`-destination 'platform=iOS,id=E3B83820-…'`, `-parallel-testing-enabled NO`), with the cap raised
+locally so the picker would offer the sizes at all. Each launch created a document at one extent,
+drew **one canvas-crossing stroke** as a real drag on `canvas.host`, and was watched for a further
+30 s; the pass/fail is whether `XCUIApplication.state` was still `.runningForeground` afterwards.
+
+Memory came from inside the app, because a jetsam kill is a `SIGKILL` and the killing process cannot
+report its own last number: a 250 ms sampler wrote `phys_footprint` and `os_proc_available_memory()`
+to a JSONL file in the app container and `fsync`ed every line, so the sample before each death
+survived it. The file was pulled off the device with `devicectl … copy from`.
+
+**The device's ceiling is 1850 MiB, and that is the run's firmest number.** `phys_footprint +
+os_proc_available_memory()` summed to **1850 MiB in every sample of every launch, at every canvas
+size** — 5,006 samples. §9's 1837 MiB is the same ceiling measured *at rest*; the extra 13 MiB is
+what the process had already spent by the time that reading was taken.
+
+**Condition A — a fresh single-layer document, one canvas-crossing stroke.** Peak `phys_footprint`,
+and the least `os_proc_available_memory()` reached:
+
+| extent | peak footprint | least available | % of the 1850 MiB ceiling | survived |
+|---|---|---|---|---|
+| 4200 | 195.7 MiB | 1654.3 MiB | 10.6% | yes |
+| 5486 | 280.2 MiB | 1569.8 MiB | 15.1% | yes |
+| 6500 | 546.9 MiB | 1303.1 MiB | 29.6% | yes |
+| 8000 | 883.7 MiB | 966.3 MiB | 47.8% | yes |
+| 9000 | 1111.1 MiB | 738.9 MiB | 60.1% | yes |
+| 10000 | 1346.2 MiB | 503.8 MiB | 72.8% | yes |
+| 11000 | 1497.9 MiB | 352.1 MiB | 81.0% | yes |
+| **12000** | **1768.3 MiB** | **81.7 MiB** | **95.6%** | **yes — by 82 MiB** |
+| **13000** | 1792.0 MiB | 58.0 MiB | — | **no** |
+| 16383 | 1767.9 MiB | 82.1 MiB | — | **no** |
+
+**Condition B — four layers, each inked, undo history behind them, then the same stroke.**
+
+| extent | peak footprint | least available | % of ceiling | survived |
+|---|---|---|---|---|
+| 3879 | 512.6 MiB | 1337.4 MiB | 27.7% | yes |
+| 4200 | 572.7 MiB | 1277.3 MiB | 31.0% | yes |
+| 5486 | 617.0 MiB | 1233.0 MiB | 33.4% | yes |
+| 6500 | 856.7 MiB | 993.3 MiB | 46.3% | yes |
+| 8000 | 1119.7 MiB | 730.3 MiB | 60.5% | yes |
+| 9000 | 1141.7 MiB | 708.3 MiB | 61.7% | yes |
+| 10000 | 1429.7 MiB | 420.3 MiB | 77.3% | yes |
+| 11000 | 1547.8 MiB | 302.2 MiB | 83.7% | yes |
+
+**The boundary is Condition A's, between 12000 and 13000 — and that is the first surprise.** §15.3
+argued row E was where the derivation was weakest, on the grounds that a worked document has less
+headroom free. The device says the opposite at the sizes that matter: B is dearer than A at small
+extents (573 MiB against 196 at 4200, 2.9x) and the two **converge** by 11000 (1548 against 1498,
+1.03x). The extra layers cost a roughly fixed transient — B's peak lands during the *third layer's*
+inking at the small sizes, not during the canvas-crossing stroke — and the stroke's own S² cost
+overtakes it. So the fresh document, which is also the shape the owner's crash report describes, is
+the binding case.
+
+**The owner's report is reproduced exactly, and the mechanism is confirmed against §15.2's reading
+of the source.** At 16383 the footprint sits at ~230-280 MiB right through the gesture — the
+`StrokeScratch` window doing its job, §15.1 — and then **explodes 6.6 s after the finger lifts**:
+667 → 1236 → 1351 → 1397 → 1548 → 1658 → 1695 → 1768 MiB, and `SIGKILL` with 82 MiB left. The dabs
+are cheap and the **commit** is what kills it, which is `RasterLayerTexture.ensureContext`'s
+canvas-sized `CGContext` plus `renderToUIImage()`'s fully-resident `CGImage` readback — BUGS.md's
+memory-audit item 2, predicted from the source in §15.2 and now watched happening.
+
+**Chosen: `maxCanvasExtent = 6000`.** The rule, in one sentence: *the largest round extent whose
+MEASURED worked-document peak stays under 40% of the device's own 1850 MiB ceiling.* At 6000 that
+peak interpolates to **733 MiB, 39.6%**; at 6500 it is **857 MiB, 46.3%**. 6000 is also under half of
+12000, the largest extent that survived at all.
+
+**The margin is not arbitrary — it is exactly the part of the app the run did not exercise.** Every
+document measured above was plain: no blend mode, no adjustment layer, no mask, no folder. A graded
+frame adds the sandwich, which `SandwichRecipe.compositeHalves` composites as two full-frame requests
+over one shared resolve — three canvas-sized buffers — at `CompositorBudget.hasHeadroom`'s own x2 for
+the readback and the Core Animation copy. That is `3 · 2 · 4 · S²`: **824 MiB at 6000**, and
+733 + 824 = **1557 MiB**, which fits the 1850 ceiling with 293 MiB to spare. The same sum at 6500 is
+**1824 against 1850** — it fits, by 26 MiB, which is a boundary and not a margin. That is the whole
+of why the cap is 6000 rather than 6500.
+`CanvasGeometryLogicTests.testTheChosenCapFitsTheMeasuredDeviceCeilingWithAnUnmeasuredSandwichOnTop`
+holds all of it as assertions, so this table and that test cannot drift apart.
+
+**6000 was put through the collision scan before being adopted** — the one that caught 4096 at ten
+occurrences — and it appears **zero** times in app source.
+
+**What this run does not establish, stated plainly.** One launch per size on one device is a data
+point, not a guarantee; no document here engaged a blend mode or an adjustment layer, so the
+sandwich figure above is arithmetic rather than measurement; each document took one stroke, where a
+real session accumulates; and the iPad was otherwise idle with the app freshly launched, so 1850 MiB
+is the *best* case for available memory rather than the typical one. Every one of those points the
+same way — toward the cap being conservative — which is why the margin is where it is.
+
+### 15.6 How far the arithmetic was off, and in which direction
+
+This is the part worth keeping, because it prices every future estimate on this hardware.
+
+§15.3 predicted `8 · 4 · S²` — four canvas-sized buffers at a x2 realism factor. At 4200 that is
+**538 MiB**. The device says:
+
+| | predicted | measured | ratio |
+|---|---|---|---|
+| fresh single-layer document at 4200 | 538 MiB | **196 MiB** | **2.7x too pessimistic** |
+| worked four-layer document at 4200 | 538 MiB | **573 MiB** | **within 6%** |
+
+**So the four-buffer count and `CompositorBudget`'s x2 are close to right for a document with layers
+and history, and much too pessimistic for a bare one.** Neither figure is the thing that made 4200
+too small, though. That was **row D's extra halving of the budget** — reserving half of 1837 MiB for
+"whatever is already resident" — stacked on top of a cost model that was already conservative. The
+device shows the two are the *same* allowance counted twice: the resident cost of layers and history
+*is* the difference between the 196 MiB row and the 573 MiB row, and the x2 factor had already paid
+for it.
+
+**The single transferable lesson: do not reserve a margin for a cost your model has already
+charged.** Row D's halving looked like prudence and was double-counting; it cost a factor of two in
+extent, four in area. Sensitivity row C — 7759 px, the same four buffers and x2 against the *full*
+at-rest headroom, with no second reservation — is the row that came closest to the truth for the
+worked case, and it was rejected in favour of a row that was wrong for a reason the arithmetic could
+not see.
+
+**And the prediction that was right: 16383 dies, immediately and for the stated reason.** §15.2
+named the mechanism from the source before any of this was run, and the device confirmed it down to
+which side of the pen lift it happens on.
