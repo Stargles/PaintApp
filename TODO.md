@@ -48,45 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (53) A keyframed transformation layer drops playback to 8 fps
-
-**Status** — reported by the owner 2026-09-06, unbuilt and undiagnosed. **Top of the queue.**
-
-> *"Right now I have a canvas with a lot of strokes. I then put a move transformation layer on top,
-> and set it to move via keyframes. When I play the animation, the FPS drops to 8fps. This really
-> shouldnt happen because from my recollection, it should automatically bake and store frames in
-> disk. This suggests to me that when a move transfomation is keyframed, something needs to get
-> calculated every frame instead of just pulling the prebaked frames off of the disk."*
-
-**The owner's own theory is the leading hypothesis and should be tested first, not last.** Their
-behavioural theories have twice beaten a code-tracing agent on this repo. It is also consistent with
-what RENDER.md claims: playback is supposed to be served from LZ4 frames on disk (RENDER §3.5-3.7,
-stages 4 and 5, merged), so a posed frame that has to be composited live at playback speed is exactly
-the shape of an 8 fps stall.
-
-**Their document is `AnimationTest` on their iPad**, and they have offered it. CLAUDE.md's
-action-recorder section is explicit that getting the artefact off the device beats guessing at a
-simulator — pull the document rather than building a fixture that may not reproduce it.
-
-**Starting points, not conclusions.** `FrameBakeKey`'s key is a digest over a recipe and the file
-mentions a pose nine times, so poses are *probably* in the key — establish whether they actually are
-before assuming either way. `FrameBaker.noteDocumentChanged` is the invalidation entry point.
-`FrameBakerLogicTests.testEditingAPoseKeyframeDirtiesTheCelsSpan` pins that *editing* a pose keyframe
-dirties a span, which is correct and is not this bug — this is about *playback* of an unedited
-document. Note also that a keyframed pose makes every frame genuinely different, so many distinct
-bake keys is the correct behaviour; the question is whether they are baked and served, or recomputed.
-
-**Left to build**
-- [ ] Reproduce it and **measure** it, at the owner's own stroke density rather than a toy document.
-      PERFORMANCE.md §1 is the baseline: the owner works at 2048x1024, and a real scene is 300-1000
-      drawn cels.
-- [ ] Establish whether a posed frame reaches the disk store at all, or falls back to live compositing.
-- [ ] Fix it, and pin playback cost against a number so this cannot regress silently.
-
-**Spec** RENDER.md §3.5-3.7 · KEYFRAMES.md §4.6, §8 stage 6b · PERFORMANCE.md
-
----
-
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
@@ -151,7 +112,11 @@ pose key has a node.
 - [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
       because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
       `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
-- [ ] **Animation-group membership editing needs a design conversation first.** §2.29 rules that
+- [ ] **Animation-group membership editing needs a design conversation first — but not the half the
+      owner remembered.** Asked on 2026-09-07 they recalled ruling *"if you make a selection and try to
+      move an already existing animation, then it refuses"*, and **that shipped on 2026-09-03**: §2.29,
+      a Move catching part of a group is refused and says so. What is still open is **retagging** an
+      element into or out of a group, which is the same question from the other side. §2.29 rules that
       splitting one animated group into two is *"a different feature"*, and retagging an element is
       that question from the other side — every key on both groups' tracks changes meaning.
 
@@ -160,29 +125,47 @@ are superseded and kept; the file says which.
 
 ---
 
-## (31) The 16383² canvas cannot be composited at all
+## (31) A 16k canvas crashes on a brushstroke, and cannot fit the owner's device at all
 
-**Status** — two of the three original symptoms are **fixed and closed**; this is what is left of the
-third.
+**Status** — **reopened 2026-09-07 by the owner**, who reports the app *crashing on a brushstroke* at
+16k. The ruling on what to do is delegated: *"I don't know, you take the reigns."*
 
-The owner is right that the reported problem is gone. The resolution knob is obeyed —
-`CompositorBudget.affordableSize`, `budgetTextures` and `CompositorSizeGate` are all deleted, and
-`StripedComposite` composites at the size asked for, pinned byte-for-byte on both backends. The
-freeze after a stroke lift is gone: the main thread does four things at pen-up and none is
-proportional to canvas area. The 16k crash is fixed (283.1 MB → 4.42 MB a gesture) and the
-disappearing stroke with it.
+**The arithmetic settles it and no optimisation changes it.** The owner's iPad is an **iPad (9th
+generation), `iPad12,1`** — MEASURED from `devicectl` 2026-09-07 — which has **3 GB of RAM**. One
+16383² RGBA texture is **1.07 GB**; the compositor's sandwich needs **three**, so **3.22 GB**, on a
+3 GB device. A 16k canvas cannot be held, let alone composited.
+
+**This item's previous "the 16k crash is fixed" was measured on the wrong hardware.** That figure
+(283.1 MB → 4.42 MB a gesture) is a *gesture delta* on a simulated iPad Pro with 8 GB, not the
+resident cost of the canvas, and every simulator in this repo is an M4/M5 with 8 GB or more. **Every
+memory claim taken on a simulator is suspect on the owner's actual device by a factor of at least
+two and a half**, and that generalises well beyond this item.
+
+**The decision, 2026-09-07 — lower `maxCanvasExtent` rather than build a display proxy.**
+`CanvasManager.maxCanvasExtent` is `16383`. A downscaled proxy does not save it: the *stroke* path
+still allocates full-size textures, which is exactly when the owner sees the crash. The owner works
+at 2048x1024 — 8.4 MB a texture, three orders of magnitude below the cap — so nothing they do is
+affected by a lower ceiling. Set it from a **measurement on the owner's own iPad**, not from a guess.
+
+**Two of the three original symptoms are genuinely fixed and stay closed**: the resolution knob is
+obeyed (`CompositorBudget.affordableSize`, `budgetTextures` and `CompositorSizeGate` are deleted, and
+`StripedComposite` composites at the size asked for, pinned byte-for-byte on both backends), and the
+freeze after a stroke lift is gone.
 
 **Left to build**
-- [ ] At the maximum extent the image still cannot be composited in one piece and wants a **downscaled
-      display proxy** — or a lower `maxCanvasExtent`, which is the cheaper answer if the owner does not
-      need 16k.
-- [ ] The remaining lag at that size is the owner's own deferral, pending an A/B they want to see.
+- [ ] Measure, **on the owner's iPad**, the largest canvas that survives a brushstroke. Device
+      testing is now possible — see the deploy section in [CLAUDE.md](CLAUDE.md).
+- [ ] Set `maxCanvasExtent` from that number and pin it, so the picker cannot offer a size that
+      crashes.
+- [ ] Say so in the size picker rather than silently clamping, per this repo's rule that a refusal
+      is visible.
 
 ---
 
 ## (42) Editing the strokes inside a selection, not just their colour
 
-**Status** — not started, and **its prerequisite got harder rather than nearer**. A slider tick on a
+**Status** — not started. **The owner set the order 2026-09-07: (41) first, then this.** Its
+prerequisite got harder rather than nearer. A slider tick on a
 selection is a *rewrite in place*, which is precisely the case (41) established cannot be bounded by
 the damage-rectangle mechanism at all — the element keeps its id, so no rectangle from a caller says
 which footprint stopped being true. This item needs that solved first, and it is a different idea from
@@ -212,7 +195,7 @@ rewrites elements in place, so every tick of a slider is a mid-list edit — a w
 
 ## (22) Select multiple cels at once
 
-**Status** — not started. The menu row exists and is `.disabled(true)` with an empty action; no
+**Status** — not started, and **deprioritised by the owner 2026-09-07**. The menu row exists and is `.disabled(true)` with an empty action; no
 cel-selection state exists. The keyframe half of the same idea is real and shipping.
 
 ---
