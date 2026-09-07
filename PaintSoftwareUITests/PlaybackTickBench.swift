@@ -31,6 +31,27 @@ final class PlaybackTickBench: XCTestCase {
     private var root: URL!
     private var storedResolution: String?
 
+    /// **Set only once `setUpWithError` is past its skip guard, because `tearDown` runs even when
+    /// `setUpWithError` throws `XCTSkip`** — and every line of it is about state setUp had not
+    /// reached yet.
+    ///
+    /// `root` is an implicitly-unwrapped `URL!`, so `removeItem(at: root)` on the skip path unwraps
+    /// nil and traps. XCTest reports that as `Test crashed with signal trap` *beside* the skip
+    /// message — i.e. as a **failure**, at 0.000 seconds, with no output — so the class red every
+    /// full suite, which never sets `PAINTAPP_BENCH`. MEASURED 2026-09-07: 2 failed / 0 skipped
+    /// isolated, and the same two reds in the full run at `74211ab`.
+    ///
+    /// The three sibling benches carrying the identical guard (`StrokeDensityBench`,
+    /// `MemoryAuditBench`, `UndoRepairBench`) never tripped it because their tearDown touches
+    /// nothing their setUp allocates. This one is also the only bench class marked `@MainActor`,
+    /// which is what made it look like an isolation problem rather than an ordering one.
+    ///
+    /// It also disambiguates `storedResolution`: nil means "there was no stored value" only if setUp
+    /// actually ran, and without this flag the skip path took the `else` branch and **removed a
+    /// `UserDefaults` key it had never set** — CLAUDE.md's write-through-`renderResolution` hazard,
+    /// reached from the one path that had not pinned anything.
+    private var didPin = false
+
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
                           "PlaybackTickBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")
@@ -46,19 +67,23 @@ final class PlaybackTickBench: XCTestCase {
                                   forKey: CanvasManager.renderResolutionDefaultsKey)
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PlaybackTickBench-" + UUID().uuidString, isDirectory: true)
+        didPin = true
     }
 
     override func tearDown() {
-        if let storedResolution {
-            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+        // Nothing below is safe on the skip path — see `didPin`.
+        if didPin {
+            if let storedResolution {
+                UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+            }
+            try? FileManager.default.removeItem(at: root)
+            FrameBakeStore.cachesDirectoryOverride = nil
+            Compositor.backend = Compositor.defaultBackend
+            MaskResolver.clearCache()
+            CompositeProbe.end()
         }
-        try? FileManager.default.removeItem(at: root)
-        FrameBakeStore.cachesDirectoryOverride = nil
-        Compositor.backend = Compositor.defaultBackend
-        MaskResolver.clearCache()
-        CompositeProbe.end()
         super.tearDown()
     }
 
