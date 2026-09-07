@@ -220,9 +220,10 @@ No colour-pipeline setting, no sRGB/linear enum, no transfer LUT, no `Composite.
 
 **One adjacent strand did ship**: `ColorMath`'s sRGB↔linear and Oklab conversions feed the gradient
 map, which is this item's own "Oklab still gets built, for interpolation" half. The code calls that
-**(10a)** in nine places — `Effect.gradientTable`, `EffectSection`, `ColorMathOklabLogicTests`,
-`EffectParityLogicTests` and `tools/oklab_ramp_ab.swift` among them. It is finished, so it left this
-file by the merge rule and the citations stand; see the convention above.
+**(10a)** in eight places, corrected 2026-09-07 from a stale count of nine — `Effect.gradientTable`,
+`EffectSection`, `ColorMathOklabLogicTests`, `EffectParityLogicTests` and `tools/oklab_ramp_ab.swift`
+among them. It is finished, so it left this file by the merge rule and the citations stand; see the
+convention above.
 
 ---
 
@@ -242,8 +243,11 @@ with orderable module chains, noise octaves and second inputs; relocatable stora
       modulation matrix rather than a bitmap reader.
 
 **Owner-side, not ours**: their tuning pass over the other nineteen presets, and driving a real Pencil
-to exercise tilt, which no test here can reach. BRUSH.md §13 has eight genuinely open questions; three
-were offered on 2026-09-06 and declined.
+to exercise tilt, which no test here can reach. BRUSH.md §13 has **nine** genuinely open questions
+(recounted 2026-09-07 — the sixteen bullets split seven answered/closed, nine still open; the "eight"
+recorded here was a miscount on the day this line was written, not later drift). Three of the nine
+were offered on 2026-09-06 and declined; which three is not recorded here and could not be verified
+against a transcript this audit does not have.
 
 **Spec** BRUSH.md — **§2 is thirty-three owner rulings.**
 
@@ -261,6 +265,19 @@ the specs, so the scope is now known rather than guessed — and the four checke
 slice that needs no simulator. **Two of those four were already true when the audit wrote them down**,
 which is the same failure the audit exists to catch, pointed at itself.
 
+**A quarantine audit on 2026-09-07 (branch `tmp/prune`, five commits) checked every claim the four
+already-checked boxes and the branch's own commits made, then rebased onto `origin/main` and
+re-checked again.** Nothing in the branch was found false; two small pre-existing numeric errors were
+found and corrected in passing (this file's own (10)-and-(37) counts, above and below) along with nine
+drifted `FILE:LINE` citations in ARCHITECTURE_REVIEW.md's finding 3, two more in its finding 4, and
+finding 4's own miscounted "twelve of sixteen" (it is twelve of seventeen). The
+rebase carried real content: `origin/main` had independently shipped `LayerFolder.transform`'s
+options-panel entry and pose-node delete/tap-to-add (both were still listed as unbuilt in this
+branch's stale copy of item (21)) and had reopened and rewritten item (31) around the owner's own iPad
+having 3 GB of RAM. All eight of this file's numbered items — (53) through (37) at the time, now seven
+since (53) shipped and left the queue during the rebase — were re-verified line by line against the
+rebased tree; every remaining status line and "Left to build" bullet checked out.
+
 **Left to build**
 - [x] **Fix what the specs assert that the code contradicts.** RENDER.md §5 stage 6 said the export
       driver was untested with no XCUITest; `FrameExportSessionLogicTests` is 13 tests and
@@ -277,13 +294,41 @@ which is the same failure the audit exists to catch, pointed at itself.
       two ways to make the sentence true rather than picking one.
 - [ ] **Citation rot.** ~10 of one deleted item's 15 anchors and 5 of another's 11 had drifted, two
       because a file moved directory. Sweep the specs the same way and prefer symbols to line numbers.
+      **Partial pass, 2026-09-07**: swept ARCHITECTURE_REVIEW.md's finding 3, the section this branch's
+      own `dc3834d` re-affirmed as "kept as written... still accurate" — the prose was accurate but nine
+      of its ten `FILE:LINE`/name anchors had drifted (`ProjectStore.swift:507→587` and three
+      failure-return lines, `:751→948`, `:799→1000`, `ProjectManifest.swift:376→490`,
+      `ProjectBackupManager.swift:471→477`, and `BUGS.md:131` replaced with the entry's own heading —
+      only `ProjectBackupManager.swift:460` was already right), now fixed. Finding 4's two
+      (`ProjectStore.swift:160→185`, `ProjectManifest.swift:242→304`) were dropped rather than
+      repaired, since the symbol is already named in the same sentence — "prefer symbols to line
+      numbers" applied rather than just restated. The rest of the spec corpus — RENDER.md, KEYFRAMES.md,
+      LASSO_MOVE.md, CANVAS_RESIZE.md, LAYER_TRANSFORM.md, VIDEO.md, EFFECT_BACKDROP.md,
+      VECTOR_INTERPOLATION.md, LASSO_FILL.md, BRUSH.md, ADD_TEXT.md — is unswept.
 - [x] **Dangling references.** Neither was rot. (10a) and (38) are **completed** items whose numbers
-      survive in nine and six citations respectively; the convention note at the top of this file says
-      so, and item (10)'s text no longer leaves the question open.
+      survive in several citations each — (10a) in eight, corrected 2026-09-07 from the nine recorded
+      here; (38)'s six was not re-verified, since a bare "(38)" also matches unrelated numeric literals
+      and re-counting it needs more care than this pass gave it. The convention note at the top of this
+      file says so, and item (10)'s text no longer leaves the question open.
 - [x] **Two commit shas cited in this repo's docs are not on `main`** (`2fa1725`, `83f7c0d` — pre-rewrite
       orphans). Both are gone: this bullet was the only remaining citation of either. Sweep for others
       when the spec sweep above runs.
 - [ ] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
+      **Recommendation, 2026-09-07 (not acted on — the owner's call): keep both.**
+      BRUSH_ENGINE_EXTENSIBILITY.md is not orphaned — BRUSH.md's own header calls it "still accurate
+      about the seams" and says its ordering "survives into §12", §11 says its argument is "not to be
+      lost", and it is cited live from ADD_TEXT.md, KEYFRAMES.md, CANVAS_RESIZE.md and one production
+      doc comment (`TextObject.swift`). Its own stale parts (the pre-§12 "Order, if it is ever
+      scheduled") are already self-marked DONE or deferred to BRUSH.md §12, which is the existing
+      convention for a survey a spec has overtaken — deleting it would orphan seven live citations for
+      no gain. REFACTOR_BASELINE.md is also live-cited three times (`ARCHITECTURE_REVIEW.md`,
+      `TimelineAndUndoUITests.swift`, `PerfBaselineTests.swift`) for specific numbers, so it should not
+      simply go — but unlike the brush document nothing has re-affirmed its figures recently, its
+      "Full suite, wall clock" row (541-1231s) is from long before the thousands-of-tests, 18-36-minute
+      runs CLAUDE.md now tracks, and its "Known remaining costs" §1 cites an `invalidate()` API that no
+      longer appears in `StrokeSpatialIndex.swift` under that name. It wants a re-measurement or a fold
+      into PERFORMANCE.md as a dated historical baseline, not deletion — flagged for the PERFORMANCE.md
+      agent rather than acted on here.
 - [x] The stash stack is empty. It held **two** entries, not the one this bullet recorded: the
       2026-08-14 vector-interpolation snapshot (48 files, 134 commits behind, superseded by interp
       phases 6-7) and a 2026-07-21 pre-rewrite working tree (5 files). Both were labelled cleared with
@@ -291,6 +336,14 @@ which is the same failure the audit exists to catch, pointed at itself.
       their SHAs are `1b8845c` and `2e4e2ff` in that commit's message if either is ever wanted back.
 - [ ] Re-run the 2026-09-06 audit itself. It found fourteen false assertions in this file and a dozen
       more across the specs; a session that shipped this much will have introduced its own.
+      **Partial re-run, 2026-09-07**: this file's own numbered items — all eight live at the time
+      ((53),(41),(21),(31),(42),(22),(10),(37)) — were checked line by line against the rebased tree.
+      One had already been fixed and left the file entirely ((53)); the rest needed no correction
+      except the two counts fixed above in (10) and (37), both pre-existing and both off by exactly
+      one. The specs were not swept beyond ARCHITECTURE_REVIEW.md's finding 3 (see the citation-rot
+      bullet above) — README.md, KEYFRAMES.md's header and §9, and BRUSH.md's two cited claims that
+      this branch's own commits touch or introduce were separately checked against the code and held
+      up. A full sweep of every remaining spec is still owed.
 
 ---
 
