@@ -497,6 +497,40 @@ bought: `tearDown` runs even when `setUpWithError` throws `XCTSkip`, so an opt-i
 teardown on a flag set past the guard** — and the report is `Test crashed with signal trap` printed
 *beside* the skip message, which reads as a failure of the code under test.
 
+**MEASURED at `e6ce40e` on an idle machine (96.7% idle) with a freshly created device erased first —
+3714 tests, 3675 passed, 3 failed, 36 skipped, 33 min.** All three failures **passed clean in
+isolation**, each with `totalTestCount: 1` so the selector genuinely ran them, and are environmental:
+`RecordingUITests` twice (the transport read `idle` where `recording` was wanted, and the notice banner
+was not found) and `DabCostBench.testWhatThePadsRewalkCostsAtItsStrokeCap`, a **wall-clock assertion**
+at 1.006 s against a 0.5 s cap — which is this file's own warning about timing assertions under four
+parallel clones, and there are at least three such tests in the suite now.
+
+| class | seconds | tests |
+|---|---|---|
+| **`BrushEditorUITests`** | **558** | 11 |
+| `SandwichCompositingUITests` | 334 | 10 |
+| `PerfBaselineTests` | 287 | 57 |
+| `SelectionAndMoveUITests` | 268 | 10 |
+| `GraphEditorGestureUITests` | 257 | 5 |
+| `LayerFolderAndMaskMenuUITests` | 254 | 9 |
+| `BrushMenuUITests` | 228 | 8 |
+| `LayerPanelControlsUITests` | 219 | 8 |
+| `BlendModesAndCompositorUITests` | 217 | 8 |
+| `MenuInterruptionUITests` | 210 | 5 |
+
+**6,582 class-seconds across 194 classes**, against 5,162 across 182 at `db21782`. Four clones hold
+**27.4 min** of ideal work against 33 min of wall clock — a **17% scheduling gap**, materially better
+than the 37% this file recorded at `35c0db6`, so the tail is being packed better as the class count
+grows.
+
+**No split is warranted, and the arithmetic says why rather than the intuition.** `BrushEditorUITests`
+is 558 s and is far and away the longest — this file recorded it at 516 s, then 319 s, and it is back
+up without being touched — but the binding constraint is **ideal work per clone (27.4 min), not the
+longest class (9.3 min)**. A class only sets the floor once it exceeds the per-clone share, and this
+one is at a third of it. Splitting it would buy nothing and would add per-class setup. Re-take this
+when the class count or the longest class changes materially; the pattern of `BrushEditorUITests`
+drifting up unwatched is the one to keep an eye on.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
