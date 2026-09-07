@@ -195,6 +195,12 @@ final class ProjectFolderLogicTests: XCTestCase {
 
     /// Two shots called "Rough" in different scenes is the ordinary case once there are folders, so
     /// uniqueness is per folder rather than across the library.
+    ///
+    /// **The directory assertions are the load-bearing half, and their absence let a mutation live.**
+    /// The first draft asserted only that both URLs ended in `Rough.paintproj` — which is true of an
+    /// implementation that ignores the `in:` argument outright and resolves both against the top of
+    /// the tree, because neither file exists yet so neither gets a "2" suffix. A green test about the
+    /// filename said nothing about the folder, which is the whole subject.
     func testTwoFoldersMayEachHoldAProjectOfTheSameName() throws {
         let a = try ProjectStore.createFolder(named: "Scene 1", in: ProjectStore.projectsDirectory)
         let b = try ProjectStore.createFolder(named: "Scene 2", in: ProjectStore.projectsDirectory)
@@ -202,6 +208,10 @@ final class ProjectFolderLogicTests: XCTestCase {
         let first = ProjectStore.createNewProjectURL(name: "Rough", in: a)
         let second = ProjectStore.createNewProjectURL(name: "Rough", in: b)
 
+        XCTAssertEqual(first.deletingLastPathComponent().standardizedFileURL, a.standardizedFileURL,
+                       "the project is minted in the folder it was asked for")
+        XCTAssertEqual(second.deletingLastPathComponent().standardizedFileURL, b.standardizedFileURL,
+                       "and so is the second, in a different one")
         XCTAssertEqual(first.lastPathComponent, "Rough.paintproj")
         XCTAssertEqual(second.lastPathComponent, "Rough.paintproj",
                        "the second is not renamed to “Rough 2” — it is in a different scene")
