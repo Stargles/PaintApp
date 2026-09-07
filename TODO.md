@@ -48,6 +48,45 @@ rather than assuming it still holds.
 
 ---
 
+## (53) A keyframed transformation layer drops playback to 8 fps
+
+**Status** — reported by the owner 2026-09-06, unbuilt and undiagnosed. **Top of the queue.**
+
+> *"Right now I have a canvas with a lot of strokes. I then put a move transformation layer on top,
+> and set it to move via keyframes. When I play the animation, the FPS drops to 8fps. This really
+> shouldnt happen because from my recollection, it should automatically bake and store frames in
+> disk. This suggests to me that when a move transfomation is keyframed, something needs to get
+> calculated every frame instead of just pulling the prebaked frames off of the disk."*
+
+**The owner's own theory is the leading hypothesis and should be tested first, not last.** Their
+behavioural theories have twice beaten a code-tracing agent on this repo. It is also consistent with
+what RENDER.md claims: playback is supposed to be served from LZ4 frames on disk (RENDER §3.5-3.7,
+stages 4 and 5, merged), so a posed frame that has to be composited live at playback speed is exactly
+the shape of an 8 fps stall.
+
+**Their document is `AnimationTest` on their iPad**, and they have offered it. CLAUDE.md's
+action-recorder section is explicit that getting the artefact off the device beats guessing at a
+simulator — pull the document rather than building a fixture that may not reproduce it.
+
+**Starting points, not conclusions.** `FrameBakeKey`'s key is a digest over a recipe and the file
+mentions a pose nine times, so poses are *probably* in the key — establish whether they actually are
+before assuming either way. `FrameBaker.noteDocumentChanged` is the invalidation entry point.
+`FrameBakerLogicTests.testEditingAPoseKeyframeDirtiesTheCelsSpan` pins that *editing* a pose keyframe
+dirties a span, which is correct and is not this bug — this is about *playback* of an unedited
+document. Note also that a keyframed pose makes every frame genuinely different, so many distinct
+bake keys is the correct behaviour; the question is whether they are baked and served, or recomputed.
+
+**Left to build**
+- [ ] Reproduce it and **measure** it, at the owner's own stroke density rather than a toy document.
+      PERFORMANCE.md §1 is the baseline: the owner works at 2048x1024, and a real scene is 300-1000
+      drawn cels.
+- [ ] Establish whether a posed frame reaches the disk store at all, or falls back to live compositing.
+- [ ] Fix it, and pin playback cost against a number so this cannot regress silently.
+
+**Spec** RENDER.md §3.5-3.7 · KEYFRAMES.md §4.6, §8 stage 6b · PERFORMANCE.md
+
+---
+
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
