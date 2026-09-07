@@ -48,6 +48,70 @@ rather than assuming it still holds.
 
 ---
 
+## (36) Store projects in a folder the artist chooses
+
+**Status** — **fast-tracked out of Later by the owner 2026-09-07**, who gave the reason: every test
+build that lands on the iPad takes their saved work with it.
+
+> *"Every time a test build gets uploaded to Ipad currently, everything is wiped. Thus, this task
+> should be fasttracked out of long term. It should ideally behave just like any other programs file
+> storage/save. It has a default folder storage location where it stores the files, but they can be
+> changed. I'd like the option to organize the files into folders. May be helpful for organizing
+> things into projects, sequences, scenes, shots, etc."*
+
+**This is a data-loss item, not a convenience one.** Projects live in the app's own container today
+(`Documents/Projects`), which is exactly the thing a reinstall is entitled to replace — and on
+2026-09-07 a measurement pass wiped that container outright, destroying the owner's `AnimationTest`
+document with no recovery. A chosen folder puts the work **outside** the container, where a build
+cannot reach it.
+
+**No dependency remains.** The stated ordering was counterfactual: RENDER stage 6 shipped without a
+chosen folder by delivering through `ShareLink`. `BrushStorage` already documents the security-scoped
+bookmark seam this needs, and `BrushStorage`'s relocatable storage is a worked example of the same
+pattern at a smaller scale.
+
+**Left to build**
+- [ ] A default location, and a picker to change it — security-scoped bookmarks, resolved on launch,
+      with the failure to re-resolve one surfaced rather than swallowed.
+- [ ] **Sub-folders**, which is the half that is not just relocation: the gallery has to browse a tree
+      rather than a flat list. The owner's own framing is projects / sequences / scenes / shots.
+- [ ] Migrate what is in the container today, and stop writing there.
+- [ ] A test that a reinstall leaves a project in a chosen folder untouched — the defect this exists
+      to prevent, asserted rather than assumed.
+
+---
+
+## (54) A held frame may be re-rendered once per frame instead of once
+
+**Status** — reported by the owner 2026-09-07, unverified. **They are right that the answer matters
+more than the saving.**
+
+> *"Lets say a frame in the animation is held for a couple cels where nothing changes. The bake and
+> cache seems to re-render each frame even though they are the same. It is a simple optimization and
+> not a high priority one, but if the program was not already meant to do this, then it could surface
+> a deeper issue."*
+
+**The design says it is already meant to do this**, which is what makes the report worth chasing rather
+than filing as an optimisation. [CLAUDE.md](CLAUDE.md) states it plainly while warning about a fixture:
+*"that cel **is** a hold, so those five frames are one bake key and one composite."* `FrameBaker`
+carries a `dedupedCount` and an explicit dedupe path whose comment reads *"a dirty frame whose
+recomputed key already has a file..."*.
+
+**So the question is where the dedupe happens**, and there are two answers with very different
+consequences. If the key is recomputed and the **composite is skipped**, the design holds and the owner
+is seeing something else — a progress count, or the bake queue enumerating frames it then skips. If the
+composite **runs** and only the disk write is skipped, then the expensive half is not being saved at
+all, and every hold in every document pays full price. That is the deeper issue the owner suspected.
+
+**Left to build**
+- [ ] Establish which of the two it is, by counting composites rather than by reading the code —
+      `CompositeProbe` counts calls to `Compositor.composite`, and note it counts **chunks, not
+      frames**, so pin "one small frame is one composite" separately before trusting a total.
+- [ ] If the composite runs, skip it and pin a hold at one composite for its whole span.
+- [ ] Either way, say in RENDER.md which it was, because the docs currently assert the good case.
+
+---
+
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
@@ -375,10 +439,6 @@ rebased tree; every remaining status line and "Left to build" bullet checked out
 - **(30) Video editor.** Its RENDER dependency is met — (29) shipped in full on 2026-09-06.
 - **(35) Advanced masks** — colour-range masks and a colour-reassign blend mode. `MaskSource` has two
   cases and there are 25 blend modes with no reassign.
-- **(36) Store projects in a folder the artist chooses.** Its stated ordering is **counterfactual now**:
-  RENDER stage 6 shipped without a chosen folder by delivering through `ShareLink`, so there is no
-  remaining RENDER dependency. `BrushStorage` already documents the security-scoped seam.
-
 ---
 
 ## Carried — deliberate, and not an ask
