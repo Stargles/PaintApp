@@ -20,8 +20,9 @@ goes unread, and every frame of a keyed cel is a fresh canvas-sized rasterize on
 as well — and it is deliberately not taken, because **the thing it changes is a drag and nobody has
 measured that drag**. A cel channel is what the graph editor authors; engaged, the canvas would show
 the previous baked frame while a node is dragged instead of re-rendering per sample. §14.6 states both
-sides, the owner rulings that pull each way, and exactly what to measure. The graph editor was live
-work in another worktree the day this was found, which is a second reason not to move it underneath.
+sides, the owner rulings that pull each way, and exactly what to measure. That drag is now the whole
+of the reason: the graph editor was live work in another worktree the day this was found, and that
+worktree (`tmp/kfui`) is merged, so nothing but the unmeasured drag is holding this open.
 
 ## The raster float's transform handles are not the stage 4 handle pattern (2026-09-06)
 

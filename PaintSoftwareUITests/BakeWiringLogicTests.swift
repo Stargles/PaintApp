@@ -523,4 +523,68 @@ final class BakeWiringLogicTests: XCTestCase {
         XCTAssertEqual(served, 12, "…and every one of the twelve frames comes back as a picture")
         XCTAssertEqual(baker.bakedCount, bakedBefore, "…without the baker writing a thing")
     }
+
+    /// `keyframedMoveDocument`'s twin with the pose on a **folder** rather than on a transformation
+    /// layer — the same ink, the same two keys, and no transformation layer anywhere, so the only
+    /// thing in the document that can answer the engagement predicate is its `folders` clause.
+    private func keyframedFolderDocument(moving: Bool = true) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        let size = CanvasFixture.canvasSize
+        manager.addVectorLayer()
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                      raster: .empty(size: size), vector: .empty(size: size))
+        cel.vector?.addStroke(VectorStroke(
+            id: UUID(), brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            size: 8, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 8, y: 32, pressure: 1),
+                                    VectorSample(x: 24, y: 32, pressure: 1)],
+                                   channels: .pressureOnly)))
+        manager.layers[0].cels = [cel]
+
+        let folder = manager.addFolder(name: "Moved")
+        manager.layers[0].parentFolderID = folder
+        let box = CGRect(origin: .zero, size: size)
+        let far = moving ? PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 24, y: 0))
+                         : PoseQuad(restingIn: box)
+        manager.setFolderTransform(folder, to: LayerPose(
+            pose: PoseQuad(restingIn: box),
+            track: TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(restingIn: box)),
+                                         .init(frame: 11, pose: far)])))
+        manager.currentLayerIndex = 0
+        return manager
+    }
+
+    /// **The `folders` arm of `hasContainerPoseInForce`, which had no assertion anywhere.**
+    ///
+    /// KEYFRAMES §4.4's container pose hangs on a **folder** as readily as on a transformation layer
+    /// — `setFolderTransform` is the artist's entry point and the predicate's second clause is what
+    /// answers for it. Nothing in the suite held that clause. The layer arm's test above passes with
+    /// it deleted, because its document has no folder; and so does the UI test that drives a folder's
+    /// own Move row, because the posed *picture* still reaches the screen — by exactly the
+    /// canvas-sized per-tick rasterize that TODO (53) is about. So deleting this clause would restore
+    /// the owner's 8 fps for every document posed by a folder instead of by a transformation layer,
+    /// silently, with the whole suite green.
+    ///
+    /// **Both operands, for the layer arm's reason**: a folder whose every key is the resting pose
+    /// has to leave a flat document on Core Animation's path, or this would pass just as well against
+    /// a clause that engaged on the mere presence of a folder transform.
+    ///
+    /// **MEASURED red** — at the second assertion, with the `folders` clause deleted from
+    /// `CanvasManager.hasContainerPoseInForce`.
+    func testAKeyframedFolderEngagesTheSandwichAndAStillOneDoesNot() {
+        let moving = keyframedFolderDocument()
+        XCTAssertFalse(moving.renderTree(atFrame: 0).needsCompositorOnCanvas,
+                       "Setup: a group at its defaults composites exactly as one that predates them, "
+                       + "so nothing in this document is a blend, a mask, an effect or a node — which "
+                       + "is why the pose has to be asked about separately for a folder too")
+        XCTAssertTrue(moving.sandwichEngagesOnCanvas(tree: moving.renderTree(atFrame: 0)),
+                      "A folder that moves its contents must put the canvas on the composite, which "
+                      + "is the only thing that reads the bake")
+
+        let still = keyframedFolderDocument(moving: false)
+        XCTAssertFalse(still.sandwichEngagesOnCanvas(tree: still.renderTree(atFrame: 0)),
+                       "A folder whose every key is the resting pose moves nothing, renders as "
+                       + "nothing, and must not pull a flat document onto the compositor")
+    }
 }

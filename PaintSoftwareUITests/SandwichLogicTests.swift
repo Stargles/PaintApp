@@ -1257,7 +1257,7 @@ final class SandwichLogicTests: XCTestCase {
 
         // The interpolation slider writes `t` per tick and the derivation is in the key, so every
         // tick would otherwise be an ARAP evaluation and three canvas-sized composites. The clause is
-        // the drag, not the frame — see `sandwichEngagesOnCanvas` and PERFORMANCE.md §14.
+        // the drag, not the frame — see `sandwichEngagesOnCanvas` and PERFORMANCE.md §7.
         manager.beginInterpolationDrag()
         XCTAssertFalse(manager.sandwichEngagesOnCanvas(tree: tree),
                        "The compositor comes off for the scrub gesture, not for the frames it lands on")

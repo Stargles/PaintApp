@@ -373,7 +373,7 @@ private extension BakeKeyEncoder {
         // carries no pose by design (`renderTreeAndPoses` says why) and `derived` is nil for a cel
         // with no vector tier — so omitting it resolves every frame of a move to one file on disk and
         // the store serves the first frame's pixels for all of them, with no error anywhere.
-        // `FrameBakeKeyLogicTests.testAContainerPoseMovesTheDigest` is the pin.
+        // `TransformLayerLogicTests.testTheBakeDigestMovesWithAContainerPose` is the pin.
         optional(version.pose) { e, pose in e.array(pose) { e, value in e.cgFloat(value) } }
         derived(version.derived)
     }
