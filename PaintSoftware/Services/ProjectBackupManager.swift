@@ -85,6 +85,13 @@ nonisolated enum ProjectBackupManager {
     /// Runs once per launch (detached from `PaintApp.init`). Order matters: wipe for tests →
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
     /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
+    /// Whether this build is running in a simulator, which is the only place `-resetGallery` is
+    /// honoured. Read from the environment rather than `#if targetEnvironment(simulator)` so a test
+    /// can reason about it, and because the compile-time form is invisible to the fast tier.
+    static var isSimulator: Bool {
+        ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != nil
+    }
+
     static func runStartupMaintenance() {
         let args = ProcessInfo.processInfo.arguments
 
@@ -93,7 +100,19 @@ nonisolated enum ProjectBackupManager {
         //   -simulateProjectCorruption  overwrite the newest project's manifest.json with garbage,
         //                               simulating an update/crash-damaged package, so the repair
         //                               pass below can be observed fixing it end-to-end.
-        if args.contains("-resetGallery") {
+        // **`-resetGallery` is refused off the simulator, and that guard is not paranoia.** On
+        // 2026-09-07 a measurement pass passed it to a *Release build on the owner's own iPad* for
+        // run-to-run isolation and destroyed every saved project, backup and trashed item on the
+        // device. The flag reads as a test hook and behaves as one everywhere it is normally seen,
+        // which is exactly why nothing stopped it: a physical device is the one place where the
+        // directories it wipes hold work nobody can regenerate. Brushes and recordings survived only
+        // because they live outside the three directories it clears.
+        //
+        // The simulator check is the whole guard, deliberately: `#if DEBUG` would not have helped,
+        // because the build that did the damage was Release, and a device UI test that genuinely
+        // needs a clean gallery can delete and reinstall the app instead, which is both narrower and
+        // reversible.
+        if args.contains("-resetGallery") && Self.isSimulator {
             let fm = FileManager.default
             for dir in [projectsDirectory, backupsRootDirectory, trashDirectory] {
                 try? fm.removeItem(at: dir)
