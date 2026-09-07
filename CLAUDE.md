@@ -458,6 +458,45 @@ per-class seconds are noisier than they look, exactly as the `032efa1` entry war
 something having been fixed. The top four are spread across 115 s, so there is still no single long
 class to split and the 2026-08-15 lever remains dead.
 
+**MEASURED at `8cbce5a` on an idle machine (91.9% idle, my own freshly created device erased first, no
+clone debris before or after) — 3661 tests, 3622 passed, 3 failed, 36 skipped, 32.6 min.** All three
+failures **passed clean in isolation** and are environmental; the table was pulled from `xcresulttool`
+before any triage run touched the same `-derivedDataPath`, which is what this section keeps asking for
+and is why it exists this time.
+
+| class | seconds | tests |
+|---|---|---|
+| `PerfBaselineTests` | 335 | 57 |
+| `SandwichCompositingUITests` | 323 | 10 |
+| `SelectionAndMoveUITests` | 277 | 10 |
+| `LayerFolderAndMaskMenuUITests` | 256 | 9 |
+| `BrushEditorUITests` | 249 | 11 |
+| `LayerPanelControlsUITests` | 230 | 8 |
+| `BrushMenuUITests` | 227 | 8 |
+| `BlendModesAndCompositorUITests` | 214 | 8 |
+| `EraserAndPersistenceUITests` | 197 | 7 |
+| `GraphEditorGestureUITests` | 193 | 5 |
+
+**5,641 class-seconds across 188 classes**, against 5,162 across 182 at `db21782` — so ~66 new tests
+cost ~479 class-seconds. Four clones hold 23.5 min of ideal work against 32.6 min of wall clock, and
+the top four are spread across 79 seconds, so there is still no single long class to split.
+
+**Two of the three environmental reds were wall-clock assertions, and the full suite is the one place
+this file says not to run them.** `PerfBaselineTests`' layered-preview test failed at 0.0213 s against
+a 0.0178 s bound and passed **1.150 s** alone; `DabCostBench`'s pad re-walk failed at 0.691 s against a
+0.5 s cap and passed **1.007 s** alone. Neither is in the bench-file exclusion, so both run under four
+parallel clones — the exact contention this file records as making a suite "return wrong answers". The
+third was `InterpolationWorkflowUITests`' `testInterpolateModeEndToEndFromGestureToScrub`, red under
+clones for the **third** consecutive full run and passing alone at 143 s, exactly as this section
+already predicts. Triage them **warm and never after an erase**: all three name durations.
+
+**The skip count moved 34 → 36 and that is a fix, not drift.** `PlaybackTickBench`'s two tests used to
+*fail* at 0.000 s in every full run — `tearDown` ran on the `XCTSkipUnless` path and trapped unwrapping
+a nil `URL!` that `setUpWithError` assigns after its guard. They skip now. **The general rule this
+bought: `tearDown` runs even when `setUpWithError` throws `XCTSkip`, so an opt-in suite must gate its
+teardown on a flag set past the guard** — and the report is `Test crashed with signal trap` printed
+*beside* the skip message, which reads as a failure of the code under test.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
