@@ -36,13 +36,20 @@ import Foundation
 /// at, and renaming *within the destination directory* (which is atomic — same volume, same
 /// directory), means the final name never exists in an incomplete state.
 ///
-/// ## Verification
+/// ## Verification: the copy must be **as good as the source**, not good in itself
 ///
 /// A copy is accepted when the destination holds the same number of files as the source and the same
-/// total bytes, and — for a `.paintproj` — when `ProjectBackupManager.validateProject` passes on the
-/// **copy**. The byte total is what catches a truncated write; the validator is what catches a
-/// package that was already damaged before the move, which is not this pass's to repair but is very
-/// much its business not to advertise as migrated.
+/// total bytes. On top of that, a `.paintproj` **whose source validates** must validate as a copy —
+/// that catches a PNG whose header was truncated in a way the byte total would not.
+///
+/// **The validator is deliberately not a gate on a source that was already damaged**, and getting
+/// that backwards was a real bug in this file's first draft. A damaged package is exactly the one
+/// the gallery surfaces with a Restore-from-Backup affordance, and the trash is full of packages
+/// that are damaged *because that is why they were trashed* (`moveToTrash(tag: "corrupt")`). Refusing
+/// to migrate those would strand, in the container a reinstall wipes, precisely the files that were
+/// already in trouble — turning a recoverable problem into the unrecoverable one this whole feature
+/// exists to prevent. So: copy it faithfully, move it, and let the repair pass find it at the new
+/// root exactly as it would have at the old one.
 ///
 /// Pure Foundation, so it compiles into the UI-test bundle like `ProjectBackupManager`.
 nonisolated enum ProjectLibraryMigration {
@@ -146,8 +153,11 @@ nonisolated enum ProjectLibraryMigration {
             report.failed.append(label)
             return
         }
+        // "As good as the source": census always, and the package validator only where the source
+        // passed it too. See the type's note for why a damaged package must still be carried.
+        let sourceWasValid = isPackage(item) && ProjectBackupManager.validateProject(at: item)
         guard matches(source: item, destination: staged),
-              !isPackage(item) || ProjectBackupManager.validateProject(at: staged) else {
+              !sourceWasValid || ProjectBackupManager.validateProject(at: staged) else {
             try? fm.removeItem(at: staged)
             report.failed.append(label)
             return

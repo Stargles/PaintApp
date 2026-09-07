@@ -170,25 +170,39 @@ nonisolated enum ProjectLocation {
                                       + "moved, or deleted.")
         }
 
-        guard url.startAccessingSecurityScopedResource() else {
-            return .unavailable(name: name,
-                                reason: "this app no longer has permission to open it.")
-        }
+        // **`startAccessingSecurityScopedResource()` returning false is not by itself a refusal**,
+        // and reading it as one would be a bug. It answers false for any URL that is not
+        // security-scoped in the first place — a folder inside the app's own container, a path a
+        // test hands over — and those are perfectly writable. What the app actually needs to know is
+        // whether it can read and write there, so that is what gets asked, and the scope call's
+        // answer only shapes *which* sentence a failure gets.
+        let scoped = url.startAccessingSecurityScopedResource()
 
         // A folder on an unplugged drive, or an iCloud folder whose contents have not come down yet,
-        // resolves and grants scope and *then* is not there. Checking is what turns a stream of
-        // silent write failures into one sentence.
-        guard (try? url.checkResourceIsReachable()) == true else {
-            url.stopAccessingSecurityScopedResource()
-            return .unavailable(name: name,
-                                reason: "it isn’t there right now. If it is on a drive or a server, "
-                                      + "reconnect it; if it is in iCloud Drive, it may still be "
-                                      + "downloading.")
+        // resolves — and is then not there. A folder whose permission has lapsed is there and will
+        // not take a write. Probing both is what turns a stream of silent save failures into one
+        // sentence, and the probe is a single file created and removed.
+        guard (try? url.checkResourceIsReachable()) == true, canWrite(into: url) else {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            return .unavailable(name: name, reason: scoped
+                ? "it isn’t there right now. If it is on a drive or a server, reconnect it; if it "
+                + "is in iCloud Drive, it may still be downloading."
+                : "this app no longer has permission to open it. Choose it again to restore access.")
         }
 
-        hold(url)
+        if scoped { hold(url) }
         if isStale { persistBookmark(for: url, name: url.lastPathComponent) }
         return .chosen(url)
+    }
+
+    /// Whether a file can be created in `url` right now. One write and one delete — cheaper than
+    /// `isWritableFile`, which answers from the permission bits and says yes about a folder on a
+    /// volume that has gone read-only.
+    private static func canWrite(into url: URL) -> Bool {
+        let probe = url.appendingPathComponent(".paintapp-access-probe-\(UUID().uuidString)")
+        guard (try? Data().write(to: probe)) != nil else { return false }
+        try? FileManager.default.removeItem(at: probe)
+        return true
     }
 
     // MARK: - Choosing

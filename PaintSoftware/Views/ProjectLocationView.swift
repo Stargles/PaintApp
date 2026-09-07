@@ -152,11 +152,11 @@ struct ProjectLocationView: View {
     /// would be correct bookkeeping and is skipped on purpose: the two URLs are equal, the scope is
     /// refcounted, and a `stop` here has been observed to revoke the hold the resolve just took.
     private func adopt(_ url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            outcome = "iOS did not grant this app access to that folder. Try picking it again, or "
-                    + "pick a folder inside On My iPad."
-            return
-        }
+        // Not `guard`: a false answer here means "this URL was not security-scoped", which is true of
+        // a folder inside the app's own container and says nothing about whether it is writable.
+        // `ProjectLocation.adopt` re-resolves and probes for real, and reports the refusal in a
+        // sentence if there is one. See `ProjectLocation.resolveStoredBookmark`.
+        _ = url.startAccessingSecurityScopedResource()
         isWorking = true
         outcome = nil
         Task.detached(priority: .userInitiated) {

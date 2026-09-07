@@ -28,6 +28,19 @@ struct GalleryView: View {
     /// Which project is opening, if any — see `GalleryOpenState` for the two rules it carries.
     @State private var openState = GalleryOpenState()
 
+    @State private var invitationDismissed = ProjectLocation.defaults.bool(forKey: GalleryView.invitationDismissedKey)
+
+    /// The artist has seen the "inside the app" warning and answered it. Persisted, because a
+    /// warning that comes back every launch is one that stops being read.
+    static let invitationDismissedKey = "PaintApp.gallery.storageInvitationDismissed"
+
+    /// Shown only at the top of the tree, only when no folder has been chosen, and only once the
+    /// artist has something to lose.
+    private var showStorageInvitation: Bool {
+        !invitationDismissed && !ProjectLocation.hasChosenFolder && locationProblem == nil
+            && path.isEmpty && !projects.isEmpty
+    }
+
     /// The directory the tiles on screen come from.
     private var currentDirectory: URL {
         path.reduce(ProjectStore.projectsDirectory) { $0.appendingPathComponent($1, isDirectory: true) }
@@ -57,6 +70,38 @@ struct GalleryView: View {
                             .background(Color.yellow.opacity(0.18))
                         }
                         .accessibilityIdentifier("gallery.locationProblemBanner")
+                    }
+
+                    // **Cold-start reachability.** A folder picker buried behind a toolbar glyph is a
+                    // feature the artist has to already know about, and the three features this repo
+                    // shipped unusable were all reachable only from a state you could not get to.
+                    // This is the one sentence that says the default is dangerous, on the screen
+                    // where the danger lives, and it goes away for good once they answer it either
+                    // way — it is a warning, not a nag.
+                    if showStorageInvitation {
+                        HStack(spacing: 8) {
+                            Image(systemName: "externaldrive.badge.exclamationmark")
+                                .foregroundColor(.orange)
+                            Text("Projects are saved inside the app. Reinstalling erases them.")
+                                .font(.footnote)
+                                .foregroundColor(.white)
+                            Spacer()
+                            Button("Choose Folder") { showingStorage = true }
+                                .font(.footnote.bold())
+                                .accessibilityIdentifier("gallery.storageInvitationChoose")
+                            Button {
+                                ProjectLocation.defaults.set(true, forKey: Self.invitationDismissedKey)
+                                invitationDismissed = true
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .accessibilityLabel("Dismiss")
+                            }
+                            .accessibilityIdentifier("gallery.storageInvitationDismiss")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.orange.opacity(0.16))
+                        .accessibilityIdentifier("gallery.storageInvitation")
                     }
 
                     if !path.isEmpty {
