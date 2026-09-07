@@ -48,19 +48,28 @@ final class SampleCodingLogicTests: XCTestCase {
     // MARK: - The field itself
 
     /// The numbers item (8) is specified in, derived rather than restated. `Int16` at a quarter of a
-    /// point reaches **-8192.0 … +8191.75** — a span of 16,383.75, which is why
-    /// `CanvasManager.maxCanvasExtent` is 16383 and not 16384.
+    /// point reaches **-8192.0 … +8191.75** — a span of 16,383.75, which is this *format's* ceiling:
+    /// 16383 is the largest canvas dimension the encoding itself can carry without clamping.
+    ///
+    /// **No longer why `CanvasManager.maxCanvasExtent` is what it is — TODO.md item (31), 2026-09-07.**
+    /// The constant is now 4096, chosen for a memory reason unrelated to this format (PERFORMANCE.md
+    /// §15); the format could still carry a canvas up to 16383 if the constant ever moved back toward
+    /// it, and that headroom is exactly what `testAMaximumCanvasEncodesBothEdgesAndOnePointWiderDoesNot`
+    /// below still exercises, reading the live constant rather than 16383 itself.
     func testTheStorableRangeIsTheSignedSixteenBitQuarterPixelField() {
         XCTAssertEqual(PackedSampleRun.quantum, 0.25, "the owner's quarter-pixel rule")
         XCTAssertEqual(SampleChannelSet.pressureOnly.bytesPerSample, 5, "16 + 16 + 8 bits")
         XCTAssertEqual(PackedSampleRun.representable.lowerBound, -8192.0)
         XCTAssertEqual(PackedSampleRun.representable.upperBound, 8191.75)
         XCTAssertEqual(PackedSampleRun.representable.upperBound - PackedSampleRun.representable.lowerBound,
-                       16383.75, "a span of 16383.75, not 16384 — the whole reason for maxCanvasExtent's value")
+                       16383.75, "a span of 16383.75, not 16384 — this format's own ceiling, independent "
+                       + "of maxCanvasExtent's current (smaller, memory-driven) value")
     }
 
-    /// The bound above and the canvas bound are the same decision, so they are asserted together:
-    /// a canvas of `maxCanvasExtent` encodes both its edges, and one point wider does not.
+    /// **Format ceiling, not canvas bound, since TODO.md item (31)** — `maxCanvasExtent` (4096) is now
+    /// well inside what this encoding can carry, so this is really "the format encodes right up to
+    /// whatever the live canvas bound is, with nothing left over", which remains true and worth
+    /// pinning: it is what lets `maxCanvasExtent` move again without this codec silently clamping.
     func testAMaximumCanvasEncodesBothEdgesAndOnePointWiderDoesNot() {
         func clamps(atExtent extent: CGFloat) -> Int {
             let origin = CGPoint(x: extent / 2, y: extent / 2)

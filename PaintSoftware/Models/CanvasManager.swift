@@ -26,14 +26,33 @@ final class CanvasManager: ObservableObject {
     /// `setCanvasPadding`, which resizes every buffer to keep existing content centred.
     @Published var canvasPadding: CGFloat = 0
 
-    /// The largest coordinate a canvas dimension may reach — **16383, not 16384**. TODO.md item (8)'s
-    /// signed 16-bit quarter-pixel sample coordinate addresses -8192.0...+8191.75 (a span of
-    /// 16383.75 pt, not 16384), so with the encoding origin at the canvas centre, 16383 is the largest
-    /// dimension that encodes without clamping a quarter-pixel *inside* the artwork on two edges.
-    /// **The single named home for this bound** — TODO.md item (13) asks for one, and this is it.
-    /// `canvasPaddingRange` below and `CanvasSizePickerView.maxDimension` both read this rather than
-    /// spelling 16383 a second time.
-    static let maxCanvasExtent: CGFloat = 16383
+    /// The largest coordinate a canvas dimension may reach — **memory-bound, not format-bound.**
+    /// TODO.md item (8)'s signed 16-bit quarter-pixel sample coordinate addresses
+    /// -8192.0...+8191.75 (a span of 16383.75 pt, not 16384), so the *format* can still carry a
+    /// canvas up to 16383 without clamping a quarter-pixel inside the artwork on two edges. That is
+    /// no longer this constant's value: a 16383² canvas crashes on a single brushstroke, reported by
+    /// the owner off their own iPad (9th generation, `iPad12,1`, 3 GB) — TODO.md item (31).
+    ///
+    /// **Why: one 16383² RGBA buffer is 1.07 GB, the sandwich compositor needs three of them live at
+    /// once (`SandwichRecipe`), and committing a stroke opens a fourth — the layer's own persistent
+    /// `CGContext` (`RasterLayerTexture.ensureContext`, BUGS.md's memory audit item 2) — against a
+    /// device MEASURED at 1837 MiB available before jetsam **at rest**, before any of that is drawn.**
+    /// None of `CompositorBudget`'s protection reaches this: a plain few-layer document composites on
+    /// `CoreGraphicsCompositor` by design (`[RenderNode].prefersGPUCompositing` is false under four
+    /// layers), and `CompositorBudget.hasHeadroom` has exactly two call sites — `MetalCompositor.swift`
+    /// and `MetalFillEngine.swift` — neither of which is on this path, so the sandwich rebuild that
+    /// runs on every stroke is never budget-checked at all.
+    ///
+    /// **4096 is INFERRED from that arithmetic, not measured — PERFORMANCE.md §15 carries the full
+    /// derivation and the open checkbox to confirm or correct it on the owner's own device.** It sits
+    /// comfortably under every conservative variant of that derivation, and it is still three orders
+    /// of magnitude above the owner's own working canvas (2048x1024, PERFORMANCE.md §1), so nothing
+    /// they actually do is bound by it.
+    ///
+    /// **The single named home for this bound** — TODO.md item (13) asked for one, and this is still
+    /// it. `canvasPaddingRange` below and `CanvasSizePickerView.maxDimension` both read this rather
+    /// than spelling the number a second time.
+    static let maxCanvasExtent: CGFloat = 4096
 
     /// Base upper bound for `canvasPadding` on an ordinary canvas — 1024 pt per side, raised from 512
     /// by TODO.md item (13).

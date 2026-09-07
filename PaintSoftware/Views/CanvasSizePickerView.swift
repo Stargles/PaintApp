@@ -13,8 +13,9 @@ struct CanvasSizePickerView: View {
     }
 
     private let minDimension = 1
-    /// TODO.md item (13): raised 8192 -> 16383. `CanvasManager.maxCanvasExtent` is the single named
-    /// home for this bound — see its doc comment for why 16383 and not 16384.
+    /// TODO.md item (13) raised this 8192 -> 16383; item (31) lowered it again, to 4096, because
+    /// 16383 crashes on a brushstroke on a 3 GB device. `CanvasManager.maxCanvasExtent` is the single
+    /// named home for this bound — see its doc comment and PERFORMANCE.md §15 for why 4096.
     private let maxDimension = Int(CanvasManager.maxCanvasExtent)
 
     private var width: Int? { Int(widthText) }
@@ -23,6 +24,17 @@ struct CanvasSizePickerView: View {
     private var isValid: Bool {
         guard let width, let height else { return false }
         return (minDimension...maxDimension).contains(width) && (minDimension...maxDimension).contains(height)
+    }
+
+    /// Whether the *reason* the fields are invalid is specifically "too large" — as opposed to
+    /// empty, non-numeric, or below `minDimension` — so the refusal can say why rather than just
+    /// restating the range. TODO.md item (31): a size above `maxDimension` is refused because it
+    /// crashes the app on a brushstroke on some devices, not for an arbitrary reason, and a refusal
+    /// is never silent in this codebase.
+    private var exceedsMaximum: Bool {
+        if let width, width > maxDimension { return true }
+        if let height, height > maxDimension { return true }
+        return false
     }
 
     var body: some View {
@@ -46,9 +58,22 @@ struct CanvasSizePickerView: View {
                 .padding(.horizontal, 50)
 
                 if !isValid {
-                    Text("Enter values between \(minDimension) and \(maxDimension)")
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    if exceedsMaximum {
+                        // Says *why*, not just *what*: PERFORMANCE.md §15 is the arithmetic behind
+                        // this number — a canvas this large needs several buffers this size at once
+                        // (the compositor's sandwich, plus the layer's own storage), and on a 3 GB
+                        // iPad that alone exceeds what the app is measured to have before a crash.
+                        Text("Canvases above \(maxDimension) can run out of memory and crash while "
+                             + "drawing, so this size isn't offered.")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .accessibilityIdentifier("sizePicker.tooLargeMessage")
+                    } else {
+                        Text("Enter values between \(minDimension) and \(maxDimension)")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .accessibilityIdentifier("sizePicker.validationMessage")
+                    }
                 }
             }
 

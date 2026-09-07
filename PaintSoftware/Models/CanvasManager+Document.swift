@@ -453,7 +453,8 @@ extension CanvasManager {
     ///
     /// **Not simply `1...maxCanvasExtent`, and the difference is the padding.** `canvasSize` includes
     /// the margin, and `maxCanvasExtent` bounds `canvasSize` — so on a document with 1024 pt of
-    /// padding the largest *artwork* that fits is 16383 − 2048. `CanvasSizePickerView` needs no such
+    /// padding the largest *artwork* that fits is `maxCanvasExtent` − 2048 (4096 − 2048 today).
+    /// `CanvasSizePickerView` needs no such
     /// inset because it creates a document with no padding at all. Clamping rather than refusing, for
     /// the same reason the padding slider clamps: the artist gets the largest thing that fits, not an
     /// error.

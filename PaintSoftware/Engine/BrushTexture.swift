@@ -818,7 +818,8 @@ struct BrushTextureSettings: Codable, Hashable {
     /// **The smallest repeat the merge will lay, and it is a cost floor rather than a taste one.**
     ///
     /// `BrushTextureMerge` draws one tile per repeat over the stroke's own clip, so the draw count is
-    /// `(clip / tileSize)²`. A stroke that crosses a 16383² canvas — which this app allows, and
+    /// `(clip / tileSize)²`. A stroke that crosses a 16383² canvas — the format's own ceiling
+    /// (`PackedSampleRun`), wider than `CanvasManager.maxCanvasExtent` allows today, and
     /// `StrokeScratch`'s whole existence is about — is 1M tiles at 16 points and 268M at 1. The
     /// pixels are the same either way; it is the per-draw overhead that is not, which is why the
     /// floor is on the *count* rather than on the blitting.

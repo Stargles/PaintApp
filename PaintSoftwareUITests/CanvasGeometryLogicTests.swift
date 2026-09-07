@@ -19,16 +19,76 @@ final class CanvasGeometryLogicTests: XCTestCase {
 
     // MARK: - The named constants
 
-    func testMaxCanvasExtentIsSixteenThreeEightyThreeNotSixteenThreeEightyFour() {
-        // A signed 16-bit quarter-pixel sample coordinate (TODO.md item (8)) addresses
-        // -8192.0...+8191.75 — a span of 16383.75 pt, not 16384 — so with the encoding origin at the
-        // canvas centre, 16383 is the largest dimension that encodes without clamping a quarter-pixel
-        // inside the artwork on two edges.
-        XCTAssertEqual(CanvasManager.maxCanvasExtent, 16383)
+    /// **Superseded 2026-09-07 by TODO.md item (31).** The signed 16-bit quarter-pixel sample
+    /// coordinate (TODO.md item (8)) still addresses -8192.0...+8191.75 — a span of 16383.75 pt, not
+    /// 16384 — so 16383 remains the *format's* ceiling (`testAMaximumCanvasEncodesBothEdgesAndOneP-
+    /// ointWiderDoesNot` in `SampleCodingLogicTests` still pins that, reading the live constant). It
+    /// is no longer `maxCanvasExtent`'s value: a 16383² canvas crashes on a single brushstroke on the
+    /// owner's 3 GB iPad, so the bound moved from a format question to a memory one.
+    func testMaxCanvasExtentIsInferredFromA3GBDeviceBudgetNotSixteenThreeEightyThree() {
+        XCTAssertEqual(CanvasManager.maxCanvasExtent, 4096,
+                       "INFERRED — PERFORMANCE.md §15 has the derivation and the open device check")
     }
 
     func testCanvasPaddingBaseUpperBoundRoseFromFiveTwelveToTenTwentyFour() {
         XCTAssertEqual(CanvasManager.canvasPaddingBaseUpperBound, 1024)
+    }
+
+    // MARK: - The arithmetic behind the memory-driven cap (TODO.md item (31))
+
+    /// **Reproduces PERFORMANCE.md §15's derivation as an assertion, so the two cannot drift apart.**
+    /// Every figure below is either MEASURED (cited to where) or INFERRED (this derivation itself,
+    /// and labelled as such in both places) — PERFORMANCE.md §15 has the full working, the
+    /// sensitivity table across less/more conservative variants, and the open device check that
+    /// would confirm or correct the constant this pins.
+    func testTheChosenCapFitsAConservativeThreeGBBudgetAndTheOldOneDidNot() {
+        // MEASURED, PERFORMANCE.md §9, owner's iPad 9 (`iPad12,1`, 3 GB), 2026-09-02:
+        // `os_proc_available_memory()` at rest, i.e. before any document is even open.
+        let availableAtRestBytes = 1837.0 * 1024 * 1024
+
+        // INFERRED margin: reserved for whatever is already resident by the time a real stroke
+        // happens — the document's own undo history, UIKit, the layer content itself — since 1837
+        // MiB was measured with nothing open at all. Half is a round, deliberately generous margin
+        // and not itself a measurement, which is exactly why this whole test is INFERRED.
+        let marginReserve = 0.5
+
+        // The sandwich compositor's three canvas-sized RGBA buffers (TODO.md item (31)'s own figure,
+        // cross-checked below against `SandwichRecipe`/`Compositor.swift`), plus the one more
+        // `RasterLayerTexture.ensureContext` opens for the layer actually being drawn on when a
+        // stroke commits — BUGS.md's memory-allocation audit, item 2: "committing one still opens
+        // the cel's canvas-sized CGContext... which is the artwork's own storage and is as
+        // unbudgeted as everything else here."
+        let canvasSizedBuffersOnAStroke = 4.0
+
+        // `CompositorBudget.hasHeadroom` already prices a canvas-sized texture at twice its raw byte
+        // count — the readback `CGImage` plus the Core Animation copy, "none of which is freed
+        // before the next composite starts" (`Compositor.swift`'s own doc comment on that function).
+        // Applied here by analogy, because the path that actually composites a plain document's
+        // sandwich has no budget of its own to read that multiplier from: `CompositorBudget.hasHeadroom`
+        // has exactly two call sites, `MetalCompositor.swift` and `MetalFillEngine.swift`, and
+        // `[RenderNode].prefersGPUCompositing` is false under four layers, so a plain few-layer
+        // document's live sandwich rebuild runs on `CoreGraphicsCompositor`, unguarded, every time.
+        let realismFactor = 2.0
+
+        func bytesNeeded(atExtent extent: Double) -> Double {
+            canvasSizedBuffersOnAStroke * realismFactor * extent * extent * 4 // 4 bytes/px, RGBA8
+        }
+
+        let budgetBytes = availableAtRestBytes * marginReserve
+
+        XCTAssertLessThan(bytesNeeded(atExtent: Double(CanvasManager.maxCanvasExtent)), budgetBytes,
+                          "the chosen cap should fit comfortably inside the conservative budget")
+
+        XCTAssertGreaterThan(bytesNeeded(atExtent: 16383), budgetBytes,
+                            "16383 is exactly the value this item retired because it does not fit — "
+                            + "if this ever passed, the arithmetic would no longer explain the crash")
+
+        // Cross-check against TODO.md item (31)'s own headline figure for the sandwich alone, with
+        // no realism factor and no fourth buffer: "one 16383² RGBA texture is 1.07 GB; the
+        // compositor's sandwich needs three, so 3.22 GB."
+        let threeBuffersAtOldLimit = 3.0 * 16383.0 * 16383.0 * 4.0
+        XCTAssertEqual(threeBuffersAtOldLimit / 1_000_000_000, 3.22, accuracy: 0.01,
+                      "TODO.md item (31)'s own figure for the sandwich alone at the old 16383 limit")
     }
 
     // MARK: - The range at an ordinary canvas
@@ -45,10 +105,11 @@ final class CanvasGeometryLogicTests: XCTestCase {
 
     func testCanvasPaddingRangeAtASquareOrdinaryCanvasIsAlsoTheBase() {
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 4096, height: 4096)
+        manager.canvasSize = CGSize(width: 1024, height: 1024)
         manager.canvasPadding = 0
 
-        // (16383 - 4096) / 2 = 6143.5, well above the 1024 base, so the base wins.
+        // (4096 - 1024) / 2 = 1536, above the 1024 base, so the base wins. (4096×4096 is now the
+        // *exact*-limit fixture below, not "comfortably under" — see the note there.)
         XCTAssertEqual(manager.canvasPaddingRange, 0...1024)
     }
 
@@ -56,26 +117,28 @@ final class CanvasGeometryLogicTests: XCTestCase {
 
     func testCanvasPaddingRangeNearTheLimitShrinksBelowTheBase() {
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 16000, height: 16000)
+        manager.canvasSize = CGSize(width: 3600, height: 3600)
         manager.canvasPadding = 0
 
-        // (16383 - 16000) / 2 = 191.5, below the 1024 base, so the budget wins.
-        XCTAssertEqual(manager.canvasPaddingRange, 0...191.5)
+        // (4096 - 3600) / 2 = 248, below the 1024 base, so the budget wins.
+        XCTAssertEqual(manager.canvasPaddingRange, 0...248)
     }
 
     func testCanvasPaddingRangeAtTheExactLimitIsZero() {
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 16383, height: 16383)
+        manager.canvasSize = CGSize(width: 4096, height: 4096)
         manager.canvasPadding = 0
 
-        // No room left at all: the artwork already fills the whole 16383 budget.
+        // No room left at all: the artwork already fills the whole 4096 budget.
         XCTAssertEqual(manager.canvasPaddingRange, 0...0)
     }
 
     func testCanvasPaddingRangeNeverGoesNegativeBeyondTheLimit() {
         // Nothing in the app can put a canvas past `maxCanvasExtent` today, but the formula itself
         // must not produce an invalid (upper < lower) range if it ever did — a `ClosedRange` traps on
-        // construction, and a trap here is a crash on opening the Actions menu.
+        // construction, and a trap here is a crash on opening the Actions menu. 20000 was chosen to
+        // sit past the *old* 16383 bound as well as the current 4096 one, so this probe still means
+        // "grossly past the limit, however the limit ever moves" rather than merely past today's.
         let manager = CanvasManager()
         manager.canvasSize = CGSize(width: 20000, height: 20000)
         manager.canvasPadding = 0
@@ -86,16 +149,15 @@ final class CanvasGeometryLogicTests: XCTestCase {
     // MARK: - `canvasSize` already includes padding — the single easiest thing to get wrong here
 
     func testCanvasPaddingRangeDoesNotDoubleCountExistingPadding() {
-        // canvasSize is at the exact limit, but 500 of each dimension is padding already applied
-        // (canvasPadding = 500, matching this item's own worked example). The artwork itself is only
-        // 16383 - 2*500 = 15383, so there is exactly 500 pt of room left on each side before the
-        // *canvas* (artwork + padding) would exceed 16383 — i.e. the upper bound should come out to
-        // the same 500 that is already applied, not 0.
+        // canvasSize is at the exact limit, but 500 of each dimension is padding already applied.
+        // The artwork itself is only 4096 - 2*500 = 3096, so there is exactly 500 pt of room left on
+        // each side before the *canvas* (artwork + padding) would exceed 4096 — i.e. the upper bound
+        // should come out to the same 500 that is already applied, not 0.
         //
         // A wrong implementation that reads `canvasSize` as the artwork extent (double-subtracting
-        // the padding already on the canvas) would compute (16383 - 16383) / 2 = 0 instead.
+        // the padding already on the canvas) would compute (4096 - 4096) / 2 = 0 instead.
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 16383, height: 16383)
+        manager.canvasSize = CGSize(width: 4096, height: 4096)
         manager.canvasPadding = 500
 
         XCTAssertEqual(manager.canvasPaddingRange, 0...500,
@@ -107,11 +169,11 @@ final class CanvasGeometryLogicTests: XCTestCase {
         // setCanvasPadding grows both dimensions by the same delta, so a non-square canvas is bounded
         // by whichever dimension is closer to the limit — here, height.
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 2048, height: 16000)
+        manager.canvasSize = CGSize(width: 2048, height: 3800)
         manager.canvasPadding = 0
 
-        // (16383 - 16000) / 2 = 191.5, driven by height even though width has plenty of room.
-        XCTAssertEqual(manager.canvasPaddingRange, 0...191.5)
+        // (4096 - 3800) / 2 = 148, driven by height even though width has plenty of room.
+        XCTAssertEqual(manager.canvasPaddingRange, 0...148)
     }
 
     // MARK: - No canvas yet
@@ -138,38 +200,52 @@ final class CanvasGeometryLogicTests: XCTestCase {
 
     func testSetCanvasPaddingClampsToTheShrunkenBudgetNearTheLimit() {
         let manager = CanvasManager()
-        manager.canvasSize = CGSize(width: 16000, height: 16000)
+        manager.canvasSize = CGSize(width: 3601, height: 3601)
 
         manager.setCanvasPadding(5000)
 
-        // `setCanvasPadding` rounds the clamped value (load-bearing for backend parity — see its own
-        // doc comment), so the range's 191.5 upper bound becomes 192 here, not 191.5 itself.
-        XCTAssertEqual(manager.canvasPadding, 192, "clamped to the budget (rounded), not the 1024 base")
+        // (4096 - 3601) / 2 = 247.5. `setCanvasPadding` rounds the clamped value (load-bearing for
+        // backend parity — see its own doc comment), so the range's 247.5 upper bound becomes 248
+        // here, not 247.5 itself.
+        XCTAssertEqual(manager.canvasPadding, 248, "clamped to the budget (rounded), not the 1024 base")
     }
 
     // MARK: - "Defined once in the code"
 
-    /// Scans the app's own source (not the test target) for stray literal spellings of the 16383
-    /// bound. `CanvasManager.maxCanvasExtent`'s declaration is the one permitted occurrence; every
-    /// other reader — `CanvasSizePickerView.maxDimension` included — must read the constant rather
-    /// than spelling the number again, or a future change to the bound silently misses one of them.
-    func testMaxCanvasExtentIsTheOnlySpellingOfSixteenThreeEightyThreeInAppSource() {
-        let occurrences = literalOccurrences(of: "16383")
+    /// Scans the app's own source (not the test target) for stray literal spellings of whatever
+    /// `maxCanvasExtent` currently is. `CanvasManager.maxCanvasExtent`'s declaration is the one
+    /// permitted occurrence; every other reader — `CanvasSizePickerView.maxDimension` included —
+    /// must read the constant rather than spelling the number again, or a future change to the bound
+    /// silently misses one of them.
+    ///
+    /// **Built from the live constant, not a hardcoded string, since TODO.md item (31).** The test
+    /// used to spell "16383" itself, which is exactly the "silently misses it" failure this test
+    /// exists to catch, one level up: item (31) changed the bound to 4096 and a test still asserting
+    /// the *old* number would have kept passing throughout — 16383 has nothing left to be the only
+    /// spelling of. Reading `CanvasManager.maxCanvasExtent` here means the next change needs no edit
+    /// to this file either.
+    func testMaxCanvasExtentIsTheOnlySpellingOfItsOwnValueInAppSource() {
+        let literal = String(Int(CanvasManager.maxCanvasExtent))
+        let occurrences = literalOccurrences(of: literal)
 
         XCTAssertEqual(occurrences.count, 1,
-                       "expected exactly one literal spelling of 16383 (CanvasManager.maxCanvasExtent's "
+                       "expected exactly one literal spelling of \(literal) (CanvasManager.maxCanvasExtent's "
                        + "own declaration); found: \(occurrences)")
         XCTAssertEqual(occurrences.first?.file, "CanvasManager.swift",
                         "the one permitted spelling should be maxCanvasExtent's declaration")
     }
 
-    /// The old flat 512 ceiling and 8192 picker maximum must both be gone — a stray leftover would
-    /// mean some reader still clamps to the number this item retired.
+    /// Every bound this item has retired must be gone — a stray leftover would mean some reader
+    /// still clamps to a number the app no longer honours. 512 and 8192 predate TODO.md item (13);
+    /// 16383 was item (13)'s own answer and item (31) retired it in turn, 2026-09-07, down to 4096.
     func testTheOldBoundsAreGoneFromAppSource() {
         XCTAssertTrue(literalOccurrences(of: "8192").isEmpty,
                       "the picker's old 8192 maximum should have no remaining spelling")
         XCTAssertTrue(literalOccurrences(of: "16384").isEmpty,
                       "16384 is one too large for a signed 16-bit quarter-pixel coordinate — 16383 is correct")
+        XCTAssertTrue(literalOccurrences(of: "16383").isEmpty,
+                      "16383 was maxCanvasExtent's value before TODO.md item (31); it crashes a 3 GB "
+                      + "device on a brushstroke and should have no remaining spelling as a bound")
     }
 
     /// `CanvasSizePickerView.maxDimension` can't be exercised from this pure-logic tier — it is a

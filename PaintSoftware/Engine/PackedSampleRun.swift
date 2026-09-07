@@ -67,7 +67,9 @@ extension CodingUserInfoKey {
 ///
 /// **The origin is written into the payload, and that is the load-bearing decision here.** The
 /// owner's ruling puts it at the centre of the *current* canvas, which is what buys the sign bit for
-/// free and makes a 16383-point canvas addressable (`CanvasManager.maxCanvasExtent`). But an origin
+/// free and makes a 16383-point canvas addressable — this format's own ceiling (TODO.md item (8)),
+/// wider than `CanvasManager.maxCanvasExtent`'s current, smaller, memory-driven value (TODO.md item
+/// (31)). But an origin
 /// that is *implied* by the reader's canvas size is an origin a caller can get wrong, and getting it
 /// wrong shifts every coordinate in the file by half a canvas — silently, and reading as success,
 /// which is this codebase's most expensive recurring bug. Writing it costs ~24 bytes a stroke against
