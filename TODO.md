@@ -199,21 +199,6 @@ rewrites elements in place, so every tick of a slider is a mid-list edit — a w
 
 ---
 
-## (26) Import videos — one stage left
-
-**Status** — stages 1 through 7 merged. Stage 8 alone remains.
-
-A video is a real `VectorElement` case with persistence, Split Drawing has its row and its caller and
-its suite, and the import path ships.
-
-**Left to build**
-- [ ] **Stage 8** — bake a video to cels of images (VIDEO.md §2.9). No bake verb exists yet.
-- [ ] VIDEO.md §9's seven open questions.
-
-**Spec** VIDEO.md §8.
-
----
-
 ## (22) Select multiple cels at once
 
 **Status** — not started. The menu row exists and is `.disabled(true)` with an empty action; no
@@ -280,6 +265,10 @@ which is the same failure the audit exists to catch, pointed at itself.
       tenants. **The third known item was already false**: neither `SelectionModels` nor LASSO_MOVE.md
       cites the lifted blocker any more, which is this list going stale in the direction of looking
       unfinished. Sweep the rest of the specs the same way — that is the last checkbox here.
+      **One more is known:** VIDEO.md §2.10 closes by saying a baked video's images *"split like any
+      other ink, because by then it is ink"*, and they do not — `splitForLassoMove` refuses `.image`
+      exactly as it refuses `.video`, by centre and whole. Stage 8 recorded it in VIDEO.md §9 with the
+      two ways to make the sentence true rather than picking one.
 - [ ] **Citation rot.** ~10 of one deleted item's 15 anchors and 5 of another's 11 had drifted, two
       because a file moved directory. Sweep the specs the same way and prefer symbols to line numbers.
 - [x] **Dangling references.** Neither was rot. (10a) and (38) are **completed** items whose numbers
