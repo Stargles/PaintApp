@@ -356,10 +356,13 @@ is now the single statement of *"which files does this brush need"*, and both `B
 *"copied by the palette, not by what is drawn"* is one missed union away from being true again, one
 field along.
 
-**What it is not, yet: reachable.** There is no editor control for any of the three fields, so today a
-textured brush can only be built in code. That is §12 stage 10's job and is the honest state to record
-rather than a defect — but it does mean nothing in the shipped app draws with paper, which is why the
-byte-identity pin below is the one that matters most.
+**It was not reachable at the time of this ruling, and §12 stage 10 was the job that fixed it.** Then
+there was no editor control for any of the three fields, so a textured brush could only be built in
+code and nothing in the shipped app drew with paper — which is why the byte-identity pin below mattered
+most, as the one check that could exercise the merge before a person could. **BUILT 2026-09-05**: §2.25
+records all three fields landing in the editor's left column, pinned by `BrushEditorUITests`'
+`testTheTipAndTexturePickersReachTheInkAndDepthZeroIsExactlyNoTexture`, so a textured brush is reachable
+from a cold start like any other.
 
 **It was still driven by hand before being called done**, per CLAUDE.md's *"a feature is not finished
 because its model is correct"*: a sixth preset carrying a sheet was added to `BrushLibrary.defaults` in
@@ -1718,14 +1721,20 @@ what stops the editor being designed around a mechanism that does not exist.
    tiltAngle`: one row, no new mechanism. **The curve is already per row**, so *"the pressure curve to
    trigger it may be adjustable"* is something the editor exposes rather than something to add.
 4. **Randomness whose *amount* is driven by a sensor** — *"pressure maps to both brush thickness and
-   spacing, with spacing using the randomizer engine"*, and *"pressure to taper"*. **Not expressible,
-   and §13 holds the decision open.** §6 is `base + Σ amount · curve(input)`, a **sum**: two rows give
-   a pressure-driven shift *plus* a fixed-amplitude wobble, never a wobble whose amplitude grows as
-   pressure falls. `density` escapes this by construction — §2.18's *"the coherence lives in the draw,
-   not in the value compared against"* means moving the compared-against value **is** moving the
-   amplitude — which is exactly why (3) works today and (4) does not. *"Pressure to taper"* is the same
-   shape from the other end: `taper` is an *input* (distance along the stroke), so "taper harder when
-   pressed lightly" wants pressure to scale taper's effect rather than add to it.
+   spacing, with spacing using the randomizer engine"*, and *"pressure to taper"*. **Was not
+   expressible in the additive §6 this bullet describes — closed since by a different one.** §6 was
+   `base + Σ amount · curve(input)`, a **sum**: two rows gave a pressure-driven shift *plus* a
+   fixed-amplitude wobble, never a wobble whose amplitude grows as pressure falls. **§2.22's second
+   input and §2.28's `.scale` module answer exactly this**: §6 is now `base + Σ amount · curve(input) ·
+   reading(second)`, so a row can read `spacing ← random(λ) scaled by pressure`, which is worked
+   example (3)'s mechanism generalised to a wobble whose own amplitude the sensor drives —
+   `BrushModulationLogicTests` exercises a scaled random wobble against an unscaled one. `density`
+   escapes the old limit by a different construction — §2.18's *"the coherence lives in the draw, not
+   in the value compared against"* means moving the compared-against value **is** moving the
+   amplitude, which is why (3) worked before §2.22 as well. *"Pressure to taper"* is the same shape
+   from the other end: `taper` is an *input* (distance along the stroke), so "taper harder when
+   pressed lightly" wants pressure to scale taper's effect rather than add to it, and is not itself
+   answered by the second-input mechanism.
 
 **The curve editor already exists.** TODO (38) built bezier tangent handles with a tap grammar for the
 timeline's graph band; a pressure curve is the same control over a different domain, and reusing it is

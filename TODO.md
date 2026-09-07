@@ -80,9 +80,12 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 - [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
       re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
       lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
-      These declare `.rewritesInPlace` now instead of saying nothing, which is the honest state and not
-      a fix. Bounding them needs a different idea: an id whose *content* changed needs its old
-      footprint forgotten and its new one bounded, and no rectangle from a caller supplies that.
+      Only Recolour, Apply Brush and the text re-edit actually declare `.rewritesInPlace` (through
+      `registerVectorElementsUndo`); video crop and speed, motion-group retags,
+      `keyPoseRestoringRest` and the lasso-move nudge still call `bumpVersion()` directly in their own
+      undo closures and were never touched by this pass. Either way it is the honest state and not a
+      fix. Bounding them needs a different idea: an id whose *content* changed needs its old footprint
+      forgotten and its new one bounded, and no rectangle from a caller supplies that.
 - [ ] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
       strokes**, which is why the "measure what was replaced" recipe never reached them.
 
@@ -92,7 +95,7 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 
 ## (21) Keyframes — four stages and four gaps
 
-**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a and 8 are merged; 6b was delivered by
+**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b and 8 are merged; 6b was delivered by
 (29); there is deliberately no stage 9.
 
 A cel or an animation group carries a track of quad poses, ink is posed through the `sqrt(|det|)`
@@ -129,7 +132,7 @@ pose key has a node.
       splitting one animated group into two is *"a different feature"*, and retagging an element is
       that question from the other side — every key on both groups' tracks changes meaning.
 
-**Spec** KEYFRAMES.md — **§2 is twenty-eight owner rulings and §8 is the build order.** Four rulings
+**Spec** KEYFRAMES.md — **§2 is thirty owner rulings and §8 is the build order.** Four rulings
 are superseded and kept; the file says which.
 
 ---
