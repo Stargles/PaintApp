@@ -1003,14 +1003,83 @@ final class CanvasManager: ObservableObject {
     @Published var canvasBackgroundColor: Color = .white
     @Published var isCanvasBackgroundVisible: Bool = true
 
-    @Published var fps: Int = 24 {
-        didSet {
-            guard fps != oldValue else { return }
+    /// **The rates the document may be set to** — KEYFRAMES.md §2.7, *"an editable fps control ships
+    /// with this feature, so the artist can take the document below 24."*
+    ///
+    /// **A range rather than a list of blessed rates**, because the ask is about working *slower* and
+    /// an artist roughing timing at 7 fps is doing the thing the ruling is for. `fpsPresets` below is
+    /// the list; it is a set of shortcuts within this range and not a constraint on it.
+    ///
+    /// The floor is 1 and not 0 for a reason the app is already full of: `fps` is a divisor on four
+    /// paths — `PlaybackClock.framesDue`, `VideoFrameMap.frameForFrameSpeed`, `FrameExport.init` and
+    /// `ExportSheet`'s duration — and every one of them carries its own `max(fps, 1)` because nothing
+    /// upstream ever promised anything. `fps`'s `didSet` is that promise now.
+    static let fpsRange: ClosedRange<Int> = 1...60
+
+    /// The rates the fps panel offers as one tap each. 24 is where a document starts; 12 and 8 are
+    /// twos and threes of it, which is the working rate the ruling was asked for.
+    static let fpsPresets: [Int] = [8, 12, 24, 30, 60]
+
+    /// The document's frame rate, in frames per second.
+    ///
+    /// **Live during playback.** `PlaybackClock` takes `fps` as an argument to `framesDue` rather than
+    /// capturing `1/fps` at play time, so a change here is obeyed on the next tick — see
+    /// `rebasePlaybackClock` and `PlaybackClock`'s own third bullet.
+    ///
+    /// **Not undoable, and that is the shipped precedent rather than an omission.** `projectName`,
+    /// `canvasBackgroundColor` and `isCanvasBackgroundVisible` are the other document-level settings
+    /// and none of them registers a step either; they are properties of the document rather than
+    /// edits to the drawing, and an undo stack that interleaves "un-name the scene" with "un-draw
+    /// that line" is not the stack the artist pressed the button for.
+    /// **Computed over a private `@Published`, and that is not a style choice.** A `didSet` clamp
+    /// looks equivalent and is not: `@Published` emits from `willSet`, so the raw value reaches every
+    /// observer *before* the clamp runs and the corrected one arrives behind it. MEASURED — a sink on
+    /// the projected publisher read `[999, 60]` where the invariant says it may only ever read `[60]`.
+    /// Clamping on the way in is what makes the range a promise rather than a repair.
+    var fps: Int {
+        get { clampedFPS }
+        set {
+            // **The only place that can promise the range.** It catches two things the stepper
+            // cannot: a manifest written by a build that had no range (TODO's standing "no document
+            // has to survive" permission cuts the other way here — a legacy `fps: 0` divides by zero
+            // rather than merely looking wrong), and any future writer.
+            let clamped = min(max(newValue, Self.fpsRange.lowerBound), Self.fpsRange.upperBound)
+            guard clamped != clampedFPS else { return }
+            clampedFPS = clamped
             // Playback derives the playhead from elapsed time at the *current* rate, so a change
             // here is live. Re-basing is what keeps it from being retroactive: without it the whole
             // elapsed span would be re-divided by the new rate and the playhead would jump.
             rebasePlaybackClock()
         }
+    }
+
+    /// `fps`'s storage. Private, so the clamp above cannot be gone around; `@Published` so that
+    /// `objectWillChange` still fires and the timeline's readout still redraws.
+    @Published private var clampedFPS: Int = 24
+
+    /// Whether `stepFPS(by:)` has anywhere to go in each direction.
+    ///
+    /// **The controls read these and disable themselves**, which is what makes the refusal visible:
+    /// an artist at 1 fps sees a greyed minus rather than pressing a live-looking button that does
+    /// nothing. A silently clamped write is the shape of defect this repo has already filed twice —
+    /// a `Bool` returned and discarded, and a `beginContainerPoseMove` that refused in silence.
+    var canDecreaseFPS: Bool { fps > Self.fpsRange.lowerBound }
+    var canIncreaseFPS: Bool { fps < Self.fpsRange.upperBound }
+
+    /// Nudge the frame rate by `delta`, refusing rather than clamping when that would leave the range.
+    ///
+    /// **Refuses rather than clamps** so that the two answers are distinguishable: an artist at 2 fps
+    /// pressing minus twice should land on 1 and then be told no, not land on 1 twice and wonder
+    /// whether the button works. The view disables the button at the same boundary, so this is the
+    /// second line of the same rule rather than the only one.
+    ///
+    /// - Returns: whether the rate changed.
+    @discardableResult
+    func stepFPS(by delta: Int) -> Bool {
+        let wanted = fps + delta
+        guard Self.fpsRange.contains(wanted) else { return false }
+        fps = wanted
+        return true
     }
     @Published var currentFrame: Int = 0 {
         didSet {

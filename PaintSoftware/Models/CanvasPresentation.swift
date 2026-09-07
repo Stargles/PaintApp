@@ -75,6 +75,15 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// (`CanvasTouchOwner` reads it to decide who owns a touch), which this list has no part in.
     case graphChannelList
 
+    /// The frame-rate panel, hung off the timeline's fps readout — KEYFRAMES.md §2.7 and §5.
+    ///
+    /// **A panel rather than a stepper inlined in the bar.** The readout has to stay legible in the
+    /// collapsed bar, which is 48 points tall and already carries five buttons and the transport
+    /// group; two arrows and five preset chips do not fit there and would not be reachable if they
+    /// did. It is `onionSkinOptions` line for line otherwise — a list of controls raised from the
+    /// timeline's own strip over a mounted, touchable `CanvasView`.
+    case frameRateOptions
+
     // MARK: - The layer rail and its options panels
 
     /// `ViewSelectorMenu`, off the layer panel's "Views" button.
@@ -136,10 +145,11 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     var overlapsLiveCanvas: Bool {
         switch self {
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
+             .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour:
-            // All nine are raised from chrome that sits over a mounted, touchable `CanvasView` —
-            // five of them `.popover`s, and the timeline's four `AnchoredMenu`s since TODO (39).
+            // All ten are raised from chrome that sits over a mounted, touchable `CanvasView` —
+            // five of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
             // **The rule is the same for both and that is the point of the type**: a presentation
             // left to its own dismissal is dismissed *by* the touch that lands outside it, and this
             // repo has observed twice that the touch is not swallowed:

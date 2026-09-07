@@ -61,6 +61,11 @@ struct AnimationTimeline: View {
     // opened on the first tap would put a mode change behind an extra step.
     @State private var showOnionSkinOptions = false
 
+    /// The frame-rate panel, opened by tapping the fps readout — KEYFRAMES.md §2.7. `@State` rather
+    /// than a model flag for `graphChannelList`'s stated reason inverted: this one carries no rule
+    /// about outliving its host, because its host is in both bars and never disappears.
+    @State private var showFrameRateOptions = false
+
     /// A vector block dropped on a raster layer, waiting on the artist's answer. Non-nil raises the
     /// rasterize alert; the drop is only applied if they say yes. Held by identity (see
     /// `CanvasManager.CelDropRequest`) because the indices it came from can be renumbered while the
@@ -308,6 +313,9 @@ struct AnimationTimeline: View {
         if canvasManager.isGraphChannelListOpen, let rect = menuAnchors[.graphChannelList] {
             return (.graphChannelList, rect, rect)
         }
+        if showFrameRateOptions, let rect = menuAnchors[.frameRateOptions] {
+            return (.frameRateOptions, rect, rect)
+        }
         return nil
     }
 
@@ -325,6 +333,8 @@ struct AnimationTimeline: View {
             InterpolatePanel(canvasManager: canvasManager).frame(width: 260)
         case .graphChannelList:
             graphChannelList.frame(width: 250)
+        case .frameRateOptions:
+            frameRatePanel.frame(width: 250)
         default:
             EmptyView()
         }
@@ -338,6 +348,7 @@ struct AnimationTimeline: View {
         case .onionSkinOptions:   showOnionSkinOptions = false
         case .interpolateOptions: showInterpolateOptions = false
         case .graphChannelList:   canvasManager.isGraphChannelListOpen = false
+        case .frameRateOptions:   showFrameRateOptions = false
         default:                  break
         }
     }
@@ -790,6 +801,105 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.loopButton")
     }
 
+    /// **The document's frame rate, and the way in to changing it** — KEYFRAMES.md §2.7, *"an
+    /// editable fps control ships with this feature, so the artist can take the document below 24."*
+    ///
+    /// **The readout is the button**, which is why there is no separate icon: this text has sat in
+    /// the expanded bar since the timeline was written, so an artist who wants to change the rate
+    /// already knows where the number is and the only thing that was missing was that it did nothing
+    /// when pressed. A new icon somewhere else would have to be found first.
+    ///
+    /// **Rendered from both `collapsedBar` and `miniToolbar`** — §2.22's standing trap, and this
+    /// control is the one it would have caught: the number was in `miniToolbar` alone, so an artist
+    /// who dragged the timeline shut could not see the rate at all, let alone set it.
+    ///
+    /// **Tinted while playing** rather than carrying a separate indicator: the rate is live during
+    /// playback (`PlaybackClock` takes `fps` per tick), so this is the one moment when pressing it
+    /// changes what is on screen *right now*, and the tint is what says so.
+    private var frameRateButton: some View {
+        Button(action: { showFrameRateOptions.toggle() }) {
+            Text("\(canvasManager.fps) fps")
+                .font(.caption)
+                .monospacedDigit()
+        }
+        .foregroundColor(canvasManager.isPlaying ? .blue : .gray)
+        .accessibilityIdentifier("timeline.frameRateButton")
+        .anchoredMenuAnchor(.frameRateOptions)
+        .canvasPresentationRegistration(.frameRateOptions, isPresented: $showFrameRateOptions,
+                                        canvasManager: canvasManager)
+    }
+
+    /// The frame-rate panel: a stepper, the number, and one tap for each of the common rates.
+    ///
+    /// **The arrows disable at the ends of `CanvasManager.fpsRange` and that is the refusal.** A
+    /// control that silently clamps is this repo's own filed defect wearing a new hat — a `Bool`
+    /// returned and discarded, a refusal with no notice — and the cheapest honest answer for a
+    /// bounded number is a button the artist can see has nowhere to go. `stepFPS(by:)` refuses the
+    /// same edit for the same reason, so the rule is stated in the model as well, where the fast tier
+    /// can see it.
+    ///
+    /// **No undo step**, following `projectName` and `canvasBackgroundColor`: see `CanvasManager.fps`.
+    private var frameRatePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Frame Rate")
+                .font(.headline)
+                .foregroundColor(.white)
+
+            HStack(spacing: 16) {
+                Button(action: { canvasManager.stepFPS(by: -1) }) {
+                    Image(systemName: "minus.circle.fill").font(.title2)
+                }
+                .disabled(!canvasManager.canDecreaseFPS)
+                .accessibilityIdentifier("frameRate.decrement")
+
+                Text("\(canvasManager.fps)")
+                    .font(.system(size: 28, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                    .frame(minWidth: 56)
+                    // The number, not the "N fps" label beside the arrows — a test asserting a step
+                    // landed reads this rather than parsing a string that carries a unit.
+                    .accessibilityIdentifier("frameRate.value")
+                    .accessibilityValue("\(canvasManager.fps)")
+
+                Button(action: { canvasManager.stepFPS(by: 1) }) {
+                    Image(systemName: "plus.circle.fill").font(.title2)
+                }
+                .disabled(!canvasManager.canIncreaseFPS)
+                .accessibilityIdentifier("frameRate.increment")
+
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(.blue)
+
+            Text("frames per second")
+                .font(.caption)
+                .foregroundColor(.gray)
+
+            Divider().overlay(Color.white.opacity(0.2))
+
+            // Presets, one tap each. The current rate is filled so the panel says where the document
+            // is even when that is not one of them.
+            HStack(spacing: 8) {
+                ForEach(CanvasManager.fpsPresets, id: \.self) { rate in
+                    let isCurrent = canvasManager.fps == rate
+                    Button(action: { canvasManager.fps = rate }) {
+                        Text("\(rate)")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(isCurrent ? Color.blue : Color.white.opacity(0.12))
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .accessibilityIdentifier("frameRate.preset.\(rate)")
+                }
+            }
+        }
+        .padding(14)
+    }
+
     /// **Opens the graph editor on the selected layer** — KEYFRAMES.md §11.3, and ask 3's own tail:
     /// *"When tapping the keyframe button it brings up the list of things being animated and graph
     /// editor instead of placing a keyframe (icon and its name also may have to be changed to graph
@@ -1121,6 +1231,9 @@ struct AnimationTimeline: View {
                 if canvasManager.isGraphEditorOpen { graphChannelsButton }
                 Spacer()
                 frameLabel
+                // Rendered from both bars, like every other control in this group (§2.22). The rate
+                // was expanded-only until stage 7, which is exactly the asymmetry that rule names.
+                frameRateButton
             }
             transportControls
         }
@@ -1152,9 +1265,7 @@ struct AnimationTimeline: View {
 
                 frameLabel
 
-                Text("\(canvasManager.fps) fps")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                frameRateButton
 
                 Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = collapsedHeight } }) {
                     Image(systemName: "chevron.down")
