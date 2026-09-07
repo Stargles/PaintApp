@@ -67,13 +67,6 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         // dismisses the popover and starts the stroke, which is the whole trigger.
         drawShortStroke(on: canvas)
 
-        // Diagnostics, not assertions: which of the popover's pieces are still in the hierarchy
-        // afterwards is what separates "the stroke recognizer is stranded" from "the presentation
-        // is still installed and eating touches".
-        NSLog("FREEZEDIAG TEST after-stroke: addDrawing=\(app.buttons["Add Drawing"].exists) "
-              + "dismissRegion=\(app.otherElements["PopoverDismissRegion"].exists) "
-              + "canvasHittable=\(canvas.isHittable) popovers=\(app.descendants(matching: .popover).count)")
-
         assertPinchMovesCanvas(app, canvas,
                                "THE BUG: the canvas stopped transforming after a stroke that began while the slot popover was open")
     }

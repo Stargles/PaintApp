@@ -69,16 +69,13 @@ final class MenuInterruptionUITests: PaintUITestCase {
         dragOnCanvas(app, from: strokeStart, to: strokeEnd)
 
         let menuSurvived = menuItem.exists
-        NSLog("MENUDIAG after-first-stroke: menuStillUp=\(menuSurvived) canvasHittable=\(canvas.isHittable)")
         closeChrome(app)
 
         let afterFirst = paintStrokes(app)
-        NSLog("MENUDIAG strokes after first: \(String(describing: afterFirst))")
 
         // Reading 3: the reported symptom is that the *next* stroke is what makes the first vanish.
         dragOnCanvas(app, from: secondStrokeStart, to: secondStrokeEnd)
         let afterSecond = paintStrokes(app)
-        NSLog("MENUDIAG strokes after second: \(String(describing: afterSecond))")
 
         // Reading 4, and the one contract that has to hold whichever way the others come out: a menu
         // may legitimately swallow its own dismiss touch, but nothing may leave the canvas dead.
