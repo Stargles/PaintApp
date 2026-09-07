@@ -36,7 +36,14 @@ enum ProjectStore {
     }
 
     static func listProjects() -> [ProjectSummary] {
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil) else {
+        listProjects(in: projectsDirectory)
+    }
+
+    /// The projects **directly inside** one directory of the tree — TODO (36). Sub-folders are
+    /// `listFolders`' business, so that the gallery draws one row of tiles per level rather than a
+    /// flattened list in which two files called "Shot 1" are indistinguishable.
+    static func listProjects(in directory: URL) -> [ProjectSummary] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return []
         }
         return urls.compactMap { url -> ProjectSummary? in
@@ -57,16 +64,146 @@ enum ProjectStore {
     }
 
     static func createNewProjectURL(name: String) -> URL {
+        createNewProjectURL(name: name, in: projectsDirectory)
+    }
+
+    /// A free package name inside `directory`. The uniqueness is per-folder on purpose: two shots
+    /// both called "Rough" in different scenes is the ordinary case once there are folders, and
+    /// forcing "Rough 2" on the second would be the app renaming the artist's work for no reason.
+    static func createNewProjectURL(name: String, in directory: URL) -> URL {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let base = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : name
         var candidate = base
-        var url = projectsDirectory.appendingPathComponent("\(candidate).paintproj")
+        var url = directory.appendingPathComponent("\(candidate).paintproj")
         var suffix = 2
         while FileManager.default.fileExists(atPath: url.path) {
             candidate = "\(base) \(suffix)"
-            url = projectsDirectory.appendingPathComponent("\(candidate).paintproj")
+            url = directory.appendingPathComponent("\(candidate).paintproj")
             suffix += 1
         }
         return url
+    }
+
+    // MARK: - Folders — TODO (36)
+
+    /// One sub-folder of the project tree, as the gallery draws it.
+    struct ProjectFolder: Identifiable, Equatable {
+        let url: URL
+        let name: String
+        /// Projects anywhere beneath it, however deep. The count is what makes a folder tile mean
+        /// something before you open it, and it is what the delete confirmation counts.
+        let projectCount: Int
+        var id: String { url.path }
+    }
+
+    /// The sub-folders of one directory, alphabetically.
+    static func listFolders(in directory: URL) -> [ProjectFolder] {
+        ProjectBackupManager.subfolders(of: directory).map {
+            ProjectFolder(url: $0, name: $0.lastPathComponent,
+                          projectCount: ProjectBackupManager.allProjectPackages(in: $0).count)
+        }
+    }
+
+    /// Every folder in the tree, depth-first, each with how deep it sits — what a "move to…" picker
+    /// needs to draw an indented list. The root is not included; callers offer it themselves.
+    static func allFolders(under directory: URL? = nil, depth: Int = 0) -> [(folder: ProjectFolder, depth: Int)] {
+        let root = directory ?? projectsDirectory
+        var out: [(ProjectFolder, Int)] = []
+        for folder in listFolders(in: root) {
+            out.append((folder, depth))
+            out.append(contentsOf: allFolders(under: folder.url, depth: depth + 1))
+        }
+        return out
+    }
+
+    enum FolderError: LocalizedError {
+        case emptyName
+        case nameTaken(String)
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyName: return "Give the folder a name."
+            case .nameTaken(let name): return "There is already something called “\(name)” here."
+            case .failed(let why): return why
+            }
+        }
+    }
+
+    /// Turns what the artist typed into something a filesystem will take, without silently accepting
+    /// a different folder than they asked for. `/` and `:` are the two characters that would either
+    /// create a nested path or be rewritten by the system, so they become spaces; a leading dot is
+    /// dropped because a dot-folder is invisible to `subfolders` and the artist would never see it
+    /// again.
+    static func sanitizedFolderName(_ raw: String) -> String {
+        var name = raw.replacingOccurrences(of: "/", with: " ")
+                      .replacingOccurrences(of: ":", with: " ")
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+        while name.hasPrefix(".") { name.removeFirst() }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @discardableResult
+    static func createFolder(named raw: String, in directory: URL) throws -> URL {
+        let name = sanitizedFolderName(raw)
+        guard !name.isEmpty else { throw FolderError.emptyName }
+        let url = directory.appendingPathComponent(name, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: url.path) else { throw FolderError.nameTaken(name) }
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        } catch {
+            throw FolderError.failed(error.localizedDescription)
+        }
+        return url
+    }
+
+    @discardableResult
+    static func renameFolder(at url: URL, to raw: String) throws -> URL {
+        let name = sanitizedFolderName(raw)
+        guard !name.isEmpty else { throw FolderError.emptyName }
+        let destination = url.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+        if destination.standardizedFileURL == url.standardizedFileURL { return url }
+        guard !FileManager.default.fileExists(atPath: destination.path) else { throw FolderError.nameTaken(name) }
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            throw FolderError.failed(error.localizedDescription)
+        }
+        return destination
+    }
+
+    /// **Deleting a folder trashes the projects in it one by one, then removes the empty shell.**
+    ///
+    /// Not `removeItem` on the folder, which would be the obvious implementation and would destroy
+    /// artwork outright — the one thing this app's storage layer has never done. Every package inside
+    /// goes to Trash under its own name, so all of it is listed in Recently Deleted and restorable for
+    /// seven days by machinery that already exists. Returns how many projects were trashed, which is
+    /// the number the confirmation warned about.
+    @discardableResult
+    static func deleteFolder(at url: URL) -> Int {
+        let packages = ProjectBackupManager.allProjectPackages(in: url)
+        for package in packages { _ = ProjectBackupManager.moveToTrash(package, tag: "deleted") }
+        // Whatever is left is folders and staging husks — no artwork, because the walk above found
+        // every `.paintproj` beneath this point.
+        try? FileManager.default.removeItem(at: url)
+        return packages.count
+    }
+
+    /// Moves a project into another folder of the tree, keeping its name unless that name is taken.
+    /// Returns the new URL, or nil if the move failed — a package left exactly where it was.
+    @discardableResult
+    static func moveProject(at url: URL, into directory: URL) -> URL? {
+        let fm = FileManager.default
+        guard url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL else { return url }
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let base = url.deletingPathExtension().lastPathComponent
+        var destination = directory.appendingPathComponent("\(base).paintproj")
+        var suffix = 2
+        while fm.fileExists(atPath: destination.path) {
+            destination = directory.appendingPathComponent("\(base) \(suffix).paintproj")
+            suffix += 1
+        }
+        return (try? fm.moveItem(at: url, to: destination)).map { destination }
     }
 
     /// "Delete" never destroys data: the package moves to Trash (auto-purged only after
@@ -603,8 +740,13 @@ enum ProjectStore {
         let startedOnMainThread = Thread.isMainThread
         let tally = WriteTally()
 
-        // Stage the new package beside the live one.
-        let stageURL = projectsDirectory.appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
+        // Stage the new package beside the live one — **beside**, meaning in the target's own
+        // directory rather than at the top of `Projects/`, since TODO (36) let a project live in a
+        // sub-folder. The swap below is a rename, and a rename is only cheap and atomic within one
+        // directory; staging at the root and renaming into `Projects/Scene 3/` would still work on
+        // one volume but stops being a guarantee the moment it is not.
+        let stageURL = target.deletingLastPathComponent()
+            .appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
         try? fm.removeItem(at: stageURL)
         let packageStarted = CFAbsoluteTimeGetCurrent()
         let celWalkSeconds = writePackage(snapshot, to: stageURL, tally: tally)

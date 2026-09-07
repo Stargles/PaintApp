@@ -10,6 +10,10 @@ struct GalleryTileView: View {
     var onDelete: () -> Void
     var onShowVersions: () -> Void
     var onRecover: () -> Void
+    /// TODO (36) — "Move to…". On the tile rather than only in the storage screen because filing a
+    /// project is something the artist does *while looking at it*, and because migration lands every
+    /// existing project at the top level: without this, folders could only ever hold new work.
+    var onMove: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -44,6 +48,7 @@ struct GalleryTileView: View {
                     } else {
                         Button("Versions…", action: onShowVersions)
                     }
+                    Button("Move to…", action: onMove)
                     Button("Delete", role: .destructive, action: onDelete)
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
@@ -82,6 +87,7 @@ struct GalleryTileView: View {
             } else {
                 Button("Versions…", action: onShowVersions)
             }
+            Button("Move to…", action: onMove)
             Button("Delete", role: .destructive, action: onDelete)
         }
     }

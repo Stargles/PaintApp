@@ -91,13 +91,22 @@ struct ContentView: View {
         }
     }
 
-    private func startNewProject() {
+    /// TODO (36): the folder the gallery was showing when "New Canvas" was tapped, so the first save
+    /// lands there rather than at the top of the tree. Nil once the document has a URL of its own —
+    /// `saveIfNeeded` only mints a URL on the very first save.
+    @State private var newProjectFolder: URL?
+
+    private func startNewProject(in folder: URL) {
         canvasManager = CanvasManager()
+        newProjectFolder = folder
         screen = .sizePicker
     }
 
     private func openProject(_ manager: CanvasManager) {
         canvasManager = manager
+        // The document already has a URL, so the pending folder is spent — clearing it stops a
+        // later "Save As"-shaped path inheriting a folder the artist chose for something else.
+        newProjectFolder = nil
         screen = .editor
     }
 
@@ -132,7 +141,9 @@ struct ContentView: View {
         // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
         // saving, or backgrounding the app silently drops whichever was still pending.
         canvasManager.commitAllInteractiveState()
-        let url = canvasManager.projectURL ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName)
+        let url = canvasManager.projectURL
+            ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
+                                                in: newProjectFolder ?? ProjectStore.projectsDirectory)
         canvasManager.projectURL = url
         // `onSaveFailed` is the one channel `completion` never was (ARCHITECTURE_REVIEW.md finding
         // 3): `writeAtomically`'s three failure returns used to be silent, so the gallery could

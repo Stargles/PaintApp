@@ -53,8 +53,12 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - Directories
 
+    /// **The root the whole library hangs off, which is not necessarily inside this app** — TODO
+    /// (36). `ProjectLocation.currentRoot` is the app's own `Documents` until the artist picks a
+    /// folder in Files, and their chosen folder afterwards. The test override still wins over both,
+    /// so every existing logic test is unaffected and none of them can reach a real bookmark.
     static var documentsDirectory: URL {
-        rootDirectoryOverride ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        rootDirectoryOverride ?? ProjectLocation.currentRoot
     }
 
     static var projectsDirectory: URL {
@@ -78,6 +82,53 @@ nonisolated enum ProjectBackupManager {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         return dir
+    }
+
+    // MARK: - Walking the tree
+
+    /// **Every project package under `Projects/`, however deeply the artist has filed it** — TODO
+    /// (36)'s sub-folders, seen from the safety net's side.
+    ///
+    /// This is the load-bearing consequence of letting the gallery hold folders, and it is easy to
+    /// miss because nothing goes red: the three maintenance passes below (`cleanupStaleSaveDirectories`,
+    /// `repairCorruptedProjects`, `snapshotAllProjectsForAppUpdate`) each used
+    /// `contentsOfDirectory(at: projectsDirectory)`, which is one level. The moment a project lives in
+    /// `Projects/Scene 3/`, a **flat** walk stops snapshotting it before an update, stops repairing it
+    /// after one, and stops sweeping its staged saves — silently, for exactly the files the artist
+    /// cared enough about to organise.
+    ///
+    /// **It does not descend into a package**, which `FileManager.enumerator` would: a `.paintproj` is
+    /// a directory, and walking into one would return its `images/` folder as a candidate and cost a
+    /// recursive stat of every PNG in the library on each launch.
+    static func allProjectPackages(in directory: URL? = nil) -> [URL] {
+        let root = directory ?? projectsDirectory
+        guard let items = try? FileManager.default.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        var out: [URL] = []
+        for item in items {
+            if item.pathExtension == "paintproj" {
+                out.append(item)
+            } else if isDirectory(item), !item.lastPathComponent.hasPrefix(".") {
+                out.append(contentsOf: allProjectPackages(in: item))
+            }
+        }
+        return out
+    }
+
+    /// Sub-folders of one directory in the project tree. Packages are directories too, so the
+    /// extension check is what separates "a folder the artist made" from "a project".
+    static func subfolders(of directory: URL) -> [URL] {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return items.filter {
+            $0.pathExtension != "paintproj" && !$0.lastPathComponent.hasPrefix(".") && isDirectory($0)
+        }
+        .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    static func isDirectory(_ url: URL) -> Bool {
+        var flag: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &flag) && flag.boolValue
     }
 
     // MARK: - Launch-time maintenance
@@ -143,10 +194,21 @@ nonisolated enum ProjectBackupManager {
     /// staging and swapping leaves one behind. It's not user data (the live package was never
     /// touched), so it's just clutter to remove.
     static func cleanupStaleSaveDirectories() {
+        cleanupStaleSaveDirectories(in: projectsDirectory)
+    }
+
+    /// Recursive since TODO (36): a project saved inside `Projects/Scene 3/` stages its package
+    /// beside itself, so a one-level sweep would leave every nested `.saving-*` on disk forever.
+    private static func cleanupStaleSaveDirectories(in directory: URL) {
         let fm = FileManager.default
-        guard let urls = try? fm.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil) else { return }
-        for url in urls where url.lastPathComponent.hasPrefix(".saving-") {
-            try? fm.removeItem(at: url)
+        guard let urls = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in urls {
+            if url.lastPathComponent.hasPrefix(".saving-") {
+                try? fm.removeItem(at: url)
+            } else if url.pathExtension != "paintproj", !url.lastPathComponent.hasPrefix("."),
+                      isDirectory(url) {
+                cleanupStaleSaveDirectories(in: url)
+            }
         }
     }
 
@@ -154,9 +216,7 @@ nonisolated enum ProjectBackupManager {
     /// backup; the damaged package is moved to Trash (never destroyed silently). A damaged project
     /// with no backups is left in place — the gallery surfaces it as damaged instead of dropping it.
     static func repairCorruptedProjects() {
-        let fm = FileManager.default
-        guard let urls = try? fm.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil) else { return }
-        for url in urls where url.pathExtension == "paintproj" {
+        for url in allProjectPackages() {
             guard !validateProject(at: url) else { continue }
             _ = restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
         }
@@ -181,10 +241,8 @@ nonisolated enum ProjectBackupManager {
     /// Clones every intact project into a `preupdate-<signature>` backup slot. Damaged projects are
     /// skipped here (the repair pass owns them) so we don't propagate a broken state as a "backup".
     static func snapshotAllProjectsForAppUpdate(signature: String) {
-        let fm = FileManager.default
-        guard let urls = try? fm.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil) else { return }
         let sig = sanitizedSignature(signature)
-        for url in urls where url.pathExtension == "paintproj" {
+        for url in allProjectPackages() {
             guard validateProject(at: url), let id = manifestID(at: url) else { continue }
             let dir = backupsDirectory(projectID: id)
             writeOriginMarker(directory: dir, projectFileName: url.lastPathComponent)
@@ -397,8 +455,11 @@ nonisolated enum ProjectBackupManager {
     static func purgeExpiredTrash(now: Date = Date()) {
         for item in listTrash() where now.timeIntervalSince(item.deletedAt) > trashRetentionInterval {
             let parsed = parseTrashName(item.url.deletingPathExtension().lastPathComponent)
-            let liveExists = parsed.map {
-                FileManager.default.fileExists(atPath: projectsDirectory.appendingPathComponent("\($0.base).paintproj").path)
+            // Tree-wide since TODO (36): a one-level check would call a project filed inside
+            // `Projects/Scene 3/` non-existent and destroy its whole backup history the moment a
+            // same-named trash item expired.
+            let liveExists = parsed.map { p in
+                allProjectPackages().contains { $0.lastPathComponent == "\(p.base).paintproj" }
             } ?? true // parse failure -> assume live exists -> keep the backups (safe direction)
             if !liveExists, let base = parsed?.base {
                 deleteBackupDirectories(whoseOriginIs: "\(base).paintproj")
