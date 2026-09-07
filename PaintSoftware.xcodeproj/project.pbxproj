@@ -200,6 +200,7 @@
 		DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */; };
 		DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */; };
 		65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19720D7965998A23D7249459 /* StrokeDensityBench.swift */; };
+		4EA7076DF68F8DFA9FCB6BF5 /* PlaybackTickBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = C826C71CD517E9C9DED43480 /* PlaybackTickBench.swift */; };
 		A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D841402ECAFFA26E9E06176 /* DabCostBench.swift */; };
 		329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */; };
 		295CCCBE4F27D38A3228BA16 /* MemoryAuditBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */; };
@@ -560,6 +561,7 @@
 		DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ThumbnailRenderer.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PerfBaselineTests.swift; sourceTree = "<group>"; };
 		19720D7965998A23D7249459 /* StrokeDensityBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeDensityBench.swift; sourceTree = "<group>"; };
+		C826C71CD517E9C9DED43480 /* PlaybackTickBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaybackTickBench.swift; sourceTree = "<group>"; };
 		7D841402ECAFFA26E9E06176 /* DabCostBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DabCostBench.swift; sourceTree = "<group>"; };
 		E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoRepairBench.swift; sourceTree = "<group>"; };
 		717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryAuditBench.swift; sourceTree = "<group>"; };
@@ -928,6 +930,7 @@
 				DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */,
 				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
 				19720D7965998A23D7249459 /* StrokeDensityBench.swift */,
+				C826C71CD517E9C9DED43480 /* PlaybackTickBench.swift */,
 				7D841402ECAFFA26E9E06176 /* DabCostBench.swift */,
 				E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */,
 				717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */,
@@ -1441,6 +1444,7 @@
 				DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */,
 				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,
 				65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */,
+				4EA7076DF68F8DFA9FCB6BF5 /* PlaybackTickBench.swift in Sources */,
 				A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */,
 				329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */,
 				295CCCBE4F27D38A3228BA16 /* MemoryAuditBench.swift in Sources */,
