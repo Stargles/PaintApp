@@ -138,6 +138,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case groupLayers
     case mergeLayers
     case duplicateLayer
+    /// A folder becoming — or ceasing to be — a transformation group (`setFolderTransform`),
+    /// KEYFRAMES.md §2.21's folder twin of `.valueLayerTransform`. Named apart from that case for the
+    /// same reason it is named apart from `.blendMode`: a folder's transform is a fourth, independent
+    /// thing to want back, and an artist who toggled it by mistake should not read "undo blend mode"
+    /// or "undo layer transform" for a group that was never a value layer.
     case transform
     case opacity
 
@@ -241,7 +246,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .groupLayers: return "group layers"
         case .mergeLayers: return "merge layers"
         case .duplicateLayer: return "duplicate layer"
-        case .transform: return "transform"
+        case .transform: return "change group transform"
         case .opacity: return "change opacity"
 
         case .shuffleFrame: return "reorder frame"

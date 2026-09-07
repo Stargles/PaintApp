@@ -2839,6 +2839,34 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// **Turns a folder's own pose on or off** — `setLayerTransform`'s twin for `LayerFolder.transform`
+    /// (§2.21), and the writer TODO (21) found missing: the field existed, `RenderTree.renderNodes`
+    /// already composes it into every leaf beneath the folder unconditionally, and nothing anywhere
+    /// could ever set it to a value the artist chose.
+    ///
+    /// **Independent of `effect`, `blendMode` and `isCompositorNode`, and that is not an omission —
+    /// it is the one place this setter genuinely differs from `setLayerTransform`.** A value layer's
+    /// transform is one of three mutually exclusive answers to "what is this content-free layer",
+    /// so picking it clears the grade a checkmark would otherwise leave stranded and unread. A folder
+    /// already has real content — its children — so its pose, its grade and its own blend mode are
+    /// three independent wrappers around that content rather than three answers to one question:
+    /// `containerPose(of:)` reads `folders[…].transform` with no gate on `effect`, unlike
+    /// `layerTransform`'s `effect == nil` clause, and the render tree carries a folder's `effect`
+    /// through "unconditionally like the leaf's" while composing its pose in on the way down — both
+    /// regardless of the other. Nothing here needs to clear anything.
+    ///
+    /// **No rename**, unlike `setLayerTransform`. That renaming exists because a value layer's name is
+    /// a claim about which of the three things it currently is (`defaultValueLayerName`) and a folder's
+    /// is not — `setFolderBlendMode` and `setFolderIsolated` beside this don't rename either, and this
+    /// follows them rather than `setNodeEffect`'s node-specific scheme.
+    func setFolderTransform(_ folderID: UUID, to pose: LayerPose?) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }),
+              folders[idx].transform != pose else { return }
+        withStructureUndo(label: .transform) {
+            folders[idx].transform = pose
+        }
+    }
+
     /// Sets a node's operation to a **blend of two inputs** in `mode` (§4.3) — a different question
     /// from `setFolderBlendMode` above, which the same folder also answers: that one is how the node's
     /// finished composite blends into whatever contains it.

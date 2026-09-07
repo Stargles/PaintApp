@@ -257,6 +257,19 @@ struct FloatingPiece {
     /// lifted at frame `n` is committed at frame `n` and there is no second frame to store.
     var containerRest: LayerPose?
 
+    /// **What a `.containerPose` box actually poses** — a transformation layer or, since §2.21's
+    /// folder twin, a folder — nil on every other kind.
+    ///
+    /// **`sourceLayerID`/`targetLayerID` still name the layer that was current when the box went up,
+    /// even when this names a folder**, and that is bookkeeping rather than a second address for the
+    /// same thing. Those two fields are what `handleActiveContextChanged` compares against
+    /// `currentLayerIndex`'s own id to decide whether the box survives a scrub — *when* this box was
+    /// raised, not *what* it poses — so a folder's box auto-commits under the same "did the active
+    /// layer/cel change" rule a layer's always has, and no field that is typed and named for a layer
+    /// ever has to hold anything but one. This field is what `showContainerPoseLive`,
+    /// `commitContainerFloat` and every writer downstream of them read instead.
+    var containerTarget: KeyframeTarget?
+
     /// The rectangle the piece's bitmap occupies in its own local space: `baseSize`, centred on the
     /// origin. `pieceImage`'s texel (0,0) is its `minX`/`minY` corner — which is the correspondence
     /// `PixelOps.render(floatingPiece:into:)` draws by and `homography` solves against.
@@ -755,13 +768,16 @@ extension CanvasManager {
         // now travel with it; see `CanvasView.Coordinator.updateVectorFloat`.
     }
 
-    /// **Raises the Move box over a transformation layer's own pose** — KEYFRAMES.md §4.4's artist
-    /// entry, and the gesture `PoseChannelID.raisesMoveBox` was waiting for.
+    /// **Raises the Move box over a transformation layer's own pose, or a folder's** — KEYFRAMES.md
+    /// §4.4's artist entry and §2.21's folder twin, and the gesture `PoseChannelID.raisesMoveBox` was
+    /// waiting for.
     ///
     /// **The box is the canvas frame, not the content.** A container holds no geometry, so there is
     /// no ink to measure a box around and nothing under it belongs to this layer — the artist is
     /// moving *the frame everything beneath is shown in*, and the canvas rect is what that frame is.
-    /// This is the same fallback `beginMove` already takes for a cel with no opaque pixels in it.
+    /// This is the same fallback `beginMove` already takes for a cel with no opaque pixels in it. A
+    /// folder is the identical case one container up: it holds children rather than pixels, and the
+    /// frame it poses is the same canvas rect.
     ///
     /// **It lifts at rest and composes**, rather than starting the box at the pose already in force.
     /// `FloatingTransform` is position + scale + rotation and cannot express a skew, so a box seeded
@@ -784,18 +800,29 @@ extension CanvasManager {
     /// move `contentEndFrame` with it) for a payload that is not cel-scoped, and a `CanvasNotice` would
     /// announce a refusal with nothing behind it. There is nothing wrong, so nothing is refused.
     ///
-    /// - Returns: whether a box came up. False when the current layer is not posing, or before the
-    ///   document has a canvas size to measure the frame against.
+    /// - Parameter target: what to pose — a specific layer or folder, or nil for the current layer,
+    ///   which is `TopToolbar`'s Move glyph and `LayerOptionsPanel`'s own `transformMoveRow`'s
+    ///   meaning and was this function's whole signature before `FolderOptionsPanel` earned the same
+    ///   row. Naming a folder is `FolderOptionsPanel`'s `transformMoveRow` alone — nothing routes to
+    ///   one implicitly, the same way `beginMove` never guesses a layer is a transformation layer
+    ///   without being told by `layerTransform`.
+    /// - Returns: whether a box came up. False when the named target (or the current layer, if none
+    ///   was named) is not posing, or before the document has a canvas size to measure the frame
+    ///   against.
     @discardableResult
-    func beginContainerPoseMove() -> Bool {
+    func beginContainerPoseMove(for target: KeyframeTarget? = nil) -> Bool {
         commitAllInteractiveState()
-        guard let canvasSize, layers.indices.contains(currentLayerIndex),
-              let pose = layers[currentLayerIndex].layerTransform
-        else { return false }
+        guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return false }
+        let target = target ?? .layer(id: layers[currentLayerIndex].id)
+        guard let pose = containerPose(of: target) else { return false }
 
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         let lift = FloatingTransform(position: CGPoint(x: canvasRect.midX, y: canvasRect.midY),
                                      scaleX: 1, scaleY: 1, rotation: 0)
+        // **`sourceLayerID`/`targetLayerID` name the current layer whatever `target` is** —
+        // `containerTarget`'s own doc says why: those two fields are read only for the "did the
+        // active layer/cel change" heuristic, never for what this box poses, so a field typed for a
+        // layer is never asked to hold a folder's id.
         let layerID = layers[currentLayerIndex].id
         // Recorded when there is one, so `handleActiveContextChanged` keeps answering "still targeted"
         // exactly as it did for a box raised inside a block — a scrub within one cel leaves the box up,
@@ -812,7 +839,8 @@ extension CanvasManager {
             remainderPreview: nil,
             transform: lift, liftTransform: lift,
             mode: transformMode,
-            containerRest: pose)
+            containerRest: pose,
+            containerTarget: target)
         return true
     }
 
@@ -943,9 +971,9 @@ extension CanvasManager {
     /// records restores the pose the drag *started* from and not the one it was standing on.
     private func showContainerPoseLive() {
         guard let piece = floatingPiece, piece.kind == .containerPose,
+              let target = piece.containerTarget,
               let restState = piece.containerRest,
-              let index = layers.firstIndex(where: { $0.id == piece.targetLayerID }),
-              layers[index].layerTransform != nil,
+              let current = containerPose(of: target),
               let posed = Self.containerPose(restState.resolvedPose(atFrame: currentFrame),
                                              movedBy: piece)
         else { return }
@@ -962,8 +990,15 @@ extension CanvasManager {
         } else {
             live.track.setKey(TransformTrack.Key(frame: currentFrame, pose: posed))
         }
-        guard layers[index].transform != live else { return }
-        layers[index].transform = live
+        guard current != live else { return }
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            layers[index].transform = live
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+            folders[index].transform = live
+        }
     }
 
     /// Why **Distort** cannot act on what is floating, or nil when it can. One line under the Move
@@ -1299,16 +1334,22 @@ extension CanvasManager {
     /// **A move that ended where it began writes nothing at all** — including no undo step — which is
     /// the raster arm's own behaviour reached by comparing poses rather than pixels.
     private func commitContainerFloat(_ piece: FloatingPiece) {
-        guard let restState = piece.containerRest,
-              let index = layers.firstIndex(where: { $0.id == piece.targetLayerID }),
-              layers[index].layerTransform != nil
+        guard let target = piece.containerTarget,
+              let restState = piece.containerRest,
+              containerPose(of: target) != nil
         else { return }
         let rest = restState.resolvedPose(atFrame: currentFrame)
         guard let posed = Self.containerPose(rest, movedBy: piece) else { return }
-        layers[index].transform = restState
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            layers[index].transform = restState
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+            folders[index].transform = restState
+        }
         guard posed != rest else { return }
-        commitContainerPose(layerID: piece.targetLayerID, restingAt: rest, movedTo: posed,
-                            atFrame: currentFrame)
+        commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: currentFrame)
     }
 
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)

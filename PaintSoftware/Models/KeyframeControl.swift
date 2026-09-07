@@ -862,7 +862,11 @@ extension CanvasManager {
 
     // MARK: - Shared machinery
 
-    private func targetExists(_ target: KeyframeTarget) -> Bool {
+    /// Not `private`: `TransformKeyframes.swift`'s `writeContainerPose` guards on it too, for a
+    /// container pose committed onto a folder that was deleted between the box going up and the
+    /// artist's finger lifting — the same race `writeContainerPose`'s layer arm always guarded
+    /// against by looking `layerID` up directly, generalised the day that lookup became a `switch`.
+    func targetExists(_ target: KeyframeTarget) -> Bool {
         switch target {
         case .layer(let id): return layers.contains { $0.id == id }
         case .folder(let id): return folders.contains { $0.id == id }

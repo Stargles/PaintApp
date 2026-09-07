@@ -1225,7 +1225,7 @@ Each stage is mergeable and leaves the app working.
 | **6** | **Bake to cels** | §6. Shares its frame-walker with TODO (29). |
 | **6b** | **The playback cache** | **Delivered by TODO (29) instead**, and this row is a cross-reference rather than work: §4.6's store is RENDER.md §3.5-3.7, whose stages 4 and 5 are merged, so playback is served from LZ4 frames on disk today. What it is *not* is §2.20's span-scoped unit — it is a per-frame content-addressed store with playhead-distance eviction. Read RENDER §3.5-3.7 before planning anything on this row. |
 | **7** | **Live recording + editable fps** | §5. Its one prerequisite is met: the playback clock is on the model (`Engine/PlaybackClock.swift`, RENDER stage 1). Nothing else of it exists — `fps` is fixed at 24 and only load and save write it. |
-| **8** ✅ | **The transformation layer** | §4.4, complete: the model and the render path, then the artist's entry — §2.6's relabelled menu, a Move box that previews through the render path rather than a bitmap, and `commitContainerPose` routing through `KeyframeControl.write`'s same five arms. Three holes fell out of making it reachable and all three are in §4.4: §2.27's baseline had nowhere to live on a container, and neither `removeKeyframe` nor `addKeyframe` could see a container pose key — the second of those had been drawing a keyframe indicator the artist could not delete. **`LayerFolder.transform` still has no entry**, and it is a row in the folder options menu plus the same box, not new machinery. |
+| **8** ✅ | **The transformation layer** | §4.4, complete: the model and the render path, then the artist's entry — §2.6's relabelled menu, a Move box that previews through the render path rather than a bitmap, and `commitContainerPose` routing through `KeyframeControl.write`'s same five arms. Three holes fell out of making it reachable and all three are in §4.4: §2.27's baseline had nowhere to live on a container, and neither `removeKeyframe` nor `addKeyframe` could see a container pose key — the second of those had been drawing a keyframe indicator the artist could not delete. **`LayerFolder.transform`'s entry landed 2026-09-06, TODO (21)** — `FolderOptionsPanel`'s Transform toggle plus the same `transformMoveRow`, `setFolderTransform` as the writer that turns it on, and `beginContainerPoseMove`/`commitContainerPose`/`containerPoseWrite`/`writeContainerPose` widened from a `layerID` to a `KeyframeTarget` so the one Move pipeline reaches a folder's own container as well as a layer's. The channel-list navigator's folder arm is still missing — §11.7's Ruling 2 has the honest reason, and it is bigger than this row. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
 
 **Stage 5 comes before stage 4, ruled by the owner 2026-08-30.** Asked whether the effort should go to
@@ -2321,6 +2321,18 @@ where the artist is standing. **A container pose navigates too, since §4.4's en
 its box is the canvas frame. `PoseChannelID.raisesMoveBox` was the one line that had to change and it
 is true for every channel now; `revealPoseChannel` was the one that had to learn there are two kinds of
 box. `LayerFolder.transform` is the case still without an entry.
+
+**Half of that is fixed, 2026-09-06, TODO (21) — the options-panel half, which is the one that
+existed to fix.** `FolderOptionsPanel` now carries the same `transformMoveRow` a value layer's panel
+does, behind a Transform toggle `setFolderTransform` turns on and off, and `beginContainerPoseMove`
+takes a `KeyframeTarget` so the box it raises can be a folder's own rather than always the current
+layer's — `LayerFolder.transform` had no writer of any kind before this; the field could not become
+non-nil outside a hand-edited save file. **This channel-list row is not that entry and is still
+without one**: it is reachable only from an *open* graph band, and `graphBandExpansion` — what a band
+is open *on* — is keyed by `layerIndex` throughout `TimelineLayoutKey`/`TimelineGraphChannelList`, so
+a folder's pose channels, while fully modelled and drawn by `poseSources`/`graphBandListing`, cannot
+be opened into a band at all today. Widening `graphBandExpansion` to a `KeyframeTarget` is the
+prerequisite this row is still waiting on, and it is a larger stage than a row and a box.
 
 #### The fold, and the two funnels
 

@@ -350,7 +350,7 @@ struct LayerOptionsPanel: View {
                 // A row rather than a hint line, because a sentence pointing at a button somewhere else
                 // is a worse control than the button. The swatch stays absent for `valueColorRow`'s own
                 // reason — in this mode the fill is inert storage the render never reads.
-                transformMoveRow {
+                transformMoveRow(scope: "beneath this layer") {
                     leavingMaskEdit { canvasManager.beginContainerPoseMove() }
                 }
             } else if let effect = canvasManager.layers[index].layerEffect {
@@ -746,17 +746,19 @@ private func effectSettingsRow(title: String, identifier: String,
 /// **The caption names the scope, not the gesture.** "Drag the box" is what the box itself already
 /// says once it is up; what the artist cannot see from the canvas is that this layer moves *what is
 /// beneath it* rather than anything of its own — a transformation layer holds no ink, so a box with
-/// nothing visibly inside it is otherwise a puzzle.
+/// nothing visibly inside it is otherwise a puzzle. `scope` is that sentence's own object, supplied
+/// by the caller rather than fixed here, because a folder poses what is *inside* it and a value
+/// layer poses what is *beneath* it — the same row and the same gesture, naming two different things.
 ///
 /// File-level beside `effectSettingsRow` and `maskRow`, so a folder's pose (§2.21) can be given the
-/// same row without a second spelling of it the day it earns one.
-private func transformMoveRow(onMove: @escaping () -> Void) -> some View {
+/// same row without a second spelling of it — `FolderOptionsPanel` is the day it earned one.
+private func transformMoveRow(scope: String, onMove: @escaping () -> Void) -> some View {
     Button(action: onMove) {
         HStack(spacing: 10) {
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Move").foregroundColor(.white)
-                Text("Pose everything beneath this layer")
+                Text("Pose everything \(scope)")
                     .font(.caption2)
                     .foregroundColor(.gray)
                     .lineLimit(2)
@@ -987,6 +989,51 @@ struct FolderOptionsPanel: View {
 
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                 }
+
+                // **Transform (§2.21, KEYFRAMES.md §4.4's folder twin) — offered on every folder, node
+                // or not.** Unlike Pass Through above, this is not inert on a node: `RenderTree`
+                // composes a folder's pose into its children on the way down whether or not the
+                // folder is a compositor node (`resolvedPoseMapping`, read unconditionally), and it is
+                // independent of `effect`/`compositorOp` too — `containerPose(of:)` reads the raw
+                // field with no gate, unlike a value layer's `layerTransform`, which is one of three
+                // mutually exclusive answers to "what is this layer". So there is no reading under
+                // which showing this switch here would be a control the render tree overrides.
+                //
+                // The toggle turns the pose on and off; the row beneath — `transformMoveRow`, the
+                // exact one `LayerOptionsPanel` uses — is what raises the box once it is on, which is
+                // TODO (21)'s "a row and a box" read literally: the box already existed for a layer,
+                // and this folder needed only its own entry to it.
+                Toggle(isOn: Binding(
+                    get: { canvasManager.folders.indices.contains(index) ? canvasManager.folders[index].transform != nil : false },
+                    set: { on in
+                        canvasManager.setFolderTransform(folderID, to: on ? canvasManager.restingContainerPose : nil)
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Transform").foregroundColor(.white)
+                        Text("Pose everything inside this group")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+                .tint(.blue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .accessibilityIdentifier("layerOptions.folderTransformToggle")
+
+                if canvasManager.folders[index].transform != nil {
+                    // `LayerOptionsPanel`'s row closes its own mask-edit session and the panel itself
+                    // before raising the box (`leavingMaskEdit`, private to that struct) — inlined
+                    // rather than duplicated across a second private helper, matching how the Delete
+                    // action just below already closes this same session by hand.
+                    transformMoveRow(scope: "inside this group") {
+                        canvasManager.endMaskEdit()
+                        canvasManager.beginContainerPoseMove(for: .folder(id: folderID))
+                        onClose()
+                    }
+                }
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
                 // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
                 // source — `maskRow`/`maskMenu` don't know or care which kind of node they were

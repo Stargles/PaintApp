@@ -208,6 +208,13 @@ final class TransformLayerLogicTests: XCTestCase {
                        "A folder's pose is its contents' pose, and only its contents'")
         XCTAssertNil(poses[stack.floor])
         XCTAssertNil(poses[stack.outside])
+        // **The value, not only the key set** — the layer form's own test one door up asserts
+        // `tx == 12`, and this one asserted membership alone until TODO (21) gave the field a writer.
+        // A pose that reached the right three leaves carrying the identity map would have satisfied
+        // the assertions above, which is the shape of "a correct set drawn as nothing moving".
+        XCTAssertEqual(poses[stack.inner]?.affine?.tx, 5)
+        XCTAssertEqual(poses[stack.mover]?.affine?.tx, 5)
+        XCTAssertEqual(poses[stack.above]?.affine?.tx, 5)
     }
 
     /// **Composition order, with two maps that do not commute.**
@@ -369,6 +376,42 @@ final class TransformLayerLogicTests: XCTestCase {
         let restBounds = try XCTUnwrap(inkBounds(resting))
         let posedBounds = try XCTUnwrap(inkBounds(posed))
         XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5)
+    }
+
+    /// **The folder-posed analogue of the test above, in pixels** — TODO (21).
+    ///
+    /// The test above proves a folder's pose reaches its children's *entries in the pose map*; this
+    /// one proves the ink lands somewhere else on the canvas because of it. They are separate for
+    /// the reason CLAUDE.md gives about a correct value drawn in the wrong place: `layerPoses` could
+    /// answer perfectly while `PixelOps.rasterize` ignored what it was handed, and the map assertion
+    /// alone could not tell the two apart. Now that `setFolderTransform` lets an artist reach this
+    /// field at all, the pixel end of it is worth pinning rather than inferring.
+    func testAFolderPosedCelRasterizesAtTheShiftedPosition() throws {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "ink")
+        let drawn = manager.layers.firstIndex { $0.name == "ink" } ?? 0
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size),
+                      vector: .empty(size: size))
+        cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
+        manager.layers[drawn].cels = [cel]
+        let folder = manager.addFolder(name: "F")
+        manager.layers[drawn].parentFolderID = folder
+        guard let fAt = manager.folders.firstIndex(where: { $0.id == folder }) else {
+            return XCTFail("fixture folder missing")
+        }
+        manager.folders[fAt].transform = pose(CGAffineTransform(translationX: 20, y: 0))
+
+        let resting = PixelOps.rasterize(cel: cel, canvasSize: size, derived: nil, pose: nil)
+        let posed = PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(
+                                        for: cel, atFrame: 0,
+                                        inheriting: manager.layerPoses(atFrame: 0)[drawn]),
+                                       pose: manager.layerPoses(atFrame: 0)[drawn])
+        let restBounds = try XCTUnwrap(inkBounds(resting))
+        let posedBounds = try XCTUnwrap(inkBounds(posed))
+        XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5,
+                       "Ink inside a posed folder is drawn 20pt to the right of where it rests")
     }
 
     /// **§2.3's *"crisp lines, not a bitmap magnify"*, asserted where the decision actually lives.**

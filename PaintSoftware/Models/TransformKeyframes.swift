@@ -670,20 +670,24 @@ extension CanvasManager {
         Self.invertedAffine(map)
     }
 
-    // MARK: - The container's own pose — KEYFRAMES.md §4.4's transformation layer
+    // MARK: - The container's own pose — KEYFRAMES.md §4.4's transformation layer, §2.21's folder twin
 
-    /// **Where a Move on a transformation layer would go**, `transformWrite`'s container twin with
-    /// `KeyframeControl.write`'s four inputs read off the layer.
+    /// **Where a Move on a transformation layer or a posed folder would go**, `transformWrite`'s
+    /// container twin with `KeyframeControl.write`'s four inputs read off `target`.
     ///
-    /// **`layerTransform`, never the raw field**, which is this file's rule everywhere else and is
+    /// **`containerPose(of:)`, never a raw field**, which is this file's rule everywhere else and is
     /// load-bearing here for the reason `poseKeyframeFrames(inLayer:)` gives: a `.raster` layer
     /// carrying a pose left behind by a kind change poses nothing, so routing a write onto it would
-    /// key an animation the canvas is not running.
-    func containerPoseWrite(layerID: UUID, atFrame frame: Int) -> KeyframeControl.Write {
-        guard let index = layers.firstIndex(where: { $0.id == layerID }),
-              let pose = layers[index].layerTransform,
-              let target = keyframeTarget(layerIndex: index)
-        else { return .storedValue }
+    /// key an animation the canvas is not running. A folder has no second field to reconcile, so the
+    /// accessor is a plain read there — `containerPose(of:)`'s own doc carries the asymmetry.
+    ///
+    /// **`target` rather than `layerID`, since a folder's transform earned its own writer.** Every
+    /// caller of this file's container-pose pipeline used to name a layer because a layer was the
+    /// only thing that could pose; `KeyframeTarget` already existed for the grade's own two homes
+    /// (§2.21), so widening this pipeline to reach `LayerFolder.transform` was a signature change and
+    /// not a new mechanism.
+    func containerPoseWrite(_ target: KeyframeTarget, atFrame frame: Int) -> KeyframeControl.Write {
+        guard let pose = containerPose(of: target) else { return .storedValue }
         let placed = keyframeFrames(of: target)
         return KeyframeControl.write(
             // A pose is not a scalar and this input is not asking whether it is — `transformWrite`
@@ -694,8 +698,8 @@ extension CanvasManager {
             playheadIsOnKeyframe: placed.contains(frame))
     }
 
-    /// **One committed Move on a transformation layer, routed** — §2.5's write-at-commit for §4.4's
-    /// container pose, through `KeyframeControl.write`'s same five arms.
+    /// **One committed Move on a transformation layer or a posed folder, routed** — §2.5's
+    /// write-at-commit for §4.4's container pose, through `KeyframeControl.write`'s same five arms.
     ///
     /// ## It is a *value* channel, not a geometry channel, and that is the one real difference
     ///
@@ -730,12 +734,10 @@ extension CanvasManager {
     ///   - posed: the pose the artist ended on.
     /// - Returns: the arm taken, so a caller can label its own bracket.
     @discardableResult
-    func commitContainerPose(layerID: UUID, restingAt restPose: PoseQuad, movedTo posed: PoseQuad,
+    func commitContainerPose(_ target: KeyframeTarget, restingAt restPose: PoseQuad, movedTo posed: PoseQuad,
                              atFrame frame: Int) -> KeyframeControl.Write {
-        guard let index = layers.firstIndex(where: { $0.id == layerID }),
-              let before = layers[index].layerTransform
-        else { return .storedValue }
-        let route = containerPoseWrite(layerID: layerID, atFrame: frame)
+        guard let before = containerPose(of: target) else { return .storedValue }
+        let route = containerPoseWrite(target, atFrame: frame)
 
         var after = before
         // Every arm, for the reason above: the edit writes the stored base exactly as it always did.
@@ -752,7 +754,7 @@ extension CanvasManager {
             if after.baseline == nil { after.baseline = restPose }
 
         case .seedAndKey:
-            let placed = keyframeFrames(of: .layer(id: layerID))
+            let placed = keyframeFrames(of: target)
             after.track = Self.seedingContainer(after.track, keyframes: placed, frame: frame,
                                                 oldPose: restPose, newPose: posed)
             after.baseline = nil
@@ -763,7 +765,7 @@ extension CanvasManager {
         }
 
         guard after != before else { return route }
-        writeContainerPose(after, from: before, layerID: layerID, label: .effectKeyframes)
+        writeContainerPose(after, from: before, target: target, label: .effectKeyframes)
         return route
     }
 
@@ -796,44 +798,56 @@ extension CanvasManager {
     /// **Records nothing while an enclosing bracket is open** — `withStructureUndo`'s own rule, so a
     /// live drag that calls this on every tick costs the artist one press of Undo rather than one per
     /// tick.
-    func writeContainerPose(_ pose: LayerPose?, from before: LayerPose?, layerID: UUID,
+    ///
+    /// **`target` rather than `layerID`**, so a folder's own posed contents (§2.21) go through the
+    /// identical funnel a transformation layer's always have — `KeyframeTarget.folder` was already
+    /// the grade's second home, and a container pose has no reason to need a second writer where the
+    /// grade needed none.
+    func writeContainerPose(_ pose: LayerPose?, from before: LayerPose?, target: KeyframeTarget,
                             label: HistoryActionLabel = .effectKeyframes) {
-        guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return }
-        let target = KeyframeTarget.layer(id: layerID)
-        let marksBefore = layers[index].keyframeMarks
+        guard targetExists(target) else { return }
+        let marksBefore = keyframeState(of: target).marks
         beginCanvasEdit()
 
         // Both halves of `marks(_:droppingKeyed:)`: the "before" set is what makes a key dragged off
         // a marked frame take the mark with it, the "after" set is what stops a mark being written
-        // under a key. Free when the layer carries no marks, which is most of them.
+        // under a key. Free when the target carries no marks, which is most of them.
         let keyedBefore = marksBefore.isEmpty ? [] : keyedFrames(of: target)
-        applyContainerPose(pose, layerID: layerID)
+        applyContainerPose(pose, target: target)
         let marksAfter = marksBefore.isEmpty
             ? marksBefore
             : Self.marks(marksBefore, droppingKeyed: keyedBefore.union(keyedFrames(of: target)))
-        if marksAfter != marksBefore { layers[index].keyframeMarks = marksAfter }
+        if marksAfter != marksBefore { applyContainerPose(pose, target: target, marks: marksAfter) }
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return }
         recordUndo(label: label,
                    cost: Self.containerPoseUndoCost(before) + Self.containerPoseUndoCost(pose),
                    undo: { [weak self] in
-                       self?.applyContainerPose(before, layerID: layerID, marks: marksBefore)
+                       self?.applyContainerPose(before, target: target, marks: marksBefore)
                    }, redo: { [weak self] in
-                       self?.applyContainerPose(pose, layerID: layerID, marks: marksAfter)
+                       self?.applyContainerPose(pose, target: target, marks: marksAfter)
                    })
     }
 
-    /// The one mutation every direction of the undo above goes through, re-resolving the layer by id
+    /// The one mutation every direction of the undo above goes through, re-resolving `target` by id
     /// on every call — `applyCelPoseState`'s rule for the payload one container up.
     ///
     /// **The raw field is written and the accessor is read**, which is
     /// `applyGraphBandPoseSnapshot`'s pairing and needed for its reason: nil is a real value here, so
     /// a restore has to be able to write it, while a pose left inert by a kind change must not be
-    /// treated as one this path may put back into force.
-    private func applyContainerPose(_ pose: LayerPose?, layerID: UUID, marks: [Int]? = nil) {
-        guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return }
-        if layers[index].transform != pose { layers[index].transform = pose }
-        if let marks, layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
+    /// treated as one this path may put back into force. A folder has no kind to change, so its arm
+    /// is the layer arm with the second field reconciled away — `containerPose(of:)`'s own asymmetry.
+    private func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            if layers[index].transform != pose { layers[index].transform = pose }
+            if let marks, layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+            if folders[index].transform != pose { folders[index].transform = pose }
+            if let marks, folders[index].keyframeMarks != marks { folders[index].keyframeMarks = marks }
+        }
     }
 
     /// `graphBandPoseUndoCost`'s container term, in the same currency and for the same reason.
