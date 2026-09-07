@@ -181,12 +181,30 @@ final class BakeWiringUITests: PaintUITestCase {
         attachScreen("02-six-frames-into-the-move")
 
         let after = try XCTUnwrap(derivedRenderCount(app))
-        report("derived renders across six frames of the move", nil)
         XCTAssertEqual(after, before,
                        "Walking six frames of a baked move must rasterize no posed ink at all: the "
                        + "picture is on disk and the composite is what puts it on screen. A count "
                        + "that climbed by one per frame is TODO (53) exactly — MEASURED at 71.9 ms "
                        + "a frame against 3.7 ms to read the baked frame instead")
+
+        // **And the owner's own gesture, which is the one the report is about.** Three seconds of a
+        // twelve-frame loop at 24 fps is six laps, so the pre-fix canvas would have rasterized posed
+        // ink dozens of times over; there is nothing left to count.
+        //
+        // **The frame counter is deliberately not the instrument.** `PlaybackClock` derives the
+        // playhead from elapsed time and *"a late tick skips rather than stretches"* — so an app
+        // playing at 8 fps still reaches the right frame at the right second and the label looks
+        // perfect. That is exactly why the cost had to be published as a count.
+        let play = app.buttons["timeline.playButton"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        Thread.sleep(forTimeInterval: 3)
+        play.tap()
+        XCTAssertEqual(derivedRenderCount(app), before,
+                       "Three seconds of playback — six laps of the loop — must rasterize no posed "
+                       + "ink either. This is the owner's report in one line: \"when I play the "
+                       + "animation, the FPS drops to 8fps\"")
+        attachScreen("03-after-three-seconds-of-playback")
     }
 
     /// The `derived:` field of the canvas's published state — see `CanvasView.derivedRenderCount`.
