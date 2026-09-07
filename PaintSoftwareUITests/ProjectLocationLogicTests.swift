@@ -173,11 +173,17 @@ final class ProjectLocationLogicTests: XCTestCase {
                        container.standardizedFileURL)
     }
 
-    /// **A folder whose bookmark cannot be minted is refused before anything moves.** The ordering
-    /// inside `adopt` is the whole assertion: discovering the failure after the migration would
-    /// leave the library in a folder the app will not find again, which is an empty gallery and a
-    /// pile of work the artist was never told the location of.
-    func testAFolderThatCannotBeBookmarkedIsRefusedBeforeTheLibraryMoves() throws {
+    /// **A folder `adopt` cannot even make is refused before anything moves.**
+    ///
+    /// **What this does *not* pin, said plainly:** `adopt` also mints the bookmark before migrating,
+    /// so that a folder which resolves today but cannot be bookmarked is refused rather than
+    /// swallowing the library. That ordering is argued in `adopt`'s own comment and is **not
+    /// asserted here** — a directory that `createDirectory` accepts and `bookmarkData` then rejects
+    /// is not a state this test can construct, and an assertion that would pass with the two
+    /// statements swapped is one of the shapes CLAUDE.md calls measuring nothing. This test guards
+    /// the step that *is* reachable: the precondition failure happens before the migration, and the
+    /// library is exactly where it was afterwards.
+    func testAFolderThatCannotBeCreatedIsRefusedBeforeTheLibraryMoves() throws {
         let doomed = writeProject(named: "Stays Put")
         let missing = scratch.appendingPathComponent("NeverExisted", isDirectory: true)
         // A path under a file rather than a directory: `createDirectory` cannot make it, so `adopt`
