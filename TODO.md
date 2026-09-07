@@ -101,11 +101,20 @@ read-write, a transformation layer is reachable and usable, animation groups can
 pose key has a node.
 
 **Left to build**
-- [ ] **Stage 7 — live recording and an editable fps**, then **stage 10**, the timing recorder, which
-      sits on 7. **The owner chose this order on 2026-09-06**, over stage 6, because `fps` is fixed at
-      24 today and only load and save even write it, so a scene cannot be taken onto twos or worked
-      slower. Its one prerequisite is met: the playback clock is on the model
-      (`Engine/PlaybackClock.swift`, delivered by RENDER stage 1). Nothing else of it exists. §5 and §7.
+- [ ] **Stage 7 is half shipped, and the half that is left needs the owner.** Merged 2026-09-07: the
+      editable fps (clamped 1-60, presets, live during playback, no undo step, persisted) and the live
+      take on **the slider surface** — captured at the control's own rate, resampled at `fps`,
+      deviation-simplified, landing as one curve and one undo step, with five refusals and two
+      auto-stop paths. 35 mutations, one survivor found and fixed.
+      **§5 specifies *"one mechanism, two surfaces: a slider, and the Move box"*, and the Move-box
+      surface is not built** — `ValueRecording` is scalar-only while a transform channel stores
+      `PoseQuad` keys, so resampling and tolerance both need definitions nobody has ruled on. §5's
+      *"slow motion is a capture-speed multiplier on the record control"* is also unbuilt. **Both are
+      owner-facing design and want a conversation before anyone builds them.**
+      **One thing for the owner's eyes rather than a defect**: at 24 fps a new document's take is over
+      before a person can react, because §5 runs a take over the scene you have. That is the design.
+- [ ] **Stage 10**, the timing recorder (§7), which sits on stage 7 and was left until its base is
+      whole.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
       when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
       bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
