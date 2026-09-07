@@ -9,115 +9,133 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 [TODO.md](TODO.md) is the owner's asks **in queue order — the top of the list is what to do next**;
 [BUGS.md](BUGS.md) is what we find.
 
+## Start here: three branches are quarantined and NONE of them may merge unverified
+
+**This is the whole job of the next session, before any new work.** Three branches hold finished-looking
+work whose authors were **killed mid-task by a usage limit**. Their reasoning is unrecoverable. The owner's
+standing requirement, stated 2026-09-06:
+
+> *"I need your complete and absolute confidence that all of their work is thoroughly examined down to
+> each line before we allow it to merge with main. Remember: the single most important design
+> consideration of this entire project is that the architecture and repository are clean, organized, and
+> up to date, with absolutely zero tolerance for defects."*
+
+| branch | commits | rebased on `1277909`? | verified? |
+|---|---|---|---|
+| `tmp/playback` | 8 | **yes** | **no — its fast tier was killed before it finished** |
+| `tmp/fps` | 5 (incl. 1 WIP) | no | no |
+| `tmp/prune` | 5 (incl. 1 WIP) | no | no |
+
+All three working trees are **clean**, no simulator clones exist, and the stash is empty. Nothing was lost.
+
+**Audit each one adversarially before merging, with an agent that did not write it.** Aim the audit at
+*tests*, because **every serious defect this session was in a test, not in app code**:
+
+- two load-bearing assertions **commented out** with `// DIAG: temporarily disabled` — the test ran green
+  against a dead feature; a mutation makes a test go red, this made a test stop being a test;
+- a ruler that took the centroid of dark pixels on a row **dominated by the black tool rail and the grey
+  layers rail**, so it measured chrome: the ink travelled 260 px right and the number went *down*;
+- a "regression test" that was a **characterization of the defect** — it asserted the drag moved the block
+  0 pt, so it was green against the broken app, and TODO called it the regression test;
+- an assertion **true of mathematics rather than of the code**, and another **true at the wrong level**.
+
+For every assertion on these branches ask *"if this went red, would the code be wrong?"* and then **prove
+it by mutation** — the killed sessions' own sweeps may never have run. **Commit before mutating.**
+
+### `tmp/playback` — TODO (53), the owner's own bug, and the most valuable of the three
+The orchestrator read the app-code diff and believed it sound; **that is not evidence and must be
+re-derived.** What it does: `sandwichEngagesOnCanvas` now also engages on a new `hasContainerPoseInForce`,
+because Core Animation draws a flat row of layer hosts and cannot move one sibling by a transformation
+layer above it — so the only thing showing the pose was `updateInterpolationPreviews` rasterizing posed ink
+into the host's slot, **a canvas-sized main-thread render per distinct pose, and a keyframed move mints a
+distinct pose every frame.** Claimed **71.9 ms a frame against 3.7 ms to read the bake** (PERFORMANCE.md
+§14). It also fixes a second bug found on the way: a raster layer under a transformation layer **moved only
+in the bake and never on the canvas**.
+
+**Audit these four points specifically.** (1) Is `LayerPose.movesItsContents` genuinely frame-invariant —
+can it disagree with what renders at some frame? It assumes two resting keys cannot interpolate to anything
+but rest; CLAUDE.md records an overshooting bezier handle inside a segment being silently flattened, so do
+not take that on faith. (2) The `guard !host.isBlanked else { continue }` is placed **before** the key check
+deliberately; verify that argument against `updateSandwich`'s blanking path and its "trap 1". (3) Engaging
+the compositor changes the rendering path for *any* document with a container pose — what regresses?
+(4) Verify the numbers: `autoreleasepool`, Debug-vs-Release, idle machine, MEASURED/INFERRED labels.
+
+`PlaybackTickBench.swift` holds eleven `print("PLAYBACK | …")` lines — confirm the file is excluded from
+the fast tier **by filename** and gated behind `XCTSkipUnless`, which is the convention, not scaffolding.
+
+**A cel's own pose channel is deliberately NOT fixed** and has the identical defect at 73.6 ms a frame. It
+is filed in BUGS.md with what must be measured first (a drag showing a stale composite). That is honest, not
+an oversight.
+
+### `tmp/fps` — KEYFRAMES §8 stage 7, part-built
+An editable fps and a live take recorder. **It edited `TODO.md`, which its brief forbade — revert that.**
+Its last commit is WIP: `ValueRecordingLogicTests.swift` may not be wired into `project.pbxproj`, and a test
+file that is not listed there is **silently never compiled and never run** while the suite still prints
+`** TEST SUCCEEDED **`. Reconcile by count before believing anything. Stage 10 (§7, the timing recorder)
+sits directly on this stage and is described as small.
+
+### `tmp/prune` — TODO (45), documentation only
+Spec corrections plus the removal of four leftover `FREEZEDIAG`/`MENUDIAG` `NSLog` scaffolds. Touching
+`TODO.md` was permitted for this one. Lower risk than the other two, but the same rule applies: a spec sweep
+of this file's own kind once produced **130 false positives**, because the specs cite sources by a
+`PaintSoftware/`-relative shorthand as a deliberate convention rather than as rot.
+
 ## State
 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**41 commits this pass, 126 files, +16,000 lines. No worktrees, no `tmp/*` branches, no simulator
-clones, nothing uncommitted.** Fast tier **3385 total / 3382 passed / 0 failed / 3 skipped**,
-reconciled against a static count of instance `func test` across the 143 selected classes.
+`main` is at **`1277909`**. Fast tier there: **3435 total / 3432 passed / 0 failed / 3 skipped**, reconciled
+exactly against 3435 static `func test` **declarations** across 146 files. A plain `grep -c "func test"`
+over-counts by 3 — three files say the phrase in prose. **The full suite has not been run this pass.**
 
-**The full suite was run and is green.** MEASURED at `db21782` on an erased simulator: **3595 tests,
-3560 passed, 1 failed, 34 skipped.** The one failure —
-`BlendModesAndCompositorUITests.testFolderOpacitySliderPersistsThroughSetFolderOpacity`, a class whose
-name differs from its file (`LayerUITests.swift`) — **passed clean in isolation in 25 s** and is
-environmental. The class table is re-taken in CLAUDE.md.
-
-**A Release build of `7ad5a9f` is on the owner's iPad**, installed 2026-09-06, provisioning valid
-until 2026-09-12. It carries everything below. **The owner has not yet used it** — the fill fix and the
-undo/redo work they confirmed were on the previous build; the merge, Distort-on-ink, the scene end, the
-panels and the onion skin are all unseen.
-
-## Start here: three things are ruled and unbuilt, and one of them is the owner's worst bug
-
-TODO's top four items are all small and all decided. None needs a conversation.
-
-1. **(39) The timeline freeze.** Reproduced and measured. **While a timeline menu popover is up, every
-   drag on the timeline is swallowed** — the track does not scroll, the ruler does not scrub, the menu
-   does not dismiss; only a tap does. MEASURED: menu up, a drag moves the cel block **0.0 pt**; menu
-   gone, the same drag moves it **369 pt**. The owner's call is to **stop presenting those four menus
-   as popovers**, not to punch a hole in the gate — `passthroughViews` leaves a cel menu naming a block
-   the artist has scrolled away from. `MenuInterruptionUITests` reproduces it.
-2. **(51)** Onion-skin Behind should cut **proportionally to layer opacity**, not on the presence of
-   ink. One line and its test — and pin it at *two* opacities, or the assertion passes against today.
-3. **(52)** A merge should drop a hidden layer's ink **everywhere**, not only where the two layers
-   overlap.
-4. **(47)** A finger tap bakes a Move while pen-only is on. Small.
+A Release build of `7ad5a9f` is on the owner's iPad from 2026-09-06, provisioning valid until 2026-09-12.
+**Everything below is newer than that build and the owner has seen none of it.**
 
 ## What shipped this pass
 
-**The owner reported five defects and all five are fixed or diagnosed to the line.** Two of their own
-diagnoses were confirmed exactly against the code; one of mine was wrong three times running.
+Six items closed and left [TODO.md](TODO.md) whole: **(39)** the timeline freeze, **(51)** onion-skin
+opacity, **(52)** the hidden-layer merge, **(47)** the pen-only finger tap, **(12)** animated Distort, and
+**(26)** import videos. Twelve items became nine.
 
-- **The lasso fill corrupting an earlier fill.** `PixelOps.contourPath` kept **one out-edge per
-  vertex**, so a region touching itself corner-to-corner lost an edge, the walk dead-ended, and
-  CoreGraphics closed the open subpath with a straight chord — every wrong edge in the owner's
-  screenshot. It is a multimap now and starts in raster order rather than Swift's per-process hash
-  order, **which is why it was never reproducible** and which also made it 34% faster. The magic wand
-  shares the trace and had the same defect. Neither function had a single test.
-- **Undo and redo.** `restoreElements(_:changedInk:)` bounds a wholesale list swap by one rectangle
-  that reads the same in both directions. **The redo was 5.6–11.3x its own undo** and is now 571 → 51
-  ms at 1,000 strokes. MEASURED: the main-thread span of a press is 0.44–7.84 ms against a 5–2,275 ms
-  render, so **the app never froze — the picture was late**. Raster undo is 0.02 ms and needed nothing.
-- **Merging vector layers stays vector**, with six named reasons it can fall back and the artist told
-  which one. Byte-identical to the old picture at max channel delta 0. Two silent data-loss bugs went
-  with it: Merge Down never asked before a lossy merge (only the pinch did), and **merge binned the
-  upper layer's cels at every frame but the playhead's**.
-- **Distort works on ink.** The blocker had lifted four days earlier and the code had not noticed. A
-  stroke stores **the map it was made by** and rebuilds its rest walk at render, so it survives a save
-  and stays editable; width is per dab.
-- **`sceneFrameCount` is deleted.** Every write to it was `max(…)`, so it only ever grew. An inventory
-  found **fifteen readers meaning four different things**, which is why one name went wrong.
-- **The timeline pinch** holds its frame at any scroll offset, and the track reaches the bottom of the
-  panel.
-- **The bottom options panels** are wider and flatter and ride the timeline's top edge. They had been
-  sitting **150 points inside the timeline** by default.
-- **The onion skin** draws over the compositor under both placements; Behind is a clip.
-- **A fill on a vector layer walls against the stroke's own path**, in that stroke's own colour, so
-  Rough Ink at low pressure encloses what its dabs do not.
-- **A transform grip past the canvas edge takes a touch**, and **RENDER (29) is finished** — stage 7's
-  memory audit built four of seven items and declined two with numbers.
+- **(39) The timeline freeze.** Four `.popover` menus became `AnchoredMenu`, drawn inside the timeline's own
+  hierarchy. Dismissal is a window recogniser that reports the touch-down point and **immediately fails**
+  with `cancelsTouchesInView = false`, so the touch that dismisses still reaches the track: one drag, not
+  two. MEASURED — menu up, one 250 pt drag closed it *and* scrolled the ruler from frames 1–28 to 18–45.
+  **Five more `.popover`s have the same gate and are filed in BUGS.md**, unfixed because three are colour
+  pickers whose chrome would visibly change — the owner's own call for the timeline's four.
+- **(12) Animated Distort.** `PoseQuad.affineOrLinearised` is deleted; a pose answers a `PoseMap` that is
+  affine **or genuinely projective**, demoted at every constructor. MEASURED: the old linearisation
+  displaced both bottom corners of a keystone by **164 px**, and local scale spans 6.09x across the quad
+  against one centre scalar — **218% wrong** at the far end. Thirteen mutations, thirteen red.
+- **(26) Import videos** closed with the bake verb; **(21)** gained the folder transform entry and the graph
+  editor's node delete and tap-to-add.
+- **(52) was refuted, not built** — the guard it asked for was already on `main`, landed nine hours before
+  the item was filed.
 
-## Two things about measurement, both learned the hard way this pass
+## The trap this pass paid for, and it cost the owner real money
 
-**1. Release test builds work again, and "Debug is 62x slower" is a fact about *Swift*.** MEASURED:
-~25x on the dab walk alone, **1.86x** once dabs go through CoreGraphics, **1.01x** on a brush-pad
-stroke. Two comments called the pad figures a worst case pending a Release run; they were already the
-artist's number and **the caveat was the error**. The penalty is not one number — say which mixture a
-figure is.
+**Subagents spawned subagents.** Three briefed agents became **seven running agents**, because
+`general-purpose` carries the Agent tool and no brief forbade delegating. Combined with an orchestrator that
+had misread the budget as "1 Opus **plus** 2 Sonnet" when it is **1 Opus *or* 2 Sonnet**, this burned
+millions of tokens and hit the usage limit, killing five agents mid-task and creating the quarantine above.
 
-**2. A harness that measures growth is measuring its own autorelease pool until you prove otherwise.**
-This produced two confident wrong findings on one day. See CLAUDE.md's section on it.
+**Every brief must say: do not spawn subagents.** And the cap is **one Opus, or two Sonnet, total.**
 
-## Traps this pass paid for
+Two smaller ones worth keeping: a worker's **completion notification fires while it is still waiting on its
+own background run**, so harvesting then makes its worktree vanish under it — one worker concluded a rival
+session had raced it. And **an agent's own triage runs evict the full run's `.xcresult`**, so pull a count
+immediately after the run that produced it or it is gone.
 
-- **Three consecutive diagnoses of the timeline freeze were wrong**, each confidently argued from the
-  owner's trace. What settled it was **reconstructing the gestures**: almost every "dead" touch was a
-  swipe, which is *supposed* to scroll and leaves no model event, and every genuine tap in the trace
-  worked. The column all three readings rested on — `grNames` — is UIKit's *offered* set, which the
-  popover's gate prunes. **Read the evidence doc before touching that item.**
-- **Mutation testing found a blind assertion in every single pass**, without exception — at 2 of 12,
-  then a 3rd on a second sweep, then the 9th, the 26th, and four at once in the memory audit. **Re-run
-  the whole sweep after *adding* a test, not only after writing one**; several were found only that way.
-- **Looking at the thing found what asserting on it did not, three times.** A one-point divider made a
-  panel 1,580 points tall — floor to ceiling over the artwork — with every test green, because the
-  assertions were about its bottom edge, which was right.
-- **A brief premise was refuted in all eleven agent runs.** Several improved the result: the fill-wall
-  "barrier" would have silently removed the Threshold slider, and carrying the stroke's *colour* fixed
-  it *and* made "an invisible stroke is not a wall" fall out rather than be a second rule.
-- **An item can be stale in the direction of looking finished.** Four TODO items sat marked "built on
-  `tmp/…`, not merged" — true when written, false the moment the branch merged.
+## Waiting on the owner — the next session's agenda after the audits
 
-## Filed rather than fixed
-
-- **BUGS.md — the auto-resign daemon counts its own runs, not the profile's expiry.** Delete
-  `~/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision` and check
-  `ExpirationDate` *before* installing; the build succeeds either way.
-- **BUGS.md — a restored project texture can be held down by a negative cache entry.**
-- **PERFORMANCE.md §10.4 — the two device measurements RENDER (29) owed** outlived the item: the
-  compression ratio against the owner's own "UI Test" document, and a decode of a compositor-produced
-  frame at their canvas size. Both need the owner's iPad.
-- **TODO (45) — the repository prune the owner asked for.** The 2026-09-06 audit found fourteen false
-  assertions in TODO.md and a dozen across the specs; that list is in the item, and a pass this large
-  will have added its own.
+- **(31) The 16383² canvas.** Build a downscaled display proxy, or lower `maxCanvasExtent` — TODO calls the
+  latter the cheaper answer if the owner does not need 16k. A deferred A/B is owed before the lag ruling.
+- **(22) Select multiple cels.** No design at all; the menu row is `.disabled(true)` with an empty action.
+- **(21) Animation-group membership editing.** §2.29 rules that splitting one animated group into two is *"a
+  different feature"*; retagging is that question from the other side.
+- **(41) / (42).** The owner has accepted (41) where it stands, but **(42) is blocked on it** — a live
+  preview over a selection is a rewrite in place, which no caller's rectangle can bound. Worth asking
+  whether (42) matters enough to reopen (41).
+- **The pencil half of (47)** cannot be driven by any test here — XCUITest cannot synthesise a pencil touch.
+  Ten seconds on the owner's iPad settles it.
