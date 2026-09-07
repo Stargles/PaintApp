@@ -3,6 +3,26 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A cel's own pose channel still rasterizes a posed picture on the main thread every frame (2026-09-06)
+
+**MEASURED at 73.6 ms a frame, a 13.6 fps ceiling, on a 2048² document of 63 strokes** —
+PERFORMANCE.md §14.6, `PlaybackTickBench.testTheSameTickOnACelsOwnPoseChannel`.
+
+This is TODO (53)'s defect surviving in its other half. That item was the owner's report about a
+**transformation layer**, and it was fixed by engaging the compositor for a document carrying a
+container pose, so the canvas shows the baked frame instead of `updateInterpolationPreviews` rendering
+the posed ink per tick. `posedCelContent` derives on `!cel.transformTracks.isEmpty || container != nil`,
+so a **cel's own** pose channel — KEYFRAMES stage 5's graph-editor band — produces the identical picture
+by the identical route and still takes the old path: `sandwichEngagesOnCanvas` answers false, the bake
+goes unread, and every frame of a keyed cel is a fresh canvas-sized rasterize on the main actor.
+
+**The fix is one clause** — widen `CanvasManager.hasContainerPoseInForce` to ask `cel.transformTracks`
+as well — and it is deliberately not taken, because **the thing it changes is a drag and nobody has
+measured that drag**. A cel channel is what the graph editor authors; engaged, the canvas would show
+the previous baked frame while a node is dragged instead of re-rendering per sample. §14.6 states both
+sides, the owner rulings that pull each way, and exactly what to measure. The graph editor was live
+work in another worktree the day this was found, which is a second reason not to move it underneath.
+
 ## The raster float's transform handles are not the stage 4 handle pattern (2026-09-06)
 
 Carried out of TODO (12) when animated Distort closed that item, because it is the one thing in it that
