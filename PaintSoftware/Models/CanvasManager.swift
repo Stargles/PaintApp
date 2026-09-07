@@ -37,22 +37,33 @@ final class CanvasManager: ObservableObject {
     /// once (`SandwichRecipe`), and committing a stroke opens a fourth — the layer's own persistent
     /// `CGContext` (`RasterLayerTexture.ensureContext`, BUGS.md's memory audit item 2) — against a
     /// device MEASURED at 1837 MiB available before jetsam **at rest**, before any of that is drawn.**
-    /// None of `CompositorBudget`'s protection reaches this: a plain few-layer document composites on
-    /// `CoreGraphicsCompositor` by design (`[RenderNode].prefersGPUCompositing` is false under four
-    /// layers), and `CompositorBudget.hasHeadroom` has exactly two call sites — `MetalCompositor.swift`
-    /// and `MetalFillEngine.swift` — neither of which is on this path, so the sandwich rebuild that
-    /// runs on every stroke is never budget-checked at all.
+    /// None of `CompositorBudget`'s protection reaches this: a plain document under four layers
+    /// composites on `CoreGraphicsCompositor` by design (`[RenderNode].prefersGPUCompositing` is
+    /// false there), and `CompositorBudget.hasHeadroom` has exactly two call sites —
+    /// `MetalCompositor.swift` and `MetalFillEngine.swift` — neither of which is on this path, so the
+    /// sandwich rebuild that runs on every stroke is never budget-checked at all.
     ///
-    /// **4096 is INFERRED from that arithmetic, not measured — PERFORMANCE.md §15 carries the full
-    /// derivation and the open checkbox to confirm or correct it on the owner's own device.** It sits
-    /// comfortably under every conservative variant of that derivation, and it is still three orders
-    /// of magnitude above the owner's own working canvas (2048x1024, PERFORMANCE.md §1), so nothing
-    /// they actually do is bound by it.
+    /// **4200 is INFERRED from that arithmetic, not measured — PERFORMANCE.md §15 carries the full
+    /// derivation, its sensitivity table, and the open checkbox to confirm or correct it on the
+    /// owner's own device.** It sits well inside the row of that table this bound is chosen from —
+    /// the scenario of a fresh document's first stroke, which is what crashed — spending 59% of that
+    /// row's own budget and leaving the rest; a document already carrying more resident state before
+    /// the stroke would need more margin than that row assumes, which is exactly what the open
+    /// checkbox asks the device to settle. Either way it is still nearly an order of magnitude above
+    /// the owner's own working canvas (2048x1024, PERFORMANCE.md §1), so nothing they actually do is
+    /// bound by it.
+    ///
+    /// **Not 4096, even though the arithmetic would allow it.** 4096 is this codebase's own common
+    /// texture-size ceiling — `TextLayout.maximumWarpTexels`, `PixelOps.maximumFloatingWarpTexels`,
+    /// `TextOverlayView.maximumGlyphTexels` and others each land on it independently, for reasons that
+    /// have nothing to do with the canvas bound — so a "does the shared constant appear exactly once"
+    /// source scan (`CanvasGeometryLogicTests`) cannot tell those apart from a forgotten reader if this
+    /// picks the same number. 4200 keeps the same derivation and margin while staying clear of them.
     ///
     /// **The single named home for this bound** — TODO.md item (13) asked for one, and this is still
     /// it. `canvasPaddingRange` below and `CanvasSizePickerView.maxDimension` both read this rather
     /// than spelling the number a second time.
-    static let maxCanvasExtent: CGFloat = 4096
+    static let maxCanvasExtent: CGFloat = 4200
 
     /// Base upper bound for `canvasPadding` on an ordinary canvas — 1024 pt per side, raised from 512
     /// by TODO.md item (13).

@@ -3508,3 +3508,179 @@ raster leaf is the only carrier.
 **This is the shape to look for after any fix of this kind.** The 8 fps was a *cost* defect and this is a
 *correctness* defect, but they are one cause seen twice: a picture that only the compositor can produce,
 on a canvas that was not running the compositor.
+
+---
+
+## 15. TODO item (31) — `maxCanvasExtent` is INFERRED from a 3 GB device budget, not measured (2026-09-07)
+
+The owner reopened item (31): *"the app is crashing on brushstroke input at 16k."* The arithmetic
+settles what to do — `CanvasManager.maxCanvasExtent` drops from 16383 to **4200**, INFERRED below —
+and this section is that derivation, in full, because the owner delegated the decision (*"I don't
+know, you take the reigns"*) and a delegated number needs its working shown more, not less.
+
+**The device's own numbers, so nothing here has to assume them** — MEASURED, §9, owner's iPad 9
+(`iPad12,1`, A13, 3 GB), 2026-09-02: `physicalMemory` **2939 MiB**; `os_proc_available_memory()` at
+rest **1837 MiB** — before any document is even open.
+
+### 15.1 The previous "fixed" claim was real, and about a different allocation
+
+Item (31) previously closed on a MEASURED-looking figure: one screen inch of pen travel at 16383²
+held 283.1 MB before `StrokeScratch`'s padded window and 4.42 MB after (§9 item 1). That number is
+not wrong, but it was never an answer to *this* crash: it is the **live-drag scratch's own window**,
+bounded to the stroke's bounding box since the fix landed, and `git diff` against
+`Engine/StrokeScratch.swift` confirms nothing there has moved. The crash TODO item (31) reopens is in
+what happens **after** the stroke — the sandwich rebuild that redraws the canvas around it, and the
+persistent layer storage the stroke commits into — neither of which `StrokeScratch` touches. Fixing
+the window was real and stays fixed; it was never going to fix a different pair of buffers.
+
+Separately, and worth stating rather than leaving implicit: the 283.1 MB *before* figure was MEASURED
+on the owner's own device, but the 4.42 MB *after* figure is a simulation validated against it
+(reproduces the device's own 8617×8611 window to within 0.3%) — not a second device measurement. That
+distinction does not change anything above; it is a different, narrower version of the same lesson
+TODO item (31) states about the sandwich figure this section derives from: a number's hardware
+matters, and it is worth naming even when the number itself still holds up.
+
+### 15.2 Why `CompositorBudget` never sees the composite that crashes
+
+TODO item (31)'s own arithmetic — one 16383² RGBA buffer is 1.07 GB, the sandwich needs three live at
+once, 3.22 GB on a 3 GB device — is confirmed against the source rather than taken on faith:
+`CompositorBudget.textureBytes(for:)` is `width × height × 4`, `SandwichRecipe.compositeHalves`
+composites `below` and `above` as two independent full-frame requests, and `Compositor.swift`'s own
+`drawHandRolled` comment independently describes a canvas-sized blend as "three canvas-sized
+allocations for one draw" — the same order of magnitude, reached by a different path in the same
+file.
+
+**None of `CompositorBudget`'s protection reaches this composite, for two independent reasons that
+each would be sufficient alone:**
+
+1. **A plain document does not even try the GPU.** `[RenderNode].prefersGPUCompositing` is `false`
+   for any ungraded document below `gpuLeafThreshold` (4) layers (`RenderTree.swift`;
+   `PerfBaselineTests.testTheAutomaticBackendPrefersTheGPUOnlyWhereTheDeviceSaysItWins` pins
+   `tree(layers: 1)` and `tree(layers: 3)` both false, `tree(layers: 4)` true) — so the fresh,
+   one-layer document the owner's crash report describes composites on `CoreGraphicsCompositor` by
+   design, never asking Metal at all.
+2. **Even a document that prefers the GPU falls back to the same unguarded path.** At any canvas
+   size where the sandwich's textures exceed `CompositorBudget.textureBudgetBytes` (183.7 MiB on this
+   exact device — `physicalMemory / 16`, clamped, and MEASURED to match exactly), `MetalCompositor`
+   refuses the walk and, per `SandwichRecipe`'s own doc comment, *"a grading document over the budget
+   composited both halves on the CPU reference, for the duration of every stroke."* 16383² blows that
+   183.7 MiB budget by roughly 17×, so this fallback is not an edge case at that size — it is what
+   always happens.
+
+Either way, the composite that actually runs is `CoreGraphicsCompositor`, and
+`CompositorBudget.hasHeadroom` — the one check that would decline an over-budget composite instead of
+crashing — has exactly **two call sites**, `MetalCompositor.swift` and `MetalFillEngine.swift`.
+Neither is on this path. BUGS.md's still-open memory-allocation audit already named this gap directly
+(item 1: *"`FrameRecipe.resolveSources` holds one canvas-sized image per visible leaf, all at once,
+with no budget... the site survives on the two callers that legitimately want one request over every
+leaf: the sandwich halves"*), and named a fourth full-canvas allocation this section's arithmetic
+uses (item 2, below).
+
+**What the stroke path allocates at full size, concretely — the brief's own question, answered by
+reading the three files it named:**
+
+- `Engine/StrokeScratch.swift` — **not full-size any more.** The live-drag window is bounded to the
+  stroke's own bounding box plus a geometric growth margin (§9 item 1); this is the fix that already
+  landed and it is not what crashes.
+- `Engine/RasterLayerTexture.swift` — **full-size, and unavoidably so.** `ensureContext()` (line 767)
+  opens `CGContext(data: nil, width: pixelWidth, height: pixelHeight, ...)` — a canvas-sized bitmap —
+  the first time a cel is touched, and stays open for the cel's life. It is lazily *committed* (§9
+  item 8: untouched pages are never faulted in, which is why one dab costs 0.9 ms at every size), but
+  `renderToUIImage()`'s `makeImage()` — called whenever the sandwich needs this layer's picture, i.e.
+  on every stroke — reads every pixel and mints a second, fully-resident canvas-sized `CGImage`. This
+  is BUGS.md's memory-audit item 2, still open: *"committing one still opens the cel's canvas-sized
+  CGContext... which is the artwork's own storage and is as unbudgeted as everything else here."*
+- `Engine/StripedComposite.swift` — **not on this path at all, which is itself the finding.** Its own
+  comment names the gap directly: *"roughly a gigabyte at 16383²... is the separate '16383² cannot be
+  composited at all' problem, not this one."* RENDER.md §3.8's striping protects the bake, the
+  thumbnail and the eyedropper; `SandwichRecipe.compositeHalves` composites the live mid-stroke halves
+  **whole**, specifically because RENDER §2.12 deleted the old shrink-to-fit knob and never gave the
+  live sandwich a strip plan of its own (§3.4's note: *"these two were left composing the frame
+  whole... on exactly the documents §3.8 exists to serve"*).
+- `Engine/Compositor.swift` — the sandwich's three canvas-sized buffers themselves (§15.2 above), plus
+  `CompositorBudget`, whose protection this whole section explains does not reach the path that runs.
+
+### 15.3 The arithmetic
+
+| step | running total (raw bytes, one canvas-sized RGBA buffer = `4·S²`) |
+|---|---|
+| the sandwich's own three buffers — TODO item (31)'s figure, confirmed above | `3 · 4 · S²` |
+| **+1**: `RasterLayerTexture.ensureContext`'s canvas-sized `CGContext`/`CGImage` pair for the layer actually being drawn on (§15.2, BUGS.md item 2) | `4 · 4 · S²` |
+| **×2**: `CompositorBudget.hasHeadroom`'s own documented multiplier — *"the textures are not the whole cost of the frame they belong to... [it] reads a canvas-sized image back out of it, hands that to the view layer, and Core Animation copies it again — none of which is freed before the next composite starts"* — applied by analogy, because the path that actually executes this composite (§15.2) has no budget of its own to read that multiplier from | `4 · 4 · S² · 2` |
+
+Set that against a **budget**, not the whole 1837 MiB: half of the MEASURED at-rest headroom, reserved
+for whatever is already resident by the time a real stroke happens — the document's own layer content,
+undo history, UIKit — since 1837 MiB was measured with **nothing open at all**. Solve `8·4·S² ≤
+0.5 × 1837 MiB` for `S`:
+
+| | assumption added | budget | max extent |
+|---|---|---|---|
+| A | 3 buffers (TODO's own sandwich figure), ×1, full at-rest headroom | 1837.0 MiB | 12670 px |
+| B | + `CompositorBudget`'s own ×2 realism factor | 1837.0 MiB | 8959 px |
+| C | + the 4th buffer (`RasterLayerTexture.ensureContext`, BUGS item 2) | 1837.0 MiB | 7759 px |
+| **D** | **+ half the headroom reserved for what's already resident — CHOSEN BASIS** | **918.5 MiB** | **5486 px** |
+| E | + reserving three quarters instead of half (extra conservative) | 459.2 MiB | 3879 px |
+
+**Chosen: `maxCanvasExtent = 4200`, not the rounder 4096.** 4200 sits comfortably inside row D — the
+scenario this section argues is the right one for the bug being fixed, a **fresh document's first
+stroke**, which is exactly the owner's report and exactly BUGS.md's crash scene — spending 538 MiB of
+the 918.5 MiB row D allows and leaving the other 41%. It is below row C outright, so the choice does
+not depend on the margin-reservation judgement call at all, only on the two buffer counts and the
+realism factor, both read from this codebase's own source rather than assumed.
+
+**Not 4096, and this is worth recording rather than quietly correcting.** 4096 was this section's
+first answer — same derivation, same row, same margin — and
+`CanvasGeometryLogicTests.testMaxCanvasExtentIsTheOnlySpellingOfItsOwnValueInAppSource` caught it: ten
+literal occurrences of "4096" in app source, not one. Nine of them are unrelated — `resizeUndoCostBytes`
+(`CanvasManager+Document.swift`, and the same flat undo charge in `CanvasManager+Undo.swift` and
+`CanvasManager+Interpolation.swift`), `TextLayout.maximumWarpTexels` and
+`.maximumWarpDestinationTexels`, `PixelOps.maximumFloatingWarpTexels`, `TextOverlayView.maximumGlyphTexels`,
+`DabRandom.quantum` and `BrushModulation.outputStride` — because **4096 is this codebase's own ordinary
+texture-size ceiling**, chosen independently by several unrelated subsystems for the unrelated reason
+that it is a texture dimension virtually every GPU supports. Picking it for the canvas bound too would
+make the "exactly one spelling" invariant untestable — not wrong, *untestable*, since a real future
+collision (a reader that should say `CanvasManager.maxCanvasExtent` and instead spells `4096`) would be
+indistinguishable from these nine legitimate ones. 4200 was checked against the same scan (both the
+literal grep and the test's own regex) before being adopted: zero collisions.
+
+**Where this derivation is honestly weaker: row E.** A document that already carries several layers
+and a long undo history before the crash-triggering stroke would have less than half its at-rest
+headroom free, and 4200 does not clear row E's tighter 3879 px floor. This section's position is that
+row D is the right scenario for *this* bug (a blank canvas, one brushstroke) rather than that row E
+never applies — see the open checkbox below, which asks the device check to cover both.
+
+**An independent cross-check on the margin itself, from a different accounting.** BUGS.md's
+memory-allocation audit — a census of this app's *declared budgets and caches*, not of one composite
+— separately estimates that *"the five declared budgets sum to 656 MiB at 2048x1024... add the
+undeclared ones... and one live rebuild reaches 850-950 MiB before a single cel of the document."*
+That is a different method (fixed per-document overhead, roughly independent of canvas extent) aimed
+at a related question, and it should not be read as measuring the same thing this section's `S`-shaped
+curve does. But it lands within a few percent of row D's own reserved margin (918.5 MiB) at the
+owner's *actual* canvas size — which is some independent reason to trust that reserving half of the
+at-rest headroom for "everything else" is in the right neighbourhood, rather than a round number
+picked for convenience.
+
+### 15.4 What this costs the owner: nothing measurable
+
+The owner's own working canvas is 2048×1024 (§1) — 2,097,152 px against 4200²'s 17,640,000, an **8.4×**
+headroom in pixel count, or roughly 2–4× per dimension depending how the aspect is read. Nothing they
+have described doing is within an order of magnitude of this cap, which is the same shape of argument
+TODO item (31) itself makes (*"the owner works at 2048x1024... three orders of magnitude below the
+cap, so nothing they do is affected by a lower ceiling"*) — three orders of magnitude against the
+retired 16383, and still nearly one against the new 4200.
+
+### 15.5 Open — the device measurement that would confirm or correct this
+
+- [ ] **On the owner's iPad**, with `maxCanvasExtent` temporarily raised past 4200 in a local,
+      uncommitted build (the picker enforces the shipped cap, so a tester needs their own build to
+      offer a larger size at all) — create a **fresh, single-layer** document at a sequence of sizes
+      (suggested: 4200, 5486 [row D's own ceiling], 6500, 8000, 16383) and draw one brushstroke that
+      crosses the whole canvas at each, noting the largest that survives without the app dying to the
+      home screen. Binary-search between the largest survivor and the smallest failure.
+- [ ] **Repeat on a document that is not fresh** — a handful of layers, a longer undo history — at
+      sizes around row D and row E's two floors (5486 and 3879) specifically, to settle §15.3's own
+      open question of which row is the realistic one once a document has some history behind it.
+- [ ] Set `maxCanvasExtent` from whichever of the two runs above is smaller, with a safety margin
+      below the observed crash boundary rather than at it — do not set it to the exact boundary a
+      single run finds, for the reason CLAUDE.md's own triage sections give repeatedly: one run on
+      one device is a data point, not a guarantee.

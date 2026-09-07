@@ -465,7 +465,7 @@ struct PickedMovie: Transferable {
 /// The validation is `CanvasSizePickerView`'s, reached through the same single named home
 /// (`CanvasManager.maxCanvasExtent`), **inset by the padding**: that view creates documents with no
 /// margin, so it can use the bound directly and this cannot — `maxCanvasExtent` of artwork plus 1024
-/// a side (4096 + 2048 today) is a buffer no canvas may have. `CanvasManager.resizableArtworkExtentRange`
+/// a side (4200 + 2048 today) is a buffer no canvas may have. `CanvasManager.resizableArtworkExtentRange`
 /// is where that lives, so the clamp the button enforces and the clamp the model applies are one value.
 ///
 /// ## Three sentences the sheet owes, and each is conditional on something the artist can see

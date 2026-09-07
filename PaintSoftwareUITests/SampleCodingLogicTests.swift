@@ -52,7 +52,7 @@ final class SampleCodingLogicTests: XCTestCase {
     /// 16383 is the largest canvas dimension the encoding itself can carry without clamping.
     ///
     /// **No longer why `CanvasManager.maxCanvasExtent` is what it is — TODO.md item (31), 2026-09-07.**
-    /// The constant is now 4096, chosen for a memory reason unrelated to this format (PERFORMANCE.md
+    /// The constant is now 4200, chosen for a memory reason unrelated to this format (PERFORMANCE.md
     /// §15); the format could still carry a canvas up to 16383 if the constant ever moved back toward
     /// it, and that headroom is exactly what `testAMaximumCanvasEncodesBothEdgesAndOnePointWiderDoesNot`
     /// below still exercises, reading the live constant rather than 16383 itself.
@@ -66,10 +66,15 @@ final class SampleCodingLogicTests: XCTestCase {
                        + "of maxCanvasExtent's current (smaller, memory-driven) value")
     }
 
-    /// **Format ceiling, not canvas bound, since TODO.md item (31)** — `maxCanvasExtent` (4096) is now
-    /// well inside what this encoding can carry, so this is really "the format encodes right up to
-    /// whatever the live canvas bound is, with nothing left over", which remains true and worth
-    /// pinning: it is what lets `maxCanvasExtent` move again without this codec silently clamping.
+    /// **Two separate claims since TODO.md item (31), where one used to do for both.** Before item
+    /// (31), `CanvasManager.maxCanvasExtent` *was* 16383, the format's own exact ceiling, so probing
+    /// the live constant and probing the format's boundary were the same two numbers. They no longer
+    /// are — the constant is 4200, well inside what the format can carry — so this now pins both,
+    /// separately: the format's own fixed 16383/16384 boundary (independent of any policy choice, and
+    /// the reason this codec's coordinate width was picked in the first place, TODO.md item (8)), and
+    /// that whatever the *live* policy cap currently is, it still encodes without clamping — the
+    /// property that would break first if a future change ever moved `maxCanvasExtent` back up past
+    /// 16383 without widening the field to match.
     func testAMaximumCanvasEncodesBothEdgesAndOnePointWiderDoesNot() {
         func clamps(atExtent extent: CGFloat) -> Int {
             let origin = CGPoint(x: extent / 2, y: extent / 2)
@@ -77,10 +82,18 @@ final class SampleCodingLogicTests: XCTestCase {
                                     VectorSample(x: extent, y: extent, pressure: 1)],
                                    about: origin).clampedCount
         }
+
+        // The format's own ceiling — fixed by the Int16 quarter-pixel field, not by policy.
+        XCTAssertEqual(clamps(atExtent: 16383), 0,
+                       "the format's own largest extent must encode without losing a quarter pixel")
+        XCTAssertEqual(clamps(atExtent: 16384), 1,
+                       "one point wider saturates the far corner — this is why 16383 and not 16384")
+
+        // Whatever the *live* policy cap is today, it must sit inside that format ceiling with room
+        // to spare — trivially true at 4200, and the guard that would catch a future policy change
+        // that forgot the format only goes up to 16383.
         XCTAssertEqual(clamps(atExtent: CanvasManager.maxCanvasExtent), 0,
-                       "the largest permitted canvas must encode without losing a quarter pixel of artwork")
-        XCTAssertEqual(clamps(atExtent: CanvasManager.maxCanvasExtent + 1), 1,
-                       "one point wider saturates the far corner — this is why the bound is what it is")
+                       "the live policy cap must encode without losing a quarter pixel of artwork")
     }
 
     /// Half a quantum is the worst a coordinate can be out, and half a step the worst pressure can be.
