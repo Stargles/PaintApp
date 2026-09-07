@@ -908,9 +908,15 @@ struct AnimationTimeline: View {
                 Spacer(minLength: 0)
             }
 
-            Text("frames per second")
+            // **The caption is where the mid-take hold explains itself.** Greying the controls says
+            // the panel has nowhere to go; only this says why, and a refusal that names no reason is
+            // the defect this repo has filed three times.
+            Text(canvasManager.isRecording
+                 ? "Held while recording — a take is timed at one rate."
+                 : "frames per second")
                 .font(.caption)
                 .foregroundColor(.gray)
+                .accessibilityIdentifier("frameRate.caption")
 
             Divider().overlay(Color.white.opacity(0.2))
 
@@ -926,9 +932,16 @@ struct AnimationTimeline: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                             .background(isCurrent ? Color.blue : Color.white.opacity(0.12))
-                            .foregroundColor(.white)
+                            // Dimmed from the same answer that disables it, for the reason the
+                            // arrows above carry: a container tint beats a disabled control's own
+                            // dimming, so `isEnabled` alone is exposed but not drawn.
+                            .foregroundColor(canvasManager.isRecording ? .white.opacity(0.3) : .white)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
+                    // A preset writes `fps` directly rather than through `stepFPS`, so the range
+                    // never disables it — but the mid-take hold reaches every writer, and this is
+                    // that hold's drawn half on this control.
+                    .disabled(canvasManager.isRecording)
                     .accessibilityIdentifier("frameRate.preset.\(rate)")
                 }
             }

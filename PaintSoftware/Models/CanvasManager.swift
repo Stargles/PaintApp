@@ -1044,6 +1044,15 @@ final class CanvasManager: ObservableObject {
             // has to survive" permission cuts the other way here — a legacy `fps: 0` divides by zero
             // rather than merely looking wrong), and any future writer.
             let clamped = min(max(newValue, Self.fpsRange.lowerBound), Self.fpsRange.upperBound)
+            // **Held for the length of a live take**, because the rate is one of the take's two
+            // arithmetics rather than a setting beside it. `ValueRecording.resampled` maps its i-th
+            // stop to `startFrame + i` *because* the playhead advanced at `fps` from the same
+            // instant; `PlaybackClock` takes the rate per tick, so a change here would move the
+            // playhead at the new rate while the resample divided the whole take by it, and the
+            // keys would land on frames the artist never watched. The panel greys its arrows and
+            // its presets from `canDecreaseFPS`/`canIncreaseFPS` below, so this is the second line
+            // of a visible refusal rather than a silent clamp.
+            guard !isRecording else { return }
             guard clamped != clampedFPS else { return }
             clampedFPS = clamped
             // Playback derives the playhead from elapsed time at the *current* rate, so a change
@@ -1078,8 +1087,12 @@ final class CanvasManager: ObservableObject {
     /// an artist at 1 fps sees a greyed minus rather than pressing a live-looking button that does
     /// nothing. A silently clamped write is the shape of defect this repo has already filed twice —
     /// a `Bool` returned and discarded, and a `beginContainerPoseMove` that refused in silence.
-    var canDecreaseFPS: Bool { fps > Self.fpsRange.lowerBound }
-    var canIncreaseFPS: Bool { fps < Self.fpsRange.upperBound }
+    ///
+    /// **Both answer false for the length of a take**, which is what makes the setter's hold above
+    /// visible: the arrows and the presets grey together, so an artist mid-take sees a panel that
+    /// has nowhere to go rather than pressing a live-looking control that does nothing.
+    var canDecreaseFPS: Bool { !isRecording && fps > Self.fpsRange.lowerBound }
+    var canIncreaseFPS: Bool { !isRecording && fps < Self.fpsRange.upperBound }
 
     /// Nudge the frame rate by `delta`, refusing rather than clamping when that would leave the range.
     ///
@@ -1093,8 +1106,13 @@ final class CanvasManager: ObservableObject {
     func stepFPS(by delta: Int) -> Bool {
         let wanted = fps + delta
         guard Self.fpsRange.contains(wanted) else { return false }
+        // **Answered by reading the property back, not by predicting it.** The range is not the only
+        // thing that can refuse a write — a live take holds the rate too — and a `Bool` that says
+        // "changed" when nothing did is this repo's own filed defect. Observing the write means any
+        // future hold is reported here without this method being told about it.
+        let before = fps
         fps = wanted
-        return true
+        return fps != before
     }
     @Published var currentFrame: Int = 0 {
         didSet {

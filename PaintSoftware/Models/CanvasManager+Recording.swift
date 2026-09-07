@@ -40,6 +40,21 @@ extension CanvasManager {
     enum RecordingRefusal: Equatable {
         /// There is no layer to record onto at all.
         case noTarget
+        /// The scene is one frame long, so there is nowhere for a take to run.
+        ///
+        /// Reached by shortening the document to a single frame — the starting block's own edge
+        /// handles do it — and without this arm the recorder would *arm* on such a document,
+        /// reach `playbackEndFrame` on its first timer fire (frame 0 is both ends of a one-frame
+        /// scene) and end about 14 ms later as `.nothingCaptured`, whose sentence tells the artist
+        /// to go and move a slider. No slider reachable in that time would have helped, and the
+        /// thing actually missing is frames: a refusal that names the wrong way out is worse than
+        /// one that names none, because the artist spends the next minute doing it.
+        ///
+        /// **Not the cold-start case, and this comment said it was.** A new document is twelve
+        /// frames, not one — MEASURED by driving it, after the claim had been written into a doc
+        /// comment, a test name and a commit message on the strength of a fixture whose base layer
+        /// happened to carry twelve frames of its own.
+        case noScene
         /// The take ended without a single channel reporting anything — the artist armed, played, and
         /// touched no control.
         case nothingCaptured
@@ -58,6 +73,8 @@ extension CanvasManager {
             switch self {
             case .noTarget:
                 return "Nothing to record onto — add a layer first."
+            case .noScene:
+                return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:
                 return "Nothing was recorded — open a layer's effect settings and move a slider while the recorder runs."
             case .noMotion:
@@ -92,6 +109,14 @@ extension CanvasManager {
         guard let target = keyframeTarget else {
             raise(.recordingRefused(.noTarget))
             return .noTarget
+        }
+        // **Refused before arming rather than discovered a tick later.** `tickPlayback` ends a take
+        // at `playbackEndFrame`, and on a one-frame scene that is frame 0 — the frame the take
+        // starts on — so arming here would run the whole take between two timer fires and report
+        // the wrong reason. See `RecordingRefusal.noScene`.
+        guard playbackEndFrame > playbackStartFrame else {
+            raise(.recordingRefused(.noScene))
+            return .noScene
         }
 
         // One bracket over the whole take. Every base write inside it — including the slider's own

@@ -90,6 +90,45 @@ final class RecordingLogicTests: XCTestCase {
         XCTAssertEqual(manager.notice?.kind, .recordingRefused(.noTarget))
     }
 
+    /// **A one-frame scene is refused before the recorder arms, rather than a tick after.**
+    ///
+    /// Frame 0 is both ends of a one-frame scene, so `tickPlayback` would end the take on its very
+    /// first fire and report `.nothingCaptured` — which tells the artist to go and move a slider,
+    /// advice no one could have taken in 14 ms and which names the wrong missing thing anyway.
+    ///
+    /// **This was written believing a new document was the case in point, and it is not**: a new
+    /// document is twelve frames. The belief came from this file's own fixture, whose base raster
+    /// layer carries twelve frames regardless of the `frames:` argument — which is why the Setup
+    /// assertion below shapes *both* layers and why it is an assertion rather than a comment. The
+    /// arm is still right and still reachable (the starting block's edge handles shorten a document
+    /// to one frame); it is simply not what an artist meets first.
+    func testArmingOnAOneFrameSceneRefusesWithNoSceneRatherThanDyingATickLater() {
+        let (manager, _) = self.manager(frames: 1)
+        // Both layers, because `playbackEndFrame` walks the whole document: the fixture's base
+        // raster layer carries `CanvasFixture`'s own twelve frames, and shortening only the graded
+        // one leaves an eleven-frame scene. The Setup assertion below is what caught that.
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 1)])
+        let before = manager.history.undoStack.count
+        XCTAssertEqual(manager.playbackEndFrame, manager.playbackStartFrame,
+                       "Setup: one frame, so a take's first and last frame are the same one")
+
+        let refusal = manager.startRecording()
+
+        XCTAssertEqual(refusal, .noScene)
+        XCTAssertFalse(manager.isRecording, "It never armed…")
+        XCTAssertFalse(manager.isPlaying, "…so it never started the transport either")
+        XCTAssertNil(manager.recordingTake)
+        XCTAssertEqual(manager.notice?.kind, .recordingRefused(.noScene))
+        XCTAssertEqual(manager.history.undoStack.count, before,
+                       "…and no bracket was opened, so there is no snapshot for the next gesture to inherit")
+
+        // The other side of the boundary, so the guard cannot be satisfied by refusing everything.
+        let (twoFrames, _) = self.manager(frames: 2)
+        CanvasFixture.setCelLayout(twoFrames, layerIndex: 0, [(start: 0, length: 2)])
+        XCTAssertNil(twoFrames.startRecording(), "Two frames is somewhere for a take to run")
+        twoFrames.stopRecording()
+    }
+
     func testStartRecordingArmsTheTakeAndStartsPlayback() {
         let (manager, _) = self.manager()
         let tgt = target(manager)
@@ -344,14 +383,67 @@ final class RecordingLogicTests: XCTestCase {
         XCTAssertEqual(manager.notice?.kind, .recordingRefused(.tooShort))
     }
 
-    func testStopRecordingWhenNotRecordingIsANoOp() {
+    /// **An idle stop leaves someone else's gesture bracket alone.**
+    ///
+    /// Written first as "nothing happens" — no undo step, still not recording — and that version
+    /// was the one assertion on this branch a mutation could not redden: an unguarded
+    /// `stopRecording` that lazily built an empty take also recorded no step and also left
+    /// `isRecording` false, so the test held for the wrong implementation as readily as the right
+    /// one. What the guard actually protects is *outside* the recorder. `cancelStructureGesture`
+    /// decrements a depth and drops a snapshot; run while another gesture is open, it takes that
+    /// gesture's, and the next commit records a step spanning both — the failure that method's own
+    /// doc exists to describe. So the bracket is the operand.
+    func testStopRecordingWhenNotRecordingLeavesAnUnrelatedGestureBracketAlone() {
         let (manager, _) = self.manager()
         let before = manager.history.undoStack.count
+        XCTAssertFalse(manager.isRecording, "Setup: nothing is armed")
+
+        manager.beginStructureGesture()
+        manager.layers[0].name = "Someone else's edit"
 
         XCTAssertNil(manager.stopRecording())
 
-        XCTAssertEqual(manager.history.undoStack.count, before)
+        manager.commitStructureGesture(label: .renameLayer)
+
         XCTAssertFalse(manager.isRecording)
+        XCTAssertEqual(manager.history.undoStack.count, before + 1,
+                       "The unrelated gesture still records its own step — and only its own")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .renameLayer,
+                       "…under its own label, so the idle stop did not close this bracket")
+    }
+
+    // MARK: - The rate the take is timed at
+
+    /// **The document's rate is held for the length of a take**, and both halves of the refusal are
+    /// here: the affordances the panel greys itself from, and the property they describe.
+    ///
+    /// `ValueRecording.resampled` maps its i-th stop to `startFrame + i` *because* the playhead
+    /// advanced at `fps` from the same instant. `PlaybackClock` takes the rate per tick, so a change
+    /// mid-take would move the playhead at the new rate while the resample divided the whole take by
+    /// it, and the keys would land on frames the artist never watched. Reachable, not theoretical:
+    /// the fps readout and the record button are the same strip, and the panel opens over a running
+    /// take.
+    func testTheDocumentRateIsHeldForTheLengthOfATakeSoTheStopsStayOnTheFramesTheArtistWatched() {
+        let (manager, _) = self.manager()
+        XCTAssertEqual(manager.fps, 24, "Setup: the rate the take is about to be timed at")
+
+        manager.startRecording()
+
+        XCTAssertFalse(manager.canDecreaseFPS, "Both arrows grey for the length of a take…")
+        XCTAssertFalse(manager.canIncreaseFPS)
+        XCTAssertFalse(manager.stepFPS(by: -1), "…and the model refuses the same edit it greys")
+        XCTAssertEqual(manager.fps, 24)
+
+        // The presets write `fps` directly rather than through `stepFPS`, and so will any future
+        // writer — so the hold is on the property and not on the stepper.
+        manager.fps = 12
+        XCTAssertEqual(manager.fps, 24, "A take's stops are startFrame + i at this rate")
+
+        manager.stopRecording()
+
+        XCTAssertTrue(manager.canDecreaseFPS, "…and the rate is the artist's again once it ends")
+        manager.fps = 12
+        XCTAssertEqual(manager.fps, 12)
     }
 
     // MARK: - Interruptions
