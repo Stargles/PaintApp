@@ -53,6 +53,7 @@
 		A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */; };
+		4BF6D9658C1177700D3470FB /* ProjectStorageUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */; };
 		CA9419823B03A3CDBEE93E3F /* ProjectFolderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */; };
 		10E1364E6BFD2F58A0DDB5F6 /* ProjectLocationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
@@ -425,6 +426,7 @@
 		A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEngineLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupManagerLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectSaveLogicTests.swift; sourceTree = "<group>"; };
+		D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStorageUITests.swift; sourceTree = "<group>"; };
 		CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFolderLogicTests.swift; sourceTree = "<group>"; };
 		4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLocationLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
@@ -873,6 +875,7 @@
 				2A96376C9031630557D740C1 /* FillContourLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
+				D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */,
 				CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */,
 				4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */,
 				E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */,
@@ -1370,6 +1373,7 @@
 				53169DD6B542AA4076A51909 /* FillContourLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
+				4BF6D9658C1177700D3470FB /* ProjectStorageUITests.swift in Sources */,
 				CA9419823B03A3CDBEE93E3F /* ProjectFolderLogicTests.swift in Sources */,
 				10E1364E6BFD2F58A0DDB5F6 /* ProjectLocationLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,

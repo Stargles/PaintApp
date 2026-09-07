@@ -14,15 +14,36 @@ struct GalleryFolderTileView: View {
     var onDelete: () -> Void
 
     var body: some View {
+        // **A `Button`, not a `VStack` with an `onTapGesture`.** The project tile next door uses the
+        // gesture form and its tests reach it through the ellipsis menu instead; a folder tile has to
+        // be tappable *as itself*, and a plain stack with an accessibility identifier on it does not
+        // appear in the element tree at all — which is what the first run of `ProjectStorageUITests`
+        // found. It is also the truer description: opening a folder is a button, and VoiceOver now
+        // says so.
         VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                Color.blue.opacity(0.18)
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 40))
-                    .foregroundColor(.blue.opacity(0.9))
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ZStack {
+                        Color.blue.opacity(0.18)
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.blue.opacity(0.9))
+                    }
+                    .frame(width: 160, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    Text(folder.name)
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Text(folder.projectCount == 1 ? "1 project" : "\(folder.projectCount) projects")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                }
             }
-            .frame(width: 160, height: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("gallery.folderTile.\(folder.name)")
             .overlay(alignment: .topTrailing) {
                 Menu {
                     Button("Rename…", action: onRename)
@@ -35,24 +56,12 @@ struct GalleryFolderTileView: View {
                 }
                 .accessibilityIdentifier("gallery.folderMenu.\(folder.name)")
             }
-
-            Text(folder.name)
-                .font(.caption)
-                .foregroundColor(.white)
-                .lineLimit(1)
-
-            Text(folder.projectCount == 1 ? "1 project" : "\(folder.projectCount) projects")
-                .font(.caption2)
-                .foregroundColor(.gray)
+            .contextMenu {
+                Button("Rename…", action: onRename)
+                Button("Delete", role: .destructive, action: onDelete)
+            }
         }
         .frame(width: 160)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onOpen)
-        .accessibilityIdentifier("gallery.folderTile.\(folder.name)")
-        .contextMenu {
-            Button("Rename…", action: onRename)
-            Button("Delete", role: .destructive, action: onDelete)
-        }
     }
 }
 

@@ -66,6 +66,10 @@ nonisolated enum ProjectLocation {
 
     /// The security-scoped bookmark for the chosen folder. Internal so tests can clear it.
     static let bookmarkDefaultsKey = "PaintApp.projectLocation.bookmark"
+    /// The gallery's "your work is inside the app" warning has been answered. Lives here rather than
+    /// on `GalleryView` so `-resetGallery` can clear it: that flag is compiled into the test bundle,
+    /// which has no app views in it.
+    static let invitationDismissedDefaultsKey = "PaintApp.gallery.storageInvitationDismissed"
     /// The folder's display name, kept **beside** the bookmark rather than derived from it, because
     /// the failure this has to describe is exactly the one where the URL cannot be produced. Without
     /// it the banner would have to say "a folder" instead of naming the one the artist chose.

@@ -164,6 +164,16 @@ nonisolated enum ProjectBackupManager {
         // needs a clean gallery can delete and reinstall the app instead, which is both narrower and
         // reversible.
         if args.contains("-resetGallery") && Self.isSimulator {
+            // **Put the library back inside the app before wiping anything** — TODO (36). The three
+            // directories below are resolved through `ProjectLocation`, so on a device that had
+            // adopted a folder in Files this flag would reach *outside* the container and delete the
+            // artist's real library. Forgetting the bookmark first makes the wipe container-only by
+            // construction, which is the same reasoning the simulator guard above is built on: this
+            // flag must not be able to touch anything a reinstall could not.
+            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.bookmarkDefaultsKey)
+            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.displayNameDefaultsKey)
+            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.invitationDismissedDefaultsKey)
+            ProjectLocation.resetForTesting()
             let fm = FileManager.default
             for dir in [projectsDirectory, backupsRootDirectory, trashDirectory] {
                 try? fm.removeItem(at: dir)

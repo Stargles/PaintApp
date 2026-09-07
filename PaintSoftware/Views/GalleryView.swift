@@ -28,11 +28,11 @@ struct GalleryView: View {
     /// Which project is opening, if any — see `GalleryOpenState` for the two rules it carries.
     @State private var openState = GalleryOpenState()
 
-    @State private var invitationDismissed = ProjectLocation.defaults.bool(forKey: GalleryView.invitationDismissedKey)
-
-    /// The artist has seen the "inside the app" warning and answered it. Persisted, because a
-    /// warning that comes back every launch is one that stops being read.
-    static let invitationDismissedKey = "PaintApp.gallery.storageInvitationDismissed"
+    /// The artist has seen the "inside the app" warning and answered it. Persisted (the key lives on
+    /// `ProjectLocation`, where `-resetGallery` can reach it), because a warning that comes back
+    /// every launch is one that stops being read.
+    @State private var invitationDismissed =
+        ProjectLocation.defaults.bool(forKey: ProjectLocation.invitationDismissedDefaultsKey)
 
     /// Shown only at the top of the tree, only when no folder has been chosen, and only once the
     /// artist has something to lose.
@@ -85,12 +85,14 @@ struct GalleryView: View {
                             Text("Projects are saved inside the app. Reinstalling erases them.")
                                 .font(.footnote)
                                 .foregroundColor(.white)
+                                .accessibilityIdentifier("gallery.storageInvitationText")
                             Spacer()
                             Button("Choose Folder") { showingStorage = true }
                                 .font(.footnote.bold())
                                 .accessibilityIdentifier("gallery.storageInvitationChoose")
                             Button {
-                                ProjectLocation.defaults.set(true, forKey: Self.invitationDismissedKey)
+                                ProjectLocation.defaults.set(
+                                    true, forKey: ProjectLocation.invitationDismissedDefaultsKey)
                                 invitationDismissed = true
                             } label: {
                                 Image(systemName: "xmark")
@@ -101,6 +103,7 @@ struct GalleryView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(Color.orange.opacity(0.16))
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("gallery.storageInvitation")
                     }
 
