@@ -1072,10 +1072,24 @@ struct CanvasView: UIViewRepresentable {
             else { textState = "box" }
             hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
                 + " entries:\(midStrokeEntryCount)"
+                + " derived:\(derivedRenderCount)"
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
         }
+
+        /// **How many canvas-sized derived pictures this canvas has rasterized on the main actor** —
+        /// posed ink and interpolated in-betweens both, counted in `updateInterpolationPreviews`.
+        ///
+        /// **A latch published beside the presentation, for `midStrokeEntryCount`'s reason applied to
+        /// a cost rather than to a state.** TODO (53) is a number nothing could see: the canvas
+        /// looked right at every frame of a keyframed move and paid a full posed render per tick to
+        /// look that way, MEASURED at 71.9 ms a frame against 3.7 ms to read the baked frame instead
+        /// (PERFORMANCE.md §14). There is nothing to sample — the work is finished by the time a test
+        /// can look, and a wall-clock assertion is what CLAUDE.md forbids in the fast tier and what
+        /// an XCUITest on a shared machine cannot make honestly anyway. A **count** can be asserted
+        /// exactly: stepping through a baked move must not move this number at all.
+        private var derivedRenderCount = 0
 
         /// How many times the canvas has *entered* the mid-stroke presentation, published beside the
         /// presentation itself.
@@ -2372,6 +2386,7 @@ struct CanvasView: UIViewRepresentable {
                                                       preview: canvasManager.isScrubbingInterpolation)
                     guard interpolationPreviewKeys[layer.id] != key else { continue }
                     interpolationPreviewKeys[layer.id] = key
+                    derivedRenderCount += 1
                     // The derivation already in hand, rather than `interpolatedImage(forCel:inLayer:)`,
                     // which would resolve a second one from the ids. Same pixels — that function is a
                     // thin call through `derivedCelContent` — and one resolve instead of two on the

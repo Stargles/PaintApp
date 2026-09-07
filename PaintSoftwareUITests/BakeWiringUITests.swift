@@ -164,16 +164,37 @@ final class BakeWiringUITests: PaintUITestCase {
                         "The baked frame the canvas came to rest on has to contain the ink — a "
                         + "composite of an elided transformation layer over nothing would be blank")
 
-        // And the move is genuinely animated: stepping forward is a different picture, which is a
-        // different bake key, which the canvas has to reach rest on again rather than sitting on
-        // frame 0's file.
+        // **The cost, as a count** — item (53)'s third checkbox. `derived:` is how many
+        // canvas-sized posed or interpolated pictures this canvas has rasterized on the main actor
+        // (`CanvasView.derivedRenderCount`). Every frame of a keyframed move is a distinct
+        // derivation, so before the fix walking six frames added six of them at 71.9 ms each; with
+        // the composite carrying the layer instead, the number must not move at all.
+        let before = try XCTUnwrap(derivedRenderCount(app), "the canvas publishes `derived:`")
         let next = app.buttons["timeline.stepForwardButton"]
         XCTAssertTrue(next.waitForExistence(timeout: 5))
-        for _ in 0..<6 { next.tap() }
-        let stepped = waitForSandwich(app, "rest")
-        report("rest six frames into the move", stepped)
-        XCTAssertNotNil(stepped, "Every frame of a move is its own bake key and its own file")
+        for _ in 0..<6 {
+            next.tap()
+            XCTAssertNotNil(waitForSandwich(app, "rest"),
+                            "Every frame of a move is its own bake key and its own file, and the "
+                            + "canvas has to come to rest on each of them")
+        }
         attachScreen("02-six-frames-into-the-move")
+
+        let after = try XCTUnwrap(derivedRenderCount(app))
+        report("derived renders across six frames of the move", nil)
+        XCTAssertEqual(after, before,
+                       "Walking six frames of a baked move must rasterize no posed ink at all: the "
+                       + "picture is on disk and the composite is what puts it on screen. A count "
+                       + "that climbed by one per frame is TODO (53) exactly — MEASURED at 71.9 ms "
+                       + "a frame against 3.7 ms to read the baked frame instead")
+    }
+
+    /// The `derived:` field of the canvas's published state — see `CanvasView.derivedRenderCount`.
+    private func derivedRenderCount(_ app: XCUIApplication) -> Int? {
+        app.otherElements["canvas.host"].label
+            .split(separator: " ")
+            .first { $0.hasPrefix("derived:") }
+            .flatMap { Int($0.dropFirst("derived:".count)) }
     }
 
     /// Polls a canvas pixel until it is not the paper. `waitForPixel` in `SandwichCompositingUITests`
