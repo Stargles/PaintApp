@@ -148,9 +148,9 @@ pose key has a node.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
       when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
       bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
-- [ ] `LayerFolder.transform` exists in the model with **no UI entry** — `transformMoveRow` is in the
-      layer options panel and never in the folder one. A row and a box, not new machinery.
-- [ ] Graph-editor **node delete and tap-to-add**, still refused "for want of a writer".
+- [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
+      because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
+      `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
 - [ ] **Animation-group membership editing needs a design conversation first.** §2.29 rules that
       splitting one animated group into two is *"a different feature"*, and retagging an element is
       that question from the other side — every key on both groups' tracks changes meaning.
