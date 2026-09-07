@@ -3438,3 +3438,28 @@ than assumed:
 and it stalls anyway, because the cost is per *frame* and not per stroke: one canvas-sized rasterize of
 whatever is there. A document with ten times the ink would be worse, but a document with a tenth of it
 would still miss 24 fps at 2048².
+
+### 14.8 A correctness bug this fix closes by accident, which nobody had reported
+
+**A *raster* layer under a transformation layer did not move on the live canvas at all.** Not slowly —
+not at all.
+
+The Core Animation path draws three things per layer and poses none of them: `bakedImageToDisplay` hands
+`cel.bakedImage` over verbatim, `host.strokeView.raster` is the tier itself, and no layer host carries a
+transform. The one thing on that path that can show a pose is `updateInterpolationPreviews`, and it needs
+a `DerivedCelContent` — which `posedCelContent` **refuses** for a cel with no vector tier, deliberately
+and by RENDER §2.12's two currencies: *"a raster layer softens under a push-in while the vector layer
+beside it stays sharp"*, and the softening happens in `PixelOps.FrozenCel.pose`, **inside the composite**.
+The composite was not on screen.
+
+So the move was real in the thumbnail, in the bake and in any export, and invisible on the canvas the
+artist draws on. Engaging the compositor is what puts it back, at no extra cost, because the picture had
+been baking correctly the whole time.
+
+`BakeWiringLogicTests.testARasterLayerUnderATransformationLayerHasNoDerivationAndTwelveDistinctBakedFrames`
+holds both halves; MEASURED red at **1 against 12** with the pose dropped from `FrameBakeKey`, which for a
+raster leaf is the only carrier.
+
+**This is the shape to look for after any fix of this kind.** The 8 fps was a *cost* defect and this is a
+*correctness* defect, but they are one cause seen twice: a picture that only the compositor can produce,
+on a canvas that was not running the compositor.

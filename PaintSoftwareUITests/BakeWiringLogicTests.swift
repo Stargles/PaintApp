@@ -415,6 +415,55 @@ final class BakeWiringLogicTests: XCTestCase {
                        + "renders as nothing, and must not pull a flat document onto the compositor")
     }
 
+    /// **A *raster* layer under a transformation layer had no way to move on the live canvas at all,
+    /// and engaging is what puts it back** — found while reading for TODO (53), not reported.
+    ///
+    /// The Core Animation path draws three things per layer and poses none of them:
+    /// `bakedImageToDisplay` hands over `cel.bakedImage` verbatim, `host.strokeView.raster` is the
+    /// tier itself, and no host carries a transform (`CanvasView` sets none). The one thing on that
+    /// path that *can* show a pose is `updateInterpolationPreviews`, and it can only show one when
+    /// there is a `DerivedCelContent` to render — which `posedCelContent` refuses for a cel with no
+    /// vector tier, by design (§2.12: *"a raster layer softens under a push-in while the vector layer
+    /// beside it stays sharp"* — the raster half is posed by `PixelOps.FrozenCel.pose` inside the
+    /// **composite**, and the composite was not on screen).
+    ///
+    /// So the move was real in the thumbnail, the bake and any export, and invisible on the canvas the
+    /// artist is looking at. **Both operands are asserted** — the nil derivation is what made the flat
+    /// path unable to draw it, and the twelve distinct bake keys are what say the composite could draw
+    /// it the whole time. Either alone would be a fact about nothing.
+    ///
+    /// **The two assertions are different kinds and it is worth saying which.** The second is a
+    /// specification: twelve frames of a move must be twelve pictures, and **MEASURED red** (at 1) by
+    /// dropping `optional(version.pose)` from `FrameBakeKey` — which for a raster leaf is the *only*
+    /// carrier, since `derived` is nil here. The first is a **characterization** of §2.12's
+    /// two-currencies ruling: if a later pass gave the raster arm a derivation of its own, this would
+    /// go red and the code would not be wrong. Read that red as "§2.12 moved", and check that the
+    /// engagement clause is still what puts the pose on screen.
+    func testARasterLayerUnderATransformationLayerHasNoDerivationAndTwelveDistinctBakedFrames() {
+        let manager = keyframedMoveDocument()
+        let size = CanvasFixture.canvasSize
+        // The same document with the ink in the raster tier instead of the vector one.
+        manager.layers[0].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                                      raster: .empty(size: size))]
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 4, y: 24,
+                                                                                  width: 20, height: 16)))
+
+        let poses = manager.layerPoses(atFrame: 6)
+        XCTAssertNotNil(poses[0], "Setup: the transformation layer above does reach this leaf")
+        XCTAssertNil(manager.derivedCelContent(for: manager.layers[0].cels[0], atFrame: 6,
+                                               inheriting: poses[0]),
+                     "A cel with no vector tier has no derivation, so nothing on Core Animation's "
+                     + "flat row of hosts could ever have drawn this layer moved")
+
+        let baker = manager.frameBaker
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        XCTAssertEqual(baker.bakedCount, 12,
+                       "…while the composite has been moving it at all twelve frames the whole time: "
+                       + "twelve distinct keys, so twelve distinct pictures on disk")
+    }
+
     /// **Playing a keyframed move a second time composites nothing at all** — item (53)'s third
     /// checkbox, pinned as a *count* rather than as a duration for CLAUDE.md's reason.
     ///
