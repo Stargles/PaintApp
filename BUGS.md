@@ -3,6 +3,14 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The raster float's transform handles are not the stage 4 handle pattern (2026-09-06)
+
+Carried out of TODO (12) when animated Distort closed that item, because it is the one thing in it that
+was never about keying a pose. `FloatingPieceOverlayView` draws and hit-tests its own transform handles
+rather than the pattern KEYFRAMES §8 stage 4 established, so the raster float behaves unlike every other
+posed surface in the app. The item itself said this "may belong there instead" of in TODO, and it does:
+it is ours, not an owner ask, and nothing is blocked on it.
+
 ## The factored blend can tilt a level drawing between two keys (2026-09-06) — RULED: keep the blend
 
 **MEASURED by `AnimatedDistortUITests.testAKeyedDistortShowsAKeystoneAtEveryFrameBetweenTheTwoMarks`,

@@ -48,40 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (12) Distort keyed across frames
-
-**Status** — partly built. **The raster tier and the ink tier both ship.** What is left is the
-*animated* one: a projective quad keyed over time, which is KEYFRAMES.md §8 stage 5b.
-
-> *"The distort in move feature must still be built and integrated with keyframes."* — 2026-09-06
-
-A four-corner drag works on the raster floating piece (2026-09-02) and on a **lassoed drawing**
-(2026-09-06). The ink tier's refusal — *"Distort needs a pixel selection"* — was a measurement that
-had already expired: `VectorStroke.size` is a scalar and a homography's local scale spans 1.3x-8.5x
-across one quad, but KEYFRAMES §8 stage 4's rest-space dab bake merged on 2026-09-02 and
-`BrushStamper.DabPose` answers `localScale` and `rotation` **per dab**, so there is no single scalar on
-that path to be wrong. `VectorCanvas.mapping(_:through: Homography)` is the entry point;
-`VectorStroke.distort` is what a commit stores — the **map** plus the artist's own width, with the
-pre-image rebuilt at render by `effectiveWalk`, which is why no cutter needed a rest-space arm.
-What is refused now is a *kind*: a placed image or a video stores six numbers and a mirror bit where a
-homography needs eight, so a float carrying one says so in a sentence.
-
-**Left to build**
-- [ ] **Keyed across frames — KEYFRAMES.md §8 stage 5b.** `TransformKeyframes` only ever writes a
-      `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` linearises a
-      projective pose at the box centre — wrong by up to 315% at a strong keystone. Store a genuinely
-      projective quad, route the two render reads in `TransformTrack` through `DabPose(Homography)`
-      instead of `affineOrLinearised`, blend two projective quads (`PoseInterpolation`), and lift
-      `distortUnavailableReason`'s container-pose arm. The engine below it is done: `posing`'s
-      `Homography` overload, `restDelta`'s projective twin and `composedWalk` all exist and are tested.
-- [ ] Port `FloatingPieceOverlayView` onto the stage 4 handle pattern (this one is a BUGS.md entry and
-      may belong there instead).
-
-**Spec** LASSO_MOVE.md §0 *"Distort, on a lassoed drawing"* · KEYFRAMES.md §8 stage 5b. **§5 is
-twenty-six owner rulings; do not re-litigate any of them.**
-
----
-
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
@@ -135,8 +101,14 @@ read-write, a transformation layer is reachable and usable, animation groups can
 pose key has a node.
 
 **Left to build**
-- [ ] **Stage 5b** — animated Distort. Shared with item (12); see there for the detail.
-- [ ] **Stages 6, 7 and 10.** Which goes first is an owner question rather than a settled order.
+- [ ] **Stage 7 — live recording and an editable fps**, then **stage 10**, the timing recorder, which
+      sits on 7. **The owner chose this order on 2026-09-06**, over stage 6, because `fps` is fixed at
+      24 today and only load and save even write it, so a scene cannot be taken onto twos or worked
+      slower. Its one prerequisite is met: the playback clock is on the model
+      (`Engine/PlaybackClock.swift`, delivered by RENDER stage 1). Nothing else of it exists. §5 and §7.
+- [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
+      when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
+      bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
 - [ ] `LayerFolder.transform` exists in the model with **no UI entry** — `transformMoveRow` is in the
       layer options panel and never in the folder one. A row and a box, not new machinery.
 - [ ] Graph-editor **node delete and tap-to-add**, still refused "for want of a writer".
