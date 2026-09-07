@@ -173,6 +173,27 @@ final class ProjectLocationLogicTests: XCTestCase {
                        container.standardizedFileURL)
     }
 
+    /// **A folder whose bookmark cannot be minted is refused before anything moves.** The ordering
+    /// inside `adopt` is the whole assertion: discovering the failure after the migration would
+    /// leave the library in a folder the app will not find again, which is an empty gallery and a
+    /// pile of work the artist was never told the location of.
+    func testAFolderThatCannotBeBookmarkedIsRefusedBeforeTheLibraryMoves() throws {
+        let doomed = writeProject(named: "Stays Put")
+        let missing = scratch.appendingPathComponent("NeverExisted", isDirectory: true)
+        // A path under a file rather than a directory: `createDirectory` cannot make it, so `adopt`
+        // throws at its first step and nothing downstream runs.
+        let blocker = scratch.appendingPathComponent("blocker")
+        try Data([0]).write(to: blocker)
+        let unmakeable = blocker.appendingPathComponent("Inside", isDirectory: true)
+
+        XCTAssertThrowsError(try ProjectLocation.adopt(unmakeable))
+        XCTAssertEqual(ProjectLocation.status, .appFolder, "the library did not move")
+        XCTAssertFalse(ProjectLocation.hasChosenFolder, "and no bookmark was written")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: doomed.path),
+                      "and the project is still where it was")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+    }
+
     /// A healthy folder resolves back from its bookmark on the next launch with nothing said.
     func testAHealthyFolderResolvesAgainAtTheNextLaunchWithNoProblemToReport() throws {
         _ = try ProjectLocation.adopt(external)

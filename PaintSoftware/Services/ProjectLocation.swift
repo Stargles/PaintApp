@@ -233,6 +233,17 @@ nonisolated enum ProjectLocation {
         let source = currentRoot
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
+        // **Minted before the migration, written after it**, and the two halves are separated for
+        // different reasons. Minting first is a precondition check: a folder whose bookmark cannot be
+        // made is one the app will not find again next launch, and discovering that *after* moving
+        // the library would leave every project in a folder the app no longer points at — an empty
+        // gallery with the work sitting somewhere the artist was not told about. Writing it after is
+        // what makes an interrupted migration resumable: until it lands, the app still points at the
+        // old root, so choosing the same folder again picks up where it stopped (see
+        // `ProjectLibraryMigration`'s `alreadyThere` path).
+        let bookmark = try folder.bookmarkData(options: [], includingResourceValuesForKeys: nil,
+                                               relativeTo: nil)
+
         let report: ProjectLibraryMigration.Report
         if folder.standardizedFileURL == source.standardizedFileURL {
             report = .empty
@@ -240,7 +251,8 @@ nonisolated enum ProjectLocation {
             report = ProjectLibraryMigration.migrate(from: source, to: folder)
         }
 
-        persistBookmark(for: folder, name: folder.lastPathComponent)
+        defaults.set(bookmark, forKey: bookmarkDefaultsKey)
+        defaults.set(folder.lastPathComponent, forKey: displayNameDefaultsKey)
         // Re-resolve rather than trusting the URL in hand: this is the same code path the next launch
         // will take, so a bookmark that cannot round-trip is discovered now, while the artist is
         // looking at the picker, instead of silently at the launch after next.
