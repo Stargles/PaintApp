@@ -40,6 +40,8 @@ final class ProjectStorageUITests: PaintUITestCase {
                       "a fresh install with work in it says, on the gallery, that the work is "
                       + "inside the app — this is the whole discoverability of the feature")
 
+        shot(app, "01-gallery-cold-start-warning")
+
         // And the setting is reachable from the toolbar regardless.
         let storage = app.buttons["gallery.storageButton"]
         XCTAssertTrue(storage.exists, "the toolbar carries a storage button")
@@ -51,6 +53,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(name.label, "Inside the app",
                        "and it says where the projects are now, in words the artist can act on")
 
+        shot(app, "02-storage-screen-default")
         let choose = app.buttons["storage.chooseFolderButton"]
         XCTAssertTrue(choose.exists, "the picker is one tap away")
         XCTAssertTrue(choose.isHittable, "and it is reachable, not merely present")
@@ -76,6 +79,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertFalse(app.staticTexts["gallery.breadcrumbPath"].exists,
                        "and there is no breadcrumb at the top of the tree")
 
+        shot(app, "03-gallery-with-folder-tile")
         tile.tap()
         let crumb = app.staticTexts["gallery.breadcrumbPath"]
         XCTAssertTrue(crumb.waitForExistence(timeout: 10), "opening a folder shows where you are")
@@ -99,6 +103,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         app.buttons["gallery.folderTile.Scene 1"].tap()
         XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 10),
                       "and it is drawn inside the folder it was made in")
+        shot(app, "04-project-inside-the-folder")
 
         // Out again, by the breadcrumb's own control.
         app.buttons["gallery.breadcrumbBack"].tap()
@@ -148,11 +153,22 @@ final class ProjectStorageUITests: PaintUITestCase {
 
         XCTAssertTrue(app.buttons["gallery.folderTile.Rooftop Chase"].waitForExistence(timeout: 10),
                       "the grid redraws under the new name")
+        shot(app, "05-folder-renamed")
         XCTAssertFalse(app.buttons["gallery.folderTile.Untitled Scene"].exists,
                        "and the old tile is gone rather than duplicated")
     }
 
     // MARK: - Helpers
+
+    /// Keeps a screenshot in the result bundle so a person can look at what the test drove. These are
+    /// what CLAUDE.md's *"drive it in the simulator and look at it"* asks for, taken from inside the
+    /// run that already performs the gestures rather than from a second, hand-driven pass.
+    private func shot(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 
     /// **Scoped to `app.alerts`, and by label rather than by identifier.** SwiftUI renders an
     /// `.alert` in its own presentation, and the accessibility identifiers set on a `TextField` and

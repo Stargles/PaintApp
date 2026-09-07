@@ -111,6 +111,20 @@ struct GalleryView: View {
                         breadcrumb
                     }
 
+                    // **The version label is in the flow, not floating over it.** It used to be a
+                    // `VStack`/`Spacer` overlay pinned to the top-left of the whole screen, which put
+                    // it at exactly the y the storage warning above now occupies — the two drew on
+                    // top of each other, which is what the first screenshot of this feature showed.
+                    // Nothing needed it to float; it only needed to be small and out of the way.
+                    HStack {
+                        Text(AppVersion.versionString)
+                            .font(.caption)
+                            .foregroundColor(.gray.opacity(0.6))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
                             Button(action: { onCreateNew(currentDirectory) }) {
@@ -183,19 +197,6 @@ struct GalleryView: View {
                         }
                         .accessibilityIdentifier("gallery.recentlyDeletedButton")
                     }
-                }
-
-                // Version display in top-left corner
-                VStack {
-                    HStack {
-                        Text(AppVersion.versionString)
-                            .font(.caption)
-                            .foregroundColor(.gray.opacity(0.6))
-                            .padding(.leading, 16)
-                            .padding(.top, 8)
-                        Spacer()
-                    }
-                    Spacer()
                 }
             }
         }

@@ -130,7 +130,9 @@ struct ProjectLocationView: View {
     private var subtitle: String {
         switch status {
         case .appFolder:
-            return "Inside the app — reinstalling erases these files."
+            // Not "Inside the app — …": the row's title already says that, and the subtitle
+            // repeating it read as a stutter on the first screenshot of this screen.
+            return "Reinstalling the app erases these files."
         case .chosen(let url):
             return url.deletingLastPathComponent().lastPathComponent.isEmpty
                 ? "A folder you chose in Files."
