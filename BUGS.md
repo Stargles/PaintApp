@@ -3,6 +3,41 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The factored blend can tilt a level drawing between two keys (2026-09-06) — RULED: keep the blend
+
+**MEASURED by `AnimatedDistortUITests.testAKeyedDistortShowsAKeystoneAtEveryFrameBetweenTheTwoMarks`,
+KEYFRAMES.md §8 stage 5b, and not a defect in that test.** Two parallel level lines, keyed with a
+symmetric keystone pull at the second mark — both top corners drawn in by the same amount, so the pose
+is dead level at *both* keys — scrub to a frame between them and the drawing sits **0.5-0.7°** off
+level anyway. Pull one corner instead of two, so the keystone is asymmetric, and the in-between does
+not merely tilt: it MEASURED as a **43-row diagonal streak** where a row-by-row ink probe expected two
+horizontal lines.
+
+**The cause is the factored blend's own arithmetic, not new to Distort, and not particular to a
+homography at all.** `PoseInterpolation.blend` (`Engine/Deform/PoseInterpolation.swift:371`) factors
+each keyed map as affine × pure-projective and blends the affine's linear part through
+`Matrix2x2.interpolatedFromIdentity` — rotation × symmetric remainder, `DeformFactorization.swift`'s
+`polar` — which is exactly right for interpolation, since it is what makes an arm swing through a
+blend rather than collapse to a line at `t = 0.5`. A symmetric keystone pull's affine factor happens to
+be a pure scale, so nothing there is asymmetric and the blend stays level. **Any less symmetric affine
+factor is not a pure scale, and `polar`'s `atan2(c − b, a + d)` reads part of that asymmetry as a
+rotation** — the identical arithmetic `PoseComponentsLogicTests
+.testPolarReportsARotationForAPureSkewAndTheQRDecompositionDoesNot` already pins for
+`PoseComponents.decompose`, reached here through the render path instead of the graph editor. `blend`'s
+exact-equality shortcut returns each stored key bit for bit at `t == 0` and `t == 1`, so neither
+keyframe ever shows the tilt — it lives only in the frames between them, which is why a test had to
+read an in-between rather than a key to find it. An affine Freeform pose with a plain shear, keyed
+across two frames with no projective content anywhere, feeds the same shear into the same `atan2` and
+turns the same way; Distort just makes the asymmetry easy to reach, because pulling one corner is the
+ordinary keystone gesture and rarely leaves a pure scale behind.
+
+**RULED, 2026-09-06: file it, keep the current blend.** KEYFRAMES.md §4.3 chose the rotation ×
+symmetric-remainder decomposition deliberately, because it is what keeps a rotation keyed across two
+frames turning the short way round instead of shearing through the identity — and changing it to avoid
+this reading risks reintroducing the collapse-to-a-line defect it was chosen to prevent. Nothing ships
+turned today that was not already turning: the in-between tilt is a property of every asymmetric affine
+or projective blend this app has shipped since §4.3 landed, and this stage only made it easy to see.
+
 ## The five remaining `.popover`s eat drags the same way the timeline's four did (2026-09-06)
 
 **INFERRED from a code sweep, not measured.** TODO (39) fixed the timeline's four menus by making them
