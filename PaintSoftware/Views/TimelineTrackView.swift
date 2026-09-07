@@ -975,10 +975,19 @@ struct TimelineTrackView: UIViewRepresentable {
                                           parameterID: ref.parameterID, frame: ref.frame),
                                graphBandView.nodeRectInWindow(ref, pixelsPerFrame: pixelsPerFrame))
             case .add(let parameterID, let frame, let value):
-                guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
-                else { return }
-                curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                _ = writeGraphBandCurves([parameterID: curve], layerIndex: drag.layerIndex)
+                // **A pose id routes to its own funnel, TODO (21)** — `writeGraphBandCurves` skips one
+                // outright (see its own doc), because a `TransformTrack.Key` is six components sharing
+                // one frame and not a curve `setEffectParameterTrack` could ever accept.
+                if PoseChannelID.isPose(parameterID: parameterID) {
+                    _ = canvasManager.addPoseChannelKey(layerIndex: drag.layerIndex,
+                                                        parameterID: parameterID, frame: frame,
+                                                        value: value)
+                } else {
+                    guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
+                    else { return }
+                    curve.setKey(AnimationCurve.Key(frame: frame, value: value))
+                    _ = writeGraphBandCurves([parameterID: curve], layerIndex: drag.layerIndex)
+                }
                 relayout()
             case .nothing:
                 // A tap on genuinely empty band drops the selection, which is the only gesture that

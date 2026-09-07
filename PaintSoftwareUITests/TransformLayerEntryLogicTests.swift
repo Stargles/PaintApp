@@ -562,6 +562,125 @@ final class TransformLayerEntryLogicTests: XCTestCase {
                        "…and the neighbouring mark was seeded with where it was")
     }
 
+    // MARK: - The graph editor's node delete and tap-to-add on a container pose — TODO (21)
+
+    /// **`removePoseChannelKey` on a transformation layer's own container** — the `.container` arm
+    /// `PoseBandLogicTests`' cel-side tests cannot reach, since `celFixture` there is a cel track and
+    /// this is `Layer.transform`'s.
+    func testRemovePoseChannelKeyDropsAKeyFromTheContainerPose() {
+        let manager = makeValueLayer()
+        let at = manager.layers.count - 1
+        enterTransformMode(manager, layerIndex: at)
+        let layerID = manager.layers[at].id
+        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
+        manager.addKeyframe(.layer(id: layerID), atFrame: 8)
+        manager.currentFrame = 8
+        moveBox(manager, by: CGVector(dx: 14, dy: 0))
+        XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame).sorted(), [0, 8],
+                       "Sanity: the seedAndKey arm above left two keys")
+
+        let containerX = PoseChannelID.container.parameterID(.x)
+        // **A frame the container does not key is refused**, `removeEffectParameterKey`'s own guard
+        // restated for this arm — the state a menu left up while an undo removed the node underneath
+        // it reaches. It needs its own assertion because the failure is invisible in the track: the
+        // write that follows a wrongly-taken guard is a no-op on the pose and a *real, empty* entry
+        // on the undo stack, so only the returned Bool can tell the two apart. `PoseBandLogicTests`
+        // pins the same refusal on the cel arm; this is the container's.
+        XCTAssertFalse(manager.removePoseChannelKey(layerIndex: at, parameterID: containerX, frame: 3),
+                       "Frame 3 carries no container key, so there is nothing to delete there")
+        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: at, parameterID: containerX, frame: 8))
+        XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame), [0],
+                       "The key at 8 is gone, the one at 0 is not")
+
+        manager.undo()
+        XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame).sorted(), [0, 8],
+                       "Undo brings the container's deleted key back")
+    }
+
+    /// **`addPoseChannelKey` on a container that has never moved writes rest on every component the
+    /// tap did not name, and specifically not zero.**
+    ///
+    /// **It cannot tell "held" from "reset to rest", and does not claim to** — on this fixture the
+    /// two answers are the same number, so a mutation that resolved the pose at the wrong frame
+    /// survives here. It survived a real sweep for exactly that reason. The test still earns its
+    /// place: zero is what an un-held component would actually read as, since a `PoseQuad` built
+    /// from nothing is a degenerate box at the origin rather than the canvas-centred identity, and
+    /// nothing else pins that. `testAddPoseChannelKeyOnAnAnimatedContainerHoldsWhatTheTrackShowed`
+    /// below is the one that separates held from reset, on a fixture where they differ.
+    func testAddPoseChannelKeyOnAFreshContainerHoldsRestOnEveryOtherComponent() throws {
+        let manager = makeValueLayer()
+        let at = manager.layers.count - 1
+        enterTransformMode(manager, layerIndex: at)
+        // One key, so the track is non-empty and `poseChannels` draws it. Written directly rather
+        // than through `addKeyframe`: with no Move ever committed, the container has neither a track
+        // nor a baseline, and `poseDeltaForKeyframe`'s container arm requires one or the other — a
+        // mark alone (or two, or a Move that lands back on rest) cannot mint this channel's first
+        // key, only hold or seed an existing one. That gap is pre-existing and out of this test's
+        // scope; the fixture only needs the state, not the sequence of artist gestures that could
+        // (today, cannot) produce it.
+        var restPose = try XCTUnwrap(manager.restingContainerPose)
+        restPose.track.setKey(TransformTrack.Key(frame: 0, pose: restPose.pose))
+        manager.layers[at].transform = restPose
+        XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame), [0])
+
+        let containerRotation = PoseChannelID.container.parameterID(.rotation)
+        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: at, parameterID: containerRotation,
+                                                frame: 6, value: 30))
+
+        let addedPose = try XCTUnwrap(manager.layers[at].transform?.track.key(atFrame: 6)?.pose)
+        let values = try XCTUnwrap(PoseComponents.decompose(addedPose))
+        XCTAssertEqual(values.rotation, 30, accuracy: 1e-9, "The tapped component takes the tapped value")
+        XCTAssertEqual(values.x, Double(canvasBox.midX), accuracy: 1e-9,
+                      "…and X — never named — holds the canvas-centred rest value, not zero")
+        XCTAssertEqual(values.scaleX, 1, accuracy: 1e-9, "…Scale X holds rest (1), not zero")
+        XCTAssertEqual(values.scaleY, 1, accuracy: 1e-9, "…Scale Y holds rest (1), not zero")
+    }
+
+    /// **The container arm holds the untapped components at what the track showed *at that frame*,
+    /// which is the assertion the fresh-container fixture above cannot make.**
+    ///
+    /// A container that has moved reads differently at every frame of its segment, so "held" and
+    /// "reset to rest" — and "resolved at the wrong frame", which is how a real defect would most
+    /// likely look — are three different numbers here rather than one. `PoseBandLogicTests` makes
+    /// the same distinction on the cel arm; this is the `.container` half of it, and neither arm's
+    /// resolver is pinned by the other.
+    ///
+    /// The reference is read **before** the add, so the expected value is one nothing in the add
+    /// path produced.
+    func testAddPoseChannelKeyOnAnAnimatedContainerHoldsWhatTheTrackShowed() throws {
+        let manager = makeValueLayer()
+        let at = manager.layers.count - 1
+        enterTransformMode(manager, layerIndex: at)
+        let layerID = manager.layers[at].id
+        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
+        manager.addKeyframe(.layer(id: layerID), atFrame: 8)
+        manager.currentFrame = 8
+        moveBox(manager, by: CGVector(dx: 14, dy: 0))
+        XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame).sorted(), [0, 8],
+                       "Sanity: two keys, so the container is genuinely animated between them")
+
+        let track = try XCTUnwrap(manager.layers[at].transform?.track)
+        let showing = try XCTUnwrap(PoseComponents.decompose(
+            try XCTUnwrap(track.pose(atDocumentFrame: 4))))
+        XCTAssertNotEqual(showing.x, Double(canvasBox.midX), accuracy: 0.5,
+                          "Fixture: frame 4 must read differently from rest, or this test cannot "
+                          + "tell a held component from a reset one")
+
+        let containerRotation = PoseChannelID.container.parameterID(.rotation)
+        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: at, parameterID: containerRotation,
+                                                frame: 4, value: 30))
+
+        let added = try XCTUnwrap(PoseComponents.decompose(
+            try XCTUnwrap(manager.layers[at].transform?.track.key(atFrame: 4)?.pose)))
+        XCTAssertEqual(added.rotation, 30, accuracy: 1e-9, "The tapped component takes the tapped value")
+        XCTAssertEqual(added.x, showing.x, accuracy: 1e-9,
+                       "…and X holds exactly what the track already showed at frame 4 — neither rest, "
+                       + "nor either neighbouring key's own reading")
+        XCTAssertEqual(added.scaleX, showing.scaleX, accuracy: 1e-9)
+        XCTAssertEqual(added.scaleY, showing.scaleY, accuracy: 1e-9)
+        XCTAssertEqual(added.skew, showing.skew, accuracy: 1e-9)
+    }
+
     // MARK: - Persistence (§2.27, §3.5)
 
     /// **An artist-made transformation layer survives a save and a reload with its pose, its track

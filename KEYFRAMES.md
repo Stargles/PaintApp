@@ -2270,6 +2270,18 @@ component values the artist never gave. Those belong to whoever extends (38)(b),
 `draggable(_:)` beside it: every channel the band draws takes a drag, so such a filter would return
 its argument and read as a rule being enforced.
 
+**Superseded 2026-09-06, TODO (21).** The handles half of this paragraph is already stale by the time
+it was written (below, `.dragOnly` → `.dragAndHandles`); the tap half stood until (21) gave it the
+two writers it was owed. `CanvasManager.removePoseChannelKey`/`addPoseChannelKey` are the pose-side
+funnels `removeEffectParameterKey`/a grade's tap-to-add always had, so a pose node's second tap now
+raises the same menu a grade's does and a tap on its line now adds a key the same way. The ruling the
+add side was missing — what the five untapped components hold — is `addKeyframe`'s own "hold this
+pose here" and `PoseEdit`'s "only what moved is listed", reused rather than invented: they hold
+exactly what the track already resolved to at that frame. `tappable(_:)` is gone with the refusal it
+existed to express; `Channel.Gestures` is kept, because `handles`/`draggingHandle`/`poseHandleEdits`
+still need to know which of the two write funnels a component edit belongs to — its own doc now says
+so rather than describing a gesture restriction that no longer exists.
+
 **One thing the surface cannot do at the shipped height, found while writing the tests and not fixed.**
 All six rows of a pose channel key the same frames, so at any keyed frame the band draws six dots on
 one x, spread over 96 pt by per-channel normalisation alone — about 16 pt apart against a `hitRadius`
@@ -2413,6 +2425,12 @@ except the node menu and tap-to-add. `.dragOnly` is deleted rather than left sta
 only producer. A second tap on a pose node answers `.focus` again and deliberately not `.nothing`,
 which is the empty-band case and whose caller drops the focus — that would take the handles away on
 the second tap.
+
+**Superseded 2026-09-06 by TODO (21), as recorded at §11.7's "Superseded" paragraph above.** The two
+exceptions this paragraph carves out are gone: `removePoseChannelKey` and `addPoseChannelKey` are the
+writers they were waiting on, so `Channel.Gestures` no longer gates *which* gestures a channel takes
+and a second tap on a pose node answers `.menu` like any other. The `.nothing` reasoning is the one
+part still live — it is why the answer had to be `.menu` and not a refusal.
 
 **The units are the trap, and the brief that commissioned this did not see them.**
 `TransformTrack.timing` is an `AnimationCurve` whose key values are the pose **indices** `0, 1, 2, …`

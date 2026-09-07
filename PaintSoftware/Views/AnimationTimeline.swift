@@ -465,16 +465,25 @@ struct AnimationTimeline: View {
         //
         // **Both actions go through `CanvasManager`, not through a curve edit written here**, because
         // this file is not compiled into `PaintSoftwareUITests` and a rule spelled here is pinned by
-        // nothing — `TimelineGraphBand`'s doc gives that argument at length. They funnel to
-        // `setEffectParameterTrack`, which is the one writer that drops a mark the node was standing
-        // on, so a node deleted from here takes its keyframe indicator with it exactly as one dragged
-        // off its frame does.
+        // nothing — `TimelineGraphBand`'s doc gives that argument at length. A grade's Delete funnels
+        // to `setEffectParameterTrack`, which is the one writer that drops a mark the node was
+        // standing on, so a node deleted from here takes its keyframe indicator with it exactly as
+        // one dragged off its frame does. **A pose node's Delete takes the second funnel TODO (21)
+        // added** — `removePoseChannelKey`, which drops the whole `TransformTrack.Key` the row's six
+        // components share, since there is no per-component version of it to remove.
         case .graphNode(let layerIndex, let parameterID, let frame):
+            let isPose = PoseChannelID.isPose(parameterID: parameterID)
             menuList {
                 // Offered only where there is something to reset — an authored tangent rather than a
                 // derived one — which is `Clear Loop Range`'s rule on the arm above. It is also the
                 // only way back out of `.free` once a handle has been dragged, so its absence on an
                 // untouched node is the honest signal that the node is already on the default.
+                //
+                // **Grade-only, and that is `effectParameterKeyIsAuthored` reading its own dictionary
+                // rather than a guard added here** — a pose id is never a key of `Layer.effectTracks`,
+                // so it answers false and the row is absent for exactly the same reason it always was.
+                // A pose key's shared ease has its own reset story (§11.7's `.free` tangent mode) and
+                // TODO (21) is node delete and tap-to-add, not that one.
                 if canvasManager.effectParameterKeyIsAuthored(layerIndex: layerIndex,
                                                               parameterID: parameterID, frame: frame) {
                     menuButton("Reset Curve", icon: "arrow.uturn.backward") {
@@ -484,8 +493,13 @@ struct AnimationTimeline: View {
                     }
                 }
                 menuButton("Delete Keyframe", icon: "trash", role: .destructive) {
-                    canvasManager.removeEffectParameterKey(layerIndex: layerIndex,
+                    if isPose {
+                        canvasManager.removePoseChannelKey(layerIndex: layerIndex,
                                                            parameterID: parameterID, frame: frame)
+                    } else {
+                        canvasManager.removeEffectParameterKey(layerIndex: layerIndex,
+                                                               parameterID: parameterID, frame: frame)
+                    }
                 }
             }
 

@@ -127,6 +127,99 @@ extension CanvasManager {
         }
     }
 
+    // MARK: - Deleting and adding one pose node from the graph editor — TODO (21)
+
+    /// **Delete one pose node from the graph editor** — TODO (21)'s "still refused for want of a
+    /// writer": the node menu's Delete funnelled through `removeEffectParameterKey`, a grade writer
+    /// that drops a pose id outright, and a `TransformTrack.Key` needed a writer of its own.
+    ///
+    /// **The whole key goes, never one component**, because there is no partial version of it to
+    /// delete: all six of the band's rows for one pose channel are decomposed from one
+    /// `TransformTrack.Key` at that frame (`poseChannels`' "six rows, one key"), so whichever row the
+    /// artist tapped, the node names a frame and a channel and the channel's *track* holds the key.
+    ///
+    /// **Resolved by trying every source that could own the frame, exactly as
+    /// `writeGraphBandPoseEdits` already does for a drag.** A layer's cels contribute disjoint
+    /// absolute spans to one merged channel (`poseChannels`' merging note), so at most one cel's
+    /// track ever has a key at a given absolute frame, and asking each in turn needs no separate
+    /// "which cel" lookup of its own.
+    ///
+    /// - Returns: whether the document changed. False for a frame the channel does not key, which is
+    ///   the state a menu left up while an undo removed the node underneath it reaches — the same
+    ///   guard `removeEffectParameterKey` states for the grade side.
+    @discardableResult
+    func removePoseChannelKey(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              let (channel, _) = PoseChannelID.resolve(parameterID: parameterID)
+        else { return false }
+        let layerID = layers[layerIndex].id
+        switch channel {
+        case .container:
+            guard let before = layers[layerIndex].layerTransform, before.track.key(atFrame: frame) != nil
+            else { return false }
+            var after = before
+            after.track.removeKey(atFrame: frame)
+            writeContainerPose(after, from: before, target: .layer(id: layerID), label: .removeKeyframe)
+            return true
+        case .cel(let id):
+            for cel in layers[layerIndex].cels {
+                let local = frame - cel.startFrame
+                guard cel.transformTracks[id.id]?.key(atFrame: local) != nil else { continue }
+                return removeTransformPoseKey(layerID: layerID, celID: cel.id, channel: id,
+                                              atCelLocalFrame: local)
+            }
+            return false
+        }
+    }
+
+    /// **Add one pose node from the graph editor's tap-to-add gesture** — TODO (21)'s other half of
+    /// "still refused for want of a writer", and the ruling its doc named as still owed: tapping a
+    /// curve to add a key "would have to invent the five component values the artist never gave."
+    ///
+    /// **They are not invented — they hold exactly what the track already resolves to at this
+    /// frame**, never re-derived and never reset to rest. That is not a new rule, only this rule's
+    /// second use: it is `addKeyframe`'s own step 3, *"hold this pose here"*, and `PoseEdit`'s own
+    /// rule for a drag — *"only what moved is listed … the five it did not name are carried"* —
+    /// applied to a gesture that creates a key instead of moving one. An artist who taps one row's
+    /// line sees every other row's animation exactly as it was reading a moment before the tap.
+    ///
+    /// **Refused where there is no pose to resolve, or where it is projective.** A pose channel is
+    /// only ever drawn for a non-empty track (`poseChannels` skips an empty one outright), so this
+    /// mainly declines a pose that `PoseComponents.setting` cannot decompose — the same case
+    /// `decompose` declines the whole channel for in the band.
+    ///
+    /// - Returns: whether the document changed.
+    @discardableResult
+    func addPoseChannelKey(layerIndex: Int, parameterID: String, frame: Int, value: Double) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              let (channel, component) = PoseChannelID.resolve(parameterID: parameterID)
+        else { return false }
+        let layerID = layers[layerIndex].id
+        switch channel {
+        case .container:
+            guard let before = layers[layerIndex].layerTransform,
+                  let resolved = before.track.pose(atDocumentFrame: frame),
+                  let posed = PoseComponents.setting(component, to: value, of: resolved)
+            else { return false }
+            var after = before
+            after.track.setKey(TransformTrack.Key(frame: frame, pose: posed))
+            writeContainerPose(after, from: before, target: .layer(id: layerID), label: .addKeyframe)
+            return true
+        case .cel(let id):
+            for cel in layers[layerIndex].cels {
+                let local = frame - cel.startFrame
+                guard local >= 0, local < cel.frameCount,
+                      let track = cel.transformTracks[id.id],
+                      let resolved = track.pose(atCelLocalFrame: local),
+                      let posed = PoseComponents.setting(component, to: value, of: resolved)
+                else { continue }
+                return setTransformPoseKey(layerID: layerID, celID: cel.id, channel: id,
+                                           atCelLocalFrame: local, pose: posed, label: .addKeyframe)
+            }
+            return false
+        }
+    }
+
     // MARK: - Writing one key
 
     /// **Inserts or replaces one channel's pose key on one cel-local frame**, as one undo step.
@@ -144,6 +237,32 @@ extension CanvasManager {
         state.tracks[channel.id] = track
         // A channel that lands a key no longer needs its held pose.
         state.baselines.removeValue(forKey: channel.id)
+        guard state != before else { return false }
+        commitCelPoseState(state, from: before, layerID: layerID, celID: celID, label: label)
+        return true
+    }
+
+    /// **`setTransformPoseKey`'s inverse: drops one channel's key on one cel-local frame**, as one
+    /// undo step — the writer `removePoseChannelKey` needed and did not have, TODO (21).
+    ///
+    /// **A channel left with no keys is removed rather than stored empty**, `clearKeyframes`'s rule
+    /// on the same payload one door over: an empty `TransformTrack` left in the dictionary is a
+    /// channel the graph editor would still list and draw as a flat, unkeyed line.
+    ///
+    /// - Returns: whether the document changed. False for a frame the channel does not key.
+    @discardableResult
+    func removeTransformPoseKey(layerID: UUID, celID: UUID, channel: TransformChannelID,
+                                atCelLocalFrame frame: Int,
+                                label: HistoryActionLabel = .removeKeyframe) -> Bool {
+        let before = celPoseState(layerID: layerID, celID: celID)
+        var state = before
+        guard var track = state.tracks[channel.id], track.key(atFrame: frame) != nil else { return false }
+        track.removeKey(atFrame: frame)
+        if track.isEmpty {
+            state.tracks.removeValue(forKey: channel.id)
+        } else {
+            state.tracks[channel.id] = track
+        }
         guard state != before else { return false }
         commitCelPoseState(state, from: before, layerID: layerID, celID: celID, label: label)
         return true

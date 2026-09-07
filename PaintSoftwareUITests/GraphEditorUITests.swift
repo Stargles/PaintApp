@@ -511,6 +511,168 @@ final class GraphEditorGestureUITests: PaintUITestCase {
                        "…and the union came back with it")
     }
 
+    /// **TODO (21), driven on a real pose channel: the same tap-to-add and node-menu-delete a grade
+    /// has, now reachable on a transformation layer's Move too.**
+    ///
+    /// Cold-start reachability first: nothing here is a fixture the test builds by hand — the layer
+    /// is turned into a transformation layer through its own options row, the pose is created the
+    /// only way an artist can create one (a Move, at two keyframes), and the graph editor is opened
+    /// on it, exactly as `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt` proves the *entry*
+    /// to Move itself is reachable. This test picks up from there and drives the two gestures that
+    /// used to be refused past that entry.
+    ///
+    /// **Rotate 45°, not a drag**, so the one component that moves does so by an exact, known amount
+    /// (`FixedAngleRotation`) — the tap coordinates below are computed through
+    /// `TimelineGraphBand.anchoredRange`/`y(ofValue:)`, the band's own formulas, rather than guessed,
+    /// and an exact input is what makes that computation exact instead of approximate. The channel
+    /// list hides every other row first — KEYFRAMES.md §11.7's own answer to six dots sharing 96 pt of
+    /// band ("hide the five rows you are not editing") — so the one node this test taps is the only
+    /// one drawn at that frame.
+    func testGraphEditorPoseNodeDeleteAndTapToAddOnATransformationLayer() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        app.staticTexts["layerPanel.row.1"].tap() // already selected after the add: opens options
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let transformItem = app.buttons["layerOptions.blendMode.transform"]
+        XCTAssertTrue(transformItem.waitForExistence(timeout: 5))
+        transformItem.tap()
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["toolbar.layersButton"].tap() // rail covers the timeline block taps below
+
+        // Two marks, then one Move at the second — `KeyframeControl.write`'s `.seedAndKey` arm,
+        // `authorAnAnimatedBrightnessCurve`'s own technique applied to a pose instead of a slider.
+        let block = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5), "The transformation layer should have a track")
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
+        func mark(_ frame: Int) {
+            let slot = block.coordinate(withNormalizedOffset:
+                CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
+            let add = app.buttons["timeline.menu.Add Keyframe"]
+            slot.tap()
+            if !add.waitForExistence(timeout: 2) {
+                slot.tap()
+                XCTAssertTrue(add.waitForExistence(timeout: 5), "No Add Keyframe on frame \(frame)'s menu")
+            }
+            add.tap()
+        }
+        mark(0)
+        mark(6)
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap() // still selected: opens options, in Transform mode
+        let moveRow = app.buttons["layerOptions.transformMove"]
+        XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
+        moveRow.tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                     "Tapping Move should raise the box, exactly as it does beneath a value layer")
+        app.buttons["moveBar.rotate45LeftButton"].tap()
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "The box should have committed")
+
+        if app.buttons["layerPanel.addButton"].exists { app.buttons["toolbar.layersButton"].tap() }
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+
+        // Isolate the one row a pure rotation actually animates.
+        app.buttons["timeline.graphChannelsButton"].tap()
+        for hidden in ["containerPose.x", "containerPose.y", "containerPose.scaleX",
+                       "containerPose.scaleY", "containerPose.skew"] {
+            let checkbox = app.buttons["timeline.graphChannels.\(hidden)"]
+            XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "Missing row: \(hidden)")
+            checkbox.tap()
+        }
+        app.buttons["timeline.graphChannelsButton"].tap()
+
+        XCTAssertEqual(band.value as? String, "containerPose.rotation:0,6",
+                      "TODO (21): a Move now reaches the graph editor as a listed, drawn pose channel")
+        var shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "pose-band-before-add-or-delete"; shot.lifetime = .keepAlways; add(shot)
+
+        // The axis a pure rotation is drawn on: reference is rest (0°, box-independent), and the one
+        // key away from it is -45°, `TimelineGraphBand.anchoredRange`'s own formula computed with the
+        // same inputs the band used rather than guessed.
+        let range = TimelineGraphBand.anchoredRange(
+            reference: 0, minimumSpan: PoseComponents.Component.rotation.minimumAxisSpan,
+            keyValues: [0, -45])
+        let bandHeight = band.frame.height
+        func point(frame: Int, value: Double) -> XCUICoordinate {
+            band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: TimelineGraphBand.x(ofFrame: frame, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
+                dy: TimelineGraphBand.y(ofValue: value, in: range, bandHeight: bandHeight)))
+        }
+        func waitForBandValue(_ value: String, timeout: TimeInterval = 5) -> XCTWaiter.Result {
+            // A fresh `XCTNSPredicateExpectation` every call: one can only be waited on once.
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", value), object: band)], timeout: timeout)
+        }
+
+        // **Tap-to-add first, while the two authored keys still differ** — frame 3 is the temporal
+        // midpoint of the fixture's only segment, so (whatever the segment's own tangents do with the
+        // ends) the line there reads the arithmetic mean of the two keys' values, exactly the
+        // reasoning `authorAnAnimatedBrightnessCurve`'s own midpoint tap uses for a grade.
+        let midpoint = point(frame: 3, value: -22.5)
+        midpoint.tap()
+        XCTAssertEqual(waitForBandValue("containerPose.rotation:0,3,6"), .completed, """
+            TODO (21): tapping a pose curve's line should add a key at the tapped frame — got \
+            \(band.value ?? "nil")
+            """)
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
+                      "…and the new key is a keyframe, with no bare mark written for it")
+        shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "pose-band-after-tap-to-add"; shot.lifetime = .keepAlways; add(shot)
+
+        // **The node just added takes the same two-stage tap and the same menu a Move-authored one
+        // does** — focus first, menu second, exactly as `restNode` would show at frame 0 or 6.
+        midpoint.tap()
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@",
+                                   TimelineGraphBand.encodeGesture(
+                                       focus: .init(parameterID: "containerPose.rotation", frame: 3),
+                                       readout: nil)),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed,
+                      "A tap on a pose node focuses it first, exactly as a grade's does — got \(band.label)")
+
+        midpoint.tap()
+        let deleteButton = app.buttons["timeline.menu.Delete Keyframe"]
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5),
+                     "TODO (21): a pose node's second tap now raises the menu a grade's always could")
+        shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "pose-node-menu-with-delete-keyframe"; shot.lifetime = .keepAlways; add(shot)
+        deleteButton.tap()
+        XCTAssertEqual(waitForBandValue("containerPose.rotation:0,6"), .completed,
+                      "Delete should remove the whole pose key at frame 3 — got \(band.value ?? "nil")")
+        shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "pose-band-after-delete"; shot.lifetime = .keepAlways; add(shot)
+
+        // **Recoverable, both ways** — one press of Undo brings the tapped-away node back, and Redo
+        // takes it away again, the same guarantee `testATapAddsAKeyToTheCurveItLandsOnAndTheNodeMenu\
+        // RemovesOne` already pins for a grade.
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertEqual(waitForBandValue("containerPose.rotation:0,3,6"), .completed,
+                      "One press of Undo must bring a tapped-away pose node back")
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertEqual(waitForBandValue("containerPose.rotation:0,6"), .completed,
+                      "…and Redo should take it away again")
+
+        // **The deleted node is gone from the *picture*, not only from the track.** Every assertion
+        // above reads the band's value, which is the list of frames it draws — a node left drawn at
+        // its old y with no key behind it would not show up in any of them. So tap the same point
+        // one more time: with nothing within `hitRadius` of it the tap resolves to the *line* and
+        // adds a key, and with a stale node still drawn there it would resolve to that node and
+        // focus it instead. This is CLAUDE.md's own graph-editor lesson — a correct value drawn in
+        // the wrong place — asked of delete rather than of a drag.
+        midpoint.tap()
+        XCTAssertEqual(waitForBandValue("containerPose.rotation:0,3,6"), .completed, """
+            After a delete the band must draw no node at that frame: this tap should have landed on \
+            the line and added one back, and instead resolved to something still drawn there — got \
+            \(band.value ?? "nil")
+            """)
+    }
 
     /// **Ask 6, through a finger: a rubber band in empty space picks keys up, and grabbing any member
     /// of that set then moves the whole of it.**

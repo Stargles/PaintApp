@@ -432,27 +432,28 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertNil(manager.vectorFloat)
     }
 
-    // MARK: - What a pose node takes, and what it still refuses
+    // MARK: - What a pose node takes, now that it has a writer for all of it — TODO (21)
 
-    /// **A pose node is dragged, marquee'd, focused and shaped, and it still raises no menu and takes
-    /// no new key beside it** — the owner's report of 2026-09-03, *"why cant i access the bezier
-    /// handles in move?"*.
+    /// **A pose node is dragged, marquee'd, focused, shaped, menu'd and tapped-to-add, exactly as a
+    /// grade's is** — TODO (21)'s "still refused for want of a writer", closed.
     ///
-    /// The two halves this used to state were "dragged and marquee'd" against "takes no tap", and the
-    /// second half was too wide. Focusing is what puts the handles on the band and does nothing else;
-    /// what a pose channel has no writer for is **Delete**, which funnels through
-    /// `removeEffectParameterKey`, and **tap-to-add**, which would have to invent the five component
-    /// values the artist never gave. Those two are still refused and are asserted here as such.
+    /// This used to be named for the two gestures it proved refused: the node menu's Delete, which
+    /// funnelled through `removeEffectParameterKey` and dropped a pose id outright, and tap-to-add,
+    /// which would have had to invent the five component values the artist never gave.
+    /// `CanvasManager.removePoseChannelKey`/`addPoseChannelKey` are the writers KEYFRAMES.md §11.7
+    /// named as owed to "whoever extends (38)(b)", and this file is that extension: both gestures now
+    /// reach `TimelineGraphBand.tap`'s `.menu`/`.add` the same way a grade's always have, because
+    /// `Channel.Gestures` no longer gates the *gesture* — see its own doc for what it gates instead.
     ///
-    /// **The second tap answers `.focus` again rather than `.nothing`**, and that is the assertion
-    /// most worth having: `.nothing` is the empty-band case and its caller drops the selection *and*
-    /// the focus, so refusing the menu that way would make the handles vanish on the second tap —
-    /// the opposite of what the report asks for, and indistinguishable from it in a test that only
-    /// checked "not `.menu`".
+    /// **The second tap answers `.menu` now, not `.focus` and emphatically not `.nothing`.**
+    /// `.nothing` is the empty-band case and its caller drops the selection *and* the focus, so a
+    /// pose node's second tap must not be indistinguishable from that — this file's own note from
+    /// when the gesture was refused, still true of the new answer for the same reason.
     ///
-    /// **The fixture holds a grade channel too**, which is what stops the refusal halves being tests
-    /// of an empty list: the same `tap` at the same kind of point raises a menu one channel over.
-    func testAPoseNodeIsFocusedAndShapedButStillTakesNoMenuOrNewKey() throws {
+    /// **The fixture holds a grade channel too**, which is what stops these being tests of a list of
+    /// one: the same `tap` at the same kind of point does the same thing on both channels now, and
+    /// this test says so rather than only asserting the pose half.
+    func testAPoseNodeTakesTheSameMenuAndTapToAddAGradesDoes() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
         let pose = try XCTUnwrap(channel(try content(manager), celX))
@@ -495,18 +496,21 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(TimelineGraphBand.tap(at: posePoint, channels: [pose], focused: poseNode,
                                              frameCount: 40, pixelsPerFrame: ppf,
                                              bandHeight: height),
-                       .focus(poseNode),
-                       "A second tap re-focuses rather than raising a menu — and emphatically does " +
-                       "not answer `.nothing`, which would drop the focus and take the handles away")
+                       .menu(poseNode),
+                       "TODO (21): a second tap now raises the menu on a pose node too — the writer " +
+                       "`removePoseChannelKey` gives it something to do")
 
-        // Halfway between the two nodes and on the drawn line, which on a grade is `.add`.
+        // Halfway between the two nodes and on the drawn line, which on a grade was always `.add`
+        // and now is on a pose channel too.
         let onTheLine = CGPoint(x: TimelineGraphBand.x(ofFrame: 8, pixelsPerFrame: ppf),
                                 y: TimelineGraphBand.y(ofValue: pose.curve.evaluate(at: 8),
                                                        in: pose.axis, bandHeight: height))
         XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: [pose], focused: nil,
                                              frameCount: 40, pixelsPerFrame: ppf,
                                              bandHeight: height),
-                       .nothing, "A tap on a pose curve adds no key: five components are missing")
+                       .add(parameterID: celX, frame: 8, value: pose.curve.evaluate(at: 8)),
+                       "TODO (21): a tap on a pose curve now adds a key — the five components the " +
+                       "tap did not name are `addPoseChannelKey`'s job to hold, not this function's")
         let onTheGradeLine = CGPoint(x: TimelineGraphBand.x(ofFrame: 8, pixelsPerFrame: ppf),
                                      y: TimelineGraphBand.y(ofValue: grade.curve.evaluate(at: 8),
                                                             in: grade.axis, bandHeight: height))
@@ -515,8 +519,8 @@ final class PoseBandLogicTests: XCTestCase {
                                              bandHeight: height),
                        .add(parameterID: grade.parameterID, frame: 8,
                             value: grade.curve.evaluate(at: 8)),
-                       "Fixture: the same geometry on a grade does add one, so the refusal above " +
-                       "is about the channel and not about where the point landed")
+                       "Fixture: the same geometry on a grade does add one too, so the two channels " +
+                       "are asserted to agree rather than one being taken on faith")
 
         let gradePoint = at(grade, frame: 4)
         let gradeNode = TimelineGraphBand.KeyRef(parameterID: grade.parameterID, frame: 4)
@@ -529,7 +533,7 @@ final class PoseBandLogicTests: XCTestCase {
                                              frameCount: 40, pixelsPerFrame: ppf,
                                              bandHeight: height),
                        .menu(gradeNode),
-                       "…and its second tap still raises the menu the pose channel is refused")
+                       "…and its second tap still raises the menu, the same answer the pose node beside it now gets")
         XCTAssertEqual(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
                                               channels: both, pixelsPerFrame: ppf,
                                               bandHeight: height),
@@ -537,6 +541,102 @@ final class PoseBandLogicTests: XCTestCase {
                         .init(parameterID: grade.parameterID, frame: 4),
                         .init(parameterID: grade.parameterID, frame: 12)],
                        "…and a marquee over both catches all four nodes")
+    }
+
+    // MARK: - The two writers TODO (21) added
+
+    /// **Delete drops the whole key, all six components, not one row's reading of it.**
+    ///
+    /// A pose channel's six band rows are one `TransformTrack.Key` decomposed — there is no partial
+    /// delete to ask for — so calling the writer through the *X* row's parameter id removes the same
+    /// key every other row would have named too, leaving the track's other key untouched.
+    func testRemovePoseChannelKeyDropsTheWholeKeyAtThatFrame() throws {
+        let (manager, layerID, celID) = celFixture()
+        animateCel(manager, layerID: layerID, celID: celID)
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
+                       2, "Sanity: the fixture keys the channel twice")
+
+        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 12),
+                     "Frame 12 is cel-local 8 (the fixture's cel starts at 4), the second key")
+
+        let track = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
+        XCTAssertEqual(track?.keys.map(\.frame), [0], "One key left, at cel-local frame 0")
+
+        manager.undo()
+        let restored = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
+        XCTAssertEqual(restored?.keys.map(\.frame), [0, 8], "Undo brings the deleted key back")
+    }
+
+    /// **A delete that empties a channel removes it rather than storing it with no keys** —
+    /// `clearKeyframes`' rule on the same payload one door over, and the reason `removeTransformPose\
+    /// Key` has an `isEmpty` branch at all.
+    ///
+    /// An empty `TransformTrack` left in the dictionary is not inert: `poseChannels` skips a channel
+    /// with no keys by *absence*, so one stored empty is a channel the band still lists and still
+    /// draws, as a flat unkeyed line with no node on it and no gesture that can remove it. The test
+    /// beside this one deletes one of two keys and so never reaches the branch; this one starts from
+    /// a single key on purpose.
+    func testDeletingTheLastKeyRemovesTheChannelRatherThanLeavingItEmpty() throws {
+        let (manager, layerID, celID) = celFixture()
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
+                       1, "Sanity: exactly one key, so the delete below empties the channel")
+
+        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 4),
+                      "Frame 4 is cel-local 0 — the fixture's cel starts at 4")
+        XCTAssertNil(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id],
+                     "The channel is gone from the dictionary, not stored with an empty track")
+    }
+
+    /// A frame the channel does not key is refused rather than deleting whatever key happens to be
+    /// nearest — `removeEffectParameterKey`'s own guard, restated for the pose funnel.
+    func testRemovePoseChannelKeyRefusesAFrameWithNoKey() throws {
+        let (manager, layerID, celID) = celFixture()
+        animateCel(manager, layerID: layerID, celID: celID)
+        XCTAssertFalse(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 7))
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count, 2,
+                       "A refused delete must not have touched the track")
+    }
+
+    /// **Add holds every component the tap did not name at exactly what the track already resolved
+    /// to there** — the ruling KEYFRAMES.md §11.7 left owed, applied: nothing is reset to rest and
+    /// nothing is invented, the same property `PoseEdit`'s retime rule and `addKeyframe`'s "hold this
+    /// pose here" step both have.
+    ///
+    /// The fixture moves **two** components together (a slide and a stretch) precisely so a "held"
+    /// bug that quietly rested or zeroed one of them is visible on a component this test never taps.
+    func testAddPoseChannelKeyHoldsTheUntappedComponentsAtWhatTheTrackAlreadyShowed() throws {
+        let (manager, layerID, celID) = celFixture()
+        let moved = PoseQuad(box: box,
+                             mappedBy: CGAffineTransform(translationX: 24, y: 0).scaledBy(x: 2, y: 1))
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 8, pose: moved)
+
+        // Read before the add, so the assertion below is against a value nobody could have
+        // fabricated after the fact to make the test pass.
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id])
+        let before = try XCTUnwrap(track.pose(atCelLocalFrame: 4))
+        let beforeValues = try XCTUnwrap(PoseComponents.decompose(before))
+
+        let celScaleY = PoseChannelID.cel(.cel).parameterID(.scaleY)
+        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: 1, parameterID: celScaleY, frame: 8,
+                                                value: 3),
+                     "Frame 8 is cel-local 4, inside the cel and between the fixture's two keys")
+
+        let afterPose = try XCTUnwrap(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?
+            .key(atFrame: 4)?.pose)
+        let after = try XCTUnwrap(PoseComponents.decompose(afterPose))
+        XCTAssertEqual(after.scaleY, 3, "The tapped component takes the tapped value")
+        XCTAssertEqual(after.x, beforeValues.x, accuracy: 1e-9,
+                      "…and X — which the tap did not name — holds exactly what the track already " +
+                      "showed there, not rest and not zero")
+        XCTAssertEqual(after.scaleX, beforeValues.scaleX, accuracy: 1e-9,
+                      "…same for Scale X, the other component this drag actually moved")
+        XCTAssertEqual(after.rotation, beforeValues.rotation, accuracy: 1e-9)
+        XCTAssertEqual(after.skew, beforeValues.skew, accuracy: 1e-9)
     }
 
     // MARK: - The y axis a node is drawn against

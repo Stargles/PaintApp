@@ -165,8 +165,9 @@ enum TimelineGraphBand {
         /// that could not put it back: a channel the band does not draw is a channel no tap in the
         /// band can add a key to.
         let isAnimated: Bool
-        /// **What a gesture on this channel is allowed to do** — KEYFRAMES §11.7's write-back, which
-        /// replaced the blanket refusal this used to spell as `isEditable`.
+        /// **Which funnel a component-level write on this channel goes through** — KEYFRAMES §11.7's
+        /// write-back, widened by TODO (21) to cover every gesture the band offers rather than a
+        /// refused remainder.
         ///
         /// A pose sub-curve is a **view** of a `PoseQuad` rather than a stored `AnimationCurve`:
         /// `PoseComponents.decompose` produces it and `PoseComponents.setting(_:to:of:)` puts an edit
@@ -178,39 +179,44 @@ enum TimelineGraphBand {
         /// accident of another function's guard rather than by decision: the bracket opens, the node
         /// travels under the finger and snaps back on lift with nothing saying why.
         ///
-        /// **The repair is a second funnel, not a second selection rule.**
-        /// `TimelineGraphBand.poseEdits(_:in:)` folds a drag's row-level moves into *key*-level ones
-        /// and `CanvasManager.writeGraphBandPoseEdits(_:from:layerIndex:)` writes them onto the
-        /// `TransformTrack.Key` itself — one frame, six components — so the six cannot come apart
-        /// however the gesture layer carries them. See `PoseEdit`.
+        /// **The repair was a second funnel, not a second selection rule, and delete and tap-to-add
+        /// are the same repair reached a stage later.** `TimelineGraphBand.poseEdits(_:in:)` folds a
+        /// drag's row-level moves into *key*-level ones and `CanvasManager.writeGraphBandPoseEdits\
+        /// (_:from:layerIndex:)` writes them onto the `TransformTrack.Key` itself — one frame, six
+        /// components — so the six cannot come apart however the gesture layer carries them (see
+        /// `PoseEdit`). Delete and tap-to-add needed the identical shape of funnel and did not have
+        /// one: the node menu's Delete used to reach only `removeEffectParameterKey`, a grade writer
+        /// that a pose id is dropped by outright, and tap-to-add had to decide what the five
+        /// components the tap did not name should hold. `CanvasManager.removePoseChannelKey` and
+        /// `addPoseChannelKey` are that second pair of funnels — a whole `TransformTrack.Key` removed
+        /// or inserted, rather than one component of a curve — and the ruling for the second is
+        /// `addKeyframe`'s own, reused rather than invented: the components untouched by the tap hold
+        /// exactly what the track already resolves to at that frame, the same "hold what was already
+        /// showing" `PoseEdit`'s retime rule and `seedAndKeyChannel`'s neighbour-seeding both apply.
         ///
-        /// **A pose channel gets `.dragAndHandles`, and the two gestures still refused are refused
-        /// for reasons that are about the *writers*, not about the handles.**
+        /// **Every gesture the band offers is available on every channel it draws, and this field
+        /// no longer says otherwise — it says which of two write funnels answers a component edit.**
+        /// A pose row's shared ease is still worth stating on its own: a `TransformTrack.Key` carries
+        /// **one** handle pair for all six components, so shaping Scale X's tangent bends the other
+        /// five, and the owner's report of 2026-09-03 — *"why cant i access the bezier handles in
+        /// move?"* — is what established that this is the *model*, not a side effect to guard
+        /// against. The repair there was to *show* it — the handle is drawn on all six rows at once
+        /// (`handleRows(of:in:)`), so what the artist grabs looks like what it is — and `.dragAndHandles`
+        /// is what `handles(of:in:…)`, `draggingHandle` and `poseHandleEdits` still switch on to find
+        /// the row's own funnel; it no longer gates whether a node menu or a tap-to-add exists at all.
         ///
-        /// This used to be `.dragOnly`, on the argument that focusing draws bezier handles and a
-        /// `TransformTrack.Key` carries **one** pair for all six components, so shaping Scale X's
-        /// tangent would bend the other five. The owner's report of 2026-09-03 — *"why cant i access
-        /// the bezier handles in move?"* — is what re-opened it, and the argument over-corrected: a
-        /// shared ease is what the model **stores** and what `PoseInterpolation.blend` runs, so
-        /// bending the other five is the truth about the document rather than a side effect to be
-        /// prevented. The repair is to *show* it — the handle is drawn on all six rows at once
-        /// (`handleRows(of:in:)`), so what the artist grabs looks like what it is.
-        ///
-        /// **Delete and tap-to-add stay refused**, and neither is about ambiguity: the node menu's
-        /// Delete funnels through `removeEffectParameterKey`, a grade writer, and tapping a curve to
-        /// add a key would have to invent the five component values the artist never gave.
-        /// `PoseEdit` would need an arm for each, and the second needs a ruling before it needs code.
-        /// **`.dragOnly` is gone rather than left standing beside the new case.** It had exactly one
-        /// producer — this — and a case nothing answers turns the guards written against it into
-        /// filters that return their argument, which is the objection `tappable(_:)`'s own doc makes
-        /// against a no-op filter: the next reader takes it for a rule being enforced.
+        /// **`.dragOnly` is gone rather than left standing beside a later case**, for the reason its
+        /// own removal note gave: a case nothing answers turns the guards written against it into
+        /// filters that return their argument, which used to be `tappable(_:)`'s own objection to a
+        /// no-op filter and is now `tappable(_:)`'s reason for not existing at all.
         enum Gestures: String, Equatable {
-            /// Everything the band offers: drag a node, marquee it, tap to focus, shape its handles,
-            /// tap the line to add a key, tap the node twice for its menu.
+            /// A grade's curve: one value per key, written through `setEffectParameterTrack`.
             case all
-            /// **Everything except the node menu and tap-to-add** — a pose row. Dragged, marquee'd,
-            /// tapped to focus, and its handles shaped; a second tap re-focuses instead of raising a
-            /// menu, and a tap on the line adds nothing.
+            /// **A pose row** — six of these share one `TransformTrack.Key`, written through
+            /// `writeGraphBandPoseEdits`/`removePoseChannelKey`/`addPoseChannelKey` instead. Every
+            /// gesture `.all` offers is offered here too; only the destination of a component write
+            /// differs, which is what the three functions above and `handles`/`draggingHandle`/
+            /// `poseHandleEdits` key off this field to find.
             case dragAndHandles
         }
         let gestures: Gestures
@@ -1135,30 +1141,27 @@ enum TimelineGraphBand {
     ///
     /// - Parameter focused: the node whose handles are currently drawn, which is what makes this a
     ///   two-stage gesture rather than a one-stage one. A tap on *that* node is the second stage and
-    ///   answers `.menu` where the channel has a writer for it and `.focus` again where it has not;
-    ///   a tap on any other node is the first and answers `.focus`. Passing nil is the state a band
-    ///   opens in, where every node's tap is a first stage.
+    ///   answers `.menu`; a tap on any other node is the first and answers `.focus`. Passing nil is
+    ///   the state a band opens in, where every node's tap is a first stage.
     static func tap(at point: CGPoint, channels all: [Channel], focused: KeyRef?, frameCount: Int,
                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Tap {
         // **Every node the band draws can be focused, pose rows included** — the owner's report of
         // 2026-09-03, *"why cant i access the bezier handles in move?"*. Focusing is what puts the
         // handles on the band and nothing else, so the filter that used to stand here excluded a pose
-        // node from the one stage it had no reason to be excluded from. `Channel.Gestures` carries
-        // what is still refused, and it is the two *writers* rather than the focus.
+        // node from the one stage it had no reason to be excluded from.
         if let hit = nearestKey(to: point, channels: all,
                                 pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
             guard hit == focused else { return .focus(hit) }
-            // **A second tap on a pose node re-focuses rather than raising the menu, and it must not
-            // answer `.nothing`.** `.nothing` is the empty-band case and its caller drops the
-            // selection *and the focus* — so refusing the menu that way would make the handles vanish
-            // on the second tap, which is the opposite of what the report asks for.
-            let writable = all.first { $0.parameterID == hit.parameterID }?.gestures == .all
-            return writable ? .menu(hit) : .focus(hit)
+            // **A second tap raises the menu on every channel now** — TODO (21): a pose node used to
+            // re-focus instead, back when the node menu's Delete had no pose writer to funnel through
+            // (`Channel.Gestures`' doc has the writers). `CanvasManager.removePoseChannelKey` is that
+            // writer, so the same two-stage tap `handleTapOnCel` established for a cel now means the
+            // same thing on every row this band draws, not on eight of the thirty-nine kinds of node.
+            return .menu(hit)
         }
-        let channels = tappable(all)
-        guard let id = nearestChannel(to: point, channels: channels,
+        guard let id = nearestChannel(to: point, channels: all,
                                       pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight),
-              let channel = channels.first(where: { $0.parameterID == id })
+              let channel = all.first(where: { $0.parameterID == id })
         else { return .nothing }
         let frame = TimelineKeyMarkers.frame(atX: point.x, pixelsPerFrame: pixelsPerFrame)
         guard frame >= 0, frame < frameCount, channel.curve.key(atFrame: frame) == nil
@@ -1944,25 +1947,6 @@ enum TimelineGraphBand {
             if content.hiddenCount > 0 { return "hidden" }
         }
         return encode(content.channels) + declined
-    }
-
-    // MARK: - Which channels a gesture may touch
-
-    /// **The channels a tap may put a *new key* on** — `Channel.Gestures.all`, applied once and named
-    /// rather than spelled as a condition inside each entry point.
-    ///
-    /// **Narrower than it reads, and narrower than it was.** It is not "the channels a tap may
-    /// resolve to": every node the band draws can be focused and every focused node offers its
-    /// handles, which is 2026-09-03's change. What this filters is the one gesture that has to invent
-    /// a value — tap-a-line-to-add — and its sibling refusal, the node menu, is spelled at the one
-    /// place it is decided rather than through this.
-    ///
-    /// **There is deliberately no `draggable(_:)` beside it.** Since §11.7's write-back every channel
-    /// the band draws takes a drag and a marquee, so a filter for those would be a function that
-    /// returns its argument — and a no-op filter is worse than none, because the next reader takes it
-    /// for a rule that is being enforced. `grab` and `keys` walk the full list on purpose.
-    static func tappable(_ channels: [Channel]) -> [Channel] {
-        channels.allSatisfy { $0.gestures == .all } ? channels : channels.filter { $0.gestures == .all }
     }
 
     /// **The band's *gesture* state, as a string** — which node's handles are drawn (38)(b) and what
