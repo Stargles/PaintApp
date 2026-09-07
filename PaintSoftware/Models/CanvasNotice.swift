@@ -188,6 +188,15 @@ struct CanvasNotice: Identifiable, Equatable {
         /// third `VideoBakeRefusal` case, so a real artist never sees that one's sentence, only a
         /// direct caller or a test does.
         case videoBakeRefused(CanvasManager.VideoBakeRefusal)
+
+        /// A live take could not start, or ended having caught nothing — KEYFRAMES.md §5, stage 7.
+        ///
+        /// **The refused-with-nothing case is why this exists at all.** A recorder that runs for
+        /// three seconds and then puts nothing on the timeline, silently, is the worst instance of
+        /// the "a refusal with no notice" defect this file already carries three cases of: the
+        /// artist has *spent the take*, and nothing on screen says whether the feature is broken or
+        /// they simply forgot to touch a control. Each `RecordingRefusal` names its own way out.
+        case recordingRefused(CanvasManager.RecordingRefusal)
     }
 
     init(_ kind: Kind) {
@@ -215,6 +224,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
+        case .recordingRefused(let refusal): return refusal.message
         }
     }
 
@@ -276,6 +286,12 @@ struct CanvasNotice: Identifiable, Equatable {
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
         case .videoBakeRefused: return nil
+        // Nor this one, and each of its four cases fails the button test for its own reason. Two
+        // name a thing to do *while recording* — open a layer's effect settings, move the slider —
+        // which is not an action after the fact; one says the take was too short, whose fix is to
+        // record for longer; and `noTarget` could offer "Add Layer", except that an artist with no
+        // layer at all is not mid-take and the layer panel is already on screen.
+        case .recordingRefused: return nil
         }
     }
 
@@ -302,6 +318,10 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
         case .videoBakeRefused: return "videoBakeRefused"
+        // One code for all four, matching `videoBakeRefused`'s precedent: a test asserting a take was
+        // refused reads this, and a test that cares *which* refusal reads `RecordingRefusal` off the
+        // model, where the fast tier can compare the case itself rather than a string.
+        case .recordingRefused: return "recordingRefused"
         }
     }
 

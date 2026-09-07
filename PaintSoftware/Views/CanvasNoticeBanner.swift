@@ -98,6 +98,10 @@ struct CanvasNoticeBanner: View {
         // A fourth: the artist asked to bake a video and an unreadable file or an empty crop
         // stopped it, which reads the same as the fill and the save refusals above.
         case .videoBakeRefused: return "exclamationmark.triangle"
+        // Not a warning: nothing went wrong, the take simply caught nothing. The record glyph,
+        // because the message is about the thing the artist was just doing and the fix — arm again
+        // and touch a control this time — is that same button.
+        case .recordingRefused: return "record.circle"
         }
     }
 }

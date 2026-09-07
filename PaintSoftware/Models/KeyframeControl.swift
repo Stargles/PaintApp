@@ -435,6 +435,21 @@ extension CanvasManager {
     @discardableResult
     func applyEffectParameterEdit(_ target: KeyframeTarget, parameter: EffectParameter,
                                   newValue: Double, atFrame frame: Int) -> KeyframeControl.Write {
+        // **A live take takes the routing decision away, and that is the whole of §5's intercept.**
+        // The five arms below each write a *key* or the *base*; keying per reported value is the
+        // aliased sample §5 forbids in its first paragraph, and would leave 72 keys a channel on a
+        // three-second take. So the value is captured with its wall time and the edit falls through
+        // to `.storedValue` — the base is a scratch pad for the length of the take and
+        // `stopRecording` puts it back. The artist sees the value move under their finger either
+        // way, which is what a recorder they cannot watch would fail to give them.
+        if parameter.isScalarAnimatable,
+           recordParameterSample(target, parameterID: parameter.id, value: newValue) {
+            if let stored = storedEffect(of: target) {
+                setStoredEffect(of: target, to: parameter.write(stored, newValue))
+            }
+            return .storedValue
+        }
+
         let route = keyframeWrite(target, parameter: parameter, atFrame: frame)
         // **The stored grade, never the resolved one.** The knobs show the value at the playhead;
         // writing that back would bake every *other* animated channel's value-at-this-frame into the
@@ -857,6 +872,46 @@ extension CanvasManager {
         guard changed > 0 else { return 0 }
 
         commitKeyframeState(state, from: before, to: target, label: .effectKeyframes)
+        return changed
+    }
+
+    /// **Replaces whole curves on several channels at once, as one step** — KEYFRAMES.md §5's
+    /// recorder, which is the only caller and the reason this exists beside `setEffectParameterKeys`
+    /// rather than being spelled by it.
+    ///
+    /// That one writes **one key per channel** at a frame and merges into whatever curve is there;
+    /// a take writes a *whole curve* per channel and replaces it, because the take is the animation
+    /// rather than an adjustment to one. Both reach `commitKeyframeState`, so both get §2.28's
+    /// `marks(_:droppingKeyed:)` rule applied once over the whole write — which is the thing that
+    /// must not be spelled twice, since a mark stranded beside a key is three device reports.
+    ///
+    /// **Curves are refused per channel rather than per call.** A parameter that is not scalar
+    /// animatable, or is not a parameter of the grade in force, is skipped and the rest are written:
+    /// the alternative is one bad channel discarding a whole take.
+    ///
+    /// - Returns: how many channels changed.
+    @discardableResult
+    func setEffectParameterCurves(_ target: KeyframeTarget,
+                                  curves: [String: AnimationCurve]) -> Int {
+        guard !curves.isEmpty, let effect = storedEffect(of: target) else { return 0 }
+
+        let before = keyframeState(of: target)
+        var state = before
+        var changed = 0
+
+        for parameter in effect.parameters {
+            guard parameter.isScalarAnimatable, let curve = curves[parameter.id] else { continue }
+            // Empty is removal, exactly as `setEffectParameterTrack` treats it: a curve with no keys
+            // is a channel that exists, animates nothing, and shows up in a channel list.
+            let after: AnimationCurve? = curve.isEmpty ? nil : curve
+            guard after != state.tracks[parameter.id] else { continue }
+            if let after { state.tracks[parameter.id] = after }
+            else { state.tracks.removeValue(forKey: parameter.id) }
+            changed += 1
+        }
+        guard changed > 0 else { return 0 }
+
+        commitKeyframeState(state, from: before, to: target, label: .recordAnimation)
         return changed
     }
 

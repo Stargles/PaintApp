@@ -742,6 +742,8 @@ struct AnimationTimeline: View {
             }
             .accessibilityIdentifier("timeline.playButton")
 
+            recordButton
+
             Button(action: { canvasManager.stepFrame(by: 1) }) {
                 Image(systemName: "forward.frame.fill")
             }
@@ -799,6 +801,32 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isLoopEnabled ? .blue : .white)
         .accessibilityIdentifier("timeline.loopButton")
+    }
+
+    /// **Arm and disarm a live take** — KEYFRAMES.md §5, stage 7.
+    ///
+    /// **In the transport group, beside play, and not a `Tool`.** §2.22's shipped precedent, stated
+    /// for the keyframe button and true for the same reasons here: recording is a transport state,
+    /// it writes at the playhead, and every switch over `Tool` is exhaustive with no `default:` on
+    /// purpose. Being inside `transportControls` also means it is drawn in both bars for free, which
+    /// is the trap that section exists to name.
+    ///
+    /// **A visible mode, not a hidden one.** §2.1 was withdrawn partly because *"a mode reached by a
+    /// hold has to be advertised or it is undiscoverable"*; this one is a red dot that fills while it
+    /// is armed, so there is no state the artist can be in without seeing it.
+    ///
+    /// **Pressing it starts playback**, because a take with no clock records a constant — see
+    /// `startRecording`.
+    private var recordButton: some View {
+        Button(action: {
+            if canvasManager.isRecording { canvasManager.stopRecording() }
+            else { canvasManager.startRecording() }
+        }) {
+            Image(systemName: canvasManager.isRecording ? "record.circle.fill" : "record.circle")
+        }
+        .foregroundColor(canvasManager.isRecording ? .red : .white)
+        .accessibilityIdentifier("timeline.recordButton")
+        .accessibilityValue(canvasManager.isRecording ? "recording" : "idle")
     }
 
     /// **The document's frame rate, and the way in to changing it** — KEYFRAMES.md §2.7, *"an

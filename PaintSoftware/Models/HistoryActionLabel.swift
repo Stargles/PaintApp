@@ -104,6 +104,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// keyframes". Apart from `.removeKeyframe` because the two undo very different amounts of work
     /// and the banner is the only thing that says which one just happened.
     case clearKeyframes
+    /// One live take, however many channels it caught (`CanvasManager.stopRecording`) — KEYFRAMES.md
+    /// §5. Apart from `.effectKeyframes` because a take is the animation rather than an adjustment
+    /// to one, and an artist who records three seconds and presses undo is taking back a
+    /// performance, not an edit.
+    case recordAnimation
     case renameLayer
     case deleteLayer
     case fillReference
@@ -223,6 +228,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"
         case .clearKeyframes: return "clear keyframes"
+        case .recordAnimation: return "record animation"
         case .renameLayer: return "rename layer"
         case .deleteLayer: return "delete layer"
         case .fillReference: return "fill reference"

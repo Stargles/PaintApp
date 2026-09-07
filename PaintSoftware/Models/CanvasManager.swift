@@ -1057,6 +1057,21 @@ final class CanvasManager: ObservableObject {
     /// `objectWillChange` still fires and the timeline's readout still redraws.
     @Published private var clampedFPS: Int = 24
 
+    /// **Whether a live take is armed** — KEYFRAMES.md §5, stage 7. Observable for the same reason
+    /// `isPlaying` is: the record button and anything else that behaves differently mid-take reads
+    /// it, and a flag on one view is a flag nothing else can see.
+    ///
+    /// **`startRecording` and `stopRecording` are its only writers** — it is not `private(set)` only
+    /// because they live in `CanvasManager+Recording.swift` and `private(set)` is file-scoped.
+    /// `RecordingLogicTests` pins that it never disagrees with `recordingTake`.
+    @Published var isRecording: Bool = false
+
+    /// The armed take, and the reason it is **not** `@Published`: every recorded sample writes it, at
+    /// the control's own rate, and publishing that would redraw the timeline once per sample of a
+    /// take — the same cost `onionSkin` was made one value to avoid. `isRecording` above is the
+    /// observable half, and it changes twice a take.
+    var recordingTake: RecordingTake?
+
     /// Whether `stepFPS(by:)` has anywhere to go in each direction.
     ///
     /// **The controls read these and disable themselves**, which is what makes the refusal visible:
@@ -2385,6 +2400,13 @@ final class CanvasManager: ObservableObject {
         playbackTimer = nil
         playbackClock = nil
         isPlaying = false
+        // **A take cannot outlive the clock it is timed against** — KEYFRAMES.md §5. Playback stops
+        // from four places besides the record button (the end of the scene, a canvas touch, the play
+        // button, `returnToGallery`) and a take left armed through any of them would keep capturing
+        // against a clock that is no longer moving the playhead, so its samples would all resample
+        // onto one frame. `stopRecording` calls this in turn; the `isRecording` guard there is what
+        // makes the pair terminate.
+        if isRecording { stopRecording() }
     }
 
     func togglePlayback() {
@@ -2398,7 +2420,17 @@ final class CanvasManager: ObservableObject {
         let due = clock.take(at: playbackNow(), fps: fps)
         playbackClock = clock
         guard due > 0 else { return }
-        if !advancePlayback(by: due) { stopPlayback() }
+        if !advancePlayback(by: due) {
+            stopPlayback()
+        } else if isRecording, currentFrame >= playbackEndFrame {
+            // **A take ends at the end of the animation, looping or not** — KEYFRAMES.md §5, and it
+            // is a decision rather than a consequence. `ValueRecording.resampled` maps the i-th stop
+            // to `startFrame + i` because the playhead is there; a loop that wrapped would break
+            // that correspondence and write keys onto frames the artist never watched. Stopping at
+            // the boundary is the narrowest rule that keeps the two arithmetics one, and it costs a
+            // looping artist nothing they can see, since the take was over anyway.
+            stopRecording()
+        }
     }
 
     private func schedulePlaybackTimer() {
