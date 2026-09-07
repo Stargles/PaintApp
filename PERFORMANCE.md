@@ -201,8 +201,11 @@ so a rebuild slower than the frame interval drops frames. A six-layer sandwich r
 against a 41.6 ms budget at 24 fps. **That figure is a rebuild of three composites and a rebuild is
 two now, so it is an upper bound rather than the number** — and nobody has re-measured it. Do not
 divide it by anything: `below` and `above` together do roughly the work `full` did on its own, so what
-came off is not a third of the total. Only fires where `needsCompositorOnCanvas` is true; a
-flat stack stays on Core Animation and pays none of it.
+came off is not a third of the total. Only fires where `sandwichEngagesOnCanvas` is true; a
+flat stack stays on Core Animation and pays none of it. **That predicate is no longer
+`needsCompositorOnCanvas` alone** — a document carrying a container pose in force engages too, as of
+§14, so a keyframed transformation layer now pays this 6.1 ms-a-frame (MEASURED, §14) in exchange for
+not paying 71.9 ms of posed rasterize on the main actor.
 
 **6. Drawing on a vector layer feeling heavier than raster. — FIXED 2026-08-20 (item 11), and the
 device has not confirmed it.** It was ~10.2 ms vs ~2.8 ms per touch-move at 2048×1024 (INFERRED from
@@ -1757,11 +1760,20 @@ frames. In-betweens aggravate a recorded miss; they do not create it. Any plan t
 
 | # | the win | what is known | what it needs |
 |---|---|---|---|
-| **1** | **Stop rendering a frame nobody sees.** With the compositor engaged, `updateInterpolationPreviews` renders the derivation for the layer host and `updateSandwich` then blanks it, because `full` already contains that layer. **MEASURED at 26.0 ms of the 100.2 ms** (§7). | The waste is confirmed and both call sites are cited (§7). The fix named there is memoizing `DerivedCelContent.render` on the `identity` it already carries — an identity minted beside the closure it describes, so the key is trustworthy by construction. | Small and self-contained. **Take the local fix, not a third memo** — §5b makes a third claimant on a frame cache after LAYER_COMPOSITING §9.2 and KEYFRAMES §4.6, and building one here first is exactly the mistake §5b exists to prevent. |
+| **1** | ~~**Stop rendering a frame nobody sees.**~~ **DONE 2026-09-06, §14** — and the fix this row proposed would not have worked. See below. | | |
 | **2** | **Play in-between frames at `.preview` quality.** The cheap tier — one stroked `CGPath` per stroke instead of the full dab walk — is built, shipped, and pinned by `InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull`. It is selected only by `isScrubbingInterpolation`, which is **false during playback**. | The tier exists and is tested. The gate is one boolean. | Playback state is `@State` on the timeline *view* (`AnimationTimeline.swift:13-14`), so `CanvasManager` cannot see it. **Hoisting the playback clock onto the model is the prerequisite — and TODO (28) and KEYFRAMES §5 already require it for other reasons.** Also a judgement call the owner may want: preview quality during playback is a visible change. |
 | **3** | **Skip the two composite halves that only a stroke can see.** Every tick computes `composite(below)` and `composite(above)` — displayed only mid-stroke — at a **MEASURED 11.0 ms of 22.4 ms** (§3 item 4b). 4b was declined **twice**, both times because making them lazy costs *"a stroke whose first frames have no visible ink, on the most latency-sensitive path in the app"*. **While the playhead runs under a timer, no stroke is starting, so that price does not exist.** | Both the cost and the reason for the two declines are recorded. The argument that the objection lapses during playback is new and is INFERRED. | Same prerequisite as (2): the model must know playback is running. Two wins share one prerequisite, which is what makes the clock hoist the highest-leverage item here. |
 | **4** | **The 50% Render Resolution knob does not reach the expensive half.** `DerivedCelContent.render` is documented as rendering **at canvas size, always** — derived geometry is in canvas coordinates and a smaller render would clip rather than scale — and `rasterizeUncached` then draws that full-size image into the reduced bounds. So the artist's existing escape hatch shrinks the composite and buys nothing on the solve or the two canvas-sized vector renders. | The code fact is verified (`CelContentProvider.swift:55-60`, `PixelOps.swift:311-317`). | Unranked because the fix is not obvious: making the derivation resolution-aware is a geometry change, not a plumbing one. Worth knowing before anyone recommends the knob as a workaround — **it is currently a knob that does not do what a user would assume**. |
 | **5** | **The one multi-frame image cache that already holds in-betweens is too small.** `PixelOps.rasterizeCache` **already keys on `DerivedCelContent.identity`** (since `531cb0a`) and does retain in-between flattens across frames. But it is FIFO, capped at **24 entries** under `CompositorBudget.textureBudgetBytes` (physicalMemory/16, clamped, = **192 MiB** on a 3 GB iPad 9), shared with every ordinary cel and every layer, and emptied on backgrounding and on memory warning. At 8 MiB a flatten that is ~24 frames of one layer, or **~8 frames of a three-layer document**. | Sizes and policy are code facts. The arithmetic is INFERRED from them. | **This is the honest small version of the owner's model** — "an in-between costs what a cel costs" is true exactly when its picture is materialised once and thereafter addressed. Sizing and scoping an existing cache, not inventing one. Reuse `evictDistantVectorRenderCaches`' distance-from-playhead policy (`vectorRenderCacheLimit = 12`) rather than minting a new one. |
+
+**Row 1 is closed and the way it is closed corrects the row.** It read: *"the fix named there is
+memoizing `DerivedCelContent.render` on the `identity` it already carries."* **That memo would have
+bought nothing for the owner's actual report** (§14), and the reason is worth keeping: playback of a
+keyframed move mints a **distinct identity at every frame**, so every lookup is a miss by construction
+and a cache with no repeats is a cache with no hits. It would have helped only the case that row was
+written from — a *held* in-between the artist is sitting on. The fix that works is not to render at all
+when the host is blanked, which is free rather than cheap and is right for both cases. **A memo is the
+answer to repeated work; this was unrepeated work nobody was going to look at.**
 
 **What not to do.** Do not build KEYFRAMES §4.6's span cache for this: **§4.6's own scope line reads
 *"This is machinery for the transformation layer and, later, for export"*, so it was never pointed at
@@ -3270,3 +3282,106 @@ because it ran one playhead tick late.
 entries are 768 MB and the budget makes them 192; at 16383² they are 12 GB. Those two are arithmetic
 over the rule the tests pin, not new measurements — the property the tests assert is that eviction
 happens at the *byte* bound and that the bound scales with canvas size, which is what a count cannot do.
+
+## 14. A keyframed transformation layer played at 8 fps because the canvas never read the bake (2026-09-06)
+
+TODO item (53), in the owner's words:
+
+> *"Right now I have a canvas with a lot of strokes. I then put a move transformation layer on top, and
+> set it to move via keyframes. When I play the animation, the FPS drops to 8fps. This really shouldnt
+> happen because from my recollection, it should automatically bake and store frames in disk. This
+> suggests to me that when a move transfomation is keyframed, something needs to get calculated every
+> frame instead of just pulling the prebaked frames off of the disk."*
+
+**They were right, in both halves, and the second half is the one no code-reading had found.** Something
+was calculated every frame; the prebaked frames were on disk and nothing read them.
+
+### 14.1 The document, which is theirs and not a fixture
+
+`AnimationTest` was copied off the owner's iPad (`devicectl device copy from`, app data container,
+`Documents/Projects/AnimationTest.paintproj`) and read rather than guessed at. It is **2048x2048, twelve
+frames at 24 fps**, and exactly two layers: a vector layer whose **one cel spans all twelve frames** —
+so the ink is a hold and every frame draws the same 63 strokes at brush size 36 — and a `.value` layer
+above it in transform mode carrying **two pose keys**, frame 0 resting and frame 11 translated by
+(535, −239). No folder, no mask, no blend mode, no effect. That absence is not incidental; it is the
+whole defect.
+
+`PaintSoftwareUITests/PlaybackTickBench.swift` reproduces it field for field.
+
+### 14.2 The measurement
+
+MEASURED, **Release**, iPad Pro 13-inch M4 simulator under `simlock`, machine idle, `autoreleasepool`
+per iteration:
+
+| what a playback tick does | ms per frame | fps ceiling on that term alone |
+|---|---|---|
+| **the posed render the canvas was doing** (`CanvasView.updateInterpolationPreviews` → `DerivedCelContent.render(.full)`) | **71.9** | **13.9** |
+| reading the same frame back off the bake (`FrameBaker.image(atFrame:)`, warm second lap) | **3.7** | 269 |
+| the dirty sweep (`CanvasManager.syncFrameBake`) | 0.09 | — |
+| the sandwich halves, off-main on `sandwichQueue` | 6.1 | — |
+
+**19.4x**, and the expensive term was on the **main actor**. A simulator on an M4 is not an A13: the
+owner's 8 fps against this machine's 13.9 fps ceiling is the same finding at the device multiplier
+PERFORMANCE §1 records, and it is the closest agreement between a report and a bench in this file.
+
+Frame 0 costs **0 ms**, because the pose at the first key is the resting pose and
+`LayerPose.mapping(atFrame:)` answers nil for it — which is why the stall starts one frame in and why
+nobody looking at a still canvas would see it.
+
+The bake itself was never the problem and is worth stating: twelve frames composited in **2.4 s** cold
+(≈200 ms a frame), **zero** deduped — so every frame is genuinely its own picture and its own file — and
+the twelve of them occupy **2,775 KB** on disk, because LZ4 over flat anime colour is what RENDER §2.8
+said it would be.
+
+### 14.3 Where the time actually went, which is not where the report pointed
+
+The owner's theory named the *symptom* precisely and the cause is one clause away from it.
+`CanvasManager.sandwichEngagesOnCanvas` asked only `[RenderNode].needsCompositorOnCanvas`, which is
+about blend modes, masks, effects and compositor nodes. **It cannot ask about a pose, by design**:
+`renderTreeAndPoses` emits the pose map *alongside* the tree precisely so a pose never reaches the
+compositor, where the only available response is to resample (RENDER §2.3, *"crisp lines, not a bitmap
+magnify"*).
+
+So this document answered **false**. The canvas stayed on Core Animation's flat row of layer hosts,
+`refreshBakedFull` — which lives inside `updateSandwich`'s engaged branch — was never called, and **not
+one of the twelve baked frames was ever read**. The pose still appeared, because the one thing on that
+path that knows a pose exists is `updateInterpolationPreviews`, whose `.derived` arm rasterizes the
+posed ink into the host's own slot. Its memo holds **one key per layer** and a keyframed move mints a
+distinct `PosedCelIdentity` at every frame, so it missed on every tick, forever, on every lap.
+
+**The bake was correct, complete, cheap to read, and unread.**
+
+### 14.4 The fix, and what it is not
+
+Two changes, and both are needed — either alone leaves the number where it was.
+
+1. **`sandwichEngagesOnCanvas` gains `hasContainerPoseInForce`.** A posed leaf is the mask clause's
+   argument reached through KEYFRAMES §4.4: Core Animation cannot move one sibling by a transformation
+   layer above it. Asked **without a frame** (`LayerPose.movesItsContents`) so the canvas cannot swap
+   rendering paths as the playhead crosses the first key of a move — the same reason
+   `needsCompositorOnCanvas` declines to consult visibility. A transformation layer the artist has added
+   and not yet moved still costs the document nothing.
+2. **`updateInterpolationPreviews` skips a host that is blanked.** Blanked is exactly *"the composite is
+   drawing this layer"*, and at rest the composite is the baked frame. Without this, engaging would only
+   *hide* the 71.9 ms — the render would still run, into a host rendering nothing.
+
+**What it is not**: it is not a change to the baker, the key, the store or the ring, none of which were
+wrong. And it is not a cheaper posed render — posing 63 strokes into a 2048² buffer costs what it costs,
+which is why RENDER §2.2 puts it on a background queue and a disk file rather than on the tick.
+
+### 14.5 The pin, which is a count and not a duration
+
+MEASURED after: **0**. Stepping six frames of the move rasterizes **zero** posed pictures, and so does
+three seconds of pressing play — six laps of the twelve-frame loop.
+
+The canvas publishes `derived:<n>` on `canvas.host`'s accessibility label beside the `entries:` latch
+that is already there, for that latch's reason applied to a cost instead of a state: the work is over by
+the time XCUITest can look, and CLAUDE.md forbids a wall-clock assertion in the fast tier. **A count can
+be asserted exactly.** `BakeWiringUITests.testAKeyframedTransformationLayerPutsTheCanvasOnTheBakedFrame`
+holds it; MEASURED red at **6 against 0** with the blanked-host guard removed.
+
+**The frame counter is deliberately not the instrument, and this is a trap worth recording.**
+`PlaybackClock` derives the playhead from elapsed time and *"a late tick skips rather than stretches"* —
+so an app playing at 8 fps still reaches the right frame at the right second and *"Frame 7/12"* looks
+perfect the whole way. Every honest instrument for this defect is a count or a millisecond; none of them
+is the timeline.

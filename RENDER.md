@@ -495,6 +495,22 @@ A tick reads the ring, since stage 4d: `currentFrame` publishes, the canvas reco
 `FrameBaker.image(atFrame:)`, which is the ring then the store then a miss. If the frame is not baked the previous
 picture stays (§2.10).
 
+**Only when the sandwich is engaged, and that clause is where TODO (53) lived.** `refreshBakedFull` is inside
+`updateSandwich`'s engaged branch, so `CanvasManager.sandwichEngagesOnCanvas` is the gate on the whole read path:
+a document that answers false never reads a baked frame at all, however many are on disk. Until 2026-09-06 that
+predicate was `[RenderNode].needsCompositorOnCanvas` alone — blend modes, masks, effects and nodes — and it
+**cannot** ask about a pose, because §2.3 keeps the pose map out of the tree on purpose. So the owner's own
+document (a vector layer and a keyframed transformation layer, nothing else) stayed on Core Animation's flat row
+of hosts, its twelve baked frames went unread, and the pose reached the screen only because
+`CanvasView.updateInterpolationPreviews` rasterized the posed ink into the host per tick: MEASURED **71.9 ms a
+frame against 3.7 ms to read the bake**, PERFORMANCE.md §14. The predicate now also asks
+`hasContainerPoseInForce`, and the preview render is skipped for a blanked host.
+
+**The general shape, for whoever adds the next thing the flat row cannot draw:** this file's promise that playback
+comes off disk is only as wide as that predicate. A feature whose picture Core Animation cannot produce must
+either engage the compositor or accept that it is rendering on the main thread every frame — and the second is
+invisible, because the canvas looks perfectly correct while it does it.
+
 **The timeline's baked-frame indication is done, 2026-09-02 (stage 4f).** `Views/TimelineBakeBar.swift` is the
 arithmetic — unbaked runs, the bar's geometry, the string a UI test reads, and the throttle — and
 `TimelineBakeBarView` in `TimelineTrackView.swift` is the `UIColor` and the `UIRectFill`, an amber strip overlaying
