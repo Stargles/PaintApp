@@ -846,8 +846,16 @@ struct AnimationTimeline: View {
                 .foregroundColor(.white)
 
             HStack(spacing: 16) {
+                // **The tint is per-arrow and comes from the same answer that disables it.** It was
+                // one `.foregroundColor(.blue)` on this `HStack` and the drive is what caught that:
+                // at 60 fps the plus reported `isEnabled == false` to XCUITest and was still drawn
+                // full blue, so the test was green and the artist saw a live-looking button that did
+                // nothing. A container tint beats a disabled control's own dimming, which is the
+                // same shape as this file's rule about an identifier on a container beating its
+                // descendants'. `isEnabled` is *exposed*, not *drawn*; this is the drawn half.
                 Button(action: { canvasManager.stepFPS(by: -1) }) {
                     Image(systemName: "minus.circle.fill").font(.title2)
+                        .foregroundColor(canvasManager.canDecreaseFPS ? .blue : .white.opacity(0.25))
                 }
                 .disabled(!canvasManager.canDecreaseFPS)
                 .accessibilityIdentifier("frameRate.decrement")
@@ -864,13 +872,13 @@ struct AnimationTimeline: View {
 
                 Button(action: { canvasManager.stepFPS(by: 1) }) {
                     Image(systemName: "plus.circle.fill").font(.title2)
+                        .foregroundColor(canvasManager.canIncreaseFPS ? .blue : .white.opacity(0.25))
                 }
                 .disabled(!canvasManager.canIncreaseFPS)
                 .accessibilityIdentifier("frameRate.increment")
 
                 Spacer(minLength: 0)
             }
-            .foregroundColor(.blue)
 
             Text("frames per second")
                 .font(.caption)
