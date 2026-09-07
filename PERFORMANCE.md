@@ -3317,7 +3317,7 @@ per iteration:
 |---|---|---|
 | **the posed render the canvas was doing** (`CanvasView.updateInterpolationPreviews` → `DerivedCelContent.render(.full)`) | **71.9** | **13.9** |
 | reading the same frame back off the bake (`FrameBaker.image(atFrame:)`, warm second lap) | **3.7** | 269 |
-| the dirty sweep (`CanvasManager.syncFrameBake`) | 0.09 | — |
+| the dirty sweep (`CanvasManager.syncFrameBake`) | 0.08 | — |
 | the sandwich halves, off-main on `sandwichQueue` | 6.1 | — |
 
 **19.4x**, and the expensive term was on the **main actor**. A simulator on an M4 is not an A13: the
@@ -3328,10 +3328,47 @@ Frame 0 costs **0 ms**, because the pose at the first key is the resting pose an
 `LayerPose.mapping(atFrame:)` answers nil for it — which is why the stall starts one frame in and why
 nobody looking at a still canvas would see it.
 
-The bake itself was never the problem and is worth stating: twelve frames composited in **2.4 s** cold
-(≈200 ms a frame), **zero** deduped — so every frame is genuinely its own picture and its own file — and
+The bake itself was never the problem and is worth stating: twelve frames composited in **1.25 s** cold
+(≈105 ms a frame), **zero** deduped — so every frame is genuinely its own picture and its own file — and
 the twelve of them occupy **2,775 KB** on disk, because LZ4 over flat anime colour is what RENDER §2.8
 said it would be.
+
+**Re-taken independently 2026-09-07 at `9f3fb52`, and the table above holds.** The figures were first
+written by the session that built the fix; this file's own rule is that a number nobody has reproduced
+is a claim, so they were taken again from scratch in **Release**, on a **freshly created** device, with
+the volume at 135 GiB free and no other `xcodebuild` running. Two consecutive runs, and the CPU reading
+is quoted beside each because a run on a busy machine is not a measurement (§6):
+
+| ms per frame | run 1 (71.4% idle) | run 2 (**81.0% idle**) | claimed above |
+|---|---|---|---|
+| the posed render | 67.6 | **72.8** | 71.9 |
+| reading the bake, warm lap | 2.84 | **3.31** | 3.7 |
+| the dirty sweep | 0.05 | **0.08** | 0.08 |
+| the sandwich halves | 5.0 | **6.4** | 6.1 |
+| twelve frames cold | 1.23 s | **1.27 s** | *2.4 s — corrected above* |
+
+**The two runs bracket every claimed figure and the second one lands on top of them**, so §14.2's table
+is confirmed rather than merely repeated. The store came back at **2,775 KB with zero dedupes on both
+runs**, byte-identical to the original — which is what says it is the same fixture and not a similar
+one. The ratio the section rests on is **22.0x** on the idler run (72.8 / 3.31) and 23.8x on the other,
+against the **19.4x** first recorded: the finding is *stronger* than it was written, never weaker.
+
+The sweep row is quoted at **0.08 ms** in both places it appears. §14.2 said 0.09 and §14.7 said 0.08
+of the one measurement, which is the kind of drift that makes a reader wonder which figure is of what;
+the re-take reads 0.08 on the idle run and 0.05 on the other, so 0.08 is both measured and the number
+already in §14.7.
+
+**The one figure that was wrong is the cold bake, and it was wrong by 2x.** Both re-runs agree tightly
+at 1.23 s and 1.27 s against **2.4 s**, which is too close a pair to be noise. INFERRED, and the most
+likely explanation rather than a demonstrated one: the original was taken on the night the volume
+filled to **zero bytes free** — twelve LZ4 files are the one part of this bench that touches the disk,
+and that is exactly the term that doubled while every CPU-bound term stayed put. Treat a bake figure
+taken on a full volume as measuring the volume.
+
+**The canvas is 2048x2048, not §1's 2048x1024 baseline**, and that is deliberate: this bench reproduces
+the owner's own `AnimationTest` field for field (§14.1) rather than the house baseline, so the figure is
+of their document. It is 2x §1's pixels, so a §1-baseline posed render would be nearer **36 ms** —
+INFERRED by area, and still 1.5x the 24 fps budget.
 
 ### 14.3 Where the time actually went, which is not where the report pointed
 
@@ -3400,22 +3437,30 @@ MEASURED, same bench, same canvas, same 63 strokes, only the keys moved from `La
 | transformation layer (§4.4 container pose) | **yes**, as of this section | 0 (the composite carries it) | — |
 | a cel's own pose channel | **no** | **73.6 ms** | **13.6** |
 
+**Re-taken 2026-09-07 in Release on an idle machine (§14.2's re-take, same two runs): 69.4 and 67.9 ms,
+a 14.4–14.7 fps ceiling, and `sandwichEngages=false` on both.** So the figure is ~5 ms better than first
+recorded and the conclusion is untouched — this arm still does not engage, still rasterizes a
+canvas-sized posed picture on the main actor every tick, and is still about 3x the 24 fps budget. The
+engagement flag is the load-bearing half of that row and it was read directly from the bench rather than
+inferred.
+
 So this is a live defect with a known one-line fix — widen `hasContainerPoseInForce` to ask
 `cel.transformTracks` too — and it is **not** taken in this pass, for a reason rather than for scope.
 
 **What has to be measured first is a drag, not a playback.** A cel channel is what the graph editor
 authors, and engaging the compositor changes what the canvas does *while a node is being dragged*: today
-it re-renders the posed ink per drag sample (73.6 ms of main actor, so the gesture itself is already at
+it re-renders the posed ink per drag sample (~68–74 ms of main actor, so the gesture itself is already at
 ~14 fps); engaged, the main thread is free and the canvas shows the previous baked frame until the bake
-catches up (≈140 ms a frame cold, from §14.2's 1.7–2.4 s for twelve). **Which of those feels better to an
+catches up (**≈105 ms a frame cold**, from §14.2's re-taken 1.25 s for twelve). **Which of those feels better to an
 artist is a question about a gesture, and this file has no measurement of it.** The owner's own rulings
 lean toward engaging — RENDER §2.13, *"a canvas that shows the previous composite for a split second is
 acceptable, provided the main thread never freezes"* — but §2.13 was ruled about pen-up, not about a
 tracking drag, and `sandwichEngagesOnCanvas`'s existing `!isScrubbingInterpolation` clause is the
 precedent for the opposite answer: *"a gesture tracking a finger, which no prebake can help with"*.
 
-**And the graph editor is live work in another worktree** (`tmp/kfui`, 2026-09-06), so changing what its
-canvas does underneath it would confuse a diagnosis as well as a merge.
+**The unmeasured drag is now the whole of the reason.** This paragraph also gave a second one — that the
+graph editor was live work in another worktree (`tmp/kfui`, 2026-09-06) — and that worktree is merged, so
+it has expired.
 
 The measurement that settles it: drive a graph-editor node drag on a cel pose channel, with and without
 the clause, and compare what the canvas shows against the finger. `derived:<n>` on `canvas.host` and the
