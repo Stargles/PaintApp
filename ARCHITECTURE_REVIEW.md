@@ -11,9 +11,14 @@ app is `///`**. `CanvasManager` is 12 files / 7,382 lines / 91 `@Published`. `Ca
 
 **Status, checked 2026-08-27: finding 1 is closed** — `CanvasTouchOwner` shipped in `38b6fed`, the same
 day this file was written (commit `6e1f9ce`), a few commits later. Marked in place at §1.1 and in §4.
-Findings 2–4 are unchanged and still open, reverified against `main` at this later date rather than
-carried forward from this file's original text — their proposed remedies (`FrameInputs`, a
-`writeAtomically` return value, undefaulting `LayerManifest.init`) are not in the tree.
+
+**Re-checked 2026-09-06: finding 3's reporting half is closed too**, by `ea51607` (2026-08-28) — the
+very next day after the line above was checked, which is why it stood wrong for over a week. Marked in
+place at §1.3. Findings 2 and 4, and finding 3's *atomicity* half, are unchanged and still open,
+reverified against `main` at this later date: `FrameInputs` is not in the tree, and
+`LayerManifest.init`'s defaulted-parameter count has grown rather than shrunk (nine of thirteen when
+this file was written, twelve of sixteen now) — `writeAtomically`'s return value is the one remedy that
+landed, and it reaches a `CanvasNotice` banner rather than `completion` itself.
 
 ---
 
@@ -106,14 +111,25 @@ render input is declared once and the compiler points at every key that must wid
 test shape this repo already uses for caches (`PerfBaselineTests.testDabGradientCacheHitRate`), one per
 key: mutate each declared input, assert the key changed.
 
-### 3. A save that fails tells nobody, and one nil PNG fails the whole document
+### 3. A save that fails tells nobody — reporting half CLOSED, `ea51607` — and one nil PNG still fails the whole document
 
-`ProjectStore.writeAtomically` (`ProjectStore.swift:507`) has **three failure returns and all three are
-silent**: validation fails → stage to Trash, `return` (`:561`); the pre-save stash fails → `return`
-(`:571`); the rename fails → restore the backup, `return` (`:585`). `save`'s own doc says it:
-"`completion` runs … once the package is on disk — or once the save has failed, which it does not
-distinguish". `ContentView.saveIfNeeded:94` branches on `.ask` and nothing else, so **the gallery
-appears exactly as it does on success.**
+**Closed in part, 2026-08-28: the *reporting* half shipped**, one day after the status check above and
+left unmarked for over a week as a result. `writeAtomically` now returns whether the write succeeded;
+`ProjectStore.save` gained an `onSaveFailed` callback that fires on any of the three failure paths
+below; `ContentView` raises `CanvasNotice.Kind.saveFailed` from it. Both sites' doc comments cite this
+finding by name. The paragraphs below are kept as written for the description of the three failure
+paths themselves (still accurate) and for the *atomicity* half, which the fix did not touch and which
+is still live: the failure atom is still the whole document, and `ManifestSkeleton`'s drift is still
+unvalidated.
+
+`ProjectStore.writeAtomically` (`ProjectStore.swift:507`) has **three failure returns**: validation
+fails → stage to Trash, `return` (`:561`); the pre-save stash fails → `return` (`:571`); the rename
+fails → restore the backup, `return` (`:585`). `completion` still runs either way and still does not
+distinguish success from failure by design — that half of `save`'s contract is unchanged, and
+`ContentView.saveIfNeeded` still branches on `.ask` and nothing else for its own control flow. What
+changed is the new, separate `onSaveFailed` channel: each of the three returns now reports `false`
+through it, so **the gallery no longer appears exactly as it does on success** — that was the actual
+symptom, and it is gone.
 
 The failure *atom* is the whole document. `writeCel` writes the raster as `if let data =
 png(rasterImage) { write(data, fileName) }` (`:751`) while the manifest still names the file, and
@@ -128,24 +144,31 @@ and named in the manifest (`ProjectManifest.swift:376`) but is absent from the s
 validated.
 
 [BUGS.md:131](BUGS.md) already covers the validator's *blind spot* and rules a content probe too
-expensive; today's evidence does not change that ruling. It does not cover the **reporting** half.
+expensive; today's evidence does not change that ruling. It did not cover the **reporting** half either
+— nothing in `BUGS.md` did — which is why that half needed the separate fix below rather than falling
+out of an existing ruling.
 
-**Cost to the next feature.** Any large feature adding a per-cel or per-layer sidecar inherits an
-all-or-nothing save with no failure channel, and must be registered in the skeleton by hand.
+**Cost to the next feature, updated.** Any large feature adding a per-cel or per-layer sidecar still
+inherits an all-or-nothing save — a failure is reported now, through `CanvasNotice.saveFailed`, but it
+is still not partial — and must still be registered in `ManifestSkeleton` by hand.
 
-**Smallest useful remedy.** Give `writeAtomically` a return value and hand it to `completion`;
-`ContentView` raises the existing `CanvasNotice` banner on failure. The banner machinery is already
-built (`canvasManager.raise(.hiddenLayer)` and friends). Roughly thirty lines, no behaviour change on
-the happy path.
+**Remedy — shipped, `ea51607` (2026-08-28).** `writeAtomically` gained a `Bool` return; `ProjectStore.save`
+gained the separate `onSaveFailed` callback described above rather than routing through `completion`
+itself (`completion` keeps its existing "the wait is over" meaning); `ContentView` raises the existing
+`CanvasNotice` banner from `onSaveFailed`. The atomicity problem this finding also named — one nil PNG
+discarding the whole save, and `ManifestSkeleton`'s drift — was not part of this remedy and is not done.
 
 ### 4. One persisted property means four hand-kept structs, and the initializer defaults hide the miss
 
 A layer property that must survive a save is declared four times: `Layer` (`Models/Layer.swift`) →
 `SaveSnapshot.LayerContent` (`ProjectStore.swift:160`) → `LayerManifest` (`ProjectManifest.swift:242`)
-→ `ManifestSkeleton` if it names a file. **Nine of `LayerManifest.init`'s thirteen parameters are
-defaulted** (`:290`), and the decoder is `decodeIfPresent` throughout — both correct, and both
-required for the migration story this file argues carefully. The side effect is that forgetting the
-snapshot hop *compiles*, writes nothing, and reads back the default.
+→ `ManifestSkeleton` if it names a file. **Nine of `LayerManifest.init`'s thirteen parameters were
+defaulted when this was written; re-checked 2026-09-06, it is twelve of sixteen** — the remedy below
+was not taken, and the struct's shape has moved on besides: `effectTracks`, `keyframeMarks` and
+`pendingBaselines` (keyframe interpolation) and `transform` (the transform layer) are new fields, all
+defaulted, all for features that did not exist on 2026-08-22. The decoder is `decodeIfPresent`
+throughout — both correct, and both required for the migration story this file argues carefully. The
+side effect is that forgetting the snapshot hop *compiles*, writes nothing, and reads back the default.
 
 Nothing generic catches it. What has kept it working is discipline: each feature landed its own
 round-trip test (`testGroupPropertiesSurviveARoundTrip`, `testAnExplicitFillReferenceSurvives…`).
@@ -212,7 +235,8 @@ resolved as of `38b6fed`, same day — see below). The parts that are expensive 
 the render path is pure and snapshot-driven, the save is atomic and backed up, undo is one budgeted
 place, the tool and layer-kind switches force the next case to answer, and the reasoning behind every
 hard decision is written next to it. Three of today's four findings are additive fixes measured in tens
-of lines, not restructurings — findings 2–4 remain open (status note at the top of this file).
+of lines, not restructurings — findings 2 and 4 remain open, and finding 3 is half done (status note
+at the top of this file).
 
 The caveat was the touch layer, and it was narrow: **the app had no single place that said who owns a
 canvas touch**, and three of the last week's defects were exactly that. **This is done** — `CanvasTouchOwner`
