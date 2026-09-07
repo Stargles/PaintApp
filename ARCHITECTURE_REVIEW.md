@@ -17,7 +17,8 @@ very next day after the line above was checked, which is why it stood wrong for 
 place at §1.3. Findings 2 and 4, and finding 3's *atomicity* half, are unchanged and still open,
 reverified against `main` at this later date: `FrameInputs` is not in the tree, and
 `LayerManifest.init`'s defaulted-parameter count has grown rather than shrunk (nine of thirteen when
-this file was written, twelve of sixteen now) — `writeAtomically`'s return value is the one remedy that
+this file was written, twelve of seventeen now — that count corrected 2026-09-07; the 2026-09-06 pass
+miscounted the total as sixteen) — `writeAtomically`'s return value is the one remedy that
 landed, and it reaches a `CanvasNotice` banner rather than `completion` itself.
 
 ---
@@ -122,9 +123,9 @@ paths themselves (still accurate) and for the *atomicity* half, which the fix di
 is still live: the failure atom is still the whole document, and `ManifestSkeleton`'s drift is still
 unvalidated.
 
-`ProjectStore.writeAtomically` (`ProjectStore.swift:507`) has **three failure returns**: validation
-fails → stage to Trash, `return` (`:561`); the pre-save stash fails → `return` (`:571`); the rename
-fails → restore the backup, `return` (`:585`). `completion` still runs either way and still does not
+`ProjectStore.writeAtomically` (`ProjectStore.swift:587`) has **three failure returns**: validation
+fails → stage to Trash, `return` (`:641`); the pre-save stash fails → `return` (`:651`); the rename
+fails → restore the backup, `return` (`:665`). `completion` still runs either way and still does not
 distinguish success from failure by design — that half of `save`'s contract is unchanged, and
 `ContentView.saveIfNeeded` still branches on `.ask` and nothing else for its own control flow. What
 changed is the new, separate `onSaveFailed` channel: each of the three returns now reports `false`
@@ -132,18 +133,19 @@ through it, so **the gallery no longer appears exactly as it does on success** �
 symptom, and it is gone.
 
 The failure *atom* is the whole document. `writeCel` writes the raster as `if let data =
-png(rasterImage) { write(data, fileName) }` (`:751`) while the manifest still names the file, and
+png(rasterImage) { write(data, fileName) }` (`:948`) while the manifest still names the file, and
 `validateProject` rejects a package whose manifest names a file that is not there — so one nil
 `pngData()`, or one failed `try? data.write`, discards the entire save in silence. This was **nearly
-shipped**: `ProjectBackupManager.swift:471` records that without the `rasterOmitted` key "every save of
+shipped**: `ProjectBackupManager.swift:477` records that without the `rasterOmitted` key "every save of
 a document with one blank cel would be quietly trashed instead of committed."
 
 `ManifestSkeleton` (`ProjectBackupManager.swift:460`) is a hand-maintained mirror of the manifest's
-file references, and it has **already drifted**: `interpolationFileName` is written (`ProjectStore.swift:799`)
-and named in the manifest (`ProjectManifest.swift:376`) but is absent from the skeleton, so it is never
+file references, and it has **already drifted**: `interpolationFileName` is written (`ProjectStore.swift:1000`)
+and named in the manifest (`ProjectManifest.swift:490`) but is absent from the skeleton, so it is never
 validated.
 
-[BUGS.md:131](BUGS.md) already covers the validator's *blind spot* and rules a content probe too
+[BUGS.md](BUGS.md)'s *"`validateProject` cannot see a file that is intact but unreadable"* entry already
+covers the validator's *blind spot* and rules a content probe too
 expensive; today's evidence does not change that ruling. It did not cover the **reporting** half either
 — nothing in `BUGS.md` did — which is why that half needed the separate fix below rather than falling
 out of an existing ruling.
@@ -161,9 +163,9 @@ discarding the whole save, and `ManifestSkeleton`'s drift — was not part of th
 ### 4. One persisted property means four hand-kept structs, and the initializer defaults hide the miss
 
 A layer property that must survive a save is declared four times: `Layer` (`Models/Layer.swift`) →
-`SaveSnapshot.LayerContent` (`ProjectStore.swift:160`) → `LayerManifest` (`ProjectManifest.swift:242`)
+`SaveSnapshot.LayerContent` (`ProjectStore.swift`) → `LayerManifest` (`ProjectManifest.swift`)
 → `ManifestSkeleton` if it names a file. **Nine of `LayerManifest.init`'s thirteen parameters were
-defaulted when this was written; re-checked 2026-09-06, it is twelve of sixteen** — the remedy below
+defaulted when this was written; re-checked 2026-09-07, it is twelve of seventeen** — the remedy below
 was not taken, and the struct's shape has moved on besides: `effectTracks`, `keyframeMarks` and
 `pendingBaselines` (keyframe interpolation) and `transform` (the transform layer) are new fields, all
 defaulted, all for features that did not exist on 2026-08-22. The decoder is `decodeIfPresent`
