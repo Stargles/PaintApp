@@ -469,13 +469,27 @@ final class BakeWiringLogicTests: XCTestCase {
     ///
     /// This is the claim the owner's report was about: *"it should automatically bake and store
     /// frames in disk"*. One lap bakes twelve distinct frames — distinct because `FrameBakeKey`
-    /// encodes the container pose, which `FrameBakeKeyLogicTests.testAContainerPoseMovesTheDigest`
-    /// pins — and every lap after it is twelve reads and **zero** composites.
+    /// encodes the container pose, which
+    /// `TransformLayerLogicTests.testTheBakeDigestMovesWithAContainerPose` pins — and every lap
+    /// after it is twelve reads and **zero** composites.
     ///
-    /// **`dedupedCount` is the second operand and it is what makes the zero mean something.** A
-    /// baker that had marked nothing dirty would also composite zero times, and so would one that
-    /// answered nil for every frame; the image assertion and the bake count are what tell those
-    /// apart from a store that is serving.
+    /// **The loop is drained *inside* the probe's window, because the sweep only marks.**
+    /// `syncFrameBake` marks and kicks; the compositing is on the bake queue, so twenty-four fast
+    /// iterations end before a job could finish and an undrained probe reads whatever happened to
+    /// land inside the block rather than what the queue held. MEASURED, with both of the guarantees
+    /// below deliberately removed: **12** composites and 24 bakes drained, against **1** and 12
+    /// undrained — the undrained number is a race, not a measurement.
+    ///
+    /// **Nothing smaller than that pair can make this red, and that is the design rather than a weak
+    /// assertion.** Playback dirties nothing — `StructuralStamp` probes frame 0 and `CelStamp` carries
+    /// no frame — and a frame that *was* dirtied still costs one key mint and one `stat`, because the
+    /// store is content-addressed and `store.contains` dedupes it. MEASURED: dirtying everything on
+    /// every sweep leaves this green, and so does deleting the dedupe; only both together turn it red.
+    /// Two independent guarantees, and this is the outcome they both defend.
+    ///
+    /// **`served` and `bakedCount` are the other two operands and they are what make the zero mean
+    /// something.** A baker that answered nil for every frame would also composite zero times; the
+    /// twelve pictures handed back are what tell that apart from a store that is serving.
     func testASecondLapOfAKeyframedMoveIsTwelveReadsAndNoComposites() {
         let manager = keyframedMoveDocument()
         let baker = manager.frameBaker
@@ -497,6 +511,10 @@ final class BakeWiringLogicTests: XCTestCase {
                     }
                 }
             }
+            // Inside the window — see the note above. The sweep marks and the queue composites, so
+            // running the loop to a stop is what turns "nothing composited while twenty-four
+            // iterations ran" into "nothing was left to composite".
+            drain(baker)
         }
         XCTAssertEqual(count, 0,
                        "Playback recomposites nothing: every frame's key already has a file, which "

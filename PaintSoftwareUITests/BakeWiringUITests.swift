@@ -164,6 +164,11 @@ final class BakeWiringUITests: PaintUITestCase {
                         "The baked frame the canvas came to rest on has to contain the ink — a "
                         + "composite of an elided transformation layer over nothing would be blank")
 
+        // Where the ink is at the move's resting key, for the comparison six frames from now.
+        let atRest = try XCTUnwrap(inkSpanOnPaper(canvas),
+                                   "The ruler has to find white paper with a dark span inside it "
+                                   + "before anything it measures means anything")
+
         // **The cost, as a count** — item (53)'s third checkbox. `derived:` is how many
         // canvas-sized posed or interpolated pictures this canvas has rasterized on the main actor
         // (`CanvasView.derivedRenderCount`). Every frame of a keyframed move is a distinct
@@ -187,6 +192,31 @@ final class BakeWiringUITests: PaintUITestCase {
                        + "that climbed by one per frame is TODO (53) exactly — MEASURED at 71.9 ms "
                        + "a frame against 3.7 ms to read the baked frame instead")
 
+        // **And the move itself, on screen, which is the assertion the rest of this test cannot
+        // make.** The probe above says the picture has ink in it; it cannot say the ink is *posed*,
+        // because frame 0 is the move's resting key and every implementation whatever agrees there.
+        // MEASURED: with `renderNodes` no longer recording a leaf's pose — one line, `poses[index] =
+        // pose` — the composite draws the resting ink at every frame, the artist's move is invisible,
+        // and **every other assertion in this test stays green**: `derived:` is still 0 (there is no
+        // derivation to render), the sandwich still engages (`hasContainerPoseInForce` asks the
+        // document, not the tree) and frame 0 still has ink at the probe point.
+        //
+        // Polled rather than read once, for `waitForSandwich`'s reason: §2.13 lets the canvas show
+        // the previous composite for a moment, so what can be asserted is that the ink gets there.
+        var travelled: (left: Int, right: Int, paperWidth: Int)?
+        let inkDeadline = Date().addingTimeInterval(10)
+        repeat {
+            travelled = inkSpanOnPaper(canvas)
+            if let span = travelled, span.left - atRest.left > span.paperWidth / 20 { break }
+            Thread.sleep(forTimeInterval: 0.2)
+        } while Date() < inkDeadline
+        let moved = try XCTUnwrap(travelled, "The ruler lost the paper or the ink six frames in")
+        XCTAssertGreaterThan(moved.left - atRest.left, moved.paperWidth / 20, """
+            The ink did not travel. Six frames into a keyframed move the drawing beneath the             transformation layer has to be visibly further right — the seed translates by 0.4 of the             canvas — and it is the *composite* that has to carry it now, because the posed render this             test has just asserted never happened is the only other thing that could.
+            """)
+        XCTAssertGreaterThan(moved.right - atRest.right, moved.paperWidth / 20,
+                             "…both edges, so this is the drawing moving rather than growing")
+
         // **And the owner's own gesture, which is the one the report is about.** Three seconds of a
         // twelve-frame loop at 24 fps is six laps, so the pre-fix canvas would have rasterized posed
         // ink dozens of times over; there is nothing left to count.
@@ -205,6 +235,70 @@ final class BakeWiringUITests: PaintUITestCase {
                        + "ink either. This is the owner's report in one line: \"when I play the "
                        + "animation, the FPS drops to 8fps\"")
         attachScreen("03-after-three-seconds-of-playback")
+    }
+
+    /// **Where the seeded stroke's ink begins and ends across the paper, in `canvas.host`'s own
+    /// pixels**, with the paper's width beside them so a caller can state a margin as a fraction of
+    /// the canvas rather than of a device.
+    ///
+    /// **Bounded by the paper's own white, and that bound is the whole of it.** `CanvasView` paints
+    /// `canvas.host` **black** and the seeded stroke is black on white paper, so a ruler that looked
+    /// for dark pixels across the whole element would spend most of its weight on the letterbox
+    /// either side of a square canvas in a landscape host — CLAUDE.md records exactly that ruler
+    /// reporting that ink which travelled 260 px to the right had moved *left*. So the paper is
+    /// found first and the ink is only ever looked for strictly inside it.
+    ///
+    /// **The paper is the white runs long enough to be paper.** A bare "first and last whitish
+    /// pixel" would be extended leftward by the Size and Opacity slider knobs, which are white, sit
+    /// inside this element and are separated from the paper by black — and the first dark pixel
+    /// after such a start is that black gap rather than any ink. Requiring a run of at least a
+    /// twentieth of the scan excludes a knob and a glyph and keeps the paper, whose two runs either
+    /// side of the ink are each far longer than that.
+    ///
+    /// One screenshot for both scans, down the middle column for the paper's vertical span and then
+    /// across the row at the centre of it: `rgbaPixel` captures once per sample, which is far too
+    /// slow to sweep with and steps clean over anything thin.
+    private func inkSpanOnPaper(_ canvas: XCUIElement) -> (left: Int, right: Int, paperWidth: Int)? {
+        guard let cg = canvas.screenshot().image.cgImage else { return nil }
+        let width = cg.width, height = cg.height, bytesPerRow = width * 4
+        var buffer = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let context = CGContext(data: &buffer, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        func isPaper(_ x: Int, _ y: Int) -> Bool {
+            let offset = y * bytesPerRow + x * 4
+            return buffer[offset] > 240 && buffer[offset + 1] > 240 && buffer[offset + 2] > 240
+        }
+        /// The runs of `isSet` over `0..<count` that are at least a twentieth of it — see above.
+        func runs(_ count: Int, _ isSet: (Int) -> Bool) -> [(first: Int, last: Int)] {
+            var found: [(first: Int, last: Int)] = []
+            var start: Int?
+            for i in 0..<count {
+                if isSet(i) {
+                    if start == nil { start = i }
+                } else if let s = start {
+                    found.append((s, i - 1)); start = nil
+                }
+            }
+            if let s = start { found.append((s, count - 1)) }
+            return found.filter { $0.last - $0.first >= count / 20 }
+        }
+        let down = runs(height) { isPaper(width / 2, $0) }
+        guard let top = down.first?.first, let bottom = down.last?.last else { return nil }
+        let row = (top + bottom) / 2
+        let across = runs(width) { isPaper($0, row) }
+        guard let paperLeft = across.first?.first, let paperRight = across.last?.last,
+              paperRight - paperLeft > width / 4 else { return nil }
+        var left: Int?, right: Int?
+        for x in paperLeft...paperRight where !isPaper(x, row) {
+            if left == nil { left = x }
+            right = x
+        }
+        guard let left, let right, left < right else { return nil }
+        return (left, right, paperRight - paperLeft)
     }
 
     /// The `derived:` field of the canvas's published state — see `CanvasView.derivedRenderCount`.

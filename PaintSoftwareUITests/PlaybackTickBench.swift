@@ -29,15 +29,31 @@ import SwiftUI
 final class PlaybackTickBench: XCTestCase {
 
     private var root: URL!
+    private var storedResolution: String?
 
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
                           "PlaybackTickBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")
+        // **Pinned, because every figure this file publishes is per *pixel*.** `renderResolution`
+        // writes through to `UserDefaults`, so it is process-wide state that survives into the next
+        // run in the simulator container — CLAUDE.md's own section on that, and `BakeWiringLogicTests`
+        // pins it for the same reason. The read, the bake and the two sandwich halves are all sized
+        // by `liveCompositeSize`, so a container an earlier suite left on Half would quarter the area
+        // under three of the four rows in PERFORMANCE.md §14.2 and publish them as full-size numbers.
+        // Restored to what was there, not to a literal.
+        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
+        UserDefaults.standard.set(RenderResolution.full.rawValue,
+                                  forKey: CanvasManager.renderResolutionDefaultsKey)
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PlaybackTickBench-" + UUID().uuidString, isDirectory: true)
     }
 
     override func tearDown() {
+        if let storedResolution {
+            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+        }
         try? FileManager.default.removeItem(at: root)
         FrameBakeStore.cachesDirectoryOverride = nil
         Compositor.backend = Compositor.defaultBackend
@@ -147,7 +163,11 @@ final class PlaybackTickBench: XCTestCase {
     func testWhatAPlaybackTickOfTheOwnersDocumentCosts() {
         let manager = animationTest()
         let tree = manager.renderTree(atFrame: 0)
-        print("PLAYBACK | layers=\(manager.layers.count) contentEndFrame=\(manager.contentEndFrame)")
+        // The configuration these numbers are of, printed beside them: a figure that does not say
+        // which mixture it is, is not a figure.
+        print("PLAYBACK | layers=\(manager.layers.count) contentEndFrame=\(manager.contentEndFrame) " +
+              "canvas=\(Int(Self.canvas.width))x\(Int(Self.canvas.height)) " +
+              "resolution=\(manager.renderResolution.rawValue) backend=\(Compositor.backend)")
         print("PLAYBACK | needsCompositorOnCanvas=\(tree.needsCompositorOnCanvas) " +
               "sandwichEngages=\(manager.sandwichEngagesOnCanvas(tree: tree))")
         let poses = manager.layerPoses(atFrame: 6)
