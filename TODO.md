@@ -164,13 +164,28 @@ obeyed (`CompositorBudget.affordableSize`, `budgetTextures` and `CompositorSizeG
 `StripedComposite` composites at the size asked for, pinned byte-for-byte on both backends), and the
 freeze after a stroke lift is gone.
 
+**Built 2026-09-07, except the measurement.** `maxCanvasExtent` is **4200** — INFERRED, derived in
+PERFORMANCE.md §15 from four canvas-sized buffers (the sandwich's three plus
+`RasterLayerTexture.ensureContext`'s), a x2 realism factor taken from `CompositorBudget.hasHeadroom`'s
+own documented rule, and half the MEASURED 1837 MiB at-rest budget. That spends **58.6%** of it;
+5486 is exactly break-even and 16383 is **892%**, which is the crash. 4096 was the first choice and
+was rejected because it collides with **nine** unrelated constants that independently land there.
+The picker now says why a size is refused instead of clamping silently, and the test asserts the
+recovery as well as the refusal.
+
+**The actual mechanism is narrower than "unbounded memory", and worth keeping**: `StrokeScratch` was
+already windowed by an earlier pass, which is why the old 4.42 MB fix never touched this crash. The
+cost is `RasterLayerTexture.renderToUIImage()` forcing a resident canvas-sized `CGImage`, and **the
+live sandwich rebuild is never budget-checked** — `CompositorBudget.hasHeadroom` has two call sites,
+neither on this path, and a GPU-preferring document falls back to the same unguarded CoreGraphics path
+when Metal declines.
+
 **Left to build**
-- [ ] Measure, **on the owner's iPad**, the largest canvas that survives a brushstroke. Device
-      testing is now possible — see the deploy section in [CLAUDE.md](CLAUDE.md).
-- [ ] Set `maxCanvasExtent` from that number and pin it, so the picker cannot offer a size that
-      crashes.
-- [ ] Say so in the size picker rather than silently clamping, per this repo's rule that a refusal
-      is visible.
+- [ ] **Confirm the constant on the owner's iPad** — PERFORMANCE.md §15.5 names the run: raise the cap
+      locally, draw one canvas-crossing stroke at 4200 / 5486 / 6500 / 8000 / 16383 on a fresh
+      single-layer document and binary-search the boundary; then repeat on a document with layers and
+      undo history, which is the case the derivation is weakest on. Set it from the smaller run, with
+      margin below the observed boundary rather than at it.
 
 ---
 
