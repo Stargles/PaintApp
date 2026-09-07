@@ -312,6 +312,7 @@
 		AF2241D8EDE8331362C8AA0A /* TimelineKeyMarkersLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */; };
 		D4131E5DBCF5534AAE2EE064 /* FrameRateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA475F6560EC749C93FEA97B /* FrameRateLogicTests.swift */; };
 		E5990596B38859687E6F2808 /* FrameRateUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CD6ABDB7096FF3A9B09CBB /* FrameRateUITests.swift */; };
+		2F5EAEC5FF24B3D506A56028 /* RecordingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B339843FABBE705385008EA5 /* RecordingUITests.swift */; };
 		545EC9DE2DA84FF5C209AFA8 /* ValueRecordingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2018279EE4E0E22AA6E3E99C /* ValueRecordingLogicTests.swift */; };
 		EFDD77021879A304E53BDCAB /* RecordingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A50F700EFEB162EA40D93 /* RecordingLogicTests.swift */; };
 		744DEF6FCE41C5843269CB69 /* PaintSoftware/Engine/Deform/PoseInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */; };
@@ -679,6 +680,7 @@
 		D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineKeyMarkersLogicTests.swift; sourceTree = "<group>"; };
 		CA475F6560EC749C93FEA97B /* FrameRateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRateLogicTests.swift; sourceTree = "<group>"; };
 		B4CD6ABDB7096FF3A9B09CBB /* FrameRateUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRateUITests.swift; sourceTree = "<group>"; };
+		B339843FABBE705385008EA5 /* RecordingUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingUITests.swift; sourceTree = "<group>"; };
 		2018279EE4E0E22AA6E3E99C /* ValueRecordingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ValueRecordingLogicTests.swift; sourceTree = "<group>"; };
 		712A50F700EFEB162EA40D93 /* RecordingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecordingLogicTests.swift; sourceTree = "<group>"; };
 		2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/PoseInterpolation.swift; sourceTree = "<group>"; };
@@ -910,6 +912,7 @@
 				D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */,
 				CA475F6560EC749C93FEA97B /* FrameRateLogicTests.swift */,
 				B4CD6ABDB7096FF3A9B09CBB /* FrameRateUITests.swift */,
+				B339843FABBE705385008EA5 /* RecordingUITests.swift */,
 				2018279EE4E0E22AA6E3E99C /* ValueRecordingLogicTests.swift */,
 				712A50F700EFEB162EA40D93 /* RecordingLogicTests.swift */,
 				EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */,
@@ -1406,6 +1409,7 @@
 				AF2241D8EDE8331362C8AA0A /* TimelineKeyMarkersLogicTests.swift in Sources */,
 				D4131E5DBCF5534AAE2EE064 /* FrameRateLogicTests.swift in Sources */,
 				E5990596B38859687E6F2808 /* FrameRateUITests.swift in Sources */,
+				2F5EAEC5FF24B3D506A56028 /* RecordingUITests.swift in Sources */,
 				545EC9DE2DA84FF5C209AFA8 /* ValueRecordingLogicTests.swift in Sources */,
 				EFDD77021879A304E53BDCAB /* RecordingLogicTests.swift in Sources */,
 				98709D5A765375DE901906E7 /* PaintSoftware/Views/TimelineKeyMarkers.swift in Sources */,
