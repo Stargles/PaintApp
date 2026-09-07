@@ -1,8 +1,8 @@
 # Keyframes
 
 **Animating properties across the frames one cel spans.** TODO.md item (21), specified 2026-08-28
-after the conversation that file names as each item's entry condition. This is the design; nothing is
-built yet.
+after the conversation that file names as each item's entry condition. **This was the design when it
+was written; §8 tracks what has since been built** — most of it, as of this revision.
 
 **What this is not.** It is not the interpolation feature. That one in-betweens *drawings* between two
 reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)). This one moves
@@ -1315,10 +1315,14 @@ frame of it — the same argument interpolation's identity already makes for omi
 
 ## 9. Open questions
 
-1. **What does an invalid in-between pose do?** §4.3's factored blend makes validity much easier to
+1. ~~**What does an invalid in-between pose do?** §4.3's factored blend makes validity much easier to
    preserve but does not guarantee it. Clamp to the last valid pose (never draws anything broken, can
    visibly stutter), or refuse the key pair when it is authored (predictable, needs a message, can
-   refuse a pair that only fails for a few frames)? **Cheap now, expensive once keys are on disk.**
+   refuse a pair that only fails for a few frames)? **Cheap now, expensive once keys are on disk.**~~
+   **Answered in code: clamp to the nearer valid key.** `PoseInterpolation.blend` falls through to
+   `guard blended.isValid else { return t < 0.5 ? a : b }` when the factored blend goes singular — the
+   nearer key rather than always the earlier one, per its own `§9.1's clamp` comment — pinned by
+   `PoseInterpolationLogicTests.testAScaleExtrapolatesUntilItGoesSingularAndThenTakesTheNearerKey`.
 2. **A value layer below a transformation layer has two irreconcilable readings.** In flat-colour mode
    it is a full-canvas sheet, so posing it means posing a quad and leaving transparency outside —
    plausible. In *effect* mode it holds no pixels at all and grades the accumulator, so there is nothing
