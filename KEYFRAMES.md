@@ -2213,13 +2213,24 @@ them would flatten the keystone the artist authored. So `PoseComponents.decompos
 is projective (five honest curves and one linearisation would be worse, because nothing would mark the
 sixth), and `Content.declinedChannelIDs` names it — the band's accessibility value reads
 `declined:celPose`, which is a third state beside `empty` and `hidden`. ~~Unreachable today: animated
-Distort is stage 5b and no writer produces a projective `PoseQuad`.~~ **Reachable since 2026-09-06, and
-stage 5b answered the question it left: neither.** `decompose` still asks `Homography.affine()` and still
-declines the whole channel, there is no corner fallback beside the six, and nothing was made to linearise.
-`PoseComponentsLogicTests.testAProjectivePoseIsDeclinedRatherThanLinearised` now pins the refusal against
-`PoseQuad.map` being `.projective` rather than against the deleted `affineOrLinearised`, so the argument
-it makes is the stronger one: *rendering carries this pose exactly, and these six curves still cannot.*
-A corner fallback is graph-editor work and belongs with whoever extends (38)(b).
+Distort is stage 5b and no writer produces a projective `PoseQuad`.~~ **Reachable since 2026-09-06.**
+`decompose` still asks `Homography.affine()` and still declines the whole channel, so a keyed Distort
+now shows `declined:celPose` in the graph editor — the first time this state has had a writer able to
+reach it. `PoseComponentsLogicTests.testAProjectivePoseIsDeclinedRatherThanLinearised` now pins the
+refusal against `PoseQuad.map` being `.projective` rather than against the deleted
+`affineOrLinearised`, so the argument it makes is the stronger one: *rendering carries this pose
+exactly, and these six curves still cannot.*
+
+**RULED, 2026-09-06: leave it declined.** Stage 5b's open question was which of a corner fallback or a
+wider set of channels should sit beside the six now that a writer can actually produce a projective
+pose; the owner's answer is neither, for now. Their reasoning: a declined channel that says plainly it
+has no curve to show is honest, where either alternative would be a guess at a shape nobody has asked
+for — animated Distort works end to end with the band silent, since the band is for *reading and
+editing* a curve and Move/Distort/Done needs neither. **What would reopen this is the owner actually
+animating a keystone and finding a concrete thing about it they want to adjust from the graph editor**
+— that is what turns the choice from a guess into a spec, and it is the trigger, not a date or a stage
+number. A corner fallback and widening the six both remain graph-editor work for whoever reopens it,
+belonging with whoever extends (38)(b).
 
 ~~**The band is read-only, deliberately and explicitly.**~~ **Superseded — the nodes are draggable on
 both axes, and the refusal is gone rather than relaxed.** What stood between the decomposition round
