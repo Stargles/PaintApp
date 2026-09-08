@@ -70,14 +70,26 @@ chosen folder by delivering through `ShareLink`. `BrushStorage` already document
 bookmark seam this needs, and `BrushStorage`'s relocatable storage is a worked example of the same
 pattern at a smaller scale.
 
+**Built 2026-09-07, all four parts.** `ProjectLocation` owns one root that
+`ProjectBackupManager.documentsDirectory` reads, resolved before anything reads it; the gallery browses
+an arbitrarily deep tree with breadcrumb, create/rename/delete and **Move to...**; migration is copy →
+verify → atomic rename → remove, per item, so **every project is complete in at least one root at every
+instant**; and the reinstall test asserts the defect first (a container project destroyed, the gallery
+empty) and then the fix.
+
+**Two limitations, both deliberate and both recorded rather than hidden.** The **bookmark does not
+survive a reinstall** — it lives in the defaults plist, which is inside the container — so the artwork
+survives and recovery is exactly one trip through the picker, which the test pins as one. And
+`restoreFromTrash` returns a project to the **top of the tree** rather than its original folder;
+Files-style restore-to-origin needs an origin marker on the trash entry.
+
+**A hole in the `-resetGallery` guard was found and closed by this work**: the flag resolves its three
+directories *through* `ProjectLocation`, so on a device that had adopted a folder it would have reached
+outside the container and deleted the real library. It forgets the bookmark before wiping now, which
+makes it container-only by construction.
+
 **Left to build**
-- [ ] A default location, and a picker to change it — security-scoped bookmarks, resolved on launch,
-      with the failure to re-resolve one surfaced rather than swallowed.
-- [ ] **Sub-folders**, which is the half that is not just relocation: the gallery has to browse a tree
-      rather than a flat list. The owner's own framing is projects / sequences / scenes / shots.
-- [ ] Migrate what is in the container today, and stop writing there.
-- [ ] A test that a reinstall leaves a project in a chosen folder untouched — the defect this exists
-      to prevent, asserted rather than assumed.
+- [ ] `restoreFromTrash` to the original folder, which wants an origin marker on the trash entry.
 
 ---
 
