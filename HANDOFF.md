@@ -27,38 +27,35 @@ passed, 4 failed, 36 skipped, 36 min.** One failure is a wall-clock assertion un
 0.0152 s cap) and passed clean in isolation. **The other three are real** — see below. CLAUDE.md
 carries the class table from the previous run.
 
-## READ THIS FIRST: three real regressions are open in the persistence path
+## The three regressions the full suite found are fixed, and they were not what they looked like
 
-`GalleryRecoveryUITests.testCorruptedProjectIsAutoRestoredFromBackupOnLaunch`,
-`GalleryRecoveryUITests.testDeletedProjectCanBeRestoredFromRecentlyDeleted` and
-`EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch` **all fail clean in
-isolation**, so they are defects and not flakes. **A fix is in flight on branch `tmp/fix`** — check
-whether it landed before starting anything.
+**They were not a persistence defect. No persistence code ran.** All three stopped ~20 s in, on the
+same assertion — `XCTAssertTrue(galleryButton.waitForExistence(timeout: 5))` — because `ed7c8f4` added
+an explicit `.accessibilityIdentifier("toolbar.galleryButton")` to `TopToolbar`, and **an explicit
+identifier replaces the implicit one SwiftUI derives from `Image(systemName:)`**. So
+`app.buttons["square.grid.2x2"]`, which two older helpers used, matched nothing. The author of that
+line wrote a new suite against the new identifier and never saw the two existing call sites.
 
-They arrived with **(36)**, which put `ProjectLocation` between the gallery and the filesystem, made the
-gallery a tree, and added a migration. All three involve **the gallery listing projects after a
-relaunch**, which is precisely what changed. One known behaviour change sits directly under the second
-of them: **`restoreFromTrash` returns a project to the top of the tree now, not its original folder** —
-so one of these tests may be pinning superseded behaviour rather than catching a defect. That has to be
-argued, not assumed.
+**What the reds actually meant is worth more than the bug.** From `ed7c8f4` until this fix, nobody had
+exercised save→relaunch→load, corruption auto-restore, or delete→trash→restore end to end. The
+verification run is the first time those assertions executed against post-(36) code — and a mutation
+that orphans the vector payload on save makes all three run their full journeys and fail at their
+*content* assertions, which proves they still guard data loss rather than merely finding a button.
 
-**One hypothesis is already ruled out, and the way it failed is worth keeping.** The `-resetGallery`
-guard added after that flag wiped the owner's iPad read
-`ProcessInfo.environment["SIMULATOR_DEVICE_NAME"]`, which an XCUITest-launched app does not inherit —
-a good story, and wrong: rewriting it to `#if targetEnvironment(simulator)` left all three failing, and
-`ProjectStorageUITests` passes 3/3 using the same flag. **The guard rewrite is kept anyway** and is on
-`tmp/fix`: a destructive path must be right before it is testable.
+`tools/check-ui-identifiers.py` is the guard: sub-second, exit 1 on any UI-test lookup by SF Symbol
+glyph name, 1 finding against the pre-fix tree and 0 after. **The general "does this identifier exist"
+version was tried and abandoned at 186 false positives**, and the tool's docstring says so, so nobody
+retries it.
 
-**The structural lesson is bigger than the bug.** These are XCUITests, and **the fast tier selects only
-logic suites by filename** — so (36) was green in Debug *and* Release and still shipped this. That is
-the **second** time in one pass a defect lived exactly in that blind spot; the first was
-`RecordingUITests` after stage 7. **A branch being green in both tiers is not evidence about any
-XCUITest.** Run the full suite as a gate on anything touching a path a UI test covers.
+**Still unverified, and honestly so**: no UI test drives recovery of a project *inside a folder* —
+`simulateNewestProjectCorruption` walks one level — though the shipped repair, snapshot and sweep passes
+are tree-aware and `ProjectFolderLogicTests` covers nested cases at the model level. Migration against a
+real security-scoped folder is untested anywhere, as is `-resetGallery` on a device that has adopted one.
 
-**The owner's iPad carries a Release build of `af51870`** — folder storage, the 6000 canvas cap. It is
-an **iPad (9th generation), `iPad12,1`, 3 GB RAM**, MEASURED 2026-09-07. **Every simulator in this repo
-is an M4/M5 with 8 GB or more, so every memory figure taken on one is suspect on the owner's device by
-at least 2.5x.** That reaches far past the item that found it.
+**The structural lesson stands.** These are XCUITests, and **the fast tier selects only logic suites by
+filename** — so a branch can be green in Debug *and* Release and still ship this. That is the **second**
+time in one pass a defect lived in that blind spot; the first was `RecordingUITests` after stage 7.
+**A branch being green in both tiers is not evidence about any XCUITest.**
 
 ## Start here
 
