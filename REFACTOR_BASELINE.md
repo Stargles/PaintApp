@@ -1,7 +1,18 @@
-# Performance baseline
+# Performance baseline — a DATED snapshot, not current numbers
 
-Current numbers, and the measurement traps that made earlier ones wrong. Measured on an iPad Pro
-13-inch (M5) simulator, iOS 26.5, medians of 3 runs, path length held fixed.
+**Every figure below is stale and must be re-measured before it is trusted. Read
+[PERFORMANCE.md](PERFORMANCE.md) for what is current.** This file is kept because its *method* and its
+measurement traps are still right, and because five places cite it — including two test files — but its
+numbers describe a much smaller app. The clearest tell is the full-suite row: **541 s parallel against
+the 33 min / 3714 tests CLAUDE.md now records**, an order of magnitude apart. Its "Known remaining costs" §1 —
+*"`StrokeSpatialIndex` is rebuilt from scratch on every `invalidate()`"* — describes a coupling that
+has since been removed: the index is **version-keyed** now (`VectorLayer`'s `cachedIndex`), and
+`StrokeSpatialIndex` has no `invalidate()` at all, only `removeAll()`. The cost that item was filed
+against is gone.
+
+The traps below are the reason to keep reading; the table is history.
+
+Measured on an iPad Pro 13-inch (M5) simulator, iOS 26.5, medians of 3 runs, path length held fixed.
 
 Re-measure with:
 
