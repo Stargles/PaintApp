@@ -408,8 +408,11 @@ This is one compositor, not two: **`PixelOps.compositeCanvas` is deleted** (phas
 goes through `Compositor.composite`. The rest of that convergence list turned out to be smaller than
 written, which is worth recording so nobody goes looking for the work:
 
-- **Export does not exist.** There is no share sheet, photo-library write, or image-export feature in
-  the app — the only PNG writes are project persistence. Nothing to converge.
+- ~~**Export does not exist.**~~ **It shipped as RENDER.md §5 stage 6 on 2026-09-02**:
+  `Engine/FrameExport.swift`, `Engine/FrameExportSession.swift` and `Views/ExportSheet.swift`, delivered
+  through `ShareLink`, with `FrameExportLogicTests` and `FrameExportSessionLogicTests` behind it. The
+  claim was true when written and is kept struck through because this section exists to say where the
+  two documents diverge, and this is now a place they agree.
 - **`mergeLayers` is not a stack composite.** It flattens exactly two cels via `PixelOps.flatten`,
   chosen by the merge rather than by the tree, and sits below the compositor beside
   `PixelOps.rasterize` (§2).

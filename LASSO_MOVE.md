@@ -183,7 +183,9 @@ ink tier below is the one that does.
 
 Four corners on the **Move box** rather than on a bitmap, and the ink follows per **dab**. The owner's
 ask was one sentence: *"The distort in move feature must still be built and integrated with
-keyframes."* This is the first half; the keyed half is KEYFRAMES.md §8 stage 5b and is not built.
+keyframes."* This is the first half; **the keyed half is KEYFRAMES.md §8 stage 5b and merged on 2026-09-07** — a
+pose is carried as a genuinely projective `PoseMap` rather than linearised at the box centre, which the
+old accessor did at up to 218% error across a strong keystone.
 
 | what | where |
 |---|---|
