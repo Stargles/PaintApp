@@ -557,10 +557,20 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// Returns to the gallery (saving the project) and waits for its tile to appear.
+    ///
+    /// **`toolbar.galleryButton`, not `square.grid.2x2`.** This read the *implicit* identifier
+    /// SwiftUI derives from `Image(systemName:)` until 2026-09-07, when `ed7c8f4` gave the gallery
+    /// button the explicit identifier its seven toolbar neighbours already carried — and an explicit
+    /// identifier replaces the implicit one, so this lookup silently stopped matching anything. Two
+    /// `GalleryRecoveryUITests` and `EraserAndPersistenceUITests`' save/reload round trip went red
+    /// together, all three of them here at line 563 and none of them anywhere near the persistence
+    /// code they exist to guard. Never reach a control by a glyph name: it is not an identifier the
+    /// app promises, and depending on the *absence* of one makes adding one a breaking change.
     @discardableResult
     func saveEditorAndReturnToGallery(_ app: XCUIApplication) -> XCUIElement {
-        let galleryButton = app.buttons["square.grid.2x2"]
-        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5))
+        let galleryButton = app.buttons["toolbar.galleryButton"]
+        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5),
+                      "The editor's toolbar should carry the route back to the gallery")
         galleryButton.tap()
         let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "The saved project should show up in the gallery")

@@ -133,27 +133,27 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - Launch-time maintenance
 
-    /// Runs once per launch (detached from `PaintApp.init`). Order matters: wipe for tests →
-    /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
-    /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
     /// Whether this build is running in a simulator, which is the only place `-resetGallery` is
     /// honoured.
     ///
-    /// **This was `ProcessInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` for one commit and that
-    /// was wrong.** The variable is set for a process the *simulator runtime* spawns, and an app
-    /// XCUITest launches does not inherit it — so the guard read `false` inside every UI test, and
-    /// `-resetGallery` silently stopped clearing the gallery. Three tests that depend on starting
-    /// clean went red together
-    /// (`GalleryRecoveryUITests`' backup-restore and trash-restore, and
-    /// `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch`) and **the
-    /// fast tier could not see any of it**, because all three are XCUITests and the tier selects only
-    /// logic suites by filename.
+    /// **This was `ProcessInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` for one commit and the
+    /// compile-time form is still the right one**, because a guard on a destructive path has to be
+    /// *right* before it is testable and `targetEnvironment(simulator)` cannot be wrong. What a test
+    /// can still reach is `honoursGalleryReset(isSimulator:)` below, which holds the *policy* — the
+    /// part worth pinning — while this property holds only the fact.
     ///
-    /// The environment read was chosen over the compile-time form so a logic test could reason about
-    /// it. That was the wrong trade: a guard on a destructive path has to be *right* before it is
-    /// testable, and `targetEnvironment(simulator)` cannot be wrong. What a test can still reach is
-    /// `honoursGalleryReset(isSimulator:)` below, which holds the *policy* — the part worth pinning —
-    /// while this property holds only the fact.
+    /// **What this rewrite did not do is fix the three red tests it was written to explain**, and the
+    /// claim that it did stood here until 2026-09-07. This comment asserted that the environment read
+    /// made the guard read `false` inside every UI test, so `-resetGallery` stopped clearing the
+    /// gallery, so `GalleryRecoveryUITests`' backup-restore and trash-restore and
+    /// `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch` went red
+    /// together. All three still failed after the rewrite, and `ProjectStorageUITests` — which uses
+    /// the same flag — was passing throughout, which was already enough to refute it. The actual
+    /// cause was in the test target and nowhere near this file: `ed7c8f4` gave the gallery button an
+    /// explicit accessibility identifier, which replaced the implicit one two helpers were reaching
+    /// it by. The lesson is CLAUDE.md's, reached by yet another door — **a story that explains the
+    /// symptom is not evidence that it is the cause**, and this one was plausible enough to be
+    /// written into the source as settled fact before anything tested it.
     static var isSimulator: Bool {
         #if targetEnvironment(simulator)
         return true
@@ -168,6 +168,9 @@ nonisolated enum ProjectBackupManager {
     /// owner's library from a Release build on their own iPad.
     static func honoursGalleryReset(isSimulator: Bool) -> Bool { isSimulator }
 
+    /// Runs once per launch (detached from `PaintApp.init`). Order matters: wipe for tests →
+    /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
+    /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
     static func runStartupMaintenance() {
         let args = ProcessInfo.processInfo.arguments
 

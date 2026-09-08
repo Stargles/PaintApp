@@ -874,11 +874,16 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
     /// Save -> relaunch -> reload round trip, exercising the real `ProjectStore.save`/`load` path
     /// (not just the manifest struct in isolation — this UI test target has no `@testable import`
     /// access to call those directly, confirmed by a link failure when tried). Draws a stroke,
-    /// returns to the gallery (via the toolbar's gallery button — its SwiftUI `Image(systemName:)`
-    /// gets "square.grid.2x2" as its accessibility identifier automatically, since TopToolbar
-    /// doesn't set one explicitly), force-quits and relaunches the whole app (so this genuinely
-    /// re-reads from disk, not just in-memory state), reopens the one saved project from the
-    /// gallery, and asserts the stroke (and therefore the layer/cel raster data) survived.
+    /// returns to the gallery via `toolbar.galleryButton`, force-quits and relaunches the whole app
+    /// (so this genuinely re-reads from disk, not just in-memory state), reopens the one saved
+    /// project from the gallery, and asserts the stroke (and therefore the layer/cel raster data)
+    /// survived.
+    ///
+    /// **That identifier used to be the glyph name.** This paragraph read *"its SwiftUI
+    /// `Image(systemName:)` gets "square.grid.2x2" as its accessibility identifier automatically,
+    /// since TopToolbar doesn't set one explicitly"* — a dependence on the **absence** of an
+    /// identifier, which `ed7c8f4` ended by adding one. See `saveEditorAndReturnToGallery`, which
+    /// broke the same way on the same day.
     ///
     /// This also serves as a build-time-only regression check for the manifest schema additions
     /// (`LayerManifest.kind`, `ProjectManifest.selectedBrush`/`customBrushes`): every save now
@@ -903,8 +908,9 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         app.buttons["toolbar.layersButton"].tap() // close panel
 
         // Back to gallery, which triggers ContentView.saveIfNeeded() -> ProjectStore.save.
-        let galleryButton = app.buttons["square.grid.2x2"]
-        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5))
+        let galleryButton = app.buttons["toolbar.galleryButton"]
+        XCTAssertTrue(galleryButton.waitForExistence(timeout: 5),
+                      "The editor's toolbar should carry the route back to the gallery")
         galleryButton.tap()
 
         let projectTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch

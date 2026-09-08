@@ -226,6 +226,37 @@ before something was deleted will silently resurrect it, and the count is the on
   reconcile the xcresult's `totalTestCount` against a static `func test` count at your own head — the
   arithmetic is what catches it, and nothing else will.
 
+  **The tier selects logic suites by filename, so it runs no XCUITest — and a branch can be green in
+  Debug *and* Release and still be broken.** That blind spot has now cost two passes in one week:
+  `RecordingUITests`, and on 2026-09-07 the three persistence tests that a full run caught
+  (`GalleryRecoveryUITests`' backup-restore and trash-restore, and
+  `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch`). Nothing short of
+  the 25-minute suite proves a UI change, so **say in the summary that the UI tier was not run** rather
+  than reporting a green fast tier as if it covered the branch.
+
+  Two cheap things see a little way into it, and both are seconds rather than minutes:
+
+  ```bash
+  tools/check-ui-identifiers.py     # no UI test may reach a control by its SF Symbol glyph name
+  ```
+
+  That one exists because of the 2026-09-07 defect and would have caught it at zero cost. `ed7c8f4`
+  gave the gallery button an explicit `accessibilityIdentifier`, which **replaces** the implicit one
+  SwiftUI derives from `Image(systemName:)` — so the two helpers reaching it by `"square.grid.2x2"`
+  silently matched nothing, and three tests failed a mile from the code they guard. **A glyph name is
+  not an identifier the app promises**; a test using one depends on the *absence* of one, which makes
+  adding an identifier a breaking change. The check is pure text over both trees and reports exactly
+  that hazard, having been narrowed to it — the general "does this identifier exist" version was
+  written first and abandoned at 186 false positives, because identifiers reach their views through
+  `identifier:` parameters on a dozen helper views.
+
+  The second is free and is about triage rather than prevention: **give every `XCTAssertTrue` in a
+  shared helper a message.** All three of those failures reported a bare `XCTAssertTrue failed`, which
+  names neither the element nor the reason, and two of them were inside `PaintUITestCase` where the
+  line number does not say which test called it. `xcodebuild` does print `file:line: error:` for a
+  serial run, so the line is recoverable; the *sentence* is not, and it is what turns a filename into
+  a diagnosis.
+
   **Never write `@testable import PaintSoftware` in `PaintSoftwareUITests`.** It resolves nothing —
   every app source a logic test touches is already compiled a second time into this target, so the
   types are local to the module — and it **breaks `-configuration Release` outright**, because
