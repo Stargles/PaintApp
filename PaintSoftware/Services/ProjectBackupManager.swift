@@ -137,11 +137,36 @@ nonisolated enum ProjectBackupManager {
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
     /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
     /// Whether this build is running in a simulator, which is the only place `-resetGallery` is
-    /// honoured. Read from the environment rather than `#if targetEnvironment(simulator)` so a test
-    /// can reason about it, and because the compile-time form is invisible to the fast tier.
+    /// honoured.
+    ///
+    /// **This was `ProcessInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` for one commit and that
+    /// was wrong.** The variable is set for a process the *simulator runtime* spawns, and an app
+    /// XCUITest launches does not inherit it — so the guard read `false` inside every UI test, and
+    /// `-resetGallery` silently stopped clearing the gallery. Three tests that depend on starting
+    /// clean went red together
+    /// (`GalleryRecoveryUITests`' backup-restore and trash-restore, and
+    /// `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch`) and **the
+    /// fast tier could not see any of it**, because all three are XCUITests and the tier selects only
+    /// logic suites by filename.
+    ///
+    /// The environment read was chosen over the compile-time form so a logic test could reason about
+    /// it. That was the wrong trade: a guard on a destructive path has to be *right* before it is
+    /// testable, and `targetEnvironment(simulator)` cannot be wrong. What a test can still reach is
+    /// `honoursGalleryReset(isSimulator:)` below, which holds the *policy* — the part worth pinning —
+    /// while this property holds only the fact.
     static var isSimulator: Bool {
-        ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != nil
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
     }
+
+    /// **The policy `-resetGallery` is gated on, separated from the platform fact so it can be
+    /// tested.** A destructive test hook runs only in a simulator: on a physical device the three
+    /// directories it clears hold work nobody can regenerate, and on 2026-09-07 it destroyed the
+    /// owner's library from a Release build on their own iPad.
+    static func honoursGalleryReset(isSimulator: Bool) -> Bool { isSimulator }
 
     static func runStartupMaintenance() {
         let args = ProcessInfo.processInfo.arguments
@@ -163,7 +188,7 @@ nonisolated enum ProjectBackupManager {
         // because the build that did the damage was Release, and a device UI test that genuinely
         // needs a clean gallery can delete and reinstall the app instead, which is both narrower and
         // reversible.
-        if args.contains("-resetGallery") && Self.isSimulator {
+        if args.contains("-resetGallery") && Self.honoursGalleryReset(isSimulator: Self.isSimulator) {
             // **Put the library back inside the app before wiping anything** — TODO (36). The three
             // directories below are resolved through `ProjectLocation`, so on a device that had
             // adopted a folder in Files this flag would reach *outside* the container and delete the
