@@ -21,11 +21,39 @@ against **3516 static `func test` declarations across 152 fast-tier files**. A n
 `grep -c "func test"` over-reads by exactly 3 — three `private static func testBrush()` helpers, in
 `VectorTextPersistenceLogicTests`, `VectorCanvasDataLogicTests` and `TextHitTestLogicTests`.
 
-**A full suite is in flight at `55b4a63` as this was written** and its result is not in this file. The
-last completed one, MEASURED at `e6ce40e` on an idle machine with a freshly erased device, was **3714
-tests, 3675 passed, 3 failed, 36 skipped, 33 min** — all three failures passed clean in isolation with
-a count of 1 each. **Re-take it before trusting that number**; five merges have landed since, and
-CLAUDE.md carries the class table.
+**Full suite MEASURED at `55b4a63` on an idle machine with a freshly erased device: 3749 tests, 3709
+passed, 4 failed, 36 skipped, 36 min.** One failure is a wall-clock assertion under parallel clones
+(`PerfBaselineTests.testTheLayeredLiveStrokePreviewCostsWhatTheRasterPathCosts`, 0.0165 s against a
+0.0152 s cap) and passed clean in isolation. **The other three are real** — see below. CLAUDE.md
+carries the class table from the previous run.
+
+## READ THIS FIRST: three real regressions are open in the persistence path
+
+`GalleryRecoveryUITests.testCorruptedProjectIsAutoRestoredFromBackupOnLaunch`,
+`GalleryRecoveryUITests.testDeletedProjectCanBeRestoredFromRecentlyDeleted` and
+`EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch` **all fail clean in
+isolation**, so they are defects and not flakes. **A fix is in flight on branch `tmp/fix`** — check
+whether it landed before starting anything.
+
+They arrived with **(36)**, which put `ProjectLocation` between the gallery and the filesystem, made the
+gallery a tree, and added a migration. All three involve **the gallery listing projects after a
+relaunch**, which is precisely what changed. One known behaviour change sits directly under the second
+of them: **`restoreFromTrash` returns a project to the top of the tree now, not its original folder** —
+so one of these tests may be pinning superseded behaviour rather than catching a defect. That has to be
+argued, not assumed.
+
+**One hypothesis is already ruled out, and the way it failed is worth keeping.** The `-resetGallery`
+guard added after that flag wiped the owner's iPad read
+`ProcessInfo.environment["SIMULATOR_DEVICE_NAME"]`, which an XCUITest-launched app does not inherit —
+a good story, and wrong: rewriting it to `#if targetEnvironment(simulator)` left all three failing, and
+`ProjectStorageUITests` passes 3/3 using the same flag. **The guard rewrite is kept anyway** and is on
+`tmp/fix`: a destructive path must be right before it is testable.
+
+**The structural lesson is bigger than the bug.** These are XCUITests, and **the fast tier selects only
+logic suites by filename** — so (36) was green in Debug *and* Release and still shipped this. That is
+the **second** time in one pass a defect lived exactly in that blind spot; the first was
+`RecordingUITests` after stage 7. **A branch being green in both tiers is not evidence about any
+XCUITest.** Run the full suite as a gate on anything touching a path a UI test covers.
 
 **The owner's iPad carries a Release build of `af51870`** — folder storage, the 6000 canvas cap. It is
 an **iPad (9th generation), `iPad12,1`, 3 GB RAM**, MEASURED 2026-09-07. **Every simulator in this repo
