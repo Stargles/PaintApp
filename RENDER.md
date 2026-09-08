@@ -149,8 +149,8 @@ re-flattened.
 ### 3.3 The bake key
 
 One key names the pixels of a frame: `FrameBakeKey` (`Engine/FrameBakeKey.swift`), built from a `FrameRecipe`,
-carrying everything the live canvas's own `SandwichKey` compares **with `frame` removed** and three inputs no
-in-memory cache carries:
+carrying everything the live canvas's own `SandwichKey` compares — **`frame` is in neither of them now; see
+§3.7's "a hold costs one composite on both sides of the seam"** — and three inputs no in-memory cache carries:
 
 - the resolved tree (`[RenderNode]`: structure, opacity, visibility, blend mode, isolation, masks including the
   implicit clip-to-below mask, each node's effect resolved at the frame — a **folder's** grade is resolved here
@@ -510,6 +510,47 @@ frame against 3.7 ms to read the bake**, PERFORMANCE.md §14. The predicate now 
 comes off disk is only as wide as that predicate. A feature whose picture Core Animation cannot produce must
 either engage the compositor or accept that it is rendering on the main thread every frame — and the second is
 invisible, because the canvas looks perfectly correct while it does it.
+
+**A hold costs one composite on both sides of the seam — and until 2026-09-07 that was true of only one of
+them.** The owner reported it: *"Lets say a frame in the animation is held for a couple cels where nothing
+changes. The bake and cache seems to re-render each frame even though they are the same."* This file asserted the
+good case in §3.3 and it was half wrong. **The two paths differed, and the difference was one field.**
+
+- **The bake was already right.** §3.3's key leaves `frame` out, `FrameBaker.kick` answers `.alreadyOnDisk` on a
+  `store.contains(key)` hit and composites nothing at all. MEASURED, with the dedupe branch mutated off and
+  restored: a nine-frame hold is **9 composites** without it and **1** with it, and a nine-step scrub through that
+  hold is **81** without and **0** with (`FrameBakerLogicTests`, counted with `CompositeProbe`).
+- **The live canvas was not.** `CanvasView.Coordinator.SandwichKey` carried `frame`, so every playhead step moved
+  the key and `startSandwichRebuild` recomposited **both halves** of a picture whose every input was identical to
+  the one on screen. MEASURED on a twelve-frame scene keyed at 0 and 4 (`-uiTestSeedHoldAfterMove`): stepping the
+  seven held frames took the canvas's published `rebuilds:` count from **5 to 12** — one rebuild, two canvas-sized
+  composites, per held frame.
+
+`frame` is out of `SandwichKey` now, so the two paths make one decision on one basis, and stepping that same hold
+moves the count **not at all** while the four frames of the move ahead of it still move it by four. Two things
+came with the fix and both are structural rather than tidying:
+
+- **`SandwichKey` moved out of the coordinator into `Views/SandwichKey.swift`**, for `TimelineRulerClip`'s reason
+  — `CanvasView.swift` is not compiled into `PaintSoftwareUITests`, so a key only that file can see is a decision
+  no logic test can check. That is why the cost had to be published on an accessibility label and driven in the
+  simulator to be seen at all.
+- **Its builder moved next to `makeSandwichRecipe`** (`CanvasManager.sandwichKey(atFrame:activeLayerIndex:)`), so
+  the key and the recipe cannot be built from different frames or different trees. The coordinator keeps only the
+  two states in which the *active* layer's version is held rather than read: a live dab and an open text edit.
+
+**The sufficiency argument is `FrameBakeKey`'s and it is the stronger of the two claims**, which is why it
+transfers: being wrong there serves the wrong picture off disk permanently, and being wrong here costs one stale
+mid-stroke pair for one pass that `finishSandwichRebuild` already reconciles. It is pinned as a **pixel**
+assertion rather than as a field list — `SandwichKeyLogicTests` sweeps every pair of frames of four documents that
+vary per frame by four different mechanisms (a cel boundary, a layer whose block covers part of the scene, a
+keyed container pose, a keyed folder grade) and requires two frames with equal keys to composite to byte-identical
+halves. Its companion removes `contents` from that comparison and requires the same sweep to find a
+counterexample, so a battery that quietly stops varying fails there instead of passing everywhere.
+
+**What the owner was most likely looking at, for the bake half where nothing was wrong**: the amber unbaked bar
+below clears **one frame at a time across a hold**, because the loop still visits every held frame — it just pays
+one mint and one `stat` for eight of the nine instead of a composite. `dedupedCount` is the number that says so
+and nothing draws it.
 
 **The timeline's baked-frame indication is done, 2026-09-02 (stage 4f).** `Views/TimelineBakeBar.swift` is the
 arithmetic — unbaked runs, the bar's geometry, the string a UI test reads, and the throttle — and
