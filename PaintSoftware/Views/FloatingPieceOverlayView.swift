@@ -358,7 +358,13 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
     @objc private func handleTapOutside(_ recognizer: TouchTypeTapGestureRecognizer) {
         guard let piece else { return }
         guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-        let location = recognizer.location(in: self)
+        // **Where the touch began, never `recognizer.location(in:)`** — the raster twin of the vector
+        // Move box's unwanted bake, fixed with it on 2026-09-07 and identical in shape: a handle drag
+        // arrives here as a tap (a tap recognizer does not fail on movement) whose release point is
+        // outside `transformedBounds`, so the box the artist was still adjusting settles under them.
+        // `TouchTypeTapGestureRecognizer.firstTouchLocationInWindow` carries the argument.
+        guard let beganInWindow = recognizer.firstTouchLocationInWindow else { return }
+        let location = convert(beganInWindow, from: nil)
         if !piece.transformedBounds.insetBy(dx: -8, dy: -8).contains(location) {
             onRequestCommit?()
         }

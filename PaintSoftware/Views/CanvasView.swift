@@ -3175,7 +3175,17 @@ struct CanvasView: UIViewRepresentable {
             // still closes an open top-bar dropdown.
             canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-            let canvasPoint = recognizer.location(in: container)
+            // **Where the touch began, never `recognizer.location(in:)`** — see
+            // `TouchTypeTapGestureRecognizer.firstTouchLocationInWindow`, which carries the fact and
+            // the whole argument. At `.ended` a tap reports where the finger *left*, and a tap
+            // recognizer does not fail on movement, so a corner drag on the Move box arrives here as
+            // an ordinary tap whose release point is off the box — which reads as the artist tapping
+            // away, which bakes the move they were still adjusting. The owner's report of 2026-09-07.
+            //
+            // A missing latch declines rather than commits: an unwanted bake is the defect, and a
+            // commit the artist can still reach through the Move button is the cheaper failure.
+            guard let beganInWindow = recognizer.firstTouchLocationInWindow else { return }
+            let canvasPoint = container.convert(beganInWindow, from: nil)
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             guard CanvasTouchOwner.owner(in: touch) == .moveBoxCommit else { return }
             canvasManager.commitVectorFloatIfNeeded()

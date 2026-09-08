@@ -48,6 +48,30 @@ rather than assuming it still holds.
 
 ---
 
+## (56) Canvas padding makes stroke-and-undo stutter, and loses strokes
+
+**Status** — reported by the owner 2026-09-07, with a recording. Root cause under investigation.
+
+> *"When I try to lay strokes down and undo it, I am met with a lot of lagspikes and stutter when the
+> brush is lifted. Sometimes, brushstrokes that I layed down dissapear. This really should not happen,
+> the canvas size should not ever impede on main thread lag. I have a suspicion that it is related to
+> canvas padding, as it happens when I turn it on."*
+
+**Evidence, from `recording-20260907-234101.jsonl`** — project `Test1`, **`canvasSize` 6000x6000**,
+which is `CanvasManager.maxCanvasExtent` exactly, on a 3 GB iPad 9th generation. Four short pencil
+strokes, then eight undo/redo taps. The recorder stamps a `touch` line with the UITouch's hardware
+timestamp and a `model`/`note` line with the time it is logged, and around the undos those diverge by
+**~180-220 ms** where they are 1-20 ms elsewhere in the same file. So the stalls are real, they are on
+the main thread, and they cluster on undo/redo.
+
+Two symptoms, possibly one cause: the stall, and strokes that come back or fail to come back
+inconsistently across undo/redo.
+
+**Left to build**
+- [ ] The root cause and the fix.
+
+---
+
 ## (36) Store projects in a folder the artist chooses
 
 **Status** — **fast-tracked out of Later by the owner 2026-09-07**, who gave the reason: every test

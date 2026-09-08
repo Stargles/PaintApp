@@ -65,9 +65,46 @@ final class TouchTypePanGestureRecognizer: UIPanGestureRecognizer {
 final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
     private(set) var lastTouchType: UITouch.TouchType = .direct
 
+    /// **Where this tap began**, in window coordinates — the second fact this subclass exists to
+    /// carry, and it is carried for the same reason as the first: `UITapGestureRecognizer` reports
+    /// only `location(in:)`, which at `.ended` is where the finger *left*, and two handlers need to
+    /// know where it *arrived*.
+    ///
+    /// **A tap recognizer does not fail on movement, so "a tap" and "a short drag" are the same
+    /// event.** `allowableMovement` is `UILongPressGestureRecognizer` API and has no counterpart
+    /// here; a tap's internal slop is undocumented and generous, and the owner's recording of
+    /// 2026-09-07 has one recognizing after **25.2 pt** of travel. So any handler that asks *"was
+    /// this touch on X?"* and asks it of the release point is asking about a point the artist never
+    /// chose. That is the whole of the vector Move box's unwanted bake: a corner drag in Uniform
+    /// mode rescales along the touch-down *bearing* from the box centre and discards the drag's
+    /// angle, so the box's own corner and the finger sit on one circle about the anchor and separate
+    /// the moment the bearing drifts — and every point of that circle but the four corners is
+    /// outside the box. Release there and `canvasChrome(at:)` answers `.none`, which is the app's
+    /// spelling of "the artist tapped away", which settles the float. `FloatingPieceOverlayView`'s
+    /// raster twin had it identically, against `piece.transformedBounds`.
+    ///
+    /// **Window coordinates, so one latch serves readers in different views** — this recognizer is
+    /// mounted on the canvas container in one case and on a container-sized overlay in the other,
+    /// and `convert(_:from: nil)` is the whole of what each needs.
+    ///
+    /// The distinction worth keeping when a third reader arrives: a handler asking *"was this touch
+    /// on X?"* must ask at touch-down, because membership is what the artist chose when they landed.
+    /// A handler asking *"where did the artist point?"* — `SelectionOverlayView.handleTap`'s
+    /// automatic-selection tap — may read either end and is deliberately left reading `location(in:)`.
+    private(set) var firstTouchLocationInWindow: CGPoint?
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let type = resolvedLastTouchType(from: touches.map(\.type)) {
             lastTouchType = type
+        }
+        // **`numberOfTouches == 0` is read before `super`, so it is "this is the first touch of the
+        // sequence"** — which is what makes the latch fresh per tap without an override of
+        // `reset()`. Reset would work and is where the symmetric spelling would put it, but it only
+        // runs on the way out of a non-`.possible` state; a sequence that never leaves `.possible`
+        // would leave the previous tap's point standing, and a *stale* answer to "did this begin on
+        // the box" is exactly the failure this property exists to remove.
+        if numberOfTouches == 0, let touch = touches.first {
+            firstTouchLocationInWindow = touch.location(in: nil)
         }
         super.touchesBegan(touches, with: event)
     }

@@ -1420,4 +1420,55 @@ final class ObjectTransformLogicTests: XCTestCase {
         XCTAssertEqual(canvas.localContentBoundsRasterizations, 2, "an edit has to be re-measured")
         XCTAssertNotEqual(after, before, "and the new ink is inside the new box")
     }
+
+    // MARK: - Why the tap-away commit cannot read the release point
+
+    /// **A Uniform corner drag leaves the finger off the box the moment its bearing turns**, and
+    /// that is the fact underneath the owner's report of 2026-09-07: *"I click a node on the box to
+    /// resize. When I let go of the node after I am done, the move unexpectedly bakes."*
+    ///
+    /// `uniformlyScaled(to:)` takes the **ratio of two radii** and nothing else, so the box's own
+    /// corner is redrawn along the bearing the finger went down on. Finger and corner then sit on
+    /// one circle about the anchor, and every point of that circle but the four corners is outside
+    /// the rectangle inscribed in it. So a release after any lateral drift is on no chrome at all —
+    /// which `CanvasView.Coordinator.canvasChrome(at:)` reports as `.none`, which
+    /// `CanvasTouchInputs.moveBoxCommitsThisTouch` reads as the artist tapping away, which settles
+    /// the float. The fix is that `handleMoveBoxCommit` asks about the touch's **first** location
+    /// (`TouchTypeTapGestureRecognizer.firstTouchLocationInWindow`) instead.
+    ///
+    /// **This pins the premise, not the fix, and the distinction is worth stating rather than
+    /// blurring.** Reverting the fix leaves this green — it is a true fact about a *correct*
+    /// function, and `uniformlyScaled` is not the thing that was wrong. What it protects is the
+    /// reasoning: if a later change makes a Uniform corner track the finger the way the Freeform arm
+    /// does (`testAFreeformCornerArrivesUnderTheFinger`'s "the corner arrives under the finger"),
+    /// this goes red and says that the argument written on the fix no longer describes the app.
+    /// The fix's own behaviour has **no automated guard** — see `MoveBoxCommitUITests`, which
+    /// records why XCUITest cannot synthesise the gesture that reproduces it.
+    func testAUniformCornerDragLeavesTheFingerOffTheBoxOnceItsBearingTurns() {
+        let frame = upright()
+        let corner = frame.corners[0]
+        let drag = ObjectTransformDrag(frame: frame, handle: .topLeft, at: corner)
+
+        XCTAssertEqual(frame.target(at: corner, reach: 22, rotationOffset: 36), .topLeft,
+                       "the touch goes down on the grip — this is the answer the commit must read")
+
+        // Perpendicular to the corner's radius: the finger's distance from the anchor barely moves,
+        // so Uniform barely rescales, but the bearing turns and that is the whole effect.
+        let radius = CGVector(dx: corner.x - frame.centre.x, dy: corner.y - frame.centre.y)
+        let armLength = hypot(radius.dx, radius.dy)
+        let tangent = CGVector(dx: radius.dy / armLength, dy: -radius.dx / armLength)
+        let travel: CGFloat = 60
+        let release = CGPoint(x: corner.x + tangent.dx * travel, y: corner.y + tangent.dy * travel)
+
+        let pose = drag.pose(draggedTo: release)
+        let after = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize,
+                                         aspect: pose.aspect)
+
+        XCTAssertEqual(pose.transform.scale, 1, accuracy: 0.05,
+                       "a tangential step is meant to barely rescale — if it did, this measures a "
+                       + "scale rather than the bearing turning")
+        XCTAssertNil(after.target(at: release, reach: 22, rotationOffset: 36),
+                     "the finger let go on no chrome at all: not the grip it grabbed, not the box "
+                     + "it belongs to. That is why the release point cannot decide a tap-away.")
+    }
 }
