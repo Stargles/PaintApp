@@ -213,58 +213,6 @@ are superseded and kept; the file says which.
 
 ---
 
-## (31) A 16k canvas crashes on a brushstroke, and cannot fit the owner's device at all
-
-**Status** — **reopened 2026-09-07 by the owner**, who reports the app *crashing on a brushstroke* at
-16k. The ruling on what to do is delegated: *"I don't know, you take the reigns."*
-
-**The arithmetic settles it and no optimisation changes it.** The owner's iPad is an **iPad (9th
-generation), `iPad12,1`** — MEASURED from `devicectl` 2026-09-07 — which has **3 GB of RAM**. One
-16383² RGBA texture is **1.07 GB**; the compositor's sandwich needs **three**, so **3.22 GB**, on a
-3 GB device. A 16k canvas cannot be held, let alone composited.
-
-**This item's previous "the 16k crash is fixed" was measured on the wrong hardware.** That figure
-(283.1 MB → 4.42 MB a gesture) is a *gesture delta* on a simulated iPad Pro with 8 GB, not the
-resident cost of the canvas, and every simulator in this repo is an M4/M5 with 8 GB or more. **Every
-memory claim taken on a simulator is suspect on the owner's actual device by a factor of at least
-two and a half**, and that generalises well beyond this item.
-
-**The decision, 2026-09-07 — lower `maxCanvasExtent` rather than build a display proxy.**
-`CanvasManager.maxCanvasExtent` is `16383`. A downscaled proxy does not save it: the *stroke* path
-still allocates full-size textures, which is exactly when the owner sees the crash. The owner works
-at 2048x1024 — 8.4 MB a texture, three orders of magnitude below the cap — so nothing they do is
-affected by a lower ceiling. Set it from a **measurement on the owner's own iPad**, not from a guess.
-
-**Two of the three original symptoms are genuinely fixed and stay closed**: the resolution knob is
-obeyed (`CompositorBudget.affordableSize`, `budgetTextures` and `CompositorSizeGate` are deleted, and
-`StripedComposite` composites at the size asked for, pinned byte-for-byte on both backends), and the
-freeze after a stroke lift is gone.
-
-**Built 2026-09-07, except the measurement.** `maxCanvasExtent` is **4200** — INFERRED, derived in
-PERFORMANCE.md §15 from four canvas-sized buffers (the sandwich's three plus
-`RasterLayerTexture.ensureContext`'s), a x2 realism factor taken from `CompositorBudget.hasHeadroom`'s
-own documented rule, and half the MEASURED 1837 MiB at-rest budget. That spends **58.6%** of it;
-5486 is exactly break-even and 16383 is **892%**, which is the crash. 4096 was the first choice and
-was rejected because it collides with **nine** unrelated constants that independently land there.
-The picker now says why a size is refused instead of clamping silently, and the test asserts the
-recovery as well as the refusal.
-
-**The actual mechanism is narrower than "unbounded memory", and worth keeping**: `StrokeScratch` was
-already windowed by an earlier pass, which is why the old 4.42 MB fix never touched this crash. The
-cost is `RasterLayerTexture.renderToUIImage()` forcing a resident canvas-sized `CGImage`, and **the
-live sandwich rebuild is never budget-checked** — `CompositorBudget.hasHeadroom` has two call sites,
-neither on this path, and a GPU-preferring document falls back to the same unguarded CoreGraphics path
-when Metal declines.
-
-**Left to build**
-- [ ] **Confirm the constant on the owner's iPad** — PERFORMANCE.md §15.5 names the run: raise the cap
-      locally, draw one canvas-crossing stroke at 4200 / 5486 / 6500 / 8000 / 16383 on a fresh
-      single-layer document and binary-search the boundary; then repeat on a document with layers and
-      undo history, which is the case the derivation is weakest on. Set it from the smaller run, with
-      margin below the observed boundary rather than at it.
-
----
-
 ## (42) Editing the strokes inside a selection, not just their colour
 
 **Status** — not started. **The owner set the order 2026-09-07: (41) first, then this.** Its
