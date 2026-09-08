@@ -1073,6 +1073,7 @@ struct CanvasView: UIViewRepresentable {
             hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
                 + " entries:\(midStrokeEntryCount)"
                 + " derived:\(derivedRenderCount)"
+                + " rebuilds:\(sandwichRebuildCount)"
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
@@ -1090,6 +1091,25 @@ struct CanvasView: UIViewRepresentable {
         /// an XCUITest on a shared machine cannot make honestly anyway. A **count** can be asserted
         /// exactly: stepping through a baked move must not move this number at all.
         private var derivedRenderCount = 0
+
+        /// **How many pairs of half-composites this canvas has dispatched** — one per
+        /// `startSandwichRebuild` that got past its guards, so two calls to `Compositor.composite`
+        /// each (`FrameRecipe.compositeHalves`).
+        ///
+        /// **Published for `derivedRenderCount`'s reason, and it answers the same shape of question
+        /// about the other half of the canvas.** TODO (54) is the owner's report that *"the bake and
+        /// cache seems to re-render each frame even though they are the same"*, and the bake half of
+        /// that is answerable headlessly — `FrameBakerLogicTests` counts `Compositor.composite` with
+        /// `CompositeProbe` and a nine-frame hold is one composite. The *cache* half is this
+        /// coordinator, which is a `UIViewRepresentable` coordinator and unreachable from a logic
+        /// test: `SandwichKey` is private to it and `CanvasView.swift` is not compiled into
+        /// `PaintSoftwareUITests`. So the count is published where an XCUITest can read it, and
+        /// stepping the playhead through a hold must not move it.
+        ///
+        /// Counted where the work is *started* rather than where it lands, because that is the
+        /// expensive commitment: a rebuild whose result is discarded by `finishSandwichRebuild`'s key
+        /// check has already paid for both composites.
+        private var sandwichRebuildCount = 0
 
         /// How many times the canvas has *entered* the mid-stroke presentation, published beside the
         /// presentation itself.
@@ -1628,6 +1648,8 @@ struct CanvasView: UIViewRepresentable {
             else { return }
 
             isSandwichRebuilding = true
+            sandwichRebuildCount += 1
+            publishCanvasState()
             Self.sandwichQueue.async { [weak self] in
                 // **The flatten happens here now, not on the main actor before the hop** — RENDER.md
                 // §3.2. `resolve()` is pure over the values `makeSandwichRecipe` froze, so an edit

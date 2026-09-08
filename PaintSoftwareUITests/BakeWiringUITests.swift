@@ -237,6 +237,83 @@ final class BakeWiringUITests: PaintUITestCase {
         attachScreen("03-after-three-seconds-of-playback")
     }
 
+    /// **A held frame is composited once for the whole hold, on the live canvas as well as in the
+    /// bake** — TODO (54).
+    ///
+    /// The owner, 2026-09-07: *"Lets say a frame in the animation is held for a couple cels where
+    /// nothing changes. The bake and cache seems to re-render each frame even though they are the
+    /// same."*
+    ///
+    /// The **bake** half of that is answered headlessly and was already pinned:
+    /// `FrameBakerLogicTests.testANineFrameHoldIsOneFileAndOneComposite` counts
+    /// `Compositor.composite` with `CompositeProbe` and finds one composite and eight `stat`s, and
+    /// MEASURED with the dedupe branch mutated off it finds nine. The **cache** half is this
+    /// coordinator's pair of half-composites, which no logic test can reach — hence
+    /// `CanvasView.sandwichRebuildCount`, published as `rebuilds:` beside `derived:`.
+    ///
+    /// **The control is the first half of the same scene, and it is what makes the second half mean
+    /// anything.** `-uiTestSeedHoldAfterMove` keys a move at frames 0 and 4 of a twelve-frame scene,
+    /// so 0→4 is four distinct pictures and 5→11 is seven identical ones, in one document and against
+    /// one instrument. A count asserted only over the hold would pass against a counter that was never
+    /// incremented, never published, or wired to the wrong thing.
+    func testSteppingThroughAHoldDoesNotRecompositeTheLiveCanvasPerFrame() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery", "-uiTestSeedHoldAfterMove"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertNotNil(waitForSandwich(app, "rest"),
+                        "A transformation layer engages the sandwich, so the canvas has to come to "
+                        + "rest on the baked frame before any of this is measurable")
+        attachScreen("01-hold-fixture-frame-0")
+
+        let next = app.buttons["timeline.stepForwardButton"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        let start = try XCTUnwrap(readFrameLabel(app), "the timeline publishes the playhead")
+        XCTAssertGreaterThanOrEqual(start.total, 12,
+                                    "The fixture needs twelve frames: four of move and seven of hold "
+                                    + "after them. A scene that stops early would make the hold half "
+                                    + "of this test a walk that never moves the playhead, which "
+                                    + "passes for the wrong reason")
+
+        /// One step forward, waiting for the canvas to settle on the new frame's baked picture.
+        func step() {
+            next.tap()
+            XCTAssertNotNil(waitForSandwich(app, "rest"),
+                            "Every frame of this scene is baked, so the canvas has to reach rest on "
+                            + "each of them before the next step is taken")
+        }
+
+        // **The control.** Frames 0→4 are the move: four distinct poses, so four distinct render
+        // trees, four distinct bake keys and four rebuilds at the very least.
+        let beforeMove = try XCTUnwrap(sandwichRebuildCount(app), "the canvas publishes `rebuilds:`")
+        for _ in 0..<4 { step() }
+        let afterMove = try XCTUnwrap(sandwichRebuildCount(app))
+        XCTAssertEqual(readFrameLabel(app)?.current, start.current + 4, "…and the playhead moved")
+        XCTAssertGreaterThanOrEqual(afterMove - beforeMove, 4,
+                                    "Four frames of a move are four different pictures, so the live "
+                                    + "composite has to be rebuilt for each. A count that did not "
+                                    + "move here is a broken instrument, and would make the "
+                                    + "assertion below meaningless")
+        attachScreen("02-end-of-the-move")
+
+        // **The case under test.** Frames 5→11 are past the last pose key, so `AnimationCurve` clamps
+        // and every one of them resolves to the frame-4 pose: the same tree, the same leaf versions,
+        // the same paper, the same active layer — the same two half-composites, seven times over.
+        for _ in 0..<7 { step() }
+        XCTAssertEqual(readFrameLabel(app)?.current, start.current + 11,
+                       "The playhead has to have walked the whole hold; a step that saturated at the "
+                       + "end of the scene would make the count below true of nothing")
+        XCTAssertEqual(sandwichRebuildCount(app), afterMove, """
+            Seven held frames must cost no live composite at all. Every input to the picture is \
+            byte-identical across them — that is what a hold is — and the bake proves it from the \
+            other side of the seam by resolving all seven to one file. A count that climbed by one \
+            per frame is fourteen canvas-sized composites (`FrameRecipe.compositeHalves` is two) \
+            spent to produce the picture already on screen, which is TODO (54) exactly.
+            """)
+        attachScreen("03-end-of-the-hold")
+    }
+
     /// **Where the seeded stroke's ink begins and ends across the paper, in `canvas.host`'s own
     /// pixels**, with the paper's width beside them so a caller can state a margin as a fraction of
     /// the canvas rather than of a device.
@@ -299,6 +376,15 @@ final class BakeWiringUITests: PaintUITestCase {
         }
         guard let left, let right, left < right else { return nil }
         return (left, right, paperRight - paperLeft)
+    }
+
+    /// The `rebuilds:` field of the canvas's published state — see
+    /// `CanvasView.sandwichRebuildCount`.
+    private func sandwichRebuildCount(_ app: XCUIApplication) -> Int? {
+        app.otherElements["canvas.host"].label
+            .split(separator: " ")
+            .first { $0.hasPrefix("rebuilds:") }
+            .flatMap { Int($0.dropFirst("rebuilds:".count)) }
     }
 
     /// The `derived:` field of the canvas's published state — see `CanvasView.derivedRenderCount`.

@@ -114,6 +114,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedKeyframedMove` — TODO (53)'s document, which
         // takes a dozen gestures across three panels to author and one call to state.
         UITestSeeds.seedKeyframedMoveIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedHoldAfterMove` — TODO (54)'s document, the same
+        // shape with its last pose key at frame 4, so the tail of the scene is a hold.
+        UITestSeeds.seedHoldAfterMoveIfRequested(into: canvasManager)
         onCreated()
     }
 }

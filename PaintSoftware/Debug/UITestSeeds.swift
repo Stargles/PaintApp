@@ -91,6 +91,56 @@ enum UITestSeeds {
         canvasManager.currentLayerIndex = 0
     }
 
+    /// **TODO (54)'s document: one scene that is half a move and half a hold**, so the control and
+    /// the case under test are the same twelve frames of the same file.
+    ///
+    /// The owner, 2026-09-07: *"Lets say a frame in the animation is held for a couple cels where
+    /// nothing changes. The bake and cache seems to re-render each frame even though they are the
+    /// same."*
+    ///
+    /// Same construction as `seedKeyframedMoveIfRequested` — ink on a vector layer that holds the
+    /// whole scene, a transformation layer above it — with **the last pose key at frame 4 instead of
+    /// at the end**. `AnimationCurve` clamps past its last key, so frames 5–11 all resolve to the
+    /// frame-4 pose: seven frames whose every render input is byte-identical, sitting immediately
+    /// after five that all differ.
+    ///
+    /// **Both halves in one document is the whole point of the fixture.** An assertion that a count
+    /// does not move across a hold measures nothing on its own — a counter that is broken, unpublished
+    /// or never reached passes it. Walking 0→4 first, in the same launch and against the same
+    /// instrument, is what makes the number that does not move afterwards mean something. It is also
+    /// why the move is first: a fixture that held first would leave "the count was already stuck"
+    /// available as an explanation.
+    static func seedHoldAfterMoveIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedHoldAfterMove"),
+              let size = canvasManager.canvasSize else { return }
+        guard let celIndex = canvasManager.activeCelIndex(inLayer: canvasManager.layers.count - 1,
+                                                          atFrame: 0),
+              let vector = canvasManager.layers[canvasManager.layers.count - 1].cels[celIndex].vector
+        else { return }
+        var brush = canvasManager.selectedBrush
+        brush.size = size.height / 8
+        vector.addStroke(VectorStroke(
+            id: UUID(), brush: brush,
+            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            size: brush.size, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: size.width * 0.2, y: size.height * 0.5, pressure: 1),
+                                    VectorSample(x: size.width * 0.5, y: size.height * 0.5, pressure: 1)],
+                                   channels: .pressureOnly)))
+
+        canvasManager.addValueLayer()
+        let box = CGRect(origin: .zero, size: size)
+        let mover = canvasManager.layers.count - 1
+        canvasManager.layers[mover].fill = nil
+        canvasManager.layers[mover].transform = LayerPose(
+            pose: PoseQuad(restingIn: box),
+            track: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: box)),
+                .init(frame: 4, pose: PoseQuad(box: box,
+                                               mappedBy: CGAffineTransform(translationX: size.width * 0.4,
+                                                                           y: 0)))]))
+        canvasManager.currentLayerIndex = 0
+    }
+
     /// One flat frame in `DecodedFrame`'s own layout (BGRA, premultiplied, opaque) — the same
     /// construction `PaintSoftwareUITests/CanvasManagerTestSupport.swift`'s `writeGreyClip` uses for
     /// the logic tier, duplicated rather than shared because that file is test-only and this one
