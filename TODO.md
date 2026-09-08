@@ -93,37 +93,6 @@ makes it container-only by construction.
 
 ---
 
-## (54) A held frame may be re-rendered once per frame instead of once
-
-**Status** — reported by the owner 2026-09-07, unverified. **They are right that the answer matters
-more than the saving.**
-
-> *"Lets say a frame in the animation is held for a couple cels where nothing changes. The bake and
-> cache seems to re-render each frame even though they are the same. It is a simple optimization and
-> not a high priority one, but if the program was not already meant to do this, then it could surface
-> a deeper issue."*
-
-**The design says it is already meant to do this**, which is what makes the report worth chasing rather
-than filing as an optimisation. [CLAUDE.md](CLAUDE.md) states it plainly while warning about a fixture:
-*"that cel **is** a hold, so those five frames are one bake key and one composite."* `FrameBaker`
-carries a `dedupedCount` and an explicit dedupe path whose comment reads *"a dirty frame whose
-recomputed key already has a file..."*.
-
-**So the question is where the dedupe happens**, and there are two answers with very different
-consequences. If the key is recomputed and the **composite is skipped**, the design holds and the owner
-is seeing something else — a progress count, or the bake queue enumerating frames it then skips. If the
-composite **runs** and only the disk write is skipped, then the expensive half is not being saved at
-all, and every hold in every document pays full price. That is the deeper issue the owner suspected.
-
-**Left to build**
-- [ ] Establish which of the two it is, by counting composites rather than by reading the code —
-      `CompositeProbe` counts calls to `Compositor.composite`, and note it counts **chunks, not
-      frames**, so pin "one small frame is one composite" separately before trusting a total.
-- [ ] If the composite runs, skip it and pin a hold at one composite for its whole span.
-- [ ] Either way, say in RENDER.md which it was, because the docs currently assert the good case.
-
----
-
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
