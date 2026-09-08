@@ -3,6 +3,49 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The debounced thumbnail regen renders the whole canvas on the main thread (2026-09-08)
+
+**Traced from the owner's own `ActionRecorder` trace, not measured** — the recorder stamps no line
+inside `flushPendingThumbnailRegens`, so the last step is inference rather than a reading, and the
+reading it is inferred from is below.
+
+`CanvasManager.init` debounces `thumbnailRegenSubject` by 400 ms on `RunLoop.main`, so every stroke
+and every undo schedules `flushPendingThumbnailRegens()` → `regenerateThumbnail` →
+`CanvasManager.celThumbnailImage` → `PixelOps.rasterize(cel:canvasSize:derived:)`. That call sizes its
+own context to `celThumbnailRasterBound`, which is small and correct — but inside
+`PixelOps.rasterizeUncached` the vector tier is fetched with `cel.vector?.render(quality:)`, and
+`cel.vector` is a `VectorCanvas.Frozen`, which renders **at the vector canvas's own size** and is then
+drawn down into the small context. On a 6000² document that is a 36-megapixel rasterize reached from
+the main thread.
+
+**It is free exactly when the memo is warm, and an undo is precisely when it is not.**
+`Frozen.render` returns `memoized` if the canvas had one; `restoreElements` clears it. So the flush
+lands 400 ms into the background re-render the same undo kicked off, finds no memo, and either waits
+for that render or walks the canvas itself.
+
+**PERFORMANCE.md §11.11a's figure for this term — 3.9–8.0 ms at 2048×1024 and 21.7 ms at 4096² — is a
+warm-memo figure** and should not be read as the cost after an undo. It is the downsample of an image
+that already exists.
+
+**The trace that points here.** `recording-20260907-234101.jsonl`, `Test1` at 6000×6000 on an iPad 9:
+four pencil strokes, then eight undo/redo taps. Divergence between a touch's hardware timestamp and
+the `CACurrentMediaTime()` of the line logged next — same clock, so the gap is main-thread latency —
+is 20 ms median across 62 touches, and **180 ms at t=4.05, 130 at 4.10, 110 at 4.12, 220 at 5.55 and
+170 at 5.61**. The stalled lines include `touch began`, which arrives *before* that tap's own undo work
+starts, so the main thread was already occupied by something the **previous** undo caused. The previous
+undos were at 3.42 and 4.91 — 400 ms and 440 ms earlier, which is where this debounce fires.
+
+A separate 300 ms stall at t=11.13 is the tap that opens the Actions menu and is SwiftUI panel
+construction, not this.
+
+**Not fixed here.** The lock narrowing in `VectorCanvas` (2026-09-08) removes a *different* main-thread
+cost on the same path — `restoreElements` blocking on a render it does not want the pixels of — and it
+does not help this one, because this caller genuinely wants the pixels. Closing it means one of: the
+thumbnail asking for a downsampled render rather than a canvas-sized one; the flush moving off the main
+thread; or the render itself ceasing to be O(canvas area) for a small edit, which is the item filed
+under *"Starting a stroke before the last one has rendered leaves the last one off screen"* above and is
+the same root cause seen from a third door.
+
 ## A cel's own pose channel still rasterizes a posed picture on the main thread every frame (2026-09-06)
 
 **MEASURED at 73.6 ms a frame, a 13.6 fps ceiling, on a 2048² document of 63 strokes** —

@@ -3062,6 +3062,67 @@ MEASURED in `testTheRedoneAppendDrawsWhatAFullReWalkDraws`: 15 bytes, **worst by
 seams, so the honest bound on a chain is the union of its clips rather than the last one. It cannot
 grow past a rounding unit — each press redraws its own clip from the bottom of the stack.
 
+### 11.11b The press is cheap only when nothing is rendering, and the artist is never in that case (2026-09-08)
+
+§11.11a's table is right and is not a bound on what the artist waits. It reports **0.44–7.84 ms** for an
+undo press on the main thread, and `UndoRepairBench` measures one press, waits for the render, and
+measures the next — so it structurally never races a press against a live render. The owner, on a
+6000×6000 document (`CanvasManager.maxCanvasExtent` exactly, 36 megapixels) on a 3 GB iPad 9:
+
+> *"When I try to lay strokes down and undo it, I am met with a lot of lagspikes and stutter when the
+> brush is lifted. Sometimes, brushstrokes that I layed down dissapear. This really should not happen,
+> **the canvas size should not ever impede on main thread lag**."*
+
+**MEASURED from their own `ActionRecorder` trace, which is a main-thread latency instrument nobody had
+read it as.** A `touch` line carries the `UITouch`'s hardware timestamp; the `model`/`note`/`recognizer`
+line logged next carries `CACurrentMediaTime()`; `ActionRecorder.stamp` and `.now` share one base, so
+the gap between them is how long the main thread took to notice. Across 62 touches in
+`recording-20260907-234101.jsonl` the median is **20 ms** and the tail is **110, 130, 170, 180 and
+220 ms**, every one of them around the undo taps.
+
+**The mechanism, and it is a lock scope rather than an algorithm.** `VectorCanvas.lock` was held across
+`renderLocked` — an O(canvas-pixel) rasterize that `StrokeCanvasView.startVectorRender` dispatches to a
+background queue — while `restoreElements(_:changedInk:)`, which `CanvasManager.undo()` reaches
+synchronously from the two-finger tap, took the same lock. So the press waited out whatever render was
+running, and that wait is a function of the canvas's area.
+
+**MEASURED, `UndoContentionBench`, iPad Pro 13-inch M4 simulator, iOS 26.5, Debug, one slot under
+`simlock`, 300 strokes, an undo landing 5 ms into the append render the previous stroke kicked off** —
+the same binary either side of the lock narrowing:
+
+| | undo, render in flight | that render | render still running |
+|---|---|---|---|
+| 6000², before | **25.57 ms** | 29.7 ms | no |
+| 6000², after | **1.70 ms** | 29.7 ms | yes |
+| 3000², before | 3.46 ms | 9.9 ms | no |
+| 3000², after | 1.18 ms | 9.0 ms | yes |
+
+Uncontended, for scale: 1.15 ms before and 2.43 ms after, one measurement each, so the difference
+between *those* two is noise — the finding is that the contended figure has joined them.
+
+**The before row's press is the render's whole remainder** — 29.7 ms of render minus a 5 ms head start
+is 24.7, and the press took 25.57 — which is the operand that says it was waiting rather than working.
+The renders are 29.7 ms on both rows, so the 15x is where the waiting went and not how much work there
+was. And the two before rows are the owner's sentence in two numbers: 3.46 ms at 3000², 25.57 ms at
+6000², same strokes, same edit, 7.4x the press for 4x the area, the press tracking the canvas and
+nothing else.
+
+**What is left after the fix is §11.11a's own figure**, which is what should be left: 1.70 ms against
+1.15–2.43 ms uncontended, i.e. the O(element-count) bookkeeping plus scheduling, and none of the render.
+
+**And the render's own cost is still the canvas's, which this measured on the way past.** The two arms
+draw identical strokes, so their dabs are identical; four times the area cost 3.0–3.3x the render
+(9.0–9.9 ms at 3000² against 29.4–29.7 at 6000²). At a fixed stroke count a vector render is its
+buffer. `renderLocalContent` builds a `UIGraphicsImageRenderer` at the **canvas's** size on every walk
+and, on an append or a repair, draws the whole standing base into it first — deliberately, since the
+base is the picture outside the clip too. So a one-stroke edit on a 6000² canvas allocates 144 MB and
+blits 144 MB in and out however small the damage rectangle is. `incrementalBase` and `regionBase` are
+*not* a second copy — at the identity transform each holds the very object `cachedImage` holds — so the
+two canvas-sized bitmaps alive during a render are the old memo and the new output, which is what
+BUGS.md's *"Starting a stroke before the last one has rendered"* already names. Fixing that is a
+different feature: `cachedImage` is a single `UIImage` to eleven consumers, and making it tiled is
+RENDER.md §3.8's striped composite generalized, with §3.8's own size-keyed-memo trap waiting in it.
+
 ---
 
 ## 12. What Debug actually costs, measured instead of remembered (2026-09-05)

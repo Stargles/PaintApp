@@ -29,6 +29,31 @@ import UIKit
 /// So every arm asserts `renderStillRunning` before it asserts a duration, and reports the render's
 /// own wall clock beside the restore's.
 ///
+/// **MEASURED, this fixture, iPad Pro 13-inch M4 simulator, iOS 26.5, Debug, one slot under
+/// `simlock`** — the same binary either side of `VectorLayer.swift`'s lock narrowing, everything else
+/// identical:
+///
+/// | | undo, render in flight | that render | render still running |
+/// |---|---|---|---|
+/// | 6000², before | **25.57 ms** | 29.7 ms | no |
+/// | 6000², after | **1.70 ms** | 29.7 ms | yes |
+/// | 3000², before | 3.46 ms | 9.9 ms | no |
+/// | 3000², after | 1.18 ms | 9.0 ms | yes |
+///
+/// Uncontended, for scale: 1.15 ms before, 2.43 ms after — one measurement each, so the difference
+/// between those two is noise and the point is that the contended figure has joined them.
+///
+/// **The before row's undo is the render's whole remainder** — 29.7 ms of render, a 5 ms head start,
+/// 25.57 ms of undo — and its `renderStillRunning` came back *false* for that reason rather than
+/// because the fixture missed: the undo did not return until the render had finished. That pairing,
+/// a false flag beside a duration that matches the render, is the defect's signature and is what the
+/// assertion messages below tell you to read in that order. The two renders are 29.7 ms either side,
+/// which is what says the rows differ by where the waiting went and not by how much work there was.
+///
+/// **And the before rows are the owner's sentence in two numbers**: 3.46 ms at 3000², 25.57 ms at
+/// 6000², same strokes, same edit — 7.4x the press for 4x the area. The after rows are 1.18 and
+/// 1.70. *"The canvas size should not ever impede on main thread lag."*
+///
 /// Not a `…LogicTests` file, deliberately: CLAUDE.md's fast-tier selector is
 /// `LogicTests$|CharacterizationTests$|^PerfBaselineTests$`, and a wall-clock assertion must never be
 /// in a tier that runs under parallel clones. Run it by name:
@@ -170,21 +195,30 @@ final class UndoContentionBench: XCTestCase {
     func testAnUndoDoesNotWaitOutARenderOnTheOwnersCanvas() {
         let arm = measureContendedUndo(size: CGSize(width: 6000, height: 6000), strokes: 300)
         report("6000² contended", arm)
-        XCTAssertTrue(arm.renderStillRunning,
-                      "the render finished before the undo returned, so this arm did not measure "
-                      + "contention at all — raise the stroke count or the canvas size rather than "
-                      + "reading the duration below as a result")
-        // Generous by design: the claim is an order of magnitude, not a constant. Before the lock was
-        // narrowed this was the render's own duration, which on this fixture is hundreds of
-        // milliseconds; the failure being guarded against is a return to that, not a slow machine.
-        XCTAssertLessThan(arm.restoreSeconds, 0.050,
-                          "the undo took \(arm.restoreSeconds * 1000) ms while a render of "
-                          + "\(arm.renderSeconds * 1000) ms was walking — that is `VectorCanvas.lock` "
-                          + "covering the pixels again, which is the defect this file exists for")
+        // **The ratio is the assertion that actually catches the defect, and the absolute one below
+        // is the artist-facing claim.** MEASURED against the pre-fix `VectorLayer.swift` on this same
+        // fixture: undo **25.57 ms** against a render of **29.7 ms**, i.e. the whole remainder of the
+        // render after this method's 5 ms head start. That is under 50 ms, so on a machine this fast
+        // the absolute bound does not see it at all — it is sized for the owner's iPad, where the
+        // same render is hundreds of milliseconds.
         XCTAssertLessThan(arm.restoreSeconds, arm.renderSeconds / 3,
                           "the undo cost \(arm.restoreSeconds * 1000) ms against a render of "
                           + "\(arm.renderSeconds * 1000) ms; an undo that scales with the render is "
-                          + "an undo that is waiting for it")
+                          + "an undo that is waiting for it, which is `VectorCanvas.lock` covering "
+                          + "the pixels again")
+        XCTAssertLessThan(arm.restoreSeconds, 0.050,
+                          "the undo took \(arm.restoreSeconds * 1000) ms while a render of "
+                          + "\(arm.renderSeconds * 1000) ms was walking")
+        // **A false flag here has two readings and the duration above tells them apart**, so read
+        // them in that order rather than reaching for the fixture. Either the render outran a fixture
+        // that is now too small for this machine — in which case the two assertions above passed —
+        // or **the restore waited the render out**, which is the defect, and then this is not the
+        // first red on the list. The pre-fix run reported exactly that pairing.
+        XCTAssertTrue(arm.renderStillRunning,
+                      "the render was over when the undo returned. If the assertions above passed, "
+                      + "this fixture no longer overlaps and wants more strokes or a bigger canvas; "
+                      + "if they failed, the undo blocked until the render finished and the flag is "
+                      + "the symptom rather than the fixture")
     }
 
     /// **The same fixture at a quarter of the area**, which is the half of the owner's sentence that

@@ -4895,8 +4895,8 @@ final class VectorCanvas {
         let known: [UUID: CGRect]
         let work: Work
 
-        /// The three shapes a walk comes in. `renderLocked` chose between them inline; naming them is
-        /// what lets the choosing happen under the lock and the drawing happen outside it.
+        /// The three shapes a walk comes in. The choosing used to be inline in one long method;
+        /// naming them is what lets it happen under the lock and the drawing happen outside it.
         enum Work {
             /// **Only the elements the artist has just added, over the picture of the ones they had
             /// before** — see `appendableBase(quality:)` for when that is the same picture. This is
@@ -4917,11 +4917,10 @@ final class VectorCanvas {
     /// What one rasterize produced and learned. The picture is the caller's answer whether or not the
     /// install below accepts it; everything else is for the install to write back.
     private struct RenderResult {
-        /// Post-transform — what `render` hands back.
+        /// Post-transform — what `render` hands back, and what `install` memoizes. At the identity
+        /// it is the very object the content walk produced, which is what makes an incremental base
+        /// free; see `install`.
         let image: UIImage
-        /// Pre-transform. `=== image` exactly at the identity, which is what makes an incremental
-        /// base free; see `install`.
-        let content: UIImage
         let measured: [UUID: CGRect]
         let dabCount: Int
         /// `.null` unless this was a repair, in which case it is the clip finally walked.
@@ -5051,7 +5050,7 @@ final class VectorCanvas {
                 content.image.draw(in: CGRect(origin: .zero, size: plan.size))
             }
         }
-        return RenderResult(image: final, content: content.image, measured: measured,
+        return RenderResult(image: final, measured: measured,
                             dabCount: content.dabCount, repairedRegion: repairedRegion,
                             repairs: repairs, repairsWidened: widened, repairsAbandoned: abandoned)
     }

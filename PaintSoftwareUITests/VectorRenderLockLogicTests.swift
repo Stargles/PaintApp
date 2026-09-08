@@ -26,32 +26,65 @@ import CoreGraphics
 ///    display path and the compositor's snapshot both — for twice the dabs and two canvas-sized
 ///    buffers alive at once, which at 6000² is 288 MB on a 3 GB iPad.
 ///
-/// **On the first test's operands.** It is concurrent, so it can fail to *provoke* the race on a run;
-/// what it cannot do is go red when the code is right, because both sides of its assertion are
-/// produced by shipped code from one display list — the canvas's own memoized answer against a cold
-/// canvas built from the same elements, `IncrementalAppendLogicTests`' comparison exactly. A green
-/// here is therefore weak evidence and a red is strong evidence, which is the safe direction for a
-/// test in a tier that runs constantly. It carries no wall-clock assertion at all; the timing claim
-/// lives in `UndoContentionBench`, where CLAUDE.md says it belongs.
+/// **On the race tests' operands, because the first draft of them had none.** Both sides of the
+/// picture assertion are produced by shipped code from one display list — the canvas's own memoized
+/// answer against a cold canvas built from the elements it currently holds, `IncrementalAppendLogicTests`'
+/// comparison exactly — so neither can go red when the code is right, and there is no wall-clock
+/// assertion anywhere in this file. But a race test that never provokes its race asserts nothing at
+/// all, and this one did not: at 256×192 with 36 strokes the walk finished in under a millisecond, the
+/// edit on this thread always won, the render came back nil as superseded, and **every test here
+/// passed with the version gate deleted from `install`**. `race(on:atVersion:editing:)` is the repair:
+/// a deliberate head start, and `canvas.rasterizations` read either side as the operand that says the
+/// render really did read the old list before the edit replaced it. `racedRounds` is asserted, so a
+/// fixture that stops overlapping reports itself instead of passing quietly.
+///
+/// The timing claim lives in `UndoContentionBench`, where CLAUDE.md says it belongs.
+///
+/// **MUTATION-TESTED, and the record is here because two of the four attempts found the *test* wrong
+/// rather than the code.** Against `VectorLayer.swift`:
+///
+/// * **`install`'s version gate deleted** → both race tests red on round 0, at 2,420 and 2,536 bytes
+///   differing with worst 217/255. It took three fixtures to get there: at 256×192 the render was
+///   superseded before it walked, at 768×576 it finished inside the head start, and both of those
+///   passed. The window and the `race` operand are what they are because of those two greens.
+/// * **`rasterizeLock` deleted** → `testTwoThreadsAskingForOnePictureStampItOnce` red at
+///   `rasterizations` 2 against 1, and on the two threads holding different image objects.
+/// * **The whole change reverted** (i.e. the lock held across the walk again) → `UndoContentionBench`
+///   red, with the undo taking the render's entire remainder.
+///
+/// The seam tolerance in `assertSamePixels` also comes from a mutation run: with `rasterizeLock`
+/// gone, the post-race render took the repair path and differed from the cold walk by 125 bytes at
+/// worst 2/255 — PERFORMANCE.md §11.11's measured seam, not a defect, and a zero-tolerance compare
+/// would have called it one.
 final class VectorRenderLockLogicTests: XCTestCase {
 
     // MARK: - The scene
     //
-    // 256×192 with a few dozen overlapping strokes: big enough that a walk takes long enough to be
-    // raced on a simulator, small enough for a tier that runs constantly.
+    // **1600×1200 with 160 overlapping strokes, and the size is load-bearing rather than arbitrary.**
+    // The raced render is the *append* path — the one a pen-up takes — and an append's whole cost is
+    // the canvas-sized base blit, so the canvas is what decides whether there is a window to land an
+    // edit in at all. This file has now had two drafts whose window was too small to hit: at 256×192
+    // the render was superseded before it started, and at 768×576 it *finished* inside the head
+    // start. Both passed with the version gate deleted from `install`. The blit here is 7.7 MB
+    // against a 0.5 ms head start, and `race` measures the overlap rather than assuming it.
 
-    private static let canvasSize = CGSize(width: 256, height: 192)
+    private static let canvasSize = CGSize(width: 1600, height: 1200)
+
+    /// How long this thread lets the background render walk before it edits under it. Not an
+    /// assertion and not a duration anything is compared against — it is the head start that makes
+    /// the interleaving happen at all, and `racedRounds` checks that it worked rather than assuming.
+    private static let headStart: TimeInterval = 0.0005
 
     private static func brush() -> Brush {
         Brush(name: "Lock", tip: .round, size: 8, dab: BrushDabSettings(spacing: 0.25))
     }
 
     private static func stroke(_ index: Int) -> VectorStroke {
-        let x = 12 + CGFloat((index * 17) % 200)
-        let y = 16 + CGFloat((index * 31) % 150)
+        let x = 12 + CGFloat((index * 37) % 680)
+        let y = 16 + CGFloat((index * 53) % 520)
         let samples = StrokeSamples((0..<10).map { step -> VectorSample in
             let t = CGFloat(step) / 9
-            return VectorSample(x: x + t * 40, y: y + sin(t * .pi) * 22,
+            return VectorSample(x: x + t * 60, y: y + sin(t * .pi) * 34,
                                 pressure: 0.35 + 0.65 * t)
         }, channels: .pressureOnly)
         return VectorStroke(brush: brush(),
@@ -76,6 +109,56 @@ final class VectorRenderLockLogicTests: XCTestCase {
         return data as Data
     }
 
+    /// Two renders show the same picture, and **say how they differ when they do not**.
+    ///
+    /// `XCTAssertEqual` on two `Data`s prints each one's byte *count*, so a real difference reports
+    /// as `("1769472 bytes") is not equal to ("1769472 bytes")` — a failure that names neither the
+    /// element nor the reason, which is the diagnosis CLAUDE.md asks every shared assertion to give.
+    ///
+    /// **The tolerance is one rounding unit and it is not slack, it is the difference between these
+    /// two operands.** The live arm here may have got its pixels from a *region repair*, and
+    /// PERFORMANCE.md §11.11 measures a repaired picture against a cold full walk at **worst 1 out of
+    /// 255**, along the seam where the clip's integral edge falls: a repair redraws its rectangle
+    /// from the bottom of the stack and composes its seam with the previous repair's. A zero-tolerance
+    /// compare between a repair and a cold walk is therefore an assertion that can go red against
+    /// correct code, and this one did — 125 of 1,769,472 bytes, worst 2/255, on a run where the
+    /// timing happened to put the post-race render on the repair path.
+    ///
+    /// **`maxDelta` and not a count, because the thing being caught is not subtle.** A stale install
+    /// puts a whole extra stroke in the picture: thousands of bytes at deltas up to the ink's own
+    /// alpha. Bounding the *depth* of the difference separates those two cases with two orders of
+    /// magnitude to spare, and bounding the count would not — a seam's byte count scales with the
+    /// clip's perimeter, which is a property of the fixture rather than of correctness.
+    private func assertSamePixels(_ live: UIImage, _ cold: UIImage, _ what: String,
+                                  maxDelta: Int = 2,
+                                  file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        guard let a = rawPixels(live), let b = rawPixels(cold) else {
+            XCTFail("\(what): no bitmap to compare", file: file, line: line)
+            return false
+        }
+        guard a.count == b.count else {
+            XCTFail("\(what): byte counts differ (\(a.count) vs \(b.count))", file: file, line: line)
+            return false
+        }
+        if a == b { return true }
+        var worst = 0, worstIndex = -1, differing = 0
+        a.withUnsafeBytes { ra in
+            b.withUnsafeBytes { rb in
+                let pa = ra.bindMemory(to: UInt8.self), pb = rb.bindMemory(to: UInt8.self)
+                for i in 0..<pa.count {
+                    let delta = abs(Int(pa[i]) - Int(pb[i]))
+                    if delta > 0 { differing += 1 }
+                    if delta > worst { worst = delta; worstIndex = i }
+                }
+            }
+        }
+        if worst <= maxDelta { return true }
+        XCTFail("\(what): \(differing) of \(a.count) bytes differ, worst \(worst)/255 at byte "
+                + "\(worstIndex) — past the \(maxDelta)/255 a repair's seam can account for, so "
+                + "this is ink rather than rounding", file: file, line: line)
+        return false
+    }
+
     /// **A cold canvas built from `elements`, which cannot take any fast path** — a fresh canvas has
     /// no memo, no incremental base and no region base, so this is the full walk by construction and
     /// is the only honest reference for what a display list is supposed to look like.
@@ -90,82 +173,101 @@ final class VectorRenderLockLogicTests: XCTestCase {
 
     // MARK: - 1. A walk whose inputs moved is not installed
 
+    /// One round of the race: start the render of `version`, let it get into the walk, then run
+    /// `edit` on this thread under it. Returns whether the render actually walked.
+    ///
+    /// **`rasterizations` read across the edit is the operand that says the race happened**, and it
+    /// has to be read across the edit rather than around the whole thing. The counter moves in
+    /// `install`; `install` is reached only by a plan that saw `version`, which the edit is about to
+    /// move. So a round where it moves **after `edit()` returned** is a round where the render read
+    /// the old list before the edit and tried to install after it — the entire interleaving under
+    /// test, in one comparison.
+    ///
+    /// Reading it around the whole round instead is the weaker claim that *a* walk happened, and it
+    /// is satisfied by a render that started and finished inside the head start. That is not a
+    /// hypothetical: it is what this file did at 768×576, where it passed with the version gate
+    /// deleted.
+    private func race(on canvas: VectorCanvas, atVersion version: Int,
+                      editing edit: () -> Void) -> Bool {
+        let entered = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            entered.signal()
+            _ = canvas.render(quality: .full, ifStillAtVersion: version)
+            finished.signal()
+        }
+        entered.wait()
+        Thread.sleep(forTimeInterval: Self.headStart)
+        edit()
+        let atEdit = canvas.rasterizations
+        finished.wait()
+        return canvas.rasterizations > atEdit
+    }
+
     func testAnUndoLandingDuringARenderNeverLeavesTheMemoShowingTheUndoneStroke() {
-        let base = Self.elements(36)
+        let base = Self.elements(160)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: base)
         // The memo and the incremental base, so the raced render takes the append path — which is the
         // path a pen-up actually takes and the one an undo actually interrupts.
         _ = canvas.render()
 
-        for round in 0..<40 {
+        var racedRounds = 0
+        for round in 0..<8 {
             // Forward edit: one more stroke, declared as an append exactly as `addStroke` does.
-            canvas.addStroke(Self.stroke(200 + round))
-            let after = canvas.elements
-            let version = canvas.version
-
-            // The background render of `version`, racing the undo below. `ifStillAtVersion:` is what
-            // `StrokeCanvasView.startVectorRender` uses, so this is the shipped call.
-            let finished = DispatchSemaphore(value: 0)
-            DispatchQueue.global(qos: .userInitiated).async {
-                _ = canvas.render(quality: .full, ifStillAtVersion: version)
-                finished.signal()
-            }
-
-            // The undo, on this thread, exactly as `registerVectorUndo`'s closure spells it.
-            canvas.restoreElements(base, changedInk: nil)
-            finished.wait()
+            canvas.addStroke(Self.stroke(900 + round))
+            let after = canvas.elements.count
+            // The undo, on this thread, exactly as `registerVectorUndo`'s closure spells it, run
+            // under a background `render(quality:ifStillAtVersion:)` — the call
+            // `StrokeCanvasView.startVectorRender` makes.
+            if race(on: canvas, atVersion: canvas.version,
+                    editing: { canvas.restoreElements(base, changedInk: nil) }) { racedRounds += 1 }
 
             // **The assertion, and both its operands are shipped code drawing one list.** Whatever
             // the memo holds now must be the picture of the elements the canvas holds now. A walk of
-            // `after` installed under the version `base` was restored at would show the undone
-            // stroke, and that is exactly the difference this catches.
-            let live = canvas.render()
-            let cold = coldRender(of: base)
-            guard let a = rawPixels(live), let b = rawPixels(cold) else {
-                return XCTFail("round \(round): no bitmap to compare")
-            }
-            XCTAssertEqual(a, b, "round \(round): the canvas's own render disagrees with a cold walk "
-                           + "of the elements it currently holds — a render planned before the undo "
-                           + "was installed after it, so the memo is a picture of \(after.count) "
-                           + "elements filed under a version that has \(base.count)")
-            if a != b { return }   // one report is enough; forty would bury it
+            // the longer list installed under the version `base` was restored at would show the
+            // undone stroke, and that is exactly the difference this catches.
+            // One report is enough; eight would bury it.
+            guard assertSamePixels(canvas.render(), coldRender(of: base),
+                                   "round \(round): the canvas's own render disagrees with a cold "
+                                   + "walk of the elements it currently holds — a render planned "
+                                   + "before the undo was installed after it, so the memo is a "
+                                   + "picture of \(after) elements filed under a version that has "
+                                   + "\(base.count)") else { return }
         }
+        XCTAssertGreaterThan(racedRounds, 0,
+                             "no round actually raced: in every one of them the render either never "
+                             + "walked or had already installed by the time the undo returned, so "
+                             + "this test asserted nothing about an install landing on a moved "
+                             + "canvas. Widen the window — see `canvasSize` and `headStart`")
     }
 
     /// The same guarantee from the other end of the class: an edit that is *not* an append, so the
     /// raced render is a region repair rather than an append, and the install has to refuse a
     /// `paintedBounds` table measured against a list that has since been replaced.
     func testARestoreLandingDuringARepairNeverLeavesStaleFootprintsBehind() {
-        let base = Self.elements(36)
+        let base = Self.elements(160)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: base)
         _ = canvas.render()
 
         var longer = base
-        longer.append(.stroke(Self.stroke(900)))
+        longer.append(.stroke(Self.stroke(1900)))
+        let damage = CGRect(x: 8, y: 8, width: 300, height: 240)
 
-        for round in 0..<30 {
+        var racedRounds = 0
+        for round in 0..<8 {
             // A region-declaring restore in each direction, which is what puts a `regionBase` up and
             // makes the next render the repair path.
-            canvas.restoreElements(longer, changedInk: CGRect(x: 8, y: 8, width: 120, height: 90))
-            let version = canvas.version
-            let finished = DispatchSemaphore(value: 0)
-            DispatchQueue.global(qos: .userInitiated).async {
-                _ = canvas.render(quality: .full, ifStillAtVersion: version)
-                finished.signal()
-            }
-            canvas.restoreElements(base, changedInk: CGRect(x: 8, y: 8, width: 120, height: 90))
-            finished.wait()
+            canvas.restoreElements(longer, changedInk: damage)
+            if race(on: canvas, atVersion: canvas.version,
+                    editing: { canvas.restoreElements(base, changedInk: damage) }) { racedRounds += 1 }
 
-            let live = canvas.render()
-            let cold = coldRender(of: base)
-            guard let a = rawPixels(live), let b = rawPixels(cold) else {
-                return XCTFail("round \(round): no bitmap to compare")
-            }
-            XCTAssertEqual(a, b, "round \(round): a repair planned before the restore was installed "
-                           + "after it — either its pixels or the footprints it measured, both of "
-                           + "which are claims about a display list this canvas no longer holds")
-            if a != b { return }
+            guard assertSamePixels(canvas.render(), coldRender(of: base),
+                                   "round \(round): a repair planned before the restore was "
+                                   + "installed after it — either its pixels or the footprints it "
+                                   + "measured, both of which are claims about a display list this "
+                                   + "canvas no longer holds") else { return }
         }
+        XCTAssertGreaterThan(racedRounds, 0, "no round actually raced — see the sibling test")
     }
 
     // MARK: - 2. Two threads asking for one picture stamp it once
@@ -177,7 +279,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
     /// the two do overlap — so the barrier below is there to make the overlap likely rather than to
     /// make the assertion true.
     func testTwoThreadsAskingForOnePictureStampItOnce() {
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.elements(48))
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.elements(160))
         let version = canvas.version
         XCTAssertEqual(canvas.rasterizations, 0, "the fixture must start with nothing memoized")
 
@@ -214,7 +316,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
     /// happen and are self-consistent — rather than in milliseconds, which is `UndoContentionBench`'s
     /// job.
     func testTheStateAccessorsStayAnswerableWhileARenderIsWalking() {
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.elements(48))
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.elements(160))
         let version = canvas.version
         let finished = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -231,7 +333,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
         var landed = false
         while !landed {
             landed = finished.wait(timeout: .now() + 0.001) == .success
-            XCTAssertEqual(canvas.elements.count, 48, "the display list changed under a read")
+            XCTAssertEqual(canvas.elements.count, 160, "the display list changed under a read")
             XCTAssertGreaterThanOrEqual(canvas.version, version, "the version went backwards")
             _ = canvas.cachedRender()
             reads += 1
