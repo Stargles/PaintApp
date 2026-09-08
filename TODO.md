@@ -282,9 +282,10 @@ finding 4's own miscounted "twelve of sixteen" (it is twelve of seventeen). The
 rebase carried real content: `origin/main` had independently shipped `LayerFolder.transform`'s
 options-panel entry and pose-node delete/tap-to-add (both were still listed as unbuilt in this
 branch's stale copy of item (21)) and had reopened and rewritten item (31) around the owner's own iPad
-having 3 GB of RAM. All eight of this file's numbered items — (53) through (37) at the time, now seven
-since (53) shipped and left the queue during the rebase — were re-verified line by line against the
-rebased tree; every remaining status line and "Left to build" bullet checked out.
+having 3 GB of RAM. **As the queue stood on 2026-09-07 during that audit** — eight items, (53) through
+(37) — every one was re-verified line by line against the rebased tree and every remaining status line
+and "Left to build" bullet checked out. **That list is history, not the current queue**: (53), (31) and
+(54) have shipped and left since, and (36) was fast-tracked in.
 
 **Left to build**
 - [x] **Fix what the specs assert that the code contradicts.** RENDER.md §5 stage 6 said the export
