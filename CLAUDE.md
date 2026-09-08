@@ -805,6 +805,27 @@ same worker polled — and queued each poll as a *background task*, leaving **78
 finished work that has not happened. A brief that says "wait" should say **block on one wait; do not queue
 timers**.
 
+**And polling a finished-or-not question costs tokens, not CPU, which is why nobody notices it.** The
+owner watched an agent run `cd <worktree> && true` — a command whose entire output is nothing —
+**over two hundred times in one chain**, waiting for a test run, 2026-09-08. Each one is a full
+request: the whole conversation re-sent, a tool call, an empty result. A 25-minute suite polled that
+way costs more than the suite. The owner: *"there has to be a better alternative than to mindlessly
+waste context like that."*
+
+There is, and it is one line. **Block on the condition inside a single command**, so one tool call
+covers the whole wait however long it takes:
+
+```bash
+until grep -qE "TEST SUCCEEDED|TEST FAILED|BUILD FAILED" /tmp/run.log; do sleep 20; done
+```
+
+Run *that* in the background if you want to do other work meanwhile — the harness re-invokes you when
+it exits, so there is nothing to check for. **Put this in every brief**, beside "do not spawn
+subagents": an agent told only *what* to wait for will invent the loop, and the loop it invents is the
+expensive one. The rule generalises past test runs — it is the same mistake as reading a banner
+instead of a count, in that a cheap proxy for "is it done" gets re-read instead of the real signal
+being waited on once.
+
 **A device of your own stops you erasing someone else's. It does not stop you starving the machine —
 wrap every run in [tools/simlock.sh](tools/simlock.sh).**
 

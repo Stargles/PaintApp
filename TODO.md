@@ -48,6 +48,62 @@ rather than assuming it still holds.
 
 ---
 
+## (57) The on-disk shape of a project does not read well
+
+**Status** — reported by the owner 2026-09-08, browsing the project files on their iPad.
+
+> *"right now I'm looking at the file structure of projects stored on the Ipad and can see some
+> things I'd like to fix:
+> 1. There is a json file for the layers im guessing that contains the strokes. Why is this file
+> under the images folder?
+> 2. Folder names are Untitled.paintproj but does not change when the project name is changed.
+> 3. if you find any other things to organize nicely, then fix them."*
+
+**This is now artwork the owner keeps**, not scratch — item (36) moved projects out of the container
+onto a folder they chose, so the layout is something they look at in Files. The standing permission
+that *"everything on the ipad right now is expendable"* (2026-08-27) has lapsed, so a layout change
+needs a migration that cannot lose a project, not a format bump.
+
+Point 2 is the one with teeth: a bundle whose directory name never follows its title means the
+**title lives in exactly one place, the manifest**, and a directory listing cannot tell two projects
+apart. Renaming a bundle on disk is also the operation most likely to lose one, so it wants the same
+copy → verify → atomic rename → remove discipline (36)'s migration used.
+
+**Left to build**
+- [ ] Move the layer/stroke JSON out from under the images directory, with a migration.
+- [ ] Make the bundle's directory name follow the project's title, safely.
+- [ ] Sweep the rest of the layout and fix what else reads badly.
+
+---
+
+## (58) Playback does not hold 24 fps on a maximum-size canvas, even with every layer hidden
+
+**Status** — reported by the owner 2026-09-08. **May already be fixed** by (56)'s thumbnail work;
+that has to be checked before anything is built.
+
+> *"currently, pressing the playback button of Test1 does not run at 24FPS, sometimes taking 313ms
+> per frame. This is even after hiding all layers so that the canvas is pretty much a blank white
+> sheet. My guess is that the current thumbnail fix may solve it, but if it does not, then that hints
+> at a deeper issue which must be investigated and solved."*
+
+**The owner's own reasoning is the right first move and it is cheap**: (56) removed a full-canvas
+rasterize from the main thread on every stroke and every undo, and the same shape sat behind the
+onion skin, the gallery tile and the `RenderResolution` knob. Re-measure playback on `Test1` at
+6000x6000 before assuming there is a second defect.
+
+**If it survives that, the reading is worth more than the number.** *"Every layer hidden and still
+313 ms a frame"* says the cost is **not** in compositing the artist's content — a hidden layer
+contributes nothing to draw. So it is per-frame work that scales with the canvas rather than with
+what is on it: a buffer allocated per frame, a cache keyed so every frame misses, or a bake the
+playback clock waits on. That is the same family as (56) and as BUGS.md's *"Starting a stroke before
+the last one has rendered"*, all three being "a small change costs the whole canvas".
+
+**Left to build**
+- [ ] Re-measure playback at 6000x6000 against the merged (56) work.
+- [ ] If it is still slow, find what per-frame cost scales with canvas area when nothing is drawn.
+
+---
+
 ## (56) Canvas padding makes stroke-and-undo stutter, and loses strokes
 
 **Status** — reported by the owner 2026-09-07, with a recording. Root cause under investigation.
