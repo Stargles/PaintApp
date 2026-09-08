@@ -3123,6 +3123,111 @@ BUGS.md's *"Starting a stroke before the last one has rendered"* already names. 
 different feature: `cachedImage` is a single `UIImage` to eleven consumers, and making it tiled is
 RENDER.md §3.8's striped composite generalized, with §3.8's own size-keyed-memo trap waiting in it.
 
+### 11.11c A cel thumbnail cost the canvas, warm memo or cold (2026-09-08)
+
+§11.11b closed the *press*. This is the other main-thread term the same trace points at, and the one
+BUGS.md filed without a number: `CanvasManager.init` debounces `thumbnailRegenSubject` by 400 ms on
+`RunLoop.main`, so `flushPendingThumbnailRegens` → `celThumbnailImage` → `PixelOps.rasterize` runs on
+the main thread after every stroke and every undo.
+
+**`PixelOps.rasterizeUncached` draws four tiers into the caller's buffer, and three of them are
+`UIImage`s that resample as they are drawn — so a flatten into a small buffer costs the small buffer
+for those three. The vector tier is a *drawing*, and it was being asked for a picture at the canvas's
+own resolution and then resampled down.** On the owner's 6000×6000 `Test1` that is a 36-megapixel
+image squeezed into a 480-point box.
+
+**The entry said it was "free exactly when the memo is warm". That is wrong, and it is the finding.**
+A warm memo removes the *walk*; what is left is the resample, and the resample is the whole
+canvas-area term. MEASURED at **34.1-35.1 ms warm at 6000x6000, flat in stroke count**. §11.11a's
+3.9-8.0 ms at 2048x1024 and 21.7 ms at 4096² are that same resample at those areas, not a floor
+somebody had already paid down.
+
+**MEASURED by `ThumbnailRenderBench`, iPad Pro 13-inch M4 simulator, iOS 26.5, Release, one slot under
+`simlock` on an idle machine (81% idle), both routes alternating in one process on one canvas, median
+of five.** The *canvas-sized* arm is `rasterizeUncached` as it stood for a vector-only cel, kept
+verbatim in the bench; the *reduced* arm is `CanvasManager.celThumbnailImage`.
+
+| canvas | strokes | canvas-sized, cold | canvas-sized, warm | reduced, no slot | **reduced, after a stroke** |
+|---|---|---|---|---|---|
+| 6000² | 4 | 56.7 ms | 34.1 ms | 1.40 ms | **1.08 ms** |
+| 6000² | 40 | 68.1 ms | 35.1 ms | 3.44 ms | **1.22 ms** |
+| 6000² | 300 | 136.4 ms | 34.1 ms | 18.1 ms | **1.50 ms** |
+| 2048×1024 | 4 | 22.2 ms | 15.2 ms* | 1.14 ms | **2.63 ms*** |
+| 2048×1024 | 40 | 71.6 ms | 15.1 ms* | 17.1 ms | **5.54 ms*** |
+| 2048×1024 | 300 | 74.4 ms | 3.9 ms | 19.8 ms | **1.09 ms** |
+| 2048×1024 | 1000 | 211.2 ms | 3.5 ms | 59.2 ms | **1.03 ms** |
+
+\* **The two starred rows are the first two the process ran and carry its warm-up** — first-touch of
+the gradient caches, the renderer's lazy state and the first multi-megabyte allocations. The tell is
+that `canvasSizedWarm` reads 15.1-15.2 ms on them and 3.5-3.9 ms on the two rows below, on a term that
+is a function of the buffer alone and cannot depend on stroke count. `measureRow` warms per row and
+that is not enough for the *first* row of a run; read those two as noise rather than as a shape. The
+Debug run of the same bench, where the same two rows land differently, agrees with everything else
+here.
+
+**Read the last column first: ~1.0-1.5 ms across an 18x range of canvas area and a 250x range of
+stroke count.** *"The canvas size should not ever impede on main thread lag."* Against the warm
+column that is 3.4-3.6x at 2048×1024 and **23-32x at 6000×6000**.
+
+**The middle two columns are the design decision, and the first version of the fix got it wrong.**
+"Walk the cel at the thumbnail's resolution" alone is the `reduced, no slot` column: right about the
+canvas — it is flat in area — and O(every dab on the cel), which at a thousand strokes is **59.2 ms
+against the 3.5 ms resample it replaced**, a 17x regression in Release and a 50x one in Debug, on a
+document the owner plausibly has. The `canvas-sized` route is O(area) and the naive reduced route is
+O(content); neither dominates. **A rule that picked the cheaper of the two would still be O(one of
+them).** So the reduced path was given its own memo and its own two bases —
+`VectorCanvas.reducedRender`, the same trio TODO (41) built for the native render, one resolution
+down — and the cost became O(what changed), which is neither.
+
+**The whole main-thread term, through the shipped entry point** — `manager.undo()`, then the debounced
+flush it queued, driven synchronously as `UndoRepairBench` drives it, five presses:
+
+| canvas | flush | canvas-sized walks across five flushes |
+|---|---|---|
+| 6000² | **2.33 ms** | 0 |
+| 2048×1024 | **1.31 ms** | 0 |
+
+**And it no longer queues behind the display's own render**, which was a second stall on the same
+path. `rasterizeLock` spans every rasterize so that two threads asking for one picture share it; a
+reduced render shares nothing with a native one, so it takes the lock no more. MEASURED with an undo's
+background render 5 ms in and still walking: **thumbnail 2.01 ms against a render of 82.0 ms**, with
+`renderStillRunning` true — `UndoContentionBench`'s operand, for its reason.
+
+**What the tile costs in fidelity, and it is real rather than absent.** Source-over of overlapping
+dabs is not linear, so coverage resolved at 480 points is not coverage resolved at 6000 and averaged
+down — the reduced tile reads very slightly bolder. MEASURED on the finished 120-point tile, worst
+channel difference of 255:
+
+| canvas | 8 strokes | 300 strokes |
+|---|---|---|
+| 6000² | 21 | 36 |
+| 2048×1024 | 27 | 49 |
+| 1024² | 20 | 25 |
+
+Mean difference over the bytes that differ is **2.2–3.5**, and `ThumbnailRenderLogicTests` bounds the
+worst at 64 with a control arm — a tile of an entirely different drawing scores **255** — plus an ink
+coverage compare that MEASURED **488 inked pixels against the canvas-sized route's 490**. Side by
+side at 4x the two tiles are indistinguishable; the bench writes that image out.
+
+**Three other consumers had the same shape and are fixed by the same line**, none of them the ones the
+brief for this pass expected:
+
+- **The onion skin.** `OnionSkinRasterCache` asks `PixelOps.rasterize(cel:canvasSize:)` at a *reduced*
+  size and got a canvas-sized vector render every time.
+- **The gallery tile.** `ProjectStore` mints its recipe with `RenderSizing.fitting(320×320)`, so every
+  visible leaf was rendered at canvas size and resampled — inside a save.
+- **The `RenderResolution` knob.** At 50% and 75% the leaves were rendered at 100% and resampled, so
+  the knob reduced the *composite* and not the leaf renders under it. It does now.
+
+**The eyedropper and the export do not have it**, which is worth writing down because they are the two
+this was expected at. The eyedropper takes `RenderSizing.native` deliberately — its own doc says a
+reduced composite would blend the neighbours into the sampled colour — and **export composites
+nothing at all**: since RENDER.md §3.9 its only pixel source is the bake store, so it never reaches
+`PixelOps.rasterize`.
+
+**What is left is `cel.derived`**, the other branch of the same line, which still renders at canvas
+size — see BUGS.md.
+
 ---
 
 ## 12. What Debug actually costs, measured instead of remembered (2026-09-05)

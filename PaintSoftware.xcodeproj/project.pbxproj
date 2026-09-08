@@ -214,6 +214,8 @@
 		329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */; };
 		9962E3741426FA1487C55459 /* VectorRenderLockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BB5473D1DDD0AA2183F5B5 /* VectorRenderLockLogicTests.swift */; };
 		EDA37468AF86B87632104BAE /* UndoContentionBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE32F10E685C4E802A5B3800 /* UndoContentionBench.swift */; };
+		7848B7FEFCE5AEFE7AC3097B /* ThumbnailRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013A41F1EC13F3CDBDB34768 /* ThumbnailRenderLogicTests.swift */; };
+		2AFCCD3A631454D22DC189D2 /* ThumbnailRenderBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE585A643A05F533D61FF99 /* ThumbnailRenderBench.swift */; };
 		295CCCBE4F27D38A3228BA16 /* MemoryAuditBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */; };
 		DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */; };
 		DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */; };
@@ -593,6 +595,8 @@
 		E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoRepairBench.swift; sourceTree = "<group>"; };
 		71BB5473D1DDD0AA2183F5B5 /* VectorRenderLockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorRenderLockLogicTests.swift; sourceTree = "<group>"; };
 		CE32F10E685C4E802A5B3800 /* UndoContentionBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoContentionBench.swift; sourceTree = "<group>"; };
+		013A41F1EC13F3CDBDB34768 /* ThumbnailRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThumbnailRenderLogicTests.swift; sourceTree = "<group>"; };
+		6AE585A643A05F533D61FF99 /* ThumbnailRenderBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThumbnailRenderBench.swift; sourceTree = "<group>"; };
 		717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryAuditBench.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Tool.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerFolder.swift; sourceTree = "<group>"; };
@@ -980,6 +984,8 @@
 				E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */,
 				71BB5473D1DDD0AA2183F5B5 /* VectorRenderLockLogicTests.swift */,
 				CE32F10E685C4E802A5B3800 /* UndoContentionBench.swift */,
+				013A41F1EC13F3CDBDB34768 /* ThumbnailRenderLogicTests.swift */,
+				6AE585A643A05F533D61FF99 /* ThumbnailRenderBench.swift */,
 				717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */,
 				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
@@ -1517,6 +1523,8 @@
 				329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */,
 				9962E3741426FA1487C55459 /* VectorRenderLockLogicTests.swift in Sources */,
 				EDA37468AF86B87632104BAE /* UndoContentionBench.swift in Sources */,
+				7848B7FEFCE5AEFE7AC3097B /* ThumbnailRenderLogicTests.swift in Sources */,
+				2AFCCD3A631454D22DC189D2 /* ThumbnailRenderBench.swift in Sources */,
 				295CCCBE4F27D38A3228BA16 /* MemoryAuditBench.swift in Sources */,
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
 				53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */,
