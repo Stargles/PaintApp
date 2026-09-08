@@ -1031,6 +1031,53 @@ extension CanvasManager {
                                    pose: pose)
     }
 
+    /// **`SandwichKey` for this frame** — everything `makeSandwichRecipe` would evaluate, as one
+    /// comparable value, so that "does the live canvas have to composite again?" is answered by the
+    /// same document walk that would answer "what does it composite?".
+    ///
+    /// **It lives beside the recipe rather than in the coordinator for `contentVersion`'s reason one
+    /// level up.** That accessor exists so the key and `leafSnapshots` cannot be short different
+    /// *fields*; this exists so the key and the recipe cannot be built from different *frames* or
+    /// different trees. `CanvasView.Coordinator.makeSandwichKey` is the only caller in the app and
+    /// does nothing but supply `override` — its two latches, which are coordinator state and cannot
+    /// move here.
+    ///
+    /// `frame` is spent here and is deliberately not a field of the result; `SandwichKey`'s own doc
+    /// carries that argument, which is TODO (54)'s fix.
+    /// **`tree` is an optimisation and not a second answer** — `reconcileLayers` has already derived
+    /// it for this frame and hands it back rather than paying a second `renderTreeAndPoses` walk on
+    /// every SwiftUI pass. Omitting it resolves the same tree here.
+    @MainActor
+    func sandwichKey(atFrame frame: Int, activeLayerIndex: Int,
+                     override: ActiveContentOverride = .resolve,
+                     tree: [RenderNode]? = nil) -> SandwichKey {
+        // §4.4's per-leaf container poses, resolved once for the whole map: `contentVersion` resolves
+        // them itself when they are not handed in, and asking inside the loop would make a tree walk
+        // quadratic in the layer count on the path RENDER §2 is most protective of.
+        let poses = layerPoses(atFrame: frame)
+        let contents = layers.indices.map { index -> LayerContentVersion? in
+            if case .held(let content) = override, index == activeLayerIndex { return content }
+            return contentVersion(ofLayer: index, atFrame: frame, poses: poses)
+        }
+        return SandwichKey(tree: tree ?? renderTreeAndPoses(atFrame: frame).tree,
+                           activeLayerIndex: activeLayerIndex,
+                           contents: contents,
+                           renderResolution: renderResolution,
+                           canvasBackgroundColor: canvasBackgroundColor,
+                           isCanvasBackgroundVisible: isCanvasBackgroundVisible)
+    }
+
+    /// What the active layer's content version should be, for the two states in which the coordinator
+    /// holds it rather than reading it — a live dab and an open text edit. See
+    /// `CanvasView.Coordinator.makeSandwichKey`, which is the only thing that ever passes `.held`.
+    ///
+    /// `.held(nil)` is a real answer and not an absence: a layer with no cel at this frame has a nil
+    /// version, and a text edit opened on one has to keep holding that nil.
+    enum ActiveContentOverride {
+        case resolve
+        case held(LayerContentVersion?)
+    }
+
     /// The field list itself, over a `Layer` the caller already holds. Static and value-only so that
     /// `leafSnapshots` — which reads a `Layer` by value precisely so nothing downstream reads off
     /// `self` — can use it without reaching back into the document.

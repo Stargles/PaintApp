@@ -1468,51 +1468,11 @@ struct CanvasView: UIViewRepresentable {
         // `MaskResolver`'s cache turned out to need exactly the same answer; the request carries it
         // for both. Its doc comment carries the reasoning this key exists at all.
 
-        /// What §5.2's cached composites depend on — everything *except* the live stroke.
-        ///
-        /// The same rule governs what may be in it as governs `InterpolationPreviewKey` above: every
-        /// evaluation input, and nothing that moves per dab. **It is no longer *modelled* on that key,
-        /// which as of 2026-08-29 has no field list to model** — it is `DerivedCelContent.identity`
-        /// plus a quality. This one still enumerates by hand, because a composite's inputs are the
-        /// tree and the document rather than one derivation; what it does not enumerate by hand any
-        /// more is `contents`, which comes from `CanvasManager.contentVersion(ofLayer:atFrame:)` so
-        /// that it and `leafSnapshots` cannot be short different fields. The derived tree carries every
-        /// structural and group property already (`[RenderNode]` is `Equatable`), so it is most of
-        /// the key on its own; the frame and the per-layer content versions are what it does not
-        /// carry, and the active index is what decides *where the tree is cut*.
-        ///
-        /// `activeLayerIndex` moving rebuilds `below` and `above`, which is exactly right —
-        /// switching layers changes where the tree is cut. **It reaches the rest picture not at all**,
-        /// and no longer needs a second key beside this one to say so: the rest picture is the baked
-        /// frame, `FrameBakeKey` has no field for the active leaf, so a layer tap is a hit in the
-        /// ring rather than a composite that was going to be skipped. This key is also what
-        /// `refreshBakedFull` compares against, and soundly — it carries strictly more than the bake
-        /// key does, so a `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
-        private struct SandwichKey: Equatable {
-            let tree: [RenderNode]
-            let activeLayerIndex: Int
-            let frame: Int
-            /// Parallel to `layers`; nil where a layer has no cel at this frame.
-            let contents: [LayerContentVersion?]
-            /// **An evaluation input like any other, and the one that is easiest to leave out.**
-            /// `RenderResolution` changes the size of every cached image without changing a
-            /// single thing this key otherwise reads — not the tree, not a content version, not the
-            /// frame — so omitting it leaves the canvas showing the previous resolution's images until
-            /// something unrelated happens to move the key. That is not a stale *picture*, which this
-            /// cache tolerates by design; it is a control that visibly does nothing when you use it.
-            let renderResolution: RenderResolution
-            /// **The paper is inside `full` and `below` now** (EFFECT_BACKDROP.md §6 step 3), so it is
-            /// an evaluation input and belongs here for exactly `renderResolution`'s reason above.
-            ///
-            /// This is the key that decides whether to *rebuild at all* — and, through
-            /// `refreshBakedFull`, whether the baked frame on hand is still this frame's. Without it
-            /// nothing recomposites when the artist recolours the canvas. `FrameBakeKey` carries the
-            /// resolved colour for the same reason from the other side of the seam.
-            let canvasBackgroundColor: Color
-            /// Invisible is not the same key as white — it is the difference between an effect
-            /// grading a backdrop and an effect grading nothing, which is the whole subject here.
-            let isCanvasBackgroundVisible: Bool
-        }
+        // What §5.2's cached composites depend on is `SandwichKey`, which lives in its own file so
+        // that a logic test can reach it — see there for the field list, for why `frame` is not one
+        // of them, and for the same rule that governs `InterpolationPreviewKey` above: every
+        // evaluation input, and nothing that moves per dab. What this file still owns is the
+        // *builder* below, because two of the fields it fills are coordinator state.
 
         /// The active layer's content version as of the first key built after a vector text edit
         /// opened, and the layer it belongs to. Nil whenever no such edit is live.
@@ -1526,62 +1486,48 @@ struct CanvasView: UIViewRepresentable {
         /// session opens is computed fresh and *then* held for the rest of it.
         private var textEditHeldContent: (layerIndex: Int, content: LayerContentVersion?)?
 
+        /// **The whole of this function is the two states in which the *active* layer's content
+        /// version is held rather than read.** Everything else — the tree, every other layer's
+        /// version, the resolution and the paper — is `CanvasManager.sandwichKey(atFrame:…)`, which
+        /// lives beside `makeSandwichRecipe` so the key and the recipe cannot be built from different
+        /// frames. `tree` is handed on rather than re-derived because `reconcileLayers` already has
+        /// it.
         private func makeSandwichKey(tree: [RenderNode]) -> SandwichKey {
             let frame = canvasManager.currentFrame
             let active = canvasManager.currentLayerIndex
-            let held = sandwichKey?.contents
             // `ADD_TEXT.md` §4 rule 5, the belt to rule 4's braces: a text edit session bumps the
             // canvas exactly twice (open, commit) on its own, and this stops anything *else* — a
             // timeline tick is the case §4 names — moving the key mid-session and paying for the
             // 276 ms snapshot `RenderRequest` records as the expensive half of a composite.
             let textEditLive = canvasManager.isTextEditLive
             if !textEditLive { textEditHeldContent = nil }
-            // **§4.4's per-leaf container poses, resolved once for the whole map.**
-            // `contentVersion(ofLayer:atFrame:)` resolves them itself when they are not handed in,
-            // and this loop runs once per layer on every SwiftUI pass — so asking inside it would
-            // make a tree walk quadratic in the layer count on the path §2 is most protective of.
-            let poses = canvasManager.layerPoses(atFrame: frame)
-            let contents = canvasManager.layers.indices.map { index -> LayerContentVersion? in
-                // **The active layer's content version is in the key only while no stroke is in
-                // progress, and that one clause is both halves of the contract.** During a dab the
-                // version is held at whatever it was when the dab started, so stamping invalidates
-                // nothing and the compositor stays off the drawing path (§2 forbids it being on it).
-                // On lift it goes live again, the key moves, and the canvas snaps to the exact
-                // composite. Held rather than elided so that *starting* a stroke does not move the
-                // key either — the state switch has to be an image swap, not a rebuild.
-                if isSandwichStrokeLive, index == active, let held, held.indices.contains(index) {
-                    return held[index]
+
+            let override: CanvasManager.ActiveContentOverride
+            // **The active layer's content version is in the key only while no stroke is in
+            // progress, and that one clause is both halves of the contract.** During a dab the
+            // version is held at whatever it was when the dab started, so stamping invalidates
+            // nothing and the compositor stays off the drawing path (§2 forbids it being on it).
+            // On lift it goes live again, the key moves, and the canvas snaps to the exact
+            // composite. Held rather than elided so that *starting* a stroke does not move the key
+            // either — the state switch has to be an image swap, not a rebuild.
+            if isSandwichStrokeLive, let held = sandwichKey?.contents, held.indices.contains(active) {
+                override = .held(held[active])
+            } else if textEditLive {
+                // Latched forward: the first key of the session is computed fresh and then held. One
+                // extra `contentVersion` for one layer, once per session, and it resolves its own
+                // pose map because there is no loop here to hoist one out of.
+                if let latch = textEditHeldContent, latch.layerIndex == active {
+                    override = .held(latch.content)
+                } else {
+                    let fresh = canvasManager.contentVersion(ofLayer: active, atFrame: frame)
+                    textEditHeldContent = (active, fresh)
+                    override = .held(fresh)
                 }
-                if textEditLive, index == active, let latch = textEditHeldContent, latch.layerIndex == index {
-                    return latch.content
-                }
-                // **`valueFill`, `effect` and the derivation are all in there, and none of them is
-                // spelled out here any more.** They used to be, and the list was one field short: a
-                // cel's *derivation* — what an interpolated in-between shows rather than stores — was
-                // missing, so the key did not move when `t` moved and the canvas would have frozen on
-                // the first in-between it composited the moment the sandwich started engaging on one.
-                // Nothing about that failure looks wrong: `t` lives on the `Cel` and moves no version
-                // number, and `SandwichKey` goes on comparing the whole node tree, so the composite
-                // rebuilds dutifully from a stale leaf (KEYFRAMES §4.5).
-                //
-                // The answer is not a fourth argument here but **one builder** —
-                // `CanvasManager.contentVersion(ofLayer:atFrame:)`, which `leafSnapshots` also goes
-                // through. `SandwichKey` is documented as that function's mirror; sharing the field
-                // list is what makes the claim structural rather than a promise two files keep by
-                // hand. It resolves at `frame` for the same reason: a mirror that asks a different
-                // question is the one shape a reader checking them will not catch.
-                guard let content = canvasManager.contentVersion(ofLayer: index, atFrame: frame,
-                                                                poses: poses) else {
-                    if textEditLive, index == active { textEditHeldContent = (index, nil) }
-                    return nil
-                }
-                if textEditLive, index == active { textEditHeldContent = (index, content) }
-                return content
+            } else {
+                override = .resolve
             }
-            return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents,
-                               renderResolution: canvasManager.renderResolution,
-                               canvasBackgroundColor: canvasManager.canvasBackgroundColor,
-                               isCanvasBackgroundVisible: canvasManager.isCanvasBackgroundVisible)
+            return canvasManager.sandwichKey(atFrame: frame, activeLayerIndex: active,
+                                             override: override, tree: tree)
         }
 
         // MARK: Rebuilding
