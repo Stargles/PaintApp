@@ -514,7 +514,23 @@ enum PixelOps {
         //
         // A nil answer from the thunk is "not yet" (a recipe mid-edit is not evaluable), and falls
         // back to the stored tier rather than to a hole.
-        let vectorImage = cel.derived?.render(quality) ?? cel.vector?.render(quality: quality)
+        //
+        // **`content` is passed because the vector tier is the only one that can be asked for fewer
+        // pixels, and asking is free.** The other three are `UIImage`s, and `draw(in:)` resamples one
+        // as it draws — a flatten into a small buffer costs the small buffer for all three. The
+        // vector tier is a *drawing*, so it was rendering at the canvas's own resolution and then
+        // being resampled down: on a 6000² document filling a 480-point thumbnail box, a
+        // 36-megapixel rasterize and then a resample of it, on whatever thread asked — which for a
+        // cel thumbnail is the main one. **MEASURED at 34.1–35.1 ms in Release even with the rasterize
+        // memoized away, and flat in stroke count**, because what is left is the resample and the resample is
+        // the canvas (PERFORMANCE.md §11.11c). `Frozen.render(quality:fittingInto:)` does the
+        // arithmetic; a caller drawing 1:1 or larger is untouched, which is every native flatten.
+        //
+        // `cel.derived` gets no such overload yet and still renders at canvas size: its geometry is
+        // in canvas coordinates and the seam's contract is an image, so the same fix is available
+        // there and is a larger change — see `DerivedCelContent.render`.
+        let vectorImage = cel.derived?.render(quality)
+            ?? cel.vector?.render(quality: quality, fittingInto: content.size)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { context in
             // **KEYFRAMES §2.12's raster half, and it is the *other* currency from the vector one.**

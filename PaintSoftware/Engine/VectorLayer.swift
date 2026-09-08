@@ -1280,6 +1280,48 @@ final class VectorCanvas {
     /// already holding, and only outlives it between the edit and the render that consumes it.
     private var regionBase: (image: UIImage, region: CGRect)?
 
+    /// **The three above again, at one reduced resolution** — what `render(quality:resolution:)`
+    /// memoizes and repairs, kept apart from the native trio because it is a different picture.
+    ///
+    /// **It exists because the alternative was MEASURED and is a 50x regression** (PERFORMANCE.md
+    /// §11.11c). A reduced walk that adopts no base is O(every dab on the cel): 1.40 ms for the
+    /// owner's four strokes on a 6000² canvas, and **59.2 ms for a thousand strokes on a 2048×1024
+    /// one**, against 3.5 ms for the resample it replaced. With this slot the cost is the same
+    /// O(what changed) the native render has had since TODO (41), which is what makes a thumbnail
+    /// independent of *both* the canvas's area and the cel's density rather than trading one for the
+    /// other.
+    ///
+    /// **One resolution, and a request at another replaces it.** Two consumers ask below native — the
+    /// cel thumbnail, at a box fixed by `celThumbnailRasterBound`, and the onion skin at its own — and
+    /// they are almost never the same cel, since an onion skin shows the frames the artist is *not*
+    /// editing. A mismatch costs one full walk and takes the slot; it can never draw the wrong
+    /// picture, because `resolution` is compared before anything in here is read.
+    ///
+    /// **Charged and evicted exactly like the native memo.** `cachedImageBytesLocked` counts it,
+    /// `dropCachedImage()` frees it, and `render(quality:resolution:)` tells `VectorRenderCache`. It
+    /// has to be: at ~0.9 MiB a slot, a document of the 300-1000 cels the owner actually draws would
+    /// otherwise hold hundreds of megabytes of thumbnails nobody is looking at.
+    private var reducedRender: ReducedRender?
+
+    /// `cachedImage`, `incrementalBase` and `regionBase` for one below-native resolution. A value
+    /// type so that "this canvas holds no reduced picture" is one `nil` rather than four.
+    private struct ReducedRender {
+        /// Raster pixels per canvas point. Compared for equality, never rounded towards: a picture at
+        /// another scale is a different picture and this slot holds one.
+        let resolution: CGFloat
+        var image: UIImage?
+        var incrementalBase: (image: UIImage, prefixCount: Int)?
+        var appendedSinceBase = 0
+        var regionBase: (image: UIImage, region: CGRect)?
+
+        init(resolution: CGFloat) { self.resolution = resolution }
+
+        /// True once every picture has been invalidated away, which is when the slot should go —
+        /// otherwise a canvas would keep an empty box alive and `VectorRenderCache` would keep an
+        /// entry for it.
+        var isEmpty: Bool { image == nil && incrementalBase == nil && regionBase == nil }
+    }
+
     /// **What each element's dabs actually painted, from the walk that last drew it** — the bound a
     /// region re-walk skips on, and the reason it can skip at all.
     ///
@@ -1416,7 +1458,21 @@ final class VectorCanvas {
     /// move's cost model is a claim about the design, not about the machine.** "Three renders for the
     /// whole move, however many times the artist nudges it" is countable; the milliseconds it takes
     /// are the laptop's business and would assert nothing about whether the latch is working.
+    ///
+    /// **It counts *canvas-sized* walks specifically, and that is now load-bearing rather than
+    /// descriptive.** A reduced-resolution walk is counted next door, so "this consumer never asks
+    /// for a canvas-sized picture" is a countable property — see `reducedRasterizations`.
     private(set) var rasterizations: Int = 0
+
+    /// How many rasterizations this canvas has performed **below its own resolution** — a walk into a
+    /// raster of fewer pixels than the canvas has points (`render(quality:resolution:)`).
+    ///
+    /// `rasterizations`' counterpart, and the pair is the assertion `ThumbnailRenderLogicTests`
+    /// actually makes: a thumbnail is a 480-point box over a document that may be 6000 points wide,
+    /// so **the number that must not move is `rasterizations`**. A duration would say the same thing
+    /// on this machine and nothing at all on the owner's, which is `localContentBoundsRasterizations`'
+    /// argument reached through a different door.
+    private(set) var reducedRasterizations: Int = 0
 
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
@@ -1662,6 +1718,7 @@ final class VectorCanvas {
         cachedPreviewImage = nil
         lastDamage = damage
         applyToIncrementalBase(damage)
+        applyToReducedRender(damage)
         // The memo is gone but a base may have survived it, and a base is a canvas-sized bitmap. The
         // registry has to be told the new figure rather than simply forgetting this canvas, or a cel
         // between an append and the render that consumes it would be charged nothing while holding
@@ -1777,6 +1834,56 @@ final class VectorCanvas {
     private func dropIncrementalBase() {
         incrementalBase = nil
         appendedSinceBase = 0
+    }
+
+    /// **`applyToRegionBase` and `applyToIncrementalBase` again, over `reducedRender`.**
+    /// Caller must hold `lock`.
+    ///
+    /// Deliberately a third method rather than a generalisation of the two above, and the reason is
+    /// that the two above are *not* symmetrical with each other: `applyToRegionBase` runs **before**
+    /// `cachedImage` is cleared, because the picture it promotes to a base is the one about to be
+    /// cleared, while `applyToIncrementalBase` runs after and reads no memo at all. Folding the
+    /// native pair and this one into one shape would mean either passing that ordering in as a
+    /// parameter or losing it — and losing it is a wrong picture, not a slow one. Here the ordering
+    /// is local and visible: `regionBase` first, `image = nil` second.
+    ///
+    /// The conditions are the native ones verbatim, for the reasons stated there: a base is only a
+    /// base at the identity transform with nothing suppressed, an append keeps the footprints and
+    /// drops the region base, and a `.region` that cannot be bounded drops it too.
+    private func applyToReducedRender(_ damage: Damage) {
+        guard var slot = reducedRender else { return }
+        switch damage {
+        case .everything, .appended:
+            slot.regionBase = nil
+        case .region(let rect):
+            let rect = rect.standardized
+            if !_transform.isIdentity || !_suppressedElementIDs.isEmpty
+                || rect.isNull || rect.isInfinite {
+                slot.regionBase = nil
+            } else if let standing = slot.regionBase {
+                slot.regionBase = (standing.image, standing.region.union(rect))
+            } else if let standing = slot.image {
+                slot.regionBase = (standing, rect)
+            } else {
+                slot.regionBase = nil
+            }
+        }
+        // **After the promotion above**, which is this method's one ordering constraint.
+        slot.image = nil
+        switch damage {
+        case .everything, .region:
+            slot.incrementalBase = nil
+            slot.appendedSinceBase = 0
+        case .appended(let count):
+            if let base = slot.incrementalBase {
+                slot.appendedSinceBase += count
+                if count < 0 || base.prefixCount + slot.appendedSinceBase != _elements.count {
+                    slot.incrementalBase = nil
+                    slot.appendedSinceBase = 0
+                }
+            }
+        }
+        reducedRender = slot.isEmpty ? nil : slot
     }
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`fills`/`images`/`elements`
@@ -1957,8 +2064,11 @@ final class VectorCanvas {
         // it is the *only* reference to a canvas-sized bitmap. Leaving it out would let eviction
         // read "nothing cached" off a cel holding 8 MB at 2048×1024. `regionBase` is the same claim
         // for the same window, one edit shape along.
+        // `reducedRender` is counted for the same reason: it is a bitmap this canvas is holding, and
+        // although one is ~0.9 MiB rather than 64, a document of the 300-1000 cels the owner draws
+        // holds one per cel that has been thumbnailed.
         return cachedImage != nil || cachedPreviewImage != nil
-            || incrementalBase != nil || regionBase != nil
+            || incrementalBase != nil || regionBase != nil || reducedRender != nil
     }
 
     /// **Bytes of memoized render this canvas is holding** — what `VectorRenderCache` charges it.
@@ -1992,6 +2102,15 @@ final class VectorCanvas {
             if let incrementalBase { total += bytes(incrementalBase.image) }
             else if let regionBase { total += bytes(regionBase.image) }
         }
+        // The reduced slot, by the same rule one resolution down: its memo and its two bases are one
+        // object while the memo is standing, and only a base survives an invalidation alone.
+        if let slot = reducedRender {
+            total += bytes(slot.image)
+            if slot.image == nil {
+                if let base = slot.incrementalBase { total += bytes(base.image) }
+                else if let base = slot.regionBase { total += bytes(base.image) }
+            }
+        }
         return total
     }
 
@@ -2010,6 +2129,7 @@ final class VectorCanvas {
         // Eviction frees pixels; a base kept here would be pixels it did not free.
         dropIncrementalBase()
         regionBase = nil
+        reducedRender = nil
         // The measured footprints are a few dozen bytes an element and are what makes the *next*
         // region edit cheap, so eviction keeps them: they are not pixels, and they stay true —
         // nothing about the display list changed here.
@@ -4770,6 +4890,62 @@ final class VectorCanvas {
         return image
     }
 
+    /// **The same picture at fewer pixels** — `resolution` in raster pixels per canvas point, clamped
+    /// to native. The walk is the walk: same elements, same order, same isolation, same dab centres
+    /// and radii *in points*. Only the raster they land in is smaller, which is what
+    /// `renderLocalContent` spends it on (`UIGraphicsImageRendererFormat.scale`).
+    ///
+    /// **Why this exists at all: a consumer that is going to draw the answer into a small buffer was
+    /// paying for the canvas twice.** A cel thumbnail is a 480-point box; on the owner's 6000×6000
+    /// document `render(quality:)` handed it a 36-megapixel image, which it then resampled down —
+    /// and that resample is **MEASURED at 34.1–35.1 ms, flat in stroke count**, on the main thread,
+    /// 400 ms after every stroke and every undo (PERFORMANCE.md §11.11c). Nothing about a 480-point thumbnail wants a
+    /// 6000-point intermediate: the other three tiers a flatten draws are `UIImage`s that resample as
+    /// they are drawn, and the vector tier is the only one that is a *drawing* and can therefore
+    /// simply be drawn smaller.
+    ///
+    /// **It never reads a canvas-sized picture, and that is the rule the whole thing turns on.**
+    /// `cachedImage`, `incrementalBase` and `regionBase` are all canvas-sized, so drawing any of them
+    /// down is exactly the resample this method exists to remove: a warm native memo is not a cheaper
+    /// answer here, it is the expensive one. It reads and writes `reducedRender` instead — the same
+    /// memo-plus-two-bases at its own resolution — so a thumbnail after a stroke costs the stroke and
+    /// a thumbnail after an undo costs the rectangle, exactly as the native render has since TODO
+    /// (41).
+    ///
+    /// **A slot of its own was measured into existence rather than designed in.** The first version
+    /// of this kept no state and walked the whole visible list every time, on the argument that a
+    /// canvas-sized base is not worth resampling. That is right about the *base* and wrong about the
+    /// consequence: MEASURED in Release at **1.40 ms** for the owner's four strokes on a 6000²
+    /// canvas and **59.2 ms** for a thousand strokes on a 2048×1024 one, against 3.5 ms for the
+    /// resample it replaced — a 17x regression in Release and 50x in Debug, on a document the owner
+    /// plausibly has. PERFORMANCE.md §11.11c
+    /// carries both tables, and the second one is why this is not "walk it small".
+    func render(quality: RenderQuality = .full, resolution: CGFloat) -> UIImage {
+        // No clamp here: `rasterize` holds the one, so that this method, `planRender`, `walk` and
+        // `install` cannot come to disagree about whether a request is native. A `resolution` of 1 or
+        // more arrives at exactly what `render(quality:)` does.
+        //
+        // `rasterize` answers nil only for a version that has moved, and there is none to have moved
+        // here — the same unreachable guard `render(quality:)` documents.
+        guard let image = rasterize(quality: quality, requestedResolution: resolution) else {
+            return Self.transparentPixel
+        }
+        // **After the unlock**, and for `render(quality:)`'s reason. It is told because this *does*
+        // memoize now: a slot is ~0.9 MiB and a document of 300-1000 cels would otherwise accumulate
+        // one per cel with nothing to evict them.
+        VectorRenderCache.noteRendered(self)
+        return image
+    }
+
+    /// `render(quality:resolution:)`, but **only while this canvas is still at `version`** — see
+    /// `render(quality:ifStillAtVersion:)`, whose contract this shares in full.
+    func render(quality: RenderQuality, resolution: CGFloat, ifStillAtVersion version: Int) -> UIImage? {
+        guard let image = rasterize(quality: quality, requestedResolution: resolution,
+                                    ifStillAtVersion: version) else { return nil }
+        VectorRenderCache.noteRendered(self)   // outside the lock — see `render(quality:resolution:)`
+        return image
+    }
+
     /// What `render(quality:)` would hand back **without rasterizing anything** — the question
     /// `StrokeCanvasView.refreshDisplay` has to ask before it decides whether to block.
     ///
@@ -4853,14 +5029,70 @@ final class VectorCanvas {
         func render(quality: RenderQuality) -> UIImage {
             if let memoized { return memoized }
             if let shared = source.render(quality: quality, ifStillAtVersion: version) { return shared }
-            // Built here rather than at freeze time so a mint over a hundred leaves allocates
-            // nothing: this branch is reached only by a resolve the artist has raced.
+            return detached().render(quality: quality)
+        }
+
+        /// **The pixels these frozen values render to, at no more resolution than a buffer of
+        /// `destination` points can show** — see `VectorCanvas.render(quality:resolution:)` for what
+        /// that buys and why it declines the memo.
+        ///
+        /// `destination` is the rect this image is about to be *drawn into*, in the caller's own
+        /// points, so the ratio against this canvas's own `size` is the stretch the draw would apply.
+        /// A caller drawing 1:1 or larger passes the identity through untouched, which is every
+        /// native flatten and therefore every export, every parity test and the live canvas at the
+        /// resolution the artist chose.
+        ///
+        /// **The arithmetic lives here rather than at the call site because `size` is this type's**,
+        /// and a caller computing the ratio would need it exposed — see `PixelOps.rasterizeUncached`,
+        /// which knows the buffer it is filling and nothing about the canvas underneath it.
+        func render(quality: RenderQuality, fittingInto destination: CGSize) -> UIImage {
+            // **A branch rather than a clamp**, and the clamp is `VectorCanvas.rasterize`'s alone —
+            // spelled three times it could not be reddened by any mutation, which is the shape
+            // CLAUDE.md warns about. What is decided *here* is whether `memoized` may be used, and
+            // that is a real fork with a test either side of it: at native or above, the memo is the
+            // answer; below it, the memo is the cost.
+            //
+            // **Its boundary is genuinely arbitrary and `<= 1` would be just as correct** — MEASURED
+            // by mutation, which reddened nothing. At exactly native the memo *is* the native render,
+            // so taking it and re-deriving it are the same picture; only the strict inequality's
+            // *direction* is load-bearing, and relaxing that (to `== 1`) reddens nine tests.
+            let resolution = Self.resolution(of: size, filling: destination)
+            guard resolution < 1 else { return render(quality: quality) }
+            // **`memoized` is deliberately skipped**, unlike `render(quality:)` above: it is a
+            // canvas-sized picture, and resampling one is the cost this overload exists to remove.
+            if let shared = source.render(quality: quality, resolution: resolution,
+                                          ifStillAtVersion: version) { return shared }
+            return detached().render(quality: quality, resolution: resolution)
+        }
+
+        /// How many raster pixels per canvas point a buffer of `destination` points can show. Not
+        /// clamped — the caller above is the one place that decides a request may only ask for less.
+        ///
+        /// The `min` of the two ratios rather than either alone, so an anisotropic destination (a
+        /// square thumbnail box over a 2:1 canvas) is sized by the axis that binds — the same `min`
+        /// `renderSize(fitting:within:)` and `ThumbnailRenderer` already take, so the three agree by
+        /// construction rather than by three authors happening to match.
+        ///
+        /// 1 for a degenerate size, so a zero-width canvas takes the native path it has always taken
+        /// rather than a scale of zero or infinity.
+        private static func resolution(of size: CGSize, filling destination: CGSize) -> CGFloat {
+            guard size.width > 0, size.height > 0,
+                  destination.width > 0, destination.height > 0 else { return 1 }
+            return min(destination.width / size.width, destination.height / size.height)
+        }
+
+        /// A canvas nobody else can reach, holding exactly these values — the atomicity guarantee
+        /// this whole type exists for.
+        ///
+        /// Built on demand rather than at freeze time so a mint over a hundred leaves allocates
+        /// nothing: it is reached only by a resolve the artist has raced.
+        private func detached() -> VectorCanvas {
             let detached = VectorCanvas(size: size, elements: elements, transform: transform)
             // Assigned rather than passed to the initialiser because it is transient state (see
             // `suppressedElementIDs`) and the setter is the one place that knows to invalidate; on a
             // canvas nobody has rendered yet that invalidation costs a counter.
             if !suppressed.isEmpty { detached.suppressedElementIDs = suppressed }
-            return detached.render(quality: quality)
+            return detached
         }
     }
 
@@ -4884,6 +5116,11 @@ final class VectorCanvas {
     private struct RenderPlan {
         let quality: RenderQuality
         let size: CGSize
+        /// **Raster pixels per canvas point**, 1 for every render that is not
+        /// `render(quality:resolution:)`'s. It reaches only the two `UIGraphicsImageRenderer` formats
+        /// the walk builds; nothing about the drawing itself is scaled, because the drawing is in
+        /// points and the points do not move.
+        let resolution: CGFloat
         let transform: CGAffineTransform
         /// The three fields the install has to find unchanged, alongside `version` — because the
         /// class's own design lets each of them move without bumping it (see `install`).
@@ -4941,8 +5178,16 @@ final class VectorCanvas {
     /// Step 1 of a render: decide, under `lock`, what the walk has to do. O(element count) — the
     /// append predicate's backward scan is the worst of it — and never O(canvas pixel).
     ///
+    /// **A reduced-resolution request is served from `reducedRender` and never from the native trio**,
+    /// which is the plan's one asymmetry. `cachedImage`, `incrementalBase` and `regionBase` are all
+    /// canvas-sized, so handing one to a walk that is filling a 480-point raster means resampling 36
+    /// megapixels to save stamping some dabs — the cost `render(quality:resolution:)` exists to
+    /// remove. Everything past that choice is the same three-way decision for both, which is why
+    /// `appendableBase` and `repairableBase` take the slot rather than being written twice.
+    ///
     /// Caller must hold `lock`.
-    private func planRender(quality: RenderQuality, ifStillAtVersion required: Int?) -> RenderStep {
+    private func planRender(quality: RenderQuality, resolution: CGFloat,
+                            ifStillAtVersion required: Int?) -> RenderStep {
         if let required, version != required { return .superseded }
         // An empty canvas is now the steady state of a freshly added layer, and it is reached
         // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
@@ -4955,21 +5200,33 @@ final class VectorCanvas {
         // Nothing is memoized here on purpose: there is no allocation to amortize, and caching would
         // make `hasCachedImage` report a claim on memory that was never made, so eviction would
         // spend its budget on canvases that cost nothing.
+        // The 1×1 an empty canvas answers with is stretched over whatever rect the caller draws it
+        // into, so it is the same nothing at any resolution — see `transparentPixel`.
         guard !_elements.isEmpty else { return .memo(Self.transparentPixel) }
-        switch quality {
-        case .full: if let cachedImage { return .memo(cachedImage) }
-        case .preview: if let cachedPreviewImage { return .memo(cachedPreviewImage) }
+        let native = resolution >= 1
+        // **The slot this render's memo and bases come from** — the native trio, or the one
+        // `reducedRender` holds when it is at this very resolution. Nil for a reduced request at a
+        // resolution nothing has drawn yet, which is the only case that must walk the list whole.
+        let slot = native ? nil : reducedRender.flatMap { $0.resolution == resolution ? $0 : nil }
+        if native {
+            switch quality {
+            case .full: if let cachedImage { return .memo(cachedImage) }
+            case .preview: if let cachedPreviewImage { return .memo(cachedPreviewImage) }
+            }
+        } else if quality == .full, let image = slot?.image {
+            return .memo(image)
         }
         let work: RenderPlan.Work
-        if let base = appendableBase(quality: quality) {
+        if let base = appendableBase(quality: quality, in: slot, native: native) {
             work = .append(base: base.image, tail: Array(_elements[base.prefixCount...]))
-        } else if let base = repairableBase(quality: quality) {
+        } else if let base = repairableBase(quality: quality, in: slot, native: native) {
             work = .repair(base: base.image, region: base.region,
                            visible: Self.visible(_elements, suppressing: _suppressedElementIDs))
         } else {
             work = .full(visible: Self.visible(_elements, suppressing: _suppressedElementIDs))
         }
-        return .walk(RenderPlan(quality: quality, size: size, transform: _transform,
+        return .walk(RenderPlan(quality: quality, size: size, resolution: resolution,
+                                transform: _transform,
                                 suppressed: _suppressedElementIDs, elementCount: _elements.count,
                                 version: version, known: paintedBounds, work: work))
     }
@@ -4985,10 +5242,11 @@ final class VectorCanvas {
         /// arm.
         var measured: [UUID: CGRect] = [:]
 
+        let resolution = plan.resolution
         switch plan.work {
         case .append(let base, let tail):
-            content = renderLocalContent(size: plan.size, elements: tail, quality: quality,
-                                         over: base, known: plan.known)
+            content = renderLocalContent(size: plan.size, resolution: resolution, elements: tail,
+                                         quality: quality, over: base, known: plan.known)
             measured = content.measured
         case .repair(let base, let region, let visible):
             repairs = 1
@@ -4997,11 +5255,13 @@ final class VectorCanvas {
             // stroke whichever walk took it, and a clipped walk measures a set the next one can
             // legitimately skip. Keeping only the final walk's would quietly forget those, which
             // costs a redraw later rather than a wrong picture, but is not what this path did.
-            var repaired = renderLocalContent(size: plan.size, elements: visible, quality: quality,
+            var repaired = renderLocalContent(size: plan.size, resolution: resolution,
+                                              elements: visible, quality: quality,
                                               over: base, clippedTo: clip, known: plan.known)
             measured.merge(repaired.measured) { _, new in new }
             if !repaired.escaped.isNull, let wider = Self.repairClip(clip.union(repaired.escaped),
-                                                                     in: plan.size) {
+                                                                     in: plan.size,
+                                                                     resolution: resolution) {
                 // **A replacement painted outside the rectangle its site declared — by a fraction of
                 // a point.** MEASURED: 0.09 to 0.6 pt, on every one of them. A cut piece re-anchors
                 // its dab walk (`detachedPiece`), so its dabs sit at different arc lengths along the
@@ -5017,7 +5277,8 @@ final class VectorCanvas {
                 // ink and nothing else.
                 widened = 1
                 clip = wider
-                repaired = renderLocalContent(size: plan.size, elements: visible, quality: quality,
+                repaired = renderLocalContent(size: plan.size, resolution: resolution,
+                                              elements: visible, quality: quality,
                                               over: base, clippedTo: clip,
                                               known: plan.known.merging(measured) { _, new in new })
                 measured.merge(repaired.measured) { _, new in new }
@@ -5027,28 +5288,32 @@ final class VectorCanvas {
                 abandoned = 1
                 // Slow-and-correct. `Damage.region` names this as the failure it is shaped to have:
                 // a site that under-declares costs a re-walk rather than an artifact.
-                content = renderLocalContent(size: plan.size, elements: visible, quality: quality,
+                content = renderLocalContent(size: plan.size, resolution: resolution,
+                                             elements: visible, quality: quality,
                                              known: plan.known.merging(measured) { _, new in new })
                 measured.merge(content.measured) { _, new in new }
             } else {
                 content = repaired
             }
         case .full(let visible):
-            content = renderLocalContent(size: plan.size, elements: visible, quality: quality,
-                                         known: plan.known)
+            content = renderLocalContent(size: plan.size, resolution: resolution,
+                                         elements: visible, quality: quality, known: plan.known)
             measured = content.measured
         }
 
-        // Apply the overall transform (identity → skip the extra pass).
+        // Apply the overall transform (identity → skip the extra pass). At a reduced resolution this
+        // resamples a picture that is already small, which is the point: the pass costs the raster it
+        // is filling and the content walk has already been paid at the same size.
         let final: UIImage
         if plan.transform.isIdentity {
             final = content.image
         } else {
             final = UIGraphicsImageRenderer(size: plan.size,
-                                            format: PixelOps.transparentFormat()).image { ctx in
-                ctx.cgContext.concatenate(plan.transform)
-                content.image.draw(in: CGRect(origin: .zero, size: plan.size))
-            }
+                                            format: PixelOps.transparentFormat(scale: resolution))
+                .image { ctx in
+                    ctx.cgContext.concatenate(plan.transform)
+                    content.image.draw(in: CGRect(origin: .zero, size: plan.size))
+                }
         }
         return RenderResult(image: final, measured: measured,
                             dabCount: content.dabCount, repairedRegion: repairedRegion,
@@ -5070,6 +5335,17 @@ final class VectorCanvas {
     ///
     /// Caller must hold `lock`.
     private func install(_ result: RenderResult, from plan: RenderPlan) {
+        // Counted apart, because "this consumer never asked for a canvas-sized picture" is the
+        // property `rasterizations` is now read for — see `reducedRasterizations`.
+        guard plan.resolution >= 1 else {
+            reducedRasterizations += 1
+            lastRenderDabCount = result.dabCount
+            installReduced(result, from: plan)
+            // **The native caches are not touched, and that is the load-bearing half.** A reduced
+            // picture is not what `cachedImage` promises, and an incremental base built from one
+            // would silently serve a native render a picture at a twelfth of its resolution.
+            return
+        }
         rasterizations += 1
         regionRepairs += result.repairs
         regionRepairsWidened += result.repairsWidened
@@ -5101,6 +5377,43 @@ final class VectorCanvas {
         }
     }
 
+    /// `install`'s reduced half — the same three writes into `reducedRender` behind the same gate.
+    /// Caller must hold `lock`.
+    ///
+    /// **The gate is not an optimisation here either**: a picture of one display list installed under
+    /// another list's version is a thumbnail showing ink the artist has already undone, and the
+    /// timeline is where they would see it.
+    ///
+    /// `.preview` is not memoized at a reduced resolution and nothing asks for it — a thumbnail is
+    /// `.full` and so is the onion skin. A `.preview` reduced walk therefore costs a full walk every
+    /// time, which is honest rather than surprising: the slot holds one picture and giving it a
+    /// second quality would double a cel's thumbnail memory for a caller that does not exist.
+    private func installReduced(_ result: RenderResult, from plan: RenderPlan) {
+        guard plan.quality == .full else { return }
+        guard version == plan.version, _elements.count == plan.elementCount,
+              _transform == plan.transform, _suppressedElementIDs == plan.suppressed else { return }
+        // **Written from a reduced walk as well as a native one, and that is correct rather than
+        // convenient**: `CGContextDabTarget.lastGroupBounds` is accumulated from the dabs' geometry
+        // in *points*, before any clip or device transform is consulted, so a footprint measured at
+        // a twelfth of the resolution is the same rectangle a native walk would have measured. It is
+        // also what lets a reduced repair skip anything at all on a cel the display has not walked.
+        for (id, rect) in result.measured { paintedBounds[id] = rect }
+        var slot = reducedRender.flatMap { $0.resolution == plan.resolution ? $0 : nil }
+            ?? ReducedRender(resolution: plan.resolution)
+        slot.image = result.image
+        if plan.transform.isIdentity, plan.suppressed.isEmpty {
+            // One object, exactly as the native trio holds one — see `install`'s note on why the
+            // base and the memo being the same image is what makes it free.
+            slot.incrementalBase = (result.image, plan.elementCount)
+            slot.appendedSinceBase = 0
+        } else {
+            slot.incrementalBase = nil
+            slot.appendedSinceBase = 0
+        }
+        slot.regionBase = nil
+        reducedRender = slot
+    }
+
     /// Plan, walk and install — the whole of a render, with the pixels outside `lock`. Returns nil
     /// only when `required` names a version the canvas has already left.
     ///
@@ -5108,7 +5421,28 @@ final class VectorCanvas {
     /// one rasterize: the second waits, then finds the memo the first installed. That is the property
     /// the old single lock had for free and the one thing this change could quietly have thrown away
     /// — see `rasterizeLock`.
-    private func rasterize(quality: RenderQuality, ifStillAtVersion required: Int? = nil) -> UIImage? {
+    ///
+    /// **A reduced-resolution render does not queue behind it, and the reason is the same property
+    /// read backwards.** The lock buys one thing: sharing a rasterize through the memo. A reduced
+    /// render reads no memo and writes none (`install` refuses it), so there is nothing for it to
+    /// share and nothing for anyone to share with it — the wait would be pure cost. And it is
+    /// precisely the cost the owner reported: the debounced thumbnail flush runs on the **main
+    /// thread** 400 ms after an undo, which is 400 ms into the background canvas-sized render that
+    /// same undo started, so queueing here would make a 480-point picture wait out a 36-megapixel one.
+    /// That is `VectorCanvas.lock`'s own defect (PERFORMANCE.md §11.11b) one lock along.
+    ///
+    /// It is safe by the split rather than by argument: `planRender` and `install` each take `lock`,
+    /// and `walk` between them is `static` and reads only its plan. Two concurrent reduced walks
+    /// duplicate work that was never going to be shared; nothing they touch is shared state.
+    private func rasterize(quality: RenderQuality, requestedResolution: CGFloat = 1,
+                           ifStillAtVersion required: Int? = nil) -> UIImage? {
+        // **The one clamp: a request may only ask for *less*.** `RenderRequest.renderSize(fitting:within:)`'
+        // rule and for its reason — rendering above native invents no detail and costs more than the
+        // native render it replaces. It is here rather than at the three entry points above because
+        // `planRender`, `walk` and `install` each branch on `resolution >= 1` and one of them
+        // disagreeing with another is not a slow picture but a wrong one: `walk` would fill a
+        // four-times-native raster and `install` would memoize it as `cachedImage`.
+        let resolution = min(requestedResolution, 1)
         // A cheap look before the queue, so a superseded request still costs one `lock` acquisition
         // and no wait — the property `startVectorRender`'s doc comment depends on for a fast drag.
         // The plan below re-asks under the lock that matters; this is an optimisation, not the test.
@@ -5118,10 +5452,11 @@ final class VectorCanvas {
             lock.unlock()
             if moved { return nil }
         }
-        rasterizeLock.lock()
-        defer { rasterizeLock.unlock() }
+        let shares = resolution >= 1
+        if shares { rasterizeLock.lock() }
+        defer { if shares { rasterizeLock.unlock() } }
         lock.lock()
-        let step = planRender(quality: quality, ifStillAtVersion: required)
+        let step = planRender(quality: quality, resolution: resolution, ifStillAtVersion: required)
         lock.unlock()
         switch step {
         case .superseded: return nil
@@ -5155,28 +5490,48 @@ final class VectorCanvas {
     /// decides whether to *take* a base — the same deliberate doubling `appendableBase` documents.
     ///
     /// Caller must hold `lock`.
-    private func repairableBase(quality: RenderQuality) -> (image: UIImage, region: CGRect)? {
+    /// **`native` picks which trio is asked, and everything below it is identical for both.** The
+    /// conditions are properties of the *display list and the transform*, not of the raster, so a
+    /// reduced repair is legitimate exactly where a native one is — which is why this takes the slot
+    /// rather than growing a second copy of the predicate. `slot` is nil for a native render and for
+    /// a reduced one at a resolution nothing has drawn yet; both mean "no base".
+    private func repairableBase(quality: RenderQuality, in slot: ReducedRender?,
+                                native: Bool) -> (image: UIImage, region: CGRect)? {
+        guard let base = native ? regionBase : slot?.regionBase else { return nil }
         guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
-              let base = regionBase, !base.region.isNull, !base.region.isEmpty else { return nil }
-        guard let clip = Self.repairClip(base.region, in: size) else { return nil }
+              !base.region.isNull, !base.region.isEmpty else { return nil }
+        guard let clip = Self.repairClip(base.region, in: size,
+                                         resolution: native ? 1 : (slot?.resolution ?? 1)) else { return nil }
         return (base.image, clip)
     }
 
     /// `rect` conditioned into a usable clip, or nil when repairing it is not worth it.
     ///
-    /// **Integral, and for `CGContextDabTarget.endStrokeGroup`'s measured reason**: a clip on a
-    /// fractional rectangle is antialiased, so the outermost row of the repair would land at partial
-    /// coverage — MEASURED there at alpha 193 where 255 was drawn, which is ink lost at a seam
-    /// rather than a rounding difference. Rounded *out*, so the clip still contains everything the
-    /// caller declared.
+    /// **Snapped out to whole raster pixels, for `CGContextDabTarget.endStrokeGroup`'s measured
+    /// reason**: a clip on a fractional rectangle is antialiased, so the outermost row of the repair
+    /// would land at partial coverage — MEASURED there at alpha 193 where 255 was drawn, which is ink
+    /// lost at a seam rather than a rounding difference. Rounded *out*, so the clip still contains
+    /// everything the caller declared.
     ///
     /// **A repair that covers the canvas is a full walk with extra bookkeeping**, and saying so is
     /// the honest half of this feature's guarantee: cost scales with the area touched, not with
     /// nothing. A lasso dragged the width of the canvas has a canvas-sized rectangle and pays for
     /// it, and taking the slow path outright is cheaper than taking it through a clip and a skip
     /// test that rejects nothing.
-    private static func repairClip(_ rect: CGRect, in size: CGSize) -> CGRect? {
-        let clip = rect.integral
+    private static func repairClip(_ rect: CGRect, in size: CGSize, resolution: CGFloat) -> CGRect? {
+        // **Whole *device* pixels, which at the native resolution is `rect.integral` and below it is
+        // not.** The rule the paragraph above states is about the raster: a clip that falls between
+        // pixels is antialiased, and here that lands on the boundary of a `clear` cutting through the
+        // standing base — so the outermost row would be part-cleared and part-redrawn, which is ink
+        // lost at a seam rather than a rounding difference. One device pixel is `1 / resolution`
+        // points, so snapping outward to a multiple of that is the same statement in the coordinates
+        // that actually matter, and it reduces to `.integral` exactly when `resolution` is 1.
+        let step = resolution >= 1 ? 1 : 1 / resolution
+        let minX = (rect.minX / step).rounded(.down) * step
+        let minY = (rect.minY / step).rounded(.down) * step
+        let clip = CGRect(x: minX, y: minY,
+                          width: (rect.maxX / step).rounded(.up) * step - minX,
+                          height: (rect.maxY / step).rounded(.up) * step - minY)
         guard clip.width > 0, clip.height > 0,
               clip.width * clip.height < size.width * size.height else { return nil }
         return clip
@@ -5208,10 +5563,15 @@ final class VectorCanvas {
     /// and then `appendPreservesTheWalk(after:)`, which is the interesting one.
     ///
     /// Caller must hold `lock`.
-    private func appendableBase(quality: RenderQuality) -> (image: UIImage, prefixCount: Int)? {
+    /// `native` picks which trio is asked — see `repairableBase(quality:in:native:)`, which says why
+    /// one predicate serves both.
+    private func appendableBase(quality: RenderQuality, in slot: ReducedRender?,
+                                native: Bool) -> (image: UIImage, prefixCount: Int)? {
+        guard let base = native ? incrementalBase : slot?.incrementalBase,
+              let appended = native ? appendedSinceBase : slot?.appendedSinceBase else { return nil }
         guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
-              let base = incrementalBase, base.prefixCount < _elements.count,
-              base.prefixCount + appendedSinceBase == _elements.count,
+              base.prefixCount < _elements.count,
+              base.prefixCount + appended == _elements.count,
               appendPreservesTheWalk(after: base.prefixCount) else { return nil }
         return base
     }
@@ -5429,7 +5789,22 @@ final class VectorCanvas {
     /// The walk is otherwise untouched — same order, same run scan, same isolation decisions, same
     /// per-stroke group — which is why a straddling stroke or a straddling blend-mode run needs no
     /// special case.
-    private static func renderLocalContent(size: CGSize,
+    ///
+    /// **`resolution` is raster pixels per canvas point and reaches only the format** — 1 for every
+    /// caller but `render(quality:resolution:)`. Nothing about the walk below is scaled by it: the
+    /// dab centres, the radii, the clip and the measured footprints are all in *points* and stay
+    /// where they are, and `UIGraphicsImageRenderer` puts the scale in the context's device transform
+    /// instead. So a reduced walk stamps the same dabs at the same places into a smaller raster,
+    /// which is what "draw this smaller" means and is not the same as scaling the drawing.
+    ///
+    /// **What it does change is where the coverage is resolved**, and that difference is real and
+    /// bounded rather than absent: source-over of overlapping dabs is not linear, so accumulating at
+    /// 480 points and then having nothing left to average is not identical to accumulating at 6000
+    /// and averaging down. MEASURED on a finished 120-point tile, worst channel difference **17 of
+    /// 255** on the owner's document shape and **65 of 255** on a dense small canvas, over 0.2–11% of
+    /// the tile's pixels (PERFORMANCE.md §11.11c). It reads as very slightly bolder ink, because
+    /// repeated partial coverage composites darker than its own average.
+    private static func renderLocalContent(size: CGSize, resolution: CGFloat = 1,
                                            elements: [VectorElement], quality: RenderQuality = .full,
                                            over base: UIImage? = nil,
                                            clippedTo clip: CGRect? = nil,
@@ -5446,7 +5821,7 @@ final class VectorCanvas {
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
         // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
         // is lost — every raster tier already renders and persists as 8-bit deviceRGB.
-        let format = PixelOps.transparentFormat()
+        let format = PixelOps.transparentFormat(scale: resolution)
         format.preferredRange = .standard
         // Hoisted so the dab count can be read off it once the (synchronous) renderer closure below
         // has finished drawing.
@@ -5462,6 +5837,11 @@ final class VectorCanvas {
             // every destination pixel is `0`, source-over leaves the source exactly as it was, and
             // this is a copy rather than a composite. `renderLocalContent` is the only place that
             // has to be true and `IncrementalAppendLogicTests` is where it is checked byte for byte.
+            //
+            // **The 1:1 is why a base and a reduced `resolution` never arrive together**: a
+            // canvas-sized base drawn into a reduced context is a resample rather than a copy, and it
+            // is the very resample `render(quality:resolution:)` exists to stop paying. `planRender`
+            // offers no base at all below native, so this is nil there by construction.
             base?.draw(at: .zero)
             if let clip {
                 // The clip goes on before anything else so it governs the clear, the walk and every
