@@ -661,8 +661,21 @@ nonisolated enum ProjectPackageName {
 
     private static func isFree(_ candidate: URL, forPackageAt current: URL, projectID: UUID?) -> Bool {
         if !FileManager.default.fileExists(atPath: candidate.path) { return true }
-        // The case-only retitle. `fileExists` says yes because the volume folds case, but the thing
-        // it found *is* the package we are renaming.
+        // **The case-only retitle on a volume that folds case**, first because it is the cheap one —
+        // a string compare where the clause below reads and decodes a manifest. There, `fileExists`
+        // says the name is taken while the thing it found *is* the package being renamed, and without
+        // this the artist's project becomes "Boat 2" for capitalising one letter.
+        //
+        // **MEASURED 2026-09-09: iOS does not fold case, so no test in this repo can catch a mutation
+        // of this line, and it stays anyway.** The app container's volume answers `fileExists` false
+        // for `Boat.paintproj` while `boat.paintproj` exists — while the host Mac's volume, probed the
+        // same day, answers true, so reasoning from the Mac would have been wrong. On a case-sensitive
+        // volume the `!fileExists` line above already answers and this one is never reached.
+        //
+        // It is not dead code: TODO (36) lets the library root be a folder in Files — an SMB share or
+        // an external volume among them — and **the save path renames on any root**, since only the
+        // launch pass is gated by `migrationIsSafe`. A guard for a volume the simulator is not,
+        // deliberately kept and labelled rather than deleted because it is untestable here.
         if candidate.path.precomposedStringWithCanonicalMapping
             .compare(current.path.precomposedStringWithCanonicalMapping,
                      options: .caseInsensitive) == .orderedSame { return true }

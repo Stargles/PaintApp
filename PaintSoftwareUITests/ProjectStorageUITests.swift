@@ -158,6 +158,67 @@ final class ProjectStorageUITests: PaintUITestCase {
                        "and the old tile is gone rather than duplicated")
     }
 
+    /// **TODO (57) part 2, driven through a finger.** The owner: *"Folder names are Untitled.paintproj
+    /// but does not change when the project name is changed."*
+    ///
+    /// Fifteen logic tests reach `ProjectStore.save` directly and assert what is on disk. Not one of
+    /// them answers the question CLAUDE.md says three shipped-and-unusable features failed: **can the
+    /// artist actually do this?** The Scene field had no accessibility identifier at all until this
+    /// item, so no test in the repo could reach the app's only title-editing control.
+    ///
+    /// So this is the owner's own sequence, in order, with nothing arranged: make a drawing, leave,
+    /// come back, retitle it, leave again — and the last two assertions are the ones that fail if the
+    /// rename works in the model and strands the artist. **One tile, not two**, is what a fork looks
+    /// like from the gallery; and reopening it has to give back the drawing, which is what a stale
+    /// `CanvasManager.projectURL` costs.
+    func testRetitlingAProjectInTheEditorRenamesItsTileAndItStillOpens() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        XCTAssertTrue(launchIntoEditor(app), "a fresh install makes a document")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10), "the editor draws a canvas")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.45), to: CGVector(dx: 0.6, dy: 0.6))
+
+        // The first save names the folder from the title, as it always did. Everything after this is
+        // the half that never worked.
+        returnToGallery(app)
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 15),
+                      "Setup: the project is on the gallery under the name it was born with")
+        shot(app, "1-gallery-before-the-retitle")
+
+        app.staticTexts["Untitled"].tap()
+        let field = app.textFields["timeline.projectNameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20),
+                      "the app's only title-editing control is reachable — it had no identifier at "
+                      + "all before (57), so nothing could drive the feature the owner asked for")
+
+        field.tap()
+        let existing = (field.value as? String) ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count)
+                       + "Rooftop Chase\n")
+        shot(app, "2-editor-after-the-retitle")
+
+        returnToGallery(app)
+
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Rooftop Chase"].waitForExistence(timeout: 20),
+                      "the gallery lists the project under the artist's new title")
+        XCTAssertFalse(app.buttons["gallery.tileMenu.Untitled"].exists,
+                       "and there is no second tile under the old name — two packages carrying one "
+                       + "manifest id is what a rename fork looks like from here")
+        shot(app, "3-gallery-after-the-retitle")
+
+        // The half a stale in-memory URL breaks: the project has to still open, with its drawing.
+        app.staticTexts["Rooftop Chase"].tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25),
+                      "the renamed project reopens rather than failing at its manifest read")
+        let reopened = app.textFields["timeline.projectNameField"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 10))
+        XCTAssertEqual(reopened.value as? String, "Rooftop Chase",
+                       "and it is the project that was retitled, not a fresh one beside it")
+        shot(app, "4-reopened-under-the-new-name")
+    }
+
     // MARK: - Helpers
 
     /// Keeps a screenshot in the result bundle so a person can look at what the test drove. These are

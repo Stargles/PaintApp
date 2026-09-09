@@ -260,10 +260,18 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         assertInkSurvived(at: landed, "after a retitle to a 480-character title")
     }
 
-    /// **The case-only retitle, which the naive rule gets wrong in a way that is invisible until you
-    /// look at Files.** iOS's APFS volume folds case, so `fileExists` says `Boat.paintproj` is taken
-    /// the moment `boat.paintproj` exists — and a disambiguation loop that believed it would rename
-    /// the artist's project to "Boat 2" for changing one letter to a capital.
+    /// **Changing one letter to a capital is a retitle, and it has to reach the folder.**
+    ///
+    /// The mistake this catches is the tempting one: comparing the stem to the desired name
+    /// *case-insensitively* at the top of `reconciled`, which reads as robustness and means a
+    /// case-only retitle is answered "nothing to do" — the artist capitalises their project and Files
+    /// goes on showing the lower-case folder forever, which is the owner's original complaint in
+    /// miniature.
+    ///
+    /// **It is not the test for `isFree`'s case-folding clause, and it cannot be.** MEASURED
+    /// 2026-09-09: the app container's volume is case-**sensitive**, so `Boat.paintproj` genuinely
+    /// does not exist here while `boat.paintproj` does and that clause is never reached. See its own
+    /// comment for why it stays.
     func testACaseOnlyRetitleRenamesInPlaceRatherThanDisambiguatingItself() {
         let (manager, original) = savedProject(titled: "boat")
         XCTAssertEqual(original.lastPathComponent, "boat.paintproj", "Setup: lower case on disk")
