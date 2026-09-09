@@ -298,7 +298,10 @@ final class VideoElementLogicTests: XCTestCase {
         let projectURL = ProjectStore.createNewProjectURL(name: "WithVideo")
         XCTAssertEqual(saveAndWait(manager, to: projectURL), .write)
 
-        let copied = projectURL.appendingPathComponent("images/clip.mov")
+        // `videos/` since TODO (57)'s sweep — an `.mp4` inside a folder called `images` was the
+        // owner's own complaint one door over. A clip written by an older build stays in `images/`
+        // and still resolves; `testAClipAnOlderBuildLeftInImagesStillResolves` is that direction.
+        let copied = projectURL.appendingPathComponent("videos/clip.mov")
         XCTAssertTrue(FileManager.default.fileExists(atPath: copied.path),
                       "The source has to be inside the package, or the project is not portable")
         XCTAssertEqual(try Data(contentsOf: copied), try Data(contentsOf: asset),
@@ -343,7 +346,48 @@ final class VideoElementLogicTests: XCTestCase {
                        "A save must not be able to lose an asset it was already holding")
         XCTAssertNotNil(videoElement(in: again))
         XCTAssertTrue(FileManager.default
-            .fileExists(atPath: projectURL.appendingPathComponent("images/clip.mov").path))
+            .fileExists(atPath: projectURL.appendingPathComponent("videos/clip.mov").path))
+    }
+
+    /// **A clip an older build left in `images/` still opens** — TODO (57)'s sweep, from the side
+    /// that matters.
+    ///
+    /// No migration moves a clip and none is written: an asset's name lives inside the *vector
+    /// payload* (`VectorVideoElement.assetFileName`) rather than in the manifest, so moving one would
+    /// mean parsing every payload on every launch. It does not have to, because the reader probes
+    /// `videos/` and then `images/`, and a re-save copies the asset from whichever address the reader
+    /// resolved into whichever directory the writer now uses. This models the old package by moving
+    /// the clip back and asserts both halves: it loads undamaged, and one save carries it forward.
+    func testAClipAnOlderBuildLeftInImagesStillResolvesAndMovesOnTheNextSave() throws {
+        let asset = try writeAsset(named: "clip.mov")
+        let (manager, _) = try managerHoldingAVideo(asset: asset)
+        let projectURL = ProjectStore.createNewProjectURL(name: "LegacyVideo")
+        XCTAssertEqual(saveAndWait(manager, to: projectURL), .write)
+
+        // Push the package back into the pre-(57) shape: the clip under `images/`, no `videos/`.
+        let fm = FileManager.default
+        let images = projectURL.appendingPathComponent("images", isDirectory: true)
+        try? fm.createDirectory(at: images, withIntermediateDirectories: true)
+        try fm.moveItem(at: projectURL.appendingPathComponent("videos/clip.mov"),
+                        to: images.appendingPathComponent("clip.mov"))
+        try fm.removeItem(at: projectURL.appendingPathComponent("videos", isDirectory: true))
+
+        let reopened = try XCTUnwrap(ProjectStore.load(from: projectURL))
+        XCTAssertFalse(reopened.loadDamage.isDamaged,
+                       "a clip at the address an older build used is found, not counted as damage")
+        let restored = try XCTUnwrap(videoElement(in: reopened))
+        XCTAssertEqual(restored.assetURL.standardizedFileURL,
+                       images.appendingPathComponent("clip.mov").standardizedFileURL,
+                       "and the restored URL names where the file actually is, which is the only "
+                       + "path stage 3's reader can open")
+
+        // One save carries it forward, which is why no migration is needed for this role.
+        try fm.removeItem(at: asset)
+        XCTAssertEqual(saveAndWait(reopened, to: projectURL), .write)
+        XCTAssertTrue(fm.fileExists(atPath: projectURL.appendingPathComponent("videos/clip.mov").path),
+                      "the re-save copied the clip into videos/ from the package's own old copy")
+        XCTAssertFalse(try XCTUnwrap(ProjectStore.load(from: projectURL)).loadDamage.isDamaged,
+                       "and the carried-forward package opens clean")
     }
 
     /// The missing-asset rule end to end, through the counter the artist is actually shown: the video
@@ -354,7 +398,7 @@ final class VideoElementLogicTests: XCTestCase {
         let (manager, _) = try managerHoldingAVideo(asset: asset)
         let projectURL = ProjectStore.createNewProjectURL(name: "WithVideo")
         XCTAssertEqual(saveAndWait(manager, to: projectURL), .write)
-        try FileManager.default.removeItem(at: projectURL.appendingPathComponent("images/clip.mov"))
+        try FileManager.default.removeItem(at: projectURL.appendingPathComponent("videos/clip.mov"))
 
         let reopened = try XCTUnwrap(ProjectStore.load(from: projectURL))
 

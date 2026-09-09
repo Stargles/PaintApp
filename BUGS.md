@@ -3,6 +3,35 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A build older than TODO (57) opens a (57) package with the drawings deleted (2026-09-09)
+
+**Accepted, one-way, and stated here rather than left silent** — the alternative was not to do
+(57) at all.
+
+Since (57) part 1, a save records the three per-cel JSON sidecars as package-relative paths
+(`drawings/<celID>.json`). A build from before it resolves `vectorFileName` as
+`images/<name>`, so it looks for `images/drawings/<celID>.json`, misses, and falls through
+`decodeCel`'s existing `?? .empty` — **every vector layer's ink on every cel loads blank**, and the
+pose channels and interpolation links load empty with no log line at all, because those two branches
+have no else arm. It is not limited to migrated packages: it is true of any package a (57) build has
+saved, including a brand-new one.
+
+**No scheme avoids it.** The manifest field is one string: either it names the old address, and the
+JSON has not left `images/` — which is the whole of the owner's ask — or it names the new one. Dual
+writing the *file* does not help, because the old build reads the *name*. The `rasterOmitted`
+precedent does not cover this: an old build reading an omitted raster degrades to a correct blank
+tier, where this one degrades to erasing real ink.
+
+**So the rule, for this repo's own multi-session deploys:** once any device has run a (57)-or-later
+build, do not `devicectl install` an older commit over it. Every worktree ships to one shared iPad in
+whatever order sessions finish, and a session on a commit that predates the merge is the realistic
+way this happens.
+
+**The escape hatch, if it does:** the app-signature bump takes a `preupdate-` clone of every project
+*before* the first (57) launch touches anything, and `Backups/`/`Trash/` are never migrated — the
+launch pass walks `Projects/` only. That clone is old-build-readable. Check
+`Backups/<projectID>/preupdate-*` is present before doing anything else.
+
 ## A 6000² document is killed by jetsam before it can play (2026-09-09)
 
 MEASURED on the owner's iPad 9 (3 GB), Release, through `PlaybackProbe`: a document at

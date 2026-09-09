@@ -69,10 +69,37 @@ Point 2 is the one with teeth: a bundle whose directory name never follows its t
 apart. Renaming a bundle on disk is also the operation most likely to lose one, so it wants the same
 copy → verify → atomic rename → remove discipline (36)'s migration used.
 
+**Point 1 is built.** `Services/ProjectPackageLayout.swift` is the one function the writer, the
+reader and the validator all ask where a file lives; a cel's three JSON sidecars are
+`drawings/<celID>.json`, `-animation.json` and `-interpolation.json`, recorded in the manifest as
+package-relative paths — **the format version is the `/`**, which is field-presence versioning
+(KEYFRAMES §3.5) inside a field that already existed. A bare name still means a pre-(57) package and
+resolves out of `images/` forever, because `Backups/` and `Trash/` are never migrated and a
+seven-day-old backup has to open. `tidyEveryProject()` runs from `runStartupMaintenance` and moves —
+never copies, never deletes — so every file is complete at exactly one of two known addresses at every
+instant. Two of point 3's sweeps came with it: clips go to `videos/`, and every content directory is
+created lazily, so a pure-vector document no longer ships an empty `images/`.
+
+**Two things that half of it left behind, and they belong to point 2.** The migration deliberately
+does **not** rename a package directory, so there is no second writer of a package's own name and the
+fork two reviewers found — the launch pass and a rename-on-save each computing a name from a different
+title — cannot occur; whoever builds point 2 owns closing that, and re-running `reconciled` immediately
+before `writeAtomically`'s final `moveItem` is the cheap half of the answer. And the launch pass skips
+a library root that is ubiquitous or on another volume (`ProjectPackageLayout.migrationIsSafe(at:)`),
+because `rename(2)`'s atomicity — the whole crash-resume argument — is a local-volume guarantee a File
+Provider need not honour. Such a library is not stranded: a save stages a *complete* package, so it
+lands in the new layout the next time the artist saves. **Verifying the pass against a real iCloud or
+external root is what would let that gate be widened, and nobody has.**
+
 **Left to build**
-- [ ] Move the layer/stroke JSON out from under the images directory, with a migration.
-- [ ] Make the bundle's directory name follow the project's title, safely.
-- [ ] Sweep the rest of the layout and fix what else reads badly.
+- [ ] Make the bundle's directory name follow the project's title, safely. `ProjectPackageName.stem`
+      exists and `createNewProjectURL` already routes through it (a title containing `/` used to
+      create a real subfolder and file the project inside it, permanently); what is missing is
+      `reconciled(_:title:projectID:)` and the two triggers.
+- [ ] Sweep the rest of the layout and fix what else reads badly. Declined so far, each with a
+      reason: renaming the PNGs (the placed-image family *cannot* be renamed, so it buys a different
+      inconsistency and multiplies the migration), `brushtable.json` → `brushes/table.json`, a
+      legible `Backups/<uuid>/`, a directory per cel, and naming files after layer and frame.
 
 ---
 

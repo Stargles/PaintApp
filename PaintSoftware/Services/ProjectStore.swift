@@ -72,7 +72,13 @@ enum ProjectStore {
     /// forcing "Rough 2" on the second would be the app renaming the artist's work for no reason.
     static func createNewProjectURL(name: String, in directory: URL) -> URL {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let base = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : name
+        // **Sanitised, which it was not** — TODO (57). This trimmed and fell back to "Untitled" and
+        // did nothing else, so a brand-new project titled `Boat/Race` was handed to
+        // `appendingPathComponent("Boat/Race.paintproj")`, where the embedded separator silently made
+        // a real subfolder `Boat/` and filed the project inside it — permanently, because a rename
+        // never moves a project between folders. A 300-character or heavy-emoji title was equally
+        // unbounded. See `ProjectPackageName.stem(forTitle:)`.
+        let base = ProjectPackageName.stem(forTitle: name)
         var candidate = base
         var url = directory.appendingPathComponent("\(candidate).paintproj")
         var suffix = 2
@@ -828,8 +834,28 @@ enum ProjectStore {
                                      tally: WriteTally = WriteTally()) -> Double {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
-        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-        try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        // **Exactly the content directories this document needs, created once, before the fan-out** —
+        // TODO (57). Before, so no worker ever races another to `createDirectory`; exactly, so a
+        // pure-vector document (the owner's own) stops shipping an empty `images/` folder beside its
+        // `drawings/`, which is the next question they would have asked. The conditions below mirror
+        // `writeCel`'s own, one for one — a directory that is not created is a file that silently
+        // does not get written.
+        var roles: Set<ProjectPackageLayout.Role> = []
+        for layer in snapshot.layers {
+            for cel in layer.cels {
+                if cel.rasterImage != nil { roles.insert(.raster) }
+                if cel.fillImage != nil { roles.insert(.fill) }
+                if cel.bakedImage != nil { roles.insert(.baked) }
+                if cel.interpolation != nil { roles.insert(.interpolation) }
+                if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty { roles.insert(.animation) }
+                if let vector = cel.vector, !vector.isEmpty {
+                    roles.insert(.drawing)
+                    if !vector.images.isEmpty { roles.insert(.placedImage) }
+                    if !vector.videos.isEmpty { roles.insert(.video) }
+                }
+            }
+        }
+        ProjectPackageLayout.createDirectories(roles, in: url)
 
         var layerManifests: [LayerManifest] = []
 
@@ -857,7 +883,7 @@ enum ProjectStore {
                 layer.cels.map { (layerIndex, $0) }
             }
         let written = PixelOps.parallelMap(jobs.count) { index in
-            writeCel(jobs[index].cel, to: imagesDir, canvasSize: snapshot.canvasSize, tally: tally)
+            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally)
         }
         var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
         for (index, celManifest) in written.enumerated() {
@@ -995,7 +1021,7 @@ enum ProjectStore {
     /// `JSONEncoder` is per-call. The failure mode a fan-out could introduce is a *manifest* whose
     /// cels came back in completion order, and `writePackage` reconstructs that order from the job
     /// list rather than from completion — see its comment.
-    private static func writeCel(_ cel: SaveSnapshot.CelContent, to imagesDir: URL,
+    private static func writeCel(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
                                  canvasSize: CGSize, tally: WriteTally) -> CelManifest {
         var encodeSeconds = 0.0
         var writeSeconds = 0.0
@@ -1038,9 +1064,12 @@ enum ProjectStore {
                 return nil
             }
         }
-        func write(_ data: Data, _ name: String) {
+        /// Writes one file at the address its **role** gives it — TODO (57). `name` is what the
+        /// manifest records: bare for a PNG, package-relative (`drawings/…`) for the three JSON
+        /// sidecars, and `ProjectPackageLayout.writeURL` reads the difference off the name.
+        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) {
             let started = CFAbsoluteTimeGetCurrent()
-            try? data.write(to: imagesDir.appendingPathComponent(name))
+            try? data.write(to: ProjectPackageLayout.writeURL(named: name, role: role, in: packageURL))
             writeSeconds += CFAbsoluteTimeGetCurrent() - started
             bytes += data.count
         }
@@ -1063,7 +1092,13 @@ enum ProjectStore {
         /// this save *encoded*.
         func copyAsset(named name: String, from source: URL) {
             let fm = FileManager.default
-            let destination = imagesDir.appendingPathComponent(name)
+            // `videos/` since TODO (57)'s sweep — an `.mp4` inside a folder called `images` is the
+            // owner's own complaint one door over. **No migration moves an existing clip and none is
+            // needed**: a clip's name lives inside the vector payload rather than the manifest, so
+            // moving one would mean parsing every payload — and it does not have to, because this
+            // copy reads the runtime `assetURL` the reader resolved, which already knows both
+            // addresses. An old package keeps its clip in `images/` and opens forever.
+            let destination = ProjectPackageLayout.writeURL(named: name, role: .video, in: packageURL)
             guard !fm.fileExists(atPath: destination.path) else { return }
             let started = CFAbsoluteTimeGetCurrent()
             defer { writeSeconds += CFAbsoluteTimeGetCurrent() - started }
@@ -1084,10 +1119,16 @@ enum ProjectStore {
         // disk does not change if it is drawn into and saved again. See `CelManifest.rasterOmitted`
         // for why the name stays non-optional, and `ProjectBackupManager.validateProject` for the
         // half of this change without which every such save would be rejected and trashed.
+        // **The four PNG names are untouched by (57)**, deliberately. The one family that *cannot* be
+        // renamed is the placed images, whose names live inside the payload — so renaming the others
+        // would buy a different inconsistency while multiplying the migration from at most three
+        // renames per cel to every file in the package, and a UUID filename reads no better either
+        // way. Note `-fill.png` uses a dash where the rest use an underscore; that predates this and
+        // is why nothing here pattern-matches a cel's files by a single separator convention.
         let fileName = "\(cel.id.uuidString)_raster.png"
         var rasterOmitted: Bool? = nil
         if let rasterImage = cel.rasterImage {
-            if let data = png(rasterImage) { write(data, fileName) }
+            if let data = png(rasterImage) { write(data, fileName, .raster) }
         } else {
             rasterOmitted = true
         }
@@ -1095,13 +1136,13 @@ enum ProjectStore {
         var fillFileName: String?
         if let fillImage = cel.fillImage, let fillData = png(fillImage) {
             let name = "\(cel.id.uuidString)-fill.png"
-            write(fillData, name)
+            write(fillData, name, .fill)
             fillFileName = name
         }
         var bakedFileName: String?
         if let baked = cel.bakedImage, let bakedData = png(baked) {
             let name = "\(cel.id.uuidString)_baked.png"
-            write(bakedData, name)
+            write(bakedData, name, .baked)
             bakedFileName = name
         }
 
@@ -1115,7 +1156,7 @@ enum ProjectStore {
             for element in vector.images {
                 let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
                 if let data = png(element.image) {
-                    write(data, name)
+                    write(data, name, .placedImage)
                     imageFileNames[element.id] = name
                 }
             }
@@ -1127,8 +1168,11 @@ enum ProjectStore {
             }
             let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
             if let data = json(payload) {
-                let name = "\(cel.id.uuidString)_vector.json"
-                write(data, name)
+                // `drawings/<celID>.json` since TODO (57) — recorded in the manifest as the
+                // package-relative path it is, which is the whole of the format version: a bare name
+                // in this field means a package written before (57), and the reader resolves either.
+                let name = ProjectPackageLayout.recordedName(for: .drawing, cel: cel.id)
+                write(data, name, .drawing)
                 vectorFileName = name
             }
         }
@@ -1138,8 +1182,8 @@ enum ProjectStore {
         // gallery reads every manifest in full.
         var interpolationFileName: String?
         if let recipe = cel.interpolation, let data = json(recipe) {
-            let name = "\(cel.id.uuidString)_interp.json"
-            write(data, name)
+            let name = ProjectPackageLayout.recordedName(for: .interpolation, cel: cel.id)
+            write(data, name, .interpolation)
             interpolationFileName = name
         }
 
@@ -1151,8 +1195,8 @@ enum ProjectStore {
         if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty,
            let data = json(CelAnimationData(tracks: cel.transformTracks,
                                             baselines: cel.pendingPoseBaselines)) {
-            let name = "\(cel.id.uuidString)_anim.json"
-            write(data, name)
+            let name = ProjectPackageLayout.recordedName(for: .animation, cel: cel.id)
+            write(data, name, .animation)
             animationFileName = name
         }
 
@@ -1358,7 +1402,6 @@ enum ProjectStore {
         // workers: asking inside an iteration would sometimes answer for the caller's thread and
         // sometimes for a pool thread, and the question is about the caller.
         let startedOnMainThread = Thread.isMainThread
-        let imagesDir = projectURL.appendingPathComponent("images", isDirectory: true)
         // Read once, before the fan-out, and interned into this process's pool here rather than in
         // each worker: `BrushPool.intern` is lock-guarded, and a hundred cels racing to intern the
         // same five brushes would be a hundred acquires for one answer. What travels to the workers is
@@ -1371,7 +1414,7 @@ enum ProjectStore {
             }
         let decoded = PixelOps.parallelMap(jobs.count) { index in
             decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
-                      imagesDir: imagesDir, canvasSize: canvasSize, brushes: brushes)
+                      projectURL: projectURL, canvasSize: canvasSize, brushes: brushes)
         }
         var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
         // **The layer's name is attached here, not in `decodeCel`.** A cel does not know which layer
@@ -1445,9 +1488,16 @@ enum ProjectStore {
     }
 
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
-                                  imagesDir: URL, canvasSize: CGSize,
+                                  projectURL: URL, canvasSize: CGSize,
                                   brushes: BrushTable.Remap) -> DecodedCel {
         var damage = ProjectLoadDamage.LayerDamage()
+        /// Where one of this cel's files actually is — TODO (57). Every read below goes through it,
+        /// **including the four whose answer never changes**: one rule, asked one way, is what stops
+        /// the writer, the reader and the validator drifting apart, which is the failure this item's
+        /// survey named as the one that would silently trash every save.
+        func fileURL(_ name: String, _ role: ProjectPackageLayout.Role) -> URL {
+            ProjectPackageLayout.existingURL(named: name, role: role, cel: celManifest.id, in: projectURL)
+        }
         /// Every decoder this cel uses, so none of them can be built without the brush table. The key
         /// is set even when the remap is empty, and that is the point: with it absent a stroke's stored
         /// number would be read as an address into *this process's* pool — right for an in-memory round
@@ -1483,7 +1533,7 @@ enum ProjectStore {
         if celManifest.rasterOmitted == true {
             raster = .empty(size: canvasSize)
         } else {
-            let rasterURL = imagesDir.appendingPathComponent(celManifest.rasterFileName)
+            let rasterURL = fileURL(celManifest.rasterFileName, .raster)
             if let image = UIImage(contentsOfFile: rasterURL.path) {
                 let loaded = RasterLayerTexture.load(from: image, size: canvasSize)
                 if loaded.releaseBitmapIfFullyTransparent() { loaded.setStrokeCount(0) }
@@ -1494,11 +1544,11 @@ enum ProjectStore {
         }
         var fillImage: UIImage?
         if let fillFileName = celManifest.fillImageFileName {
-            fillImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(fillFileName).path)
+            fillImage = UIImage(contentsOfFile: fileURL(fillFileName, .fill).path)
         }
         var bakedImage: UIImage?
         if let bakedFileName = celManifest.bakedImageFileName {
-            bakedImage = UIImage(contentsOfFile: imagesDir.appendingPathComponent(bakedFileName).path)
+            bakedImage = UIImage(contentsOfFile: fileURL(bakedFileName, .baked).path)
         }
 
         // Vector content: decode the JSON (the ordered display list + image refs + transform)
@@ -1519,7 +1569,7 @@ enum ProjectStore {
         // the cel, which is the same reasoning the interpolation recipe below already applies.
         var vector: VectorCanvas?
         if let vectorFileName = celManifest.vectorFileName {
-            let vectorURL = imagesDir.appendingPathComponent(vectorFileName)
+            let vectorURL = fileURL(vectorFileName, .drawing)
             if let data = try? Data(contentsOf: vectorURL) {
                 do {
                     let payload = try decoder().decode(VectorCanvasData.self, from: data)
@@ -1531,7 +1581,7 @@ enum ProjectStore {
                     // **`validateProject` cannot catch this one**: image refs live inside the vector
                     // JSON, not in the manifest, so the integrity check never sees their file names.
                     let elements = payload.canvasSpaceElements(resolvingImages: { ref in
-                        guard let image = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else {
+                        guard let image = UIImage(contentsOfFile: fileURL(ref.fileName, .placedImage).path) else {
                             damage.images += 1
                             log.error("""
                                 Placed image \(ref.fileName, privacy: .public) for cel \
@@ -1549,7 +1599,7 @@ enum ProjectStore {
                         // decoder, and VIDEO.md stage 3 owns that; a file that is present and
                         // unplayable is a stage-3 failure to report at the frame, not a stage-2
                         // reason to throw the element away at load.
-                        let url = imagesDir.appendingPathComponent(ref.fileName)
+                        let url = fileURL(ref.fileName, .video)
                         guard FileManager.default.fileExists(atPath: url.path) else {
                             damage.videos += 1
                             log.error("""
@@ -1602,7 +1652,7 @@ enum ProjectStore {
         // content, so losing it costs the link, not the drawing.
         var interpolation: InterpolationRecipe?
         if let interpolationFileName = celManifest.interpolationFileName,
-           let data = try? Data(contentsOf: imagesDir.appendingPathComponent(interpolationFileName)) {
+           let data = try? Data(contentsOf: fileURL(interpolationFileName, .interpolation)) {
             interpolation = try? decoder().decode(InterpolationRecipe.self, from: data)
         }
 
@@ -1611,7 +1661,7 @@ enum ProjectStore {
         // rule the recipe above follows, and the reason both are sidecars.
         var animation = CelAnimationData()
         if let animationFileName = celManifest.animationFileName,
-           let data = try? Data(contentsOf: imagesDir.appendingPathComponent(animationFileName)),
+           let data = try? Data(contentsOf: fileURL(animationFileName, .animation)),
            let decoded = try? decoder().decode(CelAnimationData.self, from: data) {
             animation = decoded
         }

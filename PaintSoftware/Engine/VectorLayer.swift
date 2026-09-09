@@ -6326,7 +6326,7 @@ struct VectorCanvasData: Codable {
         /// **No sidecar and no `TextRef`.** `VectorTextElement` is the first vector element whose
         /// runtime and persisted forms are the same type — it holds no runtime resource, so it needs
         /// none of the `ImageRef` / `<project>/images/` machinery `.image` forces on `ProjectStore`,
-        /// and the whole object rides inline in the cel's own `<celID>_vector.json`.
+        /// and the whole object rides inline in the cel's own `drawings/<celID>.json` (TODO (57)).
         ///
         /// The `"text"` discriminator is the fourth case the two-step decode above was built for. An
         /// older build meeting it loses **this element** and keeps the rest of the cel; before the

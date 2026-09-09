@@ -87,11 +87,25 @@ final class SaveDamageGateLogicTests: XCTestCase {
         return url
     }
 
+    /// The one vector payload this fixture writes, wherever the layout puts it.
+    ///
+    /// **Resolved through `ProjectPackageLayout` rather than by `images/*_vector.json`** — TODO (57)
+    /// moved the sidecars to `drawings/<celID>.json`, and this helper is the choke point every one of
+    /// this suite's damage fixtures reaches the payload through. Filtering by a name the writer no
+    /// longer produces would have taken the whole file red in one go, a mile from anything it guards.
     private func vectorPayloadURL(in projectURL: URL) throws -> URL {
-        let images = projectURL.appendingPathComponent("images", isDirectory: true)
-        let contents = try FileManager.default.contentsOfDirectory(at: images, includingPropertiesForKeys: nil)
-        let payloads = contents.filter { $0.lastPathComponent.hasSuffix("_vector.json") }
-        XCTAssertEqual(payloads.count, 1, "Setup: exactly one vector cel was written")
+        let directory = projectURL.appendingPathComponent(ProjectPackageLayout.Role.drawing.directory,
+                                                          isDirectory: true)
+        let contents = (try? FileManager.default.contentsOfDirectory(at: directory,
+                                                                     includingPropertiesForKeys: nil)) ?? []
+        // A drawing is `<celID>.json`; its animation and interpolation siblings carry a suffix.
+        let payloads = contents.filter {
+            $0.pathExtension == "json"
+                && !$0.lastPathComponent.contains("-animation")
+                && !$0.lastPathComponent.contains("-interpolation")
+        }
+        XCTAssertEqual(payloads.count, 1,
+                       "Setup: exactly one vector cel was written, so drawings/ holds one drawing payload")
         return try XCTUnwrap(payloads.first)
     }
 

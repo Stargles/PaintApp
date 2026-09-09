@@ -224,6 +224,13 @@ nonisolated enum ProjectBackupManager {
         }
 
         repairCorruptedProjects()
+
+        // TODO (57): move each project's JSON sidecars out from under `images/`. **After the repair**
+        // so a damaged package is restored before we look at it, and **before the purges** so nothing
+        // is name-matched against a half-reconciled tree. It is idempotent, it never copies or
+        // deletes, and a third run changes nothing — see `ProjectPackageLayout.tidy`.
+        ProjectPackageLayout.tidyEveryProject()
+
         purgeExpiredTrash()
         pruneToSizeCap()
     }
@@ -575,7 +582,11 @@ nonisolated enum ProjectBackupManager {
     /// real manifest is deliberate: this file is shared with the UI-test bundle, which doesn't have
     /// the app's model types — and ignoring every non-file key keeps the check robust against
     /// future manifest schema additions.
-    private struct ManifestSkeleton: Decodable {
+    ///
+    /// **Internal rather than private since TODO (57)**: `ProjectPackageLayout.tidy` asks this
+    /// manifest exactly the same question — which files does this package name, and for which cel —
+    /// and two decoders for one question is how the writer and the validator drift apart.
+    struct ManifestSkeleton: Decodable {
         var id: UUID
         var layers: [Layer]
         /// Mirrors `ProjectManifest.brushTableFileName` — BRUSH.md §5.4. It is checked for the reason
@@ -587,6 +598,17 @@ nonisolated enum ProjectBackupManager {
             var cels: [Cel]
         }
         struct Cel: Decodable {
+            /// Mirrors `CelManifest.id`, and it is what TODO (57)'s resolver needs to derive a bare
+            /// legacy sidecar name's *new* address (`ProjectPackageLayout.existingURL`).
+            ///
+            /// **Optional, where `CelManifest.id` is not, and that is deliberate rather than sloppy.**
+            /// Every manifest this app has ever written carries it, so requiring it here would reject
+            /// nothing real — but two logic-test fixtures hand-build a cel as
+            /// `["rasterFileName": …, "rasterOmitted": true]` with no `id` key, and this struct's
+            /// whole character is that it decodes less than the manifest holds rather than more. Nil
+            /// costs only the alternate probe, and a package with no cel ids has no moved sidecars to
+            /// probe for.
+            var id: UUID?
             var rasterFileName: String
             /// Mirrors `CelManifest.rasterOmitted`: the cel's raster tier held no bitmap, so no PNG
             /// was written and `rasterFileName` names a file that is legitimately not there. Without
@@ -607,6 +629,24 @@ nonisolated enum ProjectBackupManager {
             /// stage's to make; adding this one costs nothing, because no package in the world yet
             /// names an animation file.
             var animationFileName: String?
+
+            /// This cel's recorded name for one of the three moved roles — TODO (57). One switch so
+            /// the validator and `ProjectPackageLayout.tidy` cannot disagree about which field a role
+            /// reads.
+            func fileName(for role: ProjectPackageLayout.Role) -> String? {
+                switch role {
+                case .drawing:       return vectorFileName
+                case .animation:     return animationFileName
+                case .interpolation: return interpolationFileName
+                default:             return nil
+                }
+            }
+            /// **Still not decoded, and the gap is still real** — see `animationFileName` above. A cel
+            /// whose recipe sidecar is missing validates today and the atomic save proceeds over it.
+            /// (57) resolves this field's *address* through the same rule as the other two, which is
+            /// why the accessor above knows about it; closing the validation gap is a change to what
+            /// existing documents are called damaged for, and is not this item's to make.
+            var interpolationFileName: String?
         }
     }
 
@@ -622,10 +662,14 @@ nonisolated enum ProjectBackupManager {
               let skeleton = try? JSONDecoder().decode(ManifestSkeleton.self, from: data) else {
             return false
         }
-        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-
-        func fileIntact(_ name: String, isPNG: Bool) -> Bool {
-            let fileURL = imagesDir.appendingPathComponent(name)
+        // **Resolved through `ProjectPackageLayout`, not joined to `images/`** — TODO (57). The
+        // address of a sidecar is a question with one answer, and this is the third place that asks
+        // it. Without this the validator would call a package mid-migration damaged — a file moved to
+        // `drawings/` while the manifest still names it bare is *exactly* the state a crash between
+        // the move and the manifest rewrite leaves — `repairCorruptedProjects` would restore over it,
+        // and `tidy`'s own step-0 guard would refuse to finish the migration that would fix it.
+        func fileIntact(_ name: String, isPNG: Bool, role: ProjectPackageLayout.Role, cel: UUID?) -> Bool {
+            let fileURL = ProjectPackageLayout.existingURL(named: name, role: role, cel: cel, in: url)
             guard fm.fileExists(atPath: fileURL.path) else { return false }
             guard isPNG else { return true }
             guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
@@ -646,12 +690,16 @@ nonisolated enum ProjectBackupManager {
                 // telling them apart is the entire job of this line. A cel that says `rasterOmitted`
                 // never had a PNG and must validate; a cel that names one and cannot produce it is
                 // damaged exactly as it always was — `BackupManagerLogicTests` pins both directions.
-                if cel.rasterOmitted != true, !fileIntact(cel.rasterFileName, isPNG: true) { return false }
-                if let fill = cel.fillImageFileName, !fileIntact(fill, isPNG: true) { return false }
-                if let baked = cel.bakedImageFileName, !fileIntact(baked, isPNG: true) { return false }
-                if let vector = cel.vectorFileName, !fileIntact(vector, isPNG: false) { return false }
+                if cel.rasterOmitted != true,
+                   !fileIntact(cel.rasterFileName, isPNG: true, role: .raster, cel: cel.id) { return false }
+                if let fill = cel.fillImageFileName,
+                   !fileIntact(fill, isPNG: true, role: .fill, cel: cel.id) { return false }
+                if let baked = cel.bakedImageFileName,
+                   !fileIntact(baked, isPNG: true, role: .baked, cel: cel.id) { return false }
+                if let vector = cel.vectorFileName,
+                   !fileIntact(vector, isPNG: false, role: .drawing, cel: cel.id) { return false }
                 if let animation = cel.animationFileName,
-                   !fileIntact(animation, isPNG: false) { return false }
+                   !fileIntact(animation, isPNG: false, role: .animation, cel: cel.id) { return false }
             }
         }
         return true

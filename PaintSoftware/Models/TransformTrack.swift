@@ -459,8 +459,10 @@ extension TransformTrack.Key: Codable {
 
 // MARK: - The cel's animation sidecar
 
-/// **What `<celID>_anim.json` holds** — KEYFRAMES.md §3.5's track sidecar, named from
-/// `CelManifest.animationFileName`.
+/// **What `drawings/<celID>-animation.json` holds** — KEYFRAMES.md §3.5's track sidecar, named
+/// from `CelManifest.animationFileName`. It was `images/<celID>_anim.json` until TODO (57) part 1
+/// moved the per-cel JSON out from under the pixels; a package written before that still names it
+/// bare, and `ProjectPackageLayout.existingURL` resolves either.
 ///
 /// **Its own file rather than inline in `manifest.json`**, exactly as `interpolationFileName` works
 /// and for the reason that one states: the manifest is read in full for every gallery tile, and a

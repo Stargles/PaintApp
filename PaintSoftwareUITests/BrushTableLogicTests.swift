@@ -380,13 +380,19 @@ final class BrushTableLogicTests: XCTestCase {
         let manifest = try JSONDecoder().decode(
             ProjectManifest.self, from: Data(contentsOf: url.appendingPathComponent("manifest.json")))
         try rewrite(url.appendingPathComponent(try XCTUnwrap(manifest.brushTableFileName)), key: "ref")
-        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-        for name in try FileManager.default.contentsOfDirectory(atPath: imagesDir.path)
-        where name.hasSuffix(".json") {
-            let fileURL = imagesDir.appendingPathComponent(name)
-            guard let text = try? String(contentsOf: fileURL, encoding: .utf8),
-                  text.contains("\"brush\":") else { continue }
-            try rewrite(fileURL, key: "brush")
+        // Both content directories, and neither is required to exist: TODO (57) moved the per-cel
+        // JSON to `drawings/`, a pure-vector document now writes no `images/` at all, and a package
+        // written before (57) still has its sidecars under `images/`. A helper that named one
+        // directory would either throw or silently shift nothing depending on which it named.
+        for directory in ["images", ProjectPackageLayout.Role.drawing.directory] {
+            let dirURL = url.appendingPathComponent(directory, isDirectory: true)
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dirURL.path)) ?? []
+            for name in names where name.hasSuffix(".json") {
+                let fileURL = dirURL.appendingPathComponent(name)
+                guard let text = try? String(contentsOf: fileURL, encoding: .utf8),
+                      text.contains("\"brush\":") else { continue }
+                try rewrite(fileURL, key: "brush")
+            }
         }
     }
 

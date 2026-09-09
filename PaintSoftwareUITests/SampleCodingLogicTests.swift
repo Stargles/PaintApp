@@ -318,13 +318,16 @@ final class SampleCodingLogicTests: XCTestCase {
         let url = ProjectStore.createNewProjectURL(name: "Origin On Disk")
         saveAndWait(manager, to: url)
 
-        let images = url.appendingPathComponent("images", isDirectory: true)
-        let vectorFiles = try FileManager.default.contentsOfDirectory(atPath: images.path)
-            .filter { $0.hasSuffix("_vector.json") }
+        // `drawings/`, not `images/`, since TODO (57) moved the per-cel JSON out from under the
+        // pixels. What this test reads off the bytes is unchanged.
+        let drawings = url.appendingPathComponent(ProjectPackageLayout.Role.drawing.directory,
+                                                  isDirectory: true)
+        let vectorFiles = try FileManager.default.contentsOfDirectory(atPath: drawings.path)
+            .filter { $0.hasSuffix(".json") && !$0.contains("-animation") && !$0.contains("-interpolation") }
         XCTAssertEqual(vectorFiles.count, 1, "Setup: exactly one vector cel was drawn on")
 
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: try Data(contentsOf: images.appendingPathComponent(vectorFiles[0]))) as? [String: Any])
+            with: try Data(contentsOf: drawings.appendingPathComponent(vectorFiles[0]))) as? [String: Any])
         let elements = try XCTUnwrap(payload["elements"] as? [[String: Any]])
         let stroke = try XCTUnwrap(elements.compactMap { $0["stroke"] as? [String: Any] }.first)
         let samples = try XCTUnwrap(stroke["samples"] as? [String: Any])
