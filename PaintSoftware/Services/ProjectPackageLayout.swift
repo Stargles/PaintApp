@@ -148,6 +148,41 @@ nonisolated enum ProjectPackageLayout {
         }
     }
 
+    /// Every directory this type can create inside a package, named once rather than as a literal
+    /// list — `drawings`, `images`, `videos`. `brushes/` is not one of them: it belongs to
+    /// `ProjectStore.copyCustomBrushTexturesIntoProject`, which already refuses to create it empty.
+    static var contentDirectories: [String] { Set(Role.allCases.map(\.directory)).sorted() }
+
+    /// **Removes any of the three content directories that is empty, and returns which ones went.**
+    ///
+    /// `createDirectories` above makes the *writer* exact, and the artist still ends up looking at an
+    /// empty folder by two routes it does not cover. The migration is the loud one: `tidy` moves a
+    /// legacy vector-only package's sidecars into `drawings/` and leaves the `images/` they came out
+    /// of standing there empty — which is the owner's own complaint arriving one door over, at
+    /// exactly the launch they would open Files to check the update. The quiet one is the writer's
+    /// own: a role is added to the set from the snapshot, and the encode or the asset copy that was
+    /// supposed to fill it can still fail, so a save can stage a `videos/` with no clip in it.
+    ///
+    /// **`rmdir(2)` rather than `contentsOfDirectory` then `removeItem`.** The kernel refuses a
+    /// non-empty directory itself, in one call, with no window between the check and the removal —
+    /// so this cannot delete a file under any interleaving, which is not a property the
+    /// check-then-remove version has. It is also cheap enough to run on every package at every
+    /// launch: three syscalls that fail instantly against the one manifest read the pass already
+    /// pays. `ENOTEMPTY` and `ENOENT` are both the ordinary answer and neither is logged.
+    @discardableResult
+    static func pruneEmptyContentDirectories(in package: URL) -> [String] {
+        var removed: [String] = []
+        for directory in contentDirectories {
+            let url = package.appendingPathComponent(directory, isDirectory: true)
+            let status = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+                guard let path else { return -1 }
+                return rmdir(path)
+            }
+            if status == 0 { removed.append(directory) }
+        }
+        return removed
+    }
+
     // MARK: - Reading
 
     /// Where to **read** `name` from — whichever of its two possible addresses holds it today.
@@ -209,9 +244,14 @@ nonisolated enum ProjectPackageLayout {
         var renamed: [String] = []
         /// Package ids seen more than once in one walk — see `tidyEveryProject`.
         var duplicateProjectIDs: [String] = []
+        /// Empty content directories removed, `<package>/<directory>` each — see
+        /// `pruneEmptyContentDirectories`.
+        var emptiedDirectories: [String] = []
         var seconds: Double = 0
 
-        var isEmpty: Bool { tidied.isEmpty && movedFiles == 0 && renamed.isEmpty }
+        var isEmpty: Bool {
+            tidied.isEmpty && movedFiles == 0 && renamed.isEmpty && emptiedDirectories.isEmpty
+        }
         static let empty = Report()
     }
 
@@ -281,6 +321,11 @@ nonisolated enum ProjectPackageLayout {
                 }
             }
             if let renamedTo = pass.renamedTo { report.renamed.append(renamedTo) }
+            // Named `<package>/<directory>`, because "images" on its own says nothing about which of
+            // two hundred packages shed it — and under the package's name **as it is now**, since a
+            // rename in the same pass has already moved it.
+            let packageName = pass.renamedTo ?? url.lastPathComponent
+            report.emptiedDirectories += pass.emptied.map { "\(packageName)/\($0)" }
             switch pass.outcome {
             case .tidied(let tidied):
                 report.tidied.append(tidied.lastPathComponent)
@@ -295,7 +340,8 @@ nonisolated enum ProjectPackageLayout {
             log.info("""
                 Project layout pass: \(report.tidied.count, privacy: .public) tidied \
                 (\(report.movedFiles, privacy: .public) sidecars moved, \
-                \(report.renamed.count, privacy: .public) directories renamed to follow their title), \
+                \(report.renamed.count, privacy: .public) directories renamed to follow their title, \
+                \(report.emptiedDirectories.count, privacy: .public) empty content folders removed), \
                 \(report.unchanged, privacy: .public) already tidy, \
                 \(report.skippedDamaged, privacy: .public) skipped as damaged, \
                 \(report.skippedForeignVolume, privacy: .public) skipped on a root this pass will not \
@@ -313,16 +359,22 @@ nonisolated enum ProjectPackageLayout {
         var movedFiles = 0
         /// The package directory's new `lastPathComponent`, when TODO (57) part 2's rename fired.
         var renamedTo: String?
+        /// Bare directory names this pass removed because they were empty — the sweep.
+        var emptied: [String] = []
     }
 
     /// One package, moved into the new layout in place.
     ///
-    /// **Move, never copy, and never delete.** TODO (36)'s migration copies before it removes because
-    /// it crosses two roots that may be different volumes; this one moves files *within one package
-    /// on one volume*, where `rename(2)` is atomic, so a copy would add a window rather than remove
-    /// one. The invariant is therefore stronger than (36)'s: **every file is complete at exactly one
-    /// of two known addresses at every instant, and the reader knows both.** The package directory
-    /// itself is never staged, cloned or removed.
+    /// **Move, never copy, and delete no file.** TODO (36)'s migration copies before it removes
+    /// because it crosses two roots that may be different volumes; this one moves files *within one
+    /// package on one volume*, where `rename(2)` is atomic, so a copy would add a window rather than
+    /// remove one. The invariant is therefore stronger than (36)'s: **every file is complete at
+    /// exactly one of two known addresses at every instant, and the reader knows both.** The package
+    /// directory itself is never staged, cloned or removed.
+    ///
+    /// The one removal in the pass is step 8's sweep, and it is not an exception to that sentence:
+    /// `rmdir(2)` on a *content directory* the moves emptied, which the kernel refuses outright if
+    /// anything is inside it. It cannot reach a file under any interleaving.
     ///
     /// **Crash-resume is nothing**: every step is individually atomic and conditioned on what is on
     /// disk, so the next launch re-runs and finishes whatever is left. A third run changes nothing.
@@ -333,6 +385,7 @@ nonisolated enum ProjectPackageLayout {
     /// | a sidecar move | the file at `images/` **or** at `drawings/`, never neither, never both | the reader probes `images/` then `drawings/`; the cel loads whole |
     /// | between moves | some moved, some not, manifest still bare | every file resolves; the next run moves the rest |
     /// | the manifest write | the old manifest or the new one, never a partial one (`.atomic`) | old manifest + moved files still resolves via the alternate address |
+    /// | the sweep | the emptied directory is there or gone, and `rmdir` is one syscall | either way nothing reads it; the next run finishes it |
     /// | after the manifest write | fully tidy | nothing left to do |
     @discardableResult
     static func tidy(packageAt url: URL) -> TidyOutcome {
@@ -386,7 +439,15 @@ nonisolated enum ProjectPackageLayout {
         }
 
         guard !work.isEmpty || renameTarget != nil else {
-            return PackagePass(outcome: .unchanged, projectID: projectID)
+            // **The sweep still runs on a package with no work**, which is the whole reason it is
+            // three `rmdir`s rather than three directory listings: a package tidied by an earlier
+            // launch of this build (before the sweep existed) or one whose save staged a directory
+            // it then failed to fill is exactly the package that reaches here, and it is the one
+            // holding the empty folder. Gated on `migrating` like every other mutation in this pass,
+            // even though removing an empty directory cannot lose a byte — one gate, one argument.
+            let emptied = migrating ? pruneEmptyContentDirectories(in: url) : []
+            return PackagePass(outcome: emptied.isEmpty ? .unchanged : .tidied(url),
+                               projectID: projectID, emptied: emptied)
         }
         guard migrating else { return PackagePass(outcome: .skippedForeignVolume, projectID: projectID) }
 
@@ -475,9 +536,13 @@ nonisolated enum ProjectPackageLayout {
             }
         }
         guard !rewrites.isEmpty else {
-            // A rename with no sidecars to move is still a pass that changed the library.
-            return PackagePass(outcome: renamedTo == nil ? .unchanged : .tidied(url),
-                               projectID: projectID, renamedTo: renamedTo)
+            // A rename with no sidecars to move is still a pass that changed the library. The sweep
+            // runs here too: `madeDrawingsDirectory` above can have created a `drawings/` that every
+            // move then failed to put anything in.
+            let emptied = pruneEmptyContentDirectories(in: url)
+            let changed = renamedTo != nil || !emptied.isEmpty
+            return PackagePass(outcome: changed ? .tidied(url) : .unchanged,
+                               projectID: projectID, renamedTo: renamedTo, emptied: emptied)
         }
 
         // 7. Rewrite the manifest to name the new addresses. Everything here is optional work: the
@@ -486,8 +551,14 @@ nonisolated enum ProjectPackageLayout {
         //    keeping two variables.
         rewriteManifest(at: url.appendingPathComponent("manifest.json"), in: url,
                         originalBytes: originalBytes, rewrites: rewrites)
+
+        // 8. The sweep. **After the manifest rewrite, not before**: the moves above are what can
+        //    empty `images/`, and a vector-only package written before (57) is exactly the one whose
+        //    `images/` held nothing but the sidecars that just left. Leaving it standing would put an
+        //    empty folder beside `drawings/` at the one launch the artist opens Files to look.
+        let emptied = pruneEmptyContentDirectories(in: url)
         return PackagePass(outcome: .tidied(url), projectID: projectID,
-                           movedFiles: rewrites.count, renamedTo: renamedTo)
+                           movedFiles: rewrites.count, renamedTo: renamedTo, emptied: emptied)
     }
 
     /// The one step that can destroy data, and the two lines that stop it.

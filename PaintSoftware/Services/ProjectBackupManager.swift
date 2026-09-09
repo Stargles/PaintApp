@@ -227,8 +227,10 @@ nonisolated enum ProjectBackupManager {
 
         // TODO (57): move each project's JSON sidecars out from under `images/`. **After the repair**
         // so a damaged package is restored before we look at it, and **before the purges** so nothing
-        // is name-matched against a half-reconciled tree. It is idempotent, it never copies or
-        // deletes, and a third run changes nothing — see `ProjectPackageLayout.tidy`.
+        // is name-matched against a half-reconciled tree. It is idempotent, it never copies, it
+        // deletes no file (the one removal it makes is `rmdir` on a content directory it emptied,
+        // which the kernel refuses if anything is in it), and a third run changes nothing — see
+        // `ProjectPackageLayout.tidy`.
         ProjectPackageLayout.tidyEveryProject()
 
         purgeExpiredTrash()

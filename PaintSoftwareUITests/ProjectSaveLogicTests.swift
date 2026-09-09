@@ -1478,6 +1478,11 @@ final class ProjectSaveLogicTests: XCTestCase {
                                       file: StaticString = #filePath, line: UInt = #line) {
         let manifestURL = url.appendingPathComponent("manifest.json")
         let images = url.appendingPathComponent("images", isDirectory: true)
+        // **Created rather than assumed** — TODO (57) made every content directory lazy, so a package
+        // whose cels all omitted their raster has no `images/` for this to write into, and the writes
+        // below are `try?`. Without this line a fixture that "reverted" nothing would look like a
+        // package the heal had already dealt with.
+        try? FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         guard let data = try? Data(contentsOf: manifestURL),
               var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               var layers = json["layers"] as? [[String: Any]] else {

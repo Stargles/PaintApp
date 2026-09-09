@@ -391,7 +391,13 @@ final class ProjectLocationLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     /// A minimal package that `ProjectBackupManager.validateProject` accepts: a manifest naming one
-    /// cel whose raster was omitted, plus the `images/` directory the validator expects to walk.
+    /// cel whose raster was omitted.
+    ///
+    /// It hand-creates `images/` and does not need to — the validator resolves each file it is
+    /// *told about* through `ProjectPackageLayout.existingURL` and never lists a directory, and since
+    /// TODO (57) an all-omitted document is written with no `images/` at all. Kept because these
+    /// tests are about migrating and re-listing a library rather than about a package's shape, and a
+    /// fixture with one more directory in it exercises the walk a little harder.
     @discardableResult
     private func writeProject(named name: String) -> URL {
         let url = ProjectStore.createNewProjectURL(name: name)

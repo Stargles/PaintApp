@@ -4730,8 +4730,10 @@ final class PerfBaselineTests: XCTestCase {
     /// This scales that document to a size where the three figures are readable against the noise on
     /// this Mac: **60 vector-only cels at the owner's real 2048x2048**, three layers of twenty. The
     /// ink is real vector geometry, so the package is not artificially empty — the strokes are written
-    /// to `_vector.json` exactly as they are in the owner's project, and the only thing the change
-    /// removes is the transparent PNG beside them.
+    /// to their own per-cel sidecar exactly as they are in the owner's project, and the only thing the
+    /// change removes is the transparent PNG beside them. (That sidecar was `images/<celID>_vector.json`
+    /// when this was written and is `drawings/<celID>.json` since TODO (57); the figures below are
+    /// about the PNG either way.)
     ///
     /// **Three numbers, and they are deliberately not timings alone.**
     ///  * `packageBytes` / `rasterBytes` — bytes on disk, and how many of them are `_raster.png`.

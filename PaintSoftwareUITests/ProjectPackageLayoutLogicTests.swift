@@ -21,6 +21,11 @@ import UIKit
 ///  3. **The migration is crash-safe at every step boundary** — each row of `tidy`'s own resume table
 ///     is left on disk deliberately and then both re-loaded and re-run, because "it is idempotent" is
 ///     a claim about the second run and nothing but a second run tests it.
+///  4. **No empty folder is left standing, by either route** — part 3's sweep. The writer's laziness
+///     does not cover the migration (which empties `images/` by moving its contents out) and does not
+///     cover its own failures (a role created from the snapshot that the write then could not fill),
+///     so both are driven, and both directions of `rmdir`'s refusal are asserted: a directory that
+///     still holds a byte keeps it *and* keeps the byte.
 ///
 /// `Services/ProjectPackageLayout.swift`, `ProjectStore.swift` and `ProjectBackupManager.swift` are
 /// compiled directly into this bundle (see `BackupManagerLogicTests`' header for why
@@ -302,6 +307,131 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
             "and a raster-only document gets no drawings/ — every content directory is lazy")
     }
 
+    // MARK: - The sweep: no empty content directory, by either route
+
+    /// **A directory the migration empties does not stay standing** — TODO (57) part 3.
+    ///
+    /// This is the whole of part 1's own complaint arriving one door over, at the worst possible
+    /// moment. A vector-only package written before (57) keeps nothing in `images/` *but* the three
+    /// JSON sidecars; the launch pass moves them into `drawings/` and, without this, leaves an empty
+    /// `images/` beside them — at exactly the launch the artist opens Files to see whether the update
+    /// did what it said. `createDirectories`' laziness does not reach this: it makes the *writer*
+    /// exact, and nothing has been re-saved yet.
+    func testTheMigrationRemovesTheImagesDirectoryItEmpties() {
+        let url = savedProject()
+        makeLegacyLayout(at: url)
+        // The premise, asserted before the fix is: the legacy fixture really does put an `images/`
+        // there, holding nothing but the sidecars that are about to leave.
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: url.appendingPathComponent("images", isDirectory: true).path),
+            "Setup: the pre-(57) shape has an images/ directory")
+        XCTAssertEqual(names(in: "images", at: url).filter { !$0.hasSuffix(".json") }, [],
+                       "Setup: and it holds nothing but JSON, because the fixture draws no pixels")
+
+        XCTAssertEqual(ProjectPackageLayout.tidy(packageAt: url), .tidied(url))
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: url.appendingPathComponent("images", isDirectory: true).path),
+            "the folder the sidecars came out of does not survive them")
+        assertInkSurvived(at: url, "a package whose images/ was swept")
+    }
+
+    /// **And one it does not empty is left exactly as it was.** The sweep's whole safety argument is
+    /// that `rmdir(2)` refuses a non-empty directory in the kernel, so this is the assertion that
+    /// says the refusal is real rather than assumed — and it is the one a "list it, then remove it"
+    /// implementation could get wrong.
+    func testTheMigrationLeavesAnImagesDirectoryThatStillHoldsAPixel() throws {
+        let url = savedProject()
+        makeLegacyLayout(at: url)
+        let images = url.appendingPathComponent("images", isDirectory: true)
+        // A PNG the migration knows nothing about — it is named in no manifest and moves nowhere.
+        let bystander = images.appendingPathComponent("keepme.png")
+        try Data("not a real png".utf8).write(to: bystander)
+
+        XCTAssertEqual(ProjectPackageLayout.tidy(packageAt: url), .tidied(url))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: images.path),
+                      "images/ still holds something, so it stays")
+        XCTAssertEqual(try Data(contentsOf: bystander), Data("not a real png".utf8),
+                       "and the something is byte-for-byte what it was — the sweep removes "
+                       + "directories, never their contents")
+    }
+
+    /// **A clip an older build left in `images/` keeps its folder**, which is the case that would
+    /// have made a careless sweep lose a video. The sidecars leave, the `.mp4` does not (its name
+    /// lives in the vector payload, so nothing migrates it), and `images/` is therefore still the
+    /// address the resolver's `.video` alternate probes.
+    func testTheSweepDoesNotStrandAClipAnOlderBuildLeftInImages() throws {
+        let url = savedProject()
+        makeLegacyLayout(at: url)
+        let images = url.appendingPathComponent("images", isDirectory: true)
+        let clip = images.appendingPathComponent("\(UUID().uuidString)_video.mp4")
+        try Data("clip".utf8).write(to: clip)
+
+        ProjectPackageLayout.tidy(packageAt: url)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: clip.path),
+                      "the clip is still where the older build put it, and images/ with it")
+        XCTAssertEqual(
+            ProjectPackageLayout.existingURL(named: clip.lastPathComponent, role: .video, in: url),
+            clip, "so the resolver's videos/-then-images/ probe still finds it")
+    }
+
+    /// **The launch pass reports what it swept**, under the package's name — the counterpart to the
+    /// `movedFiles` and `renamed` counts beside it, and the only way an artist's log says where an
+    /// empty folder went.
+    func testTheLaunchPassReportsTheEmptyDirectoriesItRemoved() {
+        let url = savedProject(named: "Swept")
+        makeLegacyLayout(at: url)
+
+        let report = ProjectPackageLayout.tidyEveryProject()
+
+        XCTAssertEqual(report.emptiedDirectories, ["Swept.paintproj/images"],
+                       "got \(report.emptiedDirectories)")
+
+        // **`isEmpty` gates the pass's whole log line, so it has to count this.** Asserted on a
+        // constructed `Report` rather than on the one above, because that one also moved files —
+        // its `tidied` is non-empty, so `XCTAssertFalse(report.isEmpty)` there would hold whether
+        // `isEmpty` looked at this field or not.
+        var sweepOnly = ProjectPackageLayout.Report()
+        sweepOnly.emptiedDirectories = ["Somewhere.paintproj/images"]
+        XCTAssertFalse(sweepOnly.isEmpty,
+                       "a pass whose only work was removing a directory is not an empty pass, and "
+                       + "an empty pass says nothing in the log")
+        XCTAssertTrue(ProjectPackageLayout.Report().isEmpty, "and a pass that did nothing is")
+    }
+
+    /// **The writer's own route to an empty folder, which the role scan cannot close.** That scan
+    /// reads the snapshot and creates `videos/` because the document *has* a clip; the copy that was
+    /// supposed to fill it can still fail — here because the asset the element names is gone, which
+    /// is `VectorVideoElement`'s own documented hazard. Without the sweep the artist gets a saved
+    /// package containing an empty `videos/` and no word of complaint.
+    func testASaveWhoseClipCannotBeCopiedShipsNoEmptyVideosDirectory() throws {
+        let manager = makeManager()
+        let canvas = try XCTUnwrap(manager.layers[manager.layers.count - 1].cels[0].vector,
+                                   "Setup: makeManager's last layer is the vector one")
+        // An element naming a file that is not there. The save creates `videos/` from the snapshot
+        // and then has nothing to put in it.
+        let missing = root.appendingPathComponent("gone-\(UUID().uuidString).mov")
+        canvas.elements.append(.video(VectorVideoElement(
+            assetURL: missing, assetFileName: missing.lastPathComponent,
+            naturalSize: CGSize(width: 32, height: 18),
+            sourceStart: .zero, sourceEnd: SourceTime(value: 1, timescale: 1), speed: 1,
+            transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0))))
+        canvas.bumpVersion()
+
+        let url = ProjectStore.createNewProjectURL(name: "Lost Clip")
+        saveAndWait(manager, to: url)
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: url.appendingPathComponent("videos", isDirectory: true).path),
+            "the copy failed, so nothing is in videos/, so there is no videos/")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: url.appendingPathComponent("drawings", isDirectory: true).path),
+            "and the directory that did get content is untouched — the sweep is about emptiness, "
+            + "not about videos")
+    }
+
     /// **The accepted one-way break, asserted so it cannot be un-noticed** — BUGS.md carries the
     /// sentence and the rule that comes with it.
     ///
@@ -415,11 +545,20 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
                       + "restore over it and tidy's own step-0 guard would refuse to finish the job")
         assertInkSurvived(at: url, "a package caught between the move and the manifest rewrite")
 
-        // The next launch finishes it: nothing left to move, so the pass reports nothing to do, and
-        // the package is still whole either way.
-        XCTAssertEqual(ProjectPackageLayout.tidy(packageAt: url), .unchanged,
-                       "the files are already at their new address, so a re-run has nothing to move")
+        // The next launch finishes it. There is nothing left to *move* — but the interruption is
+        // exactly what leaves an empty `images/` standing, so the sweep has something to do and the
+        // outcome says so rather than claiming the pass changed nothing.
+        XCTAssertEqual(ProjectPackageLayout.tidy(packageAt: url), .tidied(url),
+                       "the files are already at their new address, so the only thing left is the "
+                       + "images/ the interrupted move emptied")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: images.path),
+                       "and it is gone — an empty images/ beside drawings/ is the owner's own "
+                       + "complaint arriving one door over")
         assertInkSurvived(at: url, "the same package after the pass re-ran")
+
+        // *Now* a re-run has nothing to do, which is what idempotence means here.
+        XCTAssertEqual(ProjectPackageLayout.tidy(packageAt: url), .unchanged,
+                       "a third run over a package with nothing left changes nothing")
     }
 
     /// **Row 2: killed between two moves** — some sidecars moved, some still under `images/`, the

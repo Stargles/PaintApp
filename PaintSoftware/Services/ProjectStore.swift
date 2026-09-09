@@ -1073,6 +1073,20 @@ enum ProjectStore {
             try? data.write(to: url.appendingPathComponent("thumbnail.png"))
         }
 
+        // **The last word on lazy directories, and the reason the role scan above is not enough** —
+        // TODO (57)'s sweep. That scan reads the snapshot and says which directories the document
+        // *should* fill; every one of the writes it authorises can still fail on its own. A PNG that
+        // will not encode, a JSON that throws, a clip whose `assetURL` has gone — each leaves the
+        // directory created and nothing in it, and the artist is then looking at an empty `videos/`
+        // in a package that was saved without a word of complaint.
+        //
+        // Here, at the end, rather than beside each failure: the stage is a directory nothing else
+        // can see (`writeAtomically` swaps it into place afterwards by rename), so this runs with no
+        // reader and no other writer, which is the cheapest correctness argument available anywhere
+        // on this path. `rmdir(2)` refuses a non-empty directory in the kernel, so it cannot reach a
+        // file that was written.
+        ProjectPackageLayout.pruneEmptyContentDirectories(in: url)
+
         return celWalkSeconds
     }
 

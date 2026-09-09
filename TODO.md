@@ -107,11 +107,31 @@ Provider need not honour. Such a library is not stranded: a save stages a *compl
 lands in the new layout the next time the artist saves. **Verifying the pass against a real iCloud or
 external root is what would let that gate be widened, and nobody has.**
 
-**Left to build**
-- [ ] Sweep the rest of the layout and fix what else reads badly. Declined so far, each with a
-      reason: renaming the PNGs (the placed-image family *cannot* be renamed, so it buys a different
-      inconsistency and multiplies the migration), `brushtable.json` → `brushes/table.json`, a
-      legible `Backups/<uuid>/`, a directory per cel, and naming files after layer and frame.
+**Point 3 is built, and it turned out to be one item rather than a list.** Every other rename anyone
+proposed was declined and each declined for the same shape of reason — the name is recorded somewhere
+(`brushtable.json` → `brushes/table.json`, the `Backups/<uuid>/` lookup key, the `Trash/` stem a regex
+parses), or it lives inside a payload that would have to be parsed to migrate it (the placed-image
+PNGs, a clip's `assetFileName`), or it trades a UUID nobody can read for a different UUID nobody can
+read (a directory per cel, `_raster.png` → `.png`). Naming files after layer and frame is the only
+genuinely legible scheme and it makes every filename depend on mutable artist-typed text.
+
+What was left was **empty folders**, and the launch pass was creating them itself:
+`ProjectPackageLayout.pruneEmptyContentDirectories` `rmdir`s any of `drawings/`, `images/`, `videos/`
+that has nothing in it, at the end of `tidy` and at the end of `writePackage`. The migration is the
+loud case — a pre-(57) vector-only package keeps *nothing* in `images/` but the three sidecars, so
+moving them into `drawings/` left an empty `images/` standing beside it at exactly the launch the
+artist opens Files to check the update. The writer is the quiet one: the role scan creates a
+directory the snapshot says the document needs, and the encode or the asset copy that was to fill it
+can still fail. `rmdir(2)` rather than list-then-remove, because the kernel refuses a non-empty
+directory in the same call, so the sweep cannot reach a file under any interleaving.
+
+**Not swept, deliberately:** `Backups/` and `Trash/` exist empty from first launch, because
+`ProjectBackupManager`'s directory accessors create on read. Left alone — the emptiness is honest
+(that *is* the trash, and it is empty), and making them lazy would move the create into every writer
+for a cosmetic nil. And `manifest.json` is compact rather than pretty-printed: the gallery decodes
+every manifest in the library to list it, so doubling those bytes is a real cost on a path
+PERFORMANCE §1 has already been tuned against, and the owner's complaint was about where a file lives
+rather than how it reads inside.
 
 ---
 
