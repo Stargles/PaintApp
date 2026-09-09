@@ -3,6 +3,28 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A 6000² document is killed by jetsam before it can play (2026-09-09)
+
+MEASURED on the owner's iPad 9 (3 GB), Release, through `PlaybackProbe`: a document at
+`CanvasManager.maxCanvasExtent` — **6000×6000, one vector layer, two frames, one stroke a cel** — is
+terminated with **signal 9** while the baker is compositing, before playback starts. It reproduces at
+one layer, so it is not the per-layer working set PERFORMANCE.md §16.2 measured.
+
+**Not a regression, and that was checked rather than assumed.** The same probe, on a build of
+`origin/main` at `9194b3f` carrying only the harness, dies the same way. Both binaries: signal 9. The
+same probe at 4096² completes on both.
+
+PERFORMANCE.md §15.5 measured `maxCanvasExtent` at 6000 on this device *for brush input*, which is a
+different working set: a stroke re-renders one cel, and a bake composites the whole tree into a
+144 MB frame and then LZ4-encodes it. Nothing has ever measured a bake or a playback at that size on
+the device, so the ceiling §15 settled is a ceiling on drawing only.
+
+Two consequences worth stating. The ring budget above ~4900² is switched off by
+`CanvasManager.frameRingByteBudget(forFrameBytes:)` and that decision is therefore **untested by
+construction** — the arithmetic says the ring cannot help there, and the app cannot get there to check.
+And PERFORMANCE.md §11.11b/c's *"the owner's 6000×6000 Test1"* cannot have been played back, whatever
+it was drawn at.
+
 ## Evicting a vector render that a layer host is displaying frees nothing (2026-09-09)
 
 `VectorRenderCache` budgets the canvases' memos; `StrokeCanvasView`'s base slot holds a second

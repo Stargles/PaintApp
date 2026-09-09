@@ -393,7 +393,17 @@ on every edit, or a hash of the cel's encoded tiers. Stage 6 decides which; stag
 default store dies with the process.
 
 A small **decoded ring** holds the frames just ahead of the playhead, under a byte budget rather than a count. Play
-never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it. **The
+never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it.
+
+**That promise held only while the budget was larger than two frames, and it was a constant, so above
+3072² it was void — MEASURED on the owner's iPad rather than reasoned about (PERFORMANCE.md §17).**
+A flip's working set is exactly two decoded frames, the one on screen and the one being fetched. With
+the old fixed 96 MiB and a 4096² frame at 67.1 MB the ring held **one**, and one is not fewer-than-you-
+wanted, it is *none*: the tick misses, decodes on the display thread, inserts, and evicts the frame
+`fillRingAhead` had just placed. **0 hits against 83 misses**, one decode on the main thread and one
+off it, every flip, forever. `CanvasManager.frameRingByteBudget(forFrameBytes:)` is a function of the
+frame now — two frames, floored at 96 MiB, ceilinged at `CompositorBudget.textureBudgetBytes` and
+switched off entirely above that, because holding one frame is strictly worse than holding none. **The
 bake loop alone cannot do that** — it only rings frames it visits, and playback dirties nothing — so
 `FrameBaker.fillRingAhead` (stage 4d) tops the window up from `keyByFrame` when the queue drains, walking outward
 only, because the ring is routinely narrower than the lookahead and a rescan would churn forever.
@@ -505,6 +515,16 @@ of hosts, its twelve baked frames went unread, and the pose reached the screen o
 `CanvasView.updateInterpolationPreviews` rasterized the posed ink into the host per tick: MEASURED **71.9 ms a
 frame against 3.7 ms to read the bake**, PERFORMANCE.md §14. The predicate now also asks
 `hasContainerPoseInForce`, and the preview render is skipped for a blanked host.
+
+**And the promise is only as wide as the *canvas pass*, too, which is the wider version of the same
+sentence and cost three passes to learn.** Reading the bake instead of compositing is worth nothing if
+some *other* thing in `updateUIView` produces canvas-scale pixels on the main thread — and one did, for
+the whole life of this document. `updateOnionSkin` composited the ghost stack and cut it, synchronously,
+inside the SwiftUI pass, on every frame flip and on every edit: MEASURED at **52.7 ms a flip at 4096²
+and 13.5 at 2048²**, against this file's 41.7 ms budget, on the owner's own iPad (PERFORMANCE.md §17).
+§2.2 says the main thread never composites; the onion skin was simply never counted as compositing.
+It has its own serial queue now, like the baker, the halves and the vector base. **The rule to apply to
+the next one is not "does it engage the compositor" but "does anything on this pass make pixels".**
 
 **The general shape, for whoever adds the next thing the flat row cannot draw:** this file's promise that playback
 comes off disk is only as wide as that predicate. A feature whose picture Core Animation cannot produce must

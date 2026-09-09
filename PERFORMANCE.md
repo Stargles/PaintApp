@@ -4113,3 +4113,186 @@ frame at 4096², so 1.7x headroom at worst), and the 6000² one is INFERRED at ~
 miss** — which is the one place the requirement may still not be met, at the largest canvas the app
 allows. Raising the ring budget is the obvious lever and is a memory decision on a 3 GB device, so it
 is named here rather than taken.
+
+---
+
+## 17. The onion skin was the third renderer and nobody had ever timed it (2026-09-09)
+
+**Everything below is MEASURED on the owner's own iPad 9 (`iPad12,1`, A13, 3 GB), iOS 26.5.2,
+Release, by `PlaybackProbe` — a launch argument that seeds a document, waits for the bake, drives the
+real path, writes a JSON report into the app container and exits.** No test runner is attached, so
+SwiftUI is in the state it is in on the artist's own device. Nothing in this section is a simulator
+figure and nothing in it is inferred from one.
+
+### 17.1 Why three Mac-measured wins delivered nothing, which is the finding that matters most
+
+Three consecutive passes measured large improvements on this Mac and the owner felt none of them:
+the lock narrowing (undo 25.6 → 1.7 ms at 6000², §11.11b), the reduced thumbnail (34.1 → 1.08 ms,
+§11.11c) and the `isPlaying` engagement clause (115.9 → 9.8 ms a flip at 4096², §16.2). Their own
+trace before and after the third was **4.9 fps and 5.0 fps**.
+
+**All three benches call an engine function; none of them runs a SwiftUI pass.** `PlaybackBudgetBench`
+asks `FrameBaker.image(atFrame:)` in a loop, `ThumbnailRenderBench` asks `celThumbnailImage`,
+`UndoContentionBench` asks `manager.undo()`. Every one of those numbers was true. The per-flip cost on
+the device lived in `CanvasView.updateUIView` — in a function **none of the three benches called** —
+and no amount of care inside them could have found it. §16.2's own table says as much without noticing:
+it reports "baked read, a flip" and calls it "a flip".
+
+So the correction is not "the simulator is faster than the device", which this file already knew and
+calibrates at ~1.3x (§1). It is that **a bench measuring the component cannot discover a cost in the
+composition**, and that the composition here is a UIKit/SwiftUI pass which no headless harness enters.
+`PlaybackProbe` exists to close that: it drives `togglePlayback()` on a real editor and reports what
+the *main thread* spent, split by phase, with an `unattributed` remainder that is named rather than
+implied.
+
+**The instrument that made the diagnosis possible is not the span list, it is the runloop pair.**
+`PlaybackTrace` installs a `kCFRunLoopAfterWaiting` observer and two `kCFRunLoopBeforeWaiting`
+observers bracketing Core Animation's own commit at order 2,000,000, so *main-thread busy* is measured
+whether or not the code doing it was instrumented. That is what turned "which of our four candidates
+is it" into "76 of the 83 ms a flip is inside `updateUIView`, and here is the row". It also **refuted
+the leading hypothesis for free**: `caCommit` is **0.00 ms mean across 349 commits at 4096²**, so Core
+Animation's upload of a 64 MB baked frame — the obvious suspect for a cost the Mac would not have —
+is not the cost and never was.
+
+### 17.2 What a frame flip actually cost, on the device, before this pass
+
+Three plain vector layers, two frames, one distinct stroke per cel, ten seconds of playback. Every
+row is milliseconds **on the main thread**, per `updateUIView` pass:
+
+| canvas | fps | `updateUIView` | `onionComposite` | `onionClip` | `bakeRead` | ring hits/misses | `caCommit` |
+|---|---|---|---|---|---|---|---|
+| 512²–3072² | **24.0** | — | — | — | ~0.0 | 250/**0** | 0.00 |
+| 3584² | 18.0 | 63.8 | 41.1 | 5.4 | 16.1 | 1/**128** | 0.00 |
+| 4096² | 16.0 | 76.6 | 52.7 | 7.3 | 22.8 | 0/**83** | 0.00 |
+
+**Two costs, and the bake is neither of them.**
+
+**The onion skin re-composites on the main thread on every frame flip.** `updateOnionSkin` ran inside
+`updateUIView` and did all of its pixel work there: `OnionSkinFrame.composite` is a skin-sized
+`UIGraphicsImageRenderer` plus one draw per ghost, and the Behind placement's `OnionSkinClip.mask` is
+two more skin-sized draws. `isOnionSkinEnabled` defaults to **true** and is not persisted, so every
+launch has it on. At 2048² that is **13.5 ms of a 41.7 ms budget on a document that meets 24 fps**;
+at 4096² it is 52.7 and nothing else matters.
+
+**The decoded ring held one frame where a flip needs two.** `CanvasManager.frameRingByteBudget` was a
+fixed 96 MiB. One 4096² decoded frame is 67.1 MB, so two do not fit — and a ring that holds one
+serves a two-frame loop **not at all**: the tick misses, decodes on the display thread, inserts, and
+evicts the frame `fillRingAhead` had just placed. MEASURED **0 hits against 83 misses**, with one
+`storeDecode` on the main thread *and* one off it per flip. RENDER.md §3.5's *"play never decodes on
+the display thread"* was void, exactly as §16.5 predicted, and the cliff is where the arithmetic says
+it is: two 3072² frames are 75.5 MB and fit; two 3584² frames are 102.8 MB and do not, and that is
+the row where the fps falls off.
+
+### 17.3 The two spikes after pen-up, named
+
+The owner: *"I see the ms per frame flicker **twice** after I lift the brush."*
+
+`PlaybackTrace` reports every main-thread stall over 10 ms with its offset from the operation. Across
+twelve operations at 2048² — four stroke commits, four undo presses, four redos — the pattern is
+identical every time and there are exactly two:
+
+```
+commit2   busy=125.1 ms   bursts: [402 ms +43 ms]  [1226 ms +80 ms]
+undo1     busy=102.8 ms   bursts: [402 ms +42 ms]  [1235 ms +58 ms]
+```
+
+**The 402 ms one is the debounced cel thumbnail** — `CanvasManager.init` debounces
+`thumbnailRegenSubject` by exactly 400 ms — plus the SwiftUI pass it raises, which runs
+`updateOnionSkin` a **second** time. **The other is the operation's own pass.** Its offset is a probe
+artefact and was checked rather than assumed: re-run with the settle time moved from 1200 ms to
+2500 ms, it moved to ~2600, while the 402 ms burst stayed at **401–402 ms in every one of the twelve
+rows on both runs**. So one burst is anchored to the operation and one to the debounce, which is the
+two the owner sees.
+
+**What is in them is the same function twice.** `OnionSkinInkRequest`'s render — the current layer's
+own ink, reduced to skin resolution, which the Behind placement subtracts from the ghost — is the
+largest main-thread term in both, and it misses its memo **by construction** on every edit, because
+the artist's own layer is exactly the thing an edit changes:
+
+| per edit, on the main thread | 2048² | 4096² |
+|---|---|---|
+| the ink render (`onionInk`), mean, **twice per operation** | **21.5 ms** | **35.8 ms** |
+| its worst case | 68.4 ms | **110.6 ms** |
+| `updateOnionSkin` whole (`onionSkin`), mean | 24.9 ms | 52.0 ms |
+| the thumbnail flush | 22.9 ms | 8.0 ms |
+| **`CanvasManager.undo()` itself (`undoPress`)** | **1.26 ms** | **0.71 ms** |
+
+**The undo press is not slow, and that is the answer to *"undoing is still very sluggish"*.**
+§11.11b's lock narrowing was real and it holds: the press is 0.7–1.3 ms. What the owner feels after an
+undo is the *same two bursts a stroke produces*, for the same reason — the layer's ink changed, so the
+ghost's clip has to be re-cut and the thumbnail re-made. **One cause, three symptoms**, which is the
+owner's own framing and it is correct.
+
+### 17.4 The fix: the last renderer that was exempt from RENDER §2.2 stops being exempt
+
+RENDER.md §2.2 rules that the main thread never composites. This app has four renderers and three
+obeyed it — `FrameBaker` on its `workQueue`, the sandwich halves on `sandwichQueue`, the vector base on
+`StrokeCanvasView.renderQueue`. The onion skin had no queue at all.
+
+It has one now (`CanvasView.Coordinator.onionQueue`, serial, `.userInitiated`), and the cut is the same
+one `startSandwichRebuild` makes: the main thread derives an `OnionSkinRenderKey` — which ghosts, at
+what size, under which mask, and `OnionSkinRasterCache.Key` for the ink it will subtract — and the queue
+produces the two images. `finishOnionRebuild` installs both or neither and only if the key still stands,
+and a request that arrived mid-rebuild is retried rather than dropped.
+
+Two things fell out of it and both are in the code rather than here. `CanvasManager
+.onionSkinInkToSubtract` split into `onionSkinInkRequest(at:)` (which cel, resolved on the main actor,
+no pixels) and `OnionSkinInkRequest.render()` (the pixels, anywhere) — the one-call spelling is kept
+because it is what the clip's own tests drive. And the retry is gated on a *declined* flag rather than
+re-derived unconditionally, because `InterpolationReferenceOnionSkinSource` mints a fresh `UIImage`
+per call by design, so an unconditional re-derive there rebuilds forever off a queue nobody is waiting
+on.
+
+**And `frameRingByteBudget` became a function of the frame** — two frames, floored at the old 96 MiB
+and **ceilinged at `CompositorBudget.textureBudgetBytes`**, above which the ring is switched off
+outright. The ceiling is MEASURED, not cautious: two 6000² frames are 288 MB, and asking for that on
+this iPad killed the app with **signal 9** during this pass. Holding *one* is strictly worse than
+holding none — the flip misses either way and 144 MB is spent on nothing — which is the same decision
+`DecodedFrameRing.insert` already makes for a single oversized frame, stated one level up where the
+size is known.
+
+### 17.5 What it is worth, on the device
+
+Same binary either side is not available for the fps rows — the fix is the binary — so the *before*
+column is `origin/main` at `9194b3f` carrying only the probe, and the *after* is this branch, on the
+same document, same device, back to back:
+
+| | before | after |
+|---|---|---|
+| **4096², 1 layer, 2 frames, playback** | **15.9 fps** | **24.0 fps** |
+| main-thread busy, mean per runloop turn | 23.2 ms | **3.6 ms** |
+| **4096², 3 layers, 2 frames, playback** | 16.0 fps | **24.0 fps** |
+| `updateUIView` per flip | 76.6 ms | **1.1 ms** |
+| `bakeRead` per flip, on the main thread | 22.8 ms | **0.0 ms** |
+| ring hits / misses | 0 / 83 | **253 / 0** |
+| **2048², 3 layers, playback** | 24.0 fps | 24.0 fps |
+| `updateUIView` per flip | 14.8 ms | **1.4 ms** |
+| **per edit, main-thread busy, 2048²** | 91–152 ms | **46–93 ms** |
+| **per edit, main-thread busy, 4096²** | 64–214 ms | **20–121 ms** |
+| `onionComposite` / `onionInk` / `onionClip`, calls **on the main thread** | 100% | **0%** |
+
+**24.0 fps is the clock, not a ceiling**: `intervalMs` p50 is 41.7 ms against a 41.7 ms target with a
+p90 of 42.1, and `vectorRasterizesDuringPlayback` is **0** at every size, so the requirement
+*"regardless of what is on the canvas"* holds in the layer term as well as in the frame rate.
+
+### 17.6 What is left, with numbers
+
+**The debounced thumbnail is now the largest main-thread term of an edit** — 22.7 ms at 2048², and it
+is the burst at 401 ms that the owner can still see. §11.11c made the *render* O(what changed); what is
+left is the flush's own work on the main actor. It is the obvious next one and it is not taken here.
+
+**Above ~4900² the ring is off and the flip decodes on the display thread**, which is where two frames
+stop fitting `CompositorBudget.textureBudgetBytes` on a 3 GB device. At 4096² the decode was 22.8 ms
+against a 41.7 ms budget, so at 6000² — 2.15x the pixels — it would not fit even if the app got there.
+
+**And it does not get there: 6000² is killed by jetsam before playback starts, and that is not new.**
+MEASURED on both binaries, one vector layer, two frames, nothing else: `origin/main` at `9194b3f`
+**signal 9**, this branch **signal 9**. So it is a pre-existing defect at `maxCanvasExtent` rather than
+a regression, it is filed in BUGS.md, and it means this section's 6000² arithmetic is untested by
+construction.
+
+**This is not the disk-bandwidth wall the owner offered.** The file read inside `loadDecoded` is
+0.1 ms on this device for a compressed frame (RENDER §3.5); what a miss costs is the **LZ4 decode**,
+which is CPU and proportional to pixels. So the honest name for the limit above ~4900² is *"a 3 GB
+device cannot hold two decoded frames of that size"*, not *"the disk cannot keep up"* — and the lever
+is a smaller decoded representation, not a faster disk.
