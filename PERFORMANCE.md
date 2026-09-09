@@ -4325,3 +4325,151 @@ construction.
 which is CPU and proportional to pixels. So the honest name for the limit above ~4900² is *"a 3 GB
 device cannot hold two decoded frames of that size"*, not *"the disk cannot keep up"* — and the lever
 is a smaller decoded representation, not a faster disk.
+
+## 18. The cel thumbnail was the fifth renderer, and the onion skin plays no part in playback (2026-09-09)
+
+Everything here is **MEASURED on the owner's iPad 9** (`iPad12,1`, A13, 3 GB, iOS 26.5.2),
+**`-configuration Release`**, through `PlaybackProbe -probeMode edit -probeEdits 6` — 18 operations,
+six stroke commits, six undos, six redos — with no test runner attached. Reports were pulled with
+`tools/probe-run.sh` and read with `tools/probe-report.py`. §17's own warning applies and is why
+none of this was taken on the Mac: *a bench measuring a component cannot find a cost in the
+composition.*
+
+### 18.1 What an edit still paid for on the main thread
+
+§17 closed by naming the debounced cel thumbnail as *"the largest main-thread term of an edit"* and
+not taking it. It reproduces. MEASURED before this pass, per edit, on the main thread:
+
+| document | main-thread busy | `thumbnailFlush` | of which `thumbnailFlatten` |
+|---|---|---|---|
+| 2048², 3 layers, **1 stroke/cel** | **76.7 ms** (48.6–105.8) | 27.6 | 25.4 |
+| 2048², 3 layers, **40 strokes/cel** | **115.4 ms** (80.4–132.1) | 74.6 | 73.7 |
+| 4096², 3 layers, 1 stroke/cel | 44.5 ms (21.0–80.2) | 7.1 | 6.3 |
+
+**It was the only term in the whole table that grew with what the artist had drawn**, which is the
+half of the owner's bar — *"no matter how many strokes or cels or layers"* — that nothing else
+threatened. §11.11c had bounded the *tile* at 480² whatever the canvas is; the flatten that fills it
+still walks every element the cel holds.
+
+### 18.2 The fix is RENDER.md §2.2 applied to a renderer nobody had counted
+
+§17 recorded that this app has four renderers and gave the last of them a queue. **There were five.**
+`CanvasManager.celThumbnailImage` is `static` and documents itself as *"Pure, and reachable from any
+thread"*, and the deferred backfill (item 9(c)) has been calling it off the main actor through that
+same code since 2026-08-20 — so the seam existed and was proven; the debounced sink simply never used
+it.
+
+The sink now resolves the job on the main actor (indices, `derivedCelContent`, `canvasSize`), draws
+on a serial `.userInitiated` queue, and installs back on main only if the `LayerContentVersion` the
+render was taken against still stands. Refusal **re-queues**, which is the one thing the backfill does
+not need: a skipped backfill leaves a placeholder the artist's next edit repaints anyway, while here
+the cel already carries a tile and dropping the render would leave the previous drawing on the
+timeline with nothing scheduled to correct it. `flushPendingThumbnailRegens()` keeps its synchronous
+contract and `regenerateAllThumbnails()` is untouched.
+
+### 18.3 What it is worth — MEASURED, same device, same documents, back to back
+
+| document | main-thread busy before | after | `thumbnailFlush` on main |
+|---|---|---|---|
+| 2048², 3L, **1 stroke/cel** | 76.7 ms | **49.9 ms** | 27.6 → **0.11** |
+| 2048², 3L, **40 strokes/cel** | 115.4 ms | **41.2 ms** | 74.6 → **0.11** |
+| 4096², 3L, 1 stroke/cel | 47.8 ms (3 runs) | **43.5 ms** (3 runs) | 7.1 → **0.07** |
+
+**Forty strokes a cel now costs less per edit than one** (41.2 against 49.9), because the term that
+scaled with the drawing is no longer on that thread. That is the first time this file has been able
+to write that sentence, and it is the owner's own criterion.
+
+**The work moved; it did not shrink, and the report says so in its own column.**
+`thumbnailFlatten` costs 25.4 → 23.3 ms and 73.7 → 72.7 ms across the change, with `onMainCount`
+going **18 → 0** against an unchanged count of 18. Nothing here is a saving in total work — it is a
+thread reassignment, which is what RENDER §2.2 asks for and all it asks for.
+
+A second confirmation that the tiles still *arrive*, on the device rather than in a test:
+`thumbnailInstall` fires **18 times per run**, once per operation, and `thumbnailFlatten`'s count
+stays at 18 — so the version guard passed every time and nothing re-queued into a loop.
+
+### 18.4 Memory: MEASURED and unchanged, and the first reading was a one-sample trap
+
+`PlaybackProbe` now samples `phys_footprint` once per operation. **It is a footprint proxy** and
+includes the autorelease pool and every framework allocation; it answers *"is this bounded"*, not
+*"what did my change allocate"*.
+
+| document | | peak MB | end MB | growth MB |
+|---|---|---|---|---|
+| 2048², 3L, 1 stroke | control / fixed | 469 / **463** | 462 / **458** | +184 / **+184** |
+| 2048², 3L, 40 strokes | control / fixed | 466 / **464** | 461 / **458** | +186 / **+184** |
+| 4096², 3L, 1 stroke | control / fixed | 972 / **978** (3 and 4 runs) | 608 / **608–609** | +50 / **+50** |
+
+**The 4096² peak is the entry worth reading twice.** The first control/fixed pair read **877 against
+1028 MB** — a 151 MB regression, which at a 1850 MiB process ceiling would have been enough to refuse
+the change. Repeating it three more times per arm gave control **877 / 1019 / 1019** and fixed
+**1028 / 893 / 1019 / 972**: the same spread on both sides, means 6 MB apart. It was one sample
+against one sample of a quantity whose transients at 4096² are 67 MB a layer. End-of-run resident is
+608–609 MB in *every* run of *both* arms, which is the number that actually persists.
+
+So the fix costs no measurable memory, which is what the code says it should: it adds no cache and no
+resident buffer. What it holds is one captured `Cel` per pending regen — references to the live
+tiers, not pixels — and the finished 120×120 tiles, for the length of one render.
+
+**6000² is not measured here and cannot be**: §17.6 recorded that the app is killed by jetsam at that
+size before playback starts, on `origin/main` as well, and that is filed in BUGS.md as a pre-existing
+defect at `maxCanvasExtent`. So the bound above is MEASURED to 4096² and INFERRED above it from the
+absence of any new allocation.
+
+### 18.5 The onion skin during playback — the owner's ruling, and what it was costing
+
+The owner, 2026-09-09: *"Hide it during playback"*. Since §17 the ghost costs the main thread
+nothing, which is why this had gone unpriced. MEASURED over ten seconds of a playing document:
+
+| | 2048², 3L, 4 frames | 4096², 3L, 2 frames |
+|---|---|---|
+| `onionComposite` calls, before → after | 258 → **0** | 128 → **0** |
+| `onionComposite` total, before → after | 4,919 ms → **0** | 7,104 ms → **0** |
+| `onionClip` total, before → after | 446 ms → **0** | 914 ms → **0** |
+| `onionFrames` (main thread) | 40.3 ms → **1.0** | 10.0 ms → **0.5** |
+| fps / interval p50 / p90 | 24.0 / 41.7 / 42.1 → 24.0 / 41.7 / 42.2 | 24.0 / 41.7 / 41.9 → 24.0 / 41.7 / 41.9 |
+| footprint over the run | — | falls 17 and 77 MB |
+
+**Nineteen milliseconds a flip at 2048² and 55 ms a composite at 4096²**, on a background core of a
+two-big-core A13 that is simultaneously baking the next frame — spent drawing the neighbouring
+drawings *over* the animation the artist is watching. The frame timing is unchanged either way
+(playback was already at the 24 fps clock), so this is background headroom and clarity rather than a
+frame-rate win. The footprint *falling* during playback is `updateOnionSkin`'s `blank()` dropping the
+skin-sized images, which is memory handed back exactly when the frame ring wants it.
+
+The rule lives on `OnionSkinSource.visibleFrames(for:)` — the **protocol** — rather than in the two
+conformances, because a third source is the reason that protocol exists.
+
+**One number moved the wrong way and is reported rather than buried**: per-flip main-thread busy went
+9.8 → 14.3 ms at 2048² and 16.7 → **15.0** at 4096². The sign disagrees between the two canvases on
+single 10-second runs, and removing work cannot add main-thread CPU, so this is variance —
+consistent with the wake-up count halving (1565 → 830 busy windows at 2048²) and each remaining
+window absorbing gaps that used to fall between windows.
+
+### 18.6 What is left, and the one thing that is still unexplained
+
+**The unattributed remainder is exactly where the last pass left it**: 43.1 → 43.5 ms per edit at
+2048², 41.9 → 45.0 on the repeat pair. This pass moved a named term and touched nothing in the
+remainder, as expected — the previous measurement already argued, on four bounds, that it is SwiftUI's
+own view-graph update plus the CATransaction commit at the end of it, and that no span this app can
+place will attribute it further. At 2048²/1 stroke it is now **87% of what an edit costs on the main
+thread**, which is the honest statement of where the next pass has to look. The lever named there is
+raising *fewer or narrower* invalidations per edit — chiefly getting the tile install off `@Published
+layers`, which is a publishing change and was deliberately not attempted here.
+
+**The flatten's cost still falls with layer count, and moving it off-thread did not explain it.**
+MEASURED after, on the queue, at 2048² with one stroke per cel and byte-identical cel content:
+`thumbnailFlatten` is **29.3 / 26.5 / 8.9 ms for 1 / 3 / 8 layers** — the same shape the last pass
+measured on the main thread (29.2 / 23.1 / 9.0). So it is a property of the *work*, not of the thread
+it ran on. `VectorRenderCache` is global with a 12-entry ceiling and `PixelOps.rasterizeCache` a
+24-entry, budget-bounded one, so a document with more cels evicts more — which is a mechanism of the
+right shape and the **wrong sign** (eviction should cost, not save). INFERRED, and not confirmed: a
+cel whose reduced-resolution base has been evicted takes the `.full` walk of a one-element list, which
+is cheaper than restoring and appending to a base. It does not change any ranking — the term is worst
+on the simplest possible document — but it is the open question this section hands on.
+
+**A pre-existing mismatch found while reading the neighbouring code, not fixed here**: the deferred
+backfill's `install` compares `LayerContentVersion(cel: live)` — no `derived:` — against a version
+captured *with* `derived?.identity`, so a cel that derives its content can never compare equal and is
+skipped by every backfill. Harmless (the debounced regen paints it) and quiet, which is why it wants
+its own test rather than a drive-by edit.
