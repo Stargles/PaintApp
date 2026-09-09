@@ -111,9 +111,23 @@ whatever else those two passes still do.
       slot still holds the picture from before stroke *n* while the new stroke has taken the scratch
       overlay, so *n* is on screen nowhere until its render lands. That entry's own text says the
       window *"scales with canvas area"*, which is why a big canvas made a two-order-of-magnitude-
-      smaller window reachable again. It needs either a second overlay for un-landed ink or a
-      synchronous composite of the appended element at pen-up, and the second is a deliberate
-      reversal of RENDER.md §2.13 — **the owner's trade to make, not a session's.**
+      smaller window reachable again.
+      **Ruled 2026-09-09, and the ruling refuses both options BUGS.md offered.** Asked to choose
+      between a second overlay for un-landed ink and a synchronous composite at pen-up, the owner:
+      > *"Your choice. Whatever it is, it must obey the fundamental design constraints: The main
+      > thread must not noticeably stutter at any given moment, and memory must stay well within
+      > limits at all canvas sizes, amount of cels, layers, strokes, etc. Code architecture must be
+      > clean, no spaghetti."*
+      A synchronous pen-up composite is main-thread stutter and reverses RENDER.md §2.13; a second
+      canvas-sized overlay is memory the 3 GB iPad already cannot spare at 6000². So the answer has to
+      cost neither, and both properties have to be **measured** rather than asserted.
+      **And the owner supplied the reproduction, which no session had.** 2026-09-09: *"the only time
+      I have observed them happen reliably on the ipad is in my the Test1, after setting the canvas
+      padding up (to max for instance). Test1 is a 4096 by 4096 canvas with three layers and a lot of
+      brushstrokes and images... Test1 is currently my source of truth."* That points at a **second
+      defect**: raising padding may take the 2026-09-04 incremental append away, so every pen-up falls
+      back to the full re-walk — 1129.6 ms rather than 2.57 ms, a window wide enough to hit every time.
+      Measure that before designing anything, because if it is true it is the larger half.
 
 ---
 
@@ -228,8 +242,33 @@ pose key has a node.
       `PoseQuad` keys, so resampling and tolerance both need definitions nobody has ruled on. §5's
       *"slow motion is a capture-speed multiplier on the record control"* is also unbuilt. **Both are
       owner-facing design and want a conversation before anyone builds them.**
-      **One thing for the owner's eyes rather than a defect**: at 24 fps a new document's take is over
-      before a person can react, because §5 runs a take over the scene you have. That is the design.
+      **The owner has now ruled on that, and it reverses what this item called "the design".** This
+      row used to end *"at 24 fps a new document's take is over before a person can react, because §5
+      runs a take over the scene you have. That is the design."* It is not. 2026-09-09:
+
+      > *"Right now I dont like where the record button is, and its behavior. The behavior should be
+      > this: You open up graph editor and it displays the record button option. You press the record
+      > button and it turns blue, but nothing happens. Then, you go and put your pencil on a slider or
+      > move box, and playback automatically starts, recording the movement then putting it on the
+      > graph. Currently when you press record it instantly plays the playback, giving you no time to
+      > adjust the sliders or move box."*
+
+      So **arming and starting are two separate acts**, and the second one is the pencil landing on the
+      surface, not a button. Pressing record arms it and turns it blue; nothing moves. The take begins
+      on first touch of a slider or the Move box, and playback starts *with* it. That removes the
+      "take is over before you can react" problem at its root rather than papering it with a countdown,
+      and it makes §5's *"one mechanism, two surfaces"* the thing that decides when recording starts.
+      The button's **placement** is also rejected — it belongs to the graph editor, shown when the
+      graph editor is open. Note this interacts with the unbuilt Move-box surface above: arming has to
+      wait for either surface, so building the trigger before the Move-box half means building it twice.
+- [ ] **Layer opacity cannot be keyframed and should be.** The owner, 2026-09-09: *"layer opacity
+      should also be able to be keyframed, currently its not."* Every channel the graph editor carries
+      today is a **pose** channel — the six curves of a quad — and opacity is neither a pose nor stored
+      on a track. So this is a new channel *kind* rather than a new curve, and it is the first one, which
+      means it also settles the shape every later non-pose channel takes (a folder's opacity, an
+      effect's strength, a blend amount). Worth checking against KEYFRAMES §2 before designing: §2.28
+      computes "a keyframe" as the union of explicit marks and every frame a channel keys on, and a
+      second channel kind has to join that union rather than keep a list of its own.
 - [ ] **Stage 10**, the timing recorder (§7), which sits on stage 7 and was left until its base is
       whole.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
