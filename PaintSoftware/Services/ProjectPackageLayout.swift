@@ -256,12 +256,14 @@ nonisolated enum ProjectPackageLayout {
         let safe = migrationIsSafe(at: root)
         var seenIDs: [UUID: URL] = [:]
         for url in ProjectBackupManager.allProjectPackages() {
+            let pass = tidy(packageAt: url, migrating: safe)
             // **The duplicate-id backstop.** `ProjectSummary` is `Identifiable` by the manifest id,
             // so two packages sharing one give SwiftUI's `ForEach` two rows with one identity and one
             // of them may simply never draw — an orphan on disk the artist cannot see. Nothing in
             // this item can produce that shape (it renames no package directory), but the walk is
-            // already here and the check is one dictionary insert.
-            if let id = ProjectBackupManager.manifestID(at: url) {
+            // already here, the id came out of the read the pass had to do anyway, and the check is
+            // one dictionary insert.
+            if let id = pass.projectID {
                 if let first = seenIDs[id] {
                     report.duplicateProjectIDs.append(id.uuidString)
                     log.error("""
@@ -273,11 +275,10 @@ nonisolated enum ProjectPackageLayout {
                     seenIDs[id] = url
                 }
             }
-            guard safe else { report.skippedForeignVolume += 1; continue }
-            switch tidy(packageAt: url) {
+            switch pass.outcome {
             case .tidied(let tidied):
                 report.tidied.append(tidied.lastPathComponent)
-                report.movedFiles += lastTidyMovedFiles
+                report.movedFiles += pass.movedFiles
             case .unchanged:            report.unchanged += 1
             case .skippedDamaged:       report.skippedDamaged += 1
             case .skippedForeignVolume: report.skippedForeignVolume += 1
@@ -297,10 +298,13 @@ nonisolated enum ProjectPackageLayout {
         return report
     }
 
-    /// How many sidecars the last `tidy(packageAt:)` moved. `tidyEveryProject` runs serially, so a
-    /// single slot is enough; it exists only so `TidyOutcome` does not have to carry a count that no
-    /// other caller wants.
-    private nonisolated(unsafe) static var lastTidyMovedFiles = 0
+    /// What one package's pass produced, for the walk above: the outcome, plus two facts the walk
+    /// would otherwise have to re-read the manifest to learn.
+    private struct PackagePass {
+        var outcome: TidyOutcome
+        var projectID: UUID?
+        var movedFiles = 0
+    }
 
     /// One package, moved into the new layout in place.
     ///
@@ -322,70 +326,89 @@ nonisolated enum ProjectPackageLayout {
     /// | after the manifest write | fully tidy | nothing left to do |
     @discardableResult
     static func tidy(packageAt url: URL) -> TidyOutcome {
+        tidy(packageAt: url, migrating: migrationIsSafe(at: ProjectBackupManager.documentsDirectory)).outcome
+    }
+
+    private static func tidy(packageAt url: URL, migrating: Bool) -> PackagePass {
         let fm = FileManager.default
-        lastTidyMovedFiles = 0
 
-        // 0. A package whose manifest we cannot read is the repair pass's business, not ours.
-        guard ProjectBackupManager.validateProject(at: url) else { return .skippedDamaged }
-
-        // 1. One read, used by the move walk and by the compare-and-swap below.
+        // 1. One manifest read, which is all a package already in the new layout ever costs. It is
+        //    used by the work scan, by the move walk, and as the compare-and-swap's baseline.
         let manifestURL = url.appendingPathComponent("manifest.json")
         guard let originalBytes = try? Data(contentsOf: manifestURL),
               let skeleton = try? JSONDecoder().decode(ProjectBackupManager.ManifestSkeleton.self,
-                                                       from: originalBytes) else { return .skippedDamaged }
+                                                       from: originalBytes) else {
+            return PackagePass(outcome: .skippedDamaged)
+        }
+        let projectID = skeleton.id
 
-        // 2. Move the sidecars. (The package *directory*'s own name is TODO (57)'s second bullet and
-        //    is deliberately not touched here — see this file's header.)
+        // 2. Is there anything to do? **Asked before the integrity check, deliberately**, because
+        //    that check stats and PNG-sniffs every file the package names and `repairCorruptedProjects`
+        //    has already paid for exactly that walk moments earlier. Every launch after the first
+        //    would otherwise double the launch's I/O over the whole library to accomplish nothing.
         let imagesDir = url.appendingPathComponent("images", isDirectory: true)
-        var rewrites: [(old: String, new: String)] = []
-        var madeDrawingsDirectory = false
+        var work: [(cel: UUID, role: Role, recorded: String)] = []
         for layer in skeleton.layers {
             for cel in layer.cels {
                 guard let celID = cel.id else { continue }
                 for role in [Role.drawing, .animation, .interpolation] {
-                    guard let recorded = cel.fileName(for: role), !recorded.contains("/") else { continue }
-                    let source = imagesDir.appendingPathComponent(recorded)
-                    guard fm.fileExists(atPath: source.path) else { continue }
-                    let relative = recordedName(for: role, cel: celID)
-                    let destination = resolve(relative, in: url)
-                    // **Both addresses occupied means something outside this flow wrote one of
-                    // them**, because a rename cannot leave both. The conservative answer is to touch
-                    // neither and say so.
-                    if fm.fileExists(atPath: destination.path) {
-                        log.error("""
-                            \(recorded, privacy: .public) exists at both its old and its new address in \
-                            \(url.lastPathComponent, privacy: .public) — a rename cannot leave both, so \
-                            neither is touched and the manifest is left naming the old one
-                            """)
-                        continue
-                    }
-                    if !madeDrawingsDirectory {
-                        try? fm.createDirectory(at: url.appendingPathComponent(Role.drawing.directory,
-                                                                              isDirectory: true),
-                                                withIntermediateDirectories: true)
-                        madeDrawingsDirectory = true
-                    }
-                    do {
-                        try fm.moveItem(at: source, to: destination)
-                        rewrites.append((recorded, relative))
-                    } catch {
-                        // Left where it is, which the resolver still finds. The next run retries.
-                        log.error("""
-                            \(recorded, privacy: .public) could not be moved out of images/ in \
-                            \(url.lastPathComponent, privacy: .public) and stays where it is: \
-                            \(String(describing: error), privacy: .public)
-                            """)
-                    }
+                    guard let recorded = cel.fileName(for: role), !recorded.contains("/"),
+                          fm.fileExists(atPath: imagesDir.appendingPathComponent(recorded).path) else { continue }
+                    work.append((celID, role, recorded))
                 }
             }
         }
-        guard !rewrites.isEmpty else { return .unchanged }
-        lastTidyMovedFiles = rewrites.count
+        guard !work.isEmpty else { return PackagePass(outcome: .unchanged, projectID: projectID) }
+        guard migrating else { return PackagePass(outcome: .skippedForeignVolume, projectID: projectID) }
 
-        // 3. Rewrite the manifest to name the new addresses. Everything below is optional work: the
-        //    files already resolve through `existingURL` whether or not this lands.
+        // 3. A package whose files do not add up is the repair pass's business, not ours.
+        guard ProjectBackupManager.validateProject(at: url) else {
+            return PackagePass(outcome: .skippedDamaged, projectID: projectID)
+        }
+
+        // 4. Move the sidecars. (The package *directory*'s own name is TODO (57)'s second bullet and
+        //    is deliberately not touched here — see this file's header.)
+        var rewrites: [(old: String, new: String)] = []
+        var madeDrawingsDirectory = false
+        for item in work {
+            let source = imagesDir.appendingPathComponent(item.recorded)
+            let relative = recordedName(for: item.role, cel: item.cel)
+            let destination = resolve(relative, in: url)
+            // **Both addresses occupied means something outside this flow wrote one of them**,
+            // because a rename cannot leave both. The conservative answer is to touch neither and
+            // say so.
+            if fm.fileExists(atPath: destination.path) {
+                log.error("""
+                    \(item.recorded, privacy: .public) exists at both its old and its new address in \
+                    \(url.lastPathComponent, privacy: .public) — a rename cannot leave both, so \
+                    neither is touched and the manifest is left naming the old one
+                    """)
+                continue
+            }
+            if !madeDrawingsDirectory {
+                try? fm.createDirectory(at: url.appendingPathComponent(Role.drawing.directory,
+                                                                      isDirectory: true),
+                                        withIntermediateDirectories: true)
+                madeDrawingsDirectory = true
+            }
+            do {
+                try fm.moveItem(at: source, to: destination)
+                rewrites.append((item.recorded, relative))
+            } catch {
+                // Left where it is, which the resolver still finds. The next run retries.
+                log.error("""
+                    \(item.recorded, privacy: .public) could not be moved out of images/ in \
+                    \(url.lastPathComponent, privacy: .public) and stays where it is: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+        guard !rewrites.isEmpty else { return PackagePass(outcome: .unchanged, projectID: projectID) }
+
+        // 5. Rewrite the manifest to name the new addresses. Everything here is optional work: the
+        //    files already resolve through `existingURL` whether or not it lands.
         rewriteManifest(at: manifestURL, in: url, originalBytes: originalBytes, rewrites: rewrites)
-        return .tidied(url)
+        return PackagePass(outcome: .tidied(url), projectID: projectID, movedFiles: rewrites.count)
     }
 
     /// The one step that can destroy data, and the two lines that stop it.

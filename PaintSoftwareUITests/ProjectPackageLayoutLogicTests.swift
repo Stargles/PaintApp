@@ -297,6 +297,33 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
             "and a raster-only document gets no drawings/ — every content directory is lazy")
     }
 
+    /// **The accepted one-way break, asserted so it cannot be un-noticed** — BUGS.md carries the
+    /// sentence and the rule that comes with it.
+    ///
+    /// A build older than (57) resolves `vectorFileName` as `images/<name>`, with no awareness of a
+    /// slash. This is that arithmetic, done here rather than left as prose: the path such a build
+    /// would compute does not exist, so it falls through `decodeCel`'s `?? .empty` and the cel's ink
+    /// loads blank. No scheme avoids it — the manifest field is one string, so it either names the old
+    /// address (and the JSON has not left `images/`, which is the whole ask) or it names the new one.
+    /// If anyone ever adds a compatibility shim, this test is what tells them it worked.
+    func testAnOlderBuildJoiningTheNameToImagesFindsNothing() throws {
+        let url = savedProject()
+        let recorded = try XCTUnwrap(celEntries(at: url).compactMap { $0["vectorFileName"] as? String }.first)
+        let asAnOldBuildWouldJoinIt = url.appendingPathComponent("images", isDirectory: true)
+            .appendingPathComponent(recorded)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: asAnOldBuildWouldJoinIt.path),
+                       "images/\(recorded) is what a pre-(57) build looks for, and it is not there — "
+                       + "such a build opens this package with every drawing blank. Accepted, one-way, "
+                       + "and the reason no worktree may install an older commit over a device that "
+                       + "has run this one; the preupdate- clone in Backups/ is the way back")
+        // And the address this build uses is the one that is actually there, so the break is about
+        // the old resolver rather than about a file that failed to get written.
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: ProjectPackageLayout.resolve(recorded, in: url).path),
+            "the drawing itself is present at the address this build records")
+    }
+
     // MARK: - (b) A package in the old layout still opens, with its ink
 
     func testAPackageInTheOldLayoutLoadsWithItsStrokesIntact() {
