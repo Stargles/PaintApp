@@ -51,6 +51,9 @@ final class PlaybackBudgetBench: XCTestCase {
         CompositorBudget.budgetOverrideBytes = Self.iPad9Budget
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PlaybackBudgetBench-" + UUID().uuidString, isDirectory: true)
+        // So `CanvasManager.frameBaker` — the baker the *canvas* uses, which is the one whose bytes
+        // belong in these figures — puts its store under this test's own directory.
+        FrameBakeStore.cachesDirectoryOverride = root
         didPin = true
     }
 
@@ -163,6 +166,20 @@ final class PlaybackBudgetBench: XCTestCase {
     private func mb(_ bytes: UInt64) -> String { String(format: "%.0f MB", Double(bytes) / 1_048_576) }
     private func mb(_ bytes: Int) -> String { mb(UInt64(max(0, bytes))) }
 
+    /// What the modelled image views are holding — **counted, not sampled**, because
+    /// `phys_footprint` cannot see it. PERFORMANCE.md §13.6 MEASURED that twice: holding twenty
+    /// nominal-160 MB raster cels moved the footprint by 0.7 MB, and §13.5 found the same for a
+    /// displayed image, because the simulator's render server is out of process. This bench
+    /// reproduced it a third time — the flat row at 4096² held 192 MB of memo against a reported
+    /// footprint delta of +1 MB — so the footprint rows below are kept as a *proxy* and the counted
+    /// bytes are the figure.
+    private func heldBytes(_ images: [UIImage?]) -> Int {
+        images.compactMap(\.self).reduce(0) { total, image in
+            guard let cg = image.cgImage else { return total }
+            return total + cg.bytesPerRow * cg.height
+        }
+    }
+
     /// One frame flip on Core Animation's flat row — `CanvasView.reconcileLayers` handing each host
     /// its new cel, and `StrokeCanvasView.refreshDisplay` deciding what to do about it. The layer
     /// host **keeps the image it is shown**, so `shown` models the image views: without it the
@@ -262,12 +279,15 @@ final class PlaybackBudgetBench: XCTestCase {
                     }
                 }
             }
+            let held = heldBytes(shown)
             say(String(format: "%@  FLAT ROW: %.1f ms a flip → %.1f fps  rasterizes=%d (%.2f a flip)  "
-                       + "footprint %@ → peak %@ (+%@)  memo=%@ in %d entries",
+                       + "live=%@ (memo %@ in %d entries + hosts %@)  churn=%@/s  footprint %@ → %@",
                        label, total / Double(Self.flips), 1000 * Double(Self.flips) / max(total, 0.001),
                        rasterized, Double(rasterized) / Double(Self.flips),
-                       mb(base), mb(peak), mb(peak &- base),
-                       mb(VectorRenderCache.residentBytes), VectorRenderCache.entryCount))
+                       mb(VectorRenderCache.residentBytes + held),
+                       mb(VectorRenderCache.residentBytes), VectorRenderCache.entryCount, mb(held),
+                       mb(Int(Double(rasterized * perRender) / max(total / 1000, 0.001))),
+                       mb(base), mb(peak)))
             shown = []
         }
 
@@ -277,8 +297,11 @@ final class PlaybackBudgetBench: XCTestCase {
             manager.play()
             let tree = manager.renderTree(atFrame: 0)
             say("\(label)  engagesWhilePlaying=\(manager.sandwichEngagesOnCanvas(tree: tree))")
-            let baker = FrameBaker(manager: manager, store: FrameBakeStore(root: root),
-                                   ring: DecodedFrameRing(byteBudget: CanvasManager.frameRingByteBudget))
+            // **The canvas's own baker, not one of this bench's.** `updateSandwich` reads
+            // `canvasManager.frameBaker`, so a private one here would measure a second copy of the
+            // work and leave the real one's ring out of the byte count.
+            manager.syncFrameBake(suspended: false)
+            let baker = manager.frameBaker
             baker.markEverythingDirty()
             let bake = ms { drain(baker) }
             say(String(format: "%@  bake: %.0f ms for %d frames (baked %d, deduped %d, failed %d), "
@@ -288,7 +311,9 @@ final class PlaybackBudgetBench: XCTestCase {
             VectorRenderCache.removeAll()
             var shown = [UIImage?](repeating: nil, count: manager.layers.count)
             var rasterized = 0, misses = 0
-            var held: CGImage?
+            // The baked frame the canvas would be displaying, held across the flip exactly as
+            // `sandwichFull` holds it, so its bytes are in the peak rather than freed at the brace.
+            var displayed: CGImage?
             var peak = residentBytes()
             let base = peak
             let total = ms {
@@ -300,18 +325,21 @@ final class PlaybackBudgetBench: XCTestCase {
                         rasterized += flatRowFlip(manager, to: frame, hostIsBlanked: true, shown: &shown)
                         // …and what `updateSandwich` puts on screen instead.
                         manager.syncFrameBake(suspended: false)
-                        held = baker.image(atFrame: frame)
-                        if held == nil { misses += 1 }
+                        displayed = baker.image(atFrame: frame)
+                        if displayed == nil { misses += 1 }
                         peak = max(peak, residentBytes())
                     }
                 }
             }
-            _ = held
+            let displayedBytes = displayed.map { $0.bytesPerRow * $0.height } ?? 0
+            let held = heldBytes(shown) + displayedBytes
             say(String(format: "%@  BAKED READ: %.1f ms a flip → %.1f fps  rasterizes=%d  misses=%d  "
-                       + "footprint %@ → peak %@ (+%@)  memo=%@",
+                       + "live=%@ (memo %@ + hosts %@ + ring %@)  churn=0 MB/s  footprint %@ → %@",
                        label, total / Double(Self.flips), 1000 * Double(Self.flips) / max(total, 0.001),
-                       rasterized, misses, mb(base), mb(peak), mb(peak &- base),
-                       mb(VectorRenderCache.residentBytes)))
+                       rasterized, misses,
+                       mb(VectorRenderCache.residentBytes + held + baker.ring.byteCount),
+                       mb(VectorRenderCache.residentBytes), mb(held), mb(baker.ring.byteCount),
+                       mb(base), mb(peak)))
             manager.stopPlayback()
             shown = []
         }

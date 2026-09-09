@@ -120,7 +120,27 @@ final class LayerHostView: UIView {
         } else if layer.mask === blankingMask {
             layer.mask = nil
         }
-        strokeView.hostBlankingChanged(to: isBlanked)
+        hostContentVisibilityChanged()
+    }
+
+    /// **Hiding a layer is the other way a host stops drawing, and it costs the same rasterize.**
+    /// `CanvasView.reconcileLayers` sets this from `isLayerEffectivelyVisible` and then, a few lines
+    /// later in the same pass, hands the host the cel that covers the current frame — so before this
+    /// observer existed a hidden layer paid a full canvas-sized vector render on every frame step,
+    /// for pixels `isHidden` throws away. That is the owner's TODO (58): *"this is even after hiding
+    /// all layers so that the canvas is pretty much a blank white sheet"*, MEASURED by them at 313 ms
+    /// a frame at 6000².
+    ///
+    /// An observer rather than a call in `reconcileLayers` because `isHidden` has other writers —
+    /// UIKit's own, and any future one — and the invariant is *"the stroke view knows whether it is
+    /// visible"*, not *"one call site remembers to say so"*.
+    override var isHidden: Bool {
+        didSet { hostContentVisibilityChanged() }
+    }
+
+    /// The one answer the stroke view needs, from the two things that can produce it.
+    private func hostContentVisibilityChanged() {
+        strokeView.hostBlankingChanged(to: isBlanked || isHidden)
     }
 
     /// **Whether this host is currently rendering nothing because the composite is drawing it** —

@@ -944,6 +944,17 @@ struct CanvasView: UIViewRepresentable {
             if catchAllTapRecognizer?.isEnabled != needsCatch {
                 catchAllTapRecognizer?.isEnabled = needsCatch
             }
+
+            // **Last, and on every pass, because the counts on that label move without anything
+            // else about the canvas changing.** It used to be published only from the presentation's
+            // `didSet`, `startSandwichRebuild` and the two transform paths — so on a document that
+            // never engages the compositor it was written *once*, and `rasterizes:` then read the
+            // same stale number however many frames the artist stepped. An XCUITest comparing it
+            // either side of an action would have compared one value with itself and passed
+            // whatever the app did, which is the shape CLAUDE.md's "a green assertion is only as
+            // good as its two operands" section is about. The write is guarded by a string compare;
+            // see `publishCanvasState`.
+            publishCanvasState()
         }
 
         // MARK: - §5.2's sandwich
@@ -1078,7 +1089,7 @@ struct CanvasView: UIViewRepresentable {
             if !canvasManager.textGestureActive { textState = "none" }
             else if canvasManager.textIsFocused { textState = "editing" }
             else { textState = "box" }
-            hostView?.accessibilityLabel = "sandwich:\(sandwichPresentation.rawValue)"
+            let state = "sandwich:\(sandwichPresentation.rawValue)"
                 + " entries:\(midStrokeEntryCount)"
                 + " derived:\(derivedRenderCount)"
                 + " rebuilds:\(sandwichRebuildCount)"
@@ -1093,7 +1104,17 @@ struct CanvasView: UIViewRepresentable {
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
+            // **Compared before it is written, because this now runs on every pass.** Building the
+            // string is a handful of interpolations against a `renderTree` derivation and a
+            // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
+            // not necessarily, and a canvas at rest has a great many passes that change nothing.
+            guard let hostView, state != lastPublishedCanvasState else { return }
+            lastPublishedCanvasState = state
+            hostView.accessibilityLabel = state
         }
+
+        /// The last string `publishCanvasState` wrote, so an unchanged pass costs a comparison.
+        private var lastPublishedCanvasState: String?
 
         /// **How many canvas-sized derived pictures this canvas has rasterized on the main actor** —
         /// posed ink and interpolated in-betweens both, counted in `updateInterpolationPreviews`.

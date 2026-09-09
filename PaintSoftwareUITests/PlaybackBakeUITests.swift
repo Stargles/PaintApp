@@ -175,6 +175,57 @@ final class PlaybackBakeUITests: PaintUITestCase {
                           + "host was holding when the composite blanked it")
     }
 
+    /// **A hidden layer costs nothing to step past** — TODO (58), reported by the owner 2026-09-08:
+    ///
+    /// > *"currently, pressing the playback button of Test1 does not run at 24FPS, sometimes taking
+    /// > 313ms per frame. This is even after hiding all layers so that the canvas is pretty much a
+    /// > blank white sheet."*
+    ///
+    /// Their reading was that the cost must be per-frame work scaling with the canvas rather than
+    /// with what is on it, and it is: `reconcileLayers` sets `host.isHidden` from
+    /// `isLayerEffectivelyVisible` and then, a few lines later in the same pass, hands that same host
+    /// the cel covering the new frame — so the view rasterized the whole canvas for pixels
+    /// `isHidden` throws away. `LayerHostView.isHidden`'s observer is what refuses it now.
+    ///
+    /// **Stepping rather than playing, deliberately.** Playing puts the canvas on the composite,
+    /// which blanks every host and would make this pass for the other reason; a *step* leaves the
+    /// canvas on the flat row, so hidden-ness is the only thing under test.
+    func testSteppingPastHiddenLayersCostsNoCanvasSizedRender() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery", "-uiTestSeedPlainAnimation"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        app.buttons["toolbar.layersButton"].tap()
+        for index in 0..<layerCount {
+            let eye = app.buttons["layerPanel.row.\(index).visibility"]
+            XCTAssertTrue(eye.waitForExistence(timeout: 5), "layer \(index)'s visibility toggle")
+            eye.tap()
+        }
+        app.buttons["toolbar.layersButton"].tap()
+        attachScreen("01-every-layer-hidden")
+
+        // After the hiding, so the renders the hiding itself provoked are behind the baseline.
+        Thread.sleep(forTimeInterval: 1)
+        let before = try XCTUnwrap(field(app, "rasterizes"), "the canvas publishes `rasterizes:`")
+
+        let next = app.buttons["timeline.stepForwardButton"]
+        let previous = app.buttons["timeline.stepBackButton"]
+        for _ in 0..<6 {
+            next.tap()
+            previous.tap()
+        }
+        Thread.sleep(forTimeInterval: 1)
+
+        let after = try XCTUnwrap(field(app, "rasterizes"))
+        XCTAssertEqual(after, before,
+                       "Twelve frame steps over three hidden layers cost \(after - before) "
+                       + "canvas-sized vector renders. A hidden host draws nothing, so it must ask "
+                       + "for nothing — at 6000² each of these is 137 MB, which is the owner's 313 ms "
+                       + "a frame on a blank white sheet")
+    }
+
     /// **The flat row is still what an ordinary edit uses**, which is the containment half and the
     /// thing a one-sided fix would quietly break: `sandwichEngagesOnCanvas` gained a clause, and a
     /// clause that leaked outside playback would put every plain document on the compositor for the

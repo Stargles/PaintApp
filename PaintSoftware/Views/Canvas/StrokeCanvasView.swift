@@ -244,21 +244,31 @@ final class StrokeCanvasView: UIView {
     /// can never mistake for "already showing that".
     static let nothingDisplayed = -1
 
-    /// **Whether the composite is drawing this layer instead of this view** — `LayerHostView
-    /// .isBlanked`, pushed down rather than read up, because a `UIView` reaching into its superview
-    /// for state is the kind of coupling that survives exactly until someone reparents it.
+    /// **Whether nothing this view draws reaches the screen** — the host is blanked because the
+    /// composite is drawing this layer (`LayerHostView.isBlanked`), or hidden because the artist
+    /// turned the layer off. Pushed down rather than read up, because a `UIView` reaching into its
+    /// superview for state is the kind of coupling that survives exactly until someone reparents it.
     ///
-    /// Set by `LayerHostView.setBlanked`, which is the only writer and also asks for the repaint on
-    /// the un-blanking edge. Read by `refreshDisplay` through `DeferredVectorRender.step`.
+    /// **The two causes are one answer here on purpose.** They arrive from different places and mean
+    /// different things to everything else in the app, but to *this* view they are the same
+    /// instruction: do not spend a canvas-sized rasterize on pixels nobody will see. The hidden half
+    /// is the owner's TODO (58) — *"this is even after hiding all layers so that the canvas is pretty
+    /// much a blank white sheet"* — where `reconcileLayers` sets `host.isHidden` and then, four lines
+    /// later, hands the same host its new cel and the view rasterizes it anyway.
+    ///
+    /// Set by `LayerHostView.hostContentVisibilityChanged`, which is the only writer and also asks
+    /// for the repaint on the edge that comes back. Read by `refreshDisplay` through
+    /// `DeferredVectorRender.step`.
     private(set) var hostIsBlanked = false
 
-    /// Called by `LayerHostView.setBlanked` on every change of the host's blanking state.
+    /// Called by `LayerHostView` on every change of "does anything this view draws reach the
+    /// screen?".
     ///
-    /// **The un-blank edge repaints and the blank edge does not.** Going blank costs nothing to
-    /// defer — the pixels are masked away either way — while coming back has to repaint, because
-    /// `refreshDisplay` may have declined a rasterize while the host was blanked and
-    /// `reconcileLayers` does not necessarily run again afterwards: `updateSandwich`'s disengage
-    /// branch un-blanks every host and returns, and nothing else on that path would ever ask.
+    /// **The edge that comes back repaints and the edge that goes away does not.** Going away costs
+    /// nothing to defer — the pixels are masked or hidden either way — while coming back has to
+    /// repaint, because `refreshDisplay` may have declined a rasterize meanwhile and nothing else
+    /// will necessarily ask again: `updateSandwich`'s disengage branch un-blanks every host and
+    /// returns, and un-hiding a layer moves no cel and no version.
     func hostBlankingChanged(to blanked: Bool) {
         guard hostIsBlanked != blanked else { return }
         hostIsBlanked = blanked
