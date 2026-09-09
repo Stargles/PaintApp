@@ -28,7 +28,16 @@ struct TopToolbar: View {
     @Binding var activePanel: ActivePanel
     var onOpenGallery: () -> Void
 
+    /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyToolbars`.
+    /// The split is a wrapper around the unchanged body below it, so nothing about what is
+    /// built, or which state it depends on, moves.
     var body: some View {
+        PlaybackTrace.span(.bodyToolbars) { bodyContent }
+    }
+
+    /// The top toolbar's body.
+    @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 10) {
             iconButton(system: "square.grid.2x2", isActive: false, action: onOpenGallery)
                 .accessibilityIdentifier("toolbar.galleryButton")

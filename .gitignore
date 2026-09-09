@@ -110,3 +110,9 @@ deploy.bat
 # `graphify update .` (the PreToolUse hook prompts for exactly that when they're missing).
 graphify-out/*
 !graphify-out/GRAPH_REPORT.md
+
+# `PlaybackProbe`'s reports, pulled off the device by `tools/probe-run.sh`. One run is ~20 KB of
+# JSON and a session takes dozens; they are measurements of one binary on one device at one
+# moment, so the *numbers worth keeping* belong in PERFORMANCE.md with their provenance, not the
+# raw files. Same argument as graphify's blobs above.
+probe-reports/

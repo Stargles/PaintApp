@@ -94,7 +94,17 @@ struct AnimationTimeline: View {
     /// anchor is the tapped block, which arrives with the menu request.
     @State private var menuAnchors: [CanvasPresentation: CGRect] = [:]
 
+    /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyTimeline`.
+    /// The split is a wrapper around the unchanged body below it, so nothing about what is
+    /// built, or which state it depends on, moves.
     var body: some View {
+        PlaybackTrace.span(.bodyTimeline) { bodyContent }
+    }
+
+    /// The timeline's body. `TimelineTrackView` and the pinned name column are built here; what the
+    /// track then *does* is `timelineTrack`.
+    @ViewBuilder private var bodyContent: some View {
         // The interpolate bar sits *outside* the height-constrained timeline rather than inside it,
         // so turning the mode on adds a strip above the panel instead of eating rows out of it.
         VStack(spacing: 0) {

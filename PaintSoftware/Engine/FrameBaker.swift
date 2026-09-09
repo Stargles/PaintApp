@@ -476,7 +476,9 @@ final class FrameBaker {
             }
 
             Task { @MainActor in
-                self?.finish(frame: frame, key: key, outcome: outcome)
+                PlaybackTrace.span(.renderLanded) {
+                    self?.finish(frame: frame, key: key, outcome: outcome)
+                }
             }
         }
     }
@@ -531,7 +533,9 @@ final class FrameBaker {
             isBaking = true
             workQueue.async { [weak self, store] in
                 let decoded = store.loadDecoded(key)
-                Task { @MainActor in self?.finishRingFill(key: key, decoded: decoded) }
+                Task { @MainActor in
+                    PlaybackTrace.span(.renderLanded) { self?.finishRingFill(key: key, decoded: decoded) }
+                }
             }
             return true
         }

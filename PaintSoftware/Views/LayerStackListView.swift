@@ -38,7 +38,10 @@ struct LayerStackListView: UIViewRepresentable {
     func updateUIView(_ tableView: UITableView, context: Context) {
         context.coordinator.canvasManager = canvasManager
         context.coordinator.onRequestOptions = onRequestOptions
-        context.coordinator.reload()
+        // The third representable a canvas pass drives, and the third that was inside the report's
+        // unattributed remainder — `reload()` rebuilds a `LayerRowModel` per row, thumbnail address
+        // included, and applies a diffable snapshot, on every SwiftUI pass.
+        PlaybackTrace.span(.layerListReload) { context.coordinator.reload() }
     }
 
     func makeCoordinator() -> Coordinator {

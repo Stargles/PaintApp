@@ -98,7 +98,11 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.rulerHeight = rulerHeight
         context.coordinator.onRequestMenu = onRequestMenu
         context.coordinator.onRequestRasterizeConfirm = onRequestRasterizeConfirm
-        context.coordinator.relayout()
+        // **The second `UIViewRepresentable` a canvas pass drives, and the first one nobody had
+        // ever timed.** `CanvasView.updateUIView` has been a named row since `PlaybackTrace`
+        // existed; this one runs in the same SwiftUI pass, off the same `@Published` writes, and
+        // was inside the report's unattributed remainder in every measurement taken so far.
+        PlaybackTrace.span(.timelineTrack) { context.coordinator.relayout() }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -257,22 +261,26 @@ struct TimelineTrackView: UIViewRepresentable {
             // knows nothing about this.
             let totalHeight = layout.contentHeight(filling: scrollView.bounds.height)
 
-            let built = TimelineLayoutKey.make(
-                canvasManager: canvasManager,
-                stackRows: stackRows,
-                pixelsPerFrame: pixelsPerFrame,
-                displayedFrameCount: laidOutCount,
-                contentWidth: totalWidth,
-                contentHeight: totalHeight,
-                rowHeight: rowHeight,
-                rulerHeight: rulerHeight,
-                drag: blockDrag.map {
-                    TimelineLayoutKey.DragKey(celID: $0.celID,
-                                              sourceLayerIndex: $0.sourceLayerIndex,
-                                              targetLayerIndex: $0.targetLayerIndex,
-                                              targetStartFrame: $0.targetStartFrame,
-                                              frameCount: $0.frameCount)
-                })
+            // Timed: it is O(layers x cels) and it reads every cel's thumbnail address, which is
+            // what makes installing one tile raise a whole-track rebuild.
+            let built = PlaybackTrace.span(.timelineKey) {
+                TimelineLayoutKey.make(
+                    canvasManager: canvasManager,
+                    stackRows: stackRows,
+                    pixelsPerFrame: pixelsPerFrame,
+                    displayedFrameCount: laidOutCount,
+                    contentWidth: totalWidth,
+                    contentHeight: totalHeight,
+                    rowHeight: rowHeight,
+                    rulerHeight: rulerHeight,
+                    drag: blockDrag.map {
+                        TimelineLayoutKey.DragKey(celID: $0.celID,
+                                                  sourceLayerIndex: $0.sourceLayerIndex,
+                                                  targetLayerIndex: $0.targetLayerIndex,
+                                                  targetStartFrame: $0.targetStartFrame,
+                                                  frameCount: $0.frameCount)
+                    })
+            }
             // Nothing the track draws has moved. Take the playhead's cheap path and leave every view,
             // every accessibility identifier and the ruler's CoreText exactly as they are.
             if built.key == laidOutKey {
@@ -289,176 +297,181 @@ struct TimelineTrackView: UIViewRepresentable {
                 refreshBakeIndication()
                 return
             }
-            laidOutKey = built.key
-            retainedThumbnails = built.retainedThumbnails
-            laidOutFrameCount = laidOutCount
+            // **Everything past the key check, as one row.** This is the branch the cheap path
+            // above exists to avoid — every row view, every block, the ruler's CoreText — and it
+            // is what a *thumbnail install* raises, because a tile's address is in the key.
+            PlaybackTrace.span(.timelineRebuild, value: stackRows.count) {
+                laidOutKey = built.key
+                retainedThumbnails = built.retainedThumbnails
+                laidOutFrameCount = laidOutCount
 
-            contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
-            if scrollView.contentSize != contentView.frame.size {
-                scrollView.contentSize = contentView.frame.size
-            }
-
-            // **Inserted at index 0, ahead of every other subview added below**, so it is the one
-            // thing every one of them — the ruler, the bake bar, every row, the graph band — is
-            // drawn over rather than under. See the view's own doc for why it spans the ruler as
-            // well as the rows.
-            if gridlinesView.superview == nil {
-                contentView.insertSubview(gridlinesView, at: 0)
-            }
-            gridlinesView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
-            gridlinesView.frameCount = laidOutCount
-            gridlinesView.pixelsPerFrame = pixelsPerFrame
-            gridlinesView.setNeedsDisplay()
-
-            if rulerView.superview == nil {
-                rulerView.isAccessibilityElement = true
-                rulerView.accessibilityIdentifier = "timeline.ruler"
-                rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
-                rulerView.onNumberTap = { [weak self] frame, columnRect in
-                    self?.onRequestMenu?(.loop(frame: frame), columnRect)
+                contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
+                if scrollView.contentSize != contentView.frame.size {
+                    scrollView.contentSize = contentView.frame.size
                 }
-                rulerView.panRecognizer.name = "timeline.rulerScrub"
-                contentView.addSubview(rulerView)
-                scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
-            }
-            rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
-            rulerView.frameCount = laidOutCount
-            rulerView.pixelsPerFrame = pixelsPerFrame
-            // `currentFrame` is set by `movePlayhead` at the end of this function, and on the scrub
-            // fast path that skips it — one writer, so the two paths cannot disagree.
-            rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
-            rulerView.setNeedsDisplay()
 
-            // **A sibling above the ruler rather than something the ruler draws**, which is the
-            // whole reason it can be refreshed at bake rate: invalidating the ruler relays out one
-            // `NSAttributedString` per visible frame, and the layout gate exists to stop exactly
-            // that happening often. The bar's own `draw` is a handful of `UIRectFill`s.
-            //
-            // It also earns its own accessibility element that way — `timeline.ruler` already is
-            // one, and hanging a second value off it would conflate the frame numbers with the
-            // bake state.
-            if bakeBarView.superview == nil { contentView.addSubview(bakeBarView) }
-            bakeBarView.frame = CGRect(x: 0, y: rulerHeight - TimelineBakeBar.height,
-                                       width: totalWidth, height: TimelineBakeBar.height)
+                // **Inserted at index 0, ahead of every other subview added below**, so it is the one
+                // thing every one of them — the ruler, the bake bar, every row, the graph band — is
+                // drawn over rather than under. See the view's own doc for why it spans the ruler as
+                // well as the rows.
+                if gridlinesView.superview == nil {
+                    contentView.insertSubview(gridlinesView, at: 0)
+                }
+                gridlinesView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
+                gridlinesView.frameCount = laidOutCount
+                gridlinesView.pixelsPerFrame = pixelsPerFrame
+                gridlinesView.setNeedsDisplay()
 
-            // Split the presented rows into the two kinds of track, each drawn from its own pool.
-            let layerEntries = stackRows.enumerated().compactMap { position, row in
-                row.layerIndex.map { (position: position, layerIndex: $0) }
-            }
-            let folderEntries = stackRows.enumerated().compactMap { position, row in
-                row.folderID.map { (position: position, folderID: $0) }
-            }
+                if rulerView.superview == nil {
+                    rulerView.isAccessibilityElement = true
+                    rulerView.accessibilityIdentifier = "timeline.ruler"
+                    rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
+                    rulerView.onNumberTap = { [weak self] frame, columnRect in
+                        self?.onRequestMenu?(.loop(frame: frame), columnRect)
+                    }
+                    rulerView.panRecognizer.name = "timeline.rulerScrub"
+                    contentView.addSubview(rulerView)
+                    scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
+                }
+                rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
+                rulerView.frameCount = laidOutCount
+                rulerView.pixelsPerFrame = pixelsPerFrame
+                // `currentFrame` is set by `movePlayhead` at the end of this function, and on the scrub
+                // fast path that skips it — one writer, so the two paths cannot disagree.
+                rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
+                rulerView.setNeedsDisplay()
 
-            while rowViews.count < layerEntries.count {
-                let row = TimelineRowView()
-                row.coordinator = self
-                // **By pool slot, not by layer**, and deliberately: the pool slot is the one thing
-                // about a row view that never moves, so a capture can say *which view* a touch
-                // reached and whether the same view is still there a minute later. Which layer that
-                // slot is currently showing changes on every reorder, and naming it that would make
-                // two lines in a trace incomparable. See `makeUIView` for what a name buys.
-                row.nameRecognizers(poolSlot: rowViews.count)
-                contentView.addSubview(row)
-                // **This is called once per row view ever created and UIKit has no un-require API,
-                // and it still does not accumulate.** Two investigations of TODO (39)(c) reached
-                // the opposite conclusion from the same two facts, so the measurement is written
-                // down rather than left to be re-derived: `_failureRequirements` is a **weak** set
-                // that deduplicates, and `UIGestureRecognizer` does not retain its action target,
-                // so a row that leaves the pool below takes its recogniser and its entry with it.
-                // `TimelineGestureArbitrationLogicTests` pins that through public API — it goes red
-                // if a future UIKit starts retaining, which is the day this *would* become a leak.
-                scrollView.panGestureRecognizer.require(toFail: row.panRecognizer)
-                rowViews.append(row)
-            }
-            while rowViews.count > layerEntries.count {
-                rowViews.removeLast().removeFromSuperview()
-            }
+                // **A sibling above the ruler rather than something the ruler draws**, which is the
+                // whole reason it can be refreshed at bake rate: invalidating the ruler relays out one
+                // `NSAttributedString` per visible frame, and the layout gate exists to stop exactly
+                // that happening often. The bar's own `draw` is a handful of `UIRectFill`s.
+                //
+                // It also earns its own accessibility element that way — `timeline.ruler` already is
+                // one, and hanging a second value off it would conflate the frame numbers with the
+                // bake state.
+                if bakeBarView.superview == nil { contentView.addSubview(bakeBarView) }
+                bakeBarView.frame = CGRect(x: 0, y: rulerHeight - TimelineBakeBar.height,
+                                           width: totalWidth, height: TimelineBakeBar.height)
 
-            layerRowGeometry = []
-            for (slot, entry) in layerEntries.enumerated() {
-                let row = rowViews[slot]
-                // **The row view gets the block half of its height, not the whole row.** A cel
-                // block's rect and the key-marker band's origin are both measured from this view's
-                // own `bounds.height` (`TimelineRowView.update`), so handing it the expanded height
-                // would stretch every thumbnail down across the curves and slide the key diamonds to
-                // the bottom of the band instead of onto the blocks they annotate. The band is a
-                // sibling in `contentView`, hung directly under this frame.
-                let height = layout.blockHeight(ofRow: entry.position)
-                row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth, height: height)
-                row.layerIndex = entry.layerIndex
-                row.layerID = layers[entry.layerIndex].id
-                row.pixelsPerFrame = pixelsPerFrame
-                row.isCurrentLayer = (entry.layerIndex == canvasManager.currentLayerIndex)
-                // Set before `update`, which is what applies it: the block being dragged is drawn by
-                // the ghost following the finger, so the copy still sitting in the row is hidden
-                // rather than reading as two copies of the same drawing.
-                row.hiddenCelID = (blockDrag?.sourceLayerIndex == entry.layerIndex) ? blockDrag?.celID : nil
-                // Also set before `update`: only the row the ghost is currently over previews making
-                // room for it (see `TimelineRowView.dragDisplacements`). A row the drag has since
-                // moved off simply gets nil here and its blocks ease back on their own, the same way
-                // they eased aside — no separate "undo the preview" path needed.
-                row.dragPreview = (blockDrag?.targetLayerIndex == entry.layerIndex) ? blockDrag : nil
-                // **Taken from the key rather than re-read off the layer, and that is the point.**
-                // §10's standing hazard here is a marker whose input is not in `TimelineLayoutKey`:
-                // the gate above early-returns whenever the key is unchanged, so such a marker would
-                // draw once and never move again — silently, which is the family
-                // `InterpolationPreviewKey` has been bitten by four times. Reading the value *out of*
-                // the key makes "drawn from" and "keyed on" the same array by construction instead of
-                // by two people remembering to keep them in step. `trackMarkers` is built parallel
-                // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
-                row.update(cels: layers[entry.layerIndex].cels,
-                           displayedFrameCount: laidOutCount,
-                           markers: built.key.trackMarkers.indices.contains(slot)
-                               ? built.key.trackMarkers[slot] : [])
-                // **Where a drop resolves and where its ghost is drawn are recorded separately, and
-                // that is the fix rather than an accident of naming.** `layoutDragChrome` used to
-                // place the ghost at `minY + gap/2`, i.e. derived from the strip — true only while a
-                // row was its blocks and nothing else. `dropBand` now stops with the blocks and
-                // splits a graph editor band with the row below (see its doc), so the strip's top is
-                // no longer the block's top and reading one off the other puts the ghost half a band
-                // out. `blockTop` is the row view's own frame origin, which is where a dropped cel
-                // will actually appear.
-                let strip = layout.dropBand(ofRow: entry.position)
-                layerRowGeometry.append((layerIndex: entry.layerIndex,
-                                         minY: strip.minY,
-                                         maxY: strip.maxY,
-                                         blockTop: layout.y(ofRow: entry.position),
-                                         height: height))
-            }
+                // Split the presented rows into the two kinds of track, each drawn from its own pool.
+                let layerEntries = stackRows.enumerated().compactMap { position, row in
+                    row.layerIndex.map { (position: position, layerIndex: $0) }
+                }
+                let folderEntries = stackRows.enumerated().compactMap { position, row in
+                    row.folderID.map { (position: position, folderID: $0) }
+                }
 
-            while folderRowViews.count < folderEntries.count {
-                let row = TimelineFolderRowView()
-                contentView.addSubview(row)
-                folderRowViews.append(row)
-            }
-            while folderRowViews.count > folderEntries.count {
-                folderRowViews.removeLast().removeFromSuperview()
-            }
+                while rowViews.count < layerEntries.count {
+                    let row = TimelineRowView()
+                    row.coordinator = self
+                    // **By pool slot, not by layer**, and deliberately: the pool slot is the one thing
+                    // about a row view that never moves, so a capture can say *which view* a touch
+                    // reached and whether the same view is still there a minute later. Which layer that
+                    // slot is currently showing changes on every reorder, and naming it that would make
+                    // two lines in a trace incomparable. See `makeUIView` for what a name buys.
+                    row.nameRecognizers(poolSlot: rowViews.count)
+                    contentView.addSubview(row)
+                    // **This is called once per row view ever created and UIKit has no un-require API,
+                    // and it still does not accumulate.** Two investigations of TODO (39)(c) reached
+                    // the opposite conclusion from the same two facts, so the measurement is written
+                    // down rather than left to be re-derived: `_failureRequirements` is a **weak** set
+                    // that deduplicates, and `UIGestureRecognizer` does not retain its action target,
+                    // so a row that leaves the pool below takes its recogniser and its entry with it.
+                    // `TimelineGestureArbitrationLogicTests` pins that through public API — it goes red
+                    // if a future UIKit starts retaining, which is the day this *would* become a leak.
+                    scrollView.panGestureRecognizer.require(toFail: row.panRecognizer)
+                    rowViews.append(row)
+                }
+                while rowViews.count > layerEntries.count {
+                    rowViews.removeLast().removeFromSuperview()
+                }
 
-            for (slot, entry) in folderEntries.enumerated() {
-                let row = folderRowViews[slot]
-                row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth,
-                                   height: layout.height(ofRow: entry.position))
-                let childIndices = canvasManager.descendantLayerIndices(ofFolder: entry.folderID)
-                let cels = childIndices.flatMap { layers[$0].cels }
-                let span: ClosedRange<Int>? = cels.isEmpty
-                    ? nil
-                    : (cels.map(\.startFrame).min() ?? 0)...(cels.map(\.endFrame).max() ?? 0)
-                let folder = canvasManager.folders.first(where: { $0.id == entry.folderID })
-                row.update(span: span,
-                           pixelsPerFrame: pixelsPerFrame,
-                           isVisible: folder?.isVisible ?? true,
-                           identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
-                           // Out of the key, for the layer rows' reason above.
-                           markers: built.key.folders.indices.contains(slot)
-                               ? built.key.folders[slot].markers : [])
+                layerRowGeometry = []
+                for (slot, entry) in layerEntries.enumerated() {
+                    let row = rowViews[slot]
+                    // **The row view gets the block half of its height, not the whole row.** A cel
+                    // block's rect and the key-marker band's origin are both measured from this view's
+                    // own `bounds.height` (`TimelineRowView.update`), so handing it the expanded height
+                    // would stretch every thumbnail down across the curves and slide the key diamonds to
+                    // the bottom of the band instead of onto the blocks they annotate. The band is a
+                    // sibling in `contentView`, hung directly under this frame.
+                    let height = layout.blockHeight(ofRow: entry.position)
+                    row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth, height: height)
+                    row.layerIndex = entry.layerIndex
+                    row.layerID = layers[entry.layerIndex].id
+                    row.pixelsPerFrame = pixelsPerFrame
+                    row.isCurrentLayer = (entry.layerIndex == canvasManager.currentLayerIndex)
+                    // Set before `update`, which is what applies it: the block being dragged is drawn by
+                    // the ghost following the finger, so the copy still sitting in the row is hidden
+                    // rather than reading as two copies of the same drawing.
+                    row.hiddenCelID = (blockDrag?.sourceLayerIndex == entry.layerIndex) ? blockDrag?.celID : nil
+                    // Also set before `update`: only the row the ghost is currently over previews making
+                    // room for it (see `TimelineRowView.dragDisplacements`). A row the drag has since
+                    // moved off simply gets nil here and its blocks ease back on their own, the same way
+                    // they eased aside — no separate "undo the preview" path needed.
+                    row.dragPreview = (blockDrag?.targetLayerIndex == entry.layerIndex) ? blockDrag : nil
+                    // **Taken from the key rather than re-read off the layer, and that is the point.**
+                    // §10's standing hazard here is a marker whose input is not in `TimelineLayoutKey`:
+                    // the gate above early-returns whenever the key is unchanged, so such a marker would
+                    // draw once and never move again — silently, which is the family
+                    // `InterpolationPreviewKey` has been bitten by four times. Reading the value *out of*
+                    // the key makes "drawn from" and "keyed on" the same array by construction instead of
+                    // by two people remembering to keep them in step. `trackMarkers` is built parallel
+                    // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
+                    row.update(cels: layers[entry.layerIndex].cels,
+                               displayedFrameCount: laidOutCount,
+                               markers: built.key.trackMarkers.indices.contains(slot)
+                                   ? built.key.trackMarkers[slot] : [])
+                    // **Where a drop resolves and where its ghost is drawn are recorded separately, and
+                    // that is the fix rather than an accident of naming.** `layoutDragChrome` used to
+                    // place the ghost at `minY + gap/2`, i.e. derived from the strip — true only while a
+                    // row was its blocks and nothing else. `dropBand` now stops with the blocks and
+                    // splits a graph editor band with the row below (see its doc), so the strip's top is
+                    // no longer the block's top and reading one off the other puts the ghost half a band
+                    // out. `blockTop` is the row view's own frame origin, which is where a dropped cel
+                    // will actually appear.
+                    let strip = layout.dropBand(ofRow: entry.position)
+                    layerRowGeometry.append((layerIndex: entry.layerIndex,
+                                             minY: strip.minY,
+                                             maxY: strip.maxY,
+                                             blockTop: layout.y(ofRow: entry.position),
+                                             height: height))
+                }
+
+                while folderRowViews.count < folderEntries.count {
+                    let row = TimelineFolderRowView()
+                    contentView.addSubview(row)
+                    folderRowViews.append(row)
+                }
+                while folderRowViews.count > folderEntries.count {
+                    folderRowViews.removeLast().removeFromSuperview()
+                }
+
+                for (slot, entry) in folderEntries.enumerated() {
+                    let row = folderRowViews[slot]
+                    row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth,
+                                       height: layout.height(ofRow: entry.position))
+                    let childIndices = canvasManager.descendantLayerIndices(ofFolder: entry.folderID)
+                    let cels = childIndices.flatMap { layers[$0].cels }
+                    let span: ClosedRange<Int>? = cels.isEmpty
+                        ? nil
+                        : (cels.map(\.startFrame).min() ?? 0)...(cels.map(\.endFrame).max() ?? 0)
+                    let folder = canvasManager.folders.first(where: { $0.id == entry.folderID })
+                    row.update(span: span,
+                               pixelsPerFrame: pixelsPerFrame,
+                               isVisible: folder?.isVisible ?? true,
+                               identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
+                               // Out of the key, for the layer rows' reason above.
+                               markers: built.key.folders.indices.contains(slot)
+                                   ? built.key.folders[slot].markers : [])
+                }
+
+                layoutGraphBand(content: built.key.graphBand, layout: layout, stackRows: stackRows,
+                                totalWidth: totalWidth)
+
+                movePlayhead(totalHeight: totalHeight)
+                refreshBakeIndication()
             }
-
-            layoutGraphBand(content: built.key.graphBand, layout: layout, stackRows: stackRows,
-                            totalWidth: totalWidth)
-
-            movePlayhead(totalHeight: totalHeight)
-            refreshBakeIndication()
         }
 
         // MARK: - The baked-frame indication (RENDER.md §3.7)
@@ -1509,6 +1522,13 @@ private final class TimelineRulerView: UIView {
     ///
     /// The band is clipped by CoreGraphics anyway; the loop is what had to be told.
     override func draw(_ rect: CGRect) {
+        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
+        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
+        // display happens, and this is the only `draw(_:)` on the editing path.
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
         if let loopRange {
             let bandRect = CGRect(x: CGFloat(loopRange.lowerBound) * pixelsPerFrame,
                                   y: 0,
@@ -1578,6 +1598,13 @@ private final class TimelineGridlinesView: UIView {
     /// Clipped to `rect` by `TimelineRulerClip`, for the reason its own doc gives: partial
     /// invalidation should cost what is redrawn, not the whole scene.
     override func draw(_ rect: CGRect) {
+        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
+        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
+        // display happens, and this is the only `draw(_:)` on the editing path.
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
         guard pixelsPerFrame > 0, frameCount > 0 else { return }
         Self.lineColor.setFill()
         for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
@@ -1725,6 +1752,13 @@ private final class TimelineKeyMarkerBand: UIView {
     }
 
     override func draw(_ rect: CGRect) {
+        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
+        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
+        // display happens, and this is the only `draw(_:)` on the editing path.
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
         guard pixelsPerFrame > 0 else { return }
         let midY = bounds.midY
         let half = TimelineKeyMarkers.markerWidth / 2
@@ -1826,6 +1860,13 @@ private final class TimelineBakeBarView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
+        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
+        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
+        // display happens, and this is the only `draw(_:)` on the editing path.
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
         guard pixelsPerFrame > 0 else { return }
         // **Amber, not red.** §2.10 rules that playback may be visibly stale while the bake catches
         // up, so an unbaked stretch is the expected transient state of a document being drawn in and
@@ -2090,6 +2131,13 @@ private final class TimelineGraphBandView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
+        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
+        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
+        // display happens, and this is the only `draw(_:)` on the editing path.
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
         guard let content,
               let sampling = TimelineGraphBand.sampling(in: rect,
                                                         visibleX: visibleX,

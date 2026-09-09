@@ -38,6 +38,7 @@ import UIKit
 ///     -probeHeight <n>               canvas height (default 4096)
 ///     -probeLayers <n>               vector layers (default 3)
 ///     -probeFrames <n>               distinct frames, one cel per layer per frame (default 2)
+///     -probeStrokes <n>              strokes already on each cel before the run (default 1)
 ///     -probeSeconds <n>              how long to play (default 10)
 ///     -probeBakeTimeout <n>          give up waiting for the bake after this (default 180)
 ///     -probeLabel <s>                goes in the filename and the report
@@ -86,6 +87,11 @@ enum PlaybackProbe {
         let height = intArgument("-probeHeight", default: 4096)
         let layerCount = max(1, intArgument("-probeLayers", default: 3))
         let frameCount = max(1, intArgument("-probeFrames", default: 2))
+        // **The owner's bar names three axes and the probe could only vary two.** *"no matter how
+        // many strokes or cels or layers"* — `-probeLayers` and `-probeFrames` cover the second and
+        // third, and until this argument existed every cel carried exactly one stroke, so nothing
+        // measured here could tell a per-edit cost that is O(ink) from one that is not.
+        let strokesPerCel = max(1, intArgument("-probeStrokes", default: 1))
         let seconds = max(1, intArgument("-probeSeconds", default: 10))
         let bakeTimeout = max(1, intArgument("-probeBakeTimeout", default: 180))
         let mode = Mode(rawValue: stringArgument("-probeMode", default: "playback")) ?? .playback
@@ -93,7 +99,8 @@ enum PlaybackProbe {
         let size = CGSize(width: width, height: height)
         canvasManager.canvasSize = size
         canvasManager.addVectorLayer()
-        seed(into: canvasManager, layers: layerCount, frames: frameCount, size: size)
+        seed(into: canvasManager, layers: layerCount, frames: frameCount,
+             strokesPerCel: strokesPerCel, size: size)
         showEditor()
 
         // One turn for the editor to build its views and run the first reconciliation pass, which is
@@ -143,6 +150,7 @@ enum PlaybackProbe {
             "canvasHeight": height,
             "layers": layerCount,
             "frames": frameCount,
+            "strokesPerCel": strokesPerCel,
             "fps": canvasManager.fps,
             "playedSeconds": report.seconds,
             "bakeWaitSeconds": bakeSeconds,
@@ -187,9 +195,35 @@ enum PlaybackProbe {
         }
         json["ticks"] = report.ticks.map {
             ["frame": $0.frame, "at": $0.atSeconds, "intervalMs": $0.intervalMs,
-             "mainBusyMs": $0.mainBusyMs, "ringHits": $0.ringHits, "ringMisses": $0.ringMisses,
+             "mainBusyMs": $0.mainBusyMs, "mainCpuMs": $0.mainCpuMs,
+             "unattributedMs": $0.unattributedMs,
+             "ringHits": $0.ringHits, "ringMisses": $0.ringMisses,
              "phaseMs": $0.phaseMs,
              "bursts": $0.bursts.map { ["at": $0.atMs, "ms": $0.ms] }]
+        }
+        // **The remainder, named at the top level of the report rather than left to be computed.**
+        // A phase table's rows nest, so no reader can subtract their way to this number; it is the
+        // union of the instrumented intervals against measured busy, and it is the honest answer to
+        // "how much of an edit is still in code nobody has timed".
+        json["attribution"] = [
+            "mainBusyMs": report.mainBusyMs,
+            "mainCpuMs": report.mainCpuMs,
+            "offCpuMs": max(report.mainBusyMs - report.mainCpuMs, 0),
+            "attributedMs": report.attributedMs,
+            "unattributedMs": report.unattributedMs,
+            "unattributedShare": report.mainBusyMs > 0 ? report.unattributedMs / report.mainBusyMs : 0
+        ]
+
+        // **Where the unattributed milliseconds sit inside the stalls the owner can see.** The
+        // share above says how much is uninstrumented; this says whether it runs before the first
+        // instrumented call, between two of them, or after the last — which is the difference
+        // between "SwiftUI deciding" and "UIKit drawing", and those have no fix in common.
+        json["burstDetail"] = PlaybackTrace.shared.longestBursts().map { burst in
+            ["at": burst.atSeconds, "ms": burst.ms,
+             "leadMs": burst.leadMs, "gapMs": burst.gapMs, "tailMs": burst.tailMs,
+             "sourceMs": burst.sourceMs, "observerMs": burst.observerMs,
+             "commitMs": burst.commitMs, "cpuMs": burst.cpuMs,
+             "spans": burst.spans.map { ["phase": $0.phase, "at": $0.atMs, "ms": $0.ms] }]
         }
 
         write(json)
@@ -232,7 +266,9 @@ enum PlaybackProbe {
 
         for index in 0..<count {
             await beat("commit\(index)")
-            commitStroke(into: canvasManager, size: size, index: index)
+            PlaybackTrace.span(.editCommit) {
+                commitStroke(into: canvasManager, size: size, index: index)
+            }
             try? await Task.sleep(nanoseconds: settle)
         }
         for index in 0..<count {
@@ -296,7 +332,8 @@ enum PlaybackProbe {
     /// cels may render to the same picture, or §3.3's content addressing dedupes them and the run
     /// measures a hold instead of an animation.
     @MainActor
-    private static func seed(into canvasManager: CanvasManager, layers: Int, frames: Int, size: CGSize) {
+    private static func seed(into canvasManager: CanvasManager, layers: Int, frames: Int,
+                             strokesPerCel: Int, size: CGSize) {
         var brush = canvasManager.selectedBrush
         brush.size = size.height / 24
         for _ in 1..<max(layers, 1) { canvasManager.addVectorLayer() }
@@ -305,14 +342,20 @@ enum PlaybackProbe {
                 let cel = Cel(id: UUID(), startFrame: frame, frameCount: 1,
                               raster: .empty(size: size), vector: .empty(size: size))
                 let step = CGFloat(layerIndex * frames + frame) / CGFloat(max(layers * frames, 1))
-                let y = size.height * (0.1 + 0.8 * step)
-                cel.vector?.addStroke(VectorStroke(
-                    id: UUID(), brush: brush,
-                    color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                    size: brush.size, opacity: 1,
-                    samples: StrokeSamples([VectorSample(x: size.width * 0.15, y: y, pressure: 1),
-                                            VectorSample(x: size.width * 0.85, y: y, pressure: 1)],
-                                           channels: .pressureOnly)))
+                // Every stroke of every cel is at its own height, for the reason this function's
+                // doc gives: two cels that render to the same picture are deduped by §3.3's content
+                // addressing and the run measures a hold instead of an animation.
+                for stroke in 0..<strokesPerCel {
+                    let jitter = CGFloat(stroke) / CGFloat(max(strokesPerCel, 1)) * 0.8 / CGFloat(max(layers * frames, 1))
+                    let y = size.height * (0.1 + 0.8 * step + jitter)
+                    cel.vector?.addStroke(VectorStroke(
+                        id: UUID(), brush: brush,
+                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                        size: brush.size, opacity: 1,
+                        samples: StrokeSamples([VectorSample(x: size.width * 0.15, y: y, pressure: 1),
+                                                VectorSample(x: size.width * 0.85, y: y, pressure: 1)],
+                                               channels: .pressureOnly)))
+                }
                 return cel
             }
         }

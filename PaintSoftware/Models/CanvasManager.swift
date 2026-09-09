@@ -2810,12 +2810,20 @@ final class CanvasManager: ObservableObject {
             // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already —
             // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
             // memo entry out of the compositor's way (see the constant).
-            let flattened = PixelOps.rasterize(cel: cel,
-                                               canvasSize: RenderRequest.renderSize(fitting: canvasSize,
-                                                                                    within: celThumbnailRasterBound),
-                                               derived: derived)
-            return ThumbnailRenderer.render(flattened, canvasSize: canvasSize,
-                                            thumbnailSize: celThumbnailSize)
+            // Two rows, because the two halves scale with different things and only one of them is
+            // bounded: `celThumbnailRasterBound` fixed the *tile* at 480² whatever the canvas is,
+            // but the flatten inside it still walks every element the cel holds, so this half is
+            // O(ink) — which is the first term of the owner's *"no matter how many strokes"*.
+            let flattened = PlaybackTrace.span(.thumbnailFlatten) {
+                PixelOps.rasterize(cel: cel,
+                                   canvasSize: RenderRequest.renderSize(fitting: canvasSize,
+                                                                        within: celThumbnailRasterBound),
+                                   derived: derived)
+            }
+            return PlaybackTrace.span(.thumbnailDownsample) {
+                ThumbnailRenderer.render(flattened, canvasSize: canvasSize,
+                                         thumbnailSize: celThumbnailSize)
+            }
         }
         return ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage,
                                         canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
@@ -2830,9 +2838,19 @@ final class CanvasManager: ObservableObject {
         // A cel's thumbnail is the picture at the frame that cel *starts* on. That is the only
         // honest answer for a held cel — one tile stands for the whole block — and it is the frame
         // `CelBlockView` draws the tile against.
-        let image = Self.celThumbnailImage(for: cel, canvasSize: canvasSize,
-                                           derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
-        installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
+        //
+        // **The render and the install are two rows of a `PlaybackTrace` report, not one.**
+        // §11.11c bounded the render (a 480² tile whatever the canvas is) and the flush stayed
+        // expensive anyway; the install writes `@Published layers`, and `Layer`/`Cel` are structs,
+        // so what it costs is a function of how many cels the document has rather than of how many
+        // pixels the canvas does. Two different levers, so two rows.
+        let image = PlaybackTrace.span(.thumbnailRender) {
+            Self.celThumbnailImage(for: cel, canvasSize: canvasSize,
+                                   derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
+        }
+        PlaybackTrace.span(.thumbnailInstall, value: layers[layerIndex].cels.count) {
+            installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
+        }
     }
 
     /// Puts a rendered thumbnail on its cel, and on the layer too when that cel is the one the

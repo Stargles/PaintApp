@@ -13,7 +13,16 @@ struct SideToolbar: View {
     /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
     private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
 
+    /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyToolbars`.
+    /// The split is a wrapper around the unchanged body below it, so nothing about what is
+    /// built, or which state it depends on, moves.
     var body: some View {
+        PlaybackTrace.span(.bodyToolbars) { bodyContent }
+    }
+
+    /// The side toolbar's body.
+    @ViewBuilder private var bodyContent: some View {
         VStack(spacing: 0) {
             Spacer()
 

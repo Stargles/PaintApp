@@ -58,7 +58,17 @@ struct DrawingView: View {
     /// arrives on the first layout pass — and it is the timeline's own default so nothing jumps.
     @State private var timelineOccupiedHeight: CGFloat = 250
 
+    /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyDrawing`.
+    /// The split is a wrapper around the unchanged body below it, so nothing about what is
+    /// built, or which state it depends on, moves.
     var body: some View {
+        PlaybackTrace.span(.bodyDrawing) { bodyContent }
+    }
+
+    /// The editor's whole body — every toolbar, the timeline and the layer rail are constructed here
+    /// on every `objectWillChange` the manager sends.
+    @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 0) {
             SideToolbar(canvasManager: canvasManager)
                 .frame(width: 64)

@@ -644,7 +644,9 @@ final class StrokeCanvasView: UIView {
                 canvas.render(quality: .full, ifStillAtVersion: version)
             }
             DispatchQueue.main.async {
-                self?.finishVectorRender(image, of: canvas, atVersion: version)
+                PlaybackTrace.span(.renderLanded) {
+                    self?.finishVectorRender(image, of: canvas, atVersion: version)
+                }
             }
         }
     }

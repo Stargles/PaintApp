@@ -360,14 +360,14 @@ struct CanvasView: UIViewRepresentable {
 
     private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
         context.coordinator.activePanel = activePanel
-        context.coordinator.updatePaper()
+        PlaybackTrace.span(.overlays) { context.coordinator.updatePaper() }
         context.coordinator.reconcileLayers()
         // Immediately after `reconcileLayers`, and before every overlay that re-fronts itself: the
         // "In Front" placement fronts the onion-skin view over `sandwichAbove`, and everything below
         // this line then lands above it. Ordering, not preference — moved here when placement
         // arrived.
         PlaybackTrace.span(.onionSkin) { context.coordinator.updateOnionSkin() }
-        context.coordinator.updateActiveLayerAndTool()
+        PlaybackTrace.span(.overlays) { context.coordinator.updateActiveLayerAndTool() }
         PlaybackTrace.span(.derivedPreview) { context.coordinator.updateInterpolationPreviews() }
         // **From here down the order is a hit-testing rule, not a drawing one.** Two of these views
         // are pinned to the whole container with no `hitTest` override — `SelectionOverlayView` while
@@ -377,17 +377,23 @@ struct CanvasView: UIViewRepresentable {
         // `CanvasTouchOwner.contenders(in:)` means by an overlay claim displacing the other views,
         // and until 2026-08-22 the guide overlay was on the wrong side of it — fronted first, so
         // opening the Select panel or floating a piece quietly took its grips away.
-        context.coordinator.updateSelectionOverlay()
-        // Above the marching ants: a lasso move's box has to sit over its own selection outline, and
-        // its grips over a capturing selection overlay. `updateVectorFloat` re-fronts it for the
-        // first of those reasons and this pass covers the whole-layer transform, which has no float.
-        context.coordinator.updateTransformOverlay()
-        context.coordinator.updateVectorFloat()
-        context.coordinator.updateFloatingOverlay()
-        context.coordinator.updateGuideOverlay()
-        context.coordinator.updateShapeOverlay()
-        context.coordinator.updateTextOverlay()
-        context.coordinator.hostBoundsDidChange()
+        // **Timed as one row, not eight.** They are one thing — the chrome — and no fix would move
+        // one of them without the others; a phase per overlay would be eight rows of noise around a
+        // number that is either large or is not. See `PlaybackTrace.Phase.overlays`.
+        PlaybackTrace.span(.overlays) {
+            context.coordinator.updateSelectionOverlay()
+            // Above the marching ants: a lasso move's box has to sit over its own selection outline,
+            // and its grips over a capturing selection overlay. `updateVectorFloat` re-fronts it for
+            // the first of those reasons and this pass covers the whole-layer transform, which has
+            // no float.
+            context.coordinator.updateTransformOverlay()
+            context.coordinator.updateVectorFloat()
+            context.coordinator.updateFloatingOverlay()
+            context.coordinator.updateGuideOverlay()
+            context.coordinator.updateShapeOverlay()
+            context.coordinator.updateTextOverlay()
+            context.coordinator.hostBoundsDidChange()
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -801,6 +807,60 @@ struct CanvasView: UIViewRepresentable {
                 lastOrderedSandwichEngaged = sandwichEngaged
             }
 
+            // **The per-layer sweep, extracted so it can be one row of a `PlaybackTrace`
+            // report.** It runs once per layer on every SwiftUI pass and ends in
+            // `refreshDisplayIfStale`, which is where a deferred vector re-render is kicked from,
+            // so it is the row that answers *"does an edit cost more when the document has more
+            // layers in it"* — half of the owner's own bar for TODO (56).
+            PlaybackTrace.span(.layerHostRows, value: canvasManager.layers.count) {
+                reconcileLayerRows(touch: touch)
+            }
+
+            // **RENDER.md §3.6's dirty sweep, at this pass's cadence and not on a hook** — see
+            // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
+            // right clock. Before `updateSandwich`, so that a frame the baker already holds is asked
+            // for after the sweep has had its say about whether it is still current.
+            PlaybackTrace.span(.syncBake) { syncFrameBake() }
+
+            // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
+            // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
+            PlaybackTrace.span(.updateSandwich) { updateSandwich(tree: tree, engaged: sandwichEngaged) }
+
+            // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
+            // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
+            // active layer has no drawing surface at all (`.value`), which `shouldInteract` above
+            // has just as deliberately declined interaction for.
+            //
+            // The three cases are `CanvasTouchInputs.catchAllIsEnabled`, so this gate and
+            // `shouldInteract` are now two readings of one value rather than two spellings that have
+            // to be kept agreeing. **One state answers differently from the hand-spelled version it
+            // replaces**: layers present but `currentLayerIndex` out of range used to fall to a bare
+            // `else { false }`, and reads as "no active layer" here. `deleteLayer` is the only writer
+            // that can park the index, it parks it at -1 only when the last layer goes (so
+            // `layers.isEmpty` and both answers are `true`), and it clamps every other case — so the
+            // difference is unreachable, and it is the reading the other thirteen gates already take.
+            let needsCatch = touch.catchAllIsEnabled
+            if catchAllTapRecognizer?.isEnabled != needsCatch {
+                catchAllTapRecognizer?.isEnabled = needsCatch
+            }
+
+            // **Last, and on every pass, because the counts on that label move without anything
+            // else about the canvas changing.** It used to be published only from the presentation's
+            // `didSet`, `startSandwichRebuild` and the two transform paths — so on a document that
+            // never engages the compositor it was written *once*, and `rasterizes:` then read the
+            // same stale number however many frames the artist stepped. An XCUITest comparing it
+            // either side of an action would have compared one value with itself and passed
+            // whatever the app did, which is the shape CLAUDE.md's "a green assertion is only as
+            // good as its two operands" section is about. The write is guarded by a string compare;
+            // see `publishCanvasState`.
+            publishCanvasState()
+        }
+
+        /// One pass of the per-layer sweep `reconcileLayersNow` makes — visibility, group
+        /// opacity, the value layer's flat colour, which content tier each host shows, and the
+        /// two interaction gates. Extracted from the middle of that function so it is a named
+        /// row rather than part of `reconcile`'s remainder; the body is unchanged.
+        private func reconcileLayerRows(touch: CanvasTouchInputs) {
             for (index, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
@@ -930,45 +990,6 @@ struct CanvasView: UIViewRepresentable {
                     host.strokeView.isUserInteractionEnabled = shouldInteract
                 }
             }
-
-            // **RENDER.md §3.6's dirty sweep, at this pass's cadence and not on a hook** — see
-            // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
-            // right clock. Before `updateSandwich`, so that a frame the baker already holds is asked
-            // for after the sweep has had its say about whether it is still current.
-            PlaybackTrace.span(.syncBake) { syncFrameBake() }
-
-            // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
-            // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
-            PlaybackTrace.span(.updateSandwich) { updateSandwich(tree: tree, engaged: sandwichEngaged) }
-
-            // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
-            // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
-            // active layer has no drawing surface at all (`.value`), which `shouldInteract` above
-            // has just as deliberately declined interaction for.
-            //
-            // The three cases are `CanvasTouchInputs.catchAllIsEnabled`, so this gate and
-            // `shouldInteract` are now two readings of one value rather than two spellings that have
-            // to be kept agreeing. **One state answers differently from the hand-spelled version it
-            // replaces**: layers present but `currentLayerIndex` out of range used to fall to a bare
-            // `else { false }`, and reads as "no active layer" here. `deleteLayer` is the only writer
-            // that can park the index, it parks it at -1 only when the last layer goes (so
-            // `layers.isEmpty` and both answers are `true`), and it clamps every other case — so the
-            // difference is unreachable, and it is the reading the other thirteen gates already take.
-            let needsCatch = touch.catchAllIsEnabled
-            if catchAllTapRecognizer?.isEnabled != needsCatch {
-                catchAllTapRecognizer?.isEnabled = needsCatch
-            }
-
-            // **Last, and on every pass, because the counts on that label move without anything
-            // else about the canvas changing.** It used to be published only from the presentation's
-            // `didSet`, `startSandwichRebuild` and the two transform paths — so on a document that
-            // never engages the compositor it was written *once*, and `rasterizes:` then read the
-            // same stale number however many frames the artist stepped. An XCUITest comparing it
-            // either side of an action would have compared one value with itself and passed
-            // whatever the app did, which is the shape CLAUDE.md's "a green assertion is only as
-            // good as its two operands" section is about. The write is guarded by a string compare;
-            // see `publishCanvasState`.
-            publishCanvasState()
         }
 
         // MARK: - §5.2's sandwich
@@ -2777,7 +2798,9 @@ struct CanvasView: UIViewRepresentable {
                 let clip = OnionSkinClip.mask(layerMask: mask, subtracting: ink?.render(),
                                               size: size, opacity: inkOpacity)
                 Task { @MainActor in
-                    self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
+                    PlaybackTrace.span(.renderLanded) {
+                        self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
+                    }
                 }
             }
         }

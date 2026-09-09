@@ -9,7 +9,16 @@ struct LayerPanel: View {
     @State private var showBackgroundColorPicker = false
     @State private var showViewSelector = false
 
+    /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyLayerPanel`.
+    /// The split is a wrapper around the unchanged body below it, so nothing about what is
+    /// built, or which state it depends on, moves.
     var body: some View {
+        PlaybackTrace.span(.bodyLayerPanel) { bodyContent }
+    }
+
+    /// The layer rail's body. `LayerStackListView` is built here; its reload is `layerListReload`.
+    @ViewBuilder private var bodyContent: some View {
         VStack(spacing: 0) {
             // The header stays put through a mask-edit session. The session is now just "an options
             // menu is open" (§6.5), which is far too ordinary a state to take the panel's own chrome

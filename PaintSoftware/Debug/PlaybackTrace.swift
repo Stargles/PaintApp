@@ -110,11 +110,91 @@ final class PlaybackTrace: @unchecked Sendable {
         case bakeWrite
         /// `CanvasManager.flushPendingThumbnailRegens` — the 400 ms debounced cel thumbnail.
         case thumbnailFlush
+        /// `celThumbnailImage` — one cel's pixels, inside the flush above. The *render* half of
+        /// §11.11c's change, separated from what installing the result costs.
+        case thumbnailRender
+        /// `PixelOps.rasterize` inside the thumbnail render — the flatten, which walks the cel's
+        /// elements and is therefore O(ink) even though its output is bounded at 480².
+        case thumbnailFlatten
+        /// `ThumbnailRenderer.render` — the 480² tile down to 120².
+        case thumbnailDownsample
+        /// `installThumbnail` — the two writes that put a rendered tile on `@Published layers`.
+        /// **A separate row because `Layer` and `Cel` are structs**: the write copies the layer's
+        /// whole cel array, so this is the row that grows with the *document* rather than with the
+        /// canvas, and the owner's bar names cels explicitly.
+        case thumbnailInstall
+        /// `CanvasView.updateUIView`'s chrome half — every overlay update from
+        /// `updateActiveLayerAndTool` down, summed. Named because `updateUIView` minus `reconcile`
+        /// minus `onionSkin` used to be a remainder a reader had to compute.
+        case overlays
+        /// `reconcileLayersNow`'s per-layer loop — the visibility/alpha/content sweep that runs once
+        /// per layer on every SwiftUI pass, `refreshDisplayIfStale` included.
+        case layerHostRows
+        /// `TimelineTrackView.updateUIView`, whole — the *second* `UIViewRepresentable` a canvas
+        /// pass drives, and one nothing had ever timed.
+        case timelineTrack
+        /// `TimelineLayoutKey.make` — O(layers × cels), and it reads every cel's thumbnail address,
+        /// which is what makes a thumbnail install raise a full track rebuild.
+        case timelineKey
+        /// The track's rebuild branch: every row, every block view, the ruler's CoreText. Taken only
+        /// when `timelineKey` says something moved.
+        case timelineRebuild
+        /// `LayerStackListView.updateUIView`, whole — the third representable.
+        case layerListReload
+        /// `DrawingView.body`.
+        case bodyDrawing
+        /// `AnimationTimeline.body`.
+        case bodyTimeline
+        /// `LayerPanel.body`.
+        case bodyLayerPanel
+        /// `TopToolbar.body` and `SideToolbar.body`, together: they are one chrome and neither is
+        /// separately actionable.
+        case bodyToolbars
         /// `CanvasManager.undo()` / `redo()`, the press itself on the main actor.
         case undoPress
+        /// The probe's own stroke commit — `addStroke`, the undo registration, the thumbnail
+        /// schedule and the publish. The commit half of what `undoPress` is for the undo half, so
+        /// that "the operation" and "the pass it raises" are two rows for all three of the owner's
+        /// symptoms rather than for two of them.
+        case editCommit
+        /// **The main-thread half of an off-thread render landing.** `finishVectorRender`,
+        /// `finishOnionRebuild` and `FrameBaker.finish` all hop back to the main actor to install
+        /// what a queue produced, and each runs as its own main-queue block inside `sourcePhase` —
+        /// so before this row they were exactly the shape of cost a phase table cannot see: our
+        /// code, on the main thread, in no instrumented call.
+        case renderLanded
+        /// Every `draw(_:)` this app implements on the editing path — all five are the timeline
+        /// track's (its gridlines, its ruler's CoreText, its blocks). They run at `CALayer` display
+        /// time, which is inside `sourcePhase` and after the last `updateUIView` has returned, so
+        /// without this row they are invisible to the report by construction.
+        case viewDraw
         /// Core Animation's commit, measured between the two `beforeWaiting` observers.
         case caCommit
+        /// **The runloop's *source* half of one wake-up** — everything from `afterWaiting` to the
+        /// first `beforeWaiting` observer: input sources, timers, `CADisplayLink`, and every block
+        /// `DispatchQueue.main.async` has queued. A `PlaybackProbe` operation and the SwiftUI pass
+        /// it raises are both in here.
+        ///
+        /// Structural rather than a cost of its own: with `observerPhase` and `caCommit` it
+        /// **partitions** `mainBusy` exactly, so an unattributed remainder can be placed in one of
+        /// three halves of the runloop instead of merely being large. Excluded from the attribution
+        /// union for that reason — counting it would make every report read 100% attributed while
+        /// naming nothing.
+        case sourcePhase
+        /// **The runloop's *observer* half** — the first `beforeWaiting` observer to Core Animation's
+        /// own at order 2,000,000. UIKit's layout pass, `CALayer.display` and every `draw(_:)` this
+        /// app implements run here, after the last `updateUIView` has returned and before anything
+        /// reaches the screen. Structural, and excluded from attribution, exactly as `sourcePhase`.
+        case observerPhase
         /// The main thread busy between two runloop waits. The denominator for everything above.
+        ///
+        /// **`value` carries the main thread's own CPU microseconds across the same window**, taken
+        /// from `thread_info`. Wall clock minus that is time the main thread held the runloop
+        /// without running on a core — blocked on a lock, or descheduled — and this app does
+        /// ~300 ms of background render work per edit on a two-big-core A13, so the difference
+        /// between *"a cost nobody has instrumented"* and *"the main thread could not get a core"*
+        /// is a question the report has to be able to answer. It is the same trap the whole file is
+        /// built against: a real, reproducible number about the wrong thing.
         case mainBusy
     }
 
@@ -127,6 +207,27 @@ final class PlaybackTrace: @unchecked Sendable {
         let end: CFTimeInterval
         let value: Int
         let onMain: Bool
+    }
+
+    /// The calling thread's user + system CPU time, in seconds. `mach_thread_self` hands back a
+    /// send right, so it is deallocated here — a port leaked once per runloop turn would be this
+    /// file's own version of the bug it exists to find.
+    static func threadCPUSeconds() -> Double {
+        var info = thread_basic_info()
+        // `THREAD_BASIC_INFO_COUNT` is a C macro and does not import into Swift; the count is the
+        // struct's size in `integer_t`s, which is what the macro spells out.
+        var count = mach_msg_type_number_t(
+            MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let port = mach_thread_self()
+        defer { mach_port_deallocate(mach_task_self_, port) }
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                thread_info(port, thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.user_time.seconds) + Double(info.user_time.microseconds) / 1e6
+            + Double(info.system_time.seconds) + Double(info.system_time.microseconds) / 1e6
     }
 
     private let lock = NSLock()
@@ -203,10 +304,15 @@ final class PlaybackTrace: @unchecked Sendable {
     // MARK: - The runloop observers
 
     private var busyObserver: CFRunLoopObserver?
+    private var preWaitObserver: CFRunLoopObserver?
     private var preCommitObserver: CFRunLoopObserver?
     private var postCommitObserver: CFRunLoopObserver?
     /// When the main thread last woke. Main-thread only, so no lock.
     private var busySince: CFTimeInterval?
+    /// The main thread's CPU seconds when it last woke — see `Phase.mainBusy`'s `value`.
+    private var busyCPUSince: Double?
+    /// When this wake-up stopped running sources and started running `beforeWaiting` observers.
+    private var preWaitAt: CFTimeInterval?
     private var preCommitAt: CFTimeInterval?
 
     /// Core Animation's transaction-commit observer registers on the main runloop at
@@ -222,11 +328,30 @@ final class PlaybackTrace: @unchecked Sendable {
             nil, CFRunLoopActivity.afterWaiting.rawValue, true, -2_000_000
         ) { [weak self] _, _ in
             self?.busySince = CACurrentMediaTime()
+            self?.busyCPUSince = Self.threadCPUSeconds()
+        }
+        // **First in the `beforeWaiting` order, so it marks where the sources stop and the
+        // observers start.** Everything UIKit and SwiftUI do to lay out and draw a pass runs between
+        // this and Core Animation's commit; without this mark that whole half of a stall is a gap in
+        // the report with no name, which is what it was until 2026-09-09.
+        let preWait = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, -2_000_000
+        ) { [weak self] _, _ in
+            guard let self, let since = self.busySince else { return }
+            let now = CACurrentMediaTime()
+            self.append(.sourcePhase, start: since, end: now, value: 0)
+            self.preWaitAt = now
         }
         let pre = CFRunLoopObserverCreateWithHandler(
             nil, CFRunLoopActivity.beforeWaiting.rawValue, true, Self.caCommitObserverOrder - 1_000
         ) { [weak self] _, _ in
-            self?.preCommitAt = CACurrentMediaTime()
+            guard let self else { return }
+            let now = CACurrentMediaTime()
+            if let waitStart = self.preWaitAt {
+                self.append(.observerPhase, start: waitStart, end: now, value: 0)
+                self.preWaitAt = nil
+            }
+            self.preCommitAt = now
         }
         let post = CFRunLoopObserverCreateWithHandler(
             nil, CFRunLoopActivity.beforeWaiting.rawValue, true, Self.caCommitObserverOrder + 100_000
@@ -238,16 +363,20 @@ final class PlaybackTrace: @unchecked Sendable {
                 self.preCommitAt = nil
             }
             if let since = self.busySince {
-                self.append(.mainBusy, start: since, end: now, value: 0)
+                let cpu = Self.threadCPUSeconds() - (self.busyCPUSince ?? Self.threadCPUSeconds())
+                self.append(.mainBusy, start: since, end: now,
+                            value: Int((cpu * 1_000_000).rounded()))
                 self.busySince = nil
+                self.busyCPUSince = nil
             }
         }
 
-        for observer in [busy, pre, post] {
+        for observer in [busy, preWait, pre, post] {
             guard let observer else { continue }
             CFRunLoopAddObserver(loop, observer, CFRunLoopMode.commonModes)
         }
         busyObserver = busy
+        preWaitObserver = preWait
         preCommitObserver = pre
         postCommitObserver = post
     }
@@ -255,14 +384,17 @@ final class PlaybackTrace: @unchecked Sendable {
     @MainActor
     private func removeObservers() {
         let loop = CFRunLoopGetMain()
-        for observer in [busyObserver, preCommitObserver, postCommitObserver] {
+        for observer in [busyObserver, preWaitObserver, preCommitObserver, postCommitObserver] {
             guard let observer else { continue }
             CFRunLoopRemoveObserver(loop, observer, CFRunLoopMode.commonModes)
         }
         busyObserver = nil
+        preWaitObserver = nil
         preCommitObserver = nil
         postCommitObserver = nil
         busySince = nil
+        busyCPUSince = nil
+        preWaitAt = nil
         preCommitAt = nil
     }
 
@@ -288,9 +420,23 @@ final class PlaybackTrace: @unchecked Sendable {
         let atSeconds: Double
         let intervalMs: Double
         let mainBusyMs: Double
+        /// Of `mainBusyMs`, the part the main thread actually spent on a core.
+        let mainCpuMs: Double
         let phaseMs: [String: Double]
         let ringHits: Int
         let ringMisses: Int
+        /// **Main-thread busy this interval that no named span covers**, in milliseconds.
+        ///
+        /// Not "busy minus the sum of the phases": spans nest — `renderTree` is inside `reconcile`
+        /// is inside `updateUIView` — so a sum triple-counts and can exceed the busy it is a share
+        /// of. This is `mainBusy` minus the **union of the intervals** every main-thread span
+        /// occupies, which is the same number a flame graph would call the self time of everything
+        /// this app did not instrument, and it is correct whatever the nesting turns out to be.
+        ///
+        /// It is the row this whole file exists to force into the open: a report whose largest term
+        /// is this one has not found the cost yet, and says so instead of implying an answer from
+        /// whichever named span happens to be biggest.
+        let unattributedMs: Double
         /// **The individual main-thread stalls, in order, as (offset from the anchor, duration).**
         /// A per-interval total cannot answer *"the ms per frame flicker **twice** after I lift the
         /// brush"* — one 120 ms stall and four 30 ms ones sum the same and are different bugs. Only
@@ -303,12 +449,51 @@ final class PlaybackTrace: @unchecked Sendable {
     /// worth of work and the list stays short enough to read.
     static let burstFloorMs = 10.0
 
+    /// **The three phases that partition `mainBusy` rather than explaining it.** They are measured
+    /// the same way and printed in the same table, but counting them as *attributed* would make
+    /// every report read 100% explained while naming nothing — see `sourcePhase`.
+    static let structuralPhases: Set<Phase> = [.mainBusy, .sourcePhase, .observerPhase]
+
     struct Report {
         let seconds: Double
         let eventCount: Int
         let overflowed: Bool
         let ticks: [TickSummary]
         let phases: [PhaseSummary]
+        /// The whole run's version of `TickSummary.unattributedMs`, and the three numbers it is
+        /// derived from, so a reader can check the arithmetic rather than trust it.
+        let mainBusyMs: Double
+        /// Of `mainBusyMs`, the part spent on a core rather than blocked or descheduled.
+        let mainCpuMs: Double
+        let attributedMs: Double
+        let unattributedMs: Double
+    }
+
+    /// **The total length of `spans`' union, clipped to `windows`.** Both arrays are (start, end)
+    /// pairs in `CACurrentMediaTime`'s clock.
+    ///
+    /// The union rather than the sum is the whole point — see `TickSummary.unattributedMs`. It is
+    /// also why this is a free function over intervals instead of arithmetic on `PhaseSummary`:
+    /// summaries have lost the timestamps by the time they exist.
+    private static func coveredMs(_ spans: [(Double, Double)],
+                                  within windows: [(Double, Double)]) -> Double {
+        guard !spans.isEmpty, !windows.isEmpty else { return 0 }
+        var merged: [(Double, Double)] = []
+        for span in spans.sorted(by: { $0.0 < $1.0 }) where span.1 > span.0 {
+            if var last = merged.last, span.0 <= last.1 {
+                last.1 = max(last.1, span.1)
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(span)
+            }
+        }
+        var total = 0.0
+        for window in windows {
+            for span in merged where span.1 > window.0 && span.0 < window.1 {
+                total += min(span.1, window.1) - max(span.0, window.0)
+            }
+        }
+        return total * 1000
     }
 
     /// **What the main thread did since the last call, emptying the buffer as it goes.**
@@ -375,13 +560,15 @@ final class PlaybackTrace: @unchecked Sendable {
             let (index, tick) = entry
             let nextStart = position + 1 < ticks.count ? ticks[position + 1].element.start : .infinity
             var phaseMs: [String: Double] = [:]
-            var busy = 0.0
+            var busy = 0.0, cpu = 0.0
             var hits = 0, misses = 0
             var bursts: [(atMs: Double, ms: Double)] = []
             // Attributed by start time to the tick that most recently preceded it, which is what
             // makes an off-main span (a bake composite, a store decode on the baker's queue) land in
             // the interval it was actually running through rather than in the one that started it.
             var cursor = index
+            var busyWindows: [(Double, Double)] = []
+            var namedSpans: [(Double, Double)] = []
             while cursor < sorted.count, sorted[cursor].start < nextStart {
                 let event = sorted[cursor]
                 let isThisTick = cursor == index
@@ -391,27 +578,130 @@ final class PlaybackTrace: @unchecked Sendable {
                 phaseMs[event.phase.rawValue, default: 0] += ms
                 if event.phase == .mainBusy {
                     busy += ms
+                    cpu += Double(event.value) / 1000
+                    busyWindows.append((event.start, event.end))
                     if ms >= Self.burstFloorMs {
                         bursts.append((atMs: (event.start - tick.start) * 1000, ms: ms))
                     }
+                } else if event.onMain, event.phase != .tick,
+                          !Self.structuralPhases.contains(event.phase) {
+                    // `caCommit` counts as attributed: it is measured, not inferred, and calling
+                    // Core Animation's own commit "unattributed" would be the one wrong answer this
+                    // remainder must never give.
+                    namedSpans.append((event.start, event.end))
                 }
                 if event.phase == .bakeRead { event.value == 1 ? (hits += 1) : (misses += 1) }
             }
             let interval = nextStart.isFinite ? (nextStart - tick.start) * 1000 : 0
+            let covered = Self.coveredMs(namedSpans, within: busyWindows)
             tickSummaries.append(TickSummary(frame: tick.value,
                                              atSeconds: tick.start - startedAt,
                                              intervalMs: interval,
                                              mainBusyMs: busy,
+                                             mainCpuMs: cpu,
                                              phaseMs: phaseMs,
                                              ringHits: hits, ringMisses: misses,
+                                             unattributedMs: max(busy - covered, 0),
                                              bursts: bursts))
         }
 
         let summaries = Self.summarize(sorted)
 
+        let busyWindows = sorted.filter { $0.phase == .mainBusy }.map { ($0.start, $0.end) }
+        let namedSpans = sorted.filter { $0.onMain && $0.phase != .tick
+                                             && !Self.structuralPhases.contains($0.phase) }
+            .map { ($0.start, $0.end) }
+        let busyMs = busyWindows.reduce(0.0) { $0 + ($1.1 - $1.0) } * 1000
+        let cpuMs = sorted.filter { $0.phase == .mainBusy }
+            .reduce(0.0) { $0 + Double($1.value) } / 1000
+        let attributed = Self.coveredMs(namedSpans, within: busyWindows)
+
         let span = (sorted.last?.end ?? startedAt) - startedAt
         return Report(seconds: span, eventCount: events.count, overflowed: overflowed,
-                      ticks: tickSummaries, phases: summaries)
+                      ticks: tickSummaries, phases: summaries,
+                      mainBusyMs: busyMs, mainCpuMs: cpuMs, attributedMs: attributed,
+                      unattributedMs: max(busyMs - attributed, 0))
+    }
+
+    /// **One main-thread stall, opened up: what ran inside it, in order, with the gaps left in.**
+    ///
+    /// A phase table says *how much* is unattributed; it cannot say *where*. These two are different
+    /// diagnoses and only the second is actionable — 20 ms of nothing **before** the first
+    /// instrumented call is SwiftUI deciding what to update, the same 20 ms **after** the last one is
+    /// UIKit laying out and Core Animation displaying, and they have no fix in common.
+    ///
+    /// Only *top-level* spans are listed — a span wholly inside another is its parent's business —
+    /// so the gaps between consecutive entries are real uninstrumented time rather than an artefact
+    /// of nesting.
+    struct BurstDetail {
+        let atSeconds: Double
+        let ms: Double
+        /// `(phase, offset from the burst's start in ms, duration in ms)`, in order.
+        let spans: [(phase: String, atMs: Double, ms: Double)]
+        /// Uninstrumented milliseconds before the first span, between spans, and after the last.
+        let leadMs: Double
+        let gapMs: Double
+        let tailMs: Double
+        /// This stall's own `sourcePhase` / `observerPhase` / `caCommit` split, which partitions
+        /// `ms` — so a large `tailMs` can be read as *"UIKit laid out and drew"* rather than left
+        /// as *"something happened after our last span"*.
+        let sourceMs: Double
+        let observerMs: Double
+        let commitMs: Double
+        /// Of `ms`, the part the main thread spent on a core.
+        let cpuMs: Double
+    }
+
+    /// The `count` longest main-thread bursts of the run, opened up. Bounded because a report is
+    /// read by a person: the longest dozen is a diagnosis, and every burst is a log file.
+    func longestBursts(_ count: Int = 40) -> [BurstDetail] {
+        lock.lock()
+        let events = self.events
+        lock.unlock()
+        let sorted = events.sorted { $0.start < $1.start }
+        let busy = sorted.filter { $0.phase == .mainBusy }
+            .sorted { ($0.end - $0.start) > ($1.end - $1.start) }
+            .prefix(count)
+
+        return busy.map { window in
+            let inside = sorted.filter {
+                $0.onMain && $0.phase != .tick && !Self.structuralPhases.contains($0.phase)
+                    && $0.start >= window.start && $0.end <= window.end && $0.end > $0.start
+            }
+            // Top level = not contained in an earlier, longer span. `inside` is start-ordered, so a
+            // container always precedes what it contains.
+            var top: [Event] = []
+            for event in inside where !top.contains(where: { $0.start <= event.start && $0.end >= event.end }) {
+                top.append(event)
+            }
+            var lead = 0.0, gap = 0.0, tail = 0.0
+            if let first = top.first, let last = top.last {
+                lead = (first.start - window.start) * 1000
+                tail = (window.end - last.end) * 1000
+                var cursor = first.end
+                for event in top.dropFirst() {
+                    if event.start > cursor { gap += (event.start - cursor) * 1000 }
+                    cursor = max(cursor, event.end)
+                }
+            } else {
+                lead = (window.end - window.start) * 1000
+            }
+            func structural(_ phase: Phase) -> Double {
+                sorted.filter { $0.phase == phase && $0.start >= window.start - 0.0005
+                                && $0.end <= window.end + 0.0005 }
+                    .reduce(0.0) { $0 + ($1.end - $1.start) } * 1000
+            }
+            return BurstDetail(atSeconds: window.start - startedAt,
+                               ms: (window.end - window.start) * 1000,
+                               spans: top.map { (phase: $0.phase.rawValue,
+                                                 atMs: ($0.start - window.start) * 1000,
+                                                 ms: ($0.end - $0.start) * 1000) },
+                               leadMs: lead, gapMs: gap, tailMs: tail,
+                               sourceMs: structural(.sourcePhase),
+                               observerMs: structural(.observerPhase),
+                               commitMs: structural(.caCommit),
+                               cpuMs: Double(window.value) / 1000)
+        }
     }
 
     /// Nearest-rank on a sorted array. Empty is 0 rather than a trap — a report is a diagnostic and
