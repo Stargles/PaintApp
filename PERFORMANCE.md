@@ -4277,6 +4277,35 @@ p90 of 42.1, and `vectorRasterizesDuringPlayback` is **0** at every size, so the
 
 ### 17.6 What is left, with numbers
 
+**The layer term is gone and the *frame* term is not.** MEASURED after, on documents deliberately
+heavier than the owner's:
+
+| canvas | layers | distinct frames | fps | ring hits / misses |
+|---|---|---|---|---|
+| 2048² | **8** | **6** | **24.0** | 257 / **0** |
+| 4096² | 3 | 2 | **24.0** | 255 / **0** |
+| 4096² | **6** | **4** | 22.0 | 11 / **218** |
+
+Eight layers over six frames at the size the owner draws at is 24.0 fps with a perfect ring, which is
+the requirement — *"regardless of what is on the canvas"* — in the term the owner meant it. **Four
+distinct frames at 4096² is not**, and the reason is arithmetic rather than a defect: the ring affords
+two 67 MB frames on this device and a four-frame loop needs four, so it misses, and the miss is a
+19 ms LZ4 decode on the display thread. Feeding it from ahead does not rescue it either — one decode
+off-main is 28 ms mean against a 41.7 ms flip, so the scheduler cannot get more than about one frame
+ahead of a playhead moving at 24 fps.
+
+**So the honest boundary is a *product*, canvas area × distinct frames in the loop, and on a 3 GB
+device it is about two 4096² frames or six 2048² ones.** That is the shape of the owner's own escape
+hatch and it is worth being precise about which half it is: not the disk, and not the layer count —
+the decoded working set.
+
+**A second main-thread term appears at four frames and did not exist at two**: `onionFrames`, the
+*neighbouring* cels' reduced rasterize, which is still on the main actor because it needs
+`derivedCelContent`. 6.9 ms mean and 54 ms worst at 4096²/4 frames, against 0.03 ms at two frames
+where the neighbours never change. It is the same cache-smaller-than-working-set shape a third time —
+`OnionSkinBudget.residentBudgetBytes` is 64 MiB and a 2048² skin is 16 MB — and it is the next thing
+to move off the main thread if this is pushed further.
+
 **The debounced thumbnail is now the largest main-thread term of an edit** — 22.7 ms at 2048², and it
 is the burst at 401 ms that the owner can still see. §11.11c made the *render* O(what changed); what is
 left is the flush's own work on the main actor. It is the obvious next one and it is not taken here.
