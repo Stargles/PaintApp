@@ -1023,12 +1023,20 @@ struct CanvasView: UIViewRepresentable {
 
         /// Publishes the Coordinator's own state on `canvas.host`'s accessibility label, for the same
         /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
-        /// XCUITest. Five space-separated fields —
+        /// XCUITest. Space-separated fields, read by prefix —
         ///
-        ///     sandwich:<off|rest|stroke> entries:<n> shape:<none|following|adjustable>
-        ///     xform:<scale>,<rotation>,<dx>,<dy> text:<none|box|editing>
+        ///     sandwich:<off|rest|stroke> entries:<n> derived:<n> rebuilds:<n> rasterizes:<n>
+        ///     shape:<none|following|adjustable> xform:<scale>,<rotation>,<dx>,<dy>
+        ///     text:<none|box|editing>
         ///
-        /// — read by `LayerUITests` (the first two) and `CanvasTransformFreezeUITests` (the rest).
+        /// — read by `LayerUITests` (the first two), `BakeWiringUITests` and `PlaybackBakeUITests`
+        /// (the three counts) and `CanvasTransformFreezeUITests` (the rest).
+        ///
+        /// **The three counts are the three canvas-sized costs a frame can carry**, and they are
+        /// separate because each was found on its own and none of them implies the others:
+        /// `derived:` is a posed or interpolated picture (TODO 53), `rebuilds:` is a sandwich
+        /// composite, and `rasterizes:` is a cel's own committed render — the one playback was
+        /// actually spending, and the one no per-canvas counter could be read for from here.
         ///
         /// **`text` is here because `canvas.textEditor` cannot be queried, and a test that assumed it
         /// could passed while placing nothing.** `TextOverlayView`'s `UITextView` carries that
@@ -1074,6 +1082,14 @@ struct CanvasView: UIViewRepresentable {
                 + " entries:\(midStrokeEntryCount)"
                 + " derived:\(derivedRenderCount)"
                 + " rebuilds:\(sandwichRebuildCount)"
+                // **The third cost of a frame, and the one playback was actually spending.**
+                // `derived:` counts posed and interpolated pictures and `rebuilds:` counts sandwich
+                // composites; neither sees the cel's *own* committed render, which is what a layer
+                // host asks for every time `reconcileLayers` hands it a new cel — one canvas-sized
+                // walk per layer per flip, 67.1 MB at 4096². Process-wide rather than per document
+                // because a flip is over before anything could enumerate the cels; monotonic, so a
+                // test reads it either side of the thing it is timing. One atomic-ish load per pass.
+                + " rasterizes:\(VectorCanvas.totalRasterizations)"
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
@@ -1583,6 +1599,20 @@ struct CanvasView: UIViewRepresentable {
             // would queue a rebuild per display frame and hand the artist a minutes-long backlog of
             // pictures nobody will see.
             guard !isSandwichRebuilding else { return }
+            // **The halves are a pre-warm for a stroke, and a stroke cannot begin while the
+            // animation is playing.** `SandwichKey` carries every layer's content version, so every
+            // frame flip moves it — which queued *two canvas-sized composites per playback tick* for
+            // a pair of images nothing on screen was ever going to show: at rest the presentation is
+            // `.rest` and `sandwichFull` is the only image displayed, and the one state that reads
+            // `sandwichHalves` is entered from `onStrokeBegan`, whose `onAnyTouchBegan` calls
+            // `canvasInteractionBegan()` and stops playback before the first dab. PERFORMANCE.md §5
+            // filed this as "every playback tick still computes the two halves nobody sees"; it is
+            // this line, and it is the third of the three costs RENDER.md §2.2 forbids on this path.
+            //
+            // Nothing is left stale by declining: `isPlaying` is `@Published`, so stopping playback
+            // raises the pass that warms them, and until then trap 1 keeps the canvas on the picture
+            // it already has.
+            guard !canvasManager.isPlaying else { return }
             // Nil for a stale or non-leaf `activeLayerIndex`, or a degenerate canvas — it does not
             // fall back to `full`, deliberately, so that a wrong cut is never composited. The canvas
             // keeps showing whatever is cached (at most one edit stale), or stays on Core Animation's

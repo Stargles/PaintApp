@@ -108,12 +108,19 @@ final class LayerHostView: UIView {
     ///
     /// `LayerUITests.testAStrokeStillLandsWhileTheSandwichIsEngaged` is the regression guard — it is
     /// what fails if this is ever "simplified" back into `isHidden`.
+    /// **The stroke view is told, because blanking is not only a mask — it is permission to stop
+    /// rendering.** A canvas-sized vector rasterize for a host that draws nothing is the whole of
+    /// TODO (53) reached through the base slot rather than the derived one, and it is what playback
+    /// was spending: see `DeferredVectorRender.Step.blankedByTheComposite` and
+    /// `CanvasManager.sandwichEngagesOnCanvas`. Pushed down rather than read up so that the stroke
+    /// view owns one answer instead of reaching into its superview for it.
     func setBlanked(_ blanked: Bool) {
         if blanked {
             if layer.mask !== blankingMask { layer.mask = blankingMask }
         } else if layer.mask === blankingMask {
             layer.mask = nil
         }
+        strokeView.hostBlankingChanged(to: isBlanked)
     }
 
     /// **Whether this host is currently rendering nothing because the composite is drawing it** —

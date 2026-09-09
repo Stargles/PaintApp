@@ -955,9 +955,45 @@ extension CanvasManager {
     /// `needsCompositorOnCanvas` is a property of the tree and **the tree carries no pose**, by
     /// design — see that property below for the whole argument, and PERFORMANCE.md §14 for the
     /// 71.9 ms a frame it was costing.
+    ///
+    /// ## The third clause is `isPlaying`, added 2026-09-09
+    ///
+    /// The two clauses above are both about *correctness* — a picture Core Animation's flat row
+    /// cannot draw at all. This one is about *capacity*, and it is the owner's report of 2026-09-08:
+    /// a plain two-frame document of ordinary Normal-mode layers, fully baked, played at **~5 fps**
+    /// on their iPad 9 and crashed the app after six seconds.
+    ///
+    /// **The flat row costs one canvas-sized vector render per layer per distinct frame, and that
+    /// working set is unbounded in the layer and frame count while the memo that holds it is
+    /// bounded by the device.** `VectorRenderCache.budgetBytes` is `CompositorBudget
+    /// .textureBudgetBytes` — 183.7 MB on a 3 GB iPad 9 — and one 4096² render is 67.1 MB, so the
+    /// memo holds **two**. Three layers over two frames need six. Every frame flip therefore evicts
+    /// what the next flip is about to ask for, and it never converges: the renders never stop, the
+    /// eviction frees nothing (the host's image view still holds the picture), and the app dies.
+    /// The composite path costs **one decode of one file** for the same flip, whatever is on the
+    /// canvas — which is the owner's own model of what playback should cost and RENDER.md §2.2's
+    /// *"the baker replaces live compositing"*.
+    ///
+    /// **Asked of playback rather than of the arithmetic**, and that is a decision rather than a
+    /// shortcut. A predicate that engaged whenever `layers × canvasBytes > budget` would swap the
+    /// canvas between two rendering paths as the artist added a layer or moved the resolution knob,
+    /// and it would be wrong in both directions on a document that holds — the flat row is fine at
+    /// rest at any size, because a render is made once and then kept by the view that shows it. It
+    /// is only ever the **frame flip** that makes the working set larger than the memo, and
+    /// `isPlaying` is exactly "the frames are flipping".
+    ///
+    /// **A miss leaves the previous picture up, which is §2.10 and is why this cannot freeze an
+    /// unbaked scene.** `updateSandwich`'s trap 1 returns *before* blanking any host while
+    /// `sandwichFull` is nil, so a document with no bake on disk plays on the flat row exactly as it
+    /// does today; the composite takes over on the pass the first frame lands. Past that a frame the
+    /// baker has not reached yet shows the frame before it, which is the ruling.
+    ///
+    /// **Scrubbing the playhead by hand has the identical shape and is deliberately not covered** —
+    /// see PERFORMANCE.md §16.5. It is a gesture tracking a finger, where a stale frame is worse
+    /// than a late one, and nobody has measured it.
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
-        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce else { return false }
+        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || isPlaying else { return false }
         guard floatingPiece == nil, vectorFloat == nil else { return false }
         return !isScrubbingInterpolation
     }

@@ -233,7 +233,37 @@ final class StrokeCanvasView: UIView {
     /// `refreshDisplayIfStale` compares, so claiming a version early — for instance when a
     /// background rasterize of it has merely been *started* — stops the view repainting and freezes
     /// the canvas on whatever was up. See `DeferredVectorRender`.
-    private var displayedVectorVersion: Int = -1
+    private var displayedVectorVersion: Int = StrokeCanvasView.nothingDisplayed
+
+    /// **No version of anything is on screen** — the value `displayedVectorVersion` and
+    /// `displayedRasterVersion` take before the first refresh and whenever a refresh deliberately
+    /// declines to produce a picture (`DeferredVectorRender.Step.blankedByTheComposite`).
+    ///
+    /// Named rather than spelled `-1` in five places because it is load-bearing in one of them: a
+    /// version counter starts at 0 and only rises, so this is the one value `refreshDisplayIfStale`
+    /// can never mistake for "already showing that".
+    static let nothingDisplayed = -1
+
+    /// **Whether the composite is drawing this layer instead of this view** — `LayerHostView
+    /// .isBlanked`, pushed down rather than read up, because a `UIView` reaching into its superview
+    /// for state is the kind of coupling that survives exactly until someone reparents it.
+    ///
+    /// Set by `LayerHostView.setBlanked`, which is the only writer and also asks for the repaint on
+    /// the un-blanking edge. Read by `refreshDisplay` through `DeferredVectorRender.step`.
+    private(set) var hostIsBlanked = false
+
+    /// Called by `LayerHostView.setBlanked` on every change of the host's blanking state.
+    ///
+    /// **The un-blank edge repaints and the blank edge does not.** Going blank costs nothing to
+    /// defer — the pixels are masked away either way — while coming back has to repaint, because
+    /// `refreshDisplay` may have declined a rasterize while the host was blanked and
+    /// `reconcileLayers` does not necessarily run again afterwards: `updateSandwich`'s disengage
+    /// branch un-blanks every host and returns, and nothing else on that path would ever ask.
+    func hostBlankingChanged(to blanked: Bool) {
+        guard hostIsBlanked != blanked else { return }
+        hostIsBlanked = blanked
+        if !blanked { refreshDisplayIfStale() }
+    }
 
     /// The `VectorCanvas.version` a background rasterize is running for, or nil. The other half of
     /// `DeferredVectorRender`'s two-integer ordering rule; always about `vectorCanvas`, because the
@@ -265,7 +295,7 @@ final class StrokeCanvasView: UIView {
     /// Both texture types are reference types mutated in place, so a content change alone never
     /// triggers a SwiftUI repaint; without this guard a baked shape or undone fill stays stale
     /// on screen until an unrelated edit happens to call `refreshDisplay()`.
-    private var displayedRasterVersion: Int = -1
+    private var displayedRasterVersion: Int = StrokeCanvasView.nothingDisplayed
     /// The in-progress stroke's own drawing surface, on either tier (nil except mid-stroke).
     ///
     /// **Windowed, not canvas-sized** — see `StrokeScratch`, which is where the 16k-canvas crash
@@ -513,7 +543,7 @@ final class StrokeCanvasView: UIView {
         // the Move tool used to write a whole-layer affine per touch-move and show it the same way.
         // Move with no selection lifts a float now, so there is one latch for both.
         guard vectorFloatBase == nil else { return }
-        displayedRasterVersion = raster?.version ?? -1
+        displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
         guard let vectorCanvas else {
             // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
@@ -536,7 +566,21 @@ final class StrokeCanvasView: UIView {
             base = interpolationImage
         case .committedRender:
             let cached = vectorCanvas.cachedRender()
-            switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion) {
+            switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,
+                                             hostIsBlanked: hostIsBlanked,
+                                             waitingForTheRender: waitingForTheRender) {
+            case .blankedByTheComposite:
+                // Nothing this view draws reaches the screen, so the canvas-sized rasterize would be
+                // thrown away. `displayedVectorVersion` goes to "nothing shown" rather than staying
+                // where it is, because the two are not the same claim once the *canvas* has changed
+                // underneath: two cels' versions are independent counters and can be equal by
+                // coincidence, and a stale-but-matching version would leave the previous cel's
+                // picture on this layer for good the moment the host un-blanks.
+                // `LayerHostView.setBlanked` is what asks for the repaint on that edge.
+                pendingVectorRenderVersion = nil
+                displayedVectorVersion = StrokeCanvasView.nothingDisplayed
+                showScratch(plan.showsScratchLayer ? scratch : nil)
+                return
             case .showNow(let version):
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = version

@@ -129,18 +129,39 @@ enum DeferredVectorRender {
         case rasterize(version: Int)
         /// A rasterize for the version the canvas is at is already running. Do nothing.
         case wait
+        /// **The composite is drawing this layer, so nothing this view puts in its base slot reaches
+        /// the screen — do not rasterize, and record nothing as displayed.** The base slot keeps the
+        /// picture it is holding (an alias of a memo the model owns, so dropping it would free
+        /// nothing — PERFORMANCE.md §13.5) and `displayedVectorVersion` goes to the "nothing shown"
+        /// sentinel, so the pass that un-blanks the host repaints it.
+        case blankedByTheComposite
     }
 
     /// - Parameter pending: the version a rasterize is already running for, or nil.
-    static func step(for cached: VectorCanvas.CachedRender, pending: Int?) -> Step {
+    /// - Parameter hostIsBlanked: `LayerHostView.isBlanked` — the composite is drawing this layer.
+    /// - Parameter waitingForTheRender: the caller wants the *image*, not the screen, and will block
+    ///   for it. `beginVectorFloat` is the one such caller and it must be served whatever the host
+    ///   is doing: the picture it is about to latch is the hole the whole move is expressed against,
+    ///   and refusing it there shows the artist their ink twice for the length of the drag.
+    static func step(for cached: VectorCanvas.CachedRender, pending: Int?,
+                     hostIsBlanked: Bool, waitingForTheRender: Bool) -> Step {
         switch cached {
         case .empty, .ready:
             // An empty canvas costs a `_elements.isEmpty` test and a memoized one costs a pointer,
-            // so neither has any reason to go anywhere. This is also what keeps a *stroke* free:
-            // an `.overlay` gesture does not touch the display list until lift, so every touch-move
-            // lands here and the canvas is never rasterized mid-stroke.
+            // so neither has any reason to go anywhere — including when the host is blanked, where
+            // showing what is already in hand is cheaper than remembering not to. This is also what
+            // keeps a *stroke* free: an `.overlay` gesture does not touch the display list until
+            // lift, so every touch-move lands here and the canvas is never rasterized mid-stroke.
             return .showNow(version: cached.version)
         case .needsRasterize(let version):
+            // **The blanked clause is TODO (53)'s, reached through the base slot instead of the
+            // derived one.** `CanvasView.updateInterpolationPreviews` already refuses to rasterize a
+            // *derivation* for a blanked host; this is the same refusal for the cel's own committed
+            // render, and it is the half that playback actually spends. Without it an engaged canvas
+            // still pays one canvas-sized rasterize per layer per frame flip for pixels a zero-alpha
+            // `CALayer.mask` throws away — 67.1 MB a render at 4096², against a memo that holds two
+            // on the owner's iPad 9. See `CanvasManager.sandwichEngagesOnCanvas`.
+            if hostIsBlanked, !waitingForTheRender { return .blankedByTheComposite }
             // Not `pending != nil`: a rasterize running for an *older* version is one whose result
             // will be refused, so a newer one has to start regardless. It is not wasted work either
             // — the older one asks the canvas for its version before rasterizing anything, and gets

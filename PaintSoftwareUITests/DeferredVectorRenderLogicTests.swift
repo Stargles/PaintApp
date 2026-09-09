@@ -30,12 +30,14 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
     /// does not touch the display list until lift.
     func testAnAlreadyAnsweredCanvasIsShownWithoutLeavingTheMainThread() {
         let empty = canvas(withInk: false)
-        XCTAssertEqual(DeferredVectorRender.step(for: empty.cachedRender(), pending: nil),
+        XCTAssertEqual(DeferredVectorRender.step(for: empty.cachedRender(), pending: nil,
+                                                hostIsBlanked: false, waitingForTheRender: false),
                        .showNow(version: empty.version))
 
         let inked = canvas(withInk: true)
         _ = inked.render()
-        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil),
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil,
+                                                hostIsBlanked: false, waitingForTheRender: false),
                        .showNow(version: inked.version))
         XCTAssertEqual(inked.rasterizations, 1, "Asking the question must not answer it")
     }
@@ -45,9 +47,11 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
     func testACommittedStrokeRasterizesElsewhereAndOnlyOnce() {
         let inked = canvas(withInk: true)
         let version = inked.version
-        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil),
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil,
+                                                hostIsBlanked: false, waitingForTheRender: false),
                        .rasterize(version: version))
-        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: version), .wait,
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: version,
+                                                hostIsBlanked: false, waitingForTheRender: false), .wait,
                        "A second refresh while the same version is rasterizing must not queue a second one")
     }
 
@@ -65,8 +69,51 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
                                      samples: [VectorSample(x: 16, y: 4, pressure: 1),
                                                VectorSample(x: 16, y: 28, pressure: 1)]))
         XCTAssertNotEqual(inked.version, stale, "Setup: the edit must move the version")
-        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: stale),
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: stale,
+                                                hostIsBlanked: false, waitingForTheRender: false),
                        .rasterize(version: inked.version))
+    }
+
+    /// **A host the composite is drawing asks for no canvas-sized rasterize** — the owner's playback
+    /// report of 2026-09-08, and TODO (53)'s refusal reached through the committed slot instead of
+    /// the derived one.
+    ///
+    /// The pair is the whole rule: a picture that has to be *made* is refused, and one that is
+    /// already in hand is still shown, because showing it costs a pointer and remembering not to
+    /// costs more than that. `PlaybackEngagementLogicTests` is where the same rule is counted over a
+    /// document's worth of flips.
+    func testABlankedHostIsRefusedARasterizeAndStillShownWhatIsAlreadyInHand() {
+        let inked = canvas(withInk: true)
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil,
+                                                 hostIsBlanked: true, waitingForTheRender: false),
+                       .blankedByTheComposite,
+                       "A zero-alpha mask throws these pixels away; making them is the cost playback was paying")
+        XCTAssertEqual(inked.rasterizations, 0, "…and asking must not have answered")
+
+        _ = inked.render()
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil,
+                                                 hostIsBlanked: true, waitingForTheRender: false),
+                       .showNow(version: inked.version),
+                       "A memo is a pointer, blanked or not — the refusal is about work, not about the slot")
+
+        let empty = canvas(withInk: false)
+        XCTAssertEqual(DeferredVectorRender.step(for: empty.cachedRender(), pending: nil,
+                                                 hostIsBlanked: true, waitingForTheRender: false),
+                       .showNow(version: empty.version),
+                       "An empty canvas has no rasterize to refuse")
+    }
+
+    /// **The one caller that must be served anyway.** `beginVectorFloat` passes
+    /// `waitingForTheRender: true` because the picture it is about to latch is the *hole* the whole
+    /// lasso move is expressed against; refusing it there leaves the source showing un-lifted ink
+    /// under a float showing the same ink again, for the length of the drag. It also cannot recover
+    /// on the un-blanking edge, because `refreshDisplay` returns early for the whole float's life.
+    func testTheCallerThatBlocksForTheImageIsServedWhileBlanked() {
+        let inked = canvas(withInk: true)
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: nil,
+                                                 hostIsBlanked: true, waitingForTheRender: true),
+                       .rasterize(version: inked.version),
+                       "It is asking for the image, not for the screen")
     }
 
     /// The completion rule, both clauses. Either one alone lets a wrong thing through — a stale

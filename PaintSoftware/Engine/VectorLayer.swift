@@ -1464,6 +1464,35 @@ final class VectorCanvas {
     /// for a canvas-sized picture" is a countable property — see `reducedRasterizations`.
     private(set) var rasterizations: Int = 0
 
+    /// **`rasterizations` for every canvas in the process at once** — the same seam asked of a
+    /// consumer that cannot hold the canvases.
+    ///
+    /// It exists because the question the owner's playback report is about is asked of the *canvas
+    /// view*, which has no list of cels: "did this frame flip rasterize anything?" is a property of
+    /// the whole document and the flip is over before anyone could enumerate it. `CanvasView`
+    /// publishes this as `rasterizes:` beside `derived:` and `rebuilds:`, so an XCUITest can assert
+    /// that playing a scene costs **no** canvas-sized vector walk at all — which is the number the
+    /// owner's requirement is written in, and one no duration can stand in for.
+    ///
+    /// Monotonic for the life of the process and never reset: a test reads it either side of the
+    /// thing it is timing. Locked separately from `lock`, which is per instance.
+    static var totalRasterizations: Int {
+        totalRasterizationLock.lock()
+        defer { totalRasterizationLock.unlock() }
+        return totalRasterizationCount
+    }
+
+    private static let totalRasterizationLock = NSLock()
+    private static var totalRasterizationCount = 0
+
+    /// Bumped beside every `rasterizations += 1`, and only there. A lock per canvas-sized walk is
+    /// free against the walk.
+    fileprivate static func countRasterization() {
+        totalRasterizationLock.lock()
+        totalRasterizationCount += 1
+        totalRasterizationLock.unlock()
+    }
+
     /// How many rasterizations this canvas has performed **below its own resolution** — a walk into a
     /// raster of fewer pixels than the canvas has points (`render(quality:resolution:)`).
     ///
@@ -5347,6 +5376,7 @@ final class VectorCanvas {
             return
         }
         rasterizations += 1
+        Self.countRasterization()
         regionRepairs += result.repairs
         regionRepairsWidened += result.repairsWidened
         regionRepairsAbandoned += result.repairsAbandoned
@@ -5700,6 +5730,7 @@ final class VectorCanvas {
         }
         guard !isolated.isEmpty else { lock.unlock(); return nil }
         rasterizations += 1
+        Self.countRasterization()
         let size = size, transform = _transform
         let contentVersionAtPlan = contentVersion
         lock.unlock()
