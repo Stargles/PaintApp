@@ -117,6 +117,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedHoldAfterMove` — TODO (54)'s document, the same
         // shape with its last pose key at frame 4, so the tail of the scene is a hold.
         UITestSeeds.seedHoldAfterMoveIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedPlainAnimation` — the owner's `Test1`, and the
+        // one seed here whose whole point is that Core Animation *can* draw it.
+        UITestSeeds.seedPlainAnimationIfRequested(into: canvasManager)
         onCreated()
     }
 }

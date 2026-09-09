@@ -141,6 +141,50 @@ enum UITestSeeds {
         canvasManager.currentLayerIndex = 0
     }
 
+    /// **The owner's `Test1`, which is the document with nothing special about it at all**: three
+    /// ordinary vector layers, two frames, a separate cel per layer per frame, Normal mode
+    /// throughout — no folder, no mask, no blend mode, no effect, no pose.
+    ///
+    /// That last sentence is the whole fixture. Every other seed here builds something Core
+    /// Animation's flat row of hosts cannot draw, and so engages the compositor by the containment
+    /// `needsCompositorOnCanvas` has always applied. This one deliberately does not, because the
+    /// defect it exists to catch is that **a document Core Animation draws perfectly well at rest
+    /// cannot afford to be drawn that way while the frames are flipping** — one canvas-sized vector
+    /// render per layer per flip, against a memo that on the owner's iPad 9 holds two of them.
+    ///
+    /// Two frames rather than twelve because that is what they reported and it is the harder case:
+    /// a two-frame loop revisits the same six cels twice a second, so a memo that held even one lap
+    /// would hide the defect entirely.
+    ///
+    /// One distinct stroke per cel, at a distinct height, so that no two cels render to the same
+    /// picture and nothing can dedupe them by accident.
+    static func seedPlainAnimationIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedPlainAnimation"),
+              let size = canvasManager.canvasSize else { return }
+        let layerCount = 3, frameCount = 2
+        var brush = canvasManager.selectedBrush
+        brush.size = size.height / 24
+        // `createCanvas` has already added the first one.
+        for _ in 1..<layerCount { canvasManager.addVectorLayer() }
+        for layerIndex in 0..<layerCount {
+            canvasManager.layers[layerIndex].cels = (0..<frameCount).map { frame in
+                let cel = Cel(id: UUID(), startFrame: frame, frameCount: 1,
+                              raster: .empty(size: size), vector: .empty(size: size))
+                let y = size.height * (0.2 + 0.1 * CGFloat(layerIndex * frameCount + frame))
+                cel.vector?.addStroke(VectorStroke(
+                    id: UUID(), brush: brush,
+                    color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                    size: brush.size, opacity: 1,
+                    samples: StrokeSamples([VectorSample(x: size.width * 0.15, y: y, pressure: 1),
+                                            VectorSample(x: size.width * 0.85, y: y, pressure: 1)],
+                                           channels: .pressureOnly)))
+                return cel
+            }
+        }
+        canvasManager.currentLayerIndex = 0
+        canvasManager.currentFrame = 0
+    }
+
     /// One flat frame in `DecodedFrame`'s own layout (BGRA, premultiplied, opaque) — the same
     /// construction `PaintSoftwareUITests/CanvasManagerTestSupport.swift`'s `writeGreyClip` uses for
     /// the logic tier, duplicated rather than shared because that file is test-only and this one
