@@ -377,6 +377,14 @@ nonisolated enum ProjectPackageLayout {
             // **Both addresses occupied means something outside this flow wrote one of them**,
             // because a rename cannot leave both. The conservative answer is to touch neither and
             // say so.
+            //
+            // **`moveItem` would refuse an occupied destination anyway**, which a mutation proved:
+            // deleting this branch entirely leaves every assertion green, because the throw below
+            // produces the same "nothing moved, nothing rewritten" outcome. It stays because the
+            // difference is what gets *said* — a sentence naming the file and the reason, rather
+            // than an opaque `NSFileWriteFileExists` in a log nobody is reading — and because the
+            // wrong repair for that error is the plausible one: removing the destination first. That
+            // is the mutation the test does catch.
             if fm.fileExists(atPath: destination.path) {
                 log.error("""
                     \(item.recorded, privacy: .public) exists at both its old and its new address in \
