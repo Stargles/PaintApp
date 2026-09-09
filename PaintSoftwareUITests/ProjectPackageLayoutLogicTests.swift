@@ -499,28 +499,69 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
     /// landing a whole new package at this path while the sidecars were being moved leaves a manifest
     /// that is already in the new layout; writing our stale bytes over it would lose the artist's last
     /// edits.
+    /// **The staleness has to come from the caller, or this test measures nothing.** The first
+    /// version of it changed the manifest and then called `tidy` — but `tidy` reads the manifest at
+    /// the instant it is called, so the compare-and-swap was handed two copies of the same value and
+    /// the test passed with the guard deleted. A mutation of that one line is what found it. So the
+    /// rewrite is driven directly, with bytes that really are the ones a pass read *before* the save
+    /// landed.
     func testAManifestThatChangedUnderTheMigrationIsNotOverwritten() throws {
         let url = savedProject()
         makeLegacyLayout(at: url)
         let manifestURL = url.appendingPathComponent("manifest.json")
 
-        // The interleaving, staged deterministically: move the files as tidy would, then let a
-        // "save" rewrite the manifest, then ask tidy to rewrite it from its own stale read.
+        // What the pass read when it started, and the rewrite it computed from it.
         let stale = try Data(contentsOf: manifestURL)
+        let bare = try XCTUnwrap(celEntries(at: url).compactMap { $0["vectorFileName"] as? String }.first)
+        let celID = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(
+            celEntries(at: url).first { $0["vectorFileName"] is String }?["id"] as? String)))
+        let rewrites = [(old: bare, new: ProjectPackageLayout.recordedName(for: .drawing, cel: celID))]
+
+        // A save lands a whole new package at this path while the sidecars are being moved. Its
+        // manifest is already in the new layout and carries edits the pass has never seen.
         var json = manifestJSON(at: url)
         json["name"] = "Renamed By A Save"
         let fresh = try JSONSerialization.data(withJSONObject: json)
         try fresh.write(to: manifestURL)
+        XCTAssertNotEqual(fresh, stale,
+                          "Setup: the save really did change the manifest under the migration")
 
-        ProjectPackageLayout.tidy(packageAt: url)
+        ProjectPackageLayout.rewriteManifest(at: manifestURL, in: url,
+                                             originalBytes: stale, rewrites: rewrites)
 
-        let onDisk = try Data(contentsOf: manifestURL)
-        XCTAssertNotEqual(onDisk, stale,
-                          "Setup: the fixture really did change the manifest under the migration")
+        XCTAssertEqual(try Data(contentsOf: manifestURL), fresh,
+                       "the save's manifest is byte-for-byte the one on disk — the migration abandons "
+                       + "its rewrite rather than writing bytes it read before the save landed, which "
+                       + "is the only step in this pass that can destroy the artist's last edits")
         XCTAssertEqual(manifestJSON(at: url)["name"] as? String, "Renamed By A Save",
-                       "the save's manifest is the one on disk — the migration abandons its rewrite "
-                       + "rather than writing bytes it read before the save landed")
-        assertInkSurvived(at: url, "a package whose manifest changed mid-migration")
+                       "and the edit the save carried is still there")
+    }
+
+    /// The other direction, so the test above cannot pass by a rewrite that never does anything: with
+    /// the bytes it was given still on disk, the surgery lands.
+    func testTheRewriteCommitsWhenTheManifestIsStillTheOneThePassRead() throws {
+        let url = savedProject()
+        makeLegacyLayout(at: url)
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        let cel = try XCTUnwrap(celEntries(at: url).first { $0["vectorFileName"] is String })
+        let celID = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(cel["id"] as? String)))
+        let bare = try XCTUnwrap(cel["vectorFileName"] as? String)
+        let relative = ProjectPackageLayout.recordedName(for: .drawing, cel: celID)
+
+        // Move the file as `tidy` would, so the rewritten manifest names something that is there.
+        try FileManager.default.createDirectory(
+            at: url.appendingPathComponent("drawings", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(
+            at: url.appendingPathComponent("images", isDirectory: true).appendingPathComponent(bare),
+            to: ProjectPackageLayout.resolve(relative, in: url))
+
+        ProjectPackageLayout.rewriteManifest(at: manifestURL, in: url,
+                                             originalBytes: try Data(contentsOf: manifestURL),
+                                             rewrites: [(old: bare, new: relative)])
+
+        XCTAssertEqual(celEntries(at: url).compactMap { $0["vectorFileName"] as? String }.first, relative,
+                       "the manifest names the new address")
+        assertInkSurvived(at: url, "a package whose manifest the rewrite committed")
     }
 
     /// A package the manifest cannot be read from is the repair pass's business, and `tidy` must not

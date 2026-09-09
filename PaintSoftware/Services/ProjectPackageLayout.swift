@@ -412,8 +412,16 @@ nonisolated enum ProjectPackageLayout {
     }
 
     /// The one step that can destroy data, and the two lines that stop it.
-    private static func rewriteManifest(at manifestURL: URL, in url: URL,
-                                        originalBytes: Data, rewrites: [(old: String, new: String)]) {
+    ///
+    /// **Internal rather than private so a test can hand it bytes that are genuinely stale.** That
+    /// is not a convenience: `tidy` reads the manifest at the instant it is called, so a test that
+    /// changes the file and *then* calls `tidy` gives the compare-and-swap two copies of the same
+    /// value and passes whether the guard is there or not — which is what the first version of
+    /// `testAManifestThatChangedUnderTheMigrationIsNotOverwritten` did, and a mutation of this very
+    /// line is what found it. The staleness has to come from the caller for the check to be about
+    /// anything.
+    static func rewriteManifest(at manifestURL: URL, in url: URL,
+                                originalBytes: Data, rewrites: [(old: String, new: String)]) {
         // **Compare-and-swap.** A save lands a whole new package at this path by rename; if that
         // happened while we were moving files, the manifest on disk is already in the new layout and
         // writing our stale bytes over it would lose the artist's last edits. Byte-identical or we
