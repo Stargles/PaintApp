@@ -76,31 +76,44 @@ copy → verify → atomic rename → remove discipline (36)'s migration used.
 
 ---
 
-## (58) Playback does not hold 24 fps on a maximum-size canvas, even with every layer hidden
+## (58) Playback does not hold 24 fps, and crashed the app
 
-**Status** — reported by the owner 2026-09-08. **May already be fixed** by (56)'s thumbnail work;
-that has to be checked before anything is built.
+**Status** — two reports, 2026-09-08, and they are one defect. **Root cause found and fixed on
+`tmp/playback` 2026-09-09; not merged.** What is left is one canvas size and one unmeasured gesture.
 
 > *"currently, pressing the playback button of Test1 does not run at 24FPS, sometimes taking 313ms
 > per frame. This is even after hiding all layers so that the canvas is pretty much a blank white
 > sheet. My guess is that the current thumbnail fix may solve it, but if it does not, then that hints
 > at a deeper issue which must be investigated and solved."*
 
-**The owner's own reasoning is the right first move and it is cheap**: (56) removed a full-canvas
-rasterize from the main thread on every stroke and every undo, and the same shape sat behind the
-onion skin, the gallery tile and the `RenderResolution` knob. Re-measure playback on `Test1` at
-6000x6000 before assuming there is a second defect.
+> *"What I got was it considerably lagging, making the main thread stutter like wild, getting worse
+> as time went on, and eventually crashing the app after a few seconds... I was noticing that when it
+> is doing the frame switching, some layers would render but not others due to how laggy it was,
+> which is very weird as every layer should all be prebaked."*
 
-**If it survives that, the reading is worth more than the number.** *"Every layer hidden and still
-313 ms a frame"* says the cost is **not** in compositing the artist's content — a hidden layer
-contributes nothing to draw. So it is per-frame work that scales with the canvas rather than with
-what is on it: a buffer allocated per frame, a cache keyed so every frame misses, or a bake the
-playback clock waits on. That is the same family as (56) and as BUGS.md's *"Starting a stroke before
-the last one has rendered"*, all three being "a small change costs the whole canvas".
+And the acceptance criterion, in their words:
+
+> *"The iPad MUST be capable of playback at 24FPS regardless of what is on the canvas (amount of
+> strokes, amount of compositing, amount of images, etc). The only time complexity for playback I can
+> see should be canvas size, as larger canvases require higher bitrate to be read from the disk. I do
+> not want to revisit rendering again after this due to another edge case in the future, so be
+> thorough."*
+
+**Their own reading was right and the thumbnail work was not the answer.** *"Every layer hidden and
+still 313 ms a frame"* says the cost is per-frame work that scales with the canvas rather than with
+what is on it — and it is: `CanvasView.reconcileLayers` hands every layer host the cel covering the
+new frame on every flip, and `StrokeCanvasView.refreshDisplay` rasterized it at canvas size whether
+the host was hidden, blanked, or drawing. The canvas also never engaged the compositor for a plain
+document, so the baked frames on disk went unread. MEASURED at **8.6 fps at 4096² and 5.4 fps at
+6000²** against **101.5 and 49.9 fps** off the bake, with **384–549 MB** of live canvas-sized bitmaps
+and **1.6–2.2 GB/s** of allocation churn — the crash. PERFORMANCE.md §16 is the whole measurement.
 
 **Left to build**
-- [ ] Re-measure playback at 6000x6000 against the merged (56) work.
-- [ ] If it is still slow, find what per-frame cost scales with canvas area when nothing is drawn.
+- [ ] The 6000² case still decodes on the tick and is INFERRED to miss 24 fps on the device:
+      `CanvasManager.frameRingByteBudget` is 96 MB and one decoded 6000² frame is 137 MB, so the ring
+      holds none. BUGS.md has it; the lever is a memory decision on a 3 GB iPad.
+- [ ] Scrubbing the playhead by hand still pays the per-layer render playback no longer does. Left
+      alone deliberately — measure the drag before widening the predicate to it.
 
 ---
 

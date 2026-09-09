@@ -3,6 +3,53 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Evicting a vector render that a layer host is displaying frees nothing (2026-09-09)
+
+`VectorRenderCache` budgets the canvases' memos; `StrokeCanvasView`'s base slot holds a second
+reference to the same `UIImage`. So `dropCachedImage()` on a canvas whose render is **on screen**
+clears `VectorCanvas.cachedImage`, frees **zero bytes**, and guarantees the next refresh re-rasterizes
+it — the eviction is pure cost.
+
+MEASURED (PERFORMANCE.md §16.2), three layers at 4096² under an iPad 9's budget: **192 MB of memo
+against 192 MB the hosts are holding**, so the budget is a ceiling on half of what it is budgeting.
+At 6000² it is 137 MB of memo against **412 MB** held by three hosts.
+
+Not a leak — the total is bounded and flat across 240 flips — and not fixed by the playback work,
+which stops the re-render happening rather than making the eviction honest. The likely answer is that
+a render a host is displaying is not an eviction candidate, which is a change to `victimsLocked`'s
+policy and wants its own measurement: at 6000² a single layer's picture is 137 MB, so "never evict
+what is displayed" is a floor of `layers × canvasBytes` that the budget cannot refuse.
+
+## Scrubbing the playhead pays the per-layer render that playback no longer does (2026-09-09)
+
+Dragging the playhead changes the cel set exactly as a playback tick does, so it pays one
+canvas-sized vector render per layer per frame crossed — MEASURED at **3.00 a flip, 115.9 ms** on a
+three-layer 4096² document under an iPad 9's budget (PERFORMANCE.md §16.2), and it never converges,
+because the memo holds two of the six renders such a document needs.
+
+`CanvasManager.sandwichEngagesOnCanvas` gained `|| isPlaying` on 2026-09-09 and deliberately did not
+gain a scrub clause: a scrub is a gesture tracking a finger, where showing a stale baked frame is
+worse than showing a late correct one, and **nobody has measured that drag**. That is the same
+argument §14.6 makes for the cel-channel half of TODO (53), and it wants the same thing first — a
+measurement of what the artist sees under their own finger, not another arithmetic.
+
+## Above 2048x1024 the decoded-frame ring holds fewer than one frame, so playback decodes on the tick (2026-09-09)
+
+RENDER.md §3.5: *"Play never decodes on the display thread: the scheduler decodes ahead into the ring
+and the tick reads from it."* `CanvasManager.frameRingByteBudget` is **96 MB**; a decoded 4096² frame
+is **67 MB** (the ring holds one, so a two-frame loop evicts what it is about to want) and a 6000²
+frame is **137 MB** (it holds none at all).
+
+MEASURED (PERFORMANCE.md §16.2, Release, simulator): a baked flip is **9.8 ms at 4096²** and **20.0 ms
+at 6000²**, and those are decodes rather than ring reads. Both clear 24 fps on that machine; on the
+owner's iPad RENDER §3.5's own device figures put 4096² at 9.9–24.6 ms — 1.7x headroom at worst — and
+6000² is INFERRED at about twice that, which **misses**. So the largest canvas the app allows is the
+one place the owner's *"24 fps regardless of what is on the canvas"* may still not hold, and the term
+that breaks it is the one they said they would accept: canvas size.
+
+Raising the ring budget is the obvious lever and is a memory decision on a 3 GB device — 274 MB of
+ring for two 6000² frames — so it is filed rather than taken.
+
 ## A *derived* cel's thumbnail still renders at canvas size (2026-09-08)
 
 The debounced thumbnail regen's own half of this is fixed: `PixelOps.rasterizeUncached` now asks the

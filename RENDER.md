@@ -511,6 +511,18 @@ comes off disk is only as wide as that predicate. A feature whose picture Core A
 either engage the compositor or accept that it is rendering on the main thread every frame — and the second is
 invisible, because the canvas looks perfectly correct while it does it.
 
+**And that paragraph was one word too narrow: `cannot` should have been `cannot afford to`.** The owner's report
+of 2026-09-08 was a document with **nothing** the flat row cannot draw — two frames of ordinary Normal-mode
+layers at 4096², fully baked — played at **4.9 fps** from their own `ActionRecorder` trace and crashed the app at
+six seconds. The flat row costs one canvas-sized vector render per layer per distinct frame, and
+`VectorRenderCache.budgetBytes` is `CompositorBudget.textureBudgetBytes`: **183.7 MB on the owner's iPad 9
+against 67.1 MB a render**, so the memo holds two where the document needs six, every flip evicts what the next
+flip asks for, and it never converges. The predicate now also asks `isPlaying`, and — the half that is not about
+the predicate at all — **a blanked host no longer rasterizes the cel it is holding**, which is TODO (53)'s own
+refusal reached through the committed slot rather than the derived one. PERFORMANCE.md §16 is the measurement,
+including what it does not fix: a hand scrub pays the same cost, and above 2048x1024 the decoded ring below
+holds fewer than one frame so the tick decodes after all.
+
 **A hold costs one composite on both sides of the seam — and until 2026-09-07 that was true of only one of
 them.** The owner reported it: *"Lets say a frame in the animation is held for a couple cels where nothing
 changes. The bake and cache seems to re-render each frame even though they are the same."* This file asserted the

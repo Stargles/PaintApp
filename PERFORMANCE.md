@@ -3970,3 +3970,146 @@ not see.
 **And the prediction that was right: 16383 dies, immediately and for the stated reason.** §15.2
 named the mechanism from the source before any of this was run, and the device confirmed it down to
 which side of the pen lift it happens on.
+
+## 16. Playing an ordinary document at ~5 fps, and the crash after it (2026-09-09)
+
+The owner, 2026-09-08, on `Test1` — **two frames, a few layers, 4096², on repeat, fully baked**, on
+their iPad 9:
+
+> *"What I got was it considerably lagging, making the main thread stutter like wild, getting worse
+> as time went on, and eventually **crashing the app** after a few seconds... I was noticing that when
+> it is doing the frame switching, **some layers would render but not others** due to how laggy it
+> was, which is very weird as every layer should all be prebaked."*
+
+And the requirement, which is the acceptance criterion:
+
+> *"The iPad MUST be capable of playback at 24FPS regardless of what is on the canvas (amount of
+> strokes, amount of compositing, amount of images, etc). The only time complexity for playback I can
+> see should be canvas size, as larger canvases require higher bitrate to be read from the disk."*
+
+**MEASURED from their own `ActionRecorder` trace** (`recording-20260908-183822.jsonl`, header
+`canvasW/H 4096`, project `Test1`): 26 `currentFrame` flips between t=0.84 and t=5.91, intervals
+**0.12–0.38 s, median 0.21, mean 0.203** — **4.9 fps against a 24 fps target of 0.0417 s**. The file
+stops at 5.91 with no further line; that is the crash.
+
+### 16.1 Three costs a frame flip was paying, and none of them was the bake
+
+**The canvas never engaged the compositor, so it never read the baked frames.**
+`CanvasManager.sandwichEngagesOnCanvas` asked `[RenderNode].needsCompositorOnCanvas` — blend mode,
+mask, mix op, effect, own buffer — plus §14's `hasContainerPoseInForce`. `Test1` is a plain stack of
+Normal-mode layers with no transformation layer, so it answered **false** and the canvas stayed on
+Core Animation's flat row of hosts. RENDER.md §3.7 predicted this sentence in advance: *"this file's
+promise that playback comes off disk is only as wide as that predicate"*.
+
+**On the flat row a frame flip costs one canvas-sized vector render per layer, and that working set
+does not fit the memo that holds it.** `VectorRenderCache.budgetBytes` is
+`CompositorBudget.textureBudgetBytes`, `physicalMemory / 16` — **183.7 MB** on a 3 GB iPad 9 (RENDER
+§0; the `3 << 30` arithmetic reads 192). One 4096² render is **67.1 MB**. So the memo holds **two**
+where the document needs **six**, every flip evicts what the next flip is about to ask for, and it
+never converges. That is the whole of *"getting worse as time went on"* and of *"some layers would
+render but not others"* — the re-renders land asynchronously on a serial queue
+(`StrokeCanvasView.renderQueue`), so at any instant some hosts have the new picture and the evicted
+ones have last frame's.
+
+**And blanking a host did not stop it rendering.** Even where the compositor *was* engaged,
+`reconcileLayers` hands each host its new cel per flip and `refreshDisplay` rasterized it into a view
+a zero-alpha `CALayer.mask` throws away. §14 closed exactly this for the *derived* preview slot
+(`updateInterpolationPreviews` skips a blanked host) and left the *committed* slot open, which is the
+slot every ordinary document uses.
+
+**A third cost, filed in §5 and never priced: the mid-stroke pair.** `SandwichKey` carries every
+layer's content version, so every flip moves it and `startSandwichRebuild` queued **two canvas-sized
+composites per tick** for images nothing on screen displays — the `.rest` presentation shows
+`sandwichFull` alone, and the one state that reads `sandwichHalves` is entered from `onStrokeBegan`,
+whose `onAnyTouchBegan` stops playback before the first dab.
+
+### 16.2 The measurement — `PlaybackBudgetBench`, Release, idle machine
+
+Three plain vector layers, two frames, one cel per layer per frame, 12 strokes a cel; 240 flips
+(ten seconds at 24 fps) per row; `CompositorBudget.budgetOverrideBytes` pinned to the iPad 9's
+budget. **Without that seam none of this reproduces on a Mac**: `textureBudgetBytes` reads the host's
+`physicalMemory`, comes out at the 768 MiB cap, and the flat row converges after two laps. That is
+why it shipped, and it is also why the first version of the XCUITest passed with the fix deleted.
+
+| canvas | one render | entries the memo holds | flat row, a flip | flat row | baked read, a flip | baked read |
+|---|---|---|---|---|---|---|
+| 2048x1024 | 8 MB | 24 | **0.4 ms** | 2508 fps | **0.1 ms** | 7372 fps |
+| 4096² (`Test1`) | 64 MB | 3 | **115.9 ms** | **8.6 fps** | **9.8 ms** | **101.5 fps** |
+| 6000² (`maxCanvasExtent`) | 137 MB | 1 | **183.7 ms** | **5.4 fps** | **20.0 ms** | **49.9 fps** |
+
+**The layer term is visible in the middle column and absent from the last one**, which is the
+owner's requirement stated as a measurement. Canvas-sized rasterizations per flip: **0.03** at
+2048x1024 (six in total — it converges, which is why the owner never saw this at the size they draw
+at), **3.00** at 4096² and **3.00** at 6000², for all 240 flips, forever. Off the bake it is **0** at
+every size.
+
+**The crash has a number, and it is a counted one.** `phys_footprint` is useless here and this is the
+third time this file has recorded that: §13.5 and §13.6 measured a displayed image and twenty raster
+cels moving it by ~0, because the simulator's render server is out of process — and the flat row at
+4096² held 192 MB of memo against a reported footprint delta of **+1 MB**. Counting what the app
+allocated instead:
+
+| canvas | live canvas-sized bitmaps, flat row | allocation churn | live, baked read |
+|---|---|---|---|
+| 2048x1024 | 72 MB (48 memo + 24 held by hosts) | — (converged) | 24 MB |
+| 4096² | **384 MB** (192 memo + 192 hosts) | **1,657 MB/s** | 128 MB |
+| 6000² | **549 MB** (137 memo + 412 hosts) | **2,243 MB/s** | 137 MB |
+
+On a device with roughly 1.4 GB before jetsam, holding 384–549 MB of canvas-sized bitmaps while
+minting and freeing 1.6–2.2 GB a second of them — with the document's own tiers, the undo history and
+UIKit wanting the rest — is a jetsam kill, not a leak. **There is no per-flip growth**: the flat row's
+live bytes are a plateau, set by the memo's budget plus one held picture per host, and the counts do
+not climb across 240 flips. See 16.3 for the accounting bug inside that plateau.
+
+### 16.3 The eviction frees nothing while the host is still displaying it
+
+**`VectorRenderCache` is a budget over the canvases' memos, and the layer host holds a second
+reference to the same image.** `dropCachedImage()` clears `VectorCanvas.cachedImage`; the `UIImage` in
+`StrokeCanvasView`'s base slot keeps the pixels alive. So evicting a *displayed* render frees **zero
+bytes and guarantees a re-render** — which is exactly the 4096² row above: 192 MB of memo against
+192 MB the hosts are holding, i.e. the budget is enforcing a ceiling on half of the thing it is
+budgeting. It is not a leak (the total is bounded and flat) and it is not fixed here, because the
+right answer is probably that a render on screen is not an eviction candidate, and that is a change to
+the eviction policy rather than to playback.
+
+### 16.4 The fix, and why it is three changes rather than one
+
+1. **`sandwichEngagesOnCanvas` gains `|| isPlaying`.** The two clauses before it are about pictures
+   Core Animation *cannot draw*; this one is about a cost it cannot *afford*. Asked of playback rather
+   than of the arithmetic (`layers × canvasBytes > budget`) deliberately: the flat row is right at rest
+   at any size, because a render is made once and kept by the view showing it, and only a **frame flip**
+   makes the working set larger than the memo. A predicate on the arithmetic would also swap the canvas
+   between two rendering paths as the artist added a layer.
+2. **A blanked host asks for no rasterize** — `DeferredVectorRender.Step.blankedByTheComposite`, with
+   `LayerHostView.setBlanked` pushing the state down and asking for the repaint on the un-blanking
+   edge. Extended to `isHidden` in the same seam, which is TODO (58): a hidden layer paid the same
+   canvas-sized render on every frame step, MEASURED at **63 renders across twelve steps** of a
+   three-layer document with every layer hidden.
+3. **No mid-stroke pre-warm while playing** — MEASURED at **50 rebuilds**, i.e. 100 canvas-sized
+   composites, across four seconds of playback before the guard.
+
+**A bake miss cannot freeze an unbaked scene**, which is the objection to (1) and it is answered by
+code that was already there: `updateSandwich`'s trap 1 returns *before* blanking any host while
+`sandwichFull` is nil, so a document with no bake on disk plays on the flat row exactly as it does
+today and the composite takes over on the pass the first frame lands. Past that, a frame the baker has
+not reached shows the frame before it — RENDER.md §2.10, an owner ruling.
+
+### 16.5 What this does not fix, with numbers
+
+**Scrubbing the playhead by hand has the identical shape and is not covered.** A drag across the
+timeline changes the cel set exactly as playback does, so it pays the same 3.00 renders a flip at
+4096². It is left alone because it is a gesture tracking a finger, where a stale frame is worse than a
+late one, and because nobody has measured that drag — the same reason §14.6 gives for the cel-channel
+half of TODO (53).
+
+**At 4096² and above the decoded-frame ring cannot hold the frames playback is about to ask for, so
+the tick decodes.** `CanvasManager.frameRingByteBudget` is 96 MB; one decoded 4096² frame is 67 MB
+(the ring holds **one**) and one 6000² frame is 137 MB (it holds **none**). RENDER.md §3.5 says *"play
+never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from
+it"*, and above 2048x1024 that promise is void. The measured 9.8 ms and 20.0 ms a flip above are
+therefore decodes, not ring reads. They clear 24 fps on this Mac with 4.2x and 2.1x headroom; **on the
+owner's device the 4096² figure is covered by RENDER §3.5's own device measurement (9.9–24.6 ms a
+frame at 4096², so 1.7x headroom at worst), and the 6000² one is INFERRED at ~2.1x that and would
+miss** — which is the one place the requirement may still not be met, at the largest canvas the app
+allows. Raising the ring budget is the obvious lever and is a memory decision on a 3 GB device, so it
+is named here rather than taken.
