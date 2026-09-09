@@ -50,6 +50,14 @@ struct ContentView: View {
         // the bake, plays it, writes a JSON report into the container and exits — the whole of a
         // device measurement with nobody in the room. See `PlaybackProbe` for why that has to exist.
         .task {
+            // Inert unless `-exportProject`. It copies a project out of the folder the artist chose
+            // into this app's own container and exits, because that folder lives in Apple's File
+            // Provider group and no `devicectl` domain reaches it — see `ProjectExport`. It runs
+            // before the probe because it never wants a document open.
+            if ProjectExport.isArmed {
+                await ProjectExport.run()
+                return
+            }
             guard PlaybackProbe.isArmed else { return }
             await PlaybackProbe.run(canvasManager: canvasManager) { screen = .editor }
         }
