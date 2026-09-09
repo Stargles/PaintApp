@@ -553,4 +553,137 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         for index in stride(from: 3, to: bytes.count, by: 4) where bytes[index] > 64 { count += 1 }
         return count
     }
+
+    // MARK: - The debounced flush renders off the main actor (PERFORMANCE.md §18)
+    //
+    // §11.11c bounded the *tile* at 480² whatever the canvas is, and the flatten that fills it still
+    // walked every element the cel holds — MEASURED on the owner's iPad 9 in Release at **25.4 ms per
+    // edit at 2048² with one stroke on the cel and 73.7 ms at forty**, on the main thread, 400 ms
+    // after every stroke and every undo. It was the largest single term of an edit and the only one
+    // that grew with the drawing. The pixels moved to `CanvasManager.thumbnailRegenQueue`; what has
+    // to be pinned here is that they still *arrive*, and that a tile rendered against content the
+    // artist has since changed is refused rather than installed stale.
+
+    /// A canvas small enough that these tests are about ordering rather than about pixels, with ink
+    /// that is genuinely visible in a 120-point tile.
+    private static let deferredCanvas = CGSize(width: 512, height: 512)
+
+    private func deferredManager() -> CanvasManager {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.deferredCanvas
+        manager.addVectorLayer()
+        manager.layers[0].cels[0].vector = canvas(Self.deferredCanvas, strokes: 4)
+        // The fixture's own thumbnail is cleared so "a tile arrived" is observable at all. Without
+        // this every assertion below would be reading whatever `addVectorLayer` happened to install.
+        manager.layers[0].cels[0].thumbnail = nil
+        return manager
+    }
+
+    /// Spins the main run loop for `seconds`. The install hops back through `Task { @MainActor }`,
+    /// which cannot run while a synchronous test body holds the main actor, so nothing lands until
+    /// this is called — which is exactly what makes the "not yet" assertions below deterministic
+    /// rather than racy.
+    private func pumpMainRunLoop(_ seconds: TimeInterval) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// **The whole of the fix, as an ordering.** After the deferred flush returns, the queue is
+    /// drained but no tile has been drawn; after the run loop turns, the tile is there and has ink in
+    /// it.
+    ///
+    /// **The first assertion is the one that would redden a revert**, and it is not a timing race: a
+    /// synchronous flush installs before the call returns, and the deferred one cannot install until
+    /// the main actor is free. The second is what stops the first passing for the wrong reason — a
+    /// flush that rendered nothing at all would also leave the tile nil.
+    func testTheDebouncedFlushDrawsNoPixelsBeforeItReturnsAndStillInstallsTheTile() {
+        let manager = deferredManager()
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+
+        manager.flushPendingThumbnailRegensDeferred()
+
+        XCTAssertNil(manager.layers[0].cels[0].thumbnail,
+                     "the deferred flush installed a tile before it returned, which means the cel "
+                     + "was flattened on the main thread — the 25.4-73.7 ms per edit PERFORMANCE.md "
+                     + "§18 moved off it")
+        XCTAssertTrue(manager.takePendingThumbnailRegens().isEmpty,
+                      "the deferred flush left its own job in the pending queue, so the next "
+                      + "debounce would render the same cel a second time")
+
+        pumpMainRunLoop(0.4)
+
+        guard let tile = manager.layers[0].cels[0].thumbnail else {
+            return XCTFail("no tile ever arrived: the render was deferred and then lost, which is "
+                           + "the failure a careless queue introduces and the one nothing else here "
+                           + "would catch")
+        }
+        XCTAssertEqual(tile.size, CanvasManager.celThumbnailSize,
+                       "the tile arrived at \(tile.size) rather than the 120-point box the timeline "
+                       + "and the layer panel draw")
+        XCTAssertGreaterThan(Self.inkedPixels(tile), 0,
+                             "the tile that arrived is blank, so the cel's four strokes did not "
+                             + "reach it and the assertion above is about an empty picture")
+    }
+
+    /// **A tile rendered against content the artist has since changed is refused, and the cel is
+    /// re-queued so it is not left showing the previous drawing.**
+    ///
+    /// The mutation lands *after* the flush and *before* the run loop turns, which is precisely the
+    /// window the version guard exists for and the one a synchronous flush never had. Both halves are
+    /// asserted: the tile finally on the cel is the picture of what the cel holds **now**, and it is
+    /// not the picture of what it held when the render started.
+    ///
+    /// **Deleting the guard reddens this**, and it is worth saying which assertion: the installed
+    /// tile would be the stale one, so the equality against the fresh render fails and the
+    /// inequality against the stale one fails with it.
+    func testATileRenderedAgainstContentThatHasChangedIsRefusedAndTheCelIsRepainted() {
+        let manager = deferredManager()
+        let staleTile = CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
+                                                        canvasSize: Self.deferredCanvas)
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+
+        manager.flushPendingThumbnailRegensDeferred()
+        // The artist draws again while the tile is still being drawn. `addStroke` bumps the vector
+        // tier's version, which is a field of the `LayerContentVersion` the render was captured at.
+        manager.layers[0].cels[0].vector?.addStroke(Self.stroke(99, canvas: Self.deferredCanvas,
+                                                                seedOffset: 500))
+
+        // Long enough for the refused landing, the re-queue, the 400 ms debounce and the repaint.
+        pumpMainRunLoop(1.2)
+
+        let freshTile = CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
+                                                        canvasSize: Self.deferredCanvas)
+        // Premise: the extra stroke really did change the picture. Without this the two comparisons
+        // below would both hold under any implementation whatever.
+        XCTAssertNotEqual(staleTile.pngData(), freshTile.pngData(),
+                          "the fixture's extra stroke changed nothing in the tile, so this test "
+                          + "cannot tell a refused stale tile from an installed one")
+        guard let installed = manager.layers[0].cels[0].thumbnail else {
+            return XCTFail("the cel was left with no tile at all: the stale render was refused and "
+                           + "nothing repainted it, which is the failure the re-queue exists for")
+        }
+        XCTAssertEqual(installed.pngData(), freshTile.pngData(),
+                       "the tile on the cel is not the picture the cel holds now")
+        XCTAssertNotEqual(installed.pngData(), staleTile.pngData(),
+                          "the tile on the cel is the picture the cel held before the artist's last "
+                          + "stroke — the version guard in `installRegeneratedThumbnails` let a "
+                          + "stale render through")
+    }
+
+    /// A layer deleted while its tile is in flight installs nothing and does not trap. The indices
+    /// the render was resolved from are gone by the time it lands, which is why the install
+    /// re-resolves by **id** rather than carrying an index across the queue.
+    func testALayerDeletedWhileItsTileRendersInstallsNothing() {
+        let manager = deferredManager()
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+
+        manager.flushPendingThumbnailRegensDeferred()
+        manager.layers.removeAll()
+
+        pumpMainRunLoop(0.4)
+
+        XCTAssertTrue(manager.layers.isEmpty,
+                      "the landing put a layer back, which means it wrote through an index rather "
+                      + "than resolving the layer by id")
+    }
 }

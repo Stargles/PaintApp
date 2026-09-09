@@ -1124,3 +1124,155 @@ extension CanvasManager {
         let images: [UIImage]
     }
 }
+
+// MARK: - The debounced regen's pixels, off the main actor (PERFORMANCE.md §18)
+//
+// **The cel thumbnail was the fifth renderer in the app and the last one still drawing on the main
+// thread.** RENDER.md §2.2 rules that the main thread never composites, and §17 counted four
+// renderers with queues of their own — `FrameBaker.workQueue`, the sandwich halves on
+// `sandwichQueue`, the vector base on `StrokeCanvasView.renderQueue`, and the onion skin on
+// `CanvasView.Coordinator.onionQueue`. Nobody had counted this one, so it kept an exemption it was
+// never granted.
+//
+// MEASURED on the owner's iPad 9 in Release through `PlaybackProbe`'s edit mode, per edit, on the
+// main thread: **25.4 ms at 2048² with one stroke on the cel and 73.7 ms at forty**, against
+// 76.7 ms and 115.4 ms of total main-thread busy. It was both the largest single term of an edit
+// and **the only one that grew with what the artist had drawn**, which is the half of the owner's
+// bar — *"no matter how many strokes"* — that nothing else in the table threatened.
+//
+// **The cut is the one `startOnionRebuild`/`finishOnionRebuild` already makes**, and the one the
+// backfill above makes: resolve the job on the main actor (indices, `derivedCelContent`,
+// `canvasSize`), produce the pixels anywhere, install only if the content the render was taken
+// against still stands. `celThumbnailImage` is `static` and documents itself as *"Pure, and
+// reachable from any thread"*; the backfill has been calling it off the actor since PERFORMANCE.md
+// item 9(c), so this is an existing seam being used a second time rather than a new one being cut.
+//
+// **What is *not* deferred, deliberately.** `flushPendingThumbnailRegens()` keeps its synchronous
+// contract — it is the escape hatch for a caller that needs `Cel.thumbnail` current *now* — and
+// `regenerateAllThumbnails()` is a whole-project fan-out that has its own argument for staying
+// where it is. Only the debounced sink moved, and the debounce is by construction already 400 ms
+// late, so nothing that reads a thumbnail can tell the difference between "400 ms" and "400 ms plus
+// one render".
+extension CanvasManager {
+
+    /// Where a debounced regen's pixels are drawn.
+    ///
+    /// **Serial and `.userInitiated`, where the backfill's queue is concurrent and `.utility`**, and
+    /// the difference is what the two are for. The backfill is a whole project's worth of tiles that
+    /// nobody is waiting for, so it fans out and yields to the touch path. This is one or two tiles
+    /// the artist is about to look at, arriving in a burst that is nearly always a single cel: fanning
+    /// out would buy nothing and would put a second thumbnail render on a core the compositor wants
+    /// (an edit already costs ~310 ms of background render work on this two-big-core device). Serial
+    /// also means two flushes cannot interleave their installs.
+    private static let thumbnailRegenQueue = DispatchQueue(
+        label: "com.paintapp.CanvasManager.thumbnailRegen", qos: .userInitiated)
+
+    /// The debounced sink's flush: resolve on the main actor, render off it, install back on it.
+    ///
+    /// The `thumbnailFlush` span stays on the main-actor half alone, which is the point of the row —
+    /// it is what an edit still pays on the thread the artist is drawing on. `thumbnailRender`,
+    /// `thumbnailFlatten` and `thumbnailDownsample` are recorded where they now run, and
+    /// `PlaybackTrace` reports each span's `onMainCount` separately from its count, so the report says
+    /// whether the work moved or merely shrank.
+    func flushPendingThumbnailRegensDeferred() {
+        let jobs = PlaybackTrace.span(.thumbnailFlush) { takePendingThumbnailRegenJobs() }
+        guard !jobs.entries.isEmpty, let canvasSize else { return }
+        Self.thumbnailRegenQueue.async { [weak self] in
+            let images = ThumbnailImages(images: jobs.entries.map { entry in
+                PlaybackTrace.span(.thumbnailRender) {
+                    CanvasManager.celThumbnailImage(for: entry.cel, canvasSize: canvasSize,
+                                                    derived: entry.derived)
+                }
+            })
+            Task { @MainActor in
+                PlaybackTrace.span(.renderLanded) {
+                    self?.installRegeneratedThumbnails(images.images, from: jobs)
+                }
+            }
+        }
+    }
+
+    /// Empties the pending queue and turns each location into a job that can cross a thread.
+    ///
+    /// **The version is captured here, before the render**, for the reason `backfillMissingThumbnails`
+    /// spells out at length: `Cel.raster` is a class, so a version built from a captured `Cel` at
+    /// install time reads the *live* counter through the same object and compares equal to itself
+    /// however much the artist drew in between.
+    ///
+    /// Not `@MainActor`-annotated, matching every other method on this class: `CanvasManager` is
+    /// main-thread-by-convention rather than actor-isolated, and what guarantees the thread here is
+    /// the caller — the debounced sink runs on `RunLoop.main`, and the landing goes through
+    /// `Task { @MainActor }`. Same shape as `CanvasView.Coordinator.finishOnionRebuild`.
+    private func takePendingThumbnailRegenJobs() -> ThumbnailRegenBatch {
+        let pending = takePendingThumbnailRegens()
+        guard !pending.isEmpty else { return ThumbnailRegenBatch(entries: []) }
+        var entries: [ThumbnailRegenBatch.Entry] = []
+        for location in pending {
+            guard let layerIndex = layers.firstIndex(where: { $0.id == location.layerID }),
+                  let celIndex = layers[layerIndex].cels
+                      .firstIndex(where: { $0.id == location.celID }) else { continue }
+            let cel = layers[layerIndex].cels[celIndex]
+            // A cel's thumbnail is the picture at the frame that cel *starts* on — the same answer
+            // `regenerateThumbnail` gives, and the frame `CelBlockView` draws the tile against.
+            let derived = derivedCelContent(for: cel, atFrame: cel.startFrame)
+            entries.append(ThumbnailRegenBatch.Entry(
+                layerID: location.layerID, cel: cel, derived: derived,
+                version: LayerContentVersion(cel: cel, derived: derived?.identity)))
+        }
+        // Counted where the renders are asked for rather than where they land, which is
+        // `recordThumbnailRenders`'s stated meaning: a job whose cel vanishes mid-flight still cost
+        // the rasterize.
+        recordThumbnailRenders(entries.count)
+        return ThumbnailRegenBatch(entries: entries)
+    }
+
+    /// Puts a finished batch on its cels — **only where the content it was rendered from still
+    /// stands**, and re-queues the ones where it does not.
+    ///
+    /// **The re-queue is the half the backfill does not need and this path does.** A backfilled tile
+    /// that is skipped leaves a cel showing its placeholder until the artist's own next edit repaints
+    /// it, which is harmless because that edit was always going to. Here the cel already carries a
+    /// tile, and dropping the render would leave the *previous* drawing on the timeline with nothing
+    /// scheduled to correct it — the quiet failure mode this whole section is arranged around.
+    /// Re-scheduling cannot spin: the debounce is 400 ms wide and a job only comes back if the cel
+    /// genuinely changed while it rendered, which is the same condition that would have scheduled one
+    /// anyway.
+    ///
+    /// Reached only from the `Task { @MainActor }` in `flushPendingThumbnailRegensDeferred`, which is
+    /// what puts it on the main thread; see `takePendingThumbnailRegenJobs` for why that is a
+    /// convention here rather than an annotation.
+    private func installRegeneratedThumbnails(_ images: [UIImage], from batch: ThumbnailRegenBatch) {
+        for (entry, image) in zip(batch.entries, images) {
+            guard let layerIndex = layers.firstIndex(where: { $0.id == entry.layerID }),
+                  let celIndex = layers[layerIndex].cels
+                      .firstIndex(where: { $0.id == entry.cel.id }) else { continue }
+            let live = layers[layerIndex].cels[celIndex]
+            let derived = derivedCelContent(for: live, atFrame: live.startFrame)
+            guard LayerContentVersion(cel: live, derived: derived?.identity) == entry.version else {
+                scheduleThumbnailRegen(layerID: entry.layerID, celID: entry.cel.id)
+                continue
+            }
+            PlaybackTrace.span(.thumbnailInstall, value: layers[layerIndex].cels.count) {
+                installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
+            }
+        }
+    }
+
+    /// One flush's worth of cels, with the content version each was captured at.
+    ///
+    /// `@unchecked Sendable` for `ThumbnailBatch`'s reason and with its one caveat: these `Cel`s point
+    /// at the *live* `RasterLayerTexture` and `VectorCanvas`, so what makes the render safe is those
+    /// types' own locks (see `PixelOps.parallelMap`) and what makes it *correct* is the version
+    /// comparison in `installRegeneratedThumbnails`.
+    private struct ThumbnailRegenBatch: @unchecked Sendable {
+        struct Entry {
+            /// The layer is carried as well as the cel because one flush can span layers — the
+            /// backfill's batch is one layer by construction and this one is not.
+            let layerID: UUID
+            let cel: Cel
+            let derived: DerivedCelContent?
+            let version: LayerContentVersion
+        }
+        let entries: [Entry]
+    }
+}

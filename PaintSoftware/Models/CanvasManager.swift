@@ -1519,7 +1519,13 @@ final class CanvasManager: ObservableObject {
         thumbnailRegenSubject
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { [weak self] in
-                self?.flushPendingThumbnailRegens()
+                // **Deferred, not synchronous** — PERFORMANCE.md §18. This sink is the one the artist
+                // pays for: it fires 400 ms after a stroke or an undo, and the flatten inside it was
+                // MEASURED at 25.4 ms per edit on the owner's iPad at 2048² and 73.7 ms at forty
+                // strokes a cel, on the main thread, which was both the largest term of an edit and
+                // the only one that grew with the drawing. See
+                // `flushPendingThumbnailRegensDeferred()`.
+                self?.flushPendingThumbnailRegensDeferred()
             }
             .store(in: &cancellables)
 
@@ -2725,17 +2731,30 @@ final class CanvasManager: ObservableObject {
         thumbnailRegenSubject.send(())
     }
 
-    /// Renders every queued thumbnail immediately and empties the queue. Called by the debounced
-    /// sink; also the escape hatch for anything that needs `Cel.thumbnail` guaranteed current right
-    /// now rather than up to 400 ms from now.
+    /// Renders every queued thumbnail immediately and empties the queue — **synchronously, on the
+    /// main actor**, which is the whole of its contract.
+    ///
+    /// **No longer what the debounced sink calls.** The sink goes through
+    /// `flushPendingThumbnailRegensDeferred()` (`CanvasManager+Document.swift`), which resolves here
+    /// and renders on a queue — PERFORMANCE.md §18. This spelling stays for the callers the doc
+    /// comment was always about: anything needing `Cel.thumbnail` guaranteed current *right now*
+    /// rather than one render from now, which is every bench that measures the flush and nothing on
+    /// the artist's path.
     func flushPendingThumbnailRegens() {
         PlaybackTrace.span(.thumbnailFlush) { flushPendingThumbnailRegensNow() }
     }
 
+    /// Empties the pending queue and hands back what was in it. **The single drain point**, so the
+    /// synchronous flush above and the deferred one cannot disagree about what "pending" means or
+    /// leave an entry behind for the other to find.
+    func takePendingThumbnailRegens() -> Set<CelLocation> {
+        defer { pendingThumbnailRegens.removeAll() }
+        return pendingThumbnailRegens
+    }
+
     private func flushPendingThumbnailRegensNow() {
-        guard !pendingThumbnailRegens.isEmpty else { return }
-        let pending = pendingThumbnailRegens
-        pendingThumbnailRegens.removeAll()
+        let pending = takePendingThumbnailRegens()
+        guard !pending.isEmpty else { return }
         for location in pending {
             guard let layerIndex = layers.firstIndex(where: { $0.id == location.layerID }),
                   let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == location.celID }) else { continue }

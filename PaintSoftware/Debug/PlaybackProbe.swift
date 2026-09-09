@@ -118,6 +118,8 @@ enum PlaybackProbe {
 
         var engagedWhilePlaying = false
         var operations: [String] = []
+        var footprint = FootprintTrack()
+        footprint.sample()
 
         PlaybackTrace.shared.start()
         switch mode {
@@ -134,9 +136,11 @@ enum PlaybackProbe {
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
-                                        settleMs: max(1, intArgument("-probeSettleMs", default: 1200)))
+                                        settleMs: max(1, intArgument("-probeSettleMs", default: 1200)),
+                                        footprint: { footprint.sample() })
         }
         PlaybackTrace.shared.stop()
+        footprint.sample()
 
         let rasterizes = VectorCanvas.totalRasterizations - rasterizesBefore
         let report = PlaybackTrace.shared.report()
@@ -173,7 +177,17 @@ enum PlaybackProbe {
             "onionSkinCompositeEdge": Int(OnionSkinBudget.compositeSize(
                 for: size, resolution: canvasManager.onionSkin.resolution).width),
             "ringResidentBytes": canvasManager.frameBaker.ring.byteCount,
-            "ringResidentFrames": canvasManager.frameBaker.ring.count
+            "ringResidentFrames": canvasManager.frameBaker.ring.count,
+            // **A footprint proxy, named as one** — see `PlaybackProbe.footprintBytes()`. Reported
+            // as the whole sample list as well as the summary, so a reader can see the shape rather
+            // than trust three numbers off a curve nobody plotted.
+            "footprintBytes": [
+                "atStart": footprint.first,
+                "peak": footprint.peak,
+                "atEnd": footprint.last,
+                "growth": footprint.growth,
+                "samples": footprint.samples
+            ]
         ]
 
         let intervals = report.ticks.map(\.intervalMs).filter { $0 > 0 }.sorted()
@@ -255,11 +269,15 @@ enum PlaybackProbe {
     /// operation's interval and every row is attributed to its successor.
     @MainActor
     private static func runEdits(_ canvasManager: CanvasManager, size: CGSize,
-                                 count: Int, settleMs: Int) async -> [String] {
+                                 count: Int, settleMs: Int,
+                                 footprint: @escaping () -> Void) async -> [String] {
         var names: [String] = []
         let settle = UInt64(settleMs) * 1_000_000
 
         func beat(_ name: String) async {
+            // **Before the mark, so the sample belongs to the settled state the operation starts
+            // from** rather than to whatever the previous one has in flight. See `FootprintTrack`.
+            footprint()
             PlaybackTrace.mark(.tick, value: names.count)
             names.append(name)
         }
@@ -417,5 +435,46 @@ enum PlaybackProbe {
         return withUnsafePointer(to: &info.machine) {
             $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
         }
+    }
+
+    // MARK: - Memory
+
+    /// The process's `phys_footprint`, which is the number jetsam is actually looking at.
+    ///
+    /// **It is a footprint proxy and this file says so where the number is written down**, per
+    /// CLAUDE.md: it includes the autorelease pool, every framework allocation and the simulator's
+    /// or device's own noise, so it answers *"is this bounded"* and not *"what did my change
+    /// allocate"*. It is here rather than in `PlaybackTrace` because it is sampled per **operation**,
+    /// which is a fact about the probe's script rather than about the runloop.
+    ///
+    /// Spelled exactly as `PerfBaselineTests`/`StrokeDensityBench` spell it, so a device figure and a
+    /// bench figure are the same measurement.
+    static func footprintBytes() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size
+                                           / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? UInt64(info.phys_footprint) : 0
+    }
+
+    /// Peak and final footprint across a run, sampled once per operation.
+    ///
+    /// Per operation rather than continuously, and the sample is taken **at the top of an operation's
+    /// interval**, after the previous one has settled — so a rise that persists is a rise the next
+    /// operation inherits, which is what "bounded" has to mean here. A sampler on a timer would read
+    /// transient peaks the artist never pays for twice.
+    struct FootprintTrack {
+        private(set) var samples: [UInt64] = []
+        mutating func sample() { samples.append(PlaybackProbe.footprintBytes()) }
+        var peak: UInt64 { samples.max() ?? 0 }
+        var first: UInt64 { samples.first ?? 0 }
+        var last: UInt64 { samples.last ?? 0 }
+        /// What the run *grew* by, which is the number a leak would show up in. Unsigned subtraction
+        /// traps, so this saturates at zero rather than wrapping when the run gives memory back.
+        var growth: Int64 { Int64(last) - Int64(first) }
     }
 }
