@@ -179,9 +179,16 @@ enum ProjectExport {
 
     // MARK: - Output
 
+    /// **Wiped at the start of every run, which is the cleanup as well as the freshness.** A name can
+    /// match many bundles — a project, its autosaves and its pre-update copies all carry the same
+    /// manifest title, so one `-exportName Test1` copied ten of them and left ~100 MB inside the
+    /// container. Leaving that to accumulate on a 3 GB device would be this tool taking storage from
+    /// the artist to answer a developer's question. So a run with no `-exportName` both writes the
+    /// index and clears the last run's copies, and there is nothing else to remember to do.
     private static func destinationDirectory() -> URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let directory = documents.appendingPathComponent("Export", isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
