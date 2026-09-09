@@ -8,6 +8,35 @@ import CoreGraphics
 /// way.
 enum UITestSeeds {
 
+    /// **Makes this simulator behave like the iPad that crashes, for the one number that decides
+    /// whether it does** — `-uiTestTextureBudgetBytes <n>`, armed from `PaintApp.init`.
+    ///
+    /// `CompositorBudget.textureBudgetBytes` is `ProcessInfo.processInfo.physicalMemory / 16`, and in
+    /// a simulator that reads the **Mac's** RAM: the budget comes out at the 768 MiB cap, every memo
+    /// in the app fits everything it is asked for, and the thrash the owner reported on 2026-09-08
+    /// cannot be reproduced at all. That is why it shipped, and it is why a UI test asserting *"a
+    /// frame flip costs no canvas-sized render"* was, without this, comparing a converged count with
+    /// itself: MEASURED on 2026-09-09, deleting the fix's own refusal left every assertion in
+    /// `PlaybackBakeUITests` green.
+    ///
+    /// **A byte count from the caller rather than a device name**, because the caller knows the
+    /// canvas it is about to create and this runs before there is one. The value that reproduces an
+    /// iPad 9 is `CompositorBudget.textureBytes(for: canvas) * 2` — 183.7 MB against 67.1 MB a render
+    /// at 4096² is two entries, and two entries is what the test wants whatever size it draws at.
+    ///
+    /// Simulator-only, on `honoursGalleryReset`'s rule and for a milder version of its reason: this
+    /// one destroys nothing, but a flag that silently made a *device* build composite under a
+    /// pretend budget would be a performance report about a machine that does not exist.
+    static func applyTextureBudgetOverrideIfRequested() {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestTextureBudgetBytes"),
+              args.index(after: flag) < args.endIndex,
+              let bytes = Int(args[args.index(after: flag)]), bytes > 0 else { return }
+        CompositorBudget.budgetOverrideBytes = bytes
+    }
+
     /// **VIDEO.md §8 stage 8's own gap.** Every video- or image-carrying element in this app is
     /// reached, for a real artist, through `PhotosPicker` — real system UI in a separate process
     /// that XCUITest cannot drive reliably, which is why `VideoImportLogicTests`'s own header says

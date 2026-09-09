@@ -30,6 +30,21 @@ final class PlaybackBakeUITests: PaintUITestCase {
     private let layerCount = 3
     private let frameCount = 2
 
+    /// **The launch this suite makes, and the second argument is what makes it a test at all.**
+    ///
+    /// A simulator reports the *Mac's* memory, so `CompositorBudget.textureBudgetBytes` comes out at
+    /// its 768 MiB cap — and at that budget the flat row's six canvas-sized renders all fit, the memo
+    /// converges after two laps, and *"a frame flip costs no canvas-sized render"* is true whether or
+    /// not anything refuses one. MEASURED 2026-09-09: with the fix's own refusal deleted, every
+    /// assertion below stayed green until this argument was added.
+    ///
+    /// `-uiTestTextureBudgetBytes` pins it to two renders of the app's default 2048² canvas, which is
+    /// an iPad 9 at 4096² to the entry: 183.7 MB against 67.1 MB a render.
+    private var launchArguments: [String] {
+        ["-resetGallery", "-uiTestSeedPlainAnimation",
+         "-uiTestTextureBudgetBytes", String(2048 * 2048 * 4 * 2)]
+    }
+
     private func attachScreen(_ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
@@ -60,7 +75,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
     /// scene cannot be frozen by this change: it simply stays at `off`.
     func testPlayingAPlainDocumentPutsTheCanvasOnTheBakedFrame() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetGallery", "-uiTestSeedPlainAnimation"]
+        app.launchArguments = launchArguments
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -90,9 +105,9 @@ final class PlaybackBakeUITests: PaintUITestCase {
         XCTAssertTrue(waitForInkBand(canvas),
                       "The canvas is at rest on the baked frame and there is no ink anywhere on it")
 
-        // Both counts are read at the instant the presentation changed, which is when the label was
-        // last published; `publishCanvasState` deliberately does not run on every pass (see
-        // `refreshBakedFull` for why a canvas at rest has a great many passes that change nothing).
+        // `publishCanvasState` runs at the end of every `reconcileLayers` and writes only when the
+        // string moved, so these are current rather than whenever the presentation last changed —
+        // which it had to become before any of these comparisons meant anything.
         let rebuildsAtEngage = try XCTUnwrap(field(app, "rebuilds"), "the canvas publishes `rebuilds:`")
         let rasterizesAtEngage = try XCTUnwrap(field(app, "rasterizes"), "the canvas publishes `rasterizes:`")
 
@@ -129,50 +144,56 @@ final class PlaybackBakeUITests: PaintUITestCase {
 
     }
 
-    /// **Every layer comes back to the cel under the playhead when the composite lets go**, which is
-    /// the correctness half of "a blanked host does not rasterize".
+    /// **Every layer comes back to the cel under the playhead the moment the composite lets go**,
+    /// which is the correctness half of "a blanked host does not rasterize".
     ///
     /// Declining a render leaves the base slot holding the *previous* cel's picture, and
-    /// `refreshDisplayIfStale` compares version numbers that are **per canvas** — two cels can sit at
-    /// the same version by coincidence, so a host that recorded its declined version as displayed
-    /// would show one cel's ink on another's frame, permanently, and no count anywhere would move.
-    /// Two things stop that and both are exercised here: `refreshDisplay` records
+    /// `refreshDisplayIfStale` compares version numbers that are **per canvas** — the seed's six cels
+    /// each carry one stroke, so all six sit at the same version, and a host that recorded its
+    /// declined version as displayed would answer "already showing that" about a completely
+    /// different cel. Two things stop that and both are exercised here: `refreshDisplay` records
     /// `nothingDisplayed` when it declines, and `LayerHostView.setBlanked` asks for a repaint on the
     /// un-blanking edge — which nothing else would, because `updateSandwich`'s disengage branch
     /// un-blanks every host and returns.
     ///
-    /// **The assertion is that the two frames look different**, not that a particular row is ink.
-    /// The seed puts each layer's two cels on different rows, so a canvas showing stale content
-    /// shows the *same* three rows on both frames; that is a comparison between two measurements of
-    /// the running app rather than against a coordinate this test would have to derive from the
-    /// canvas's fit transform.
-    func testStoppingPlaybackReturnsEveryLayerToTheCelUnderThePlayhead() {
+    /// **The assertion is against the same app's own answer for that frame**, measured before any
+    /// playback, rather than against a coordinate this test would have to derive from the canvas's
+    /// fit transform. And it is taken **without stepping the playhead afterwards**, because a step
+    /// changes the cel and `vectorCanvas`'s `didSet` repaints unconditionally — which would hide
+    /// exactly the defect this test is for.
+    func testStoppingPlaybackLeavesEveryLayerShowingTheFrameItStoppedOn() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetGallery", "-uiTestSeedPlainAnimation"]
+        app.launchArguments = launchArguments
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
+        // The truth for each frame, from the app itself, before anything is engaged.
+        app.buttons["timeline.toStartButton"].tap()
+        let first = waitForRowSignature(canvas)
+        app.buttons["timeline.stepForwardButton"].tap()
+        let second = waitForRowSignature(canvas, differingFrom: first)
+        XCTAssertNotEqual(first, second,
+                          "Setup: the seed's two frames have to draw different rows (\(first)), or "
+                          + "nothing below can tell a stale picture from a correct one")
+        attachScreen("01-the-two-frames-before-playback")
+
         let play = app.buttons["timeline.playButton"]
-        XCTAssertTrue(play.waitForExistence(timeout: 5))
         play.tap()
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "Setup: the canvas has to engage"))
         Thread.sleep(forTimeInterval: 2)
         play.tap()
         XCTAssertEqual(sandwichState(app), "off", "Setup: stopping disengages")
 
-        app.buttons["timeline.toStartButton"].tap()
-        let atFrame0 = waitForRowSignature(canvas)
-        attachScreen("01-frame-0-after-playback")
-
-        app.buttons["timeline.stepForwardButton"].tap()
-        let atFrame1 = waitForRowSignature(canvas)
-        attachScreen("02-frame-1-after-playback")
-
-        XCTAssertNotEqual(atFrame0, atFrame1,
-                          "Both frames drew the same rows (\(atFrame0)). Every layer's two cels are "
-                          + "on different rows, so this is a canvas still showing whichever cel each "
-                          + "host was holding when the composite blanked it")
+        let stopped = try XCTUnwrap(readFrameLabel(app)?.current, "the timeline publishes the frame")
+        let expected = stopped == 1 ? first : second
+        let settled = waitForRowSignature(canvas, matching: expected)
+        attachScreen("02-stopped-on-frame-\(stopped)")
+        XCTAssertEqual(settled, expected,
+                       "Playback stopped on frame \(stopped) and the canvas is drawing \(settled) "
+                       + "where that frame is \(expected). Every host was blanked a moment ago and "
+                       + "declined its render; coming back it has to repaint, and it cannot decide "
+                       + "that by comparing a version number it recorded against another cel's")
     }
 
     /// **A hidden layer costs nothing to step past** — TODO (58), reported by the owner 2026-09-08:
@@ -192,7 +213,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
     /// canvas on the flat row, so hidden-ness is the only thing under test.
     func testSteppingPastHiddenLayersCostsNoCanvasSizedRender() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetGallery", "-uiTestSeedPlainAnimation"]
+        app.launchArguments = launchArguments
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -232,7 +253,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
     /// whole session — RENDER.md §5.2's *"a document with no blend modes anywhere cannot regress"*.
     func testAnOrdinaryStrokeOnAPlainDocumentNeverEngagesTheCompositor() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetGallery", "-uiTestSeedPlainAnimation"]
+        app.launchArguments = launchArguments
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -270,14 +291,22 @@ final class PlaybackBakeUITests: PaintUITestCase {
     /// all-paper canvas is `......`, both frames answer the same, and the caller's `XCTAssertNotEqual`
     /// reddens with the signatures printed. A `XCTFail` here would report the symptom one level away
     /// from the comparison that gives it meaning, and an `XCTSkip` would report it as nothing at all.
-    private func waitForRowSignature(_ canvas: XCUIElement, timeout: TimeInterval = 10) -> String {
+    private func waitForRowSignature(_ canvas: XCUIElement, timeout: TimeInterval = 10,
+                                     matching wanted: String? = nil,
+                                     differingFrom previous: String? = nil) -> String {
         let deadline = Date().addingTimeInterval(timeout)
         var signature = ""
         repeat {
             signature = Self.rows
                 .map { isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: $0)) ? "." : "#" }
                 .joined()
-            if signature.contains("#") { return signature }
+            if let wanted {
+                if signature == wanted { return signature }
+            } else if let previous {
+                if signature.contains("#"), signature != previous { return signature }
+            } else if signature.contains("#") {
+                return signature
+            }
             Thread.sleep(forTimeInterval: 0.2)
         } while Date() < deadline
         return signature

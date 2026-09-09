@@ -10,6 +10,11 @@ struct PaintApp: App {
         // every open, so a file left from the previous launch is a digest whose meaning is gone.
         // It is one `removeItem` on a Caches directory, not a walk.
         FrameBakeStore.purgeEverything()
+        // Inert unless an XCUITest passed `-uiTestTextureBudgetBytes`, and simulator-only. First,
+        // because every memo in the app reads this number and one of them is filled before the first
+        // frame is drawn. See `UITestSeeds` for why a simulator cannot otherwise reproduce the
+        // owner's device at all on this axis.
+        UITestSeeds.applyTextureBudgetOverrideIfRequested()
         // TODO (36): resolve the artist's chosen projects folder **before** anything reads
         // `ProjectBackupManager.documentsDirectory`. Synchronous and on the main thread on purpose —
         // it is one bookmark resolve, and every line below this one asks where the library is. The
