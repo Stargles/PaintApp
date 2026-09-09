@@ -1223,4 +1223,100 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertNil(manager.onionSkinInkRequest(at: size),
                      "In Front subtracts nothing, so there is nothing to resolve or to render")
     }
+
+    // MARK: - Playback hides it (the owner's ruling, 2026-09-09)
+    //
+    // > *"Hide it during playback"*
+    //
+    // Ghosts drawn over a playing animation are clutter rather than reference, and every one of them
+    // is a skin-sized composite on a background core that is already baking the next frame —
+    // MEASURED on the owner's iPad 9 at 2048² through `PlaybackProbe`: `onionComposite` 37.6 ms and
+    // `onionInk` 31.0 ms per operation, off the main thread since §17 but not free.
+
+    /// **The ruling, at one frame, with `isPlaying` as the only thing that differs between the three
+    /// readings.**
+    ///
+    /// The playhead is put back to frame 8 after `play()` — which moves it to the playback entry
+    /// frame — precisely so that this test is about playback being *engaged* and not about where the
+    /// playhead ended up. The first assertion is the premise: there really is a ghost at frame 8 to
+    /// hide, so the empty answer in the middle is a refusal rather than a document with nothing in it.
+    func testEngagingPlaybackHidesTheOnionSkinAndStoppingItBringsItBack() {
+        let manager = twoCelManager()
+        assertCelsAreDistinguishable(manager)
+        manager.currentFrame = 8
+        let source = OnionSkinSettingsSource()
+
+        let atRest = source.visibleFrames(for: manager)
+        XCTAssertEqual(atRest.count, 1,
+                       "the fixture shows \(atRest.count) skins at rest where one was wanted — with "
+                       + "nothing to hide, the assertion below could not fail")
+
+        manager.play()
+        manager.currentFrame = 8
+        XCTAssertTrue(manager.isPlaying,
+                      "`play()` did not engage playback, so the next assertion is about a stopped "
+                      + "document and proves nothing")
+        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
+                      "the onion skin still resolved to \(source.visibleFrames(for: manager).count) "
+                      + "skin(s) while the animation was playing — the owner asked for it hidden, and "
+                      + "each one is a skin-sized composite drawn over the frames they are watching")
+
+        manager.stopPlayback()
+        XCTAssertEqual(manager.currentFrame, 8,
+                       "stopping playback moved the playhead, so the reading below is at a different "
+                       + "frame from the one at rest and the comparison is not like for like")
+        XCTAssertEqual(source.visibleFrames(for: manager).count, atRest.count,
+                       "the onion skin did not come back when playback stopped: the ghosts are "
+                       + "supposed to disappear on play and return on stop, not disappear for good")
+    }
+
+    /// **The rule is on the protocol, so a source that has never heard of playback obeys it.**
+    ///
+    /// This is the structural claim rather than a second copy of the one above: `visibleFrames` is a
+    /// protocol extension, and a source written next year gets the ruling for free. `AlwaysOneSkin`
+    /// answers unconditionally, so if the guard were moved into the two shipped conformances instead
+    /// this test would go red while the app still looked right — which is exactly what it is for.
+    func testAnySourceIsHiddenByPlayback() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        let source = AlwaysOneSkin()
+
+        XCTAssertEqual(source.visibleFrames(for: manager).count, 1,
+                       "the stub source answers one skin unconditionally; if it does not, nothing "
+                       + "below is measuring the protocol")
+
+        manager.play()
+        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
+                      "a source that knows nothing about playback still drew a skin while the "
+                      + "animation was playing, so the rule is not on the protocol")
+
+        manager.stopPlayback()
+        XCTAssertEqual(source.visibleFrames(for: manager).count, 1,
+                       "the stub source stayed hidden after playback stopped")
+    }
+
+    /// **The artist's own toggle still wins, and playback is a second reason rather than a
+    /// replacement for the first.** Without this, a `showsOnionSkin` that read only `isPlaying`
+    /// would pass every assertion above while ignoring the button in the timeline.
+    func testTurningTheOnionSkinOffStillHidesItWhileStopped() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        let source = OnionSkinSettingsSource()
+
+        XCTAssertFalse(manager.isPlaying, "the fixture is not stopped, so this says nothing about "
+                       + "the toggle")
+        manager.isOnionSkinEnabled = false
+
+        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
+                      "the onion skin drew with the artist's own toggle off")
+    }
+
+    /// Answers one skin whatever it is handed — a source that has never heard of playback, used by
+    /// `testAnySourceIsHiddenByPlayback` to hold the rule against the protocol rather than against
+    /// the two conformances that ship.
+    private struct AlwaysOneSkin: OnionSkinSource {
+        func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
+            [OnionSkinFrame(image: UIImage(), opacity: 1, tint: nil)]
+        }
+    }
 }

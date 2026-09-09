@@ -2701,7 +2701,11 @@ struct CanvasView: UIViewRepresentable {
             let source: OnionSkinSource = canvasManager.isInterpolateMode
                 ? InterpolationReferenceOnionSkinSource()
                 : onionSkinSource
-            let frames = PlaybackTrace.span(.onionFrames) { source.frames(for: canvasManager) }
+            // **`visibleFrames`, never `frames`** — the moment's rules (today: the owner's *"hide it
+            // during playback"*) are decided once, on the protocol, so a source cannot forget one.
+            // An empty answer falls into the `blank()` below, which hides the view *and* drops the
+            // skin-sized images, so a playing animation neither draws ghosts nor holds their pixels.
+            let frames = PlaybackTrace.span(.onionFrames) { source.visibleFrames(for: canvasManager) }
             guard !frames.isEmpty, let canvasSize = canvasManager.canvasSize else { return blank() }
 
             // **§6.4's mask, applied to the ghost as well as to the artwork.** BUGS.md's
@@ -2820,8 +2824,11 @@ struct CanvasView: UIViewRepresentable {
                 onionSkinClipImage = clip
             }
             guard onionRebuildWasDeclined else {
+                // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real
+                // race rather than tidiness: a rebuild in flight when the artist presses play would
+                // otherwise put its ghost on screen *after* `blank()` had taken the last one off.
                 if let view = onionSkinView, let canvasSize = canvasManager.canvasSize,
-                   canvasManager.isOnionSkinEnabled {
+                   canvasManager.showsOnionSkin {
                     applyOnionSkin(to: view, canvasSize: canvasSize)
                 }
                 return

@@ -1164,6 +1164,25 @@ final class CanvasManager: ObservableObject {
         }
     }
     @Published var isOnionSkinEnabled: Bool = true
+
+    /// **Whether a ghost should be on screen at this instant** — the artist's toggle, and the one
+    /// rule that is about *when* rather than about what.
+    ///
+    /// The owner, 2026-09-09, asked what the onion skin should do while the animation plays:
+    /// *"Hide it during playback"*. Ghosts go when play is pressed and come back when it stops.
+    ///
+    /// **Not merely cosmetic, and the cost is on a background core rather than this one.** §17 gave
+    /// the ghost its own queue, so it costs the main thread nothing now; what it still costs is
+    /// MEASURED at 37.6 ms of `onionComposite` and 31.0 ms of `onionInk` per operation on the
+    /// owner's iPad 9 at 2048² — real work on a two-big-core A13 that is already running the baker,
+    /// and during playback it is spent drawing neighbouring drawings *over the animation the artist
+    /// is watching*. Hiding it also lets `updateOnionSkin`'s `blank()` drop the skin-sized images,
+    /// which is memory handed back at exactly the moment the frame ring wants it.
+    ///
+    /// Consumed through `OnionSkinSource.visibleFrames(for:)`, which is what makes it true of every
+    /// source rather than of the two that exist today.
+    var showsOnionSkin: Bool { isOnionSkinEnabled && !isPlaying }
+
     /// Everything the onion-skin panel configures — how many skins, which side, how they are tinted
     /// and how opaque each one is. See `OnionSkinSettings`.
     ///

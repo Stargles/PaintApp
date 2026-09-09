@@ -8,6 +8,27 @@ protocol OnionSkinSource {
     func frames(for manager: CanvasManager) -> [OnionSkinFrame]
 }
 
+extension OnionSkinSource {
+
+    /// **What to draw, as opposed to what this source is about** — `frames(for:)` filtered by the
+    /// rules that belong to the moment rather than to the drawing.
+    ///
+    /// There is one such rule and it is the owner's, 2026-09-09: the onion skin is hidden while the
+    /// animation plays (`CanvasManager.showsOnionSkin`). Ghosts drawn over a playing animation are
+    /// not a reference, they are clutter — and every one of them costs a skin-sized composite on a
+    /// background core that is already baking the next frame.
+    ///
+    /// **It lives on the protocol rather than in each conformance, and that is the point.** Both
+    /// sources would have to remember the rule, and a third — this protocol exists precisely because
+    /// interpolate mode answers the same question from different inputs, so there will be a third —
+    /// would have to be told. Here it is structural: a source answers what it is about, and *when* is
+    /// decided once. The Coordinator calls this and never `frames(for:)`.
+    func visibleFrames(for manager: CanvasManager) -> [OnionSkinFrame] {
+        guard manager.showsOnionSkin else { return [] }
+        return frames(for: manager)
+    }
+}
+
 /// One image to composite into the onion-skin layer.
 struct OnionSkinFrame {
     let image: UIImage
