@@ -589,6 +589,15 @@ nonisolated enum ProjectBackupManager {
     struct ManifestSkeleton: Decodable {
         var id: UUID
         var layers: [Layer]
+        /// Mirrors `ProjectManifest.name` — the project's title, which since TODO (57) part 2 is what
+        /// the package *directory* is named after.
+        ///
+        /// **Optional, where `ProjectManifest.name` is not**, for `Cel.id`'s reason one door over:
+        /// this struct decodes less than the manifest holds rather than more, several logic-test
+        /// fixtures hand-build a manifest with no `name` key at all, and a required field would take
+        /// them red for nothing. Nil means only that the launch pass leaves that package's directory
+        /// name alone — there is no title to reconcile it against.
+        var name: String?
         /// Mirrors `ProjectManifest.brushTableFileName` — BRUSH.md §5.4. It is checked for the reason
         /// `vectorFileName` is: without it every stroke in the package names a brush that cannot be
         /// resolved, so the package's ink is gone. Unlike the recipe sidecar this is not a link whose
@@ -757,6 +766,26 @@ nonisolated enum ProjectBackupManager {
 
     private static func writeOriginMarker(directory: URL, projectFileName: String) {
         try? projectFileName.write(to: directory.appendingPathComponent("origin.name"), atomically: true, encoding: .utf8)
+    }
+
+    /// **Points a project's backup folder at the name its package is about to have** — TODO (57)
+    /// part 2, called by the launch rename pass *before* it moves the directory.
+    ///
+    /// `origin.name` is the fallback `backupDirectory(forProjectAt:)` uses when a package's manifest
+    /// has become unreadable, and it is `purgeExpiredTrash`'s history key. It records the package's
+    /// filename at the moment some backup slot was minted and is otherwise never rewritten, so a
+    /// directory rename would strand it — the one case where the fallback matters is exactly the one
+    /// where the primary manifest-id lookup cannot answer.
+    ///
+    /// **Written before the move, and only into a folder that already exists.** Before, because a
+    /// crash between the two leaves a marker naming a package that is about to appear rather than one
+    /// that has already gone; and `backupsDirectory(projectID:)` *creates* the folder it names, which
+    /// would leave an empty `Backups/<uuid>/` behind for every project that has never been saved by
+    /// this build.
+    static func noteProjectRenamed(projectID: UUID, to projectFileName: String) {
+        let dir = backupsRootDirectory.appendingPathComponent(projectID.uuidString, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return }
+        writeOriginMarker(directory: dir, projectFileName: projectFileName)
     }
 
     /// "<base>__<tag>__<yyyyMMdd-HHmmss>" -> (base, tag, date). The base may itself contain "__".

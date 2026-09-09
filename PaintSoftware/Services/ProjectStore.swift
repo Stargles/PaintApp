@@ -678,14 +678,26 @@ enum ProjectStore {
         // package rather than damaging the old one, but losing the user's last edits is still worth
         // avoiding. `.invalid` (assertion refused) is handled rather than assumed away.
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ProjectStore.save")
+        // **The artist has this package open** — TODO (57) part 2. Registered here rather than in
+        // `writeAtomically` so it is on the main actor and ordered against the artist's own actions,
+        // and it is what stops the launch pass renaming a package out from under a save in flight.
+        PackageRenameGate.noteOpen(url)
 
         saveQueue.async {
-            let succeeded = writeAtomically(snapshot, to: url,
+            let landed = writeAtomically(snapshot, to: url,
                             destination: decision == .writeAside ? .versionSlot : .liveProject,
                             startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
-                if !succeeded {
+                if landed == nil {
                     onSaveFailed?()
+                }
+                // **Before `completion`, which is "now show the gallery"** — TODO (57) part 2. A save
+                // that renamed the package to follow its title has left `canvasManager.projectURL`
+                // naming a directory that no longer exists; the next save would then stage beside the
+                // new name and swap into the *old* one, resurrecting an orphan. `.versionSlot` is
+                // excluded because its landing is a backup slot, not the project.
+                if let landed, landed != url, decision != .writeAside {
+                    canvasManager.projectURL = landed
                 }
                 completion?()
                 if backgroundTask != .invalid {
@@ -723,23 +735,39 @@ enum ProjectStore {
     /// character — a crash or kill at any point still leaves either the complete old package or the
     /// complete new one on disk, never a partial one.
     ///
-    /// Returns whether the package actually landed. The three `return false`s below used to be bare
-    /// `return`s — the save silently did nothing and `save`'s completion ran regardless, which is
-    /// ARCHITECTURE_REVIEW.md finding 3.
+    /// Returns **the URL the package actually landed at**, or nil if it did not land. It used to
+    /// return `Bool`; the three `nil`s below used to be bare `return`s — the save silently did
+    /// nothing and `save`'s completion ran regardless, which is ARCHITECTURE_REVIEW.md finding 3.
+    /// The URL is TODO (57) part 2: a save may now rename the package to follow its title, and
+    /// `CanvasManager.projectURL` has to learn where it went in the same stroke (see `save`).
     @discardableResult
     private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL,
                                         destination: WriteDestination = .liveProject,
                                         startedAt saveStarted: CFAbsoluteTime,
-                                        snapshotSeconds: Double) -> Bool {
+                                        snapshotSeconds: Double) -> URL? {
         let fm = FileManager.default
         // Minted here rather than by the caller so it is chosen on `saveQueue` — it lists a directory
         // to pick a free name, and the caller is the artist's own thread.
-        let target: URL
+        let stagedTarget: URL
         switch destination {
-        case .liveProject: target = url
-        case .versionSlot: target = ProjectBackupManager.unsavedChangesSlotURL(projectURL: url,
-                                                                              projectID: snapshot.projectID)
+        case .liveProject: stagedTarget = url
+        case .versionSlot: stagedTarget = ProjectBackupManager.unsavedChangesSlotURL(projectURL: url,
+                                                                                     projectID: snapshot.projectID)
         }
+        // **Did the title change in *this* save?** — TODO (57) part 2, the narrow trigger, and it is
+        // narrow on purpose. The owner's complaint is exactly "the folder does not change when the
+        // project name is changed", so the event to catch is the change: the name in the package's
+        // own on-disk manifest against the name in the snapshot. A first save has no on-disk manifest
+        // and needs no rename (the name was just minted from the title by `createNewProjectURL`), and
+        // a save that did not retitle anything renames nothing — which is also what keeps this out of
+        // the forty-odd existing tests that save a manager titled "Untitled" to a URL called
+        // `Damaged.paintproj` and then read that path back.
+        //
+        // The *broad* question — "is the stem an acceptable rendering of the title today?" — belongs
+        // to the launch pass, which has to ask it because a project retitled under an older build has
+        // no change event left to catch. See `ProjectPackageLayout.tidy` step 3.
+        let titleChanged = destination == .liveProject
+            && loadManifest(at: url).map { $0.name != snapshot.projectName } == true
         // Read here rather than inside the walk, for `decodeCels`' reason one direction over: the
         // walk may recruit its caller as a worker, so asking inside an iteration would sometimes
         // answer for a pool thread, and the question is about the caller.
@@ -751,7 +779,9 @@ enum ProjectStore {
         // sub-folder. The swap below is a rename, and a rename is only cheap and atomic within one
         // directory; staging at the root and renaming into `Projects/Scene 3/` would still work on
         // one volume but stops being a guarantee the moment it is not.
-        let stageURL = target.deletingLastPathComponent()
+        // A (57) rename never leaves the package's own parent directory, so staging beside `url` is
+        // still staging beside wherever the swap will aim.
+        let stageURL = stagedTarget.deletingLastPathComponent()
             .appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
         try? fm.removeItem(at: stageURL)
         let packageStarted = CFAbsoluteTimeGetCurrent()
@@ -786,41 +816,82 @@ enum ProjectStore {
         // in Trash for diagnosis.
         guard ProjectBackupManager.validateProject(at: stageURL) else {
             _ = ProjectBackupManager.moveToTrash(stageURL, tag: "failedsave")
-            return false
+            return nil
         }
 
-        // Stash the live package as an autosave restore point, then swap in the new one. A version
-        // slot skips the stash: it is a name nothing occupies, and the live package — which is the
-        // damaged original the artist has not yet ruled on — is precisely what this write exists not
-        // to touch.
-        if destination == .liveProject {
-            guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
-                try? fm.removeItem(at: stageURL)
-                return false
-            }
-        }
-        do {
-            try fm.moveItem(at: stageURL, to: target)
-        } catch {
-            // Swap failed: put the stashed package back so the project is never missing. Nothing was
-            // stashed for a version slot, and the project package was never moved out of the way, so
-            // there is nothing to undo — restoring here would move a *backup* over a live project
-            // that is perfectly fine.
+        /// Stash the live package as an autosave restore point, then swap in the new one, returning
+        /// where it landed. A version slot skips the stash: it is a name nothing occupies, and the
+        /// live package — which is the damaged original the artist has not yet ruled on — is
+        /// precisely what this write exists not to touch.
+        func commitSwap(to target: URL) -> URL? {
             if destination == .liveProject {
-                _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
+                guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
+                    try? fm.removeItem(at: stageURL)
+                    return nil
+                }
+                // **The rename's own restore point, and it is not decoration** — TODO (57) part 2.
+                // `saveQueue` is serial, but `ContentView.saveIfNeeded` reads
+                // `canvasManager.projectURL` on the main actor *before* the previous save's
+                // completion has updated it, so two overlapping saves can arrive with a stale `url`.
+                // `reconciled`'s "a package carrying my own id is me" clause then aims the second
+                // save at the first one's landing, and this line makes that occupant a restore point
+                // instead of something the `moveItem` below destroys.
+                if target != url, fm.fileExists(atPath: target.path) {
+                    _ = ProjectBackupManager.stashLiveProjectForSave(projectURL: target,
+                                                                     projectID: snapshot.projectID)
+                }
             }
-            try? fm.removeItem(at: stageURL)
-            return false
+            do {
+                try fm.moveItem(at: stageURL, to: target)
+            } catch {
+                // Swap failed: put the stashed package back so the project is never missing. Nothing
+                // was stashed for a version slot, and the project package was never moved out of the
+                // way, so there is nothing to undo — restoring here would move a *backup* over a live
+                // project that is perfectly fine.
+                if destination == .liveProject {
+                    _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
+                }
+                try? fm.removeItem(at: stageURL)
+                return nil
+            }
+            return target
         }
+
+        let landed: URL?
+        switch destination {
+        case .liveProject:
+            // **Under `PackageRenameGate`, and the reconcile is re-run here rather than reused** —
+            // TODO (57) part 2. The answer computed before `writePackage` is potentially seconds old
+            // by now (the encode is cel-count-scaled), and in that time another save can have taken
+            // the name this one was aiming at. The gate is the part that matters: it is the shared
+            // mutual-exclusion point between this rename and the launch pass's, and it is what makes
+            // the registry follow the package to its new name in the same critical section as the
+            // `moveItem`. See that type for the two-package fork neither check alone prevents.
+            landed = PackageRenameGate.renamingOpenPackage(from: url) {
+                guard titleChanged,
+                      let renamed = ProjectPackageName.reconciled(url, title: snapshot.projectName,
+                                                                  projectID: snapshot.projectID) else {
+                    return commitSwap(to: url)
+                }
+                return commitSwap(to: renamed)
+            }
+        case .versionSlot:
+            // No gate and no rename: a version slot leaves the live package exactly where it is, so
+            // there is nothing here for the launch pass to race with and nothing for the registry to
+            // follow.
+            landed = commitSwap(to: stagedTarget)
+        }
+        guard let landed else { return nil }
 
         // Restore points: `latest` = exact copy of this save; autos rotated by count. `latest` means
         // "the last state the project file was actually in", so a version slot must not refresh it —
-        // the project file did not change.
+        // the project file did not change. **`landed`, not `url`**: after a rename the project file
+        // is the one that just appeared under the new name.
         if destination == .liveProject {
-            ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: snapshot.projectID)
+            ProjectBackupManager.refreshLatestSnapshot(projectURL: landed, projectID: snapshot.projectID)
         }
         ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
-        return true
+        return landed
     }
 
     /// Writes the complete project package at `url` (used by `writeAtomically` to stage the package
@@ -1317,6 +1388,10 @@ enum ProjectStore {
     @MainActor
     static func load(from url: URL) -> CanvasManager? {
         let loadStarted = CFAbsoluteTimeGetCurrent()
+        // TODO (57) part 2: the artist is opening this package, so the launch rename pass must
+        // leave its directory name alone for the rest of this process. Registered before the
+        // manifest read, which is the earliest this call knows which URL it is about to work on.
+        PackageRenameGate.noteOpen(url)
         guard let manifest = loadManifest(at: url) else { return nil }
         let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
         let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize)
@@ -1343,6 +1418,10 @@ enum ProjectStore {
     /// would cost more than it saves.
     static func loadInBackground(from url: URL) async -> CanvasManager? {
         let loadStarted = CFAbsoluteTimeGetCurrent()
+        // TODO (57) part 2: the artist is opening this package, so the launch rename pass must
+        // leave its directory name alone for the rest of this process. Registered before the
+        // manifest read, which is the earliest this call knows which URL it is about to work on.
+        PackageRenameGate.noteOpen(url)
         guard let manifest = loadManifest(at: url) else { return nil }
         let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
         let decoded: Transfer<DecodedCels> = await withCheckedContinuation { continuation in

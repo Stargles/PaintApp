@@ -379,7 +379,19 @@ struct GalleryView: View {
         guard openState.begin(project.id) else { return }
         Task { @MainActor in
             await Task.yield()
-            let manager = await ProjectStore.loadInBackground(from: project.url)
+            var manager = await ProjectStore.loadInBackground(from: project.url)
+            // **The one window TODO (57) part 2's rename leaves open, and six lines close it.** The
+            // launch pass renames a package's directory to follow its title while the gallery is on
+            // screen holding a listing taken before it; a tile tapped in that gap names a URL that no
+            // longer exists, `loadInBackground` returns nil at its manifest read, and the artist gets
+            // nothing at all. Re-list and try once more at whatever URL the *same project id* is at
+            // now — id, not name, because the name is precisely what changed.
+            if manager == nil {
+                refresh()
+                if let moved = projects.first(where: { $0.id == project.id && $0.url != project.url }) {
+                    manager = await ProjectStore.loadInBackground(from: moved.url)
+                }
+            }
             // Unconditional, and before the screen switch: a package that fails to decode returns nil
             // and leaves the artist in the gallery, which must not be a gallery stuck behind a
             // spinner. See `GalleryOpenState`.

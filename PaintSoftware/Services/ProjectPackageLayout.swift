@@ -183,9 +183,11 @@ nonisolated enum ProjectPackageLayout {
 
     /// What one package's `tidy` did.
     enum TidyOutcome: Equatable {
-        /// At least one sidecar moved out of `images/`. Carries the package's URL.
+        /// At least one sidecar moved out of `images/`, or the directory was renamed to follow the
+        /// title. Carries the package's URL **as it is now**, which is the new one after a rename.
         case tidied(URL)
-        /// Nothing to do: already in the new layout, or a raster-only document with no sidecars.
+        /// Nothing to do: already in the new layout under the right name, or a raster-only document
+        /// with no sidecars whose directory already says what the project is called.
         case unchanged
         /// The manifest could not be read, so nothing was touched. The repair pass owns this package.
         case skippedDamaged
@@ -202,11 +204,14 @@ nonisolated enum ProjectPackageLayout {
         var skippedForeignVolume = 0
         /// Individual sidecars renamed out of `images/`.
         var movedFiles = 0
+        /// Package directories whose name was made to follow their title — TODO (57) part 2. The
+        /// **new** `lastPathComponent` of each, which is what the gallery will list.
+        var renamed: [String] = []
         /// Package ids seen more than once in one walk — see `tidyEveryProject`.
         var duplicateProjectIDs: [String] = []
         var seconds: Double = 0
 
-        var isEmpty: Bool { tidied.isEmpty && movedFiles == 0 }
+        var isEmpty: Bool { tidied.isEmpty && movedFiles == 0 && renamed.isEmpty }
         static let empty = Report()
     }
 
@@ -275,6 +280,7 @@ nonisolated enum ProjectPackageLayout {
                     seenIDs[id] = url
                 }
             }
+            if let renamedTo = pass.renamedTo { report.renamed.append(renamedTo) }
             switch pass.outcome {
             case .tidied(let tidied):
                 report.tidied.append(tidied.lastPathComponent)
@@ -288,7 +294,8 @@ nonisolated enum ProjectPackageLayout {
         if !report.isEmpty || report.skippedDamaged > 0 || report.skippedForeignVolume > 0 {
             log.info("""
                 Project layout pass: \(report.tidied.count, privacy: .public) tidied \
-                (\(report.movedFiles, privacy: .public) sidecars moved), \
+                (\(report.movedFiles, privacy: .public) sidecars moved, \
+                \(report.renamed.count, privacy: .public) directories renamed to follow their title), \
                 \(report.unchanged, privacy: .public) already tidy, \
                 \(report.skippedDamaged, privacy: .public) skipped as damaged, \
                 \(report.skippedForeignVolume, privacy: .public) skipped on a root this pass will not \
@@ -304,6 +311,8 @@ nonisolated enum ProjectPackageLayout {
         var outcome: TidyOutcome
         var projectID: UUID?
         var movedFiles = 0
+        /// The package directory's new `lastPathComponent`, when TODO (57) part 2's rename fired.
+        var renamedTo: String?
     }
 
     /// One package, moved into the new layout in place.
@@ -320,6 +329,7 @@ nonisolated enum ProjectPackageLayout {
     ///
     /// | killed during | on disk | what the app does |
     /// |---|---|---|
+    /// | the directory rename | one name or the other, both complete packages | opens normally; `origin.name` already names the new one |
     /// | a sidecar move | the file at `images/` **or** at `drawings/`, never neither, never both | the reader probes `images/` then `drawings/`; the cel loads whole |
     /// | between moves | some moved, some not, manifest still bare | every file resolves; the next run moves the rest |
     /// | the manifest write | the old manifest or the new one, never a partial one (`.atomic`) | old manifest + moved files still resolves via the alternate address |
@@ -331,11 +341,13 @@ nonisolated enum ProjectPackageLayout {
 
     private static func tidy(packageAt url: URL, migrating: Bool) -> PackagePass {
         let fm = FileManager.default
+        // Reassigned by the directory rename in step 5, so every path below is derived from it rather
+        // than captured before it.
+        var url = url
 
         // 1. One manifest read, which is all a package already in the new layout ever costs. It is
         //    used by the work scan, by the move walk, and as the compare-and-swap's baseline.
-        let manifestURL = url.appendingPathComponent("manifest.json")
-        guard let originalBytes = try? Data(contentsOf: manifestURL),
+        guard let originalBytes = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
               let skeleton = try? JSONDecoder().decode(ProjectBackupManager.ManifestSkeleton.self,
                                                        from: originalBytes) else {
             return PackagePass(outcome: .skippedDamaged)
@@ -358,20 +370,71 @@ nonisolated enum ProjectPackageLayout {
                 }
             }
         }
-        guard !work.isEmpty else { return PackagePass(outcome: .unchanged, projectID: projectID) }
+
+        // 3. Does the directory name still say what the project is called? — TODO (57) part 2, the
+        //    backlog half. A project retitled under a build that shipped before this one has no "the
+        //    title changed in this save" event left for the save path to catch, so the launch pass
+        //    asks the broad question instead: *is this stem an acceptable rendering of the title
+        //    today?* After the first pass the two rules agree forever, because nothing but a title
+        //    ever names a package.
+        //
+        //    **It costs a string comparison for a package whose name is already right**, which is the
+        //    steady state and is why this sits beside the work scan rather than behind the integrity
+        //    check: `reconciled` returns nil on `stem == desired` before it lists anything.
+        let renameTarget = skeleton.name.flatMap {
+            ProjectPackageName.reconciled(url, title: $0, projectID: projectID)
+        }
+
+        guard !work.isEmpty || renameTarget != nil else {
+            return PackagePass(outcome: .unchanged, projectID: projectID)
+        }
         guard migrating else { return PackagePass(outcome: .skippedForeignVolume, projectID: projectID) }
 
-        // 3. A package whose files do not add up is the repair pass's business, not ours.
+        // 4. A package whose files do not add up is the repair pass's business, not ours — and a
+        //    package whose manifest we could not read has no title either, so it must not be renamed.
         guard ProjectBackupManager.validateProject(at: url) else {
             return PackagePass(outcome: .skippedDamaged, projectID: projectID)
         }
 
-        // 4. Move the sidecars. (The package *directory*'s own name is TODO (57)'s second bullet and
-        //    is deliberately not touched here — see this file's header.)
+        // 5. Rename the directory to follow the title. **Through `PackageRenameGate`**, which refuses
+        //    outright if the artist has this package open in this process — see that type for the
+        //    silent two-package fork this is the fix for.
+        var renamedTo: String?
+        if let renameTarget {
+            let landed = PackageRenameGate.renamingIdlePackage(at: url) { () -> URL? in
+                // `origin.name` **before** the move: it is `backupDirectory(forProjectAt:)`'s fallback
+                // for a package whose manifest has gone unreadable, and a crash between the two lines
+                // is better spent naming a package about to appear than one already gone.
+                ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                                                        to: renameTarget.lastPathComponent)
+                do {
+                    try fm.moveItem(at: url, to: renameTarget)
+                    return renameTarget
+                } catch {
+                    // Put the marker back and carry on under the old name. Nothing is lost: the
+                    // package is complete where it always was, and the next launch retries.
+                    ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                                                            to: url.lastPathComponent)
+                    log.error("""
+                        \(url.lastPathComponent, privacy: .public) could not be renamed to \
+                        \(renameTarget.lastPathComponent, privacy: .public) and keeps its old name: \
+                        \(String(describing: error), privacy: .public)
+                        """)
+                    return nil
+                }
+            }
+            if let landed {
+                renamedTo = landed.lastPathComponent
+                url = landed
+            }
+        }
+
+        // 6. Move the sidecars.
         var rewrites: [(old: String, new: String)] = []
         var madeDrawingsDirectory = false
         for item in work {
-            let source = imagesDir.appendingPathComponent(item.recorded)
+            let source = url.appendingPathComponent("images", isDirectory: true)
+                .appendingPathComponent(item.recorded)
             let relative = recordedName(for: item.role, cel: item.cel)
             let destination = resolve(relative, in: url)
             // **Both addresses occupied means something outside this flow wrote one of them**,
@@ -411,12 +474,20 @@ nonisolated enum ProjectPackageLayout {
                     """)
             }
         }
-        guard !rewrites.isEmpty else { return PackagePass(outcome: .unchanged, projectID: projectID) }
+        guard !rewrites.isEmpty else {
+            // A rename with no sidecars to move is still a pass that changed the library.
+            return PackagePass(outcome: renamedTo == nil ? .unchanged : .tidied(url),
+                               projectID: projectID, renamedTo: renamedTo)
+        }
 
-        // 5. Rewrite the manifest to name the new addresses. Everything here is optional work: the
-        //    files already resolve through `existingURL` whether or not it lands.
-        rewriteManifest(at: manifestURL, in: url, originalBytes: originalBytes, rewrites: rewrites)
-        return PackagePass(outcome: .tidied(url), projectID: projectID, movedFiles: rewrites.count)
+        // 7. Rewrite the manifest to name the new addresses. Everything here is optional work: the
+        //    files already resolve through `existingURL` whether or not it lands. **Resolved against
+        //    the post-rename `url`**, which is the whole reason step 5 reassigns it rather than
+        //    keeping two variables.
+        rewriteManifest(at: url.appendingPathComponent("manifest.json"), in: url,
+                        originalBytes: originalBytes, rewrites: rewrites)
+        return PackagePass(outcome: .tidied(url), projectID: projectID,
+                           movedFiles: rewrites.count, renamedTo: renamedTo)
     }
 
     /// The one step that can destroy data, and the two lines that stop it.
@@ -528,5 +599,166 @@ nonisolated enum ProjectPackageName {
         // than the manifest holds, so without this an accented title would compare unequal to its own
         // folder and rename itself on every launch once (57)'s second bullet lands.
         return name.precomposedStringWithCanonicalMapping
+    }
+
+    // MARK: - Reconciling a package's directory name against its title — TODO (57) part 2
+
+    /// **The name `current` should have, given `title` — or nil for "leave it alone".**
+    ///
+    /// The owner, 2026-09-08: *"Folder names are Untitled.paintproj but does not change when the
+    /// project name is changed."* They were right about the cause: `createNewProjectURL` runs once,
+    /// on a document's very first save, and nothing has ever re-derived the directory name since.
+    ///
+    /// Nil is the answer far more often than a URL, and the two nil cases are the whole rule:
+    ///
+    ///  - **The stem already is the title.** Compared precomposed, because APFS hands a name back in
+    ///    a different Unicode normalisation than the manifest holds and an accented title would
+    ///    otherwise rename itself on every single launch.
+    ///  - **The stem is a *disambiguated rendering* of this exact title** — `Boat 2` for `Boat`.
+    ///    Without this clause a second project called "Boat" is renamed to "Boat" (taken, so
+    ///    "Boat 2") and back on every save forever, because the disambiguation is invisible to a
+    ///    plain equality check.
+    ///
+    /// Otherwise: the first free of `desired`, `desired 2`, `desired 3`, … **in `current`'s own
+    /// parent directory**. A rename never moves a project between folders — "Move to…" owns that —
+    /// and a title is not a filing instruction.
+    ///
+    /// A candidate counts as free when it does not exist, when it *is* `current` compared
+    /// case-insensitively (iOS's APFS volume is case-insensitive, so a retitle that changes only
+    /// case must not disambiguate itself into "Boat 2" — a case-only `rename(2)` is MEASURED to
+    /// succeed on this volume), or when the package occupying it already carries `projectID` — it is
+    /// this same project, so that path is ours to take.
+    static func reconciled(_ current: URL, title: String, projectID: UUID?) -> URL? {
+        let desired = stem(forTitle: title)
+        let stem = current.deletingPathExtension().lastPathComponent
+            .precomposedStringWithCanonicalMapping
+        if stem == desired { return nil }
+        if isDisambiguation(stem, of: desired) { return nil }
+
+        let parent = current.deletingLastPathComponent()
+        var candidate = desired
+        // Bounded rather than `while true`: a thousand projects called "Boat" in one folder is not a
+        // library, and the failure this bound produces — nil, meaning "leave the name alone" — is the
+        // one that costs nothing.
+        for suffix in 2...1000 {
+            let url = parent.appendingPathComponent("\(candidate).paintproj")
+            if isFree(url, forPackageAt: current, projectID: projectID) { return url }
+            candidate = "\(desired) \(suffix)"
+        }
+        return nil
+    }
+
+    /// `"Boat 2"` is a disambiguation of `"Boat"`; `"Boat II"` and `"Boatyard"` are not.
+    ///
+    /// A hand-written prefix-and-digits check rather than a regular expression, because `desired` is
+    /// artist-typed text and would have to be escaped into a pattern — one forgotten escape and a
+    /// title containing `(` decides every name is a disambiguation of it.
+    static func isDisambiguation(_ stem: String, of desired: String) -> Bool {
+        guard stem.hasPrefix(desired + " ") else { return false }
+        let tail = stem.dropFirst(desired.count + 1)
+        return !tail.isEmpty && tail.allSatisfy(\.isNumber)
+    }
+
+    private static func isFree(_ candidate: URL, forPackageAt current: URL, projectID: UUID?) -> Bool {
+        if !FileManager.default.fileExists(atPath: candidate.path) { return true }
+        // The case-only retitle. `fileExists` says yes because the volume folds case, but the thing
+        // it found *is* the package we are renaming.
+        if candidate.path.precomposedStringWithCanonicalMapping
+            .compare(current.path.precomposedStringWithCanonicalMapping,
+                     options: .caseInsensitive) == .orderedSame { return true }
+        // Occupied by this same project — which happens when two overlapping saves both aim here, and
+        // is the case `writeAtomically` turns into a restore point rather than a clobbering.
+        if let projectID, ProjectBackupManager.manifestID(at: candidate) == projectID { return true }
+        return false
+    }
+}
+
+/// **The one gate every `.paintproj` directory rename passes through, and why there has to be one.**
+///
+/// TODO (57) part 2 gives a package's directory name two independent authors: the launch pass
+/// (`ProjectPackageLayout.tidy`) and the save (`ProjectStore.writeAtomically`). Both compute
+/// `ProjectPackageName.reconciled` from the same two inputs — the on-disk title, and which names are
+/// free in the parent — and neither can see the other's answer. An adversarial review traced the
+/// fork that falls out of that, and it is silent:
+///
+/// > the artist opens a project the launch pass has not reached yet and retitles it. The pass renames
+/// > the directory from `url` to `targetA`, computed from the **stale** pre-session title it read.
+/// > The save independently computes `targetB` from the artist's **new** title, finds `targetB` free
+/// > (the pass put the package at `targetA`), and its `moveItem` simply succeeds. Two packages, one
+/// > manifest id, forever — and `ProjectSummary` is `Identifiable` by that id, so SwiftUI's `ForEach`
+/// > gets two rows with one identity and one of them may never draw.
+///
+/// **Re-running `reconciled` immediately before the swap does not close this**, which is worth
+/// stating because it is the obvious fix: the second answer is computed from the same stale `url`,
+/// finds `targetB` free exactly as the first did, and returns it again. The review's own closing
+/// clause admits as much — such a check "does not catch a source directory relocated to a THIRD
+/// address". `writeAtomically` re-runs it anyway, because it *does* close the narrower window where
+/// another save took the name; it is not what makes the fork impossible.
+///
+/// What makes it impossible is this: **the launch pass never renames a package this process has
+/// open**, and the check and the rename happen under one lock, so a project cannot become open in
+/// between. A package the artist is working in has exactly one name-giver — its own save — and one
+/// name-giver cannot fork.
+///
+/// There is deliberately **no `noteClosed`**. A package stays registered for the life of the process,
+/// which costs only that the launch pass declines to rename something the artist opened during it —
+/// and the save renames that one anyway, the moment its title changes. The pass runs once per launch;
+/// leaving a name stale until the next one is the direction that loses nothing.
+nonisolated enum PackageRenameGate {
+    private static let lock = NSLock()
+    private static var openPackages: Set<String> = []
+
+    /// Case-folded and normalised, because the volume is: `boat.paintproj` and `Boat.paintproj` are
+    /// one directory here, and a registry that thought otherwise would let the pass rename an open
+    /// package whose case the artist had just changed.
+    private static func key(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+            .precomposedStringWithCanonicalMapping.lowercased()
+    }
+
+    /// **The artist has this package open in this process.** Called at the top of every load and
+    /// every save, which is the earliest either one knows which URL it is about to work on — earlier
+    /// than `CanvasManager.projectURL` is assigned, and that gap is the window the registry exists to
+    /// cover.
+    static func noteOpen(_ url: URL) {
+        lock.lock(); defer { lock.unlock() }
+        openPackages.insert(key(url))
+    }
+
+    /// The save's side. It **always** proceeds — the caller *is* the open document, and refusing to
+    /// rename here would be refusing the feature — but under the same lock the launch pass takes, so
+    /// the two can never interleave. `body` returns the URL the package actually landed at, and the
+    /// registry follows it there.
+    static func renamingOpenPackage(from url: URL, _ body: () -> URL?) -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        let landed = body()
+        if let landed, key(landed) != key(url) {
+            openPackages.remove(key(url))
+            openPackages.insert(key(landed))
+        }
+        return landed
+    }
+
+    /// The launch pass's side. Refuses outright when the package is open, and otherwise runs `body`
+    /// under the lock so the answer cannot go stale between the check and the `rename(2)`.
+    static func renamingIdlePackage(at url: URL, _ body: () -> URL?) -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        guard !openPackages.contains(key(url)) else { return nil }
+        return body()
+    }
+
+    /// Whether this process has `url` open. Read by nothing in the app — it exists so a test can
+    /// assert the registry is what refuses a rename, rather than inferring it from the refusal.
+    static func isOpen(_ url: URL) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return openPackages.contains(key(url))
+    }
+
+    /// **Test seam.** The registry is process-wide and has no `noteClosed`, so one suite's saves
+    /// would otherwise silently disarm the launch pass for every suite that ran after it in the same
+    /// process — a green test that measured nothing.
+    static func resetForTesting() {
+        lock.lock(); defer { lock.unlock() }
+        openPackages.removeAll()
     }
 }

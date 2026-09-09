@@ -80,22 +80,34 @@ never copies, never deletes — so every file is complete at exactly one of two 
 instant. Two of point 3's sweeps came with it: clips go to `videos/`, and every content directory is
 created lazily, so a pure-vector document no longer ships an empty `images/`.
 
-**Two things that half of it left behind, and they belong to point 2.** The migration deliberately
-does **not** rename a package directory, so there is no second writer of a package's own name and the
-fork two reviewers found — the launch pass and a rename-on-save each computing a name from a different
-title — cannot occur; whoever builds point 2 owns closing that, and re-running `reconciled` immediately
-before `writeAtomically`'s final `moveItem` is the cheap half of the answer. And the launch pass skips
-a library root that is ubiquitous or on another volume (`ProjectPackageLayout.migrationIsSafe(at:)`),
-because `rename(2)`'s atomicity — the whole crash-resume argument — is a local-volume guarantee a File
+**Point 2 is built.** `ProjectPackageName.reconciled(_:title:projectID:)` is the rule and it answers
+nil far more often than a URL — the stem already *is* the title, or it is a disambiguated rendering of
+it (`Boat 2` for `Boat`), which is what stops a second project called Boat being renamed back and
+forth on every launch forever. Two triggers use it: the **save** asks the narrow question *did the
+title change in this save?*, which is the owner's complaint stated exactly; the **launch pass** asks
+the broad one *is this stem an acceptable rendering of the title today?*, because a project retitled
+under a build older than this one has no change event left to catch. After the first pass the two
+agree forever, since nothing but a title ever names a package.
+
+**The fork two reviewers found is closed by `PackageRenameGate`, not by the re-run they suggested.**
+Their scenario is real — the pass renames from the stale title while the save renames from the new
+one, leaving two packages with one manifest id and a gallery `ForEach` holding two rows of one
+identity. But re-running `reconciled` before the swap does not close it: the second answer is computed
+from the same stale URL and returns the same name. What closes it is that **the launch pass never
+renames a package this process has open**, checked and renamed under one lock so a package cannot
+become open in between; a package the artist is working in then has exactly one name-giver. The
+re-run is in `writeAtomically` anyway, because it does close the narrower window where another *save*
+took the name. The honest cost of the refusal: a package merely opened and not retitled keeps its
+stale name until the next launch, which is pinned by a test rather than left to be discovered.
+
+And the launch pass skips a library root that is ubiquitous or on another volume
+(`ProjectPackageLayout.migrationIsSafe(at:)`), because `rename(2)`'s atomicity — the whole
+crash-resume argument, and now the directory rename's too — is a local-volume guarantee a File
 Provider need not honour. Such a library is not stranded: a save stages a *complete* package, so it
 lands in the new layout the next time the artist saves. **Verifying the pass against a real iCloud or
 external root is what would let that gate be widened, and nobody has.**
 
 **Left to build**
-- [ ] Make the bundle's directory name follow the project's title, safely. `ProjectPackageName.stem`
-      exists and `createNewProjectURL` already routes through it (a title containing `/` used to
-      create a real subfolder and file the project inside it, permanently); what is missing is
-      `reconciled(_:title:projectID:)` and the two triggers.
 - [ ] Sweep the rest of the layout and fix what else reads badly. Declined so far, each with a
       reason: renaming the PNGs (the placed-image family *cannot* be renamed, so it buys a different
       inconsistency and multiplies the migration), `brushtable.json` → `brushes/table.json`, a

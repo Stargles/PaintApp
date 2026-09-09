@@ -35,9 +35,14 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
             .appendingPathComponent("project-layout-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         ProjectBackupManager.rootDirectoryOverride = root
+        // TODO (57) part 2's registry is process-wide and has no `noteClosed`, so an earlier
+        // suite's saves would otherwise leave packages registered and make the launch-pass
+        // tests below decline work for a reason that has nothing to do with them.
+        PackageRenameGate.resetForTesting()
     }
 
     override func tearDownWithError() throws {
+        PackageRenameGate.resetForTesting()
         ProjectBackupManager.rootDirectoryOverride = nil
         try? FileManager.default.removeItem(at: root)
         root = nil

@@ -54,6 +54,7 @@
 		C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */; };
 		B09E10D0839E1B4C4667D4E3 /* ProjectPackageLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */; };
+		E3F5A93396CFEBF2B3AF9FE6 /* ProjectPackageRenameLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */; };
 		4BF6D9658C1177700D3470FB /* ProjectStorageUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */; };
 		CA9419823B03A3CDBEE93E3F /* ProjectFolderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */; };
 		10E1364E6BFD2F58A0DDB5F6 /* ProjectLocationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */; };
@@ -440,6 +441,7 @@
 		C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupManagerLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectSaveLogicTests.swift; sourceTree = "<group>"; };
 		4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectPackageLayoutLogicTests.swift; sourceTree = "<group>"; };
+		13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectPackageRenameLogicTests.swift; sourceTree = "<group>"; };
 		D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStorageUITests.swift; sourceTree = "<group>"; };
 		CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFolderLogicTests.swift; sourceTree = "<group>"; };
 		4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLocationLogicTests.swift; sourceTree = "<group>"; };
@@ -902,6 +904,7 @@
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */,
+				13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */,
 				D514BBC162DC4DAE47405E40 /* ProjectStorageUITests.swift */,
 				CB4ABDD9EE866EBACA2B4341 /* ProjectFolderLogicTests.swift */,
 				4D0D3E4EF786DB7569DA1657 /* ProjectLocationLogicTests.swift */,
@@ -1413,6 +1416,7 @@
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B09E10D0839E1B4C4667D4E3 /* ProjectPackageLayoutLogicTests.swift in Sources */,
+				E3F5A93396CFEBF2B3AF9FE6 /* ProjectPackageRenameLogicTests.swift in Sources */,
 				4BF6D9658C1177700D3470FB /* ProjectStorageUITests.swift in Sources */,
 				CA9419823B03A3CDBEE93E3F /* ProjectFolderLogicTests.swift in Sources */,
 				10E1364E6BFD2F58A0DDB5F6 /* ProjectLocationLogicTests.swift in Sources */,
