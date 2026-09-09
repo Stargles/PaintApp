@@ -253,8 +253,10 @@ final class FrameBaker {
     /// It is deliberately not a lookup in `keyByFrame`, which records what the baker last saw and is
     /// therefore exactly the stale answer §3.3 forbids.
     func currentKey(atFrame frame: Int) -> FrameBakeKey? {
-        guard let manager, let recipe = Self.recipe(manager, atFrame: frame) else { return nil }
-        return FrameBakeKey(recipe: recipe, renderResolution: manager.renderResolution)
+        PlaybackTrace.span(.bakeKeyMint) {
+            guard let manager, let recipe = Self.recipe(manager, atFrame: frame) else { return nil }
+            return FrameBakeKey(recipe: recipe, renderResolution: manager.renderResolution)
+        }
     }
 
     /// **One mint, so the display path's key and the loop's key cannot disagree** — the same
@@ -296,10 +298,18 @@ final class FrameBaker {
     /// one `Data`: `loadDecoded` hands back the decompressor's own buffer, the ring retains it, and
     /// `makeImage()` wraps it in a `CGDataProvider`.
     func image(for key: FrameBakeKey) -> CGImage? {
-        if let resident = ring.frame(for: key.fileName) { return resident.makeImage() }
-        guard let decoded = store.loadDecoded(key) else { return nil }
-        ring.insert(decoded, for: key.fileName)
-        return decoded.makeImage()
+        // `value` is the ring's answer — 1 resident, 0 a decode — so a `PlaybackTrace` report
+        // carries the hit rate without a second counter, and RENDER §3.5's *"play never decodes on
+        // the display thread"* becomes something a device run can be held against rather than a
+        // sentence. PERFORMANCE §16.5 already records that the promise is void above 2048x1024.
+        if let resident = ring.frame(for: key.fileName) {
+            return PlaybackTrace.span(.bakeRead, value: 1) { resident.makeImage() }
+        }
+        return PlaybackTrace.span(.bakeRead, value: 0) {
+            guard let decoded = store.loadDecoded(key) else { return nil }
+            ring.insert(decoded, for: key.fileName)
+            return decoded.makeImage()
+        }
     }
 
     /// The finished picture for `frame`, or nil. The two calls above, in the order the display path
@@ -442,8 +452,12 @@ final class FrameBaker {
                 // costs one mint and one `stat`; no composite happens at all. That is what makes a
                 // nine-frame hold one file and a scrub through it free (§3.3).
                 outcome = .alreadyOnDisk
-            } else if let image = recipe.composite(budgetBytes: budget) {
-                switch store.store(image, for: key, playhead: playhead, frames: frames) {
+            } else if let image = PlaybackTrace.span(.bakeComposite, {
+                recipe.composite(budgetBytes: budget)
+            }) {
+                switch PlaybackTrace.span(.bakeWrite, {
+                    store.store(image, for: key, playhead: playhead, frames: frames)
+                }) {
                 case .success:
                     outcome = .baked
                 case .failure(let failure):

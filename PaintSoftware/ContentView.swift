@@ -46,6 +46,13 @@ struct ContentView: View {
         #if os(iOS)
         .statusBar(hidden: true)
         #endif
+        // Inert unless the process was launched with `-playbackProbe`. It seeds a document, waits for
+        // the bake, plays it, writes a JSON report into the container and exits — the whole of a
+        // device measurement with nobody in the room. See `PlaybackProbe` for why that has to exist.
+        .task {
+            guard PlaybackProbe.isArmed else { return }
+            await PlaybackProbe.run(canvasManager: canvasManager) { screen = .editor }
+        }
         // **The app is a dark app, and this is where it says so** — BUGS.md, "The channel-list
         // popover renders in system appearance, on an app that is otherwise black" (2026-08-30).
         //

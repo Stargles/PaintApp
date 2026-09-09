@@ -133,6 +133,20 @@ final class ActionRecorder: ObservableObject {
 
         write(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url))
 
+        // **The recording explains itself now, and that is a defect this closed rather than a
+        // feature added.** Before 2026-09-09 a file said the playhead moved and nothing about what a
+        // flip cost, so the owner's ~5 fps report was diagnosable only because `currentFrame`
+        // happens to be a logged model key — and two passes then argued about which of four
+        // candidate costs it was, on a Mac, and shipped a fix worth nothing on the device
+        // (PERFORMANCE.md §17.1). `PlaybackTrace` times the main thread whether or not the code
+        // doing the work is instrumented, and `tick` writes a window of it every two seconds.
+        //
+        // `assumeIsolated` for `tick`'s reason two screens down: `start` is reached from the Actions
+        // menu and is main-thread by construction, but this type is compiled a second time into
+        // `PaintSoftwareUITests` where that is not inferred, and `PlaybackTrace`'s observers are
+        // `@MainActor` because a runloop observer added off the main loop watches the wrong loop.
+        MainActor.assumeIsolated { PlaybackTrace.shared.start() }
+
         // Recording is live from here: the gate flips only once both the writer and the tap are up,
         // so a hook can never fire into a nil writer.
         Self.isCapturing = true
@@ -158,6 +172,11 @@ final class ActionRecorder: ObservableObject {
         Self.isCapturing = false
         isRecording = false
 
+        // The last window before the summary line, so nothing between the final flush and the stop
+        // is lost — that is usually the moment the artist stopped recording *because* of.
+        writeMainThreadWindow()
+        MainActor.assumeIsolated { PlaybackTrace.shared.stop() }
+
         write(line("recordingStopped", [("events", .int(writtenEvents + 1)), ("seconds", .num(CACurrentMediaTime() - startTime))]))
 
         flushTimer?.invalidate()
@@ -181,6 +200,7 @@ final class ActionRecorder: ObservableObject {
 
     private func tick() {
         guard isRecording else { return }
+        writeMainThreadWindow()
         writer?.flush()
         eventCount = writtenEvents
         elapsed = CACurrentMediaTime() - startTime
@@ -189,6 +209,35 @@ final class ActionRecorder: ObservableObject {
         // drawing path entirely — the cost is that a recognizer created mid-recording is unwatched
         // for up to `flushInterval`, which is invisible next to a human's reaction time.
         tap?.rescanRecognizers()
+    }
+
+    /// **One line per two seconds saying where the main thread went**, which is the half of a
+    /// recording that used to be missing entirely.
+    ///
+    /// `busy` is the denominator — everything the main thread did between two runloop waits, whether
+    /// or not this app wrote it — and `ca` is Core Animation's own commit, measured rather than
+    /// inferred. The named phases follow, largest first, each as `total/max` milliseconds with the
+    /// count and how many of them were on the main thread; a phase whose `onMain` is 0 is off the
+    /// display path and is there for scale. `ringHit`/`ringMiss` say whether playback read a decoded
+    /// frame or decoded one, and `vectorRasterize` being present at all during playback says the
+    /// canvas is not showing the bake.
+    ///
+    /// Only phases the window actually saw are written, so an idle two seconds is a short line and a
+    /// still canvas writes almost nothing.
+    private func writeMainThreadWindow() {
+        let window = PlaybackTrace.shared.drainWindow()
+        guard !window.phases.isEmpty else { return }
+        var fields: [(String, JSONValue)] = []
+        for phase in window.phases.prefix(8) {
+            fields.append((phase.phase, .str("\(Self.number(CGFloat(phase.totalMs)))/"
+                                            + "\(Self.number(CGFloat(phase.maxMs)))ms"
+                                            + " n=\(phase.count) main=\(phase.onMainCount)")))
+        }
+        if window.ringHits + window.ringMisses > 0 {
+            fields.append(("ringHit", .int(window.ringHits)))
+            fields.append(("ringMiss", .int(window.ringMisses)))
+        }
+        write(line("mainThread", fields))
     }
 
     // MARK: - Event emitters

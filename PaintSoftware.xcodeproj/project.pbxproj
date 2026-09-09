@@ -303,6 +303,7 @@
 		DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */; };
 		F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */; };
 		3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */; };
+		0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */; };
 		D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */; };
 		057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */; };
 		04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */; };
@@ -687,6 +688,7 @@
 		3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeLogicTests.swift; sourceTree = "<group>"; };
 		98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeMetalLogicTests.swift; sourceTree = "<group>"; };
 		3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeKey.swift; sourceTree = "<group>"; };
+		97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/PlaybackTrace.swift; sourceTree = "<group>"; };
 		924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeStore.swift; sourceTree = "<group>"; };
 		A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBaker.swift; sourceTree = "<group>"; };
 		1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeKeyLogicTests.swift; sourceTree = "<group>"; };
@@ -1075,6 +1077,7 @@
 				3FA6FD066DB909B5C01970AE /* PaintSoftware/Engine/FrameExportSession.swift */,
 				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */,
+				97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */,
 				924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */,
 				A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */,
 				3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */,
@@ -1490,6 +1493,7 @@
 				DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */,
 				F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */,
 				3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */,
+				0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */,
 				D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */,
 				057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */,
 				04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */,

@@ -557,7 +557,7 @@ final class StrokeCanvasView: UIView {
         guard let vectorCanvas else {
             // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
-            let base = raster?.renderIfNonEmpty()
+            let base = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() }
             if imageView.image !== base { imageView.image = base }
             showScratch(scratch)
             return
@@ -599,7 +599,7 @@ final class StrokeCanvasView: UIView {
                 if waitingForTheRender {
                     pendingVectorRenderVersion = nil
                     displayedVectorVersion = version
-                    base = vectorCanvas.render()
+                    base = PlaybackTrace.span(.vectorRasterize) { vectorCanvas.render() }
                 } else {
                     pendingVectorRenderVersion = version
                     startVectorRender(of: vectorCanvas, atVersion: version)
@@ -637,7 +637,12 @@ final class StrokeCanvasView: UIView {
     /// code had for free and the one thing this change could quietly have thrown away.
     private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int) {
         Self.renderQueue.async { [weak self] in
-            let image = canvas.render(quality: .full, ifStillAtVersion: version)
+            // The flat row's per-layer, per-flip cost, and the one the composite path exists to stop
+            // paying — so it is a named row in a `PlaybackTrace` report rather than something a
+            // reader has to infer from `VectorCanvas.totalRasterizations` moving.
+            let image = PlaybackTrace.span(.vectorRasterize) {
+                canvas.render(quality: .full, ifStillAtVersion: version)
+            }
             DispatchQueue.main.async {
                 self?.finishVectorRender(image, of: canvas, atVersion: version)
             }

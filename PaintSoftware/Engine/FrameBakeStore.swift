@@ -228,6 +228,10 @@ final class FrameBakeStore {
     /// answered in `CGImage` could not fill the ring at all without decoding twice. §2.15: the
     /// superseded path is deleted rather than kept beside the new one.
     func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? {
+        PlaybackTrace.span(.storeDecode) { loadDecodedNow(key) }
+    }
+
+    private func loadDecodedNow(_ key: FrameBakeKey) -> DecodedFrame? {
         guard let file = try? Data(contentsOf: url(for: key)),
               file.count >= Self.headerBytes,
               Array(file.prefix(4)) == Self.magic,
