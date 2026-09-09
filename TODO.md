@@ -76,68 +76,44 @@ copy → verify → atomic rename → remove discipline (36)'s migration used.
 
 ---
 
-## (58) Playback does not hold 24 fps, and crashed the app
+## (56) Strokes still cost too much per edit, and some of them vanish
 
-**Status** — two reports, 2026-09-08, and they are one defect. **Root cause found and fixed on
-`tmp/playback` 2026-09-09; not merged.** What is left is one canvas size and one unmeasured gesture.
-
-> *"currently, pressing the playback button of Test1 does not run at 24FPS, sometimes taking 313ms
-> per frame. This is even after hiding all layers so that the canvas is pretty much a blank white
-> sheet. My guess is that the current thumbnail fix may solve it, but if it does not, then that hints
-> at a deeper issue which must be investigated and solved."*
-
-> *"What I got was it considerably lagging, making the main thread stutter like wild, getting worse
-> as time went on, and eventually crashing the app after a few seconds... I was noticing that when it
-> is doing the frame switching, some layers would render but not others due to how laggy it was,
-> which is very weird as every layer should all be prebaked."*
-
-And the acceptance criterion, in their words:
-
-> *"The iPad MUST be capable of playback at 24FPS regardless of what is on the canvas (amount of
-> strokes, amount of compositing, amount of images, etc). The only time complexity for playback I can
-> see should be canvas size, as larger canvases require higher bitrate to be read from the disk. I do
-> not want to revisit rendering again after this due to another edge case in the future, so be
-> thorough."*
-
-**Their own reading was right and the thumbnail work was not the answer.** *"Every layer hidden and
-still 313 ms a frame"* says the cost is per-frame work that scales with the canvas rather than with
-what is on it — and it is: `CanvasView.reconcileLayers` hands every layer host the cel covering the
-new frame on every flip, and `StrokeCanvasView.refreshDisplay` rasterized it at canvas size whether
-the host was hidden, blanked, or drawing. The canvas also never engaged the compositor for a plain
-document, so the baked frames on disk went unread. MEASURED at **8.6 fps at 4096² and 5.4 fps at
-6000²** against **101.5 and 49.9 fps** off the bake, with **384–549 MB** of live canvas-sized bitmaps
-and **1.6–2.2 GB/s** of allocation churn — the crash. PERFORMANCE.md §16 is the whole measurement.
-
-**Left to build**
-- [ ] The 6000² case still decodes on the tick and is INFERRED to miss 24 fps on the device:
-      `CanvasManager.frameRingByteBudget` is 96 MB and one decoded 6000² frame is 137 MB, so the ring
-      holds none. BUGS.md has it; the lever is a memory decision on a 3 GB iPad.
-- [ ] Scrubbing the playhead by hand still pays the per-layer render playback no longer does. Left
-      alone deliberately — measure the drag before widening the predicate to it.
-
----
-
-## (56) Canvas padding makes stroke-and-undo stutter, and loses strokes
-
-**Status** — reported by the owner 2026-09-07, with a recording. Root cause under investigation.
+**Status** — **the padding theory is refuted and the title it was filed under was wrong.** Nothing on
+this path reads `canvasPadding`; padding was only the owner's lever for pushing `canvasSize` toward
+`maxCanvasExtent`. Two of the three costs behind the original report are fixed and merged (§11.11b's
+lock, §16's onion skin); **what is left is a per-edit cost that is smaller but still visible, and the
+disappearing strokes, which are untouched.**
 
 > *"When I try to lay strokes down and undo it, I am met with a lot of lagspikes and stutter when the
-> brush is lifted. Sometimes, brushstrokes that I layed down dissapear. This really should not happen,
-> the canvas size should not ever impede on main thread lag. I have a suspicion that it is related to
-> canvas padding, as it happens when I turn it on."*
+> brush is lifted. Sometimes, brushstrokes that I layed down dissapear."* — 2026-09-07
 
-**Evidence, from `recording-20260907-234101.jsonl`** — project `Test1`, **`canvasSize` 6000x6000**,
-which is `CanvasManager.maxCanvasExtent` exactly, on a 3 GB iPad 9th generation. Four short pencil
-strokes, then eight undo/redo taps. The recorder stamps a `touch` line with the UITouch's hardware
-timestamp and a `model`/`note` line with the time it is logged, and around the undos those diverge by
-**~180-220 ms** where they are 1-20 ms elsewhere in the same file. So the stalls are real, they are on
-the main thread, and they cluster on undo/redo.
+> *"get to a point where there is no noticeable lag when placing strokes or undoing (somewhat
+> tolerable) no matter how many strokes or cels or layers etc are on canvas."* — 2026-09-09, which is
+> the acceptance criterion
 
-Two symptoms, possibly one cause: the stall, and strokes that come back or fail to come back
-inconsistently across undo/redo.
+**What the device says now.** MEASURED on the owner's iPad 9 after §16: main-thread busy per edit
+**64-214 ms → 20-121 ms** at 4096², **91-152 → 46-93 ms** at 2048². Halved, and not yet "not
+noticeable". `CanvasManager.undo()` itself is **0.71-1.26 ms** — the press was never the cost, and
+§11.11b's lock fix holds. What the artist feels after an undo is the same cascade a stroke produces,
+because an undo changes the same layer's ink.
+
+**The two spikes the owner saw are identified and one of them is still there.** `PlaybackTrace`
+listed every main-thread stall over 10 ms across twelve operations: exactly two each, one at
+**401-402 ms** (the 400 ms debounced cel thumbnail, plus the SwiftUI pass it raises) and one from the
+operation's own pass. §16 took the onion skin's pixel work out of both. The remaining term is
+whatever else those two passes still do.
 
 **Left to build**
-- [ ] The root cause and the fix.
+- [ ] Get per-edit main-thread busy from 20-121 ms to unnoticeable, at any stroke, cel and layer
+      count. Measure on the device — see §16's note on why three Mac-measured wins delivered nothing.
+- [ ] **The disappearing strokes, which nothing so far has addressed.** BUGS.md's *"Starting a stroke
+      before the last one has rendered leaves the last one off screen"* is the mechanism: the base
+      slot still holds the picture from before stroke *n* while the new stroke has taken the scratch
+      overlay, so *n* is on screen nowhere until its render lands. That entry's own text says the
+      window *"scales with canvas area"*, which is why a big canvas made a two-order-of-magnitude-
+      smaller window reachable again. It needs either a second overlay for un-landed ink or a
+      synchronous composite of the appended element at pen-up, and the second is a deliberate
+      reversal of RENDER.md §2.13 — **the owner's trade to make, not a session's.**
 
 ---
 
