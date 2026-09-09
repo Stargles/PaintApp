@@ -32,6 +32,12 @@ struct OnionSkinFrame {
     /// `OnionSkinBudget`, which is what decides that size, and why an onion skin is allowed to be
     /// softer than the artwork.
     static func composite(_ frames: [OnionSkinFrame], size: CGSize?) -> UIImage? {
+        PlaybackTrace.span(.onionComposite, value: frames.count) {
+            compositeNow(frames, size: size)
+        }
+    }
+
+    private static func compositeNow(_ frames: [OnionSkinFrame], size: CGSize?) -> UIImage? {
         guard let size, size.width > 0, size.height > 0, !frames.isEmpty else { return nil }
         let bounds = CGRect(origin: .zero, size: size)
         return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
@@ -106,6 +112,12 @@ enum OnionSkinClip {
     /// cut edge sharper than the ghost it cuts would buy nothing and cost the square of the ratio.
     static func mask(layerMask: CGImage?, subtracting ink: UIImage?, size: CGSize,
                      opacity: CGFloat = 1) -> CGImage? {
+        PlaybackTrace.span(.onionClip) { maskNow(layerMask: layerMask, subtracting: ink,
+                                                 size: size, opacity: opacity) }
+    }
+
+    private static func maskNow(layerMask: CGImage?, subtracting ink: UIImage?, size: CGSize,
+                                opacity: CGFloat) -> CGImage? {
         guard let ink, size.width > 0, size.height > 0 else { return layerMask }
 
         let bounds = CGRect(origin: .zero, size: size)
@@ -172,6 +184,23 @@ extension CanvasManager {
     /// Not `@MainActor`, matching `OnionSkinSettingsSource.frames(for:)` next to it: everything it
     /// reads is ordinary document state and the only caller is a SwiftUI pass.
     func onionSkinInkToSubtract(at size: CGSize) -> UIImage? {
+        onionSkinInkRequest(at: size)?.render()
+    }
+
+    /// **Which cel Behind subtracts, and at what size — resolved without rendering it.**
+    ///
+    /// The split exists because the render is the single most expensive thing a stroke commit or an
+    /// undo press costs on the main thread. MEASURED on the owner's iPad 9 in Release, per edit,
+    /// through `PlaybackProbe`'s edit mode: **21.5 ms mean at 2048² and 35.8 ms at 4096², twice per
+    /// operation, with a 110.6 ms worst case** — because the artist's own layer is exactly the thing
+    /// an edit changes, so this memo misses by construction on every stroke and every undo. It was
+    /// the largest term in both of the two main-thread stalls the owner reported feeling after
+    /// lifting the brush.
+    ///
+    /// So the *decision* stays on the main actor, where the document lives, and the *pixels* move to
+    /// `CanvasView.Coordinator`'s onion queue — which is RENDER.md §2.2 (*"the main thread never
+    /// composites"*) reaching the last renderer in the app that was exempt from it.
+    func onionSkinInkRequest(at size: CGSize) -> OnionSkinInkRequest? {
         guard onionSkin.placement == .behind else { return nil }
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return nil }
         let layer = layers[currentLayerIndex]
@@ -192,7 +221,7 @@ extension CanvasManager {
         // would be worse than the gap.
         let derived = derivedCelContent(for: cel, atFrame: currentFrame)
         guard derived != nil || !cel.isCertainlyBlank else { return nil }
-        return OnionSkinRasterCache.image(for: cel, canvasSize: canvasSize, at: size, derived: derived)
+        return OnionSkinInkRequest(cel: cel, canvasSize: canvasSize, size: size, derived: derived)
     }
 
     /// **The proportion of the ghost `onionSkinInkToSubtract`'s ink actually cuts** — `OnionSkinClip.
@@ -218,6 +247,35 @@ extension CanvasManager {
 /// **Not persisted.** `isOnionSkinEnabled`/`onionSkinOpacity` were not in the project manifest
 /// either, and onion skin is a way of looking at a drawing rather than part of it. Adding it to
 /// `ProjectManifest` later is additive and needs nothing here to change.
+/// **What the Behind placement subtracts, named but not yet drawn.**
+///
+/// `CanvasManager.onionSkinInkRequest(at:)` resolves one on the main actor — which cel, at what
+/// size, through which derivation — and `render()` produces the pixels, off it. `key` is the same
+/// value `OnionSkinRasterCache` stores under, so a caller can ask *"has this changed?"* for the cost
+/// of a hash instead of a canvas-scale rasterize.
+///
+/// The two halves are separate types' business on purpose: everything here is a value or a shared
+/// tier object, so the request crosses a queue boundary without carrying the document with it.
+struct OnionSkinInkRequest {
+    let cel: Cel
+    let canvasSize: CGSize
+    let size: CGSize
+    let derived: DerivedCelContent?
+
+    /// What the memo would be keyed on. Cheap, and does not touch a pixel.
+    var key: OnionSkinRasterCache.Key {
+        OnionSkinRasterCache.Key(cel: cel, size: size, derived: derived?.identity)
+    }
+
+    /// The pixels. **Off the main thread**, through the same lock-protected store the main-thread
+    /// spelling used, so a skin already rendered is still a dictionary hit.
+    func render() -> UIImage {
+        PlaybackTrace.span(.onionInk) {
+            OnionSkinRasterCache.image(for: cel, canvasSize: canvasSize, at: size, derived: derived)
+        }
+    }
+}
+
 struct OnionSkinSettings: Equatable {
 
     /// What "one step away" counts, and the distinction is real in this model rather than cosmetic —
@@ -995,7 +1053,12 @@ enum OnionSkinBudget {
 /// cache, and reuses `PixelOps`' own draw order rather than copying it.
 enum OnionSkinRasterCache {
 
-    private struct Key: Hashable {
+    /// **Also the identity a caller holds to say "the picture I would get is the one I already
+    /// have" without rendering anything.** `OnionSkinInkRequest` carries one for exactly that: the
+    /// clip's rebuild is scheduled off the main thread now, so the decision to schedule it has to be
+    /// made from a value rather than from the rendered image's address. One field list rather than
+    /// two, which is the whole reason it is this type and not a copy of it.
+    struct Key: Hashable {
         let celID: UUID
         let raster: ObjectIdentifier
         let rasterVersion: Int

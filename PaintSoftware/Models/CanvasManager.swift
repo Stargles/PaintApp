@@ -2479,7 +2479,12 @@ final class CanvasManager: ObservableObject {
         let due = clock.take(at: playbackNow(), fps: fps)
         playbackClock = clock
         guard due > 0 else { return }
-        if !advancePlayback(by: due) {
+        let advanced = advancePlayback(by: due)
+        // **The anchor every interval in a `PlaybackTrace` report is measured between**, and it is
+        // placed *after* the advance deliberately: the flip is what the artist sees, and the SwiftUI
+        // pass that draws it has not started yet. See `PlaybackTrace` for what the report is for.
+        PlaybackTrace.mark(.tick, value: currentFrame)
+        if !advanced {
             stopPlayback()
         } else if isRecording, currentFrame >= playbackEndFrame {
             // **A take ends at the end of the animation, looping or not** — KEYFRAMES.md §5, and it
@@ -2547,14 +2552,65 @@ final class CanvasManager: ObservableObject {
     /// rather than bytes, so a hold — a quarter of cel art's file — decodes **slower**, 24.6 ms
     /// against 9.9 ms at 4096². A ring budgeted in file bytes would hold the most compressible
     /// frames, which are the expensive ones to bring back.
-    static let frameRingByteBudget = 96 * 1024 * 1024
+    static let minimumFrameRingByteBudget = 96 * 1024 * 1024
+
+    /// **The budget for a document whose decoded frame is `frameBytes`, and the floor is two
+    /// frames** — MEASURED on the owner's iPad 9, which is what turned this from a constant into a
+    /// function.
+    ///
+    /// A frame flip's working set is exactly two decoded frames: the one on screen and the one the
+    /// scheduler is fetching. A ring that holds **one** cannot serve it and costs more than no ring
+    /// at all — the tick's own miss inserts and evicts what `fillRingAhead` just placed, so the
+    /// ahead-decode and the display fight over one slot forever. MEASURED on a two-frame document,
+    /// 4096², iPad 9, Release: **1 ring hit against 83 misses**, one `storeDecode` on the display
+    /// thread *and* one off it per flip, and RENDER.md §3.5's *"play never decodes on the display
+    /// thread"* void. At 3584² — the first size where two frames exceed the old 96 MiB constant —
+    /// it is 1 hit against 128. At 3072² and below, where two frames fit, it is **zero misses at
+    /// every size** and playback is 24.0 fps exactly.
+    ///
+    /// So this is not a tuning knob. It is the condition under which the ring is a cache rather than
+    /// a tax, and it is the same defect PERFORMANCE.md §16.1 recorded in `VectorRenderCache` —
+    /// a budget fixed by the device against a working set fixed by the document. That one held two
+    /// renders where the flip needed six; this one held one frame where the flip needed two.
+    /// **And a ring that cannot hold two frames holds none**, which is the other half of the same
+    /// argument and is MEASURED rather than reasoned. Two 6000² frames are 288 MB; asking for that
+    /// on a 3 GB iPad 9 alongside the bake's own compositing killed the app with **signal 9** —
+    /// jetsam — during this pass, at the largest canvas `maxCanvasExtent` allows. So the two-frame
+    /// floor is bounded by `CompositorBudget.textureBudgetBytes`, the device fraction this app
+    /// already argues for (§2.6: portable, `physicalMemory / 16`, 192 MB here), and above the size
+    /// where two frames stop fitting the ring is switched off outright rather than left holding one.
+    ///
+    /// Holding one is strictly worse than holding none: the flip misses either way — MEASURED at
+    /// 1 hit against 83 misses — and a resident frame nobody can hit is 67-144 MB of a 3 GB device
+    /// spent on nothing. That is also exactly what `DecodedFrameRing.insert` already decides for a
+    /// single frame larger than the whole budget, stated one level up where the size is known.
+    ///
+    /// The cliff is at **~4900²** on this device, and above it playback decodes on the display
+    /// thread. That is the one place RENDER.md §3.5's promise is still void, and PERFORMANCE.md §17
+    /// carries the measurement of what it costs.
+    static func frameRingByteBudget(forFrameBytes frameBytes: Int) -> Int {
+        guard frameBytes > 0 else { return minimumFrameRingByteBudget }
+        let twoFrames = 2 * frameBytes
+        guard twoFrames <= CompositorBudget.textureBudgetBytes else { return 0 }
+        return max(minimumFrameRingByteBudget, twoFrames)
+    }
+
+    /// This document's decoded frame in bytes — BGRA at the size the knob actually renders, which is
+    /// what `DecodedFrame.byteCount` sums and therefore the only quantity the ring's budget can be
+    /// compared against.
+    var decodedFrameBytes: Int {
+        guard let canvasSize else { return 0 }
+        let rendered = renderResolution.renderSize(for: canvasSize)
+        return Int(rendered.width.rounded()) * Int(rendered.height.rounded()) * 4
+    }
 
     @MainActor
     private func makeFrameBaker() -> FrameBaker {
         FrameBaker(manager: self,
                    store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
                                                                           renderResolution: renderResolution)),
-                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget))
+                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(
+                       forFrameBytes: decodedFrameBytes)))
     }
 
     /// **`FrameBaker.reset()`'s real caller.** `ContentView.returnToGallery` calls this on the way
@@ -2617,6 +2673,14 @@ final class CanvasManager: ObservableObject {
         }
         lastBakePlayhead = currentFrame
 
+        // **The ring is re-budgeted here rather than only at `makeFrameBaker`**, because a canvas
+        // resize moves the frame's size without moving the store's root — see
+        // `frameRingByteBudget(forFrameBytes:)` for why a ring that holds fewer than two frames is
+        // worse than none. Guarded so an unchanged budget costs a comparison rather than the
+        // setter's lock and eviction sweep.
+        let wantedRingBudget = Self.frameRingByteBudget(forFrameBytes: decodedFrameBytes)
+        if baker.ring.byteBudget != wantedRingBudget { baker.ring.byteBudget = wantedRingBudget }
+
         baker.isSuspended = suspended
         // `noteDocumentChanged` rather than `syncDirty()` + `kick()`: they are the same two lines,
         // and two spellings of one path is what §2.15 calls a peculiarity — the one the tests use
@@ -2665,6 +2729,10 @@ final class CanvasManager: ObservableObject {
     /// sink; also the escape hatch for anything that needs `Cel.thumbnail` guaranteed current right
     /// now rather than up to 400 ms from now.
     func flushPendingThumbnailRegens() {
+        PlaybackTrace.span(.thumbnailFlush) { flushPendingThumbnailRegensNow() }
+    }
+
+    private func flushPendingThumbnailRegensNow() {
         guard !pendingThumbnailRegens.isEmpty else { return }
         let pending = pendingThumbnailRegens
         pendingThumbnailRegens.removeAll()
@@ -3597,6 +3665,10 @@ final class CanvasManager: ObservableObject {
     // MARK: - Undo / redo
 
     func undo() {
+        PlaybackTrace.span(.undoPress, value: 0) { undoNow() }
+    }
+
+    private func undoNow() {
         // Before everything, including the finalize below: with the caret live, undo belongs to the
         // keyboard's own stack (`textEditUndoHandler`, and §5.1 of `ADD_TEXT.md` for why the owner
         // chose that). Returning here is the whole of it — the drawing history is untouched, so the
@@ -3623,6 +3695,10 @@ final class CanvasManager: ObservableObject {
     }
 
     func redo() {
+        PlaybackTrace.span(.undoPress, value: 1) { redoNow() }
+    }
+
+    private func redoNow() {
         // `undo()`'s twin — see the comment there.
         if textEditUndoHandler?(true) == true { return }
         finalizePendingGesturesForHistoryAction()

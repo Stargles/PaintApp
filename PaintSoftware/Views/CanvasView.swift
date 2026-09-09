@@ -355,6 +355,10 @@ struct CanvasView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: CanvasHostView, context: Context) {
+        PlaybackTrace.span(.updateUIView) { updateUIViewNow(uiView, context: context) }
+    }
+
+    private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
         context.coordinator.activePanel = activePanel
         context.coordinator.updatePaper()
         context.coordinator.reconcileLayers()
@@ -362,9 +366,9 @@ struct CanvasView: UIViewRepresentable {
         // "In Front" placement fronts the onion-skin view over `sandwichAbove`, and everything below
         // this line then lands above it. Ordering, not preference — moved here when placement
         // arrived.
-        context.coordinator.updateOnionSkin()
+        PlaybackTrace.span(.onionSkin) { context.coordinator.updateOnionSkin() }
         context.coordinator.updateActiveLayerAndTool()
-        context.coordinator.updateInterpolationPreviews()
+        PlaybackTrace.span(.derivedPreview) { context.coordinator.updateInterpolationPreviews() }
         // **From here down the order is a hit-testing rule, not a drawing one.** Two of these views
         // are pinned to the whole container with no `hitTest` override — `SelectionOverlayView` while
         // it is capturing, `FloatingPieceOverlayView` while a piece floats — so every overlay that
@@ -583,7 +587,15 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
+        /// **The whole pass, timed as one row of a `PlaybackTrace` report.** The wrapper exists so
+        /// that "what a frame flip spent inside this app" and "what it spent in Core Animation's
+        /// commit" are two numbers rather than one — see `PlaybackTrace`, whose header explains why
+        /// the second is the one that mattered on the device and was invisible on the Mac.
         func reconcileLayers() {
+            PlaybackTrace.span(.reconcile) { reconcileLayersNow() }
+        }
+
+        private func reconcileLayersNow() {
             guard let container = containerView else { return }
 
             // Derived once per pass and threaded through: the ordering pass below has to know whether
@@ -594,7 +606,9 @@ struct CanvasView: UIViewRepresentable {
             // At `currentFrame` for the reason the value-layer swatch two hundred lines below already
             // gives: the frame is the argument a derivation asks for, and a live canvas pass is
             // always about the frame the playhead is on. Nothing in the tree varies with it yet.
-            let tree = canvasManager.renderTree(atFrame: canvasManager.currentFrame)
+            let tree = PlaybackTrace.span(.renderTree) {
+                canvasManager.renderTree(atFrame: canvasManager.currentFrame)
+            }
             let sandwichEngaged = isSandwichEngaged(tree)
 
             // Derived once for the same reason, and used by both touch gates this function owns —
@@ -921,11 +935,11 @@ struct CanvasView: UIViewRepresentable {
             // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
             // right clock. Before `updateSandwich`, so that a frame the baker already holds is asked
             // for after the sweep has had its say about whether it is still current.
-            syncFrameBake()
+            PlaybackTrace.span(.syncBake) { syncFrameBake() }
 
             // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
             // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
-            updateSandwich(tree: tree, engaged: sandwichEngaged)
+            PlaybackTrace.span(.updateSandwich) { updateSandwich(tree: tree, engaged: sandwichEngaged) }
 
             // Enable the catch-all gesture when no layers exist, the active layer is hidden — by its
             // own switch or by a group's gating it (§4.1), either reads as "hidden" here — or the
@@ -1334,7 +1348,7 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
 
-            let key = makeSandwichKey(tree: tree)
+            let key = PlaybackTrace.span(.sandwichKey) { makeSandwichKey(tree: tree) }
             sandwichKey = key
             if key != sandwichCacheKey { startSandwichRebuild(for: key) }
             // **The rest picture comes off the bake now** (§3.6), so this is a lookup and not a
@@ -1594,7 +1608,9 @@ struct CanvasView: UIViewRepresentable {
             guard let image = canvasManager.frameBaker.image(atFrame: canvasManager.currentFrame) else {
                 return
             }
-            sandwichFull = UIImage(cgImage: image, scale: 1, orientation: .up)
+            sandwichFull = PlaybackTrace.span(.bakeImageWrap) {
+                UIImage(cgImage: image, scale: 1, orientation: .up)
+            }
             sandwichFullKey = key
         }
 
@@ -1669,7 +1685,7 @@ struct CanvasView: UIViewRepresentable {
                 // knob asked for, rather than refused by the GPU and re-rendered whole on the CPU
                 // reference for the duration of every stroke. A document that fits takes the
                 // identical path it took before: one composite per half, unwindowed, unchunked.
-                let halves = recipe.compositeHalves()
+                let halves = PlaybackTrace.span(.sandwichComposite) { recipe.compositeHalves() }
                 Task { @MainActor in
                     self?.finishSandwichRebuild(key: key, below: halves?.below, above: halves?.above)
                 }
@@ -2535,7 +2551,7 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// **Placement is not in it**, and used to be: the two placements were two views, so moving
         /// between them had to re-assign the image. There is one view now and one composite, and
-        /// Behind differs only in the clip — which is `onionSkinClipInputs`' business, not this
+        /// Behind differs only in the clip — which is `OnionSkinRenderKey.ink`'s business, not this
         /// key's. Leaving it here would rebuild the whole ghost stack on a setting that no longer
         /// changes a pixel of it.
         private struct OnionSkinKey: Equatable {
@@ -2556,8 +2572,7 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        private var onionSkinKey: OnionSkinKey?
-        /// Held only so `OnionSkinKey`'s addresses cannot alias — never read. See the key's doc
+        /// Held only so `OnionSkinRenderKey`'s addresses cannot alias — never read. See the key's doc
         /// comment. Cleared whenever the key is, so nothing outlives the entry it protects.
         private var onionSkinKeyImages: [UIImage] = []
         private var onionSkinKeyMask: CGImage?
@@ -2577,38 +2592,55 @@ struct CanvasView: UIViewRepresentable {
             return layer
         }()
 
-        /// The Behind clip's inputs, held strongly so identity is a sound comparison — the same ABA
-        /// argument `onionSkinKeyImages` makes, and here the references *are* the key rather than a
-        /// side-car to it. `opacity` rides beside them as a plain value: it cannot change the `ink`
-        /// object's identity (`onionSkinInkOpacity` is resolved separately from the cached raster), so
-        /// without it in the key a layer-opacity slider drag would keep serving a stale cut.
-        private var onionSkinClipInputs: (layerMask: CGImage?, ink: UIImage?,
-                                          opacity: CGFloat, width: Int, height: Int)?
-        /// What those inputs built. Nil is a legitimate answer (no clip at all), so this is not a
-        /// "have we built one yet" flag — `onionSkinClipInputs` is.
-        private var onionSkinClipImage: CGImage?
-
-        /// `OnionSkinClip.mask` behind a memo, because this runs on every SwiftUI pass and the two
-        /// canvas-reduced draws inside it must not.
-        ///
-        /// The inputs move on exactly three things: the current layer's ink (once per stroke, since a
-        /// dab publishes nothing — so the cut is static for a stroke's duration, which is the same
-        /// guarantee §6.4 gives the live mask and for the same reason), its opacity, and the placement
-        /// picker.
-        private func onionSkinClip(layerMask: CGImage?, ink: UIImage?, opacity: CGFloat,
-                                   size: CGSize) -> CGImage? {
-            let width = Int(size.width.rounded()), height = Int(size.height.rounded())
-            if let held = onionSkinClipInputs,
-               held.layerMask === layerMask, held.ink === ink, held.opacity == opacity,
-               held.width == width, held.height == height {
-                return onionSkinClipImage
-            }
-            let clip = OnionSkinClip.mask(layerMask: layerMask, subtracting: ink, size: size,
-                                          opacity: opacity)
-            onionSkinClipInputs = (layerMask, ink, opacity, width, height)
-            onionSkinClipImage = clip
-            return clip
+        /// **Everything the ghost is made of, in one value the main thread can compare without
+        /// drawing anything.** `ghosts` is the stack of neighbouring drawings; `ink` names the
+        /// current layer's own picture that the Behind placement subtracts, unrendered; `inkOpacity`
+        /// rides beside it because a layer-opacity drag changes the cut without changing which cel
+        /// it is cut from.
+        private struct OnionSkinRenderKey: Equatable {
+            let ghosts: OnionSkinKey
+            let ink: OnionSkinRasterCache.Key?
+            let inkOpacity: CGFloat
         }
+
+        /// **The onion skin renders off the main thread, exactly as the sandwich and the vector base
+        /// already do** — RENDER.md §2.2, *"the main thread never composites"*, reaching the last
+        /// path in the app that was exempt from it.
+        ///
+        /// MEASURED on the owner's iPad 9 in Release, per frame flip, before this queue existed:
+        /// `OnionSkinFrame.composite` **13.5 ms at 2048², 41.1 at 3584², 49.0 at 4096²**, and
+        /// `OnionSkinClip.mask` a further 1.8 / 5.4 / 7.3 — all of it inside `updateUIView`, on a
+        /// 41.7 ms budget. On an *edit* the dominant term was `OnionSkinInkRequest.render` instead,
+        /// at 21.5-35.8 ms twice per stroke or undo press. So the ghost was the largest single cost
+        /// in all three symptoms the owner reported, and it is the only renderer here that had no
+        /// queue of its own.
+        ///
+        /// Serial, `.userInitiated`, and coalescing on the latest key through `isOnionRebuilding` —
+        /// `startSandwichRebuild`'s contract, for its reasons: a scrub moves the key at display rate
+        /// and every job is a skin-sized render nobody will see.
+        private static let onionQueue = DispatchQueue(label: "com.paintapp.CanvasView.onion",
+                                                      qos: .userInitiated)
+
+        /// Mutual exclusion with a retry, not a drop: a request that arrives mid-rebuild sets
+        /// `onionRebuildWasDeclined`, and `finishOnionRebuild` re-derives the key and starts it.
+        private var isOnionRebuilding = false
+
+        /// **Whether a pass asked for a ghost while one was being drawn**, and the whole reason the
+        /// far end does not simply re-derive unconditionally. `InterpolationReferenceOnionSkinSource`
+        /// mints a fresh `UIImage` on every call by design, so its key never compares equal — an
+        /// unconditional re-derive there would rebuild forever off a queue nobody was waiting on.
+        private var onionRebuildWasDeclined = false
+
+        /// What a rebuild has been asked for. Compared against the key this pass derives, so a pass
+        /// that changes nothing schedules nothing.
+        private var onionRequestedKey: OnionSkinRenderKey?
+
+        /// The finished ghost and its cut. Both nil until the first rebuild lands, which is one
+        /// hop rather than a freeze — RENDER.md §2.13's ruling applied to the ghost.
+        private var onionSkinComposite: UIImage?
+        /// Nil is a legitimate answer (In Front, or no ink to subtract), so this is not a
+        /// "have we built one yet" flag — `onionSkinComposite` is.
+        private var onionSkinClipImage: CGImage?
 
         func updateOnionSkin() {
             guard let view = onionSkinView else { return }
@@ -2634,10 +2666,11 @@ struct CanvasView: UIViewRepresentable {
                 if view.image != nil { view.image = nil }
                 if view.layer.mask != nil { view.layer.mask = nil }
                 onionSkinMaskImage = nil
-                onionSkinKey = nil
                 onionSkinKeyImages = []
                 onionSkinKeyMask = nil
-                onionSkinClipInputs = nil
+                onionRequestedKey = nil
+                onionRebuildWasDeclined = false
+                onionSkinComposite = nil
                 onionSkinClipImage = nil
             }
 
@@ -2647,7 +2680,7 @@ struct CanvasView: UIViewRepresentable {
             let source: OnionSkinSource = canvasManager.isInterpolateMode
                 ? InterpolationReferenceOnionSkinSource()
                 : onionSkinSource
-            let frames = source.frames(for: canvasManager)
+            let frames = PlaybackTrace.span(.onionFrames) { source.frames(for: canvasManager) }
             guard !frames.isEmpty, let canvasSize = canvasManager.canvasSize else { return blank() }
 
             // **§6.4's mask, applied to the ghost as well as to the artwork.** BUGS.md's
@@ -2669,40 +2702,109 @@ struct CanvasView: UIViewRepresentable {
             // reference is not the current drawing and has no single mask to inherit.
             let mask: CGImage? = canvasManager.isInterpolateMode
                 ? nil
-                : resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex)
+                : PlaybackTrace.span(.onionMask) {
+                    resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex)
+                }
 
             // The artist's resolution setting, applied here and carried into the cache key below —
             // so changing it rebuilds rather than reusing a composite at the old resolution.
             let size = OnionSkinBudget.compositeSize(for: canvasSize,
                                                      resolution: canvasManager.onionSkin.resolution)
-            let key = OnionSkinKey(frames: frames, size: size, mask: mask)
-            if key != onionSkinKey {
-                onionSkinKey = key
+
+            // **Behind, in one line: name the artist's own ink so the rebuild can subtract it, at
+            // its own opacity.** `onionSkinInkRequest` is what reads the placement setting — In
+            // Front answers nil and `OnionSkinClip.mask` hands §6.4's coverage straight back, so
+            // that placement is byte-for-byte what it was before the ruling. No branch here: this
+            // coordinator is not reachable from a headless test, so the decision lives where one
+            // can hold it. `onionSkinInkOpacity` rides in the key separately because it changes the
+            // cut without changing which cel the cut is made from.
+            let ink = canvasManager.onionSkinInkRequest(at: size)
+            let key = OnionSkinRenderKey(ghosts: OnionSkinKey(frames: frames, size: size, mask: mask),
+                                         ink: ink?.key,
+                                         inkOpacity: canvasManager.onionSkinInkOpacity)
+            if key != onionRequestedKey {
+                onionRequestedKey = key
                 onionSkinKeyImages = frames.map(\.image)
                 onionSkinKeyMask = mask
-                view.image = OnionSkinFrame.composite(frames, size: size)
+                startOnionRebuild(for: key, frames: frames, size: size, mask: mask, ink: ink,
+                                  inkOpacity: canvasManager.onionSkinInkOpacity)
             }
-            guard view.image != nil else { return blank() }
 
-            // **Always 1, and this used to be a bug.** `composite` already draws every frame at its
-            // own opacity, and the line here previously multiplied a single frame's opacity in a
-            // second time — so the shipped one-skin default rendered at 0.3 × 0.3 = 0.09 while the
-            // comment above it said the opposite was happening.
+            applyOnionSkin(to: view, canvasSize: canvasSize)
+        }
+
+        /// Puts whatever the last rebuild produced on screen. **The only place the ghost's three
+        /// Core Animation properties are written**, so a rebuild landing between two SwiftUI passes
+        /// shows up without one — the same reason `FrameBaker.onFrameFinished` exists for the
+        /// composite.
+        private func applyOnionSkin(to view: UIImageView, canvasSize: CGSize) {
+            // **Nothing to show yet is hidden, not blanked.** `blank()` drops the pending request
+            // too, so using it here would cancel the rebuild that is about to answer. One hop with
+            // no ghost on the very first engage is RENDER.md §2.13's ruling reaching the ghost:
+            // the previous picture stays and the main thread does not freeze, and on the first pass
+            // there is no previous picture.
+            guard let composite = onionSkinComposite else {
+                if !view.isHidden { view.isHidden = true }
+                if view.image != nil { view.image = nil }
+                return
+            }
+            if view.image !== composite { view.image = composite }
+            // **Always 1, and this used to be a bug.** `OnionSkinFrame.composite` already draws
+            // every frame at its own opacity, and the line here previously multiplied a single
+            // frame's opacity in a second time — so the shipped one-skin default rendered at
+            // 0.3 × 0.3 = 0.09 while the comment above it said the opposite was happening.
             if view.alpha != 1 { view.alpha = 1 }
-
-            // **Behind, in one line: subtract the artist's own ink from the clip, at its own
-            // opacity.** `onionSkinInkToSubtract` is what reads the placement setting — In Front
-            // answers nil and `OnionSkinClip.mask` hands §6.4's coverage straight back, so that
-            // placement is byte-for-byte what it was before the ruling. No branch here: this
-            // coordinator is not reachable from a headless test, so the decision lives where one can
-            // hold it. `onionSkinInkOpacity` is read unconditionally and costs nothing when there is
-            // no ink — `OnionSkinClip.mask` never multiplies by it unless `ink` is non-nil.
-            applyOnionSkinMask(onionSkinClip(layerMask: mask,
-                                             ink: canvasManager.onionSkinInkToSubtract(at: size),
-                                             opacity: canvasManager.onionSkinInkOpacity,
-                                             size: size),
-                               to: view, canvasSize: canvasSize)
+            applyOnionSkinMask(onionSkinClipImage, to: view, canvasSize: canvasSize)
             if view.isHidden { view.isHidden = false }
+        }
+
+        /// Renders the ghost and its cut on `onionQueue` and hands both back on the main actor.
+        ///
+        /// Everything crossing the boundary is a value or an already-finished image: `frames` holds
+        /// `UIImage`s the reduced-source cache already produced, `mask` is the compositor's own
+        /// shared coverage, and `ink` is an `OnionSkinInkRequest` — a cel and two sizes — whose
+        /// `render()` goes through the same lock-protected store the main-thread spelling used.
+        private func startOnionRebuild(for key: OnionSkinRenderKey, frames: [OnionSkinFrame],
+                                       size: CGSize, mask: CGImage?, ink: OnionSkinInkRequest?,
+                                       inkOpacity: CGFloat) {
+            guard !isOnionRebuilding else {
+                onionRebuildWasDeclined = true
+                return
+            }
+            isOnionRebuilding = true
+            Self.onionQueue.async { [weak self] in
+                let composite = OnionSkinFrame.composite(frames, size: size)
+                let clip = OnionSkinClip.mask(layerMask: mask, subtracting: ink?.render(),
+                                              size: size, opacity: inkOpacity)
+                Task { @MainActor in
+                    self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
+                }
+            }
+        }
+
+        /// **Both or neither, and only if it is still the picture that was asked for** — the same
+        /// two rules `finishSandwichRebuild` keeps, for the same reason: a ghost from this frame
+        /// under a cut from the last one is a wrong picture rather than a stale one.
+        ///
+        /// It ends by calling `updateOnionSkin` again, which is how the declined request from
+        /// `startOnionRebuild`'s guard gets started — the key is re-derived from the model, so a
+        /// request that arrived mid-rebuild waits one iteration instead of evaporating.
+        private func finishOnionRebuild(key: OnionSkinRenderKey, composite: UIImage?,
+                                        clip: CGImage?) {
+            isOnionRebuilding = false
+            if key == onionRequestedKey {
+                onionSkinComposite = composite
+                onionSkinClipImage = clip
+            }
+            guard onionRebuildWasDeclined else {
+                if let view = onionSkinView, let canvasSize = canvasManager.canvasSize,
+                   canvasManager.isOnionSkinEnabled {
+                    applyOnionSkin(to: view, canvasSize: canvasSize)
+                }
+                return
+            }
+            onionRebuildWasDeclined = false
+            updateOnionSkin()
         }
 
         /// Installs (or removes) the clip on whichever onion view is showing.

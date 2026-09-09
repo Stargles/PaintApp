@@ -1142,4 +1142,85 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(alpha(seenAlpha, 15, 15), alpha(ghostAlpha, 15, 15),
                        "and untouched everywhere else, at full strength")
     }
+
+    // MARK: - The Behind clip's ink is named on the main actor and drawn off it
+
+    /// **Resolving which cel Behind subtracts must not rasterize it**, which is the whole of the
+    /// split `CanvasView.Coordinator` schedules its rebuild from.
+    ///
+    /// MEASURED on the owner's iPad 9 in Release, through `PlaybackProbe`'s edit mode: rendering
+    /// this ink cost **21.5 ms a call at 2048² and 35.8 ms at 4096², twice per stroke commit and
+    /// twice per undo press, worst case 110.6 ms** — all of it inside `updateUIView`, because the
+    /// artist's own layer is exactly the thing an edit changes and so this memo misses by
+    /// construction. It was the largest main-thread term in both stalls the owner reported feeling
+    /// after lifting the brush.
+    ///
+    /// The counter is `VectorCanvas.reducedRasterizations` rather than a duration for this file's
+    /// usual reason: *"the decision is free and the pixels are separate"* is a claim about the
+    /// design, and it is countable exactly.
+    func testResolvingTheBehindInkCostsNoRasterizeAndRenderingItCostsExactlyOne() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        manager.onionSkin.placement = .behind
+        // Half the canvas, so the reduced path is genuinely taken — at canvas size
+        // `OnionSkinRasterCache` hands back the compositor's shared memo and counts nothing here.
+        let size = CGSize(width: CanvasFixture.canvasSize.width / 2,
+                          height: CanvasFixture.canvasSize.height / 2)
+        guard let canvas = manager.layers[0].cels[1].vector else {
+            return XCTFail("premise: the cel at frame 8 has a vector tier")
+        }
+
+        let before = canvas.reducedRasterizations
+        guard let request = manager.onionSkinInkRequest(at: size) else {
+            return XCTFail("premise: Behind on a layer with ink resolves a request")
+        }
+        XCTAssertEqual(canvas.reducedRasterizations, before,
+                       "resolving which cel to cut from must not draw it")
+
+        _ = request.render()
+        XCTAssertEqual(canvas.reducedRasterizations, before + 1,
+                       "rendering it draws exactly once")
+        // Two memos stand behind this one and either satisfies it — `OnionSkinRasterCache`'s
+        // dictionary and `VectorCanvas.reducedRender`'s own. MEASURED with the first disabled: this
+        // assertion still holds and the two tests below it go red instead, which is the honest
+        // reading — the claim here is that a repeat costs no *walk*, not which store served it.
+        _ = request.render()
+        XCTAssertEqual(canvas.reducedRasterizations, before + 1,
+                       "and a second render of the same request re-walks nothing")
+    }
+
+    /// **The key is what says whether a rebuild is needed, so it has to move when the ink does and
+    /// stay put when it does not.** A key that never moved would freeze the cut at whatever the
+    /// first stroke made; one that always moved would rebuild the ghost off a background queue on
+    /// every SwiftUI pass forever.
+    func testTheBehindInkKeyMovesWithTheDrawingAndNotOtherwise() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        manager.onionSkin.placement = .behind
+        let size = CGSize(width: CanvasFixture.canvasSize.width / 2,
+                          height: CanvasFixture.canvasSize.height / 2)
+
+        guard let first = manager.onionSkinInkRequest(at: size)?.key,
+              let second = manager.onionSkinInkRequest(at: size)?.key else {
+            return XCTFail("premise: Behind on a layer with ink resolves a request")
+        }
+        XCTAssertEqual(first, second, "nothing changed, so nothing may be rebuilt")
+
+        manager.layers[0].cels[1].vector?.addStroke(opaqueRedStroke())
+        guard let afterDrawing = manager.onionSkinInkRequest(at: size)?.key else {
+            return XCTFail("still Behind, still ink")
+        }
+        XCTAssertNotEqual(first, afterDrawing, "a stroke changes what the ghost is cut by")
+
+        guard let atAnotherSize = manager.onionSkinInkRequest(
+            at: CGSize(width: size.width / 2, height: size.height / 2))?.key else {
+            return XCTFail("still Behind, still ink")
+        }
+        XCTAssertNotEqual(afterDrawing, atAnotherSize,
+                          "the resolution picker changes the picture the cut is made at")
+
+        manager.onionSkin.placement = .inFront
+        XCTAssertNil(manager.onionSkinInkRequest(at: size),
+                     "In Front subtracts nothing, so there is nothing to resolve or to render")
+    }
 }

@@ -351,4 +351,88 @@ final class DecodedFrameRingLogicTests: XCTestCase {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return bytes
     }
+
+    // MARK: - The budget the document gets, and why a one-frame ring is worthless
+
+    /// **`CanvasManager.frameRingByteBudget(forFrameBytes:)`, pinned at the owner's own device
+    /// budget**, which is what makes this a statement about their iPad rather than about this Mac.
+    ///
+    /// MEASURED on the owner's iPad 9 in Release: with the old fixed 96 MiB constant, a two-frame
+    /// 4096² document played at **15.9 fps with 0 ring hits against 83 misses**, one LZ4 decode on
+    /// the display thread per flip. With the budget below it is **24.0 fps with 155 hits and 0
+    /// misses**. The rule is the fix; this is the rule.
+    func testTheRingBudgetHoldsTwoFramesUntilTwoFramesStopFittingTheDevice() {
+        let iPad9 = 192_663_552            // `CompositorBudget.textureBudgetBytes` read off the device
+        CompositorBudget.budgetOverrideBytes = iPad9
+        defer { CompositorBudget.budgetOverrideBytes = nil }
+
+        let minimum = CanvasManager.minimumFrameRingByteBudget
+        func budget(_ edge: Int) -> Int {
+            CanvasManager.frameRingByteBudget(forFrameBytes: edge * edge * 4)
+        }
+
+        // 2048²: two frames are 33.6 MB, far under the minimum, so the minimum stands and the ring
+        // holds six. This is the size the owner draws at and it never had the defect.
+        XCTAssertEqual(budget(2048), minimum,
+                       "a small frame leaves the floor alone — two of them are well inside it")
+
+        // 4096², the canvas in the owner's own trace: two frames are 134.2 MB, over the 96 MiB floor
+        // and inside the device's 192 MB, so the budget is exactly the flip's working set.
+        XCTAssertEqual(budget(4096), 2 * 4096 * 4096 * 4,
+                       "the flip's working set is two frames and the ring must hold both")
+        XCTAssertGreaterThan(budget(4096), minimum,
+                             "premise: this is the regime the old constant got wrong")
+
+        // 6000², `maxCanvasExtent`: two frames are 288 MB against a 192 MB device budget, so the
+        // ring is switched off rather than left holding one. Holding one is strictly worse — the
+        // flip misses either way and 144 MB is spent on nothing. MEASURED: asking for 288 MB here
+        // killed the app with signal 9 on the owner's iPad.
+        XCTAssertEqual(budget(6000), 0,
+                       "two frames do not fit this device, so the ring holds none rather than one")
+
+        // The boundary is a property of the rule rather than of any canvas: exactly at the ceiling
+        // the ring is on, one byte past it the ring is off.
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2), iPad9 / 2 * 2,
+                       "two frames that exactly fit are held")
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2 + 1), 0,
+                       "one byte more and there is no useful ring to have")
+    }
+
+    /// **The behaviour the rule exists for, played out against the real ring**: a two-frame loop
+    /// alternating A, B, A, B… misses *every single access* on a ring that holds one, and hits every
+    /// one after the first lap on a ring that holds two.
+    ///
+    /// The one-frame arm is the control and it is the whole argument for the `0` above: it is not
+    /// that a small ring helps a little, it is that it helps not at all while holding a frame's
+    /// worth of a 3 GB device. Scaled down to bytes because the claim is about the *ratio* of budget
+    /// to frame, which is what `DecodedFrameRing` is written in.
+    func testAOneFrameRingMissesEveryFlipOfATwoFrameLoopAndATwoFrameRingMissesOnlyTheFirstLap() {
+        let frameBytes = 1024
+        let a = frame(bytes: frameBytes, fill: 0x11)
+        let b = frame(bytes: frameBytes, fill: 0x22)
+
+        func play(budget: Int, laps: Int) -> (hits: Int, misses: Int) {
+            let ring = DecodedFrameRing(byteBudget: budget)
+            var hits = 0, misses = 0
+            for _ in 0..<laps {
+                for (digest, decoded) in [("A", a), ("B", b)] {
+                    if ring.frame(for: digest) != nil {
+                        hits += 1
+                    } else {
+                        misses += 1
+                        ring.insert(decoded, for: digest)
+                    }
+                }
+            }
+            return (hits, misses)
+        }
+
+        let one = play(budget: frameBytes, laps: 10)
+        XCTAssertEqual(one.hits, 0, "a ring that holds one frame hits nothing at all on a two-frame loop")
+        XCTAssertEqual(one.misses, 20, "every access decodes — which is the 0/83 measured on the device")
+
+        let two = play(budget: 2 * frameBytes, laps: 10)
+        XCTAssertEqual(two.misses, 2, "only the first lap of each frame")
+        XCTAssertEqual(two.hits, 18, "and everything after it is resident")
+    }
 }

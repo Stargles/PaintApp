@@ -152,7 +152,7 @@ final class PlaybackTickBench: XCTestCase {
     private func makeBaker(_ manager: CanvasManager) -> FrameBaker {
         FrameBaker(manager: manager,
                    store: FrameBakeStore(root: root),
-                   ring: DecodedFrameRing(byteBudget: CanvasManager.frameRingByteBudget))
+                   ring: DecodedFrameRing(byteBudget: CanvasManager.minimumFrameRingByteBudget))
     }
 
     /// Runs the loop to a stop — `FrameBakerLogicTests.drain`'s shape, for its reason.
