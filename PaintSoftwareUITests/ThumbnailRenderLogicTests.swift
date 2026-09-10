@@ -816,7 +816,14 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     func testAResizeAnnouncesEveryCelWhoseTileItDropped() {
         let manager = deferredManager()
         manager.addVectorLayer()
-        manager.addCel(layerIndex: 0, startFrame: 4, frameCount: 1)
+        // **Placed past the end of the layer's existing block, and asserted.** `addCel` refuses a
+        // frame another cel already covers and says so only in its return value; a fixture that let
+        // that pass would leave one cel per layer, and this test would then be unable to tell a
+        // per-cel announcement from a per-*layer* one.
+        let free = manager.layers[0].cels.map(\.endFrame).max() ?? 1
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: free, frameCount: 1),
+                      "the fixture could not give layer 0 a second cel at frame \(free), so the "
+                      + "document under test has one cel per layer")
         for layerIndex in manager.layers.indices {
             for celIndex in manager.layers[layerIndex].cels.indices {
                 manager.installThumbnail(tile(manager, layer: layerIndex, cel: celIndex),
@@ -826,9 +833,10 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         let everyCel = Set(manager.layers.flatMap { layer in
             layer.cels.map { CanvasManager.CelLocation(layerID: layer.id, celID: $0.id) }
         })
-        XCTAssertGreaterThan(everyCel.count, 1,
-                             "the fixture has \(everyCel.count) cel(s); with one, a per-cel "
-                             + "announcement is indistinguishable from a single document-wide one")
+        XCTAssertEqual(everyCel.count, 3,
+                       "the fixture has \(everyCel.count) cels rather than three — two on one layer "
+                       + "and one on another, which is the shape that tells a per-cel announcement "
+                       + "apart from a per-layer or a document-wide one")
         var announced: Set<CanvasManager.CelLocation> = []
         let token = manager.thumbnailInstalled.sink { announced.insert($0) }
         defer { token.cancel() }
