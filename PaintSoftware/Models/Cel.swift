@@ -24,10 +24,13 @@ import UIKit
 /// `CanvasManager`'s job — `installThumbnail` and `clearThumbnail` write a cell and then publish
 /// `thumbnailInstalled`, and those two are the only writers the app has.
 ///
-/// Main-thread by convention like the rest of `CanvasManager`'s model, with the one documented
-/// exception that off-actor render batches carry `Cel` values around without touching this field —
-/// see `ThumbnailRegenBatch`, which is `@unchecked Sendable` for that reason already.
-final class ThumbnailTile: @unchecked Sendable {
+/// **Main-thread only, and deliberately not `Sendable`.** `Cel` values do cross threads — the
+/// deferred regen and the load-time backfill both carry them to a queue — but nothing off the main
+/// actor reads or writes a tile: `celThumbnailImage` renders from the raster and vector tiers and
+/// never looks at this. The batches that carry those cels are `@unchecked Sendable` already, and
+/// their doc comments say what makes each field safe; claiming it for a bare mutable class would be
+/// claiming something this type cannot honour.
+final class ThumbnailTile {
     var image: UIImage?
 
     init(image: UIImage? = nil) { self.image = image }
