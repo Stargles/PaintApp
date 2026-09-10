@@ -506,6 +506,25 @@ final class ProjectFolderLogicTests: XCTestCase {
         XCTAssertNil(restore.notice)
     }
 
+    /// A restore that could not happen answers nil, and the trash keeps what it had. The gallery's
+    /// Restore button used to discard this result, so a refusal looked exactly like a success and
+    /// then like a project that had vanished — the discarded-`Bool` shape this repo has a filed bug
+    /// for. It says so on screen now; **what this test pins is the nil, not the sentence**, because
+    /// nothing in a logic test can make the filesystem refuse a move the way a real one would.
+    func testARestoreThatCannotHappenAnswersNilAndTakesNothingWithIt() throws {
+        let scene = try ProjectStore.createFolder(named: "Scene 3", in: ProjectStore.projectsDirectory)
+        let real = try XCTUnwrap(ProjectBackupManager.moveToTrash(writeProject(named: "Kept", in: scene), tag: "deleted"))
+        let ghost = real.deletingLastPathComponent().appendingPathComponent("NotThere__deleted__20260101-000000.paintproj")
+
+        XCTAssertNil(ProjectBackupManager.restoreFromTrash(ghost),
+                     "a restore of something that is not there refuses rather than reporting success")
+        XCTAssertEqual(ProjectBackupManager.listTrash().map(\.displayName), ["Kept"],
+                       "and the entry that is there is untouched")
+        XCTAssertTrue(ProjectBackupManager.isDirectory(
+            ProjectBackupManager.trashDirectory.appendingPathComponent("Scene 3")),
+                      "including its mirror, which a refusal must not sweep out from under it")
+    }
+
     // MARK: - Fixtures
 
     @discardableResult

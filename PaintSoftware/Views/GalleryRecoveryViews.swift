@@ -68,7 +68,14 @@ struct RecentlyDeletedView: View {
     @State private var items: [ProjectBackupManager.TrashItem] = []
     /// What the last restore has to explain, if anything. Nil for the ordinary restore, which needs
     /// no words at all.
-    @State private var notice: String?
+    @State private var notice: Notice?
+
+    /// A restore that has something to say. Two titles, because "Restored" is a lie on the one path
+    /// where nothing was.
+    private struct Notice {
+        let title: String
+        let message: String
+    }
 
     var body: some View {
         NavigationStack {
@@ -100,10 +107,19 @@ struct RecentlyDeletedView: View {
                         }
                         Spacer()
                         Button("Restore") {
+                            // **The `else` is not defensive padding.** This button used to discard
+                            // the result outright, so a restore the filesystem refused looked exactly
+                            // like one that worked and then like a project that had vanished — the
+                            // same shape as the discarded `Bool` this repo has a filed bug for.
                             if let restore = ProjectBackupManager.restoreFromTrash(item.url) {
                                 onRestored()
                                 reload()
-                                notice = restore.notice
+                                notice = restore.notice.map { Notice(title: "Restored", message: $0) }
+                            } else {
+                                notice = Notice(
+                                    title: "Couldn’t Restore",
+                                    message: "“\(item.displayName)” could not be put back just now. "
+                                           + "It is still here, complete, and still safe to try again.")
                             }
                         }
                         .accessibilityIdentifier("gallery.trashRestore.\(item.id)")
@@ -119,12 +135,12 @@ struct RecentlyDeletedView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: reload)
-        .alert("Restored", isPresented: Binding(
+        .alert(notice?.title ?? "", isPresented: Binding(
             get: { notice != nil }, set: { if !$0 { notice = nil } }
         )) {
             Button("OK", role: .cancel) { notice = nil }
         } message: {
-            Text(notice ?? "")
+            Text(notice?.message ?? "")
         }
     }
 
