@@ -161,19 +161,26 @@ verify → atomic rename → remove, per item, so **every project is complete in
 instant**; and the reinstall test asserts the defect first (a container project destroyed, the gallery
 empty) and then the fix.
 
-**Two limitations, both deliberate and both recorded rather than hidden.** The **bookmark does not
-survive a reinstall** — it lives in the defaults plist, which is inside the container — so the artwork
-survives and recovery is exactly one trip through the picker, which the test pins as one. And
-`restoreFromTrash` returns a project to the **top of the tree** rather than its original folder;
-Files-style restore-to-origin needs an origin marker on the trash entry.
+**One limitation, deliberate and recorded rather than hidden.** The **bookmark does not survive a
+reinstall** — it lives in the defaults plist, which is inside the container — so the artwork survives
+and recovery is exactly one trip through the picker, which the test pins as one.
 
 **A hole in the `-resetGallery` guard was found and closed by this work**: the flag resolves its three
 directories *through* `ProjectLocation`, so on a device that had adopted a folder it would have reached
 outside the container and deleted the real library. It forgets the bookmark before wiping now, which
 makes it container-only by construction.
 
-**Left to build**
-- [ ] `restoreFromTrash` to the original folder, which wants an origin marker on the trash entry.
+**Restore-to-origin built 2026-09-10, which was the last box.** The origin marker this asked for does
+not exist, because **the trash mirrors the folder path instead of recording it**: a project deleted
+from `Projects/Scene 3/Shot 1/` lands at `Trash/Scene 3/Shot 1/`, so the origin *is* where the entry
+sits and there is nowhere for a second opinion to live. An entry written before this — one at `Trash/`
+itself, which is every entry the shipped build made — reads as "the top of the tree" and restores
+exactly as it always did, so nothing was migrated and nothing could be lost by migrating. The restore
+is a `rename(2)` between two siblings of one root, so the package is complete in one place at every
+instant; it never overwrites (a taken name disambiguates *in that folder*, and the test asserts the
+incumbent's own manifest id afterwards); and it never invents (an origin folder that has gone is
+reported in a sentence naming it, not silently recreated). Each Recently Deleted row says where its
+project came from before the artist commits to restoring it.
 
 ---
 
