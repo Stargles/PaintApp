@@ -411,6 +411,26 @@ final class TimingRecorderLogicTests: XCTestCase {
         XCTAssertFalse(manager.isRecording, "…and the take goes with it")
     }
 
+    /// **And the refusal an artist gets for landing on the wrong *layer* names a layer.**
+    ///
+    /// `.notRecordable` was written for a stepped slider and its sentence said so. Stage 10 points it
+    /// at three new things that look exactly as drawable as the layer beside them — a raster layer,
+    /// the eraser, an in-between — and a sentence naming only a slider would send an artist to a
+    /// settings panel to fix a layer-kind problem. Operand: the sentence itself.
+    func testTheUnrecordableRefusalNamesTheSurfacesItActuallyCovers() {
+        let (manager, _) = self.manager()
+        manager.armRecording()
+
+        XCTAssertFalse(manager.beginArmedTake(on: target(manager), isRecordable: false),
+                       "A landing that cannot contribute a sample is refused")
+        XCTAssertTrue(manager.isRecordingArmed, "…and the arm survives it, so the next landing is live")
+        let message = manager.notice?.message ?? ""
+        XCTAssertTrue(message.lowercased().contains("slider"),
+                      "The sentence keeps the surface it was written for (read \"\(message)\")")
+        XCTAssertTrue(message.lowercased().contains("layer"),
+                      "…and names the one stage 10 added (read \"\(message)\")")
+    }
+
     /// The armed sentence names the canvas. Stage 10 makes the canvas the surface an artist is most
     /// likely to have armed the recorder *for*, and a notice that sent them to a settings panel
     /// instead is the closed loop this repo has shipped three times.

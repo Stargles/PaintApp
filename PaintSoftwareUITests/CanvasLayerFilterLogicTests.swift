@@ -41,7 +41,7 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
     private static let artworkFiles: [(path: String, imageViews: Int)] = [
         ("PaintSoftware/Views/Canvas/LayerHostView.swift", 2),        // baked + fill tiers
         ("PaintSoftware/Views/Canvas/StrokeCanvasView.swift", 4),     // the layer's picture, the live scratch, the float, one held un-landed stroke
-        ("PaintSoftware/Views/CanvasView.swift", 2),                  // the sandwich pair, the onion-skin pair
+        ("PaintSoftware/Views/CanvasView.swift", 3),                  // the sandwich pair, the onion-skin pair, the timing recorder's trail
         ("PaintSoftware/Views/ShapeOverlayView.swift", 1),            // the live shape preview
         ("PaintSoftware/Views/FloatingPieceOverlayView.swift", 1)     // the lifted raster piece
     ]

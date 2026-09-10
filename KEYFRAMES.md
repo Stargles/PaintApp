@@ -1294,24 +1294,89 @@ the frame-walker once.
 
 ---
 
-## 7. The timing recorder
+## 7. The timing recorder — built 2026-09-10
 
-The laser-pointer tool. It is §5's recorder with no target channel: capture `[TimedSample]` from the
-canvas, then draw a trail whose tail tapers from where the point was on the previous frame.
+**This section described a laser-pointer tool and the owner's brief replaced it.** What it said — *"a
+trail whose tail tapers from where the point was on the previous frame"*, entered from the Actions menu
+as a tool of its own, INFERRED to be *"an animated dot with a position curve"* — is superseded and kept
+here only so that a reader who arrives from §8's row knows this paragraph is history. The owner, 2026-09-09:
 
-Both halves exist. Taper is `StrokeGeometry.stampRadius(forPressure:brush:size:)` plus the capsule chain
-— substitute a decay-since-touch-down scalar for pressure. Cel creation is `addCel(layerIndex:startFrame:
-frameCount:)`, already `withStructureUndo`-wrapped. **INFERRED**: the cleanest shape is an animated dot
-with a position curve, so it *is* an instance of this feature rather than a special case, and the trail
-is a render style; baking it then falls out of §6.
+> *"The user primes the recorder and selects the brush. Then as they put their pen on canvas, the
+> recorder starts and the user can draw while recording. This is just useful for timing. The stroke will
+> go on the cel of the layer that is active. The start and end of the stroke in the cel will be where
+> the stroke started and ended while that cel was active."*
 
-**It enters through the Actions menu, not the toolbar.** `.text` was routed through Actions because the
-toolbar was full (`Models/Tool.swift:22-24`), and every switch over `Tool` is exhaustive with **no
-`default:`** on purpose, because three past bugs shipped from someone adding a case and missing a
-hand-maintained exclusion list (`Tool.swift:48-53`, `:78-104`). **But do not plan around a slot count.**
-This document said "seven slots" and that was wrong twice over: `Tool` has **six** cases, and the number
-at `Tool.swift:24` is a remark about the *toolbar*, which itself now ships **nine** controls
-(`TopToolbar.swift:33-75`) after the adjust icon was removed. Count the cases before believing either.
+So it is **not a tool and not a trail**: it is the artist's own brush, drawing while playback runs, with
+the gesture shared out among the cels the playhead crosses under it. There is no new `Tool` case and the
+Actions menu is untouched.
+
+### 7.1 The cut is a partition, not a mid-gesture commit
+
+The owner offered a fork — the real brush split live, or a specialised engine inside a record tool — and
+**both arms shared a premise that is false**. Splitting live means closing a stroke on the outgoing cel
+and opening one on the incoming cel *at the boundary*, which would put a display-list mutation, a version
+bump, a render invalidation and an undo record on the main thread up to twenty-four times a second inside
+a live gesture, and would have to keep `UnlandedInk`'s invariant true across a cel change while doing it.
+
+None of that is necessary. The gesture already accumulates **one** knot stream
+(`StrokeCanvasView.currentVectorSamples`), and `commitVectorStroke` already walks **several runs** of it —
+that is the selection clip (`StrokeGeometry.splitRuns`). So the cut is a partition: `Engine/TimingStrokeCut.swift`
+splits at indices recorded while the pen moves, and the commit spends them at pen-up with the target canvas
+varying per run instead of samples being dropped. The single-cel path below the new early branch in
+`commitVectorStroke` is byte-for-byte what it was.
+
+**A boundary knot belongs to both runs**, which is the whole of the seam: the two arcs end and begin at
+one point with one pressure, so a round dab's closing cap and its opening dab are the same circle at the
+same width. Split at `i`/`i+1` instead and the seam is a gap up to `StrokePathFit.maximumKnotSpacing` —
+twelve points — in the middle of a line. What a shared knot cannot make identical is anything a brush
+derives from *arc length*: grain and scatter restart per stroke and `taper` reads the whole stroke's
+length, so a tapering or scattering brush will show the cut. That is inherent to storing the pieces as
+independent strokes, which LASSO_MOVE §5.4 already rules for a split stroke.
+
+### 7.2 The display is what it actually cost, and option B would have paid the same bill
+
+**Playback engages the compositor unconditionally** — `sandwichEngagesOnCanvas`'s `isPlaying` clause,
+added 2026-09-09 — so every layer host is blanked while the frames flip and the canvas is the baked
+composite. Blanking is a `layer.mask`, which covers a view's whole subtree, and `scratchView` is inside
+it: **an artist drawing during a take would have watched their pen leave no mark at all.** Nothing about
+that depends on whose engine draws the ink, so the specialised-engine arm needed the identical fix.
+
+The trail is therefore drawn by a `UIImageView` that is a sibling of the layer hosts, in the canvas
+container (`CanvasView.makeTimingInkView` / `updateTimingInk`), showing the very image the scratch holds.
+`StrokeCanvasView.showOverlays` routes there for the whole gesture rather than only while the sandwich is
+engaged, so a take that ends mid-stroke cannot un-blank the host and leave the same pixels drawn twice.
+The consequence to know is that the trail is **above every layer** while the pen is down; at pen-up the
+ink lands on the active layer at its own height.
+
+### 7.3 What was decided, and where each answer lives
+
+- **A frame the layer has no block on gets one** — `timingStrokeSurface()`, which is
+  `ensureCelAtCurrentFrame` and therefore the rule that already ships for touching a blank frame. The
+  spawn costs no step of its own: `withStructureUndo` no-ops inside the take's bracket, and the stroke's
+  own step is what puts the blocks back.
+- **One gesture is one undo press**, blocks included — `recordTimingStrokeUndo`, which restores every
+  visited canvas's display list *and* the layer's `cels` array, resolving the layer by id at undo time.
+  It is `bakePreciseStrokes`' shape reached from a live gesture.
+- **A take whose whole product is ink ends clean.** `RecordingTake.caughtInk` is why: without it the
+  take reported `.nothingCaptured`, whose sentence sends the artist to an opacity slider after they
+  have drawn across four cels. Such a take also **cancels** its own structure bracket rather than
+  committing it, because every byte it changed is already in the stroke's step.
+- **A canvas touch does not end the take it is part of.** `canvasInteractionBegan` gained
+  `mayContinueTake`, passed true by the stroke recognizer's `onAnyTouchBegan` and by nothing else — a
+  fill tap or an eyedropper press during a take still stops playback, because neither has a
+  cel-crossing story.
+- **Smart-shape detection is off during a timing stroke.** It fires on the pen holding still, which is
+  exactly how an artist records a hold.
+- **The eraser, a raster layer and an in-between are refused out loud** and the arm survives, per §5.1's
+  `isRecordable` contract.
+
+### 7.4 §5.1 held for a third surface, with one gap
+
+The trigger needed no change: `beginArmedTake(on:isRecordable:)` is called on touch-down before the
+stroke opens anything of its own, and the two lines §5.1 promises are the two lines it took. What §5.1
+does **not** cover is what a take *catches* — it assumes the answer is a channel, because the two
+surfaces it was written for both report scalars. Ink is not a channel and never becomes one, so the
+take's own commit needed a third arm. That is a gap in §5.1's model of a take, not in its trigger.
 
 ---
 
@@ -1335,7 +1400,7 @@ Each stage is mergeable and leaves the app working.
 | **6b** | **The playback cache** | **Delivered by TODO (29) instead**, and this row is a cross-reference rather than work: §4.6's store is RENDER.md §3.5-3.7, whose stages 4 and 5 are merged, so playback is served from LZ4 frames on disk today. What it is *not* is §2.20's span-scoped unit — it is a per-frame content-addressed store with playhead-distance eviction. Read RENDER §3.5-3.7 before planning anything on this row. |
 | **7** | **Live recording + editable fps** | §5. Its one prerequisite is met: the playback clock is on the model (`Engine/PlaybackClock.swift`, RENDER stage 1). Nothing else of it exists — `fps` is fixed at 24 and only load and save write it. |
 | **8** ✅ | **The transformation layer** | §4.4, complete: the model and the render path, then the artist's entry — §2.6's relabelled menu, a Move box that previews through the render path rather than a bitmap, and `commitContainerPose` routing through `KeyframeControl.write`'s same five arms. Three holes fell out of making it reachable and all three are in §4.4: §2.27's baseline had nowhere to live on a container, and neither `removeKeyframe` nor `addKeyframe` could see a container pose key — the second of those had been drawing a keyframe indicator the artist could not delete. **`LayerFolder.transform`'s entry landed 2026-09-06, TODO (21)** — `FolderOptionsPanel`'s Transform toggle plus the same `transformMoveRow`, `setFolderTransform` as the writer that turns it on, and `beginContainerPoseMove`/`commitContainerPose`/`containerPoseWrite`/`writeContainerPose` widened from a `layerID` to a `KeyframeTarget` so the one Move pipeline reaches a folder's own container as well as a layer's. The channel-list navigator's folder arm is still missing — §11.7's Ruling 2 has the honest reason, and it is bigger than this row. |
-| **10** | **The timing recorder** | §7. Small, sits on 7. |
+| **10** ✅ | **The timing recorder** | §7, built 2026-09-10 to the owner's own brief, which is larger than §7's laser pointer: the artist's **real brush**, one gesture shared out among the cels the playhead crossed under it. **The fork the owner offered was decided by refuting its shared premise** — both arms assumed a mid-gesture commit, and the cut is a *partition* of the gesture's own knot stream (`Engine/TimingStrokeCut.swift`), recorded as indices while the pen moves and spent at pen-up exactly as `commitVectorStroke` already spends the selection clip's runs. The stroke lifecycle did not move; the single-cel path below the new early branch is byte-for-byte what it was. What it *did* cost is the **display**, and option B would have paid the same bill: playback engages the compositor unconditionally and blanking is a `layer.mask` over the whole host, so the live scratch was inside it and a stroke drawn during a take reached the screen nowhere. The trail is drawn by a sibling of the layer hosts now. |
 
 **Stage 5 comes before stage 4, ruled by the owner 2026-08-30.** Asked whether the effort should go to
 stage 4 or to stage 5 — given that §4.2 says in its own words that the rest-space dab bake is *"not

@@ -101,8 +101,15 @@ extension CanvasManager {
         /// armed, put the pencil down on something that reads as a slider, and watched nothing
         /// happen, which is the "refusal with no notice" defect this repo has already shipped twice.
         ///
+        /// **Stage 10 widened it past sliders and the sentence had to move with it.** The canvas is a
+        /// recordable surface now, and this case is what an artist gets for landing on a *raster*
+        /// layer, with the eraser, or on an in-between — three things that look exactly as drawable
+        /// as the layer next to them. A sentence naming only a slider would have sent them to a
+        /// settings panel to fix a layer-kind problem.
+        ///
         /// **The arm survives it**, and the sentence says so, because the artist's next act is to
-        /// land on a different slider and they must not have to guess whether they are still armed.
+        /// land on a different slider — or a different layer — and they must not have to guess
+        /// whether they are still armed.
         case notRecordable
 
         /// **What the artist reads, and each one names what to do next.** A refusal that says only
@@ -121,7 +128,7 @@ extension CanvasManager {
             case .tooShort:
                 return "That take was shorter than one frame — let it play for a moment before stopping."
             case .notRecordable:
-                return "That control can't be recorded — a take needs a slider that moves smoothly. Still armed, so try another one."
+                return "That can't be recorded — a take needs a slider that moves smoothly, or a vector layer to draw on with the brush. Still armed, so try another."
             }
         }
     }

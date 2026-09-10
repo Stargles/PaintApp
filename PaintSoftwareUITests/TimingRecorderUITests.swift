@@ -301,7 +301,10 @@ final class TimingRecorderUITests: PaintUITestCase {
     /// pre-stage-10 wording an artist who armed the recorder to draw was sent to a settings panel.
     func testArmingTellsTheArtistTheCanvasIsAWayToStartATake() throws {
         let app = XCUIApplication()
-        _ = documentWithTwoBlocks(app)
+        // A bare launch rather than `documentWithTwoBlocks`: this test is about what the arm *says*,
+        // and building the two-block fixture for it would spend twenty seconds of the class's budget
+        // on state no assertion below reads.
+        XCTAssertTrue(launchIntoEditor(app), "Setup: a brand-new document")
         armRecorder(app)
 
         let banner = app.staticTexts["canvasNotice"]

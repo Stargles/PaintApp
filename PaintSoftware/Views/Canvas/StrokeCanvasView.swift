@@ -1113,6 +1113,13 @@ final class StrokeCanvasView: UIView {
         // measure Δt off it now.
         lastSampleTime = nil
         if vectorCanvas != nil { beginVectorStroke(touch, timingCelsBefore: timingCelsBefore); return }
+        // **A take was started and this gesture cannot contribute to it**, which is reachable only
+        // when the cel spawn above failed on a vector layer. The flag is set at the arm because
+        // `onStrokeBegan` reads it — `startShapeDetection` declines while a timing stroke is live —
+        // so it is set before there is a `TimingStroke` to prove it, and it must not outlive the one
+        // touch that could have made one. A latch nobody clears is the failure `endTimingStroke`
+        // exists to describe, reached before the state it clears was ever built.
+        if timingCelsBefore != nil { canvasManager?.timingStrokeIsLive = false }
         guard let raster else { return }
         shapeFollowingTouch = false
         // Only for the stroke count: no dab reaches the cel until lift, so the cel's own dirty
@@ -1696,17 +1703,23 @@ final class StrokeCanvasView: UIView {
         vectorElementsBeforeSnapshot = vectorCanvas.elements
         // KEYFRAMES.md §7 stage 10. After the guard, because the first run's canvas is this one, and
         // after `handleBegin` minted the seed, because the first run replays with it.
-        if let timingCelsBefore, let layerID, let manager = canvasManager,
-           let target = manager.keyframeTarget(layerIndex: manager.currentLayerIndex) {
-            let celID = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
-                                               atFrame: manager.currentFrame)
-                .map { manager.layers[manager.currentLayerIndex].cels[$0].id }
-            timingStroke = TimingStroke(layerID: layerID, target: target,
-                                        celsBefore: timingCelsBefore,
-                                        canvases: [vectorCanvas],
-                                        celIDs: [celID ?? UUID()],
-                                        befores: [vectorCanvas.elements],
-                                        seeds: [strokeSeed])
+        if let timingCelsBefore {
+            if let layerID, let manager = canvasManager,
+               let target = manager.keyframeTarget(layerIndex: manager.currentLayerIndex) {
+                let celID = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
+                                                   atFrame: manager.currentFrame)
+                    .map { manager.layers[manager.currentLayerIndex].cels[$0].id }
+                timingStroke = TimingStroke(layerID: layerID, target: target,
+                                            celsBefore: timingCelsBefore,
+                                            canvases: [vectorCanvas],
+                                            celIDs: [celID ?? UUID()],
+                                            befores: [vectorCanvas.elements],
+                                            seeds: [strokeSeed])
+            } else {
+                // The arm set the flag before this state existed — see `handleBegin`. Nothing here
+                // can be recovered, so the latch goes rather than outliving the touch.
+                canvasManager?.timingStrokeIsLive = false
+            }
         }
         vectorGestureDamage = .null
         vectorContentChanged = false

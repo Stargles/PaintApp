@@ -1351,8 +1351,23 @@ struct CanvasView: UIViewRepresentable {
 
         /// Latches the mid-stroke state. Called from `onStrokeBegan` *after* the cel spawn — see the
         /// comment there for why the condition is load-bearing rather than defensive.
+        /// **A timing stroke is not a mid-stroke, and latching it as one freezes the animation** —
+        /// KEYFRAMES.md §7.2, stage 10.
+        ///
+        /// The mid-stroke presentation wants the two halves, and `startSandwichRebuild` deliberately
+        /// declines to build them while the animation plays (*"a stroke cannot begin while the
+        /// animation is playing"*, which stage 10 made false). So a take begun on a document that
+        /// already has bakes would find `midStroke` true and `sandwichHalves` nil, `updateSandwich`
+        /// would return before touching `belowView` — and the artist would watch their animation
+        /// stop dead the moment the pen landed, for the length of the take.
+        ///
+        /// Declining the latch puts the take on the **rest** presentation instead, which is the right
+        /// one for it in its own terms as well as this one: `refreshBakedFull` is a lookup, so the
+        /// frames keep flipping off the disk store at one decode each, and the trail the artist is
+        /// drawing is above the whole composite anyway (`makeTimingInkView`).
         private func sandwichStrokeBegan(host: LayerHostView?) {
             guard let view = host?.strokeView, view.raster != nil || view.vectorCanvas != nil else { return }
+            guard !canvasManager.timingStrokeIsLive else { return }
             isSandwichStrokeLive = true
         }
 

@@ -114,8 +114,8 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 
 ## (21) Keyframes — four stages and four gaps
 
-**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b and 8 are merged; 6b was delivered by
-(29); there is deliberately no stage 9.
+**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b, 8 and 10 are merged, and 7 is
+merged except its Move-box surface; 6b was delivered by (29); there is deliberately no stage 9.
 
 A cel or an animation group carries a track of quad poses, ink is posed through the `sqrt(|det|)`
 width rule with endpoints bit-exact, a pose channel has a six-curve graph-editor band that is
@@ -166,8 +166,8 @@ pose key has a node.
       the same reasoning as [[render the cost, don't describe it]]. Do not hold the surface for a
       ruling that cannot usefully be given in advance.
       §5's *"slow motion is a capture-speed multiplier on the record control"* is also still unbuilt.
-- [ ] **Stage 10, the timing recorder (§7) — the owner gave the full brief on 2026-09-09 and it is
-      larger than §7's laser pointer.** It sits on stage 7 and was left until its base is whole.
+- [x] **Stage 10, the timing recorder (§7) — built and merged 2026-09-10.** The owner gave the full
+      brief on 2026-09-09 and it is larger than §7's laser pointer.
 
       > *"The user primes the recorder and selects the brush. Then as they put their pen on canvas, the
       > recorder starts and the user can draw while recording. This is just useful for timing. The
@@ -198,13 +198,25 @@ pose key has a node.
       .stampRadius(forPressure:brush:size:)` plus the capsule chain, with decay-since-touch-down
       standing in for pressure). Cheap and contained, at the cost of a second thing that draws ink.
 
-      **Decide it on a measured cost, not a guess.** The one fact already in hand: nothing in the
-      gesture path refuses a touch while `isPlaying` — the only `isPlaying` guard in `CanvasView` is the
-      sandwich rebuild — so "draw while it plays" may need no gating work at all, which is the premise
-      option A's cost turns on. If a mid-gesture cel-boundary commit is a small change to the stroke
-      lifecycle, A is worth it and B duplicates ink-drawing for nothing; if it is not, take B and say so.
-      **Prerequisite either way**: the owner's two-act arming above — record arms, the *pen landing*
-      starts the take. This feature is that trigger's second surface, so build the trigger once.
+      **Built 2026-09-10 as A, and the measurement that chose it refuted the fork's own premise.**
+      Both arms assumed the cut has to be a *mid-gesture commit*; it does not. The gesture already
+      accumulates one knot stream and `commitVectorStroke` already walks **several runs** of it —
+      that is what the selection clip does — so the cut is a **partition** recorded as indices while
+      the pen moves and spent once at pen-up, with the target canvas varying per run. `TimingStrokeCut`
+      is that partition, 97 lines and pure. Nothing in the stroke lifecycle moved: the single-cel path
+      below the new early branch is byte-for-byte what it was. B would have had to invent an ink
+      representation or reuse `VectorStroke`, at which point it is A with a worse brush.
+      **What A did cost, and B would have cost identically, is the display**: playback engages the
+      compositor unconditionally (`sandwichEngagesOnCanvas`'s `isPlaying` clause) and blanking is a
+      `layer.mask` over the whole host, so the live scratch was inside it — an artist drawing during a
+      take would have seen no mark at all. The trail is drawn by a sibling of the hosts now.
+      **Two premises in this row were wrong and are worth recording**: "nothing refuses a touch while
+      `isPlaying`" is true of *refusal* and false of the outcome — `canvasInteractionBegan` **stops
+      playback** on the first touch, and its own comment names the cel-crossing hazard this feature
+      turns into the feature; and "this lands squarely in the scratch/base overlay lifecycle, so the
+      two must not be built at once" is true of a mid-gesture commit and does not apply to a partition.
+      A frame with no block gets one, by the rule that already ships for touching a blank frame. One
+      gesture is one undo press, blocks included.
 - [ ] **A folder's keyframes have no entry point, and that is now two channel kinds deep.** Folder
       opacity animates and renders correctly (merged 2026-09-10), and so have a folder's *grade*
       channels since stage 2b — but **Add Keyframe** lives only on a layer row's cel menu and the
