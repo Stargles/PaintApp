@@ -220,12 +220,20 @@ struct SelectPanel: View {
     /// deleted from underneath it.
     private var animationGroupBand: some View {
         let reason = canvasManager.animationGroupEditUnavailableReason
-        let live = reason == nil && hasSelection
-        // Read once and used for the readout and for every chip's outline, so the sentence and the
-        // ring can never disagree — `recolorReason`'s rule one property up. It is memoized behind
-        // three gates (`selectionAnimationGroup`), so reading it here rather than per chip costs one
-        // struct comparison a body pass on a document with no animation groups at all.
+        // Read once and used for the readout, for the gate, and for every chip's outline, so the
+        // sentence, the dimming and the ring can never disagree — `recolorReason`'s rule one property
+        // up. It is memoized behind three gates (`selectionAnimationGroup`), so reading it here rather
+        // than per chip costs one struct comparison a body pass on a document with no animation groups.
         let current = canvasManager.selectionAnimationGroup
+        // **`.unavailable` rather than `selection != nil`, and that is a defect this caught.** A
+        // selection is stamped with the cel it was drawn on and outlives a layer switch, so "there is
+        // a selection" and "this verb can act on it" are different questions: with a loop drawn on
+        // layer 1 and layer 2 active, `hasSelection` is true, `reason` is nil, and every chip would
+        // have been live and done nothing silently — the "a refusal with no notice" defect, reached
+        // through a third door. `selectionAnimationGroup` answers `.unavailable` for exactly the cases
+        // `setAnimationGroupOfSelection` bails on, so gating on it makes the control's liveness and
+        // the verb's guard one statement.
+        let live = reason == nil && current != .unavailable
         return HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Animation Group")

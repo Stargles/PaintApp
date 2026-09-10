@@ -357,6 +357,15 @@ extension CanvasManager {
         let leaving = leavingGroupName(working, caught: caught, registered: registered)
         let arriving = minted?.displayName
             ?? destination.flatMap { id in animationGroups.first { $0.id == id }?.displayName }
+        // **Whether the destination poses anything on this cel**, which decides which sentence the
+        // artist gets. The *loose* predicate — does the channel have a track at all — rather than
+        // `TransformTrack.isAnimated`, matching `existingAnimationChannel`'s own routing question: a
+        // one-key channel is in force and does move the drawing, so it is not the case that wants
+        // "keyframe a Move on it".
+        let destinationIsInForce = destination.map {
+            layers[currentLayerIndex].cels[celIndex]
+                .transformTracks[TransformChannelID.group($0).id] != nil
+        } ?? false
         vector.elements = rewritten
         // **Not optional.** The `elements` setter deliberately does not invalidate, and both
         // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this the
@@ -391,7 +400,8 @@ extension CanvasManager {
         // artist taps a control and watches the canvas not change, which is indistinguishable from a
         // control that is broken. It is the *"a refusal with no notice"* defect wearing its positive
         // costume.
-        raise(.animationGroupMembershipChanged(edit(leaving: leaving, arriving: arriving)))
+        raise(.animationGroupMembershipChanged(edit(leaving: leaving, arriving: arriving,
+                                                    destinationIsInForce: destinationIsInForce)))
         refreshUndoRedoState()
         return true
     }
@@ -409,7 +419,12 @@ extension CanvasManager {
         return animationGroups.first { $0.id == id }?.displayName
     }
 
-    private func edit(leaving: String?, arriving: String?) -> CanvasNotice.AnimationGroupEdit {
+    private func edit(leaving: String?, arriving: String?,
+                      destinationIsInForce: Bool) -> CanvasNotice.AnimationGroupEdit {
+        // **The static-group sentence wins over both of the others**, and it is the one that answers
+        // *"what do I do next"*: where the ink came from is a footnote when the group it has arrived
+        // in is not animating anything.
+        if let to = arriving, !destinationIsInForce { return .joinedGroupThatIsNotAnimatedHere(to) }
         switch (leaving, arriving) {
         case (let from?, let to?) where from != to: return .moved(from: from, to: to)
         case (_, let to?): return .joined(to)

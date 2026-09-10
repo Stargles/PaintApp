@@ -239,6 +239,16 @@ struct CanvasNotice: Identifiable, Equatable {
         case joined(String)
         case moved(from: String, to: String)
         case left(String)
+        /// **The destination carries no pose channel on this cel**, so the ink has joined a group that
+        /// is not animating anything yet — which is *every* use of New Group, and the state an artist
+        /// most needs a next step from.
+        ///
+        /// It is a fourth case rather than a flag on the first two because the sentence it wants is
+        /// not a variation on theirs: those two end by saying what the drawing will do on the other
+        /// frames, and here the honest answer is that it will do nothing until the artist keyframes a
+        /// Move. Saying *"it follows Group 3 on the others"* of a group that goes nowhere is true and
+        /// useless, which is the shape of an answer that sends a reader to the source.
+        case joinedGroupThatIsNotAnimatedHere(String)
     }
 
     /// Why a membership edit was refused. Both are properties of the *pose at this frame* rather than
@@ -303,6 +313,8 @@ struct CanvasNotice: Identifiable, Equatable {
                 return "Moved from \(from) to \(to) — it hasn't moved on this frame, and it follows \(to) on the others."
             case .left(let group):
                 return "Taken out of \(group) — it stays where it is now and stops moving with the group."
+            case .joinedGroupThatIsNotAnimatedHere(let group):
+                return "Now in \(group) — nothing is animating it yet. Mark a keyframe, scrub, and Move it, and this comes along."
             }
         case .animationGroupEditRefused(let refusal):
             switch refusal {
@@ -429,6 +441,7 @@ struct CanvasNotice: Identifiable, Equatable {
             case .joined: return "animationGroupJoined"
             case .moved:  return "animationGroupMoved"
             case .left:   return "animationGroupLeft"
+            case .joinedGroupThatIsNotAnimatedHere: return "animationGroupJoinedStaticGroup"
             }
         case .animationGroupEditRefused: return "animationGroupEditRefused"
         }

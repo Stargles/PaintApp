@@ -395,6 +395,31 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
                      "joining a group that is not animated rewrites no geometry")
     }
 
+    /// **A group that poses nothing on this cel gets a different sentence, and it is the one that says
+    /// what to do next.**
+    ///
+    /// *"It follows Group 3 on the others"* is true of a group that goes nowhere and useless, which is
+    /// the shape of an answer that sends the artist to the source. New Group always lands here, so it
+    /// is the commonest state this feature produces.
+    ///
+    /// Operands: the notice's code after joining a group with **no** track against the code after
+    /// joining one **with** a track, in one document over the same loop. Either alone would pass
+    /// against a message that never varies.
+    func testJoiningAGroupThatAnimatesNothingHereSaysWhatToDoNext() throws {
+        let f = fixture()
+        select(f, loopOverS3)
+
+        XCTAssertTrue(f.manager.setAnimationGroupOfSelection(.newGroup))
+        XCTAssertEqual(f.manager.notice?.code, "animationGroupJoinedStaticGroup",
+                       "a fresh group poses nothing, and the sentence has to say so")
+        XCTAssertTrue(f.manager.notice?.message.contains("keyframe") ?? false,
+                      "…and name the step that makes it animate (read \"\(f.manager.notice?.message ?? "nil")\")")
+
+        XCTAssertTrue(f.manager.setAnimationGroupOfSelection(.existing(f.groupA)))
+        XCTAssertEqual(f.manager.notice?.code, "animationGroupMoved",
+                       "and a group that does pose this cel gets the ordinary sentence")
+    }
+
     /// **An edit that cannot keep a placed image where it looks is refused whole** — the second edge,
     /// and "whole" is the load-bearing word.
     ///
@@ -547,6 +572,30 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         XCTAssertTrue(f.manager.setAnimationGroupOfSelection(.existing(f.groupB)))
         XCTAssertEqual(f.manager.selectionAnimationGroupName, "Group B",
                        "the memo is keyed on the vector version, which the edit bumps")
+    }
+
+    /// **A selection drawn on another layer leaves the control unavailable rather than live-and-inert.**
+    ///
+    /// A `Selection` is stamped with the cel it was drawn on and outlives a layer switch, so *"there is
+    /// a selection"* and *"this verb can act on it"* are different questions. Before this test the
+    /// panel gated its chips on the first, which would have left every one of them tappable and silent
+    /// — the *"a refusal with no notice"* defect reached through a third door.
+    ///
+    /// Operands: `selectionAnimationGroup` with the selection's own layer active against the same
+    /// selection with a different layer active, and the verb's own answer in the second state. All
+    /// three read the same `Selection`, so what moved is the playhead's layer and nothing else.
+    func testASelectionFromAnotherLayerLeavesTheControlUnavailableRatherThanInert() throws {
+        let f = fixture()
+        select(f, loopOverS1AsItLooks)
+        XCTAssertEqual(f.manager.selectionAnimationGroup, .one(f.groupA),
+                       "fixture: on its own layer the loop resolves to Group A")
+
+        f.manager.currentLayerIndex = 0     // the raster layer the fixture made first
+        XCTAssertEqual(f.manager.selectionAnimationGroup, .unavailable,
+                       "the loop belongs to a cel that is not the one under the playhead")
+        XCTAssertFalse(f.manager.setAnimationGroupOfSelection(.existing(f.groupB)),
+                       "…and the verb bails on exactly that, which is why the control must be dim")
+        XCTAssertEqual(group(f, f.s1), f.groupA, "so nothing was re-grouped")
     }
 
     /// **The control refuses on a layer it cannot act on, and says why** — the shape
