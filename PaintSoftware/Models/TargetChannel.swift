@@ -16,9 +16,13 @@ import Foundation
 /// case (§2.21's ruling for grades, which said a folder's effect animates exactly as a layer's,
 /// reached one field over). A blend amount and an effect's overall strength are the same shape
 /// again: a `Double` on `Layer` and on `LayerFolder`, keyed in absolute document frames, resolved
-/// on the render path. Each of those costs **one entry in `all` below** and nothing else — no new
-/// store, no new union, no new persistence field, no new arm in the recorder — which is the test
-/// this design had to pass.
+/// on the render path. **The channel plumbing for each of those is one entry in `all` below and two
+/// `HistoryActionLabel` cases** — no new store, no new union accessor, no new persistence field, no
+/// new arm in the recorder, no new write funnel — because every one of those walks this table or the
+/// dictionary it keys. What is *not* free is the feature's own work, and it should not be: the
+/// property on both structs, the render path reading `resolvedValue(_:atFrame:)` for it, and
+/// whatever control the artist edits it with calling `applyTargetChannelEdit` and `beginArmedTake`.
+/// Being able to say which half is which was the test this design had to pass.
 ///
 /// **Ids are bare and undotted, and that is a namespace partition rather than a style.** Every
 /// `EffectParameter.id` is `"<case>.<field>"` and therefore contains a dot; every id here does not.
