@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -111,7 +112,17 @@ struct TimelineTrackView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject {
-        var canvasManager: CanvasManager
+        /// **Reassigned on every `updateUIView`, which is why the `didSet` is here.** A new document
+        /// is a new `CanvasManager` object, and the thumbnail subscription below is the coordinator's
+        /// only way of hearing that a tile changed — left pointed at the old manager it would go
+        /// quiet for the life of the new document, and nothing would say so, because the track would
+        /// keep laying itself out correctly in every other respect.
+        var canvasManager: CanvasManager {
+            didSet {
+                guard canvasManager !== oldValue else { return }
+                observeThumbnailInstalls()
+            }
+        }
         var rowHeight: CGFloat = 34
         var rulerHeight: CGFloat = 18
         var onRequestMenu: ((MenuRequest, CGRect) -> Void)?
@@ -169,6 +180,44 @@ struct TimelineTrackView: UIViewRepresentable {
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
             super.init()
+            observeThumbnailInstalls()
+        }
+
+        /// Holds the `thumbnailInstalled` subscription. One, replaced rather than added to, so a
+        /// coordinator that outlives several documents does not accumulate sinks pointed at managers
+        /// nobody is looking at.
+        private var thumbnailSubscription: AnyCancellable?
+
+        /// **The tile's route to the screen now that it does not travel by SwiftUI pass.**
+        ///
+        /// PERFORMANCE.md §18.6: installing a thumbnail writes a `ThumbnailTile` reference cell
+        /// rather than `@Published layers`, so nothing republishes, `updateUIView` does not run, and
+        /// `relayout()` is never called. This is what runs instead, and it is deliberately the
+        /// smallest thing that can be correct — one `UIImageView.image` on the block that owns the
+        /// cel.
+        private func observeThumbnailInstalls() {
+            thumbnailSubscription = canvasManager.thumbnailInstalled
+                .sink { [weak self] location in self?.applyInstalledThumbnail(location) }
+        }
+
+        /// Repaints the one block whose tile changed, reading the tile **from the document** rather
+        /// than from anything carried in the notification — so what lands on screen is what
+        /// `CanvasManager.layers` says it is, and a signal that arrives after a second install cannot
+        /// paint the older of the two pictures.
+        ///
+        /// Silent when the cel has no block view: the row may not be laid out yet, or the layer may be
+        /// inside a collapsed folder. That is not a hole, because the rebuild branch of `relayout()`
+        /// paints every block it creates from `cel.thumbnail` — a block that misses this call is
+        /// current the moment it exists.
+        private func applyInstalledThumbnail(_ location: CanvasManager.CelLocation) {
+            guard let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == location.layerID }),
+                  let cel = canvasManager.layers[layerIndex].cels
+                      .first(where: { $0.id == location.celID }),
+                  let row = rowViews.first(where: { $0.layerID == location.layerID })
+            else { return }
+            PlaybackTrace.span(.timelineTilePaint) {
+                row.setThumbnail(cel.thumbnail, forCel: location.celID)
+            }
         }
 
         @objc func handlePinch(_ gr: UIPinchGestureRecognizer) {
@@ -215,13 +264,12 @@ struct TimelineTrackView: UIViewRepresentable {
         /// when the track actually has to grow rather than on every delegate callback.
         private var laidOutFrameCount = 0
 
-        /// What the laid-out track was built from, and the thumbnails that key's addresses name.
+        /// What the laid-out track was built from.
         ///
-        /// Held together and dropped together: `TimelineLayoutKey.CelKey.thumbnail` is an
-        /// `ObjectIdentifier`, which is a sound identity only while the object behind it cannot be
-        /// freed and a new one land at the same address. See the key's doc comment.
+        /// **It used to be held alongside the thumbnails its addresses named, and is not any more.**
+        /// The tile left the key in PERFORMANCE.md §18.6, taking the ABA hazard — and the
+        /// retain-until-the-key-is-dropped idiom that closed it — with it.
         private var laidOutKey: TimelineLayoutKey?
-        private var retainedThumbnails: [UIImage] = []
 
         /// Re-lays-out the track, or does nothing if nothing it draws has moved.
         ///
@@ -261,8 +309,9 @@ struct TimelineTrackView: UIViewRepresentable {
             // knows nothing about this.
             let totalHeight = layout.contentHeight(filling: scrollView.bounds.height)
 
-            // Timed: it is O(layers x cels) and it reads every cel's thumbnail address, which is
-            // what makes installing one tile raise a whole-track rebuild.
+            // Timed: it is O(layers x cels). It used to read every cel's thumbnail address too,
+            // which is what made installing one tile raise a whole-track rebuild; §18.6 took the tile
+            // out of the key and gave it `applyInstalledThumbnail` instead.
             let built = PlaybackTrace.span(.timelineKey) {
                 TimelineLayoutKey.make(
                     canvasManager: canvasManager,
@@ -283,7 +332,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
             // Nothing the track draws has moved. Take the playhead's cheap path and leave every view,
             // every accessibility identifier and the ruler's CoreText exactly as they are.
-            if built.key == laidOutKey {
+            if built == laidOutKey {
                 movePlayhead(totalHeight: totalHeight)
                 // The band's window is not in the key (see `updateGraphBandViewport`), so it is
                 // refreshed on this path as well as from `scrollViewDidScroll`. Both are needed and
@@ -292,17 +341,17 @@ struct TimelineTrackView: UIViewRepresentable {
                 updateGraphBandViewport()
                 // **Which frames are baked is not in the key either, and deliberately so** — see
                 // `refreshBakeIndication`. This is the path a stroke's own pass takes, since a dab
-                // moves no cel id, start, length or thumbnail address: the artist's frame goes
-                // unbaked here, in the same pass that dirtied it.
+                // moves no cel id, start or length: the artist's frame goes unbaked here, in the same
+                // pass that dirtied it.
                 refreshBakeIndication()
                 return
             }
             // **Everything past the key check, as one row.** This is the branch the cheap path
-            // above exists to avoid — every row view, every block, the ruler's CoreText — and it
-            // is what a *thumbnail install* raises, because a tile's address is in the key.
+            // above exists to avoid — every row view, every block, the ruler's CoreText. Installing a
+            // thumbnail used to raise it, because a tile's address was in the key; §18.6 moved that
+            // to `applyInstalledThumbnail`, which touches one `UIImageView`.
             PlaybackTrace.span(.timelineRebuild, value: stackRows.count) {
-                laidOutKey = built.key
-                retainedThumbnails = built.retainedThumbnails
+                laidOutKey = built
                 laidOutFrameCount = laidOutCount
 
                 contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
@@ -420,8 +469,8 @@ struct TimelineTrackView: UIViewRepresentable {
                     // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
                     row.update(cels: layers[entry.layerIndex].cels,
                                displayedFrameCount: laidOutCount,
-                               markers: built.key.trackMarkers.indices.contains(slot)
-                                   ? built.key.trackMarkers[slot] : [])
+                               markers: built.trackMarkers.indices.contains(slot)
+                                   ? built.trackMarkers[slot] : [])
                     // **Where a drop resolves and where its ghost is drawn are recorded separately, and
                     // that is the fix rather than an accident of naming.** `layoutDragChrome` used to
                     // place the ghost at `minY + gap/2`, i.e. derived from the strip — true only while a
@@ -462,11 +511,11 @@ struct TimelineTrackView: UIViewRepresentable {
                                isVisible: folder?.isVisible ?? true,
                                identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
                                // Out of the key, for the layer rows' reason above.
-                               markers: built.key.folders.indices.contains(slot)
-                                   ? built.key.folders[slot].markers : [])
+                               markers: built.folders.indices.contains(slot)
+                                   ? built.folders[slot].markers : [])
                 }
 
-                layoutGraphBand(content: built.key.graphBand, layout: layout, stackRows: stackRows,
+                layoutGraphBand(content: built.graphBand, layout: layout, stackRows: stackRows,
                                 totalWidth: totalWidth)
 
                 movePlayhead(totalHeight: totalHeight)
@@ -2569,6 +2618,19 @@ private final class TimelineRowView: UIView {
         bringSubviewToFront(keyMarkers)
     }
 
+    /// Repaints one block's picture and touches nothing else about it.
+    ///
+    /// **The narrow counterpart to `update(cels:displayedFrameCount:markers:)`**, and the reason it
+    /// is narrow is PERFORMANCE.md §18.6: a tile arriving 400 ms after every edit used to rebuild
+    /// every row of the track, and before that a whole SwiftUI pass over the editor. Nothing here
+    /// moves a frame, mints a string or invalidates a `draw(_:)`.
+    ///
+    /// No-op for a cel this row has no view for — the row may not have been laid out yet, and
+    /// `update` paints from `cel.thumbnail` when it is.
+    func setThumbnail(_ image: UIImage?, forCel celID: UUID) {
+        celViews[celID]?.setThumbnail(image)
+    }
+
     /// How far (in frames) each of this row's blocks should slide to open the gap the dragged block
     /// would land in, keyed by cel id — the timeline's answer to `AnimationTimeline.rowOffset`, which
     /// does the layer panel's version of the same thing (a picked-up row's neighbours slide one slot
@@ -2866,8 +2928,18 @@ private final class CelBlockView: UIView {
         layer.borderColor = border.cgColor
         layer.borderWidth = isReference ? 3 : 1.5
         referenceWash.isHidden = !isReference
-        thumbnailView.image = thumbnail
-        thumbnailView.isHidden = thumbnail == nil
+        setThumbnail(thumbnail)
+    }
+
+    /// The picture half of `configure`, on its own.
+    ///
+    /// **Called through `TimelineRowView.setThumbnail` when a tile lands outside a relayout** —
+    /// PERFORMANCE.md §18.6 — and by `configure` itself, so the two paths cannot come to disagree
+    /// about what showing a tile means. `isHidden` is the half that would be missed by a hand-written
+    /// second copy: a nil tile has to leave the block empty rather than showing the last one.
+    func setThumbnail(_ image: UIImage?) {
+        thumbnailView.image = image
+        thumbnailView.isHidden = image == nil
     }
 
     /// Tints a dragged block's ghost by what would happen if it were dropped where it is — matching

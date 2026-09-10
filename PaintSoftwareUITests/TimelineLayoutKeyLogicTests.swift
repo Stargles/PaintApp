@@ -36,7 +36,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                                contentHeight: contentHeight,
                                rowHeight: rowHeight,
                                rulerHeight: rulerHeight,
-                               drag: drag).key
+                               drag: drag)
     }
 
     private func manager(layerCount: Int = 2) -> CanvasManager {
@@ -90,13 +90,28 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         XCTAssertNotEqual(before, key(m), "A block that changed length is a block drawn at a different width")
     }
 
-    /// A regenerated thumbnail replaces the object outright, so identity is the right comparison —
-    /// and it has to be *in* the key, because the block draws it.
-    func testANewCelThumbnailMovesTheKey() {
+    /// **The one input this file asserts is *out* of the key besides `currentFrame`**, and it is out
+    /// for the same reason: PERFORMANCE.md §18.6.
+    ///
+    /// A tile used to be named here by `ObjectIdentifier`, so installing one 400 ms after every
+    /// stroke moved the key and rebuilt every row, every block view and the ruler's CoreText — to
+    /// change one `UIImageView`. It travels on `CanvasManager.thumbnailInstalled` now and lands on
+    /// the block that owns the cel; the rebuild branch still paints each block it *creates* from
+    /// `cel.thumbnail`, so nothing goes unpainted.
+    ///
+    /// **This is not the assertion that the tile reaches the screen** — that is
+    /// `ThumbnailRenderLogicTests`' business, and this one would pass just as happily if the picture
+    /// were dropped on the floor. What it pins is that a tile costs no relayout, which is a claim
+    /// about this key and nothing else. The positive controls that stop it being vacuous are the
+    /// neighbouring tests: adding, moving and resizing a cel all still move the key.
+    func testANewCelThumbnailDoesNotMoveTheKey() {
         let m = manager()
         let before = key(m)
-        m.layers[0].cels[0].thumbnail = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8))
-        XCTAssertNotEqual(before, key(m), "The picture on the block is part of what the row draws")
+        m.installThumbnail(CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8)),
+                           layerIndex: 0, celIndex: 0)
+        XCTAssertEqual(before, key(m),
+                       "installing a tile moved the layout key, so it still rebuilds every row of "
+                       + "the track — the cost §18.6 removed")
     }
 
     func testSwitchingTheCurrentLayerMovesTheKey() {

@@ -866,10 +866,17 @@ extension CanvasManager {
     func duplicateLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         let source = layers[index]
-        let cels = source.cels.map { cel in
-            Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
-                raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
-                vector: cel.vector?.makeCopy(), thumbnail: cel.thumbnail)
+        let cels = source.cels.map { cel -> Cel in
+            let copy = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
+                           raster: cel.raster.makeCopy(), fillImage: cel.fillImage,
+                           bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
+            // **Assigned after construction rather than carried in the initialiser**, because since
+            // §18.6 a tile is a reference cell and this is a *new cel with a new id*. Every `Cel(...)`
+            // mints its own `ThumbnailTile` (see `Cel.tile`), so this line copies the picture into the
+            // duplicate's own cell; passing the field across would have shared the original's, and
+            // the next edit to either drawing would have repainted both blocks.
+            copy.thumbnail = cel.thumbnail
+            return copy
         }
         // `fill` and `effect` are carried because each *is* its kind's content — §4.5's value layer
         // and §4.4's effect layer keep theirs outside the cel, so the cel copy above does not reach
@@ -891,7 +898,9 @@ extension CanvasManager {
         // door. A copy with the curves and no marks is a layer whose animation exists and whose
         // keyframes are invisible: the timeline shows none, and the next keyframe press has no
         // neighbour to seed the held value onto.
-        var copy = Layer(id: UUID(), name: source.name + " copy", hasCustomName: source.hasCustomName,
+        // `let`, not `var`: since §18.6 the only line below that touches `copy` is the tile
+        // assignment, and that setter is `nonmutating` because the tile is a reference cell.
+        let copy = Layer(id: UUID(), name: source.name + " copy", hasCustomName: source.hasCustomName,
                          opacity: source.opacity,
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
                          kind: source.kind, effect: source.effect,
@@ -901,6 +910,9 @@ extension CanvasManager {
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
+        // Into the duplicate's **own** `ThumbnailTile`, which `Layer(...)` just minted — the same
+        // point the cel loop above makes: a duplicate is a new layer, so it gets a copy of the
+        // picture rather than a share of the original's cell.
         copy.thumbnail = source.thumbnail
         withStructureUndo(label: .duplicateLayer) {
             layers.insert(copy, at: index + 1)

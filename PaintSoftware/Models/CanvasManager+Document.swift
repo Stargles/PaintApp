@@ -774,7 +774,11 @@ extension CanvasManager {
                         layers[layerIndex].cels[celIndex].interpolation = recipe.mapped(through: map)
                     }
                     // Nil rather than re-rendered, and picked up by the deferred backfill below.
-                    layers[layerIndex].cels[celIndex].thumbnail = nil
+                    // **Through the funnel, not by assignment**: a tile write publishes nothing since
+                    // §18.6, and this one has to reach the timeline — the resize moves the artwork
+                    // inside the frame, so a block left drawing the old tile is drawing the wrong
+                    // picture rather than an old one.
+                    clearThumbnail(layerIndex: layerIndex, celIndex: celIndex)
                 }
             }
         }
@@ -844,7 +848,10 @@ extension CanvasManager {
                 if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
                     layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
-                layers[layerIndex].cels[celIndex].thumbnail = nil
+                // Through the funnel for the reason `setCanvasPadding` gives: a tile write publishes
+                // nothing since §18.6, and a mirror is the other operation that leaves the old tile
+                // a picture of content that has moved.
+                clearThumbnail(layerIndex: layerIndex, celIndex: celIndex)
             }
             // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
             // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
@@ -1033,12 +1040,13 @@ extension CanvasManager {
     /// Renders the missing thumbnails **a layer at a time**, off the main actor, installing each
     /// layer's batch in one main-actor turn.
     ///
-    /// **Batched by layer rather than by cel, and that is a judgement about publishing rather than
-    /// about rendering.** `cels[i].thumbnail` is `@Published` and `TimelineLayoutKey` carries each
-    /// thumbnail's object identity, so one assignment is one relayout of the track. Installing
-    /// thirty-two of them individually would trade a 96 ms block for thirty-two relayouts spread
-    /// across the next second, which is not obviously the better deal. A layer at a time gives the
-    /// timeline something to show while the rest arrives, at one relayout per layer.
+    /// **Batched by layer rather than by cel**, which was a judgement about publishing when it was
+    /// written and is now one about latency alone. A tile assignment used to republish the document
+    /// and move `TimelineLayoutKey`, so installing thirty-two individually meant thirty-two relayouts
+    /// of the track; since PERFORMANCE.md §18.6 it means thirty-two `UIImageView` writes and one
+    /// coalesced rail reload, and the batching survives because it is still the right shape — a
+    /// layer at a time gives the timeline something to show while the rest arrives, and each batch is
+    /// one suspension rather than one per cel.
     ///
     /// **The loop walks layer *ids*, not indices, and that is not fastidiousness.** It suspends once
     /// per layer, and `layers` is a `@Published` array the artist can add to, delete from or reorder
@@ -1146,6 +1154,14 @@ extension CanvasManager {
 // against still stands. `celThumbnailImage` is `static` and documents itself as *"Pure, and
 // reachable from any thread"*; the backfill has been calling it off the actor since PERFORMANCE.md
 // item 9(c), so this is an existing seam being used a second time rather than a new one being cut.
+//
+// **And the landing raises no SwiftUI pass either, which is §18.6 rather than §18.2.** Moving the
+// pixels off the main thread left `installThumbnail` writing `@Published layers`, so the flush still
+// republished the document 400 ms after every edit and the editor rebuilt its whole view graph —
+// MEASURED at ~43 ms of main-thread busy on the owner's iPad, against a fraction of a millisecond of
+// actual install. The tile is a `ThumbnailTile` reference cell now, so nothing below this line
+// touches a published property; what tells the timeline and the layer rail is
+// `CanvasManager.thumbnailInstalled`.
 //
 // **What is *not* deferred, deliberately.** `flushPendingThumbnailRegens()` keeps its synchronous
 // contract — it is the escape hatch for a caller that needs `Cel.thumbnail` current *now* — and

@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 import UIKit
 
@@ -685,5 +686,282 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers.isEmpty,
                       "the landing put a layer back, which means it wrote through an index rather "
                       + "than resolving the layer by id")
+    }
+
+    // MARK: - The install itself: PERFORMANCE.md §18.6, the tile leaves `@Published layers`
+    //
+    // §18 took the thumbnail's *pixels* off the main thread and left the *install* writing
+    // `CanvasManager.layers`. `Layer` and `Cel` are structs inside an `@Published` array, so putting
+    // a 120x120 image on one block republished the document and every `ObservedObject` in the editor
+    // rebuilt — MEASURED on the owner's iPad 9 in Release at ~43 ms of main-thread busy per edit,
+    // 400 ms after every stroke and every undo, to deliver a picture that costs a fraction of a
+    // millisecond to store.
+    //
+    // The tile is a `ThumbnailTile` reference cell now, so the write reaches a class and `layers` is
+    // only read on the way to it. **That makes the install silent, which is the whole point and also
+    // the whole hazard**: the two views that draw a tile can no longer find out by being rebuilt, so
+    // `thumbnailInstalled` is what tells them and the tests below are as much about the send as
+    // about the silence.
+
+    /// Fresh pixels for a cel, through the shipped renderer so the tile under test is the tile the
+    /// app would install.
+    private func tile(_ manager: CanvasManager, layer: Int = 0, cel: Int = 0) -> UIImage {
+        CanvasManager.celThumbnailImage(for: manager.layers[layer].cels[cel],
+                                        canvasSize: Self.deferredCanvas)
+    }
+
+    /// **The measurement this pass exists for, as a count.**
+    ///
+    /// The two operands are the number of `objectWillChange` emissions `CanvasManager` makes across
+    /// one `installThumbnail`, and zero. **The second half of the test is what makes the first half
+    /// mean anything**: an ordinary stored-property write to the same cel, through the same array,
+    /// with the same counter still attached — so a subscription that had quietly stopped working
+    /// would fail here rather than pass above. Without it this is the classic green assertion whose
+    /// operands are both nothing.
+    func testInstallingATileRepublishesNothingWhileAnOrdinaryCelEditStillDoes() {
+        let manager = deferredManager()
+        let image = tile(manager)
+        var publishes = 0
+        let token = manager.objectWillChange.sink { _ in publishes += 1 }
+        defer { token.cancel() }
+
+        manager.installThumbnail(image, layerIndex: 0, celIndex: 0)
+
+        XCTAssertEqual(publishes, 0,
+                       "installing a cel tile republished `CanvasManager` \(publishes) time(s). "
+                       + "That is a SwiftUI pass over the whole editor — MEASURED at ~43 ms on the "
+                       + "owner's iPad 9 — raised to move a 120-point picture onto one timeline "
+                       + "block. The tile must be written through `ThumbnailTile`, not through a "
+                       + "stored property of `Cel`.")
+
+        let before = publishes
+        manager.layers[0].cels[0].startFrame += 1
+
+        XCTAssertEqual(publishes, before + 1,
+                       "an ordinary stored write to `layers[0].cels[0]` republished \(publishes - before) "
+                       + "time(s) rather than once, so the counter above was not watching anything "
+                       + "and the zero it reported is meaningless")
+    }
+
+    /// The silence is worth nothing if the tile does not arrive. Operands: the object on the cel
+    /// afterwards, and the object handed to `installThumbnail` — identity, because a tile is
+    /// replaced wholesale rather than edited.
+    func testAnInstalledTileIsTheObjectTheCelReportsAfterwards() {
+        let manager = deferredManager()
+        let image = tile(manager)
+
+        manager.installThumbnail(image, layerIndex: 0, celIndex: 0)
+
+        XCTAssertTrue(manager.layers[0].cels[0].thumbnail === image,
+                      "the cel is not carrying the image that was installed on it, so the write "
+                      + "went somewhere the readers do not look")
+        XCTAssertTrue(manager.layers[0].thumbnail === image,
+                      "the layer rail's tile did not follow the cel under the playhead, which is "
+                      + "the second of `installThumbnail`'s two writes")
+    }
+
+    /// **The send is the replacement for the SwiftUI pass, so it is pinned by the same test that
+    /// pins the silence.** Operands: the locations `thumbnailInstalled` published, and the
+    /// `(layerID, celID)` the document says was written.
+    func testInstallingATileAnnouncesExactlyTheCelItLandedOn() {
+        let manager = deferredManager()
+        manager.addVectorLayer()
+        var announced: [CanvasManager.CelLocation] = []
+        let token = manager.thumbnailInstalled.sink { announced.append($0) }
+        defer { token.cancel() }
+
+        manager.installThumbnail(tile(manager, layer: 1), layerIndex: 1, celIndex: 0)
+
+        let expected = CanvasManager.CelLocation(layerID: manager.layers[1].id,
+                                                 celID: manager.layers[1].cels[0].id)
+        XCTAssertEqual(announced, [expected],
+                       "an install announced \(announced.count) location(s), \(announced). The "
+                       + "timeline and the layer rail hear about a tile here and nowhere else since "
+                       + "§18.6, so a missing or misaddressed send is a block that never repaints.")
+    }
+
+    /// A cleared tile has to be announced too, and it is the half a reader would not think to check.
+    ///
+    /// Operands: what the cel reads afterwards (nil), and the location the subject carried. The
+    /// second is what would go red if `clearThumbnail` were flattened back into
+    /// `layers[i].cels[j].thumbnail = nil` — which now writes the cell silently and leaves the old
+    /// picture on the block.
+    func testClearingATileAnnouncesItAsWellAsDroppingIt() {
+        let manager = deferredManager()
+        manager.installThumbnail(tile(manager), layerIndex: 0, celIndex: 0)
+        var announced: [CanvasManager.CelLocation] = []
+        let token = manager.thumbnailInstalled.sink { announced.append($0) }
+        defer { token.cancel() }
+
+        manager.clearThumbnail(layerIndex: 0, celIndex: 0)
+
+        XCTAssertNil(manager.layers[0].cels[0].thumbnail,
+                     "the cel still carries a tile after `clearThumbnail`")
+        XCTAssertNil(manager.layers[0].thumbnail,
+                     "the layer rail still carries the tile of a cel that has none")
+        XCTAssertEqual(announced,
+                       [CanvasManager.CelLocation(layerID: manager.layers[0].id,
+                                                  celID: manager.layers[0].cels[0].id)],
+                       "clearing a tile announced \(announced.count) location(s) rather than one, so "
+                       + "the timeline block would keep drawing a picture the document has thrown "
+                       + "away")
+    }
+
+    /// **A canvas resize is the operation that made `clearThumbnail` necessary**, because it moves
+    /// the artwork inside the frame: a block left holding its old tile is drawing the wrong picture
+    /// rather than a late one.
+    ///
+    /// Operands: the set of `(layerID, celID)` the resize announced, and the set of every cel in the
+    /// document. Reverting the funnel to a bare assignment empties the first and reddens this.
+    func testAResizeAnnouncesEveryCelWhoseTileItDropped() {
+        let manager = deferredManager()
+        manager.addVectorLayer()
+        manager.addCel(layerIndex: 0, startFrame: 4, frameCount: 1)
+        for layerIndex in manager.layers.indices {
+            for celIndex in manager.layers[layerIndex].cels.indices {
+                manager.installThumbnail(tile(manager, layer: layerIndex, cel: celIndex),
+                                         layerIndex: layerIndex, celIndex: celIndex)
+            }
+        }
+        let everyCel = Set(manager.layers.flatMap { layer in
+            layer.cels.map { CanvasManager.CelLocation(layerID: layer.id, celID: $0.id) }
+        })
+        XCTAssertGreaterThan(everyCel.count, 1,
+                             "the fixture has \(everyCel.count) cel(s); with one, a per-cel "
+                             + "announcement is indistinguishable from a single document-wide one")
+        var announced: Set<CanvasManager.CelLocation> = []
+        let token = manager.thumbnailInstalled.sink { announced.insert($0) }
+        defer { token.cancel() }
+
+        manager.setCanvasPadding(12)
+
+        XCTAssertTrue(manager.layers.allSatisfy { $0.cels.allSatisfy { $0.thumbnail == nil } },
+                      "a cel kept a tile of the old extent across a resize")
+        XCTAssertEqual(announced, everyCel,
+                       "the resize announced \(announced.count) of \(everyCel.count) cels, so the "
+                       + "blocks it did not name are still drawing the artwork at its old position "
+                       + "in the frame")
+    }
+
+    /// **The semantics the reference cell changes, stated rather than left to be discovered.**
+    ///
+    /// Two `Cel` values with the same `id` are the same cel at two moments, and they share one tile:
+    /// a copy taken for an undo snapshot or an off-actor render batch reads the picture the live cel
+    /// has *now*. That is deliberate — a copy carrying a stale tile is the failure this arrangement
+    /// cannot have — and it is the one place a reader of `Cel` could be surprised, so it is pinned.
+    ///
+    /// Operands: what the copy reports, and the image written through the live cel afterwards. Under
+    /// a stored `UIImage?` the copy would report the older one, so this is a real fork and not a
+    /// truth of value semantics.
+    func testTwoValuesOfTheSameCelShareOneTile() {
+        let manager = deferredManager()
+        let copyTakenFirst = manager.layers[0].cels[0]
+        let image = tile(manager)
+
+        manager.installThumbnail(image, layerIndex: 0, celIndex: 0)
+
+        XCTAssertTrue(copyTakenFirst.thumbnail === image,
+                      "a `Cel` value copied out of the document before the install is reporting a "
+                      + "different tile from the live cel of the same id, so the tile is stored per "
+                      + "*copy* rather than per cel — which is how an off-actor render batch or an "
+                      + "undo snapshot comes to hold a picture nobody can invalidate")
+    }
+
+    /// **And the boundary of that sharing: a duplicate is a different cel.**
+    ///
+    /// `duplicateLayer` mints new `id`s, so each copied cel gets a `ThumbnailTile` of its own and the
+    /// picture is copied into it. Operands: what the duplicate's cel reads after the *original* is
+    /// repainted, and the tile the duplicate was made with. They must differ from the original's new
+    /// one — sharing here would repaint both blocks from one drawing and neither artist-visible
+    /// symptom would point back at this line.
+    func testADuplicatedCelGetsATileOfItsOwnRatherThanAShareOfTheOriginals() {
+        let manager = deferredManager()
+        let original = tile(manager)
+        manager.installThumbnail(original, layerIndex: 0, celIndex: 0)
+
+        manager.duplicateLayer(at: 0)
+        guard let duplicateIndex = manager.layers.indices.first(where: { $0 != 0 })
+        else { return XCTFail("duplicateLayer produced no second layer to compare against") }
+        XCTAssertTrue(manager.layers[duplicateIndex].cels[0].thumbnail === original,
+                      "the duplicate did not start out carrying the original's picture")
+
+        let repainted = tile(manager)
+        manager.installThumbnail(repainted, layerIndex: 0, celIndex: 0)
+
+        XCTAssertTrue(manager.layers[duplicateIndex].cels[0].thumbnail === original,
+                      "repainting the original's tile changed the duplicate's as well, so the two "
+                      + "cels share one `ThumbnailTile` — `duplicateLayer` must assign the image "
+                      + "into the new cel's own cell rather than carrying the field across")
+        XCTAssertFalse(repainted === original,
+                       "the fixture rendered the same object twice, so the assertion above would "
+                       + "hold whether the cells were shared or not")
+    }
+
+    /// **End to end through the shipped flush**, so the silence is pinned at the seam the artist's
+    /// edit actually reaches rather than only at `installThumbnail`.
+    ///
+    /// `flushPendingThumbnailRegens()` is the synchronous spelling — the deferred one is pinned two
+    /// tests up — and it is used here precisely because it installs before it returns, which makes
+    /// the publish count deterministic instead of a function of what else turned the run loop.
+    func testAWholeThumbnailFlushRepublishesNothingAndStillLandsTheTile() {
+        let manager = deferredManager()
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        var publishes = 0
+        let token = manager.objectWillChange.sink { _ in publishes += 1 }
+        defer { token.cancel() }
+
+        manager.flushPendingThumbnailRegens()
+
+        XCTAssertEqual(publishes, 0,
+                       "a thumbnail flush republished the document \(publishes) time(s), which is the "
+                       + "whole-editor SwiftUI pass PERFORMANCE.md §18.6 set out to stop raising")
+        guard let landed = manager.layers[0].cels[0].thumbnail else {
+            return XCTFail("the flush published nothing and installed nothing, so the zero above is "
+                           + "the cost of doing no work rather than of doing it quietly")
+        }
+        XCTAssertEqual(landed.size, CanvasManager.celThumbnailSize,
+                       "the flush installed a \(landed.size) image rather than the 120-point tile "
+                       + "the timeline draws")
+    }
+
+    /// **Undo has to leave a correct tile, and it is the case the owner would find first.**
+    ///
+    /// Operands: the tile on the cel after undoing a stroke, and a cold render of what the cel holds
+    /// at that point. They must match; and the tile must differ from the one that was on the cel
+    /// while the stroke existed, or the block is showing a drawing the document no longer has.
+    func testUndoingAStrokeLeavesTheTileShowingWhatTheCelHoldsAfterwards() throws {
+        let manager = deferredManager()
+        // The fixture starts with no tile on purpose (see `deferredManager`), so the flush needs a
+        // job: without this the "before" tile is nil and the comparison below has one operand.
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        manager.flushPendingThumbnailRegens()
+        let beforeStroke = try XCTUnwrap(manager.layers[0].cels[0].thumbnail,
+                                         "the fixture never got a starting tile to compare against")
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector, "the fixture cel has no vector tier")
+        let elementsBefore = vector.elements
+        vector.addStroke(Self.stroke(77, canvas: Self.deferredCanvas, seedOffset: 900))
+        manager.registerVectorElementsUndo(
+            vectorCanvas: vector, oldElements: elementsBefore, newElements: vector.elements,
+            layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id,
+            label: .brushStroke, swap: .addsAndRemoves(ink: nil))
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
+        manager.flushPendingThumbnailRegens()
+        let withStroke = try XCTUnwrap(manager.layers[0].cels[0].thumbnail)
+        // Premise: the stroke changed the picture at all. Without it the comparison after the undo
+        // would hold under any implementation, including one that never repaints.
+        XCTAssertNotEqual(beforeStroke.pngData(), withStroke.pngData(),
+                          "the extra stroke did not change the tile, so this test cannot tell a "
+                          + "repainted block from a frozen one")
+
+        manager.undo()
+        manager.flushPendingThumbnailRegens()
+
+        let after = try XCTUnwrap(manager.layers[0].cels[0].thumbnail,
+                                  "the cel has no tile at all after an undo")
+        let cold = tile(manager)
+        XCTAssertEqual(after.pngData(), cold.pngData(),
+                       "the tile after the undo is not a picture of what the cel now holds")
+        XCTAssertNotEqual(after.pngData(), withStroke.pngData(),
+                          "the block is still showing the stroke the artist undid")
     }
 }

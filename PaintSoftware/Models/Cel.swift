@@ -1,5 +1,38 @@
 import UIKit
 
+/// **One rendered thumbnail, held by reference so that installing it is not a mutation of the
+/// `@Published` array the cel or layer lives in.** PERFORMANCE.md §18.6.
+///
+/// The problem it solves is not the tile's own cost — §18 had already taken the render off the main
+/// thread, leaving `installThumbnail` at a fraction of a millisecond. It is that the *write*
+/// published: `CanvasManager.layers` is `@Published` and `Layer`/`Cel` are structs, so putting a
+/// 120×120 image on one block raised a SwiftUI pass over the whole editor, 400 ms after every edit,
+/// MEASURED at ~43 ms of main-thread busy on the owner's iPad 9 — two orders of magnitude more than
+/// the thing it delivered.
+///
+/// **It is one storage location, not a shadow of one.** `Cel.thumbnail` and `Layer.thumbnail` are
+/// accessors over this and there is no other place a tile is kept, which is the difference between
+/// this and a side-channel cache keyed by cel id: nothing can hold a second opinion, because there
+/// is nothing else to hold it in. What the arrangement does change is *semantics* — two `Cel` values
+/// with the same `id` share one cell, so a copy taken for an undo snapshot or an off-thread render
+/// batch reads the tile the live cel has now rather than the one it had when the copy was taken.
+/// For a picture that is *derived* from the cel's content that is the answer you want; a copy
+/// carrying a stale tile is exactly the failure this cannot have.
+///
+/// **Nothing here notifies.** A cell has no back-reference to the document and giving it one would
+/// be the duplicate-truth spaghetti this exists to avoid, so telling the views is
+/// `CanvasManager`'s job — `installThumbnail` and `clearThumbnail` write a cell and then publish
+/// `thumbnailInstalled`, and those two are the only writers the app has.
+///
+/// Main-thread by convention like the rest of `CanvasManager`'s model, with the one documented
+/// exception that off-actor render batches carry `Cel` values around without touching this field —
+/// see `ThumbnailRegenBatch`, which is `@unchecked Sendable` for that reason already.
+final class ThumbnailTile: @unchecked Sendable {
+    var image: UIImage?
+
+    init(image: UIImage? = nil) { self.image = image }
+}
+
 struct Cel: Identifiable {
     let id: UUID
     var startFrame: Int
@@ -66,7 +99,33 @@ struct Cel: Identifiable {
     /// reopen and placing B writes two identical poses, produces no animation, and puts nothing on
     /// screen to explain why.
     var pendingPoseBaselines: [String: PoseQuad] = [:]
-    var thumbnail: UIImage? = nil
+
+    /// **Where this cel's timeline tile actually lives** — a reference cell rather than a stored
+    /// image, and the whole of PERFORMANCE.md §18.6's change. See `ThumbnailTile`, and read
+    /// `thumbnail` below as the accessor over it.
+    ///
+    /// A `let` with a default value, so the memberwise initialiser does not carry it and **every
+    /// `Cel(...)` gets a cell of its own**. That is what makes a *duplicate* — a new cel with a new
+    /// `id` — start out with its own tile rather than sharing the original's; `duplicateLayer`
+    /// assigns the image across afterwards, which is a copy of a picture rather than a shared one.
+    let tile = ThumbnailTile()
+
+    /// The 120×120 picture of this cel that the timeline block and the layer rail draw.
+    ///
+    /// **Reading and writing this touches `tile` and nothing else, so a write publishes nothing.**
+    /// `Cel` lives inside `CanvasManager.layers`, which is `@Published`; a *stored* thumbnail made
+    /// installing one a mutation of that array, and the SwiftUI pass it raised — the whole editor,
+    /// MEASURED at ~43 ms on the owner's iPad — cost far more than the tile did. A `nonmutating`
+    /// setter over a class means `layers` is only *read* on the way to the cell (verified by
+    /// counting `objectWillChange`, `ThumbnailRenderLogicTests`).
+    ///
+    /// **So a write here reaches no view by itself.** Go through `CanvasManager.installThumbnail` or
+    /// `CanvasManager.clearThumbnail`, which write it and then say so on `thumbnailInstalled` — the
+    /// timeline track and the layer rail listen there precisely because no pass will tell them.
+    var thumbnail: UIImage? {
+        get { tile.image }
+        nonmutating set { tile.image = newValue }
+    }
 
     var endFrame: Int { startFrame + frameCount }
 

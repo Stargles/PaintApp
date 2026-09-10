@@ -1526,6 +1526,25 @@ final class CanvasManager: ObservableObject {
         let celID: UUID
     }
 
+    /// **Announces that one cel's tile has changed, to the two views that draw one.**
+    ///
+    /// PERFORMANCE.md §18.6. A tile now lives in a `ThumbnailTile` reference cell, so installing one
+    /// mutates no `@Published` property and raises no SwiftUI pass — which is the entire point, and
+    /// which means `TimelineTrackView` and `LayerStackListView` would otherwise never find out. They
+    /// subscribe here instead and each does the narrow thing: the track repaints the one block view
+    /// the cel owns, the rail marks itself for a reload.
+    ///
+    /// **A `PassthroughSubject` rather than a `@Published` anything**, because a published property
+    /// on `CanvasManager` is exactly what this is escaping — every `ObservedObject` in the editor
+    /// watches this object, and there is no way to publish to two of them and not the rest.
+    ///
+    /// **One send per install, uncoalesced, and the coalescing is the subscriber's business.** The
+    /// artist's path sends one or two per flush; `regenerateAllThumbnails` and the load-time backfill
+    /// send one per cel, which is why the rail schedules a reload instead of running one. Keeping the
+    /// subject synchronous is what lets a logic test count sends against installs with no runloop
+    /// pumping at all.
+    let thumbnailInstalled = PassthroughSubject<CelLocation, Never>()
+
     private var cancellables = Set<AnyCancellable>()
 
     /// Holds this document's registration with `MemoryPressure`; releasing it unregisters, so a
@@ -2894,6 +2913,12 @@ final class CanvasManager: ObservableObject {
     /// Puts a rendered thumbnail on its cel, and on the layer too when that cel is the one the
     /// playhead is over. The single writer, so the deferred backfill cannot install one differently
     /// from the synchronous path.
+    ///
+    /// **The two writes below reach `ThumbnailTile`, not `@Published layers`** — PERFORMANCE.md
+    /// §18.6, and `Cel.thumbnail` carries the argument. `layers` is *read* on the way to the cell,
+    /// so no publisher fires and no SwiftUI pass is raised; what tells the views instead is the
+    /// `thumbnailInstalled` send on the last line, which they answer with a repaint of the one block
+    /// that changed rather than with a rebuild of the editor.
     func installThumbnail(_ image: UIImage, layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex) else { return }
@@ -2901,6 +2926,27 @@ final class CanvasManager: ObservableObject {
         if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image
         }
+        thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,
+                                            celID: layers[layerIndex].cels[celIndex].id))
+    }
+
+    /// Drops the tile a cel is carrying, and says so.
+    ///
+    /// **The counterpart to `installThumbnail`, and it exists because the send does.** Two document
+    /// operations blank every cel's tile rather than re-rendering it — a canvas resize and a mirror
+    /// — and left to a bare `thumbnail = nil` they would now blank the storage and leave the old
+    /// picture on the timeline, because a tile write publishes nothing and the tile is no longer in
+    /// `TimelineLayoutKey`. Both of those operations change the *geometry* the tile is a picture of,
+    /// so the stale block would be wrong rather than merely late.
+    func clearThumbnail(layerIndex: Int, celIndex: Int) {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        layers[layerIndex].cels[celIndex].thumbnail = nil
+        if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
+            layers[layerIndex].thumbnail = nil
+        }
+        thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,
+                                            celID: layers[layerIndex].cels[celIndex].id))
     }
 
     // MARK: - Fill state (the operations live in CanvasManager+Fill.swift)

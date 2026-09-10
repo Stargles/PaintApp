@@ -50,20 +50,25 @@ enum TimelineRulerClip {
 /// track, so it gets a fast path instead of a key field. Putting it in would make the key move on
 /// every tick of the very gesture this exists to make cheap.
 ///
-/// **The `ObjectIdentifier`s carry the same ABA hazard `LayerContentVersion` documents, and it is
-/// closed the same way**: the coordinator retains the thumbnails this key names for exactly as long
-/// as it holds the key, so a stale address cannot be reused by a new object and read as equal.
+/// **It named thumbnails by address until PERFORMANCE.md §18.6 and no longer does**, which is worth
+/// saying because the retain-alongside-the-key idiom that closed that ABA hazard went with it. There
+/// is nothing in this key that is identified by an address any more.
 struct TimelineLayoutKey: Equatable {
 
-    /// One block on a track. Everything `TimelineRowView.update` draws from, and nothing else.
+    /// One block on a track: its identity, and where and how long it is.
+    ///
+    /// **The picture is deliberately not here, and that is this key's second fast path.** It carried
+    /// the tile's `ObjectIdentifier` until PERFORMANCE.md §18.6, which is what made installing a
+    /// 120×120 image rebuild every row, every block and the ruler's CoreText. A tile now travels on
+    /// `CanvasManager.thumbnailInstalled` and lands on the one block view that owns it — exactly the
+    /// arrangement `currentFrame` has had since this key was written, and for the same reason: an
+    /// input that moves faster than the layout, and moves nothing the layout decides, does not belong
+    /// in a layout key. The rebuild branch still paints each block from `cel.thumbnail`, so a block
+    /// that is *created* by a relayout is current without being told.
     struct CelKey: Equatable {
         let id: UUID
         let startFrame: Int
         let frameCount: Int
-        /// The picture on the block. Identity rather than content, because a regenerated thumbnail
-        /// replaces the object wholesale — the same reason `LayerContentVersion` compares
-        /// `fillImage`/`bakedImage` that way.
-        let thumbnail: ObjectIdentifier?
     }
 
     /// A folder's summary band. Its span is derived from every descendant's cels, so it moves when a
@@ -176,12 +181,11 @@ struct TimelineLayoutKey: Equatable {
 
 extension TimelineLayoutKey {
 
-    /// Builds the key for the timeline as it stands, and hands back the thumbnails it named.
+    /// Builds the key for the timeline as it stands.
     ///
-    /// **The second half of the tuple is not incidental.** `CelKey.thumbnail` is an address, and an
-    /// address is only a sound identity while the object behind it cannot be freed and replaced. The
-    /// caller stores these alongside the key and drops them together — the idiom
-    /// `CanvasView.Coordinator` spells out at its `retainedOnionSources`.
+    /// **It used to hand back the thumbnails it named as well, and no longer needs to** — the tile is
+    /// out of the key (see `CelKey`), so there is no address here whose object has to be kept alive
+    /// for the comparison to mean anything.
     @MainActor
     static func make(canvasManager: CanvasManager,
                      stackRows: [LayerStackRow],
@@ -191,19 +195,16 @@ extension TimelineLayoutKey {
                      contentHeight: CGFloat,
                      rowHeight: CGFloat,
                      rulerHeight: CGFloat,
-                     drag: DragKey?) -> (key: TimelineLayoutKey, retainedThumbnails: [UIImage]) {
+                     drag: DragKey?) -> TimelineLayoutKey {
         var tracks: [[CelKey]] = []
         var trackMarkers: [[Int]] = []
         var folders: [FolderKey] = []
-        var retained: [UIImage] = []
 
         for row in stackRows {
             if let layerIndex = row.layerIndex, canvasManager.layers.indices.contains(layerIndex) {
                 let layer = canvasManager.layers[layerIndex]
-                let cels = layer.cels.map { cel -> CelKey in
-                    if let thumbnail = cel.thumbnail { retained.append(thumbnail) }
-                    return CelKey(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                                  thumbnail: cel.thumbnail.map(ObjectIdentifier.init))
+                let cels = layer.cels.map { cel in
+                    CelKey(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount)
                 }
                 tracks.append(cels)
                 // **What counts as a keyframe is the model's answer, asked here rather than rebuilt.**
@@ -231,7 +232,7 @@ extension TimelineLayoutKey {
             ? canvasManager.effectiveLoopRange
             : nil
 
-        let key = TimelineLayoutKey(
+        return TimelineLayoutKey(
             rows: stackRows,
             tracks: tracks,
             trackMarkers: trackMarkers,
@@ -249,6 +250,5 @@ extension TimelineLayoutKey {
             interpolationReferences: canvasManager.isInterpolateMode ? canvasManager.interpolationReferences : [],
             drag: drag
         )
-        return (key, retained)
     }
 }

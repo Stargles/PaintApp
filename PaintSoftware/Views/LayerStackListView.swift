@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -50,7 +51,15 @@ struct LayerStackListView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject {
-        var canvasManager: CanvasManager
+        /// **Reassigned on every `updateUIView`**, so the thumbnail subscription below has to follow
+        /// it — a new document is a new object, and a sink left on the old one goes quiet with
+        /// nothing on screen to say why. Same `didSet` as `TimelineTrackView.Coordinator`'s.
+        var canvasManager: CanvasManager {
+            didSet {
+                guard canvasManager !== oldValue else { return }
+                observeThumbnailInstalls()
+            }
+        }
         var onRequestOptions: ((UUID) -> Void)?
 
         private weak var tableView: UITableView?
@@ -133,6 +142,40 @@ struct LayerStackListView: UIViewRepresentable {
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
             super.init()
+            observeThumbnailInstalls()
+        }
+
+        /// Holds the `thumbnailInstalled` subscription. One, replaced rather than added to, so a
+        /// coordinator that outlives several documents does not accumulate sinks.
+        private var thumbnailSubscription: AnyCancellable?
+        private var reloadScheduled = false
+
+        /// **How the rail hears about a tile now that installing one raises no SwiftUI pass.**
+        ///
+        /// PERFORMANCE.md §18.6. `LayerRowModel.thumbnail` is the picture this list draws and it
+        /// comes off `Layer.thumbnail`, which is a `ThumbnailTile` reference cell — so the write that
+        /// fills it republishes nothing, `updateUIView` does not run, and without this the row would
+        /// keep drawing the tile it had at the last unrelated pass.
+        private func observeThumbnailInstalls() {
+            thumbnailSubscription = canvasManager.thumbnailInstalled
+                .sink { [weak self] _ in self?.setNeedsReload() }
+        }
+
+        /// Coalesces a burst of installs into one `reload()` on the next turn of the runloop.
+        ///
+        /// **The track can afford to answer every send and this cannot.** A track repaints one
+        /// `UIImageView` per send; a reload here rebuilds a `LayerRowModel` for every row and applies
+        /// a diffable snapshot, and the two callers that install in bulk — `regenerateAllThumbnails`
+        /// and the load-time backfill — send one per cel of the whole document. `setNeedsLayout`'s
+        /// shape, for `setNeedsLayout`'s reason.
+        private func setNeedsReload() {
+            guard !reloadScheduled else { return }
+            reloadScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reloadScheduled = false
+                self.reload()
+            }
         }
 
         func attach(to tableView: UITableView) {

@@ -197,7 +197,21 @@ struct Layer: Identifiable {
     /// the corresponding `LayerFolder` in `CanvasManager.folders`.
     var parentFolderID: UUID? = nil
     var cels: [Cel]
-    var thumbnail: UIImage? = nil
+
+    /// The rail's tile, in a reference cell for `Cel.tile`'s reason and by the same rules — see
+    /// `ThumbnailTile`. A `let` with a default, so the memberwise initialiser does not carry it and
+    /// every `Layer(...)` gets its own; `duplicateLayer` assigns the image across afterwards.
+    let tile = ThumbnailTile()
+
+    /// The picture the layer panel's row draws: whichever cel is live at the playhead, as
+    /// `CanvasManager.installThumbnail` last resolved it.
+    ///
+    /// **Writing it publishes nothing** (`Cel.thumbnail` says why at length), so the rail hears about
+    /// a new tile on `CanvasManager.thumbnailInstalled` rather than through a SwiftUI pass.
+    var thumbnail: UIImage? {
+        get { tile.image }
+        nonmutating set { tile.image = newValue }
+    }
 }
 
 extension Layer {

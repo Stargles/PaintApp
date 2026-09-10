@@ -69,7 +69,7 @@ final class TimelineGraphChannelListLogicTests: XCTestCase {
                                contentHeight: 200,
                                rowHeight: 34,
                                rulerHeight: 18,
-                               drag: nil).key
+                               drag: nil)
     }
 
     private func drawnIDs(_ manager: CanvasManager) -> [String] {

@@ -118,11 +118,19 @@ final class PlaybackTrace: @unchecked Sendable {
         case thumbnailFlatten
         /// `ThumbnailRenderer.render` — the 480² tile down to 120².
         case thumbnailDownsample
-        /// `installThumbnail` — the two writes that put a rendered tile on `@Published layers`.
-        /// **A separate row because `Layer` and `Cel` are structs**: the write copies the layer's
-        /// whole cel array, so this is the row that grows with the *document* rather than with the
-        /// canvas, and the owner's bar names cels explicitly.
+        /// `installThumbnail` — the writes that put a rendered tile on its cel, plus the
+        /// `thumbnailInstalled` send and everything the subscribers do synchronously inside it.
+        ///
+        /// **It used to be the row that grew with the document and is not any more.** Until
+        /// PERFORMANCE.md §18.6 the two writes went to `@Published layers`, so each copied the
+        /// layer's whole cel array *and* raised a SwiftUI pass over the editor; the tile is a
+        /// `ThumbnailTile` reference cell now, so the write is a class store and this row's honest
+        /// reading is the repaint it triggers.
         case thumbnailInstall
+        /// `TimelineTrackView.Coordinator.applyInstalledThumbnail` — one block's `UIImageView`,
+        /// which is what a landed tile costs the main thread since §18.6. It is inside
+        /// `thumbnailInstall`, so the two rows are nested and must not be added together.
+        case timelineTilePaint
         /// `CanvasView.updateUIView`'s chrome half — every overlay update from
         /// `updateActiveLayerAndTool` down, summed. Named because `updateUIView` minus `reconcile`
         /// minus `onionSkin` used to be a remainder a reader had to compute.
@@ -133,8 +141,8 @@ final class PlaybackTrace: @unchecked Sendable {
         /// `TimelineTrackView.updateUIView`, whole — the *second* `UIViewRepresentable` a canvas
         /// pass drives, and one nothing had ever timed.
         case timelineTrack
-        /// `TimelineLayoutKey.make` — O(layers × cels), and it reads every cel's thumbnail address,
-        /// which is what makes a thumbnail install raise a full track rebuild.
+        /// `TimelineLayoutKey.make` — O(layers × cels). It read every cel's thumbnail address until
+        /// PERFORMANCE.md §18.6, which is what made a thumbnail install raise a full track rebuild.
         case timelineKey
         /// The track's rebuild branch: every row, every block view, the ruler's CoreText. Taken only
         /// when `timelineKey` says something moved.
