@@ -35,7 +35,7 @@ import CoreGraphics
 /// ink and is composited *over* the layer's picture, so the layer's picture stays on screen
 /// underneath and the commit is a source-over draw at the stroke's own opacity. `.subtractive` holds
 /// this stroke's own **removal coverage** and *stands in for* the layer's picture inside the window,
-/// so the display has to hide the layer's picture there (`StrokeCanvasView.showScratch` punches it
+/// so the display has to hide the layer's picture there (`StrokeCanvasView.showOverlays` punches it
 /// out) and the commit is one `.destinationOut` merge of that coverage at the stroke's opacity.
 /// `.replacing` is the odd one out and is now the cut preview's alone: its window genuinely holds a
 /// *picture*, several `stampStroke` calls deep (`VectorCanvas.applyPreview` erases and then restamps

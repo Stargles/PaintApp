@@ -17,7 +17,7 @@ enum VectorScratchRole {
     /// Modes 1 and 2: the scratch starts as a copy of the canvas render *inside its own window* and
     /// dabs punch `.destinationOut` into it, standing in for the canvas render over that window for
     /// the stroke's duration — the raster eraser's own code path applied to the vector layer's
-    /// pixels. `StrokeCanvasView.showScratch` punches the base out under it; see `StrokeScratch`.
+    /// pixels. `StrokeCanvasView.showOverlays` punches the base out under it; see `StrokeScratch`.
     case replacement
     /// Mode 3: nothing is drawn into the scratch. It commits during the drag, so the canvas render
     /// alone is truth and a scratch would show what is already on screen.

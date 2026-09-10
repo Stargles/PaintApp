@@ -82,11 +82,15 @@ identified — one at 401-402 ms is the debounced thumbnail and the SwiftUI pass
 is the operation's own — and §16 removed the onion skin from both. **What those two passes still do
 is the next measurement, and it must be taken on the device.**
 
-**The disappearing strokes are untouched and are the owner's oldest live complaint.** BUGS.md's
-*"Starting a stroke before the last one has rendered leaves the last one off screen"* is the
-mechanism and its own text says the window *"scales with canvas area"*. Closing it needs a second
-overlay for un-landed ink, or a synchronous composite at pen-up — and the second reverses RENDER.md
-§2.13 deliberately, so **it is the owner's trade rather than a session's.**
+**The disappearing strokes are CLOSED** — the entry left BUGS.md on 2026-09-09 and PERFORMANCE.md
+§11.12 is the measurement. The window is MEASURED on the owner's own Test1 at **14.4 ms at 4096² and
+27.3–30.2 ms once the padding slider is at its max (6000²)**, and the reason they hit it reliably is
+area rather than a lost fast path: the incremental append still runs after a `setCanvasPadding` (85
+dabs stamped on both sides), and what is left is one canvas-sized allocation plus one canvas-sized
+blit. `UnlandedInk` holds the finished stroke's own display image until a base containing it lands,
+so neither of BUGS.md's two options was taken: nothing is composited on the main thread, and the ink
+held is **2.6 MiB for an ordinary stroke at any canvas size** — less than the `StrokeScratch` the
+shipped code was holding for the same window.
 
 After that, in queue order: **(36)**'s one remaining box, **(41)**, then **(42)**.
 

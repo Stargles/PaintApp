@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		66E8831AAE8E8361D2157D0F /* UnlandedInkUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B478F546F64167BCA8DD04E /* UnlandedInkUITests.swift */; };
+		424F758C02439CF296959F64 /* UnlandedInkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A996758C2A2576AD7441D64C /* UnlandedInkLogicTests.swift */; };
+		1BB8E2166CA3DF7056054588 /* UnlandedInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB903836ADFA18C63BA3FB0 /* PaintSoftware/Views/UnlandedInk.swift */; };
+		31CCC55BEF553554C3B1E65E /* StrokeHandoffBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF81A3DB5100A326C07EBED /* StrokeHandoffBench.swift */; };
 		79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */; };
 		14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */; };
 		FF5656C311B7834F505F8383 /* PoseBandLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */; };
@@ -392,6 +396,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0B478F546F64167BCA8DD04E /* UnlandedInkUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnlandedInkUITests.swift; sourceTree = "<group>"; };
+		A996758C2A2576AD7441D64C /* UnlandedInkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnlandedInkLogicTests.swift; sourceTree = "<group>"; };
+		5CB903836ADFA18C63BA3FB0 /* PaintSoftware/Views/UnlandedInk.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/UnlandedInk.swift; sourceTree = "<group>"; };
+		3BF81A3DB5100A326C07EBED /* StrokeHandoffBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeHandoffBench.swift; sourceTree = "<group>"; };
 		DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PoseComponents.swift; sourceTree = "<group>"; };
 		20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseComponentsLogicTests.swift; sourceTree = "<group>"; };
 		01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseBandLogicTests.swift; sourceTree = "<group>"; };
@@ -1001,6 +1009,9 @@
 				C826C71CD517E9C9DED43480 /* PlaybackTickBench.swift */,
 				7D841402ECAFFA26E9E06176 /* DabCostBench.swift */,
 				E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */,
+				0B478F546F64167BCA8DD04E /* UnlandedInkUITests.swift */,
+				A996758C2A2576AD7441D64C /* UnlandedInkLogicTests.swift */,
+				3BF81A3DB5100A326C07EBED /* StrokeHandoffBench.swift */,
 				71BB5473D1DDD0AA2183F5B5 /* VectorRenderLockLogicTests.swift */,
 				CE32F10E685C4E802A5B3800 /* UndoContentionBench.swift */,
 				013A41F1EC13F3CDBDB34768 /* ThumbnailRenderLogicTests.swift */,
@@ -1078,6 +1089,7 @@
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
 				CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */,
 				1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */,
+				5CB903836ADFA18C63BA3FB0 /* PaintSoftware/Views/UnlandedInk.swift */,
 				C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */,
 				5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */,
 				845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */,
@@ -1549,6 +1561,10 @@
 				4EA7076DF68F8DFA9FCB6BF5 /* PlaybackTickBench.swift in Sources */,
 				A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */,
 				329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */,
+				66E8831AAE8E8361D2157D0F /* UnlandedInkUITests.swift in Sources */,
+				424F758C02439CF296959F64 /* UnlandedInkLogicTests.swift in Sources */,
+				1BB8E2166CA3DF7056054588 /* UnlandedInk.swift in Sources */,
+				31CCC55BEF553554C3B1E65E /* StrokeHandoffBench.swift in Sources */,
 				9962E3741426FA1487C55459 /* VectorRenderLockLogicTests.swift in Sources */,
 				EDA37468AF86B87632104BAE /* UndoContentionBench.swift in Sources */,
 				7848B7FEFCE5AEFE7AC3097B /* ThumbnailRenderLogicTests.swift in Sources */,

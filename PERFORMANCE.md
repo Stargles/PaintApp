@@ -2488,21 +2488,21 @@ measured 3.16 µs/dab, 236 dabs a stroke). In their own terms, on their own devi
 
 (INFERRED from the MEASURED 3.16 µs/dab; each row is arithmetic over it.)
 
-**And the artist sees that latency as their ink disappearing, not as a slow refresh.** READ from
-`StrokeCanvasView`, not measured, and it wants a minute on the device to confirm: at pen-up the
-finished stroke stays visible as the `scratch` overlay while the re-walk runs
-(`scratchIsHeldForRerender`), which is correct. But `scratch`'s `didSet` releases that hold when a
-*new* scratch is made — deliberately, and the doc comment says why. So if the artist starts stroke
-n+1 before stroke n's re-walk has landed, **stroke n is not on screen at all** until it does: the base
-slot still holds the pre-stroke picture and the scratch now shows only the new stroke. The window is
-exactly the re-walk above — **0.74 s at 1,000 strokes, 3.0 s at 4,000** — and a person inking line art
-puts strokes down far faster than that. **This is what "lagspike" will mean to the owner even though
-no thread ever blocks**, and it is invisible to every timing in this section.
+**And the artist sees that latency as their ink disappearing, not as a slow refresh.** At pen-up the
+finished stroke stayed visible as the `scratch` overlay while the re-walk ran
+(`scratchIsHeldForRerender`), which is correct — but `scratch`'s `didSet` released that hold when a
+*new* scratch was made, so if the artist started stroke n+1 before stroke n's re-walk had landed,
+**stroke n was not on screen at all** until it did: the base slot still held the pre-stroke picture
+and the scratch now showed only the new stroke. The window is exactly the re-walk above — **0.74 s at
+1,000 strokes, 3.0 s at 4,000** — and a person inking line art puts strokes down far faster than that.
+**This is what "lagspike" meant to the owner even though no thread ever blocked**, and it was
+invisible to every timing in this section.
 
-**That suspicion was chased down and it is real** — [BUGS.md](BUGS.md), 2026-09-04, where the reading
-is completed by tracing every path that repaints the base rather than only the one that releases the
-hold. §11.8 shrank the window it opens from 1.1 s to 2.6 ms at 2,000 strokes and did not close it,
-and no small fix does: there is one scratch view, so holding the old scratch does not display it.
+**That suspicion was chased down, was real, and is FIXED — §11.12.** `UnlandedInk` separates the two
+meanings the one overlay carried: the stroke under the pen, and ink the base does not have yet. A
+finished stroke's *picture* moves to the second at pen-up and gets a layer of its own, so beginning
+the next stroke cannot take its place. §11.8 had shrunk the window from 1.1 s to 2.6 ms at 2,000
+strokes without closing it; the entry left [BUGS.md](BUGS.md) on 2026-09-09.
 
 ### 11.5 The other half of "memory overflow": undo, which does scale with n
 
@@ -3118,9 +3118,9 @@ and, on an append or a repair, draws the whole standing base into it first — d
 base is the picture outside the clip too. So a one-stroke edit on a 6000² canvas allocates 144 MB and
 blits 144 MB in and out however small the damage rectangle is. `incrementalBase` and `regionBase` are
 *not* a second copy — at the identity transform each holds the very object `cachedImage` holds — so the
-two canvas-sized bitmaps alive during a render are the old memo and the new output, which is what
-BUGS.md's *"Starting a stroke before the last one has rendered"* already names. Fixing that is a
-different feature: `cachedImage` is a single `UIImage` to eleven consumers, and making it tiled is
+two canvas-sized bitmaps alive during a render are the old memo and the new output — the term §11.12
+measures as the whole of a pen-up's residual cost. Making a one-stroke edit cost less than the canvas
+is a different feature: `cachedImage` is a single `UIImage` to eleven consumers, and making it tiled is
 RENDER.md §3.8's striped composite generalized, with §3.8's own size-keyed-memo trap waiting in it.
 
 ### 11.11c A cel thumbnail cost the canvas, warm memo or cold (2026-09-08)
@@ -3227,6 +3227,68 @@ nothing at all**: since RENDER.md §3.9 its only pixel source is the bake store,
 
 **What is left is `cel.derived`**, the other branch of the same line, which still renders at canvas
 size — see BUGS.md.
+
+### 11.12 The disappearing strokes: what the window actually is, on the owner's own document (2026-09-09)
+
+§11.4 read the defect off the source and §11.8 shrank it by two orders of magnitude without closing
+it. This is the first measurement of it on **the document the owner reproduces it in**, which they
+supplied on 2026-09-09 along with the step nobody had:
+
+> *"the only time I have observed them happen reliably on the ipad is in my the Test1, after setting
+> the canvas padding up (to max for instance)."*
+
+**MEASURED on an iPad Pro 13-inch M4 simulator, iOS 26.5, Debug, on `Test1` itself** — 4096², three
+layers, heaviest vector cel **302 strokes** — by `StrokeHandoffBench`. A "pen-up" is one `addStroke`
+followed by the `render(quality:ifStillAtVersion:)` that `StrokeCanvasView.startVectorRender` runs,
+which is the window exactly. Median of five, each iteration in its own `autoreleasepool`.
+
+| | canvas | median pen-up | dabs stamped on the walk |
+|---|---|---|---|
+| as saved | 4096² | **14.4 ms** | 85 |
+| padding raised to its max, live | **6000²** | **27.3 / 30.2 ms** (two runs) | 85 |
+
+**The hypothesis that raising the padding takes the incremental append away is REFUTED, and the dab
+column is the operand that refutes it.** An append walks only the tail, so it stamps the new stroke's
+own 85 dabs; a full walk of that cel would stamp thousands. It reads **85 on both sides**, so the
+append is running as well after a `setCanvasPadding` as before it — a resize hands every cel a brand
+new `VectorCanvas` with no memo, and the first render rebuilds the base that every later one appends
+to. `setCanvasPadding` itself cost **2.6–3.8 ms** on this document.
+
+**What the padding does is 2.1x the area, and the residual cost is area.** §11.9 measured an append
+as ~75% buffer traffic on an 8 MB canvas; the canvas here is 67 MiB and then 137 MiB, and 14.4 → 30.2
+is 2.10x against an area ratio of 2.146. So the window is one canvas-sized allocation plus one
+canvas-sized blit, and *"scales with canvas area, not stroke count"* — which BUGS.md's entry already
+predicted — is now measured rather than reasoned.
+
+**That is also the whole answer to "why can the owner hit it reliably and nobody else could".** §11.8's
+2.57 ms was at the owner's 2048x1024 baseline, 2.1 megapixels; 6000² is **17.2x** that area. Nobody
+starts a stroke inside 3 ms; a 30 ms window on a Mac is, by §11.8's own device-to-simulator ratio,
+comfortably over a tenth of a second on the iPad 9 — which is not a race at all, it is just how long
+the stroke is missing for.
+
+**The fix costs nothing in either direction, and both halves are measured.** `UnlandedInk` holds the
+finished stroke's *display image* — the bitmap that was already on screen a moment earlier — and
+releases the `StrokeScratch` that produced it, where the shipped code held the whole scratch. So the
+main thread does no more work than before (nothing is composited at pen-up; §2.13 stands) and the
+memory is a **reduction**, not an addition:
+
+| at | one held picture, ordinary stroke | one held picture, canvas-crossing stroke | the second canvas-sized overlay this refused |
+|---|---|---|---|
+| 4096² | **2.6 MiB** (1169x584) | 64.0 MiB | 64.0 MiB |
+| 6000² | **2.6 MiB** (1169x584) | 137.3 MiB | 137.3 MiB |
+
+MEASURED the same run, `bytesPerRow × height` off the bitmap rather than a footprint, so it is the
+app's own allocation and not the pool's. **The held picture does not scale with the canvas**, because
+`StrokeScratch`'s window is the stroke's own box: the two columns differ only where a stroke really
+does cross the canvas, and that stroke's window is canvas-sized while it is being drawn anyway. The
+set is bounded by how far a pen travels in one render, which is the same few hundred points at 512²
+as at 6000².
+
+**And the `TEST_RUNNER_` prefix does not work on a simulator destination**, which cost this section a
+run. §11.8's note is right about a *device*; MEASURED 2026-09-09 on Xcode 26.5, a simulator run echoes
+`TEST_RUNNER_PAINTAPP_BENCH = 1` in its build settings, the runner process never sees `PAINTAPP_BENCH`,
+every test skips, and the run reports `** TEST SUCCEEDED **`. Use the device's own environment instead
+— `xcrun simctl spawn "$UDID" launchctl setenv PAINTAPP_BENCH 1`, before the run.
 
 ---
 

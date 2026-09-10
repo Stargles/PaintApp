@@ -138,6 +138,21 @@ final class StrokeCanvasView: UIView {
     /// allocation and an autolayout pass at the worst possible moment.
     private let scratchView = UIImageView()
 
+    /// **Where `unlandedInk` reaches the screen** — one `UIImageView` per held picture, stacked in
+    /// commit order, between the base and the live stroke.
+    ///
+    /// A container rather than a single view because the held set has more than one member whenever
+    /// an artist finishes two strokes inside one render, and because each picture carries its own
+    /// alpha: a group opacity over the pair would be a different number from either of them, which
+    /// is BRUSH.md §2.11's cap applied to the wrong operand. Core Animation composites the siblings
+    /// source-over, which is what `renderLocalContent` does to the same strokes when the base
+    /// eventually replaces them — the same argument `scratchView` already stands on.
+    ///
+    /// **It holds no pixels of its own.** Its subviews show the `UIImage`s the live scratch was
+    /// already showing, so the ink on screen costs what it cost a moment before pen-up and the
+    /// `StrokeScratch` behind it is released instead of held.
+    private let heldInkView = UIView()
+
     /// The lasso move's floating piece: the lifted ink, rendered once and shown through Core Animation
     /// while the artist drags it. Sits **above** `scratchView` and so above this layer's own content,
     /// and below every layer stacked on top of this one — which is z-correct by construction, and is
@@ -223,6 +238,12 @@ final class StrokeCanvasView: UIView {
             // the same version number is a coincidence, not a match. Cleared here so
             // `finishVectorRender`'s pending test can be a plain integer comparison.
             pendingVectorRenderVersion = nil
+            // **And held ink belongs to the canvas it was drawn on, for the same reason and one that
+            // is worse.** Two cels' `version` counters are independent and can be equal by
+            // coincidence, so a picture kept across a layer, cel or frame change could be retired by
+            // an unrelated number — or, worse, drawn over the *new* cel's base until it was. A layer
+            // switch mid-render is exactly when that happens.
+            if oldValue !== vectorCanvas { unlandedInk.removeAll() }
             refreshDisplay()
         }
     }
@@ -291,16 +312,27 @@ final class StrokeCanvasView: UIView {
     private static let renderQueue = DispatchQueue(label: "com.paintapp.StrokeCanvasView.render",
                                                    qos: .userInitiated)
 
-    /// True between a vector stroke committing and its re-render landing, while the finished
-    /// stroke's own scratch stands in for ink the base slot does not contain yet.
+    /// **The ink that is on screen but not in the base slot** — every stroke committed since the
+    /// base was rasterized, shown above it until a render that contains them lands. See
+    /// `UnlandedInk`, which is where the invariant and the reasoning live.
     ///
-    /// **Releasing it is the frame the artist would otherwise see the stroke vanish on.** The
-    /// commit puts the ink in the display list and invalidates the render, so the base is
-    /// momentarily a picture *without* the stroke in it; dropping the scratch at that moment — which
-    /// is what `endScratch()` did straight after `commitVectorStroke` — would blink the stroke out
-    /// for as long as the rasterize takes. So it is dropped by the refresh that installs the new
-    /// base, in the same main-thread turn and therefore the same Core Animation commit.
-    private var scratchIsHeldForRerender = false
+    /// **This replaced a `Bool`, and the `Bool` is the whole of BUGS.md's 2026-09-04 defect.** It
+    /// was `scratchIsHeldForRerender`: true between a commit and its re-render landing, while the
+    /// finished stroke's own scratch stood in for ink the base did not contain yet. That works for
+    /// one stroke and cannot work for two — there is a single `scratchView`, so beginning the next
+    /// stroke put its pixels where the finished one's were, and the finished one was on screen
+    /// nowhere at all until its render arrived. A count, not a flag, is what the situation actually
+    /// is.
+    private var unlandedInk = UnlandedInk()
+
+    /// The id the next held picture takes. Monotonic; see `UnlandedInk.Picture.id`.
+    private var nextUnlandedInkID = 0
+
+    /// The ids `heldInkView`'s subviews were last built from, so the rebuild happens when the held
+    /// set changes rather than on every SwiftUI pass — `refreshDisplay` runs once per layer per
+    /// pass, and rebuilding a view hierarchy there is the cost `scratchView`'s stored `let` exists
+    /// to avoid.
+    private var heldInkIDsOnScreen: [Int] = []
     /// The `RasterLayerTexture.version` last shown — the raster twin of `displayedVectorVersion`.
     /// Both texture types are reference types mutated in place, so a content change alone never
     /// triggers a SwiftUI repaint; without this guard a baked shape or undone fill stays stale
@@ -321,12 +353,12 @@ final class StrokeCanvasView: UIView {
     /// this is belt and braces; it is here because the failure it prevents is silent, permanent, and
     /// looks to the artist like corrupted artwork rather than like a bug in a preview.
     ///
-    /// **A new scratch also ends any hold on the last one.** A stroke started before the previous
-    /// stroke's re-render landed would otherwise have its own window torn out from under it when that
-    /// render arrived and released the hold — see `scratchIsHeldForRerender`.
+    /// **A new scratch no longer ends anything.** It used to release the previous stroke's hold,
+    /// because there was one overlay and the incoming stroke needed it; the finished stroke moves to
+    /// `unlandedInk` at pen-up now and keeps its own picture until a base containing it lands.
     private var scratch: StrokeScratch? {
         didSet {
-            if scratch == nil { showScratch(nil) } else { scratchIsHeldForRerender = false }
+            if scratch == nil { showOverlays(nil) }
         }
     }
 
@@ -438,6 +470,14 @@ final class StrokeCanvasView: UIView {
         imageView.layer.minificationFilter = .trilinear
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
+        // **Above the base and below the live stroke**, which is the z-order the two things mean:
+        // held ink is finished ink the base does not have yet, and the stroke under the pen is
+        // newer than all of it. Pinned to the edges like `imageView` so its own coordinate space is
+        // canvas points and a held picture's frame is the `windowRect` it was drawn at.
+        heldInkView.isUserInteractionEnabled = false
+        heldInkView.isHidden = true
+        heldInkView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(heldInkView)
         // `.scaleToFill` with a frame set to the scratch's own window rect — which is integral in
         // canvas points, and this view's coordinates *are* canvas points — puts the window on the
         // same sample grid as `imageView`, which is what makes "filter each, then composite" agree
@@ -480,7 +520,11 @@ final class StrokeCanvasView: UIView {
             imageView.topAnchor.constraint(equalTo: topAnchor),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            heldInkView.topAnchor.constraint(equalTo: topAnchor),
+            heldInkView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heldInkView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            heldInkView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
@@ -559,7 +603,7 @@ final class StrokeCanvasView: UIView {
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
             let base = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() }
             if imageView.image !== base { imageView.image = base }
-            showScratch(scratch)
+            showOverlays(scratch)
             return
         }
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
@@ -570,10 +614,19 @@ final class StrokeCanvasView: UIView {
         // renders to nil rather than to a transparent sheet. It is already an image, so there is
         // nothing to rasterize and nothing to defer.
         let base: UIImage?
+        /// The `VectorCanvas.version` the base slot ends this refresh holding, or nil when the base
+        /// is not the cel's own render — what `retireUnlandedInk` is asked about at the bottom.
+        var installedVersion: Int?
         switch plan.base {
         case .interpolation:
             displayedVectorVersion = vectorCanvas.version
             base = interpolationImage
+            // **A derived in-between replaces the cel's own content outright**, so nothing held
+            // against the cel's version is meaningful here — and `retire(upTo:)`'s arithmetic could
+            // never release it, since an in-between's `version` is constant across a scrub.
+            // Reached when the playhead moves onto an in-between while ink is still un-landed.
+            unlandedInk.removeAll()
+            installedVersion = nil
         case .committedRender:
             let cached = vectorCanvas.cachedRender()
             switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,
@@ -589,40 +642,48 @@ final class StrokeCanvasView: UIView {
                 // `LayerHostView.setBlanked` is what asks for the repaint on that edge.
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = StrokeCanvasView.nothingDisplayed
-                showScratch(plan.showsScratchLayer ? scratch : nil)
+                // Nothing held can reach the screen either, and the pass that un-blanks the host
+                // repaints from the canvas — so the pictures would be bytes nobody can see, held
+                // against a base that is deliberately not being kept current.
+                unlandedInk.removeAll()
+                showOverlays(plan.showsScratchLayer ? scratch : nil)
                 return
             case .showNow(let version):
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = version
                 base = cached.image
+                installedVersion = version
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRenderVersion = nil
                     displayedVectorVersion = version
                     base = PlaybackTrace.span(.vectorRasterize) { vectorCanvas.render() }
+                    installedVersion = version
                 } else {
                     pendingVectorRenderVersion = version
                     startVectorRender(of: vectorCanvas, atVersion: version)
-                    // The base slot keeps what it has. `displayedVectorVersion` deliberately stays
-                    // where it is: it means "on screen", and this version is not.
-                    showScratch(plan.showsScratchLayer ? scratch : nil)
+                    // The base slot keeps what it has, and so does the held ink — which is the
+                    // whole of this defect's fix: the picture the base is missing stays up until the
+                    // render that contains it lands.
+                    showOverlays(plan.showsScratchLayer ? scratch : nil)
                     return
                 }
             case .wait:
-                showScratch(plan.showsScratchLayer ? scratch : nil)
+                showOverlays(plan.showsScratchLayer ? scratch : nil)
                 return
             }
         }
+        // **Before the base is installed and in the same main-thread turn**, so Core Animation
+        // commits the new base and the removal of the ink it now contains together — otherwise the
+        // artist sees one frame with the stroke drawn twice, once in each.
+        retireUnlandedInk(coveredBy: installedVersion)
         // Identity-checked because the committed render is memoized on the canvas's `version` and an
         // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
         // change on the frame for nothing.
         if imageView.image !== base { imageView.image = base }
-        showScratch(plan.showsScratchLayer ? scratch : nil)
+        showOverlays(plan.showsScratchLayer ? scratch : nil)
         if plan.showsScratchLayer { livePreviewFrames += 1 }
-        // Last, and in the same turn as the assignment above, so Core Animation commits the new base
-        // and the removal of the scratch together — see `scratchIsHeldForRerender`.
-        if scratchIsHeldForRerender { endScratch() }
     }
 
     /// Rasterizes `version` of `canvas` on `renderQueue` and hands the result back on main.
@@ -637,6 +698,12 @@ final class StrokeCanvasView: UIView {
     /// code had for free and the one thing this change could quietly have thrown away.
     private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int) {
         Self.renderQueue.async { [weak self] in
+            // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
+            // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
+            // `unlandedInk` closes needs a seam to be reachable from a test at all.
+            if UITestSeeds.slowVectorRenderDelay > 0 {
+                Thread.sleep(forTimeInterval: UITestSeeds.slowVectorRenderDelay)
+            }
             // The flat row's per-layer, per-flip cost, and the one the composite path exists to stop
             // paying — so it is a named row in a `PlaybackTrace` report rather than something a
             // reader has to infer from `VectorCanvas.totalRasterizations` moving.
@@ -668,9 +735,13 @@ final class StrokeCanvasView: UIView {
             return
         }
         pendingVectorRenderVersion = nil
+        // **Before the assignment and in the same main-thread turn**, so Core Animation commits the
+        // new base and the removal of the ink it now contains together. One turn apart is one frame
+        // with the stroke drawn twice.
+        retireUnlandedInk(coveredBy: version)
         if imageView.image !== image { imageView.image = image }
         displayedVectorVersion = version
-        if scratchIsHeldForRerender { endScratch() }
+        showOverlays(scratch)
     }
 
     // MARK: - The lasso move's floating piece
@@ -756,8 +827,14 @@ final class StrokeCanvasView: UIView {
         refreshDisplay()
     }
 
-    /// Shows `scratch` over the layer at its own window rect, or empties and hides the layer when
-    /// nil.
+    /// **Puts both overlays above the base where this refresh wants them** — the live stroke's
+    /// scratch at its own window rect, and every held picture `unlandedInk` still owns.
+    ///
+    /// One function rather than two because the two share the base hole below and are the same
+    /// question — *what is on screen that the base does not contain* — asked about the stroke under
+    /// the pen and the strokes just finished. Both are windowed, both are composited by Core
+    /// Animation, and a caller that updated one without the other would leave the hole naming a
+    /// window nothing is drawing into.
     ///
     /// Hidden rather than merely emptied so Core Animation skips the layer outright, and
     /// identity-guarded so the overwhelmingly common call — `nil` when it is already nil, once per
@@ -769,9 +846,15 @@ final class StrokeCanvasView: UIView {
     /// and the artist would drag the eraser across their line and see nothing happen. The
     /// alternative — punching a canvas-sized copy of the render and showing that instead — is 1 GiB
     /// at 16383² for a stroke a few hundred points long, which is the defect this window closed.
-    private func showScratch(_ scratch: StrokeScratch?) {
+    private func showOverlays(_ scratch: StrokeScratch?) {
+        showHeldInk()
         let image = scratch?.image
-        setBaseHole(scratch.flatMap { $0.replacesBase ? $0.windowRect : nil })
+        // **The live stroke's window wins the hole, and the held one is the fallback.** Both stand
+        // in for the base inside their window and only one of them can be a removal at a time: an
+        // eraser's touch-down renders the canvas synchronously and so retires everything held (see
+        // `UnlandedInk.hold`), and `UnlandedInk` holds at most one removal in any case.
+        let liveHole = scratch.flatMap { $0.replacesBase ? $0.windowRect : nil }
+        setBaseHole(liveHole ?? unlandedInk.baseHole)
         // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
         // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under
@@ -784,6 +867,62 @@ final class StrokeCanvasView: UIView {
         if let scratch, image != nil { scratchView.frame = scratch.windowRect }
         scratchView.image = image
         scratchView.isHidden = image == nil
+    }
+
+    /// **Moves the finished stroke's picture from the live overlay to the held one** — the pen-up
+    /// half of `UnlandedInk`'s invariant, and RENDER.md §2.13's cost in one place.
+    ///
+    /// The commit above put this stroke's ink in the display list and invalidated the render, so
+    /// the base slot is now a picture the stroke is *not* in; the rasterize that puts it back
+    /// happens off the main thread — MEASURED at 14.4 ms on the owner's own Test1 at 4096² and
+    /// 27.3 ms at 6000², `StrokeHandoffBench`. Showing nothing for that long is worse than the
+    /// freeze it replaces, so the picture stays up. What is *not* kept is the `StrokeScratch`: only
+    /// its display image is, which is the bitmap the artist was already looking at.
+    ///
+    /// Nothing is held for an edit that did not reach this cel's own `VectorCanvas` — an in-between
+    /// records a `LocalEdit` and the base there is a derived frame with a version of its own, so
+    /// `retire(upTo:)`'s arithmetic does not apply to it and the picture could never be released.
+    private func holdUnlandedInk(from scratch: StrokeScratch?, at version: Int) {
+        guard let scratch, let image = scratch.image, !scratch.windowRect.isNull else { return }
+        // Exactly the three fields `showOverlays` reads off a live scratch, so the picture does
+        // not change when it changes hands.
+        let alpha = scratch.replacesBase ? 1 : scratch.opacity
+        unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: version,
+                                             windowRect: scratch.windowRect, alpha: alpha,
+                                             replacesBase: scratch.replacesBase, image: image))
+        nextUnlandedInkID += 1
+    }
+
+    /// A base rasterized at `version` is on screen, so everything it contains stops being held. Nil
+    /// means the base slot is not the cel's own render, in which case nothing is claimed and nothing
+    /// is retired.
+    private func retireUnlandedInk(coveredBy version: Int?) {
+        guard let version, !unlandedInk.isEmpty else { return }
+        unlandedInk.retire(upTo: version)
+    }
+
+    /// Rebuilds `heldInkView`'s subviews when the held set has changed, and does nothing at all when
+    /// it has not — which is the overwhelmingly common call, once per layer per SwiftUI pass.
+    private func showHeldInk() {
+        let ids = unlandedInk.pictures.map(\.id)
+        guard ids != heldInkIDsOnScreen else { return }
+        heldInkIDsOnScreen = ids
+        for subview in heldInkView.subviews { subview.removeFromSuperview() }
+        for picture in unlandedInk.pictures {
+            let view = UIImageView(image: picture.image)
+            // Identical to `scratchView` in every respect and for every one of its reasons — same
+            // sample grid, same crispness contract, same mipmap under minification. This is the very
+            // picture that was in `scratchView` a moment ago and it must not change appearance as it
+            // moves.
+            view.contentMode = .scaleToFill
+            view.isUserInteractionEnabled = false
+            view.layer.magnificationFilter = .nearest
+            view.layer.minificationFilter = .trilinear
+            view.frame = picture.windowRect
+            view.alpha = picture.alpha
+            heldInkView.addSubview(view)
+        }
+        heldInkView.isHidden = unlandedInk.isEmpty
     }
 
     /// Cuts `rect` out of the layer's own picture, or puts it back whole when nil.
@@ -1263,6 +1402,11 @@ final class StrokeCanvasView: UIView {
         scratch = {
             if case .replacement = vectorScratchRole {
                 let backdrop = interpolationImage ?? vectorCanvas.renderIfNonEmpty()
+                // **That render was synchronous and it is a picture of everything committed**, so
+                // every held picture's ink is inside it — both in this window and, because
+                // `renderIfNonEmpty` memoizes, in the base the `refreshDisplay` at the end of this
+                // method is about to install. Keeping them would draw that ink a second time.
+                unlandedInk.removeAll()
                 // **Mode 1 and Mode 2 want different windows, and §12 stage 8 is where they part.**
                 // Mode 1 *is* an eraser stroke, so its window holds removal coverage and caps at the
                 // eraser's opacity like any other stroke. Mode 2's window is a picture — `applyPreview`
@@ -1452,15 +1596,24 @@ final class StrokeCanvasView: UIView {
         // Recorded before `endScratch` resets the role and before `refreshDisplay` runs.
         Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames)"
 
-        // **The scratch is not dropped here, and that is RENDER.md §2.13 in one line.** The commit
-        // above put this stroke's ink in the display list and invalidated the render, so the base
-        // slot is now a picture the stroke is *not* in; the rasterize that puts it back happens off
-        // the main thread. Dropping the scratch now would blink the stroke out for the length of
-        // that rasterize — MEASURED at 70.3 ms for a 20-stroke cel at 2048² on the owner's iPad in
-        // Release (`PerfBaselineTests.testVectorLayerRenderCostAndMemory`, 2026-09-02) — which is a
-        // worse thing to show the artist than the freeze it replaces. `refreshDisplay` releases it
-        // in the same turn as the new base. See `scratchIsHeldForRerender`.
-        scratchIsHeldForRerender = true
+        // **The stroke's picture is not dropped here, and that is RENDER.md §2.13 in one line.** The
+        // commit above put this stroke's ink in the display list and invalidated the render, so the
+        // base slot is now a picture the stroke is *not* in; the rasterize that puts it back happens
+        // off the main thread. Showing nothing for the length of that rasterize — MEASURED at 70.3 ms
+        // for a 20-stroke cel at 2048² on the owner's iPad in Release
+        // (`PerfBaselineTests.testVectorLayerRenderCostAndMemory`, 2026-09-02), and at 14.4 / 27.3 ms
+        // on their Test1 at 4096² / 6000² (`StrokeHandoffBench`) — is a worse thing to show the artist
+        // than the freeze it replaces.
+        //
+        // **What is kept is the picture, not the scratch, and that is the fix for BUGS.md's
+        // 2026-09-04 defect.** The `StrokeScratch` is released right here, as it is on every other
+        // exit from a stroke; its display image moves to `unlandedInk` and gets a layer of its own,
+        // so the *next* stroke's scratch cannot take this one's place on screen. Nothing is held for
+        // an in-between, whose base is a derived frame with a version of its own.
+        if vectorContentChanged, inBetweenCelID == nil {
+            holdUnlandedInk(from: scratch, at: vectorCanvas.version)
+        }
+        endScratch()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil
         lastStampPoint = nil
@@ -1506,8 +1659,6 @@ final class StrokeCanvasView: UIView {
     /// flight. Called on every exit from a stroke — lift, interruption, cancel, and the smart-shape
     /// revert — so the window's pixels live no longer than the stroke that needed them.
     private func endScratch() {
-        // Before the release, so the `didSet` below cannot see a hold that is being ended.
-        scratchIsHeldForRerender = false
         scratch = nil
         vectorScratchRole = .overlay
         lastPreviewSample = nil

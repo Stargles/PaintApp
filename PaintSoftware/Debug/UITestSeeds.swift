@@ -37,6 +37,35 @@ enum UITestSeeds {
         CompositorBudget.budgetOverrideBytes = bytes
     }
 
+    /// **Makes the pen-up render take long enough for a person to draw again inside it** —
+    /// `-uiTestSlowVectorRenderMillis <n>`, read by `StrokeCanvasView.startVectorRender`.
+    ///
+    /// BUGS.md's 2026-09-04 defect opens by saying it is *"confirmed by tracing every path that
+    /// repaints the base, not measured"*, and the reason is timing: the window between a stroke
+    /// committing and its render landing is MEASURED at **14.4 ms** on the owner's own Test1 at
+    /// 4096² and **27.3 ms** at 6000² (`StrokeHandoffBench`), while one XCUITest
+    /// `press(forDuration:thenDragTo:)` is most of a second. So the race is real on a pen and
+    /// unreachable from a test, and no assertion in the suite could see the defect at all — which is
+    /// how it survived from 2026-09-04 to 2026-09-09.
+    ///
+    /// This makes it reachable by slowing the *one* thing whose duration the defect is about, and
+    /// nothing else: the sleep is on `StrokeCanvasView.renderQueue`, which is a background serial
+    /// queue whose only job is that rasterize. The main thread is untouched, so a test that stages
+    /// the race is still driving the app the artist drives.
+    ///
+    /// Simulator-only, on `applyTextureBudgetOverrideIfRequested`'s rule and for its reason: a flag
+    /// that silently made a *device* build draw slower would be a report about a machine that does
+    /// not exist.
+    static let slowVectorRenderDelay: TimeInterval = {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return 0 }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestSlowVectorRenderMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return 0 }
+        return TimeInterval(millis) / 1000
+    }()
+
     /// **VIDEO.md §8 stage 8's own gap.** Every video- or image-carrying element in this app is
     /// reached, for a real artist, through `PhotosPicker` — real system UI in a separate process
     /// that XCUITest cannot drive reliably, which is why `VideoImportLogicTests`'s own header says
