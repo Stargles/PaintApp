@@ -148,6 +148,29 @@ class PaintUITestCase: XCTestCase {
         return value == "1"
     }
 
+    /// **Whether a timeline block is drawing a picture, and a wait rather than a read.**
+    ///
+    /// `CelBlockView.setThumbnail` writes "1" or "0" into the block's tile element, which is the only
+    /// way to ask this from XCUITest: the view is hidden when the tile is nil and a hidden view still
+    /// resolves, so `exists` reports the same thing either way (MEASURED — an assertion built on it
+    /// passed with the whole install deleted).
+    ///
+    /// A wait because a tile is 400 ms behind the edit that dirtied it by construction
+    /// (`CanvasManager`'s debounce) and is then rendered off the main thread.
+    func tileState(_ app: XCUIApplication, layerIndex: Int, celIndex: Int) -> String? {
+        app.images["timeline.cel.\(layerIndex).\(celIndex).tile"].value as? String
+    }
+
+    func waitForTile(_ app: XCUIApplication, layerIndex: Int, celIndex: Int,
+                     timeout: TimeInterval = 15) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if tileState(app, layerIndex: layerIndex, celIndex: celIndex) == "1" { return true }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return false
+    }
+
     /// Drags a straight line on the canvas between two normalized offsets of `canvas.host` — used to
     /// draw a rectangle selection (Select tool, Rectangle mode) or to draw a stroke.
     func dragOnCanvas(_ app: XCUIApplication, from: CGVector, to: CGVector) {

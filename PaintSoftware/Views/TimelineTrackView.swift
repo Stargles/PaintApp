@@ -2940,6 +2940,13 @@ private final class CelBlockView: UIView {
     func setThumbnail(_ image: UIImage?) {
         thumbnailView.image = image
         thumbnailView.isHidden = image == nil
+        // **"1" when this block is carrying a picture, "0" when it is blank** —
+        // `layerPanel.row.N.hasBaked`'s idiom, and it is written out rather than left to `isHidden`
+        // because `isHidden` is not readable from XCUITest: a hidden `UIImageView` that has been made
+        // an accessibility element still resolves and still reports `exists`. An earlier version of
+        // the test below pinned the tile's arrival on that existence and **passed with the whole
+        // install deleted**, which is why the state is a string rather than an inference.
+        thumbnailView.accessibilityValue = image == nil ? "0" : "1"
     }
 
     /// Tints a dragged block's ghost by what would happen if it were dropped where it is — matching
@@ -3006,15 +3013,14 @@ private final class CelBlockView: UIView {
         rightHandleMarker.accessibilityIdentifier = base + ".rightHandle"
         rightHandleMarker.isAccessibilityElement = true
         // **The picture, made queryable — the one thing on this block a test could not otherwise
-        // see.** `thumbnailView.isHidden` follows the tile being nil (see `setThumbnail`), and a
-        // hidden view does not exist to XCUITest, so "does this block carry a picture" is
-        // `exists` on this element and nothing has to read a pixel.
+        // see.** `setThumbnail` writes "1" or "0" into this element's `accessibilityValue`, so
+        // "does this block carry a picture" is a string read rather than a pixel read.
         //
         // It is here because PERFORMANCE.md §18.6 took the tile out of `TimelineLayoutKey`: a
         // landed thumbnail now reaches the screen through `Coordinator.applyInstalledThumbnail`
-        // alone, which is view code no logic test can reach. `layerPanel.row.N.current` is the same
-        // idiom — an identified, otherwise-invisible element standing for a state the artist can
-        // see and a test could not.
+        // alone, which is view code no logic test can reach. `layerPanel.row.N.hasBaked` is the same
+        // idiom — an identified, otherwise-invisible element whose value stands for a state the
+        // artist can see and a test could not.
         thumbnailView.accessibilityIdentifier = base + ".tile"
         thumbnailView.isAccessibilityElement = true
     }

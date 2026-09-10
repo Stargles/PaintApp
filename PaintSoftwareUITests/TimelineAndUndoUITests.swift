@@ -339,66 +339,37 @@ final class TimelineGestureUITests: PaintUITestCase {
     /// layers`, so it republishes nothing, `updateUIView` never runs, and `relayout()` is never
     /// called. The tile is out of `TimelineLayoutKey` as well, so even a relayout raised by something
     /// *else* takes the cheap path and repaints no block. What puts a picture on a block is
-    /// `TimelineTrackView.Coordinator.applyInstalledThumbnail`, which is view code and which no logic
-    /// test in this repo can reach.
+    /// `CanvasManager.thumbnailInstalled` reaching
+    /// `TimelineTrackView.Coordinator.applyInstalledThumbnail` — view code no logic test in this repo
+    /// can run.
     ///
-    /// **So the fixture is a block that starts with no picture at all.** Tapping an empty stretch of
-    /// a row creates one; the creation moves the layout key, so the block view is built — and it is
-    /// built while `cel.thumbnail` is still nil, because the regen is 400 ms behind. Nothing after
-    /// that moves the key, so the picture appearing is attributable to the install path and to
-    /// nothing else. Delete `applyInstalledThumbnail` and this block stays blank for ever.
+    /// **The fixture is the artist's ordinary case and that is what makes it attributable.** A new
+    /// document's only block carries no picture at all until something dirties its cel; drawing on it
+    /// dirties it and moves no cel id, start or length, so the layout key does not move and no
+    /// relayout can paint the result. Neuter the install and this block stays blank — MEASURED, not
+    /// argued: an earlier version of this test asserted the tile element's *existence* and passed
+    /// with the whole install deleted, because a hidden view still resolves.
     ///
-    /// Two operands, and the first is what stops the second being vacuous: the *existing* block's
-    /// tile, which must already be there (so the identifier and the element really do stand for "this
-    /// block carries a picture"), and the new block's, which must arrive.
-    func testABlockCreatedOnAnEmptyFrameGetsItsPictureWithNoRelayoutToCarryIt() throws {
+    /// The two operands are the block's tile state before the stroke ("0", blank) and after it ("1",
+    /// carrying a picture). The first is what stops the second being a truth about any implementation.
+    func testTheOnlyBlockOfANewDocumentGetsItsPictureAfterTheArtistDrawsOnIt() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        XCTAssertTrue(app.images["timeline.cel.0.0.tile"].waitForExistence(timeout: 15),
-                      "PREMISE: the document's own first block never showed a picture, so this test "
-                      + "cannot tell a tile that failed to arrive from an identifier that names "
-                      + "nothing")
+        XCTAssertTrue(app.otherElements["timeline.cel.0.0"].waitForExistence(timeout: 10),
+                      "PREMISE: a new document has one block on layer 0")
+        XCTAssertEqual(tileState(app, layerIndex: 0, celIndex: 0), "0",
+                       "PREMISE: the block of an untouched document draws no picture, and this test "
+                       + "is about one arriving. A \"1\" here means the fixture starts where it "
+                       + "meant to finish; nil means the affordance names nothing.")
 
-        // A new document is one twelve-frame block, so there is no empty frame to tap until the
-        // block is shortened. The right handle is how the artist does it.
-        performDrag(app, identifier: "timeline.cel.0.0.rightHandle", totalDelta: -220)
-        let shortened = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0))
-        XCTAssertLessThan(shortened.length, 12,
-                          "PREMISE: the drag has to actually shorten the block, or there is no gap "
-                          + "to the right of it to tap")
-        XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists,
-                       "PREMISE: layer 0 has exactly one block before the tap")
+        dragOnCanvas(app, from: CGVector(dx: 0.35, dy: 0.4), to: CGVector(dx: 0.65, dy: 0.6))
 
-        // The centre of the first uncovered slot, measured from the block's own leading edge —
-        // `CanvasTransformFreezeUITests.emptySlotCoordinate`'s arithmetic, since an empty slot is not
-        // an element and there is nothing to query for it. A block spans its cel and is inset 2 pt
-        // inside the slot, so one frame is `(width + 4) / length`.
-        let element = app.otherElements["timeline.cel.0.0"]
-        let frameWidth = (element.frame.width + 4) / CGFloat(shortened.length)
-        let slot = element.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
-            .withOffset(CGVector(dx: CGFloat(shortened.length) * frameWidth + frameWidth / 2 - 2, dy: 0))
-
-        // Two taps, then the menu: an empty slot selects on the first tap and opens its menu on a
-        // second that lands on the frame already selected, which is the owner's two-stage contract.
-        slot.tap()
-        slot.tap()
-        let addDrawing = app.buttons["Add Drawing"]
-        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5),
-                      "PREMISE: a second tap on the empty slot has to raise its menu (block "
-                      + "\(element.frame), \(shortened.length) frames, one frame \(frameWidth) pt)")
-        addDrawing.tap()
-
-        let created = app.otherElements["timeline.cel.0.1"]
-        XCTAssertTrue(created.waitForExistence(timeout: 10),
-                      "Add Drawing did not create a second block on layer 0, so there is no blank "
-                      + "block to watch fill in")
-
-        XCTAssertTrue(app.images["timeline.cel.0.1.tile"].waitForExistence(timeout: 15),
-                      "the new block never got a picture. Nothing else repaints a block since §18.6 "
-                      + "— the tile is out of `TimelineLayoutKey` and installing one raises no "
-                      + "SwiftUI pass — so this is `applyInstalledThumbnail` failing to reach the "
-                      + "screen, which is a blank timeline the artist can see.")
+        XCTAssertTrue(waitForTile(app, layerIndex: 0, celIndex: 0, timeout: 20),
+                      "the block is still blank after the stroke: `timeline.cel.0.0.tile` reads "
+                      + "\(tileState(app, layerIndex: 0, celIndex: 0) ?? "nothing"). A tile was "
+                      + "rendered for this cel and never reached the screen — a drawing whose "
+                      + "timeline block stays empty, which is what the artist sees.")
     }
 
 }
