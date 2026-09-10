@@ -408,6 +408,39 @@ enum TimelineGraphBand {
         allChannels(effect: effect, tracks: tracks).filter(\.isAnimated)
     }
 
+    // MARK: - The target's own scalars — TODO (21)'s second channel kind
+
+    /// **Every `TargetChannel` curve the target carries, as band channels.**
+    ///
+    /// `allChannels` with the descriptor table swapped, and the two differences are the two
+    /// differences between the channel kinds:
+    ///
+    ///  * **No `effect` operand and therefore no gate.** A grade's channels vanish from the band on
+    ///    a target that is not grading, because a track left by a kind change renders nothing.
+    ///    Opacity renders on every layer at every frame, so a plain drawing layer with an opacity
+    ///    curve draws one here.
+    ///  * **The walk is over `TargetChannel.all`**, which is `Effect.parameters`' rule one table
+    ///    over: the order is the descriptor table's and therefore deterministic, and an id the table
+    ///    does not carry cannot enter the band.
+    ///
+    /// - Parameter descriptorOffset: added to each index so the colours continue past the grade's
+    ///   table, exactly as `poseChannels` continues past both.
+    static func targetChannels(tracks: [String: AnimationCurve],
+                               descriptorOffset: Int) -> [Channel] {
+        guard !tracks.isEmpty else { return [] }
+        return TargetChannel.all.enumerated().compactMap { index, channel in
+            guard let curve = tracks[channel.id], !curve.isEmpty else { return nil }
+            return Channel(parameterID: channel.id,
+                           name: channel.name,
+                           curve: curve,
+                           uiRange: channel.uiRange,
+                           modelDomain: channel.modelDomain,
+                           format: channel.format,
+                           descriptorIndex: descriptorOffset + index,
+                           isAnimated: curve.isAnimated)
+        }
+    }
+
     // MARK: - The pose channels — KEYFRAMES.md §11.7
 
     /// **One pose track, with everything the band needs to put it on the timeline's own axis.**
@@ -2072,15 +2105,23 @@ extension CanvasManager {
     func graphBandListing(of target: KeyframeTarget)
         -> (channels: [TimelineGraphBand.Channel], declined: [String]) {
         let effect = storedEffect(of: target)
-        let grade = TimelineGraphBand.allChannels(effect: effect,
-                                                  tracks: keyframeState(of: target).tracks)
+        let state = keyframeState(of: target)
+        let grade = TimelineGraphBand.allChannels(effect: effect, tracks: state.tracks)
+        // **The grade, then the target's own scalars, then the poses.** The order is arbitrary
+        // between the three kinds and is fixed here so that nothing else has to decide it — and
+        // `listedAnimationChannelIDs` states the same order, the two pinned equal in both directions
+        // by `TimelineGraphBandLogicTests` because two implementations of one invariant is the
+        // defect §2.28 was written about.
+        let gradeCount = effect?.parameters.count ?? 0
+        let own = TimelineGraphBand.targetChannels(tracks: state.channelTracks,
+                                                   descriptorOffset: gradeCount)
         let sources = poseSources(of: target)
-        guard !sources.isEmpty else { return (grade, []) }
-        // The colour indices continue past the grade's descriptor table, so a band showing both
+        guard !sources.isEmpty else { return (grade + own, []) }
+        // The colour indices continue past the two tables before them, so a band showing all three
         // gives them different hues for as long as `colour(forDescriptorIndex:)`'s eight last.
-        let poses = TimelineGraphBand.poseChannels(sources,
-                                                   descriptorOffset: effect?.parameters.count ?? 0)
-        return (grade + poses.channels, poses.declined)
+        let poses = TimelineGraphBand.poseChannels(
+            sources, descriptorOffset: gradeCount + TargetChannel.all.count)
+        return (grade + own + poses.channels, poses.declined)
     }
 
     /// **Every pose track that addresses `target`, across both of §3.1's time bases.**

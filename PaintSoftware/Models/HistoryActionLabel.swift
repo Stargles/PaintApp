@@ -92,6 +92,14 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// this one is the animation on it, and an artist who deletes a curve by mistake reads "undo
     /// adjust layer effect" as the wrong thing having gone.
     case effectKeyframes
+    /// One keyframe track on one of the scalars a layer or folder owns itself being written,
+    /// replaced or removed (`setTargetChannelTrack`) — `TargetChannel`, TODO (21)'s second channel
+    /// kind. Apart from `.effectKeyframes` because they name different things: that one is an
+    /// animation on the grade, this one is an animation on the layer, and an artist who deletes an
+    /// opacity curve by mistake reads "undo edit effect keyframes" as a grade having changed.
+    /// Apart from `.opacity` for `.effectKeyframes`' own reason — the value is what the artist
+    /// picked and the curve is the animation on it.
+    case opacityKeyframes
     /// A keyframe being placed (`CanvasManager.addKeyframe`) — KEYFRAMES.md §2.26. Named apart from
     /// `.effectKeyframes` because they are different things to want back: that one is an adjustment to
     /// an animation that already exists, this one is the press that *made* one, and an artist who
@@ -225,6 +233,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .valueLayerEffect: return "adjust layer effect"
         case .valueLayerTransform: return "change layer transform"
         case .effectKeyframes: return "edit effect keyframes"
+        case .opacityKeyframes: return "edit opacity keyframes"
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"
         case .clearKeyframes: return "clear keyframes"

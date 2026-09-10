@@ -1988,12 +1988,13 @@ final class CanvasManager: ObservableObject {
         if marksBefore.isEmpty {
             marksAfter = marksBefore
         } else {
-            var tracksAfter = layers[layerIndex].effectTracks
-            if let after { tracksAfter[parameterID] = after } else { tracksAfter.removeValue(forKey: parameterID) }
             let target = KeyframeTarget.layer(id: layerID)
+            var stateAfter = keyframeState(of: target)
+            if let after { stateAfter.tracks[parameterID] = after }
+            else { stateAfter.tracks.removeValue(forKey: parameterID) }
             marksAfter = Self.marks(marksBefore,
                                     droppingKeyed: keyedFrames(of: target)
-                                        .union(keyedFrames(of: target, tracks: tracksAfter)))
+                                        .union(keyedFrames(of: target, in: stateAfter)))
         }
 
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as
@@ -2048,12 +2049,38 @@ final class CanvasManager: ObservableObject {
     ///   the state a menu left up while an undo removed the node underneath it reaches.
     @discardableResult
     func removeEffectParameterKey(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard layers.indices.contains(layerIndex),
-              var curve = layers[layerIndex].effectTracks[parameterID],
+        guard var curve = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID),
               curve.key(atFrame: frame) != nil
         else { return false }
         curve.removeKey(atFrame: frame)
-        return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+        return writeGraphNodeCurve(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+    }
+
+    /// **The curve one graph-editor node belongs to, from whichever store owns its id** — the two
+    /// non-pose channel kinds resolved in one place.
+    ///
+    /// The node menu addresses a node by `(layerIndex, parameterID, frame)` and cannot know which
+    /// store the id names, so the three readers below asked `effectTracks` outright — which for a
+    /// `TargetChannel` id answers nil, and every one of them then returns false in silence. That is
+    /// Delete Keyframe doing nothing on a node the artist is looking at, which is the shape of a
+    /// control that appears not to work.
+    private func graphNodeCurve(layerIndex: Int, parameterID: String) -> AnimationCurve? {
+        guard layers.indices.contains(layerIndex) else { return nil }
+        return TargetChannel.isTargetChannel(parameterID: parameterID)
+            ? layers[layerIndex].channelTracks[parameterID]
+            : layers[layerIndex].effectTracks[parameterID]
+    }
+
+    /// `graphNodeCurve`'s write half, routed to the same store — so a node menu action reaches the
+    /// funnel that applies §2.28's mark rule for that kind rather than the one that would refuse it.
+    @discardableResult
+    private func writeGraphNodeCurve(layerIndex: Int, parameterID: String,
+                                     to curve: AnimationCurve?) -> Bool {
+        guard TargetChannel.isTargetChannel(parameterID: parameterID) else {
+            return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+        }
+        guard let target = keyframeTarget(layerIndex: layerIndex) else { return false }
+        return setTargetChannelTrack(target, channelID: parameterID, to: curve)
     }
 
     /// **Give one node its derived tangents back** — the node menu's Reset Curve, and the only way
@@ -2069,23 +2096,22 @@ final class CanvasManager: ObservableObject {
     ///   is what lets the menu hide the item rather than offering an action that does nothing.
     @discardableResult
     func resetEffectParameterKeyCurve(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard layers.indices.contains(layerIndex),
-              var curve = layers[layerIndex].effectTracks[parameterID],
+        guard var curve = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID),
               var key = curve.key(atFrame: frame)
         else { return false }
         key.tangentMode = .autoClamped
         key.inHandle = .zero
         key.outHandle = .zero
         curve.setKey(key)
-        return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+        return writeGraphNodeCurve(layerIndex: layerIndex, parameterID: parameterID, to: curve)
     }
 
     /// Whether that node has anything to reset — an authored tangent rather than a derived one. The
     /// menu reads this so Reset Curve appears only where it would do something, which is
     /// `Clear Loop Range`'s rule on the ruler menu beside it.
     func effectParameterKeyIsAuthored(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard layers.indices.contains(layerIndex),
-              let key = layers[layerIndex].effectTracks[parameterID]?.key(atFrame: frame)
+        guard let key = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID)?
+                .key(atFrame: frame)
         else { return false }
         return key.tangentMode != .autoClamped
     }
@@ -2133,12 +2159,13 @@ final class CanvasManager: ObservableObject {
         if marksBefore.isEmpty {
             marksAfter = marksBefore
         } else {
-            var tracksAfter = folders[index].effectTracks
-            if let after { tracksAfter[parameterID] = after } else { tracksAfter.removeValue(forKey: parameterID) }
             let target = KeyframeTarget.folder(id: folderID)
+            var stateAfter = keyframeState(of: target)
+            if let after { stateAfter.tracks[parameterID] = after }
+            else { stateAfter.tracks.removeValue(forKey: parameterID) }
             marksAfter = Self.marks(marksBefore,
                                     droppingKeyed: keyedFrames(of: target)
-                                        .union(keyedFrames(of: target, tracks: tracksAfter)))
+                                        .union(keyedFrames(of: target, in: stateAfter)))
         }
 
         beginCanvasEdit()
@@ -3147,9 +3174,13 @@ final class CanvasManager: ObservableObject {
     /// and `captureStructure` snapshots `folders`, so one drag is one "Opacity" step. Taking a step
     /// per set would nest inside that bracket and be swallowed anyway — see `withStructureUndo`'s
     /// depth guard — which is why this is a bare write rather than an oversight.
+    /// **Since TODO (21) this is the *base* write, and the folder slider no longer takes it.** That
+    /// slider routes through `applyTargetChannelEdit(_:channel:newValue:atFrame:)`, which applies
+    /// the keyframe rule and reaches this write only on its `.storedValue` arms. What is left here
+    /// is the direct set — "put the number on the folder, no keyframe rule" — which is what a
+    /// fixture and a non-slider caller want.
     func setFolderOpacity(_ folderID: UUID, to opacity: Double) {
-        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        folders[idx].opacity = min(max(opacity, 0), 1)
+        setStoredValue(of: .folder(id: folderID), channel: .opacity, to: opacity)
     }
 
     /// Flips a group between isolated and pass-through (§4.2). Wrapped here rather than by a caller,

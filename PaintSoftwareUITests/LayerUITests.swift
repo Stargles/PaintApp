@@ -1301,9 +1301,13 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                        "The toggle should reflect the folder's isIsolated flag, not reset when the panel reopens")
     }
 
-    /// Folder rows get the same opacity slider layer rows already have (§4.1), routed through
-    /// `CanvasManager.setFolderOpacity` rather than the raw `layers[i].opacity = value` write the
-    /// layer rows use (folders have no such index).
+    /// Folder rows get the same opacity slider layer rows already have (§4.1).
+    ///
+    /// **Since TODO (21) both rows take one route** — `applyTargetChannelEdit(_:channel:…)`, the
+    /// keyframe rule — where the folder used to take `setFolderOpacity` and the layer a raw
+    /// `layers[i].opacity = value` write. On a document with no keyframes that rule's fifth arm is a
+    /// plain assignment, so what this test asserts is unchanged and it is now also the pin that the
+    /// folder's slider still writes *through* to the model rather than staying local to the control.
     func testFolderOpacitySliderPersistsThroughSetFolderOpacity() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

@@ -96,6 +96,14 @@ struct LayerFolder: Identifiable {
     /// **Read through `resolvedEffect(atFrame:)`, never here.** The raw pair is what `setNodeEffect`,
     /// `maxInputCount` and the panel read, for the reason that accessor gives at length.
     var effectTracks: [String: AnimationCurve] = [:]
+    /// `Layer.channelTracks` on the other home — the scalars the *folder* owns, keyed by
+    /// `TargetChannel.id` in absolute document frames. §2.21's ruling for grades reached by the
+    /// channel kind that arrived after it: a folder's opacity animates exactly as a layer's, through
+    /// one descriptor with two key paths rather than through a second code path.
+    var channelTracks: [String: AnimationCurve] = [:]
+    /// `Layer.channelBaselines` on the folder, and apart from `pendingBaselines` for that field's
+    /// stated reason — the grade's writers prune `pendingBaselines` against the grade's descriptors.
+    var channelBaselines: [String: Double] = [:]
 
     /// **The frames on which the artist has placed a keyframe on this folder** — §2.26's bare marks,
     /// absolute document frames. `Layer.keyframeMarks` carries the whole argument; this is that field

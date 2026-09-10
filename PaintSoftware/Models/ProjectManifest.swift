@@ -200,6 +200,14 @@ struct FolderManifest: Codable {
     /// answer "is anything animated" differently depending on which one the artist reached for.
     var effectTracks: [String: AnimationCurve]? = nil
 
+    /// `LayerFolder.channelTracks` — TODO (21)'s second channel kind on the folder, keyed by
+    /// `TargetChannel.id`. `LayerManifest.channelTracks` carries the whole argument; the two must
+    /// stay the same shape or a document would answer "is opacity animated" differently depending
+    /// on which of the two homes the artist reached for.
+    var channelTracks: [String: AnimationCurve]? = nil
+    /// `LayerFolder.channelBaselines`, the held pre-edit values for those channels.
+    var channelBaselines: [String: Double]? = nil
+
     /// `LayerFolder.keyframeMarks` — §2.26's marks that no channel keys, **written only when there
     /// are any**.
     /// `LayerManifest.keyframeMarks` carries the argument for the optional-here / non-optional-in-the-
@@ -226,6 +234,8 @@ struct FolderManifest: Codable {
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
          alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil,
          effectTracks: [String: AnimationCurve]? = nil,
+         channelTracks: [String: AnimationCurve]? = nil,
+         channelBaselines: [String: Double]? = nil,
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
          transform: LayerPose? = nil) {
         self.id = id
@@ -241,6 +251,8 @@ struct FolderManifest: Codable {
         self.compositorRole = compositorRole
         self.effect = effect
         self.effectTracks = effectTracks
+        self.channelTracks = channelTracks
+        self.channelBaselines = channelBaselines
         self.keyframeMarks = keyframeMarks
         self.pendingBaselines = pendingBaselines
         self.transform = transform
@@ -274,6 +286,8 @@ struct FolderManifest: Codable {
         compositorRole = (try? CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)) ?? nil
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
+        channelTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .channelTracks)
+        channelBaselines = try container.decodeIfPresent([String: Double].self, forKey: .channelBaselines)
         keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
@@ -287,6 +301,7 @@ struct FolderManifest: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
         case isIsolated, alphaMask, compositorRole, effect, effectTracks
+        case channelTracks, channelBaselines
         case keyframeMarks, pendingBaselines, transform
     }
 }
@@ -353,6 +368,22 @@ struct LayerManifest: Codable {
     /// saved before keyframes says, and an older build reading a manifest that *does* carry it ignores
     /// the unknown key and opens the document with its grades static.
     var effectTracks: [String: AnimationCurve]? = nil
+    /// `Layer.channelTracks` — TODO (21)'s second channel kind, keyed by `TargetChannel.id` and in
+    /// absolute document frames, **written only when there are any**.
+    ///
+    /// `effectTracks` above carries the whole argument for the optional-here /
+    /// non-optional-in-the-model shape and for absence being the entire migration. **Its closing
+    /// sentence is what decided this to be a key of its own rather than more entries in
+    /// `effectTracks`**: an older build ignores an unknown key and opens the document with opacity
+    /// static, which is the graceful half. Had these curves ridden `effectTracks`, that build would
+    /// have found ids no `EffectParameter` claims — counted their keys into §2.28's union and drawn
+    /// keyframe diamonds for a channel it cannot render, then destroyed them at the next grade
+    /// change through `Effect.tracksAddressed(by:from:)`.
+    var channelTracks: [String: AnimationCurve]? = nil
+    /// `Layer.channelBaselines` — the held pre-edit value for those channels, **written only when
+    /// there are any**. `pendingBaselines` carries the argument for persisting an authoring
+    /// transient at all; this is that field for the channels the grade's writers do not prune.
+    var channelBaselines: [String: Double]? = nil
     /// `Layer.keyframeMarks` — §2.26's keyframe marks no channel keys, in absolute document frames, **written only
     /// when there are any**.
     ///
@@ -393,6 +424,8 @@ struct LayerManifest: Codable {
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
          alphaMask: AlphaMask? = nil, effect: Effect? = nil,
          effectTracks: [String: AnimationCurve]? = nil,
+         channelTracks: [String: AnimationCurve]? = nil,
+         channelBaselines: [String: Double]? = nil,
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
          fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, transform: LayerPose? = nil,
@@ -408,6 +441,8 @@ struct LayerManifest: Codable {
         self.alphaMask = alphaMask
         self.effect = effect
         self.effectTracks = effectTracks
+        self.channelTracks = channelTracks
+        self.channelBaselines = channelBaselines
         self.keyframeMarks = keyframeMarks
         self.pendingBaselines = pendingBaselines
         self.fill = fill
@@ -435,6 +470,8 @@ struct LayerManifest: Codable {
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
+        channelTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .channelTracks)
+        channelBaselines = try container.decodeIfPresent([String: Double].self, forKey: .channelBaselines)
         keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
@@ -444,7 +481,8 @@ struct LayerManifest: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
-        case effect, effectTracks, keyframeMarks, pendingBaselines, fill, fillReferenceOverride
+        case effect, effectTracks, channelTracks, channelBaselines
+        case keyframeMarks, pendingBaselines, fill, fillReferenceOverride
         case transform, cels
     }
 }

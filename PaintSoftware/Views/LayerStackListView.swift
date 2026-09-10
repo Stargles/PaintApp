@@ -62,9 +62,32 @@ struct LayerStackListView: UIViewRepresentable {
         }
         var onRequestOptions: ((UUID) -> Void)?
 
+        /// **The keyframe target one row's opacity slider writes onto** — a folder row addresses the
+        /// folder, a layer row the layer, and a row whose subject has gone addresses nothing.
+        ///
+        /// By id on both arms, which is `KeyframeTarget`'s own shape and matters here for its stated
+        /// reason: a restack between the touch-down that armed a take and the commit that ends the
+        /// drag would move an index and cannot move an id.
+        fileprivate func opacityTarget(_ model: LayerRowModel) -> KeyframeTarget? {
+            if let folderID = model.folderID {
+                return canvasManager.folders.contains { $0.id == folderID } ? .folder(id: folderID) : nil
+            }
+            return canvasManager.keyframeTarget(layerIndex: model.layerIndex)
+        }
+
         private weak var tableView: UITableView?
         private var dataSource: UITableViewDiffableDataSource<Int, UUID>?
         private(set) var rows: [LayerRowModel] = []
+
+        /// **Whether the opacity drag in progress has written a keyframe** — TODO (21), and the
+        /// input to which label its undo step carries.
+        ///
+        /// A property on the coordinator rather than a value returned to `commitStructureGesture`,
+        /// because a drag reports many values and only the *first* one's routing arm is knowable at
+        /// the commit: `applyTargetChannelEdit` seeds or holds on tick one and then keys on every
+        /// tick after, so the honest question is "did this gesture write any keys at all". Reset on
+        /// touch-down so an abandoned drag cannot label the next one.
+        private var opacityWroteKeys = false
 
         /// The two rows a live pinch started on.
         private var pinchPair: (UUID, UUID)?
@@ -211,17 +234,44 @@ struct LayerStackListView: UIViewRepresentable {
                         self.canvasManager.setFillReference(layerIndex: model.layerIndex,
                                                             isReference: !model.isFillReference)
                     }
+                    // **The opacity slider is a keyframable channel's surface** — TODO (21), the
+                    // owner's ask of 2026-09-09 — so the write is routed by
+                    // `applyTargetChannelEdit` rather than assigned. That call is the same five-arm
+                    // rule an effect slider takes: on a document with no keyframes it assigns the
+                    // value and nothing about this feature is visible; on one with keyframes it
+                    // keys, seeds or holds a baseline.
+                    //
+                    // **The arm it returns names the undo step**, which is why the label is a
+                    // `@State`-free box read at the commit: an artist who animated a fade must not
+                    // read "undo change opacity" and conclude the fade itself has gone.
                     cell.onOpacityChange = { [weak self] value in
                         guard let self else { return }
-                        if let folderID = model.folderID {
-                            self.canvasManager.setFolderOpacity(folderID, to: value)
-                        } else if self.canvasManager.layers.indices.contains(model.layerIndex) {
-                            self.canvasManager.layers[model.layerIndex].opacity = value
-                        }
+                        guard let target = self.opacityTarget(model) else { return }
+                        let route = self.canvasManager.applyTargetChannelEdit(
+                            target, channel: .opacity, newValue: value,
+                            atFrame: self.canvasManager.currentFrame)
+                        if route != .storedValue { self.opacityWroteKeys = true }
                     }
-                    cell.onOpacityChangeBegan = { [weak self] in self?.canvasManager.beginStructureGesture() }
+                    cell.onOpacityChangeBegan = { [weak self] in
+                        guard let self else { return }
+                        self.opacityWroteKeys = false
+                        // **§5.1 step 1: the arm is answered on touch-down, before this surface
+                        // opens its own undo bracket**, so the take's bracket is the outer one and
+                        // `stopRecording`'s commit merely decrements while the artist is still
+                        // holding the slider. The answer is deliberately unread — `false` with
+                        // nothing raised is "the recorder was not armed", and this surface then
+                        // behaves exactly as it did before recording existed.
+                        if let target = self.opacityTarget(model) {
+                            _ = self.canvasManager.beginArmedTake(on: target, isRecordable: true)
+                        }
+                        self.canvasManager.beginStructureGesture()
+                    }
                     cell.onOpacityChangeEnded = { [weak self] in
-                        self?.canvasManager.commitStructureGesture(label: .opacity)
+                        guard let self else { return }
+                        self.canvasManager.commitStructureGesture(
+                            label: self.opacityWroteKeys ? TargetChannel.opacity.keyframeLabel
+                                                         : TargetChannel.opacity.editLabel)
+                        self.opacityWroteKeys = false
                     }
                 }
                 return cell
@@ -1148,7 +1198,7 @@ struct LayerRowModel: Equatable {
             parentFolderID = folder?.parentFolderID
             layerIndex = -1
             isCurrent = false
-            opacity = folder?.opacity ?? 1
+            opacity = folder?.opacity(atFrame: manager.currentFrame) ?? 1
             blendMode = folder?.blendMode ?? .normal
             isVector = false
             isFillReference = false
@@ -1168,7 +1218,12 @@ struct LayerRowModel: Equatable {
             parentFolderID = layer?.parentFolderID
             layerIndex = index
             isCurrent = manager.currentLayerIndex == index
-            opacity = layer?.opacity ?? 1
+            // **Resolved at the playhead** — TODO (21). The slider and the row's thumbnail both
+            // draw from this, so while a curve exists they show the value the canvas is showing
+            // rather than the stored base. §2.23's argument, which is about a settings bar and
+            // applies here word for word: a control showing a number the curve overrides is a
+            // control the artist cannot move, because every edit springs back under their finger.
+            opacity = layer?.opacity(atFrame: manager.currentFrame) ?? 1
             blendMode = layer?.blendMode ?? .normal
             isVector = layer?.kind == .vector
             // `layerEffect`, never `effect` — the accessor is the only place "is this layer grading"

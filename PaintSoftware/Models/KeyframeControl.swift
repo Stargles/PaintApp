@@ -114,6 +114,18 @@ extension CanvasManager {
         var marks: [Int] = []
         var baselines: [String: Double] = [:]
         var tracks: [String: AnimationCurve] = [:]
+        /// **The `TargetChannel` curves** — TODO (21)'s second channel kind, in the same state
+        /// object rather than in a store of its own reached separately.
+        ///
+        /// That is the whole of what made a second kind cheap. Every writer here already reads this
+        /// state, mutates it and hands it to `commitKeyframeState`, so a dictionary added *here*
+        /// gets one undo step, §2.28's `marks(_:droppingKeyed:)` rule and the id-addressed
+        /// re-resolution for free — and cannot acquire a second, drifting definition of "a
+        /// keyframe", because there is no second round trip for it to drift in.
+        var channelTracks: [String: AnimationCurve] = [:]
+        /// The held pre-edit values for those channels — `Layer.channelBaselines`, apart from
+        /// `baselines` for that field's stated reason (the grade's writers prune `baselines`).
+        var channelBaselines: [String: Double] = [:]
     }
 
     /// **The target the keyframe writers address when nothing more specific is named: the current
@@ -185,11 +197,15 @@ extension CanvasManager {
         case .layer(let id):
             guard let layer = layers.first(where: { $0.id == id }) else { return KeyframeState() }
             return KeyframeState(marks: layer.keyframeMarks, baselines: layer.pendingBaselines,
-                                 tracks: layer.effectTracks)
+                                 tracks: layer.effectTracks,
+                                 channelTracks: layer.channelTracks,
+                                 channelBaselines: layer.channelBaselines)
         case .folder(let id):
             guard let folder = folders.first(where: { $0.id == id }) else { return KeyframeState() }
             return KeyframeState(marks: folder.keyframeMarks, baselines: folder.pendingBaselines,
-                                 tracks: folder.effectTracks)
+                                 tracks: folder.effectTracks,
+                                 channelTracks: folder.channelTracks,
+                                 channelBaselines: folder.channelBaselines)
         }
     }
 
@@ -218,8 +234,7 @@ extension CanvasManager {
     /// can see). The keys live on the layer's *cels* in cel-local frames (§3.1) and are converted by
     /// `poseKeyframeFrames(inLayer:)`, which is the one place that conversion happens.
     func keyframeFrames(of target: KeyframeTarget) -> [Int] {
-        let state = keyframeState(of: target)
-        return keyframeFrames(of: target, marks: state.marks, tracks: state.tracks)
+        keyframeFrames(of: target, in: keyframeState(of: target))
     }
 
     /// **The same union, taken against marks and curves a writer is holding mid-edit** — which is the
@@ -233,10 +248,16 @@ extension CanvasManager {
     /// reported: the neighbour search steps over a keyframe the artist can see, and the seed arm writes
     /// onto the wrong one. The static form is gone and this stands in its place, so the pose frames
     /// cannot be forgotten by omission.
-    func keyframeFrames(of target: KeyframeTarget,
-                        marks: [Int], tracks: [String: AnimationCurve]) -> [Int] {
-        var frames = keyedFrames(of: target, tracks: tracks)
-        frames.formUnion(marks)
+    /// **It takes the whole `KeyframeState` rather than the two fields it happens to need**, and
+    /// that is the correction TODO (21)'s second channel kind forced. The signature used to be
+    /// `(marks:tracks:)`, which meant a caller holding a mid-edit state had to remember to pass each
+    /// dictionary — and the *previous* version of that signature, a static one whose `poseFrames`
+    /// defaulted to empty, is exactly what let a pose key go missing from the union and produced two
+    /// of the owner's device reports. A second track dictionary would have added a second thing to
+    /// forget. A state object cannot be partially handed over.
+    func keyframeFrames(of target: KeyframeTarget, in state: KeyframeState) -> [Int] {
+        var frames = keyedFrames(of: target, in: state)
+        frames.formUnion(state.marks)
         return frames.sorted()
     }
 
@@ -248,16 +269,26 @@ extension CanvasManager {
     /// one per-cel `isEmpty` per cel; for one that does it is a walk of the curves' own key arrays and
     /// never a call to `Effect.parameters`, which rebuilds up to thirty-three closures.
     func keyedFrames(of target: KeyframeTarget) -> Set<Int> {
-        keyedFrames(of: target, tracks: keyframeState(of: target).tracks)
+        keyedFrames(of: target, in: keyframeState(of: target))
     }
 
-    /// The same, against a track dictionary the caller is holding mid-edit.
-    func keyedFrames(of target: KeyframeTarget, tracks: [String: AnimationCurve]) -> Set<Int> {
+    /// The same, against a state the caller is holding mid-edit.
+    func keyedFrames(of target: KeyframeTarget, in state: KeyframeState) -> Set<Int> {
         var keyed: Set<Int> = []
-        if !tracks.isEmpty, storedEffect(of: target) != nil {
-            for curve in tracks.values {
+        if !state.tracks.isEmpty, storedEffect(of: target) != nil {
+            for curve in state.tracks.values {
                 for key in curve.keys { keyed.insert(key.frame) }
             }
+        }
+        // **A `TargetChannel` key is a keyframe, and it is ungated exactly as a pose key is.**
+        // Opacity is not a property of the grade: a plain drawing layer with no effect whatsoever
+        // still has one, the compositor reads it at every frame, so a key on it is a frame the
+        // artist can see a change at. Gating these on `storedEffect` — the line above, which is
+        // right for the grade's own channels because a track left behind by a kind change renders
+        // nothing — would reproduce §2.28's divergence precisely: a node in the graph editor with no
+        // indicator on the cel, and a Remove Keyframe that is not offered for a key that exists.
+        for curve in state.channelTracks.values {
+            for key in curve.keys { keyed.insert(key.frame) }
         }
         // A pose key is a landed key exactly as a curve key is. Ungated by the grade, unlike the
         // effect curves: a pose channel is not a property of an effect at all, so a drawing layer with
@@ -360,18 +391,43 @@ extension CanvasManager {
     /// track-level answer here would list four channels the band draws as dashed flat lines and call
     /// them animations. The predicate is the same one every other channel gets, applied to the
     /// synthesised sub-curve: `AnimationCurve.isAnimated`.
+    /// **And since TODO (21)'s second channel kind it lists the target's own scalars too**, between
+    /// the grade's channels and the poses — `graphBandListing(of:)`'s order and the only place that
+    /// order is decided. The two are pinned equal by `TimelineGraphBandLogicTests` in both
+    /// directions, which is what stops a channel appearing in the band and not in the list.
     func listedAnimationChannelIDs(of target: KeyframeTarget) -> [String] {
         let grade = channelIDs(of: target) { $0.isAnimated }
+        let own = targetChannelIDs(of: target) { $0.isAnimated }
         let sources = poseSources(of: target)
-        guard !sources.isEmpty else { return grade }
-        return grade + TimelineGraphBand.poseChannels(sources, descriptorOffset: 0)
+        guard !sources.isEmpty else { return grade + own }
+        return grade + own + TimelineGraphBand.poseChannels(sources, descriptorOffset: 0)
             .channels.filter(\.isAnimated).map(\.parameterID)
     }
 
     /// Whether one channel is an animation by the list's definition — `listedAnimationChannelIDs` for
     /// a single id, without building the array.
     func channelIsAnimated(_ target: KeyframeTarget, parameterID: String) -> Bool {
-        keyframeState(of: target).tracks[parameterID]?.isAnimated ?? false
+        let state = keyframeState(of: target)
+        // Both stores, because an id belongs to exactly one of them (`TargetChannel`'s namespace
+        // rule) and the caller asking this does not know which — it holds an id off the channel
+        // list, which lists both kinds.
+        return state.tracks[parameterID]?.isAnimated
+            ?? state.channelTracks[parameterID]?.isAnimated
+            ?? false
+    }
+
+    /// **The same walk over `TargetChannel.all`** — the target's own scalars, which are in force on
+    /// every layer and folder and are therefore *not* gated on a grade being present. That
+    /// asymmetry with `channelIDs` below is `keyedFrames`' asymmetry stated a second time, and it
+    /// is the whole difference between the two channel kinds.
+    private func targetChannelIDs(of target: KeyframeTarget,
+                                  where matches: (AnimationCurve) -> Bool) -> [String] {
+        let tracks = keyframeState(of: target).channelTracks
+        guard !tracks.isEmpty else { return [] }
+        return TargetChannel.all.compactMap { channel in
+            guard let curve = tracks[channel.id], matches(curve) else { return nil }
+            return channel.id
+        }
     }
 
     /// The shared walk behind the two predicates above. Over `parameters` rather than over the track
@@ -534,7 +590,7 @@ extension CanvasManager {
 
         var state = keyframeState(of: target)
         let before = state
-        let placed = keyframeFrames(of: target, marks: state.marks, tracks: state.tracks)
+        let placed = keyframeFrames(of: target, in: state)
         state.tracks[parameterID] = Self.seeded(state.tracks[parameterID], keyframes: placed,
                                                 frame: frame, oldValue: oldValue, newValue: newValue)
         // A channel that seeds is a channel that no longer needs its held value.
@@ -601,7 +657,12 @@ extension CanvasManager {
         // effect loop, so a pose key missing from it seeds a pose baseline onto the wrong frame — or,
         // when it is the only other keyframe there is, onto no frame at all, discarding the baseline
         // and the animation with it.
-        let placed = keyframeFrames(of: target, marks: state.marks, tracks: before.tracks)
+        // The *new* marks against the *old* curves, which is what the comment above means by a
+        // snapshot: `state.marks` may already carry the mark this press is placing, while every
+        // track dictionary must be the one this write has not touched yet.
+        var neighbourState = before
+        neighbourState.marks = state.marks
+        let placed = keyframeFrames(of: target, in: neighbourState)
 
         if let stored = storedEffect(of: target) {
             let resolved = resolvedEffect(of: target, atFrame: frame)
@@ -625,6 +686,32 @@ extension CanvasManager {
             }
         }
         state.baselines = [:]
+
+        // **Steps 2 and 3 again for the target's own scalars** — TODO (21)'s second channel kind,
+        // and it is the same two steps with the descriptor table swapped and no grade to gate on.
+        // A layer with no effect at all still reaches this loop, which is the point: opacity is a
+        // property of every layer, so a keyframe press on a plain drawing layer commits a held
+        // opacity exactly as it commits a held bloom on a value layer.
+        for channel in TargetChannel.all {
+            if let baseline = before.channelBaselines[channel.id] {
+                // 2. Commit the held value. The *stored* base, not the resolved one: a channel with
+                // a baseline has no curve to resolve through — that absence is what made the edit
+                // hold a baseline instead of keying.
+                guard let current = storedValue(of: target, channel: channel) else { continue }
+                state.channelTracks[channel.id] = Self.seeded(state.channelTracks[channel.id],
+                                                              keyframes: placed, frame: frame,
+                                                              oldValue: baseline, newValue: current)
+            } else if before.channelTracks[channel.id]?.isEmpty == false {
+                // 3. Hold the value the curve *resolves* to here, §2.24's surviving half — or
+                // placing a mark lets an animated opacity drift straight through it.
+                guard let curve = state.channelTracks[channel.id] else { continue }
+                var held = curve
+                held.setKey(AnimationCurve.Key(frame: frame,
+                                               value: channel.clamped(curve.evaluate(at: Double(frame)))))
+                state.channelTracks[channel.id] = held
+            }
+        }
+        state.channelBaselines = [:]
 
         let (poses, posesBefore) = poseDeltaForKeyframe(target, atFrame: frame, keyframes: placed)
 
@@ -768,6 +855,18 @@ extension CanvasManager {
             for frame in frames { trimmed.removeKey(atFrame: frame) }
             if trimmed.isEmpty { state.tracks.removeValue(forKey: id) } else { state.tracks[id] = trimmed }
         }
+        // The target's own scalars go the same way and for the same reason: the artist asked for the
+        // keyframe to go, and leaving an opacity key behind would take the marker off the timeline
+        // and leave the fade running — a control that appears not to work.
+        for (id, curve) in state.channelTracks {
+            var trimmed = curve
+            for frame in frames { trimmed.removeKey(atFrame: frame) }
+            if trimmed.isEmpty { state.channelTracks.removeValue(forKey: id) }
+            else { state.channelTracks[id] = trimmed }
+        }
+        // A baseline whose channel has no keys left has nothing to be committed onto —
+        // `poseDeltaClearing` applies the same rule one currency over.
+        state.channelBaselines = state.channelBaselines.filter { state.channelTracks[$0.key] != nil }
 
         // **The pose channels go with them**, for the same reason the curve keys do: the artist asked
         // for the keyframe to go, and leaving the keys behind would take the marker off the timeline
@@ -1055,11 +1154,15 @@ extension CanvasManager {
             layers[index].keyframeMarks = state.marks
             layers[index].pendingBaselines = state.baselines
             layers[index].effectTracks = state.tracks
+            layers[index].channelTracks = state.channelTracks
+            layers[index].channelBaselines = state.channelBaselines
         case .folder(let id):
             guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
             folders[index].keyframeMarks = state.marks
             folders[index].pendingBaselines = state.baselines
             folders[index].effectTracks = state.tracks
+            folders[index].channelTracks = state.channelTracks
+            folders[index].channelBaselines = state.channelBaselines
         }
     }
 
@@ -1069,7 +1172,232 @@ extension CanvasManager {
     /// history what a couple of structural edits do rather than what one whole-cel snapshot does.
     private static func stateUndoCost(_ state: KeyframeState) -> Int {
         state.tracks.values.reduce(0) { $0 + 64 + 96 * $1.keys.count }
+            + state.channelTracks.values.reduce(0) { $0 + 64 + 96 * $1.keys.count }
             + 8 * state.marks.count
-            + 72 * state.baselines.count
+            + 72 * (state.baselines.count + state.channelBaselines.count)
+    }
+}
+
+// MARK: - The target's own scalars — KEYFRAMES.md TODO (21)'s second channel kind
+
+/// **Everything a `TargetChannel` needs that an `EffectParameter` already had**, and deliberately
+/// nothing more.
+///
+/// The five-arm routing rule itself is *not* repeated here: `KeyframeControl.write` is a pure
+/// function of four values and both channel kinds hand it the same four. What differs between them
+/// is only where the number is read from and written to, which is two key paths on the descriptor —
+/// so what follows is `applyEffectParameterEdit`'s shape with `parameter.read`/`parameter.write`
+/// swapped for `storedValue`/`setStoredValue` and the track dictionary swapped for the other one.
+/// Everything downstream — the union, the mark rule, the undo step, the recorder — is shared.
+extension CanvasManager {
+
+    /// This channel's **stored** value on a target, or nil if the target is not in the document.
+    /// `storedEffect(of:)`'s counterpart, and note there is no `layerEffect`-style accessor to route
+    /// through: opacity is in force on every layer whatever its kind, so there is no mode to ask
+    /// about.
+    func storedValue(of target: KeyframeTarget, channel: TargetChannel) -> Double? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?[keyPath: channel.layerPath]
+        case .folder(let id): return folders.first { $0.id == id }?[keyPath: channel.folderPath]
+        }
+    }
+
+    /// **Writes the number back onto whichever of the two homes `target` names.**
+    ///
+    /// The index is resolved *here*, at write time, rather than taken from a caller — a restack
+    /// while a slider is open would otherwise send the write to a neighbour. That is
+    /// `setStoredEffect(of:to:)`'s rule, and it is the reason `KeyframeTarget` carries ids on both
+    /// arms.
+    func setStoredValue(of target: KeyframeTarget, channel: TargetChannel, to value: Double) {
+        let clamped = channel.clamped(value)
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }),
+                  layers[index][keyPath: channel.layerPath] != clamped else { return }
+            layers[index][keyPath: channel.layerPath] = clamped
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }),
+                  folders[index][keyPath: channel.folderPath] != clamped else { return }
+            folders[index][keyPath: channel.folderPath] = clamped
+        }
+    }
+
+    /// **This channel at one frame** — the value the canvas is actually showing, which is what a
+    /// panel must display while a curve exists (§2.23's dead-control argument: a settings bar that
+    /// shows the stored base under a live curve offers a number the artist cannot move).
+    func resolvedValue(of target: KeyframeTarget, channel: TargetChannel, atFrame frame: Int) -> Double? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
+        case .folder(let id): return folders.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
+        }
+    }
+
+    /// `keyframeWrite(_:parameter:atFrame:)` for a target channel — the *same* rule with the same
+    /// four inputs, read off the other store.
+    ///
+    /// `isScalarAnimatable` is `true` by construction: `TargetChannel` describes a continuous
+    /// `Double` and there is no stepped or compound member of the table to refuse. Passing the
+    /// literal rather than deleting the parameter keeps `KeyframeControl.write` one function with
+    /// one set of arms, which is what makes the two kinds provably route alike.
+    func keyframeWrite(_ target: KeyframeTarget, channel: TargetChannel,
+                       atFrame frame: Int) -> KeyframeControl.Write {
+        let state = keyframeState(of: target)
+        let placed = keyframeFrames(of: target, in: state)
+        return KeyframeControl.write(
+            isScalarAnimatable: true,
+            channelHasCurve: state.channelTracks[channel.id]?.isEmpty == false,
+            keyframeCount: placed.count,
+            playheadIsOnKeyframe: placed.contains(frame))
+    }
+
+    /// **One opacity-slider edit, routed and performed** — `applyEffectParameterEdit`'s twin, arm
+    /// for arm.
+    ///
+    /// - Returns: the arm taken, so the caller can label its undo bracket. A drag that wrote keys is
+    ///   the channel's `keyframeLabel` and a drag that wrote a value is its `editLabel`; an artist
+    ///   who animated opacity must not read "change opacity" and conclude the fade itself has gone.
+    @discardableResult
+    func applyTargetChannelEdit(_ target: KeyframeTarget, channel: TargetChannel,
+                                newValue: Double, atFrame frame: Int) -> KeyframeControl.Write {
+        // **A live take takes the routing decision away** — §5's intercept, and it is the *same*
+        // intercept: `recordParameterSample` is keyed by an id string and knows nothing about which
+        // store the channel lives in, so a scalar surface plugs into the recorder by calling it.
+        // Keying per reported value is the aliased sample §5 forbids in its first paragraph.
+        if recordParameterSample(target, parameterID: channel.id, value: newValue) {
+            setStoredValue(of: target, channel: channel, to: newValue)
+            return .storedValue
+        }
+
+        let route = keyframeWrite(target, channel: channel, atFrame: frame)
+        // **The stored value, never the resolved one** — `applyEffectParameterEdit`'s rule: writing
+        // back what the playhead resolves to would bake a curve's value-at-this-frame into the base
+        // as a side effect, and that base is invisible for as long as its curve exists.
+        let stored = storedValue(of: target, channel: channel)
+
+        switch route {
+        case .key:
+            setTargetChannelKeys(target, frame: frame, values: [channel.id: newValue])
+        case .seedAndKey:
+            if let stored {
+                seedAndKeyTargetChannel(target, channel: channel,
+                                        oldValue: stored, newValue: newValue, atFrame: frame)
+            }
+        case .storedValueHoldingBaseline:
+            // Both halves, and the ordinary write is not optional: a provisional edit that is never
+            // committed is lost work (§2.27's second consequence).
+            if let stored { holdChannelBaseline(target, channelID: channel.id, value: stored) }
+            setStoredValue(of: target, channel: channel, to: newValue)
+        case .storedValue:
+            setStoredValue(of: target, channel: channel, to: newValue)
+        }
+        return route
+    }
+
+    /// `holdBaseline` in the other store. Written once per channel per keyframe cycle for that
+    /// method's reason — the first edit after a mark is the only one that knows the value at A.
+    @discardableResult
+    func holdChannelBaseline(_ target: KeyframeTarget, channelID: String, value: Double) -> Bool {
+        var state = keyframeState(of: target)
+        guard state.channelBaselines[channelID] == nil else { return false }
+        state.channelBaselines[channelID] = value
+        applyKeyframeState(state, to: target)
+        return true
+    }
+
+    /// `seedAndKeyChannel` in the other store — the owner's *"the user modifies another slider while
+    /// on B"*, where A already exists and must receive the value B is moving away from.
+    @discardableResult
+    func seedAndKeyTargetChannel(_ target: KeyframeTarget, channel: TargetChannel,
+                                 oldValue: Double, newValue: Double, atFrame frame: Int) -> Bool {
+        guard targetExists(target) else { return false }
+        var state = keyframeState(of: target)
+        let before = state
+        let placed = keyframeFrames(of: target, in: state)
+        state.channelTracks[channel.id] = Self.seeded(state.channelTracks[channel.id],
+                                                      keyframes: placed, frame: frame,
+                                                      oldValue: channel.clamped(oldValue),
+                                                      newValue: channel.clamped(newValue))
+        state.channelBaselines.removeValue(forKey: channel.id)
+        guard state != before else { return false }
+        commitKeyframeState(state, from: before, to: target, label: channel.keyframeLabel)
+        return true
+    }
+
+    /// `setEffectParameterKeys` in the other store: one key on each of several channels, one undo
+    /// step, and the walk over `TargetChannel.all` rather than over `values` for that method's
+    /// stated reason — an id the table does not carry is ignored rather than stored.
+    @discardableResult
+    func setTargetChannelKeys(_ target: KeyframeTarget, frame: Int, values: [String: Double]) -> Int {
+        guard !values.isEmpty, targetExists(target) else { return 0 }
+        let before = keyframeState(of: target)
+        var state = before
+        var changed = 0
+        // The first channel this write actually touches names the step. With one channel in the
+        // table that is always Opacity; the day there are two, a press that moves both is named
+        // after the first in `TargetChannel.all` rather than after whichever the dictionary
+        // iterated to first, which is the same determinism `Effect.parameters`' order buys.
+        var label: HistoryActionLabel?
+
+        for channel in TargetChannel.all {
+            guard let value = values[channel.id] else { continue }
+            let existing = state.channelTracks[channel.id]
+            var curve = existing ?? AnimationCurve()
+            curve.setKey(AnimationCurve.Key(frame: frame, value: channel.clamped(value)))
+            guard curve != existing else { continue }
+            state.channelTracks[channel.id] = curve
+            if label == nil { label = channel.keyframeLabel }
+            changed += 1
+        }
+        guard changed > 0, let label else { return 0 }
+
+        commitKeyframeState(state, from: before, to: target, label: label)
+        return changed
+    }
+
+    /// **Replaces one whole curve** — the graph editor's own write, reached from
+    /// `writeGraphBandCurves` when the dragged node belongs to a target channel.
+    ///
+    /// It goes through `commitKeyframeState` rather than spelling `setEffectParameterTrack`'s
+    /// hand-rolled mark arithmetic a third time. That funnel already applies §2.28's
+    /// `marks(_:droppingKeyed:)` against the keys either side of the write, which is what makes a
+    /// key dragged off a marked frame take the mark with it — the divergence the owner reported
+    /// three times, and the one thing that must never be implemented twice.
+    ///
+    /// An empty curve is removal, exactly as it is for a grade's channel: a curve with no keys is a
+    /// channel that exists, animates nothing, and shows up in a channel list.
+    @discardableResult
+    func setTargetChannelTrack(_ target: KeyframeTarget, channelID: String,
+                               to curve: AnimationCurve?) -> Bool {
+        guard targetExists(target), let channel = TargetChannel.named(channelID) else { return false }
+        let before = keyframeState(of: target)
+        var state = before
+        if let curve, !curve.isEmpty { state.channelTracks[channelID] = curve }
+        else { state.channelTracks.removeValue(forKey: channelID) }
+        guard state != before else { return false }
+        commitKeyframeState(state, from: before, to: target, label: channel.keyframeLabel)
+        return true
+    }
+
+    /// `setEffectParameterCurves` in the other store — §5's recorder, which writes a *whole curve*
+    /// per channel because a take is the animation rather than an adjustment to one.
+    @discardableResult
+    func setTargetChannelCurves(_ target: KeyframeTarget, curves: [String: AnimationCurve]) -> Int {
+        guard !curves.isEmpty, targetExists(target) else { return 0 }
+        let before = keyframeState(of: target)
+        var state = before
+        var changed = 0
+
+        for channel in TargetChannel.all {
+            guard let curve = curves[channel.id] else { continue }
+            let after: AnimationCurve? = curve.isEmpty ? nil : curve
+            guard after != state.channelTracks[channel.id] else { continue }
+            if let after { state.channelTracks[channel.id] = after }
+            else { state.channelTracks.removeValue(forKey: channel.id) }
+            changed += 1
+        }
+        guard changed > 0 else { return 0 }
+
+        commitKeyframeState(state, from: before, to: target, label: .recordAnimation)
+        return changed
     }
 }

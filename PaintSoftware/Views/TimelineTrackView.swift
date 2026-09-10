@@ -1135,8 +1135,20 @@ struct TimelineTrackView: UIViewRepresentable {
                 // KEYFRAMES §11.7 refused the whole band over. Its own funnel is
                 // `writeGraphBandPoseEdits`; passing one through here would silently do nothing.
                 guard !PoseChannelID.isPose(parameterID: parameterID) else { continue }
-                if canvasManager.setEffectParameterTrack(layerIndex: layerIndex,
-                                                         parameterID: parameterID, to: curve) {
+                // **TODO (21)'s second channel kind routes to its own funnel here**, not skipped
+                // like a pose: an opacity curve *is* an `AnimationCurve` and every band gesture —
+                // drag, retime, marquee, tap-to-add — produces exactly the whole-curve replacement
+                // `setTargetChannelTrack` takes. It is a different store rather than a different
+                // shape, which is why one line covers it and the pose needed a funnel of its own.
+                // `setEffectParameterTrack` would refuse it silently (no `EffectParameter` claims
+                // the id), so the node would move under the finger and spring back.
+                if TargetChannel.isTargetChannel(parameterID: parameterID) {
+                    guard let target = canvasManager.keyframeTarget(layerIndex: layerIndex) else { continue }
+                    if canvasManager.setTargetChannelTrack(target, channelID: parameterID, to: curve) {
+                        changed = true
+                    }
+                } else if canvasManager.setEffectParameterTrack(layerIndex: layerIndex,
+                                                                parameterID: parameterID, to: curve) {
                     changed = true
                 }
             }

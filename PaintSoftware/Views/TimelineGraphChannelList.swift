@@ -296,6 +296,20 @@ enum TimelineGraphChannelList {
         return names
     }
 
+    /// **The label for every group a `TargetChannel` contributes** — TODO (21)'s second channel
+    /// kind, and the second of the two tables `groupNames(of:)`' doc predicted would be merged.
+    ///
+    /// One group per channel, because `groupID(ofParameterID:)` returns the whole id when there is
+    /// no dot and a target channel's id is bare by construction (`TargetChannel`'s namespace rule).
+    /// So "Opacity" is a group of one row also called Opacity — which reads the way a grade's
+    /// "Gaussian Blur ▸ Radius" reads and is what lets the artist switch the curve off, fold it and
+    /// find it in the same places as every other channel.
+    static func targetChannelGroupNames() -> [String: String] {
+        var names: [String: String] = [:]
+        for channel in TargetChannel.all { names[groupID(ofParameterID: channel.id)] = channel.name }
+        return names
+    }
+
     /// **The list the popup shows: every channel the band could draw, grouped, with its box's state.**
     ///
     /// Built from the band's *unfiltered* channels, so the rows are exactly the band's membership, and
@@ -373,6 +387,7 @@ extension CanvasManager {
         // a band lists a transform beside a grade, its names are two of these merged, and nothing
         // above here changes."* It is that day.
         var names = TimelineGraphChannelList.groupNames(of: storedEffect(of: target))
+        for (id, name) in TimelineGraphChannelList.targetChannelGroupNames() { names[id] = name }
         for (id, name) in TimelineGraphBand.poseGroupNames(poseSources(of: target)) {
             names[id] = name
         }

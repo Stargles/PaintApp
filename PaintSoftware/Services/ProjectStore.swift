@@ -347,6 +347,11 @@ enum ProjectStore {
             /// key is `writePackage`'s job one level down, for the reason `LayerManifest.effectTracks`
             /// gives.
             let effectTracks: [String: AnimationCurve]
+            /// `Layer.channelTracks` and `Layer.channelBaselines` — TODO (21)'s second channel kind.
+            /// Value types, snapshotted whole and unconditionally for `effectTracks`' reason; empty
+            /// maps to absent in `writePackage`.
+            let channelTracks: [String: AnimationCurve]
+            let channelBaselines: [String: Double]
             /// `Layer.keyframeMarks` and `Layer.pendingBaselines` — §2.26's bare marks and the value
             /// each channel is holding between two of them. Value types, snapshotted whole and
             /// unconditionally for `effectTracks`' reason; empty maps to absent in `writePackage`.
@@ -426,6 +431,9 @@ enum ProjectStore {
                                // `FolderManifest` by the time the snapshot exists, while a layer is
                                // still a `LayerContent`; the rule is one rule.
                                effectTracks: folder.effectTracks.isEmpty ? nil : folder.effectTracks,
+                               // The same empty-to-absent line on TODO (21)'s channel kind.
+                               channelTracks: folder.channelTracks.isEmpty ? nil : folder.channelTracks,
+                               channelBaselines: folder.channelBaselines.isEmpty ? nil : folder.channelBaselines,
                                keyframeMarks: folder.keyframeMarks.isEmpty ? nil : folder.keyframeMarks,
                                pendingBaselines: folder.pendingBaselines.isEmpty ? nil : folder.pendingBaselines,
                                // §4.4's container pose. Already optional in the model, so there is
@@ -450,6 +458,8 @@ enum ProjectStore {
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
                              alphaMask: layer.alphaMask, effect: layer.effect,
                              effectTracks: layer.effectTracks,
+                             channelTracks: layer.channelTracks,
+                             channelBaselines: layer.channelBaselines,
                              keyframeMarks: layer.keyframeMarks,
                              pendingBaselines: layer.pendingBaselines,
                              fill: layer.fill,
@@ -1029,6 +1039,9 @@ enum ProjectStore {
                 // a document nobody has animated writes no `effectTracks` key and stays byte-for-byte
                 // the manifest it was. See `LayerManifest.effectTracks`.
                 effectTracks: layer.effectTracks.isEmpty ? nil : layer.effectTracks,
+                // Same line for the same reason, on TODO (21)'s channel kind.
+                channelTracks: layer.channelTracks.isEmpty ? nil : layer.channelTracks,
+                channelBaselines: layer.channelBaselines.isEmpty ? nil : layer.channelBaselines,
                 // Same line for the same reason, on §2.26's two fields.
                 keyframeMarks: layer.keyframeMarks.isEmpty ? nil : layer.keyframeMarks,
                 pendingBaselines: layer.pendingBaselines.isEmpty ? nil : layer.pendingBaselines,
@@ -1876,6 +1889,10 @@ enum ProjectStore {
                         // §2.21 says and what a folder nobody has keyed says — one meaning, so the
                         // model's non-optional dictionary takes them both as empty.
                         effectTracks: f.effectTracks ?? [:],
+                        // Absent means "nothing animated" here too — one meaning in both
+                        // directions, so the model's non-optional dictionary takes both as empty.
+                        channelTracks: f.channelTracks ?? [:],
+                        channelBaselines: f.channelBaselines ?? [:],
                         // Absent means "none", one meaning in both directions — §2.26's marks and
                         // baselines follow `effectTracks`' rule exactly.
                         keyframeMarks: f.keyframeMarks ?? [],
@@ -1913,6 +1930,8 @@ enum ProjectStore {
                 kind: layerManifest.kind,
                 effect: layerManifest.effect,
                 effectTracks: layerManifest.effectTracks ?? [:],
+                channelTracks: layerManifest.channelTracks ?? [:],
+                channelBaselines: layerManifest.channelBaselines ?? [:],
                 keyframeMarks: layerManifest.keyframeMarks ?? [],
                 pendingBaselines: layerManifest.pendingBaselines ?? [:],
                 transform: layerManifest.transform,

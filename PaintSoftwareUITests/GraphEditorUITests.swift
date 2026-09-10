@@ -339,6 +339,103 @@ final class GraphEditorUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["Extend to End"].waitForExistence(timeout: 5),
                       "The arm is a cel identity, so the second tap still reaches the block's menu")
     }
+
+    /// **Keyframing a layer's opacity from a cold start** — the owner's ask of 2026-09-09, driven end
+    /// to end on a brand-new document with no fixture state built behind the artist's back.
+    ///
+    /// **This is a reachability test before it is a correctness one.** Three features shipped in one
+    /// pass that could not be used at all, and the common cause was that every test constructed the
+    /// post-state and asserted on it. So this starts where an artist starts — a new document, one
+    /// layer, nothing animated — and the only inputs are taps and a slider drag.
+    ///
+    /// **The load-bearing assertion is the slider's own value at two different playhead positions.**
+    /// `exists` on a control proves nothing here (a hidden view still resolves, which is how a test
+    /// passed with a whole feature deleted), and neither would the stored number: `.seedAndKey`
+    /// leaves the stored base alone, so a build whose panel read the base would show **the same
+    /// value at both frames**. Reading 100 % at frame 0 and the dragged value at frame 8 is a claim
+    /// only a panel resolving at the playhead can satisfy — §2.23's dead-control argument, made
+    /// visible.
+    func testKeyframingALayersOpacityFromAColdStart() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let block = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5), "A new document has one layer with a block")
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0))
+        XCTAssertGreaterThan(cel.length, 8, "PREMISE: the starting block is long enough for two marks")
+
+        /// One frame's column of that block, tapped through the two-stage cel contract — the same
+        /// technique `authorAnAnimatedBrightnessCurve` uses, and for its stated reason.
+        func slot(_ frame: Int) -> XCUICoordinate {
+            block.coordinate(withNormalizedOffset:
+                CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
+        }
+        func mark(_ frame: Int) {
+            let add = app.buttons["timeline.menu.Add Keyframe"]
+            slot(frame).tap()
+            if !add.waitForExistence(timeout: 2) {
+                slot(frame).tap()
+                XCTAssertTrue(add.waitForExistence(timeout: 5),
+                              "No Add Keyframe on frame \(frame)'s menu — the artist's only way in")
+            }
+            add.tap()
+        }
+
+        // Step 1 and 2: the artist marks A and then B, exactly as §2.26 describes.
+        mark(0)
+        mark(8)
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.0"].value as? String, "0|8",
+                       "PREMISE: two marks carrying no channel, which is what puts the drag in seedAndKey")
+
+        // Step 3: standing on B, they drag the layer's opacity down. This is the whole gesture — no
+        // mode, no second control, and no effect layer anywhere in the document.
+        openLayerPanel(app)
+        let slider = app.sliders["layerPanel.row.0.opacity"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "The layer row carries the opacity slider")
+        XCTAssertEqual(sliderNumericValue(slider), 100, accuracy: 1, "A fresh layer is fully opaque")
+        slider.adjust(toNormalizedSliderPosition: 0.25)
+        let faded = sliderNumericValue(slider)
+        XCTAssertLessThan(faded, 90, "The drag really moved the control")
+        app.buttons["toolbar.layersButton"].tap()
+
+        // The timeline still shows both keyframes — now carried by the curve's own keys rather than
+        // by marks, which is §2.28's union answering with one voice.
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.0"].value as? String, "0|8",
+                       "Both frames are still keyframes, now because the channel keys on them")
+
+        // Step 4: they scrub, and the panel tells them what the canvas is showing.
+        // `readFrameLabel` reports the label, and the label is **one-based** —
+        // `Text("Frame \(currentFrame + 1)/…")` — while every model frame here is zero-based. A is
+        // frame 0 and reads as 1.
+        slot(0).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, 1, "The playhead moved to A (frame 0)")
+        openLayerPanel(app)
+        XCTAssertEqual(sliderNumericValue(app.sliders["layerPanel.row.0.opacity"]), 100, accuracy: 2,
+                       "At A the slider shows the value the curve holds there, which is the value the "
+                       + "artist moved away from")
+        app.buttons["toolbar.layersButton"].tap()
+
+        slot(8).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, 9, "…and back to B (frame 8)")
+        openLayerPanel(app)
+        XCTAssertEqual(sliderNumericValue(app.sliders["layerPanel.row.0.opacity"]), faded, accuracy: 2,
+                       "At B it shows the faded value — a panel reading the stored base would have "
+                       + "shown the same number at both frames, since seedAndKey never wrote it")
+        app.buttons["toolbar.layersButton"].tap()
+
+        // Step 5: and the animation is in the graph editor, where they can shape it.
+        app.buttons["timeline.graphEditorButton"].tap()
+        XCTAssertTrue(app.otherElements["timeline.graphBand"].waitForExistence(timeout: 5),
+                      "The band opens on the layer the artist animated")
+        app.buttons["timeline.graphChannelsButton"].tap()
+        let row = app.buttons["timeline.graphChannels.opacity"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5),
+                      "The opacity channel is listed — a model that animated correctly and offered no "
+                      + "row would be the unreachable-feature failure this test exists for")
+        XCTAssertEqual(row.value as? String, "on",
+                       "…and it is an animation rather than a flat curve wearing a row, which would "
+                       + "read \"on,flat\"")
+    }
 }
 
 /// **Stage D3's gestures through a real finger** — KEYFRAMES.md §11.4.

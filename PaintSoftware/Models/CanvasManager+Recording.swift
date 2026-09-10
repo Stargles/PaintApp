@@ -29,6 +29,17 @@ extension CanvasManager {
         /// resolved against.
         let baseEffect: Effect?
 
+        /// **The stored value of every `TargetChannel` at arm time** — TODO (21)'s second channel
+        /// kind, and `baseEffect`'s counterpart in every respect including why it is restored at
+        /// commit: opacity is a scratch pad during a take, because an artist who cannot see the
+        /// layer fade under their finger is recording blind, and the motion belongs on the curve.
+        ///
+        /// **Captured for every channel rather than for the ones touched**, which costs one `Double`
+        /// per channel per take and removes a hazard: a channel first touched mid-take would
+        /// otherwise have no base to restore, and the value the artist let go on would silently
+        /// become the stored one *and* the curve's — the fade would then apply twice.
+        let baseChannelValues: [String: Double]
+
         /// **How many gesture brackets were open when the take began**, so that `stopRecording` can
         /// tell "a control the artist is still holding opened one *inside* mine" from "brackets that
         /// were already open outside mine". The first is the case `pendingGestureLabel` exists for
@@ -93,7 +104,7 @@ extension CanvasManager {
             case .noScene:
                 return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:
-                return "Nothing was recorded — open a layer's effect settings and move a slider while the recorder runs."
+                return "Nothing was recorded — move a layer's opacity slider, or an effect slider, while the recorder runs."
             case .noMotion:
                 return "Nothing moved during the take — a recording needs the value to change, not just be touched."
             case .tooShort:
@@ -267,9 +278,14 @@ extension CanvasManager {
         beginStructureGesture()
 
         if !isPlaying { play() }
+        var baseChannelValues: [String: Double] = [:]
+        for channel in TargetChannel.all {
+            baseChannelValues[channel.id] = storedValue(of: target, channel: channel)
+        }
         recordingTake = RecordingTake(target: target,
                                       startFrame: currentFrame,
                                       baseEffect: storedEffect(of: target),
+                                      baseChannelValues: baseChannelValues,
                                       // Read *after* the bracket above, so it counts the brackets
                                       // that were open before the take rather than including its own.
                                       gestureDepthAtStart: structureGestureDepth - 1)
@@ -344,18 +360,35 @@ extension CanvasManager {
         // The base first, whatever happens next: it was a scratch pad and the artist never asked for
         // the value they let go on to become the stored grade.
         if let base = take.baseEffect { setStoredEffect(of: take.target, to: base) }
+        // The same restore for the target's own scalars, and it is not conditional on the take
+        // having touched them: `setStoredValue` early-returns when the value is already there.
+        for channel in TargetChannel.all {
+            guard let base = take.baseChannelValues[channel.id] else { continue }
+            setStoredValue(of: take.target, channel: channel, to: base)
+        }
 
         guard !take.channels.isEmpty else { return .nothingCaptured }
 
         let parameters = take.baseEffect?.parameters ?? []
         var curves: [String: AnimationCurve] = [:]
+        var channelCurves: [String: AnimationCurve] = [:]
         var sawTwoStops = false
 
         for (parameterID, recording) in take.channels {
-            guard let parameter = parameters.first(where: { $0.id == parameterID }),
-                  parameter.isScalarAnimatable,
-                  let range = parameter.uiRange
-            else { continue }
+            // **Which store this id belongs to is decided once, here** — `TargetChannel`'s namespace
+            // rule — and the two arms differ only in where the descriptor's range comes from. The
+            // resample, the tolerance and the `isAnimated` gate are shared, which is the whole
+            // reason a scalar surface plugs into the recorder by calling `recordParameterSample`
+            // and doing nothing else: `ValueRecording` is scalar-only and both kinds are scalars.
+            let range: ClosedRange<Double>
+            if let channel = TargetChannel.named(parameterID) {
+                range = channel.uiRange
+            } else if let parameter = parameters.first(where: { $0.id == parameterID }),
+                      parameter.isScalarAnimatable, let uiRange = parameter.uiRange {
+                range = uiRange
+            } else {
+                continue
+            }
 
             let tolerance = (range.upperBound - range.lowerBound) * Self.recordingSimplifyFraction
             let keys = recording.keys(fps: fps, startFrame: take.startFrame, tolerance: tolerance)
@@ -366,14 +399,19 @@ extension CanvasManager {
             // holding one value — and it is exactly the right gate here: anything less is a channel
             // that would appear in the list and animate nothing.
             guard curve.isAnimated else { continue }
-            curves[parameterID] = curve
+            if TargetChannel.isTargetChannel(parameterID: parameterID) { channelCurves[parameterID] = curve }
+            else { curves[parameterID] = curve }
         }
 
-        // **One write for the whole take**, so §2.28's mark rule runs once over every channel it
-        // touched rather than once per channel against a half-written state.
-        guard setEffectParameterCurves(take.target, curves: curves) > 0 else {
-            return sawTwoStops ? .noMotion : .tooShort
-        }
+        // **One write per store, so §2.28's mark rule runs once over everything each of them
+        // touched** rather than once per channel against a half-written state. Two calls rather than
+        // one because the stores are two, and that is safe where a half-written state would not be:
+        // `marks(_:droppingKeyed:)` is asked against the keys either side of *its own* write and the
+        // second call sees the first's keys in its "before" set, so a mark under either write's key
+        // is dropped exactly once.
+        let wrote = setEffectParameterCurves(take.target, curves: curves)
+            + setTargetChannelCurves(take.target, curves: channelCurves)
+        guard wrote > 0 else { return sawTwoStops ? .noMotion : .tooShort }
         return nil
     }
 }

@@ -223,9 +223,18 @@ extension CanvasManager {
     /// Animation, handed a flat row of siblings, can only do the latter. The alternative was a slider
     /// the live canvas ignores entirely until §5.2's sandwich arrives in phase 5, which is a worse
     /// lie than a close one. The thumbnail, which goes through the compositor, is already exact.
+    /// **Resolved at the playhead, both halves** — TODO (21)'s keyframable opacity, and this is the
+    /// live canvas's *only* view of it: `CanvasView` hands the layer's host view
+    /// `CGFloat(effectiveOpacity(ofLayer:))`, so a curve that stopped here would animate the
+    /// thumbnail and the export and leave the canvas the artist is drawing on at the stored value.
+    /// The frame is `currentFrame` because that is what a live canvas *is* — the tree derivation
+    /// (`renderNodes(inContainer:atFrame:)`) takes its frame as an argument and this cannot, which
+    /// is the same split `layerEffect` and `layerEffect(atFrame:)` already carry.
     func effectiveOpacity(ofLayer index: Int) -> Double {
         guard layers.indices.contains(index) else { return 1 }
-        return ancestorFolders(ofLayer: index).reduce(layers[index].opacity) { $0 * $1.opacity }
+        let frame = currentFrame
+        return ancestorFolders(ofLayer: index)
+            .reduce(layers[index].opacity(atFrame: frame)) { $0 * $1.opacity(atFrame: frame) }
     }
 
     // MARK: - Reorder
@@ -552,6 +561,13 @@ extension CanvasManager {
                              asVector: stayedVector, canvasSize: canvasSize)
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
+            // **The opacity curve goes with the number it drove**, TODO (21). `mergeContribution`
+            // resolved it at this frame and baked it into the pixels, so a surviving curve would
+            // fade the merged result a second time — and the line above already declares that the
+            // survivor's own opacity is spent. Beside `opacity = 1` rather than inside the
+            // `.value` block below, because opacity belongs to every layer and not to the grade.
+            layers[bottomIndex].channelTracks.removeValue(forKey: TargetChannel.opacity.id)
+            layers[bottomIndex].channelBaselines.removeValue(forKey: TargetChannel.opacity.id)
 
             if !stayedVector {
                 // **The survivor comes out `.raster`, which for a `.value` lower layer it did not.**
@@ -756,6 +772,13 @@ extension CanvasManager {
         let below = layers[bottomIndex], above = layers[topIndex]
         guard below.kind == .vector, above.kind == .vector,
               below.opacity == 1, above.opacity == 1,
+              // **And neither is *animating* its opacity**, TODO (21). The two tests above read the
+              // stored base, which a curve overrides at every frame — so a layer stored at 1 and
+              // faded to 0.2 by a curve would pass them and concatenate into a list that draws at
+              // full strength. It is the same class of refusal as the derived-cel one below: what
+              // the artist sees is not what the layer stores.
+              below.channelTracks[TargetChannel.opacity.id] == nil,
+              above.channelTracks[TargetChannel.opacity.id] == nil,
               above.blendMode == .normal, above.alphaMask == nil else { return false }
 
         for aboveCel in above.cels {
@@ -838,7 +861,7 @@ extension CanvasManager {
         // opacity : 0` ternary this used to spell at each of two call sites.
         guard layer.isVisible else { return .nothing }
         if let effect = layer.layerEffect(atFrame: frame) {
-            return isBackdrop ? .nothing : .grade(effect, opacity: layer.opacity)
+            return isBackdrop ? .nothing : .grade(effect, opacity: layer.opacity(atFrame: frame))
         }
         // §4.4's transformation layer poses the layers beneath it, which is not something a pixel
         // bake can express; `mergeLossKind` warns before the artist reaches this.
@@ -853,13 +876,17 @@ extension CanvasManager {
             guard let solid = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: frame)),
                                                       canvasSize: canvasSize) else { return .nothing }
             return .pixels(UIImage(cgImage: solid, scale: 1, orientation: .up),
-                           mode: mode, opacity: layer.opacity)
+                           mode: mode, opacity: layer.opacity(atFrame: frame))
         }
         // No `ContentProvider` here on purpose: both layers went through `rasterizeLayer` in
         // `mergeLayers`, which flattens every derived cel *through* the seam and then clears both the
         // geometry and the recipe. By this point neither cel can derive anything.
+        // **Resolved at the frame being merged**, exactly as `layerEffect(atFrame:)` above is:
+        // a merge flattens what the canvas shows at one frame, and what it shows is the opacity the
+        // curve resolves to there. Reading the stored base here would bake a layer at 100% that the
+        // artist is looking at faded.
         return .pixels(PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize),
-                       mode: mode, opacity: layer.opacity)
+                       mode: mode, opacity: layer.opacity(atFrame: frame))
     }
 
     /// Copies a layer — content, cels, folder, and settings — in place above the original.
@@ -905,6 +932,12 @@ extension CanvasManager {
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
                          kind: source.kind, effect: source.effect,
                          effectTracks: source.effectTracks,
+                         // `channelTracks` and `channelBaselines` travel for `effectTracks`' reason
+                         // read one channel kind over: a copy takes the whole feature or none, and a
+                         // duplicate whose opacity curve was dropped would fade differently from the
+                         // layer it was copied from with nothing saying why.
+                         channelTracks: source.channelTracks,
+                         channelBaselines: source.channelBaselines,
                          keyframeMarks: source.keyframeMarks,
                          pendingBaselines: source.pendingBaselines,
                          fill: source.fill,

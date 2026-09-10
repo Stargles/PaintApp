@@ -34,14 +34,15 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     private var defaultZoom: CGFloat { TimelineKeyMarkers.basePixelsPerFrame }
 
     /// **The band's markers for a state a writer would be holding mid-edit.** The union is the
-    /// model's — `CanvasManager.keyframeFrames(of:marks:tracks:)`, the one accessor — asked against a
+    /// model's — `CanvasManager.keyframeFrames(of:in:)`, the one accessor — asked against a
     /// real graded document so the grade asymmetry it carries is in force. `TimelineLayoutKey.make`
     /// asks the same question the same way, so the assertions below are about the band the artist
     /// sees rather than about a fixture's own arithmetic.
     private func markerRow(marks: [Int], tracks: [String: AnimationCurve]) -> [Int] {
         let manager = gradedManager()
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
-        return manager.keyframeFrames(of: target, marks: marks, tracks: tracks)
+        return manager.keyframeFrames(of: target,
+                                      in: CanvasManager.KeyframeState(marks: marks, tracks: tracks))
     }
 
     /// The same against a document's stored state, through the accessor production reads.

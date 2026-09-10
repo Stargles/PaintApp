@@ -917,7 +917,14 @@ extension CanvasManager {
                 // no transformation layer therefore mints nothing at all.
                 if let pose = carried[position] { poses[index] = pose }
                 result.append(RenderNode(id: layer.id, content: .leaf(layerIndex: index),
-                                  opacity: layer.opacity, isVisible: layer.isVisible,
+                                  // **Resolved at this frame** — TODO (21)'s keyframable opacity,
+                                  // and the seam is the one `layerEffect(atFrame:)` already cut two
+                                  // lines up. The compositor receives a number, so it never learns
+                                  // that opacity can be animated, and `FrameBakeKey` digests
+                                  // `node.opacity` and therefore varies per frame for free. A layer
+                                  // with no curve returns the stored value byte for byte, which is
+                                  // what keeps every document nobody has animated identical.
+                                  opacity: layer.opacity(atFrame: frame), isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
                                   // not a blend (§7 says so while listing it among them); it is this
                                   // machinery with an implicit source, so it is resolved here into a
@@ -996,7 +1003,10 @@ extension CanvasManager {
                                   // phase 1 stood in with. They each still *default* to the
                                   // identity, so an untouched folder remains a no-op in the tree —
                                   // that is `LayerFolder`'s doing now rather than this line's.
-                                  opacity: folder.opacity, isVisible: folder.isVisible,
+                                  // Resolved at this frame, the leaf's rule on the other home —
+                                  // §2.21 for grades, reached by the channel kind that arrived
+                                  // after it.
+                                  opacity: folder.opacity(atFrame: frame), isVisible: folder.isVisible,
                                   // **Two forcings, and they are different rules that happen to write
                                   // the same value.**
                                   //

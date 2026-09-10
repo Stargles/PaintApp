@@ -110,6 +110,47 @@ struct Layer: Identifiable {
     /// it. So flipping `Blur.isDirectional`, which is one `.blur` case wearing two artist-facing
     /// names, keeps `blur.radius` and `blur.angle`; Levels → Curves keeps nothing.
     var effectTracks: [String: AnimationCurve] = [:]
+    /// **The keyframe tracks driving the scalars this layer owns *itself*** — `TargetChannel`, and
+    /// TODO (21)'s second channel kind. Keyed by `TargetChannel.id` and evaluated in **absolute
+    /// document frames**, exactly as `effectTracks` one field up and for §2.4's reason.
+    ///
+    /// **A second dictionary rather than more entries in `effectTracks`, and the three differences
+    /// are why.** Every one of them would have had to become a per-key predicate over one merged
+    /// dictionary — a partition every reader has to remember, which is the shape of the divergence
+    /// §2.28 exists to forbid.
+    ///
+    ///  * **It is never pruned.** `Effect.tracksAddressed(by:from:)` destroys a curve whose id the
+    ///    current grade cannot drive, which is right for a grade's channel and wrong for this one:
+    ///    opacity does not belong to the effect and does not go when the effect does.
+    ///  * **It is never gated.** `CanvasManager.keyedFrames(of:)` ignores `effectTracks` entirely on
+    ///    a target with no grade in force, because a track left behind by a kind change is storage
+    ///    rather than animation. Opacity is in force on every layer at every frame, so its keys are
+    ///    keyframes on a plain drawing layer with no grade whatsoever — the pose channels' rule, not
+    ///    the grade's.
+    ///  * **It degrades gracefully in the other direction.** A build without this feature decodes
+    ///    the manifest with `decodeIfPresent` and a fixed `CodingKeys`, so an unknown key is
+    ///    ignored: the document opens, opacity is the stored base, and nothing is lost but the
+    ///    animation. Had these curves ridden `effectTracks`, that build would have counted their
+    ///    keys into §2.28's union and drawn keyframe diamonds for a channel it cannot render.
+    ///
+    /// Empty by default, so every existing `Layer(...)` call site and every saved manifest is
+    /// unchanged by this field arriving — `effectTracks`' recipe, one field up.
+    var channelTracks: [String: AnimationCurve] = [:]
+    /// **The value each `TargetChannel` held before the artist's first edit since the last mark** —
+    /// `pendingBaselines` for the channels `channelTracks` carries, and the owner's *"the previous
+    /// value is held"* (§2.27).
+    ///
+    /// **A third baseline home, and it is the same reason KEYFRAMES §3.5 gives for the second.**
+    /// `pendingBaselines` is walked and *pruned against the grade's descriptors* by every writer of
+    /// `effect` (`Effect.channelEntriesAddressed(by:from:)`, five call sites in `CanvasManager`), so
+    /// an opacity baseline parked there would be silently thrown away the moment the artist changed
+    /// or cleared the layer's grade — losing the value at keyframe A with nothing on screen to
+    /// explain it. §3.5 reached that conclusion for `LayerPose.baseline`; this is the same trap
+    /// through a third door.
+    ///
+    /// Persisted for `pendingBaselines`' own reason: the gap between keyframe A and keyframe B can
+    /// span a save.
+    var channelBaselines: [String: Double] = [:]
     /// **The frames on which the artist has placed a keyframe on this layer** — KEYFRAMES.md §2.26,
     /// the 2026-08-29 workflow. Sorted, unique, **absolute document frames**, the same time base
     /// `effectTracks` uses and for §2.4's reason.
