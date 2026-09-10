@@ -540,11 +540,57 @@ Doing it once serves both features.
   `blur.radius` and `bloom.radius` cannot collide. Kept rather than pruned on `Layer.valueFill`'s own
   asymmetry — a picker that silently destroys the other mode's setting is what a picker must not do —
   so flipping back restores the animation.
+- **`TargetChannel`'s curves are a key of their own** — `LayerManifest.channelTracks` and
+  `channelBaselines`, same idiom, same absence-is-the-migration — and **not more entries in
+  `effectTracks`**, which is the decision §3.6 below is about. The half that belongs here: a build
+  without the feature ignores an unknown key and opens the document with opacity static, where the
+  merged store would have handed it ids no `EffectParameter` claims, counted their keys into §2.28's
+  union and drawn keyframe indicators it cannot render.
 - **Precision.** Keys are `Double`. Do **not** route a pose through `PackedSampleRun`: its Int16
   quarter-pixel grid **saturates rather than throwing** (`PackedSampleRun`'s `clampedCount`, at
   ±8192 points), which for
   a handful of anchor values would silently teleport an out-of-range key. That encoding is tuned for
   thousands of samples a stroke; a key wants exactness over compactness.
+
+### 3.6 The second channel *kind* — `TargetChannel`, shipped 2026-09-10
+
+The owner, 2026-09-09: *"Also, layer opacity should also be able to be keyframed, currently its
+not."* Every channel before it was an `EffectParameter` (a number inside an `Effect`, addressed
+`"<case>.<field>"`) or a pose (`TransformTrack`, six curves of a quad). Opacity is neither: it is a
+`Double` on `Layer` and on `LayerFolder`, read by the compositor at every frame whether or not the
+layer grades anything.
+
+`Models/TargetChannel.swift` is the descriptor table for that family — id, name, ui range, model
+domain, format, two `HistoryActionLabel`s and **one `WritableKeyPath` into each of the two homes**,
+which is what makes "a folder's opacity is the same channel" a fact of the type system rather than
+two `switch`es that can drift. **A blend amount or an effect's overall strength costs one more entry
+in `TargetChannel.all` and nothing else**: no new store, no new union, no new persistence field, no
+new arm in the recorder.
+
+**Ids are bare and undotted.** Every `EffectParameter.id` contains a dot and so does every
+`PoseChannelID.parameterID`, so the three namespaces cannot collide and `isTargetChannel` is the one
+predicate that routes a write.
+
+**The curves live in a second dictionary, and the three differences are why** — each of them a
+per-key predicate over one merged dictionary otherwise, which is the drift §2.28 forbids. They are
+never pruned (`Effect.tracksAddressed` would destroy a fade when the grade changed); never gated
+(`keyedFrames` ignores `effectTracks` entirely on a target with no grade in force, which would hide
+every opacity keyframe on a plain drawing layer); and they degrade gracefully in an older build
+(§3.5). `channelBaselines` is a **third** baseline home for the reason §3.5 already gives
+`LayerPose.baseline`: every writer of `Layer.effect` prunes `pendingBaselines` against the grade's
+descriptors, so a held opacity parked there is destroyed by a grade change and keyframe B commits
+nothing.
+
+**Both dictionaries ride `CanvasManager.KeyframeState`**, which is what bought the rest for free: one
+undo step, §2.28's `marks(_:droppingKeyed:)` rule at the same funnel, and one union accessor. That
+accessor now takes the whole state rather than `(marks:tracks:)`, so a caller mid-edit cannot hand
+over half of it — the previous signature is how a pose key once went missing from the union.
+
+**Resolution happens in the tree** (`RenderNode.opacity` at the frame asked for), which is the seam
+`layerEffect(atFrame:)` already cut: the compositor still receives a number, and `FrameBakeKey`,
+`SandwichKey` and the baker's dirty stamp all follow with no edit of their own. The live canvas
+resolves at the playhead through `effectiveOpacity(ofLayer:)`, and the layer panel's slider shows the
+same resolved number — §2.23's dead-control argument, which is why the panel must not show the base.
 
 ---
 
@@ -1187,6 +1233,16 @@ the recorder is armed and an unadvertised mode is what §2.1 was withdrawn over.
    `CanvasManager.recordParameterSample`, reached from `applyEffectParameterEdit`, which returns whether
    the recorder consumed the routing decision. **A quad surface needs its own intercept**, because
    `ValueRecording` is scalar-only — that is the unbuilt part of the Move box, not the trigger.
+
+   **The layer panel's opacity slider is the second surface and it cost exactly these two lines**
+   (2026-09-10, §3.6). `recordParameterSample` is keyed by an id string and knows nothing about which
+   store a channel lives in, so `applyTargetChannelEdit` calls it unchanged; `RecordingTake` gained
+   `baseChannelValues` beside `baseEffect` for the same restore, and the commit picks the tolerance
+   off `TargetChannel.uiRange` where a grade's comes off `EffectParameter.uiRange`. Nothing else
+   moved. The one thing to copy rather than re-derive is the **order**: the arm goes before the
+   surface's own `beginStructureGesture`, which for a `UISlider` means the `.touchDown` target and
+   for the settings bar's SwiftUI `Slider` means the first half of `onEditingChanged` — both already
+   existed, and both are documented at their call site as load-bearing for that reason.
 4. Nothing on touch-up. A take ends at the end of the scene, or on the record button, or when playback
    stops for any of the four other reasons `stopPlayback` lists.
 
