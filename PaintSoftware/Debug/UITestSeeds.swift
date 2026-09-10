@@ -66,6 +66,30 @@ enum UITestSeeds {
         return TimeInterval(millis) / 1000
     }()
 
+    /// **How long a `CanvasNotice` stays up, when a test needs to read one.**
+    ///
+    /// `CanvasNotice.duration` is 2.6 s, which is right for an artist and wrong for a harness: a
+    /// banner that dismisses itself is gone before a loaded machine gets round to asking whether it
+    /// is there, so `waitForExistence` misses it and **no timeout can fix that** — a longer wait
+    /// cannot see something that has already left. MEASURED 2026-09-10:
+    /// `TimingRecorderUITests.testArmingTellsTheArtistTheCanvasIsAWayToStartATake` red inside the
+    /// full suite under four parallel clones and green in isolation on the same binary, which is the
+    /// signature of exactly that race and not of a wrong assertion.
+    ///
+    /// So a test that reads a banner asks for one that waits for it. `-uiTestNoticeSeconds <n>`,
+    /// read by `DrawingView`'s dismissal task. Simulator-only, on `slowVectorRenderDelay`'s rule and
+    /// for its reason: a flag that silently made a *device* build hold its banners would be a report
+    /// about an app nobody ships.
+    static let noticeDurationOverride: TimeInterval? = {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return nil }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestNoticeSeconds"),
+              args.index(after: flag) < args.endIndex,
+              let seconds = Double(args[args.index(after: flag)]), seconds > 0 else { return nil }
+        return seconds
+    }()
+
     /// **VIDEO.md §8 stage 8's own gap.** Every video- or image-carrying element in this app is
     /// reached, for a real artist, through `PhotosPicker` — real system UI in a separate process
     /// that XCUITest cannot drive reliably, which is why `VideoImportLogicTests`'s own header says

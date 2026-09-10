@@ -311,6 +311,15 @@ final class TimingRecorderUITests: PaintUITestCase {
         // A bare launch rather than `documentWithTwoBlocks`: this test is about what the arm *says*,
         // and building the two-block fixture for it would spend twenty seconds of the class's budget
         // on state no assertion below reads.
+        //
+        // The banner dismisses itself after 2.6 s, which is right for an artist and is a race this
+        // test cannot win on a loaded machine — MEASURED 2026-09-10, red inside the full suite under
+        // four parallel clones and green in isolation on the same binary. A longer `waitForExistence`
+        // does not help: it cannot see a view that has already gone. So the test asks for a banner
+        // that waits for it (`UITestSeeds.noticeDurationOverride`, simulator-only, nil in any shipped
+        // build). This changes how long the pill is up and nothing about what it says, which is what
+        // every assertion below reads.
+        app.launchArguments += ["-uiTestNoticeSeconds", "120"]
         XCTAssertTrue(launchIntoEditor(app), "Setup: a brand-new document")
         armRecorder(app)
 

@@ -315,7 +315,11 @@ struct DrawingView: View {
         // finds nothing, and returns, so no stale deadline survives.
         .task(id: canvasManager.notice?.id) {
             guard let notice = canvasManager.notice else { return }
-            try? await Task.sleep(nanoseconds: UInt64(notice.duration * 1_000_000_000))
+            // `UITestSeeds.noticeDurationOverride` is nil in every shipped build; a UI test that
+            // has to *read* this banner asks for a longer one, because a self-dismissing view is a
+            // race no `waitForExistence` timeout can win. See that property for the measurement.
+            let seconds = UITestSeeds.noticeDurationOverride ?? notice.duration
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             // `Task.sleep` throws on cancellation and `try?` swallows it, so the flag is the only
             // thing that distinguishes "the wait finished" from "a newer notice replaced this one".
             guard !Task.isCancelled else { return }
