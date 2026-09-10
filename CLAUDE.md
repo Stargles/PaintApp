@@ -88,6 +88,16 @@ tables themselves are in `git log`, and only these conclusions survived them:
   exactly that. Two of one run's three environmental reds were timing assertions that passed alone;
   bench files are excluded by filename and exist for this. **Triage a timing failure warm and never
   after an erase** — the first run after a `simctl erase` measured 4.7x worse and read as a regression.
+  **But "excluded by filename" only excludes them from the *fast tier*; the full suite runs
+  everything**, which is how a bench with no gate of its own has now red three full runs. The remedy
+  is an env-var opt-in on the *assertion* — `BrushContactSheetBench`'s shape, and now
+  `DabCostBench`'s `PAINTAPP_PADCAP` — leaving the measurement printed unconditionally, since a
+  re-take reads the printed number and not the pass. **Before adding headroom instead, measure the
+  spread**: that bench read 338.7 / 374.1 / 378.7 / **489.5** ms against a 0.5 s cap on a 97.6%-idle
+  machine and 947.9 ms minutes after a full suite, so it had no headroom at all and the cap was
+  sampling the machine rather than checking the ruling. **And a two-run theory about *why* is worth
+  nothing**: the same failure looked exactly like a Debug-versus-Release effect until Release
+  measured 368.4 against Debug's 338.7, i.e. the same. Take four samples before naming a cause.
 - **`tearDown` runs even when `setUpWithError` throws `XCTSkip`**, so an opt-in suite must gate its
   teardown on a flag set past the guard. Two tests once *failed* at 0.000 s in every full run because
   teardown trapped unwrapping a nil `URL!`, reported as `Test crashed with signal trap` printed *beside*
