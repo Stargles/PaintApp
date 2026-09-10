@@ -101,7 +101,11 @@ final class TimingRecorderUITests: PaintUITestCase {
     /// Arms the recorder through the only control that arms it — the graph editor's record button
     /// (§5.1), which is where the owner asked for it on 2026-09-09.
     private func armRecorder(_ app: XCUIApplication) {
-        app.buttons["timeline.graphEditorButton"].tap()
+        let graphEditor = app.buttons["timeline.graphEditorButton"]
+        XCTAssertTrue(graphEditor.waitForExistence(timeout: 5),
+                      "Setup: `timeline.graphEditorButton` is the only way to the record button "
+                      + "(§5.1), so without it nothing below can arm")
+        graphEditor.tap()
         let record = app.buttons["timeline.recordButton"]
         XCTAssertTrue(record.waitForExistence(timeout: 5),
                       "Setup: opening the graph editor is what displays the record button")
@@ -116,7 +120,10 @@ final class TimingRecorderUITests: PaintUITestCase {
     /// an artist scrubs.
     private func scrubToFirstBlock(_ app: XCUIApplication) {
         let block = app.otherElements["timeline.cel.0.0"]
-        XCTAssertTrue(block.waitForExistence(timeout: 5))
+        XCTAssertTrue(block.waitForExistence(timeout: 5),
+                      "Setup: `timeline.cel.0.0` is the opening block, and tapping it is how the "
+                      + "playhead gets back inside it — every assertion below is about which cel "
+                      + "the canvas is showing")
         block.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).tap()
         XCTAssertEqual(readFrameLabel(app)?.current, 1,
                        "Setup: the take has to start at the top of the scene, or it has no cels to "
