@@ -107,11 +107,11 @@ struct UnlandedInk {
         pictures.removeAll { $0.version <= version }
     }
 
-    /// **Nothing held is about this canvas any more.** Four callers, and each is a case where the
+    /// **Nothing held is about this canvas any more.** Five callers, and each is a case where the
     /// base slot stops being a picture of the same list: the view is handed a different
     /// `VectorCanvas` (a layer, cel or frame change), the base becomes a derived in-between frame,
-    /// the composite takes over drawing this layer, or an eraser's synchronous touch-down render has
-    /// just made the base current.
+    /// the composite takes over drawing this layer, an eraser's synchronous touch-down render has
+    /// just made the base current, or a lasso move latches its float over the whole layer.
     mutating func removeAll() {
         pictures.removeAll()
     }

@@ -741,6 +741,11 @@ final class StrokeCanvasView: UIView {
         retireUnlandedInk(coveredBy: version)
         if imageView.image !== image { imageView.image = image }
         displayedVectorVersion = version
+        // **The raw scratch rather than a `VectorPreviewPlan`'s**, and it is the same answer: the one
+        // role the plan would filter out is `.none`, which stamps nothing into its window, so its
+        // `image` is nil and its `replacesBase` is false. Both branches below are then the no-ops
+        // their identity guards make them. This is a landing render, so it is the held ink that has
+        // just changed and the scratch that has not.
         showOverlays(scratch)
     }
 
@@ -772,6 +777,15 @@ final class StrokeCanvasView: UIView {
         // picture for a split second" is not good enough: the previous picture here is the layer
         // with the lifted piece still in it, under a float showing the same piece again.
         refreshDisplayIfStale(waitingForTheRender: true)
+        // **And nothing held survives the latch**, whether or not that refresh managed to install a
+        // current base — `DeferredVectorRender.step` answers `.wait` even to a caller that is
+        // blocking, when a rasterize for this very version is already running. A held picture left
+        // standing under a float would draw a stroke that the float is *also* drawing, which reads
+        // as the ink having duplicated: strictly worse than the missing frame it would be sparing.
+        // Reachable only by starting a lasso move inside one render of a pen-up (§11.12 measures
+        // that at 14–30 ms), which is why it is a guard rather than a fix.
+        unlandedInk.removeAll()
+        showHeldInk()
         vectorFloatBase = base
         floatView.transform = .identity
         floatView.image = image
@@ -904,6 +918,10 @@ final class StrokeCanvasView: UIView {
     /// Rebuilds `heldInkView`'s subviews when the held set has changed, and does nothing at all when
     /// it has not — which is the overwhelmingly common call, once per layer per SwiftUI pass.
     private func showHeldInk() {
+        // The overwhelmingly common call, and it is two `isEmpty` reads: nothing is held and nothing
+        // is shown. `refreshDisplay` runs once per layer per SwiftUI pass, so anything here that
+        // allocates is an allocation per layer per pass.
+        if unlandedInk.isEmpty, heldInkIDsOnScreen.isEmpty { return }
         let ids = unlandedInk.pictures.map(\.id)
         guard ids != heldInkIDsOnScreen else { return }
         heldInkIDsOnScreen = ids
