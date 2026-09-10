@@ -237,7 +237,12 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .recordingRefused(let refusal): return refusal.message
-        case .recordingArmed:   return "Recorder armed — put your pencil on a slider in a layer's effect settings and playback starts with it."
+        // **The canvas is named first and the slider second** — KEYFRAMES.md §7, stage 10. The order
+        // is the ranking an artist reads as "the usual thing": drawing the timing is what the
+        // recorder is mostly for, and the sentence has to reach the surface the artist is already
+        // looking at. A sentence that named only the slider is what shipped before stage 10, and it
+        // would have sent an artist who armed the recorder to draw into a settings panel instead.
+        case .recordingArmed:   return "Recorder armed — draw on the canvas, or put your pencil on a layer's opacity or effect slider, and playback starts with it."
         }
     }
 

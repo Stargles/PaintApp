@@ -1148,6 +1148,32 @@ final class CanvasManager: ObservableObject {
     /// observable half, and it changes twice a take.
     var recordingTake: RecordingTake?
 
+    /// **Whether a timing stroke is under the pen right now** — KEYFRAMES.md §7, stage 10: the
+    /// artist is drawing on the canvas while a take runs, and the ink is being shared out among the
+    /// cels the playhead crosses.
+    ///
+    /// Not `@Published`, and that is deliberate rather than an oversight: it changes at pen-down and
+    /// pen-up, and both of those already raise a SwiftUI pass through `onStrokeBegan`/`onStrokeEnded`
+    /// (`CanvasView` calls `applySandwichPresentationNow` on each). Publishing it would add a second
+    /// pass for a value the first one already carries. `isSandwichStrokeLive` on the coordinator is
+    /// the shipped precedent for exactly this shape, and this flag is here rather than beside it
+    /// because two things in the *model* read it — the playhead's own `didSet`, and
+    /// `canvasInteractionBegan`.
+    var timingStrokeIsLive = false
+
+    /// **Called synchronously when the playhead moves while a timing stroke is live**, so the cel the
+    /// gesture is writing into changes on the tick rather than on the SwiftUI pass that follows it.
+    ///
+    /// A closure rather than an `@Published` the canvas observes, for one measured reason: the cut
+    /// has to happen between the tick and the next touch sample, and a SwiftUI pass is neither
+    /// synchronous with the tick nor guaranteed to run before the pen moves again. Samples that
+    /// arrived in that window would be attributed to the cel the playhead has already left — sub-frame
+    /// jitter on an ordinary edit, but this feature's entire content is *which frame a mark was made
+    /// on*. `playbackNow` is the shipped precedent for a closure on this class.
+    ///
+    /// Installed by `CanvasView.Coordinator`; nil in every headless test that does not need it.
+    var onTimingStrokeFrameAdvanced: (() -> Void)?
+
     /// Whether `stepFPS(by:)` has anywhere to go in each direction.
     ///
     /// **The controls read these and disable themselves**, which is what makes the refusal visible:
@@ -1185,6 +1211,11 @@ final class CanvasManager: ObservableObject {
         didSet {
             if oldValue != currentFrame {
                 handleActiveContextChanged()
+                // **After `handleActiveContextChanged`, which is what settles anything the outgoing
+                // frame was still holding** — and before the SwiftUI pass, which is the whole point:
+                // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
+                // so an ordinary take driving a slider pays one `Bool` read per frame and nothing else.
+                if timingStrokeIsLive { onTimingStrokeFrameAdvanced?() }
                 ActionRecorder.ifRecording { $0.model("currentFrame", String(currentFrame)) }
             }
         }
@@ -1307,7 +1338,10 @@ final class CanvasManager: ObservableObject {
     /// the top-bar dropdowns while closing no presentation for six days. Anyone auditing the sites
     /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
     /// sixth, added 2026-08-22 and correct from the start.
-    func canvasInteractionBegan() {
+    ///
+    /// - Parameter mayContinueTake: whether this touch is on the surface a live take can keep
+    ///   recording from — the drawing canvas, and only it. See the `stopPlayback` call below.
+    func canvasInteractionBegan(mayContinueTake: Bool = false) {
         // A touch that is about to become an edit ends playback. The playhead moving under the
         // artist's hand is the whole hazard: a tick lands mid-gesture, `currentFrame`'s `didSet`
         // commits the float and clears the selection through `handleActiveContextChanged`, and the
@@ -1316,7 +1350,20 @@ final class CanvasManager: ObservableObject {
         // Here rather than in `beginCanvasEdit`, which would be the tempting chokepoint and is a
         // recursion: `handleActiveContextChanged` calls `beginCanvasEdit`, and it runs on every
         // playback tick, so playback would stop itself on its first frame.
-        stopPlayback()
+        //
+        // **The exception is KEYFRAMES.md §7's timing recorder, and it is the narrowest one that
+        // works.** Stage 10 makes the canvas a recordable surface, so "the gesture finishes against
+        // a different cel than it started on" stops being the hazard and becomes the feature — but
+        // only for a stroke, and only while a take is actually running. Every other way into this
+        // method still stops playback, which is why this is a parameter rather than a bare
+        // `isRecording` test: a fill tap, an eyedropper press or a catch-all tap during a take has
+        // no cel-crossing story and would land against a moving playhead.
+        //
+        // **Arming needs no exception.** Arming starts nothing, so playback is not running when the
+        // first pen lands; this stops nothing, and `startRecording` calls `play()` a moment later.
+        // It is the *second* stroke of a take that would otherwise end it here, and `stopPlayback`
+        // ends a take outright (see its own comment).
+        if !(mayContinueTake && isRecording) { stopPlayback() }
         dismissPresentationsOverLiveCanvas()
         interactionBegan.send()
     }

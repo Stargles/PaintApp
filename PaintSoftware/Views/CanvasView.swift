@@ -58,6 +58,19 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.sandwichBelowView = sandwichBelow
         context.coordinator.sandwichAboveView = sandwichAbove
 
+        // **The timing recorder's live trail** — KEYFRAMES.md §7 stage 10, and the one view in this
+        // container that is not pinned to it: its frame is the live scratch's own window in canvas
+        // points, exactly as `StrokeCanvasView.scratchView`'s is, and container coordinates *are*
+        // canvas coordinates because every host is pinned edge to edge.
+        //
+        // **It is here rather than inside the active host because playback blanks every host**
+        // (`sandwichEngagesOnCanvas`'s `isPlaying` clause), and blanking is a `layer.mask`, which
+        // covers a view's whole subtree. Drawing the trail in the host would have meant drawing it
+        // nowhere. See `StrokeCanvasView.showOverlays`.
+        let timingInk = Coordinator.makeTimingInkView()
+        container.addSubview(timingInk)
+        context.coordinator.timingInkView = timingInk
+
         // **One onion-skin view, above everything the artwork draws into, under both placements** —
         // the owner's ruling of 2026-09-06, and `OnionSkinClip` carries it in full. Behind is a mask
         // on this view rather than a slot lower in the stack, so there is no interleaving left to
@@ -265,6 +278,14 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.floatingOverlay = floatingOverlay
         context.coordinator.setUpGestures(on: container)
 
+        // KEYFRAMES.md §7 stage 10: the playhead moving under a live timing stroke has to reach the
+        // stroke view *now*, not on the SwiftUI pass that follows — see
+        // `CanvasManager.onTimingStrokeFrameAdvanced` for the measurement that makes it a closure.
+        context.coordinator.canvasManager.onTimingStrokeFrameAdvanced = {
+            [weak coordinator = context.coordinator] in
+            coordinator?.timingStrokeFrameAdvanced()
+        }
+
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
         // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
         // vector-layer whole-layer transforms mutate `VectorCanvas` in place and aren't captured
@@ -422,6 +443,8 @@ struct CanvasView: UIViewRepresentable {
         weak var transformOverlay: ObjectTransformOverlayView?
         weak var selectionOverlay: SelectionOverlayView?
         weak var floatingOverlay: FloatingPieceOverlayView?
+        /// KEYFRAMES.md §7 stage 10's live trail — see `makeTimingInkView` and `updateTimingInk`.
+        weak var timingInkView: UIImageView?
         var activePanel: ActivePanel = .none
         var layerHosts: [UUID: LayerHostView] = [:]
 
@@ -747,9 +770,17 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
+                host.strokeView.onLiveInkChanged = { [weak self] image, rect, alpha in
+                    self?.updateTimingInk(image: image, rect: rect, alpha: alpha)
+                }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
                     // Touching the canvas at all dismisses whatever top-bar dropdown is open.
-                    self?.canvasManager.canvasInteractionBegan()
+                    //
+                    // **`mayContinueTake` is true here and nowhere else** — KEYFRAMES.md §7 stage 10.
+                    // This is the one entry point that can become a timing stroke, so it is the one
+                    // that must not end the take it is part of. A take is stopped by playback
+                    // stopping, and every other caller of this method still stops it.
+                    self?.canvasManager.canvasInteractionBegan(mayContinueTake: true)
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self else { return }
@@ -1256,6 +1287,66 @@ struct CanvasView: UIViewRepresentable {
             view.isHidden = true
             view.translatesAutoresizingMaskIntoConstraints = false
             return view
+        }
+
+        /// The timing recorder's live trail — KEYFRAMES.md §7 stage 10.
+        ///
+        /// **Identical to `StrokeCanvasView.scratchView` in every respect that decides how ink
+        /// looks**, and deliberately so: this shows the very `UIImage` that view would have shown,
+        /// so a difference in `contentMode` or in either filter would make the ink under the pen
+        /// change appearance the moment a take starts. Nearest under magnification keeps the pixels
+        /// crisp at zoom; trilinear under minification is what stops a thin line vanishing when the
+        /// canvas is larger than the screen.
+        ///
+        /// **`translatesAutoresizingMaskIntoConstraints` is left true**, unlike every other view in
+        /// this container: its frame is the scratch's window rather than the whole canvas, so it is
+        /// positioned rather than pinned.
+        static func makeTimingInkView() -> UIImageView {
+            let view = UIImageView()
+            view.contentMode = .scaleToFill
+            view.layer.magnificationFilter = .nearest
+            view.layer.minificationFilter = .trilinear
+            view.isUserInteractionEnabled = false
+            view.isHidden = true
+            return view
+        }
+
+        /// Shows, moves or takes down the timing trail. The one writer of `timingInkView`.
+        ///
+        /// **Fronted on the edge into visibility rather than every call.** `reconcileLayers` re-fronts
+        /// the hosts and `sandwichAbove` whenever the stack order or engagement changes, and both of
+        /// those move during a take — the frames are flipping — so a trail added once at build time
+        /// would sink under them. Re-fronting on every sample instead would be a subview reorder per
+        /// touch sample; the edge is enough, because nothing re-fronts while the trail is up except
+        /// a restack, which cannot happen with the pen down.
+        func updateTimingInk(image: UIImage?, rect: CGRect, alpha: CGFloat) {
+            guard let view = timingInkView else { return }
+            guard let image, !rect.isNull, !rect.isEmpty else {
+                if !view.isHidden || view.image != nil {
+                    view.image = nil
+                    view.isHidden = true
+                }
+                return
+            }
+            if view.image !== image { view.image = image }
+            if view.frame != rect { view.frame = rect }
+            if view.alpha != alpha { view.alpha = alpha }
+            if view.isHidden {
+                view.isHidden = false
+                containerView?.bringSubviewToFront(view)
+            }
+        }
+
+        /// **The playhead moved under a live timing stroke** — routed to the active layer's own
+        /// stroke view, which is the only one that can be holding a gesture.
+        ///
+        /// Resolved through `layerHosts` by id rather than kept as a reference to "the drawing view",
+        /// for the reason every index in this file is re-resolved: the active layer is an index into
+        /// an array that other things reorder.
+        func timingStrokeFrameAdvanced() {
+            let index = canvasManager.currentLayerIndex
+            guard canvasManager.layers.indices.contains(index) else { return }
+            layerHosts[canvasManager.layers[index].id]?.strokeView.timingStrokeFrameAdvanced()
         }
 
         /// Latches the mid-stroke state. Called from `onStrokeBegan` *after* the cel spawn — see the
@@ -2879,6 +2970,11 @@ struct CanvasView: UIViewRepresentable {
         private func startShapeDetection(host: LayerHostView) {
             guard canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil else { return }
             guard !canvasManager.shapeGestureActive else { return }
+            // **A held pen during a take is timing, not a request for a circle** — KEYFRAMES.md §7
+            // stage 10. Smart-shape detection fires on the pen holding still, which is precisely
+            // what an artist does to record a hold; leaving it armed would turn every pause in a
+            // performance into a shape and throw the take's ink away with it.
+            guard !canvasManager.timingStrokeIsLive else { return }
             shapeDetectionSamples.removeAll()
             shapeDetectionHost = host
             shapeDetectionActive = true

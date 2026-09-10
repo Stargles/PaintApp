@@ -48,6 +48,17 @@ extension CanvasManager {
 
         /// Per parameter id, everything that channel reported.
         var channels: [String: ValueRecording] = [:]
+
+        /// **Whether this take caught ink on the canvas** — KEYFRAMES.md §7, stage 10.
+        ///
+        /// A `Bool` beside `channels` rather than a channel of its own, because a timing stroke is
+        /// not a curve and never becomes one: it is ink, it has already been committed to the cels
+        /// it crossed, and it carries its own undo step. What the take needs to know is only that it
+        /// caught *something* — without this the take would end in `.nothingCaptured`, whose sentence
+        /// tells the artist to go and move an opacity slider after they have just drawn across four
+        /// cels. That is the "refusal that names the wrong way out" this file already has a case
+        /// about, reached by a new door.
+        var caughtInk = false
     }
 
     /// Why a take could not start, or produced nothing. **Every case has a sentence an artist reads**
@@ -104,7 +115,7 @@ extension CanvasManager {
             case .noScene:
                 return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:
-                return "Nothing was recorded — move a layer's opacity slider, or an effect slider, while the recorder runs."
+                return "Nothing was recorded — draw on the canvas, or move a layer's opacity or effect slider, while the recorder runs."
             case .noMotion:
                 return "Nothing moved during the take — a recording needs the value to change, not just be touched."
             case .tooShort:
@@ -294,6 +305,120 @@ extension CanvasManager {
         return nil
     }
 
+    // MARK: - The timing recorder — KEYFRAMES.md §7, stage 10
+
+    /// One cel's share of a timing stroke, as an undo step sees it: the canvas it went into and that
+    /// canvas's display list either side of the commit.
+    ///
+    /// `changedInk` is what `VectorCanvas.lastDamage` reported for the edit, carried so the restore
+    /// can bound its own invalidation exactly as `StrokeCanvasView.registerVectorUndo` does for a
+    /// single-cel stroke. Nil means unbounded, which is the honest answer for an append (see
+    /// `foldGestureDamage`).
+    struct TimingStrokeEdit {
+        /// The cel this run landed on. Carried beside the canvas because a thumbnail is asked for by
+        /// **id** — `celContentChangedOutsideStroke` — and only the cel under the playhead gets one
+        /// from the ordinary stroke-end path. Without this the timeline would show the artist a row
+        /// of blocks with none of the ink they had just drawn into them.
+        let celID: UUID
+        let canvas: VectorCanvas
+        let before: [VectorElement]
+        let after: [VectorElement]
+        let changedInk: CGRect?
+    }
+
+    /// **The cel a timing stroke should be writing into right now**, creating a block if the playhead
+    /// is over a frame the active layer has none on.
+    ///
+    /// This is the answer to "what happens at a frame with no cel", and it is deliberately the rule
+    /// that already ships rather than a new one: touching a blank frame with a drawing tool spawns a
+    /// one-frame block there (`ensureCelAtCurrentFrame`, reached from
+    /// `CanvasView.attachSpawnedCelIfFrameIsEmpty`). A take crossing that frame does the same thing,
+    /// so an artist who records over a gap gets ink on the gap rather than a hole they have to go
+    /// back and explain.
+    ///
+    /// **The spawn costs no undo step of its own**, which is the half worth stating. `addCel` is
+    /// `withStructureUndo`-wrapped, and that scope no-ops when a gesture bracket is already open —
+    /// the take's, opened in `startRecording`. The blocks are put back by the stroke's own step
+    /// instead (`recordTimingStrokeUndo`), which is what makes one gesture one press.
+    ///
+    /// - Returns: the layer index and its `VectorCanvas` at `currentFrame`, or nil when the active
+    ///   layer is not one a stroke can land on.
+    func timingStrokeSurface() -> (layerIndex: Int, celID: UUID, canvas: VectorCanvas)? {
+        let index = currentLayerIndex
+        guard layers.indices.contains(index), layers[index].kind == .vector else { return nil }
+        guard let celIndex = ensureCelAtCurrentFrame(layerIndex: index),
+              let canvas = layers[index].cels[celIndex].vector else { return nil }
+        return (index, layers[index].cels[celIndex].id, canvas)
+    }
+
+    /// **One undo step for one gesture, however many cels it crossed and however many blocks it had
+    /// to make** — the brief's second requirement, and `bakePreciseStrokes`' shape reached from a
+    /// live gesture instead of a menu tap.
+    ///
+    /// Two things are put back together because one gesture caused both: every visited canvas's
+    /// display list, and the layer's own `cels` array, which differs from `celsBefore` exactly where
+    /// the take crossed an empty frame. Registering them apart would cost the artist one press per
+    /// cel plus one for the blocks — which is the very complaint `bakePreciseStrokes`' own comment
+    /// records, *"rather than registering per cel, which would cost the artist one press per cel to
+    /// take back a single menu tap."*
+    ///
+    /// **The layer is resolved by id at undo time, not by the index passed here.** A step can be
+    /// taken back long after a restack, and `layers` is an array — the index that was right when the
+    /// stroke was drawn addresses somebody else's layer by then. This is the rule `layerIndex(ofID:)`
+    /// exists for.
+    ///
+    /// **The cels are restored before the elements**, and that ordering is load-bearing rather than
+    /// tidy: `restoreElements` bumps a canvas's version and invalidates its render, and putting the
+    /// cels back afterwards would install blocks whose canvases had been repaired against a document
+    /// they were not yet in.
+    func recordTimingStrokeUndo(layerID: UUID, celsBefore: [Cel], celsAfter: [Cel],
+                                edits: [TimingStrokeEdit]) {
+        guard !edits.isEmpty || celsBefore.count != celsAfter.count else { return }
+        let cost = edits.reduce(0) { $0 + VectorUndoCost.bytes(from: $1.before, to: $1.after) }
+        recordUndo(label: .brushStroke, cost: cost, undo: { [weak self] in
+            self?.restoreTimingStroke(layerID: layerID, cels: celsBefore, edits: edits,
+                                      elements: \.before)
+        }, redo: { [weak self] in
+            self?.restoreTimingStroke(layerID: layerID, cels: celsAfter, edits: edits,
+                                      elements: \.after)
+        })
+    }
+
+    private func restoreTimingStroke(layerID: UUID, cels: [Cel], edits: [TimingStrokeEdit],
+                                     elements: KeyPath<TimingStrokeEdit, [VectorElement]>) {
+        // Written unconditionally rather than compared first — `Cel` is `Identifiable` and not
+        // `Equatable`, and the comparison that could be written by hand (ids and frame ranges) is
+        // exactly the one that would miss a field somebody adds later. A write of an identical array
+        // costs a copy of a few structs and publishes one change nothing renders differently.
+        if let index = layerIndex(ofID: layerID) { layers[index].cels = cels }
+        for edit in edits {
+            edit.canvas.restoreElements(edit[keyPath: elements], changedInk: edit.changedInk)
+            // The timeline's own picture of each cel. `reconcileLayers` repaints the cel under the
+            // playhead off the canvas's version; every other block this step touched has nothing
+            // else that would ask.
+            celContentChangedOutsideStroke(layerID: layerID, celID: edit.celID)
+        }
+        refreshUndoRedoState()
+    }
+
+    /// **A timing stroke landed ink during this take** — KEYFRAMES.md §7, stage 10.
+    ///
+    /// The canvas's counterpart to `recordParameterSample`, and it is deliberately much smaller.
+    /// A scalar surface hands the recorder a *stream* to resample, because what it is recording is a
+    /// value over time and the value only exists while the finger is on it. Ink is already timed:
+    /// the cut has put each arc on the cel the playhead was showing when it was drawn, and the ink
+    /// is in the document before this is called. So the take is told, and not given anything.
+    ///
+    /// - Returns: whether a take took the note. `false` means nothing was recording, which is not an
+    ///   error — a stroke drawn with no take running is an ordinary stroke.
+    @discardableResult
+    func noteRecordedInk(on target: KeyframeTarget) -> Bool {
+        guard isRecording, var take = recordingTake, take.target == target else { return false }
+        take.caughtInk = true
+        recordingTake = take
+        return true
+    }
+
     /// Takes one reported value into the armed take, if there is one and it is for this target.
     ///
     /// **Returns whether the recorder consumed the routing decision.** When it did, the caller must
@@ -330,11 +455,28 @@ extension CanvasManager {
         recordingTake = nil
         if isPlaying { stopPlayback() }
 
-        let outcome = commitRecordingTake(take)
+        let written = commitRecordingTake(take)
+        let outcome = written.refusal
         // The bracket opened at `startRecording`. It closes whatever the outcome, or a refused take
         // would strand a snapshot for the next gesture to record a step spanning both — which is the
         // failure `cancelStructureGesture` exists to describe.
-        if outcome == nil {
+        //
+        // **A take that wrote no curve closes it by cancelling, and that is not a shortcut** —
+        // KEYFRAMES.md §7. The bracket exists to fold *this take's own* base writes into one step,
+        // and a take that only caught ink makes none: every document change it caused is ink, and
+        // each stroke of it registered its own step at its own pen-up, covering the blocks it had to
+        // create as well as the ink. Committing here would record a second step over the same
+        // blocks — press undo, watch nothing change, press it again. Cancelling drops a snapshot
+        // nothing needs, because the step that owns those bytes has already been recorded.
+        //
+        // **Asked of the curves rather than of `caughtInk`**, which is the operand that would have
+        // been wrong: a take that drew ink *and* touched a slider that did not move restores its
+        // base and is a success, and cancelling there would be right for the same reason — nothing
+        // in `layers` moved. `curvesWritten` is the one number that separates "this take changed the
+        // document itself" from "this take's changes are already recorded elsewhere".
+        if outcome == nil, written.curvesWritten == 0 {
+            cancelStructureGesture()
+        } else if outcome == nil {
             commitStructureGesture(label: .recordAnimation)
             // **The common case since arming moved to the pencil**: the scene ran out while the
             // artist was still holding the slider that began the take, so their bracket is open
@@ -356,7 +498,11 @@ extension CanvasManager {
 
     /// The write half of `stopRecording`, separated so the refusal arms are readable and so a test
     /// can drive a take end to end without a timer.
-    private func commitRecordingTake(_ take: RecordingTake) -> RecordingRefusal? {
+    ///
+    /// - Returns: the refusal, and how many curves were written. The second is what tells
+    ///   `stopRecording` whether its own bracket has anything in it — see there.
+    private func commitRecordingTake(_ take: RecordingTake)
+        -> (refusal: RecordingRefusal?, curvesWritten: Int) {
         // The base first, whatever happens next: it was a scratch pad and the artist never asked for
         // the value they let go on to become the stored grade.
         if let base = take.baseEffect { setStoredEffect(of: take.target, to: base) }
@@ -367,7 +513,14 @@ extension CanvasManager {
             setStoredValue(of: take.target, channel: channel, to: base)
         }
 
-        guard !take.channels.isEmpty else { return .nothingCaptured }
+        // **Ink counts as having captured something, and it is the only thing here that is already
+        // in the document** — KEYFRAMES.md §7. A timing take's product is strokes on cels, committed
+        // at each pen-up under their own undo step; there is nothing left for this method to write,
+        // so it says so and stops. Without this arm the artist who has just drawn across four cels
+        // is told to go and move an opacity slider.
+        guard !take.channels.isEmpty else {
+            return (take.caughtInk ? nil : .nothingCaptured, 0)
+        }
 
         let parameters = take.baseEffect?.parameters ?? []
         var curves: [String: AnimationCurve] = [:]
@@ -411,7 +564,14 @@ extension CanvasManager {
         // is dropped exactly once.
         let wrote = setEffectParameterCurves(take.target, curves: curves)
             + setTargetChannelCurves(take.target, curves: channelCurves)
-        guard wrote > 0 else { return sawTwoStops ? .noMotion : .tooShort }
-        return nil
+        // **Ink rescues a take whose channels wrote nothing**, and only from the *refusal*: the count
+        // is still zero, so `stopRecording` still cancels its bracket. An artist who drew across the
+        // cels and also brushed a slider without moving it has recorded something, and "nothing
+        // moved during the take" would be a lie about the half they can see.
+        guard wrote > 0 else {
+            if take.caughtInk { return (nil, 0) }
+            return (sawTwoStops ? .noMotion : .tooShort, 0)
+        }
+        return (nil, wrote)
     }
 }

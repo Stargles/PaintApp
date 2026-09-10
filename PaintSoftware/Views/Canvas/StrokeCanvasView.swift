@@ -95,6 +95,11 @@ final class StrokeCanvasView: UIView {
     func discardStrokeInProgress() {
         guard scratch != nil else { return }
         endScratch()
+        // A held pen during a take is *timing*, so `CanvasView.startShapeDetection` declines to arm
+        // at all while one is live and this is unreachable from there. It is here because "the
+        // scratch is dropped and the gesture becomes something else" is exactly the state a timing
+        // stroke must not be left half-in — see `cancelTimingStroke`.
+        cancelTimingStroke()
         if vectorCanvas != nil {
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
@@ -862,6 +867,33 @@ final class StrokeCanvasView: UIView {
     /// at 16383² for a stroke a few hundred points long, which is the defect this window closed.
     private func showOverlays(_ scratch: StrokeScratch?) {
         showHeldInk()
+        // **A timing stroke's trail is drawn by a sibling of this host, never by this view** —
+        // KEYFRAMES.md §7 stage 10, and it is the one thing about stage 10 that is not a partition.
+        //
+        // Playback engages the compositor unconditionally (`sandwichEngagesOnCanvas`'s `isPlaying`
+        // clause, 2026-09-09), so every host is blanked by a `layer.mask` while the frames flip and
+        // the canvas is the baked composite. A mask covers a view's whole subtree, so `scratchView`
+        // is inside it: an artist drawing during a take would have watched their pen leave no mark
+        // at all. The trail therefore goes to a view that is *not* in any host — see
+        // `CanvasView.updateTimingInk`.
+        //
+        // **Routed there for the whole gesture rather than only while the sandwich is engaged**, so
+        // that a take which ends mid-stroke (the scene ran out) does not un-blank the host and leave
+        // the same pixels drawn twice — which for a semi-transparent brush is visibly darker ink
+        // under the pen than the ink that lands. One rule, one drawer.
+        if timingStroke != nil {
+            onLiveInkChanged?(scratch?.image, scratch?.windowRect ?? .null,
+                              scratch.map { $0.replacesBase ? 1 : $0.opacity } ?? 1)
+            if scratchView.image != nil {
+                scratchView.image = nil
+                scratchView.isHidden = true
+            }
+            // A timing stroke is never an eraser (`beginTimingTakeIfArmed` refuses one), so the live
+            // window never replaces the base — but held ink from an earlier eraser stroke can still
+            // be up, and it owns the hole. The same call the ordinary path makes with `liveHole` nil.
+            setBaseHole(unlandedInk.baseHole)
+            return
+        }
         let image = scratch?.image
         // **The live stroke's window wins the hole, and the held one is the fallback.** Both stand
         // in for the base inside their window and only one of them can be a removal at a time: an
@@ -1064,6 +1096,12 @@ final class StrokeCanvasView: UIView {
     private func handleBegin(_ touch: UITouch) {
         if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
+        // **Before `onStrokeBegan`, and that ordering is load-bearing** — KEYFRAMES.md §7 stage 10.
+        // §5.1's rule is "on touch-down, before the surface opens its own undo bracket", and here it
+        // is also before the *cel spawn*: starting a take calls `play()`, which replays from the top
+        // when the playhead is parked at the end of the scene, so a block spawned first would be
+        // spawned on the frame the artist has just left.
+        let timingCelsBefore = beginTimingTakeIfArmed()
         onStrokeBegan?() // commit any still-adjustable fill first
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
@@ -1074,7 +1112,7 @@ final class StrokeCanvasView: UIView {
         // it as a dead stop. Reset here rather than in either tier's own begin, because both walks
         // measure Δt off it now.
         lastSampleTime = nil
-        if vectorCanvas != nil { beginVectorStroke(touch); return }
+        if vectorCanvas != nil { beginVectorStroke(touch, timingCelsBefore: timingCelsBefore); return }
         guard let raster else { return }
         shapeFollowingTouch = false
         // Only for the stroke count: no dab reaches the cel until lift, so the cel's own dirty
@@ -1255,6 +1293,10 @@ final class StrokeCanvasView: UIView {
             onStrokeEnded?()
             return
         }
+        // KEYFRAMES.md §7 stage 10: nothing of a timing gesture has been committed to any canvas —
+        // the runs are recorded and spent at pen-up — so the only trace is a block the take may have
+        // spawned for it, and putting that back is the whole rollback.
+        cancelTimingStroke()
         if let vectorCanvas {
             // Mode 3 commits during the drag, so it can already have changed the document by the
             // time the second finger lands. Roll the display list back to the touch-down snapshot.
@@ -1393,15 +1435,279 @@ final class StrokeCanvasView: UIView {
         return input.sample(at: point, secondsSincePrevious: seconds)
     }
 
+    // MARK: - The timing recorder — KEYFRAMES.md §7, stage 10
+
+    /// Everything one timing stroke needs that an ordinary stroke does not — non-nil for exactly as
+    /// long as the pen is down on a take.
+    ///
+    /// **The runs are recorded and not committed**, which is the whole cost model of this feature:
+    /// see `TimingStrokeCut`. What is kept per run is only what the commit at pen-up cannot recover
+    /// afterwards — which canvas it belongs to, that canvas's display list as it was, and the random
+    /// seed the live walk drew it with.
+    private struct TimingStroke {
+        let layerID: UUID
+        let target: KeyframeTarget
+        /// The layer's blocks as the pen landed, so one undo press takes back the blocks the take
+        /// had to make as well as the ink. Captured *before* `onStrokeBegan` spawns one.
+        let celsBefore: [Cel]
+        /// Ascending indices into `currentVectorSamples`; each is shared by the run it ends and the
+        /// run it begins. `TimingStrokeCut.split` is what spends them.
+        var boundaries: [Int] = []
+        /// One per run slot — `canvases.count == boundaries.count + 1` always, because a boundary is
+        /// only recorded together with the canvas it opens.
+        var canvases: [VectorCanvas]
+        /// The cel each run's canvas belongs to, by id — what a thumbnail is asked for by, and what
+        /// the ordinary stroke-end path only ever asks for the cel under the playhead.
+        var celIDs: [UUID]
+        /// Each run's canvas's elements before this gesture touched it.
+        var befores: [[VectorElement]]
+        /// The seed the live walk used for each run, so the stored stroke replays the field the
+        /// artist watched — BRUSH.md §4, applied per run because each run is its own stroke.
+        var seeds: [UInt64]
+    }
+
+    private var timingStroke: TimingStroke?
+
+    /// **Where a timing stroke's live trail is drawn** — the picture, its window in canvas points,
+    /// and the alpha to show it at, or `(nil, .null, 1)` for "nothing".
+    ///
+    /// Called only while a timing stroke is live, and always at least once as one ends, so the view
+    /// on the other end never has to guess. See `showOverlays` for why the trail cannot live in this
+    /// host at all, and `CanvasView.updateTimingInk` for what receives it.
+    var onLiveInkChanged: ((UIImage?, CGRect, CGFloat) -> Void)?
+
+    /// **Starts a take if the recorder is armed and this landing can contribute ink** — §5.1 step 1,
+    /// the third surface.
+    ///
+    /// **`isRecordable` is passed rather than filtered on**, which is §5.1's own instruction and is
+    /// what stops the eraser and the raster tier failing silently: an artist who arms the recorder
+    /// and puts the pen on a raster layer gets the refusal's sentence and keeps the arm, instead of
+    /// drawing an ordinary stroke and wondering why nothing was recorded. The gate is only crossed at
+    /// all when the recorder is armed or already running, so nothing an unarmed artist does reaches
+    /// this.
+    ///
+    /// - Returns: the active layer's blocks as they are right now when a take is running on this
+    ///   layer, or nil when this is an ordinary stroke.
+    private func beginTimingTakeIfArmed() -> [Cel]? {
+        guard let manager = canvasManager, let layerID,
+              manager.isRecordingArmed || manager.isRecording,
+              manager.layers.indices.contains(manager.currentLayerIndex) else { return nil }
+        let index = manager.currentLayerIndex
+        guard manager.layers[index].id == layerID,
+              let target = manager.keyframeTarget(layerIndex: index) else { return nil }
+        // Asked of `LayerKind` rather than of `vectorCanvas != nil`, for `handleBegin`'s own reason:
+        // on a frame with no block yet the canvas is nil and the layer is a vector layer all the
+        // same. The eraser is refused because a take records what was *drawn* during each cel, and
+        // an in-between because its ink is a `LocalEdit` on a derived frame rather than content in a
+        // cel's own canvas — neither is a cut this feature knows how to make.
+        let canRecord = manager.layers[index].kind == .vector && !isEraser
+            && manager.inBetweenCelID(inLayer: layerID) == nil
+        guard manager.beginArmedTake(on: target, isRecordable: canRecord) else { return nil }
+        // At pen-down rather than at the commit, because a take ends at the end of the scene — very
+        // often while the pen is still down — and the take that ended would then have reported
+        // `.nothingCaptured` over a canvas the artist had just drawn across. Putting the pen on the
+        // canvas during a take *is* touching a control, which is the question that refusal asks.
+        manager.noteRecordedInk(on: target)
+        manager.timingStrokeIsLive = true
+        return manager.layers[index].cels
+    }
+
+    /// **The playhead has moved under a live timing stroke — cut here.** Called synchronously from
+    /// `CanvasManager.currentFrame`'s `didSet` through `onTimingStrokeFrameAdvanced`, so the cut
+    /// lands between the tick and the next touch sample rather than on the SwiftUI pass after it.
+    ///
+    /// Three things happen and they are three different kinds of thing:
+    ///
+    ///  * **The stream is marked.** `pathFit.finish(nil)` flushes whatever knots the fit was holding
+    ///    so the boundary is a knot that exists, and its index goes in `boundaries` — shared by both
+    ///    runs, which is the seam (see `TimingStrokeCut`).
+    ///  * **The display starts again.** The scratch holds every dab this gesture has laid down, and
+    ///    the cel it laid them on is not the one on screen any more, so keeping it would draw the
+    ///    outgoing cel's arc over the incoming cel. A fresh scratch costs nothing until its first
+    ///    dab — `StrokeScratch`'s window is `.null` until then — so this is not an allocation per
+    ///    frame in any sense that matters.
+    ///  * **The walk starts again**, seed and arc length included, so the live preview and the stored
+    ///    stroke address the same field. A run is a stroke, and `stampStroke` restarts both for
+    ///    every stroke it replays.
+    ///
+    /// A no-op when the frame's cel is the one already being drawn on, which is the ordinary case:
+    /// a block covering five frames takes five ticks and one run.
+    func timingStrokeFrameAdvanced() {
+        guard var timing = timingStroke, let manager = canvasManager,
+              let surface = manager.timingStrokeSurface(),
+              surface.canvas !== timing.canvases.last else { return }
+        for knot in pathFit.finish(nil) { currentVectorSamples.append(knot) }
+        pathFit.reset()
+        let boundary = max(currentVectorSamples.count - 1, 0)
+        let shared = currentVectorSamples.isEmpty ? nil : currentVectorSamples[boundary]
+        timing.boundaries.append(boundary)
+        timing.canvases.append(surface.canvas)
+        timing.celIDs.append(surface.celID)
+        timing.befores.append(surface.canvas.elements)
+        strokeSeed = DabRandom.freshSeed()
+        timing.seeds.append(strokeSeed)
+        timingStroke = timing
+        restartTimingScratch(at: shared, canvasSize: surface.canvas.size)
+        // Last, because its `didSet` refreshes the display and the scratch above is what that refresh
+        // should show. Assigned here rather than left to the SwiftUI pass so that the very next touch
+        // sample stamps into the right cel's window; `reconcileLayers` finds the same instance and
+        // does nothing.
+        vectorCanvas = surface.canvas
+    }
+
+    /// Opens the next run's scratch and seeds its walk at the shared boundary sample — exactly the
+    /// three lines `beginVectorStroke` opens a gesture with, which is the point: a run is a stroke.
+    private func restartTimingScratch(at shared: VectorSample?, canvasSize: CGSize) {
+        strokeArcWidths = 0
+        lastStampPoint = nil
+        lastLiveSample = nil
+        liveSpacing = 1
+        let fresh = StrokeScratch(canvasSize: canvasSize, role: .additive,
+                                  opacity: CGFloat(brushOpacity),
+                                  blendMode: brush.stroke.blendMode.cgBlendMode,
+                                  texture: brush.texture)
+        scratch = fresh
+        // The boundary dab, so the incoming run's preview starts where the outgoing one ended rather
+        // than at wherever the pen has reached by the next sample.
+        if let shared { stampPath(to: shared, into: fresh) }
+    }
+
+    /// Commits one timing gesture: one stroke per cel it crossed, one undo step over all of them.
+    ///
+    /// **The selection clip is applied inside each run, not across the gesture**, which falls out of
+    /// the ordering rather than being a decision: a run already belongs to one canvas, and
+    /// `StrokeGeometry.splitRuns` then does to it exactly what it does to a single-cel stroke.
+    private func commitTimingStroke() {
+        guard let timing = timingStroke, let manager = canvasManager else { return }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let colour = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+
+        var edits: [CanvasManager.TimingStrokeEdit] = []
+        for run in TimingStrokeCut.split(currentVectorSamples, at: timing.boundaries) {
+            guard timing.canvases.indices.contains(run.slot) else { continue }
+            let canvas = timing.canvases[run.slot]
+            let pieces: [StrokeSamples]
+            if let clipPath = selectionClipPath {
+                pieces = StrokeGeometry.splitRuns(run.samples) { clipPath.contains($0) }
+                    .map { run.samples.replacingSamples($0) }
+            } else {
+                pieces = [run.samples]
+            }
+            var damage: CGRect? = .null
+            var changed = false
+            for piece in pieces where !piece.isEmpty {
+                let stroke = VectorStroke(brush: brush, color: colour, size: brushSize,
+                                          opacity: brushOpacity, samples: piece,
+                                          seed: timing.seeds[run.slot])
+                canvas.addStroke(canvasSpaceStroke: stroke)
+                changed = true
+                // `foldGestureDamage`'s rule against this run's own accumulator rather than the
+                // gesture-wide one: each canvas is restored on its own, so each carries its own
+                // bound, and an unbounded one must not make its neighbours unbounded too.
+                if let running = damage, case .region(let rect) = canvas.lastDamage {
+                    damage = running.union(rect)
+                } else {
+                    damage = nil
+                }
+            }
+            guard changed else { continue }
+            edits.append(CanvasManager.TimingStrokeEdit(celID: timing.celIDs[run.slot],
+                                                        canvas: canvas,
+                                                        before: timing.befores[run.slot],
+                                                        after: canvas.elements,
+                                                        changedInk: damage))
+            if canvas === vectorCanvas {
+                // The cel on screen: `refreshDisplay` and the coordinator's own `strokeEnded` keep
+                // its picture and its block up to date, exactly as for a single-cel stroke.
+                vectorContentChanged = true
+            } else {
+                // **Every other cel this gesture inked, and nothing else would ask.** The
+                // coordinator's `onStrokeEnded` regenerates one thumbnail — the cel at the playhead
+                // — so without this the artist looks at the timeline after a take and sees a row of
+                // blocks with none of the ink they just drew into them.
+                canvasManager?.celContentChangedOutsideStroke(layerID: timing.layerID,
+                                                              celID: timing.celIDs[run.slot])
+            }
+        }
+
+        let celsAfter = manager.layerIndex(ofID: timing.layerID)
+            .map { manager.layers[$0].cels } ?? timing.celsBefore
+        manager.recordTimingStrokeUndo(layerID: timing.layerID, celsBefore: timing.celsBefore,
+                                       celsAfter: celsAfter, edits: edits)
+    }
+
+    /// Drops a timing stroke without committing it, putting back any block the take spawned for it.
+    ///
+    /// Reached from `handleCancel` (a second finger took the sequence) and from the smart-shape
+    /// revert. Nothing has been written to any canvas — the runs are recorded, not committed — so the
+    /// blocks are the only trace, and they would otherwise be un-undoable: the take's own bracket is
+    /// cancelled at the end of an ink-only take, deliberately, because the stroke's step is what owns
+    /// them.
+    private func cancelTimingStroke() {
+        guard let timing = timingStroke, let manager = canvasManager else { return }
+        if let index = manager.layerIndex(ofID: timing.layerID) {
+            manager.layers[index].cels = timing.celsBefore
+        }
+        endTimingStroke()
+    }
+
+    private func endTimingStroke() {
+        guard timingStroke != nil else { return }
+        timingStroke = nil
+        canvasManager?.timingStrokeIsLive = false
+        // Said here rather than left to the next `refreshDisplay`, because the cancel path clears
+        // the state *before* refreshing and the report is gated on the state — the trail would stay
+        // on screen with nothing left to take it down.
+        onLiveInkChanged?(nil, .null, 1)
+    }
+
+    /// `commitVectorStroke`'s tail for a timing gesture — the same five things a single-cel lift
+    /// does, minus the one it cannot do (`registerVectorUndo` names one canvas, and
+    /// `recordTimingStrokeUndo` has already covered every canvas this gesture touched).
+    ///
+    /// **Held ink is kept for the cel on screen and no other**, which is `UnlandedInk`'s invariant
+    /// read literally: the overlay contains exactly the ink that is not yet in the installed base,
+    /// and the base is this one cel's render. The earlier runs' cels are not being displayed, and
+    /// `vectorCanvas`'s own `didSet` cleared the overlay at each cut precisely so that nothing held
+    /// against one cel's version can be retired by another's.
+    private func finishTimingStroke(on canvas: VectorCanvas) {
+        if vectorContentChanged { holdUnlandedInk(from: scratch, at: canvas.version) }
+        endScratch()
+        currentVectorSamples = StrokeSamples(channels: .captured)
+        lastSampleTime = nil
+        lastStampPoint = nil
+        lastLiveSample = nil
+        refreshDisplay()
+        vectorElementsBeforeSnapshot = nil
+        vectorContentChanged = false
+        endTimingStroke()
+        onStrokeEnded?()
+    }
+
     // MARK: - Vector-layer drawing
 
     /// On a vector layer, a stroke is recorded as geometry (`VectorStroke` samples) instead of
     /// stamped into a raster. A scratch raster gives live feedback; on lift the samples become a
     /// `VectorStroke` added to the cel's `VectorCanvas` (or, for the eraser, split existing
     /// strokes), and the display switches back to the canvas's own render.
-    private func beginVectorStroke(_ touch: UITouch) {
+    private func beginVectorStroke(_ touch: UITouch, timingCelsBefore: [Cel]? = nil) {
         guard let vectorCanvas else { return }
         vectorElementsBeforeSnapshot = vectorCanvas.elements
+        // KEYFRAMES.md §7 stage 10. After the guard, because the first run's canvas is this one, and
+        // after `handleBegin` minted the seed, because the first run replays with it.
+        if let timingCelsBefore, let layerID, let manager = canvasManager,
+           let target = manager.keyframeTarget(layerIndex: manager.currentLayerIndex) {
+            let celID = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
+                                               atFrame: manager.currentFrame)
+                .map { manager.layers[manager.currentLayerIndex].cels[$0].id }
+            timingStroke = TimingStroke(layerID: layerID, target: target,
+                                        celsBefore: timingCelsBefore,
+                                        canvases: [vectorCanvas],
+                                        celIDs: [celID ?? UUID()],
+                                        befores: [vectorCanvas.elements],
+                                        seeds: [strokeSeed])
+        }
         vectorGestureDamage = .null
         vectorContentChanged = false
         inBetweenCelID = layerID.flatMap { canvasManager?.inBetweenCelID(inLayer: $0) }
@@ -1535,7 +1841,14 @@ final class StrokeCanvasView: UIView {
             onStrokeEnded?()
             return
         }
-        guard let vectorCanvas, scratch != nil else { return }
+        guard let vectorCanvas, scratch != nil else {
+            // Nothing to commit — the cel or the window went away under the gesture. A timing stroke
+            // left live here would have the *next* playhead move cut a gesture that is over, so it
+            // is rolled back (which is only ever a block the take spawned; the runs are recorded and
+            // not committed).
+            cancelTimingStroke()
+            return
+        }
         // The lift point bypasses the stabilizer (`handleEnd` explains why) and closes the fit.
         // Artists decelerate into the end of a stroke, so its last samples each fail the deviation
         // test on their own; without this the stroke would stop short of where the pen did.
@@ -1554,6 +1867,18 @@ final class StrokeCanvasView: UIView {
         // A finger reports π/2 and 0 for tilt, so this is where a finger-drawn stroke stops paying
         // for a sensor it never had.
         currentVectorSamples = currentVectorSamples.compacted()
+
+        // **KEYFRAMES.md §7 stage 10, and it is an early branch on purpose.** Everything below this
+        // line is the single-cel path exactly as it shipped — one `before`, one canvas, one undo
+        // step — and a timing gesture satisfies none of those three. Sharing the tail by widening
+        // each of them into an array would have put the multi-cel case inside every stroke the app
+        // draws; the arm below is the only thing that pays for it.
+        if timingStroke != nil {
+            commitTimingStroke()
+            finishTimingStroke(on: vectorCanvas)
+            return
+        }
+
         let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
         // Selection clip: a stroke that exits the selection and re-enters must become two pieces,
