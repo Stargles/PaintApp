@@ -31,168 +31,80 @@ toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 
 ### Why the full run costs what it does
 
-**`xcodebuild` distributes parallel work per test *class*, never per test**, so a class is
-indivisible and the longest one sets the critical path. That is the whole cost model, and it is why
-class granularity — not worker count — is the lever.
+**`xcodebuild` distributes parallel work per test *class*, never per test**, so a class is indivisible
+and the work is only as evenly spread as the classes are. That is the whole cost model.
 
-Measured 2026-08-15, before and after splitting the six heavy UI classes into three each:
+It was derived on 2026-08-15 by splitting the six heavy UI classes into three each: **961 tests in
+25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
+two sat idle while the last ground on.
 
-| | tests | wall clock |
-|---|---|---|
-| six indivisible UI classes | 961 | 25.7 min |
-| eighteen | 1023 | **18.8 min** |
-
-Before the split four clones received 482 / 324 / 74 / **44** tests and two sat idle on the home
-screen while the last ground on; ~1,950 s of the run lived in six classes (ToolsAndSelection 424 s,
-TimelineAndUndo 392 s, VectorShapeAndRecovery 389 s, VectorEraser 357 s, Fill 277 s, Layer 107 s)
-against ~250 s for every logic test together.
-
-**That was true and is no longer.** Measured again 2026-08-29 on the full run at `0717ed6` — **2221
-tests in 25.6 min**, which is where the suite sat *before* the 2026-08-15 split. The gain was not lost to
-general slowness; **one class ate it**:
+**MEASURED 2026-09-09 at `e890fdc`**, fresh device, idle machine (86% idle), no clone debris:
+**3849 tests, 3799 passed, 2 failed, 48 skipped, 35.9 min.** Both failures passed clean in isolation
+at `totalTestCount: 2` and are environmental. **7,161 class-seconds across 208 classes**, so four
+clones hold **29.8 min** of ideal work against 35.9 of wall clock — a 20% scheduling gap.
 
 | class | seconds | tests |
 |---|---|---|
-| **`LayerPanelUITests`** | **517** | 19 |
-| `SelectionAndMoveUITests` | 337 | 10 |
-| `SandwichCompositingUITests` | 307 | 10 |
-| `BlendModesAndCompositorUITests` | 275 | 8 |
-| `CuttingModesUITests` | 188 | 4 |
-| `PerfBaselineTests` | 183 | 53 |
+| `BrushEditorUITests` | 586 | 11 |
+| `SandwichCompositingUITests` | 391 | 10 |
+| `SelectionAndMoveUITests` | 355 | 10 |
+| `LayerFolderAndMaskMenuUITests` | 290 | 9 |
+| `PerfBaselineTests` | 280 | 57 |
+| `GraphEditorGestureUITests` | 247 | 5 |
+| `LayerPanelControlsUITests` | 234 | 8 |
+| `MenuInterruptionUITests` | 233 | 5 |
+| `BrushMenuUITests` | 227 | 8 |
+| `BlendModesAndCompositorUITests` | 216 | 8 |
 
-3,607 class-seconds total, so four clones have ~15 min of ideal work in them — and the run takes 25.6
-because **a class is indivisible and `LayerPanelUITests` alone is 517 s**, 2.7x the 189 s test that used
-to be the floor. The lever is the same one that worked before: split that class (it lives in
-`LayerUITests.swift`, which already holds three), and the floor falls back toward ~190 s. Note it is
-*also* the class that produced this run's one environmental red, which is what a class held that long
-under parallel clones tends to do.
+**What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
+tables themselves are in `git log`, and only these conclusions survived them:
 
-**Re-taken 2026-08-29 at `4b86966` and it holds** — **2274 tests in 22.3 min, 0 failed, 6 skipped**, the
-first full run in several passes with no environmental red either. `LayerPanelUITests` **515 s / 19**,
-`SelectionAndMoveUITests` 327 / 10, `SandwichCompositingUITests` 297 / 10,
-`BlendModesAndCompositorUITests` 222 / 8, `CuttingModesUITests` 177 / 4, `PerfBaselineTests` 173 / 53,
-plus two the earlier table did not carry — `EraserAndPersistenceUITests` 171 / 7 and
-`TimelineGestureUITests` 144 / 7. 3,542 class-seconds, so four clones hold ~15 min of ideal work against
-a 22.3 min run and **the gap is still one indivisible class**. The 25.6 → 22.3 move is variance, not
-structure: nothing was split.
+- **"One indivisible class sets the floor" is dead, and the arithmetic says why.** It held while
+  `LayerPanelUITests` was 515 s; it stopped holding once the top classes came within ~80 s of each
+  other. **The binding constraint is ideal work per clone, not the longest class** — a class only sets
+  the floor once it exceeds the per-clone share, and the longest here is 9.8 min against a 29.8 min
+  share. Splitting the longest just promotes the second, and **past some point splitting makes it
+  worse**, because every new class pays its own setup. The class count has grown 109 → 208.
+- **A class grows past the floor while nobody is looking.** `LayerPanelUITests` had to be *discovered*
+  at 515 s; `GraphEditorUITests` went 40 s → 271 s over three stages, each adding two or three tests to
+  the obvious place; `BrushEditorUITests` did not exist one morning and was 516 s by that night.
+  **Re-take this table when you add UI tests to an existing class, not when the suite feels slow.**
+- **Only the total is worth trending.** Per-class seconds are not independent of which classes a clone
+  is co-scheduled with, so single rows are noisier than they look: `SelectionAndMoveUITests` rose
+  274 → 398 on the same ten tests while `SandwichCompositingUITests` fell 346 → 265 on the same ten,
+  and `BrushEditorUITests` came down 516 → 319 without being touched. **Read a single class's rise as a
+  signal only when it repeats.**
+- **A new test was close to free for five consecutive runs and then stopped being.** ~120 new tests once
+  cost +1,190 class-seconds, and the reason is visible rather than inferred: those were UI tests driving
+  a full-screen editor, and a class of those costs what the heavy classes cost. Wall clock is not
+  comparable across runs while the suite is growing — per test it has stayed flat.
+- **Balance a split on measured seconds, not test count**, and **no split goes below one test**: one
+  test measured 71 s and then 58 s, which is a seventh of its old class by itself.
+- **A run measured against a busy machine is not a measurement.** One attempt ran beside a research
+  workflow and reported **28.5 min** — four minutes worse — while its per-class seconds came out within
+  noise of the clean run's. **Contention costs wall clock through scheduling and leaves per-test
+  durations almost untouched**, so the class table looks right while the headline is wrong.
+- **Wall-clock assertions do not belong in a run with four parallel clones**, and the full suite is
+  exactly that. Two of one run's three environmental reds were timing assertions that passed alone;
+  bench files are excluded by filename and exist for this. **Triage a timing failure warm and never
+  after an erase** — the first run after a `simctl erase` measured 4.7x worse and read as a regression.
+- **`tearDown` runs even when `setUpWithError` throws `XCTSkip`**, so an opt-in suite must gate its
+  teardown on a flag set past the guard. Two tests once *failed* at 0.000 s in every full run because
+  teardown trapped unwrapping a nil `URL!`, reported as `Test crashed with signal trap` printed *beside*
+  the skip message — which reads as a failure of the code under test.
+- **Some class names differ from their file names**, which silently breaks any `-only-testing` selector
+  built from a filename. `SandwichCompositingUITests` and `BlendModesAndCompositorUITests` live in
+  `LayerUITests.swift`, `InterpolationWorkflowUITests` in `TimelineAndUndoUITests.swift`,
+  `GalleryRecoveryUITests` in `VectorShapeAndRecoveryUITests.swift`, `FillLiveAdjustUITests` in
+  `FillUITests.swift`. Resolve the class from the source every time — the snippet is in the triage
+  section below.
+- **`InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`** is the suite's
+  longest single test (~150 s) and has red under parallel clones in three consecutive full runs, passing
+  alone every time. Treat a red there as environmental until an isolated run says otherwise; do not bisect it.
+- **If you split a class, verify by test count from the xcresult** — a test that stops running still
+  prints green — and take the count *before* you merge as well as after: a split branch cut before
+  something was deleted will silently resurrect it, and the count is the only signal.
 
-**`LayerPanelUITests` was cut on 2026-08-29 and that floor is gone.** It is three classes now, still in
-`LayerUITests.swift` (which therefore holds five): `LayerStackUITests` — the shape of the stack, add /
-delete / reorder / swipe; `LayerFolderAndMaskMenuUITests` — folders, what a drop onto one resolves to,
-and the mask sub-menu that opens from a folder's options as well as a layer's; and
-`LayerPanelControlsUITests` — the panel's controls rather than its contents, the views dropdown through
-the effect settings bar to the colour swatches. MEASURED serially on a dedicated device, 19 tests,
-0 failed, counted from the xcresult:
-
-| class | seconds | tests |
-|---|---|---|
-| `LayerFolderAndMaskMenuUITests` | 190 | 7 |
-| `LayerPanelControlsUITests` | 174 | 7 |
-| `LayerStackUITests` | 159 | 5 |
-
-523 s in total against **534 s measured for the same 19 tests as one class immediately before the cut**,
-so the work is unchanged and only its granularity moved. **The longest of the three is 190 s against
-515 s**, which drops this file below `SelectionAndMoveUITests` and makes *that*, at 327 s, the suite's
-new floor.
-
-**MEASURED 2026-09-02 at `35c0db6`, on an idle machine — 2482 tests in 21.7 min, 2474 passed, 2 failed,
-6 skipped.** Both failures re-ran clean in isolation (48 s and 140 s) and are environmental, not
-findings. Freshly erased simulator, under `simlock`, nothing else running.
-
-| class | seconds | tests |
-|---|---|---|
-| **`SandwichCompositingUITests`** | **356** | 10 |
-| `SelectionAndMoveUITests` | 309 | 10 |
-| `BlendModesAndCompositorUITests` | 259 | 8 |
-| `LayerPanelControlsUITests` | 238 | 7 |
-| `LayerFolderAndMaskMenuUITests` | 196 | 7 |
-| `CuttingModesUITests` | 170 | 4 |
-| `EraserAndPersistenceUITests` | 169 | 7 |
-| `PerfBaselineTests` | 164 | 54 |
-| `LayerStackUITests` | 162 | 5 |
-| `GraphEditorUITests` / `GraphEditorGestureUITests` | 142 / 138 | 7 / 3 |
-
-**3,794 class-seconds across 109 classes. Four clones hold 15.8 min of ideal work against a 21.7 min
-run, and the longest class is 5.9 min — so the gap is NOT the indivisible-class story this section told
-from 2026-08-15 to 2026-08-29.** About 5.9 min, ~37% over ideal, is scheduling: clone boot, per-class
-setup, and the tail where classes run out before the clones do. **That is where the lever is now.**
-Splitting further cannot recover it and past some point makes it worse, because every new class pays its
-own setup — INFERRED from the arithmetic, and the experiment nobody has run is a full suite with the
-class count deliberately *reduced*.
-
-**`SandwichCompositingUITests` is the longest class and again one of the two that red**, which is what
-this file predicts of a class held long under parallel clones. It has been the next split candidate
-across three consecutive full runs and has not moved; splitting it buys at most the difference between
-356 s and the ~309 s class behind it, which is why nobody has.
-
-**Two failing tests, two classes whose names differ from their files** — `SandwichCompositingUITests`
-lives in `LayerUITests.swift` and `InterpolationWorkflowUITests` in `TimelineAndUndoUITests.swift`. A
-selector built from the filename matches nothing and reports `** TEST SUCCEEDED **`. Resolve the class
-from the source every time; the snippet below does it.
-
-**A run measured against a busy machine is not a measurement, and this section nearly recorded one.**
-The first attempt ran concurrently with a research workflow whose agents read files and compiled with
-`swiftc`. It reported **28.5 min** — four minutes worse — while its per-class seconds came out at 3,864
-against the clean run's 3,893, i.e. within noise. **Contention cost wall clock through scheduling and
-left the per-test durations almost untouched**, so the class table looked right while the headline was
-wrong by four minutes. That is the banner-versus-count trap wearing yet another costume: measure the
-suite on an idle machine, or do not write the number down.
-
-**Balance a split on measured seconds, not on test count**, which is why these are 5/7/7 and not 6/6/7:
-`testRepeatedAddDeleteLayersDoesNotCrashOrFreeze` measured 71 s and then 58 s on two runs — a seventh of
-the old class in one test — so the class holding it earns two fewer. It is also this file's real
-remaining floor, because **no split goes below one test**: ~60 s is the limit here and a fourth class
-would buy almost nothing.
-
-**A second class was split the same day, and it is the more instructive one because it grew under
-observation.** `GraphEditorUITests` was ~40 s when the graph editor's first stage created it, and three
-stages later it was a MEASURED **271 s across 10 tests** — the suite's second-longest class, behind only
-`SelectionAndMoveUITests`. Nothing went wrong: each stage added two or three tests to the obvious place,
-and every one of them pays a fixture cost (there is no shorter way to author an animated channel than two
-keyframe marks plus a slider drag). It is now `GraphEditorUITests` (7 tests / **133 s**) and
-`GraphEditorGestureUITests` (3 / **136 s**) in the same file — 269 s of work against 271 s before, so the
-split cost nothing and the work now occupies two clones. **The lesson is that a class grows past the floor
-while nobody is looking**: `LayerPanelUITests` had to be *discovered* at 515 s, and this one would have
-been discovered later at a worse number. Re-take the class table when you add UI tests to an existing
-class, not when the suite feels slow.
-
-`testInterpolateModeEndToEndFromGestureToScrub` is **MEASURED at 150 s run alone** (2026-08-30), so it
-is half of its class's floor by itself and decomposing it is still what going below ~3 min would need.
-The next class worth cutting is `SandwichCompositingUITests` at 344 s. **Re-take this table rather than
-trusting it — it has now gone stale twice, been confirmed once, and been acted on once.**
-
-**MEASURED at `04099a9` on an idle machine — 2759 tests, 2752 passed, 1 failed, 6 skipped.** The one
-failure, `BlendModesAndCompositorUITests`' `testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem`,
-**passed clean in isolation** and is environmental. That run followed a pass that rewrote the compositing
-path — the bake store, the scheduler, striped rendering, the live canvas served from disk, export.
-
-| class | seconds | tests |
-|---|---|---|
-| `SelectionAndMoveUITests` | 336 | 10 |
-| `SandwichCompositingUITests` | 330 | 10 |
-| **`BlendModesAndCompositorUITests`** | **311** | 8 |
-| `LayerFolderAndMaskMenuUITests` | 240 | 7 |
-| `PerfBaselineTests` | 233 | 56 |
-| `LayerPanelControlsUITests` | 214 | 7 |
-| `LayerStackUITests` | 165 | 5 |
-| `EraserAndPersistenceUITests` | 163 | 7 |
-| `CuttingModesUITests` | 161 | 4 |
-| `GraphEditorUITests` / `GraphEditorGestureUITests` | 157 / 143 | 7 / 3 |
-
-**4,206 class-seconds across 129 classes**, against 3,794 across 109 at `35c0db6` — the cost of ~280 new
-tests, which is close to free per test.
-
-**The shape of the problem has changed, and this section should stop looking for one long class.** From
-2026-08-15 to 2026-08-29 the lever was always a single indivisible class: `LayerPanelUITests` at 515 s,
-then `SandwichCompositingUITests` at 356 s. **The top three are now within 25 seconds of each other at
-~330 s**, so no split buys anything — cutting the longest just makes the second-longest the floor. Four
-clones hold ~17.5 min of ideal work; whatever the gap to wall clock is, it is scheduling and per-class
-setup, not one class. **Splitting further now makes it worse**, because every new class pays its own
-setup, and the class count has already grown 109 → 129.
-
-If you split a class again, **verify by test count from the xcresult** — a test that stops running
-still prints green — and take the count *before* you merge as well as after: a split branch cut
-before something was deleted will silently resurrect it, and the count is the only signal.
 - Use the dedicated simulator by UDID: `eraser-mutex-test`,
   `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
   doesn't have (there is no "iPad Pro 13-inch (M4)" — it is an M5) does **not** error; xcodebuild
@@ -310,257 +222,6 @@ before something was deleted will silently resurrect it, and the count is the on
   rebuilding, drew with the brush, and spent a cycle diagnosing a shipped defect that existed only in
   the installed bundle. **Rebuild between a mutation run and a drive**, and when a drive contradicts a
   green test about the same code, suspect the bundle before the code.
-
-**MEASURED at `8a4f156` — 3048 tests, 3042 passed, 0 failed, 6 skipped, and no environmental red at all**,
-which is rare enough here to be worth stating. The wall clock was 24.9 min but **that number is not a
-measurement**: two logic-tier runs were queued alongside it under `simlock`. Per this section's own 2026-08-29
-finding, contention costs wall clock through scheduling and leaves per-test durations almost untouched, so
-the class table below is usable and the headline is not.
-
-| class | seconds | tests |
-|---|---|---|
-| `SandwichCompositingUITests` | 343 | 10 |
-| `SelectionAndMoveUITests` | 285 | 10 |
-| `BlendModesAndCompositorUITests` | 265 | 8 |
-| `PerfBaselineTests` | 228 | 56 |
-| `EraserAndPersistenceUITests` | 197 | 7 |
-| `GraphEditorGestureUITests` | 196 | 4 |
-| `LayerFolderAndMaskMenuUITests` | 192 | 7 |
-| `LayerPanelControlsUITests` | 184 | 7 |
-| `CuttingModesUITests` | 160 | 4 |
-| `GraphEditorUITests` | 158 | 7 |
-
-**4,238 class-seconds across 149 classes**, against 4,206 across 129 at `04099a9` — so ~290 new tests cost
-about 30 class-seconds, which is close to free per test and the same conclusion that measurement reached.
-**The top three are still within 80 s of each other**, so the "one indivisible class sets the floor" story
-that held from 2026-08-15 to 2026-08-29 remains dead: splitting the longest just promotes the second. Four
-clones hold 17.7 min of ideal work. **`GraphEditorGestureUITests` is the one to watch** — 196 s across only
-**4** tests, the worst seconds-per-test on the board, and this file has twice recorded a graph-editor class
-growing past the floor while nobody looked.
-
-**MEASURED at `77430e1` on an idle machine with the simulator erased first — 3159 tests, 3139 passed, 1
-failed, 19 skipped, 24:47.** The one failure, `InterpolationWorkflowUITests`'
-`testInterpolateModeEndToEndFromGestureToScrub`, passed clean in isolation and is environmental; it is
-this file's own longest-single-test at ~150 s and lives in a class whose name differs from its file.
-
-| class | seconds | tests |
-|---|---|---|
-| `SelectionAndMoveUITests` | 335 | 10 |
-| `BlendModesAndCompositorUITests` | 295 | 8 |
-| `LayerFolderAndMaskMenuUITests` | 273 | 7 |
-| `SandwichCompositingUITests` | 246 | 10 |
-| `PerfBaselineTests` | 235 | 57 |
-| **`GraphEditorGestureUITests`** | **217** | **4** |
-| `LayerPanelControlsUITests` | 213 | 8 |
-| `CuttingModesUITests` | 165 | 4 |
-| `EraserAndPersistenceUITests` | 162 | 7 |
-| `LayerStackUITests` | 160 | 5 |
-
-**4,283 class-seconds across 155 classes**, against 4,238 across 149 at `8a4f156` — so ~190 new tests cost
-about 45 class-seconds, the fourth consecutive run to find a new test close to free. Four clones hold 17.8
-min of ideal work against 24.8 min of wall clock, and **the top four classes are spread across 90 seconds**,
-so there is still no single long class to split and the 2026-08-15 lever remains dead.
-
-**`GraphEditorGestureUITests` is the one to watch and is now the worst seconds-per-test on the board** —
-217 s across **four** tests, 54 s each. This file has twice recorded a graph-editor class growing past the
-floor while nobody looked, and this is the third time it has drifted up. It is not the critical path, so
-splitting it buys nothing today; re-take this table when the next graph-editor test is added.
-
-**MEASURED at `7605169` on an idle machine with the simulator erased first — 3212 tests, 3192 passed, 1
-failed, 19 skipped, 25:02.** The one failure is `InterpolationWorkflowUITests`'
-`testInterpolateModeEndToEndFromGestureToScrub` **again** — the same test as at `77430e1` — and it
-**passed clean in isolation** again. That is now twice in consecutive full runs, so it is worth saying
-plainly: this test is the suite's longest single test at ~150 s, it lives in a class whose name differs
-from its file, and it is the one that reds under parallel clones. Treat a red there as environmental
-until an isolated run says otherwise, and do not bisect it.
-
-| class | seconds | tests |
-|---|---|---|
-| `SandwichCompositingUITests` | 346 | 10 |
-| `SelectionAndMoveUITests` | 274 | 10 |
-| `PerfBaselineTests` | 261 | 57 |
-| `BlendModesAndCompositorUITests` | 233 | 8 |
-| `LayerPanelControlsUITests` | 226 | 8 |
-| `GraphEditorGestureUITests` | 206 | 4 |
-| `LayerFolderAndMaskMenuUITests` | 192 | 7 |
-| `EraserAndPersistenceUITests` | 163 | 7 |
-| `CuttingModesUITests` | 162 | 4 |
-| `LayerStackUITests` | 161 | 5 |
-
-**4,236 class-seconds across 158 classes**, against 4,283 across 155 at `77430e1` — so ~53 new tests cost
-**less than nothing** measurable, the fifth consecutive run to find a new test close to free. Four clones
-hold 17.7 min of ideal work against 25.0 min of wall clock, and the top five classes are spread across
-120 seconds, so there is still no single long class to split.
-
-**`GraphEditorGestureUITests` has stopped drifting** — 206 s across 4 tests against 217 s at `77430e1`,
-so the third rise this file recorded was noise rather than a trend, and the watch on it can relax. The
-one to watch instead is **`LayerPanelControlsUITests`**, 226 s across 8 where it was 213 across 8: the
-same class, the same tests, thirteen seconds slower. That is the shape of a class growing under
-observation, and this file has twice recorded one being discovered late.
-
-
-**MEASURED at `032efa1` on an idle machine with the simulator erased first — 3241 tests, 3222 passed,
-**0 failed**, 19 skipped, 28:55.** A full run with no environmental red at all is rare enough here to be
-worth stating, and it is the second in this file's history. graphify's background rebuild — which the
-post-commit hook fires and which is the obvious suspect for a busy machine — last ran 84 minutes before
-the suite started, so this is an idle-machine number.
-
-| class | seconds | tests |
-|---|---|---|
-| `SelectionAndMoveUITests` | 398 | 10 |
-| `PerfBaselineTests` | 352 | 57 |
-| `SandwichCompositingUITests` | 265 | 10 |
-| `BlendModesAndCompositorUITests` | 259 | 8 |
-| `LayerPanelControlsUITests` | 229 | 8 |
-| `LayerFolderAndMaskMenuUITests` | 201 | 7 |
-| `EraserAndPersistenceUITests` | 199 | 7 |
-| `CuttingModesUITests` | 187 | 4 |
-| `ToolPanelsUITests` | 173 | 10 |
-| `LayerStackUITests` | 165 | 5 |
-
-**4,537 class-seconds across 160 classes**, against 4,236 across 158 at `7605169` — **+301 s for +29
-tests, which breaks the "a new test is close to free" run this file had recorded five times.** Only 98 s
-of that is the new work (`BrushMenuUITests`, 5 tests, ~20 s each, and they are dear because each is a
-cold start with the library file deleted). **The other ~200 s is on classes that did not change**, and it
-is not a slowdown: `SelectionAndMoveUITests` rose 274 → 398 on the same ten tests while
-`SandwichCompositingUITests` fell 346 → 265 on the same ten. **Per-class seconds are not independent of
-which classes a clone is co-scheduled with**, so at 160 classes across four clones that pairing is itself
-a source of variance — which means this table's individual rows are noisier than they look and only the
-total is worth trending. Read a single class's rise as a signal only when it repeats.
-
-**MEASURED at `c26efc9` on an idle machine with the simulator erased first — 3363 tests, 3342 passed,
-**0 failed**, 21 skipped, 36.5 min.** A full run with no environmental red at all is the **third** in this
-file's history, and it followed a pass that rewrote the dab alpha (a per-stroke transparency layer), the
-modulation walk (ordered module chains), the scatter output and the whole brush library.
-
-| class | seconds | tests |
-|---|---|---|
-| `SelectionAndMoveUITests` | 524 | 10 |
-| **`BrushEditorUITests`** | **516** | **11** |
-| `SandwichCompositingUITests` | 440 | 10 |
-| `BlendModesAndCompositorUITests` | 275 | 8 |
-| `GraphEditorGestureUITests` | 256 | 4 |
-| `PerfBaselineTests` | 236 | 57 |
-| `BrushMenuUITests` | 219 | 8 |
-| `LayerPanelControlsUITests` | 218 | 8 |
-| `CuttingModesUITests` | 200 | 4 |
-| `EraserAndPersistenceUITests` | 196 | 7 |
-
-**5,727 class-seconds across 168 classes**, against 4,537 across 160 at `032efa1` — so ~120 new tests cost
-**+1,190 class-seconds**, which decisively ends the "a new test is close to free" run this section recorded
-five times. The reason is visible in the table rather than inferred: **the new tests are UI tests that
-drive a full-screen editor**, and a class of those costs what the old table's heavy classes cost.
-
-**`BrushEditorUITests` is this file's own warning coming true inside one day.** It did not exist at
-breakfast; it is 516 s across 11 tests by night, second on the board, and it grew the way this section has
-twice recorded a graph-editor class growing — two or three tests added to the obvious place per pass, each
-paying a fixture cost nobody priced. **It is the split candidate**, and unlike the classes this file has
-argued about, splitting it actually buys something: the top three are 524 / 516 / 440, so cutting the
-second still leaves the first as the floor, but four clones hold 23.9 min of ideal work against 36.5 min of
-wall clock and that gap is now the largest it has been.
-
-**The wall clock is not comparable to the 21.7 min at `032efa1`** and this is worth saying plainly rather
-than reading as a regression: the suite grew from 2482 to 3363 tests. Per-test it is flat.
-
-**MEASURED at `db21782` on an idle machine with the simulator erased first — 3595 tests, 3560 passed,
-1 failed, 34 skipped.** The one failure,
-`BlendModesAndCompositorUITests`' `testFolderOpacitySliderPersistsThroughSetFolderOpacity`, **passed
-clean in isolation in 25 s** and is environmental; note it is again a class whose name differs from its
-file. That run followed a pass of 41 commits touching the fill trace, undo damage, the layer merge, ink
-Distort, the timeline, the onion skin and the whole memory audit.
-
-| class | seconds | tests |
-|---|---|---|
-| `SelectionAndMoveUITests` | 371 | 10 |
-| `BrushEditorUITests` | 319 | 11 |
-| `SandwichCompositingUITests` | 259 | 10 |
-| `BlendModesAndCompositorUITests` | 256 | 8 |
-| `PerfBaselineTests` | 232 | 57 |
-| `BrushMenuUITests` | 223 | 8 |
-| `LayerPanelControlsUITests` | 215 | 8 |
-| `EraserAndPersistenceUITests` | 203 | 7 |
-| `LayerFolderAndMaskMenuUITests` | 180 | 7 |
-| `LayerStackUITests` | 162 | 5 |
-
-**5,162 class-seconds across 182 classes**, against 4,238 across 149 at `8a4f156`. **`BrushEditorUITests`
-has come *down* from 516 s to 319 s across 11 tests** without being split, which is the first time this
-table has recorded a heavy class shrinking on its own — read it as evidence that a single run's
-per-class seconds are noisier than they look, exactly as the `032efa1` entry warned, rather than as
-something having been fixed. The top four are spread across 115 s, so there is still no single long
-class to split and the 2026-08-15 lever remains dead.
-
-**MEASURED at `8cbce5a` on an idle machine (91.9% idle, my own freshly created device erased first, no
-clone debris before or after) — 3661 tests, 3622 passed, 3 failed, 36 skipped, 32.6 min.** All three
-failures **passed clean in isolation** and are environmental; the table was pulled from `xcresulttool`
-before any triage run touched the same `-derivedDataPath`, which is what this section keeps asking for
-and is why it exists this time.
-
-| class | seconds | tests |
-|---|---|---|
-| `PerfBaselineTests` | 335 | 57 |
-| `SandwichCompositingUITests` | 323 | 10 |
-| `SelectionAndMoveUITests` | 277 | 10 |
-| `LayerFolderAndMaskMenuUITests` | 256 | 9 |
-| `BrushEditorUITests` | 249 | 11 |
-| `LayerPanelControlsUITests` | 230 | 8 |
-| `BrushMenuUITests` | 227 | 8 |
-| `BlendModesAndCompositorUITests` | 214 | 8 |
-| `EraserAndPersistenceUITests` | 197 | 7 |
-| `GraphEditorGestureUITests` | 193 | 5 |
-
-**5,641 class-seconds across 188 classes**, against 5,162 across 182 at `db21782` — so ~66 new tests
-cost ~479 class-seconds. Four clones hold 23.5 min of ideal work against 32.6 min of wall clock, and
-the top four are spread across 79 seconds, so there is still no single long class to split.
-
-**Two of the three environmental reds were wall-clock assertions, and the full suite is the one place
-this file says not to run them.** `PerfBaselineTests`' layered-preview test failed at 0.0213 s against
-a 0.0178 s bound and passed **1.150 s** alone; `DabCostBench`'s pad re-walk failed at 0.691 s against a
-0.5 s cap and passed **1.007 s** alone. Neither is in the bench-file exclusion, so both run under four
-parallel clones — the exact contention this file records as making a suite "return wrong answers". The
-third was `InterpolationWorkflowUITests`' `testInterpolateModeEndToEndFromGestureToScrub`, red under
-clones for the **third** consecutive full run and passing alone at 143 s, exactly as this section
-already predicts. Triage them **warm and never after an erase**: all three name durations.
-
-**The skip count moved 34 → 36 and that is a fix, not drift.** `PlaybackTickBench`'s two tests used to
-*fail* at 0.000 s in every full run — `tearDown` ran on the `XCTSkipUnless` path and trapped unwrapping
-a nil `URL!` that `setUpWithError` assigns after its guard. They skip now. **The general rule this
-bought: `tearDown` runs even when `setUpWithError` throws `XCTSkip`, so an opt-in suite must gate its
-teardown on a flag set past the guard** — and the report is `Test crashed with signal trap` printed
-*beside* the skip message, which reads as a failure of the code under test.
-
-**MEASURED at `e6ce40e` on an idle machine (96.7% idle) with a freshly created device erased first —
-3714 tests, 3675 passed, 3 failed, 36 skipped, 33 min.** All three failures **passed clean in
-isolation**, each with `totalTestCount: 1` so the selector genuinely ran them, and are environmental:
-`RecordingUITests` twice (the transport read `idle` where `recording` was wanted, and the notice banner
-was not found) and `DabCostBench.testWhatThePadsRewalkCostsAtItsStrokeCap`, a **wall-clock assertion**
-at 1.006 s against a 0.5 s cap — which is this file's own warning about timing assertions under four
-parallel clones, and there are at least three such tests in the suite now.
-
-| class | seconds | tests |
-|---|---|---|
-| **`BrushEditorUITests`** | **558** | 11 |
-| `SandwichCompositingUITests` | 334 | 10 |
-| `PerfBaselineTests` | 287 | 57 |
-| `SelectionAndMoveUITests` | 268 | 10 |
-| `GraphEditorGestureUITests` | 257 | 5 |
-| `LayerFolderAndMaskMenuUITests` | 254 | 9 |
-| `BrushMenuUITests` | 228 | 8 |
-| `LayerPanelControlsUITests` | 219 | 8 |
-| `BlendModesAndCompositorUITests` | 217 | 8 |
-| `MenuInterruptionUITests` | 210 | 5 |
-
-**6,582 class-seconds across 194 classes**, against 5,162 across 182 at `db21782`. Four clones hold
-**27.4 min** of ideal work against 33 min of wall clock — a **17% scheduling gap**, materially better
-than the 37% this file recorded at `35c0db6`, so the tail is being packed better as the class count
-grows.
-
-**No split is warranted, and the arithmetic says why rather than the intuition.** `BrushEditorUITests`
-is 558 s and is far and away the longest — this file recorded it at 516 s, then 319 s, and it is back
-up without being touched — but the binding constraint is **ideal work per clone (27.4 min), not the
-longest class (9.3 min)**. A class only sets the floor once it exceeds the per-clone share, and this
-one is at a third of it. Splitting it would buy nothing and would add per-class setup. Re-take this
-when the class count or the longest class changes materially; the pattern of `BrushEditorUITests`
-drifting up unwatched is the one to keep an eye on.
 
 ### A green assertion is only as good as its two operands
 

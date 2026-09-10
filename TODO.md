@@ -48,93 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (57) The on-disk shape of a project does not read well
-
-**Status** — reported by the owner 2026-09-08, browsing the project files on their iPad.
-
-> *"right now I'm looking at the file structure of projects stored on the Ipad and can see some
-> things I'd like to fix:
-> 1. There is a json file for the layers im guessing that contains the strokes. Why is this file
-> under the images folder?
-> 2. Folder names are Untitled.paintproj but does not change when the project name is changed.
-> 3. if you find any other things to organize nicely, then fix them."*
-
-**This is now artwork the owner keeps**, not scratch — item (36) moved projects out of the container
-onto a folder they chose, so the layout is something they look at in Files. The standing permission
-that *"everything on the ipad right now is expendable"* (2026-08-27) has lapsed, so a layout change
-needs a migration that cannot lose a project, not a format bump.
-
-Point 2 is the one with teeth: a bundle whose directory name never follows its title means the
-**title lives in exactly one place, the manifest**, and a directory listing cannot tell two projects
-apart. Renaming a bundle on disk is also the operation most likely to lose one, so it wants the same
-copy → verify → atomic rename → remove discipline (36)'s migration used.
-
-**Point 1 is built.** `Services/ProjectPackageLayout.swift` is the one function the writer, the
-reader and the validator all ask where a file lives; a cel's three JSON sidecars are
-`drawings/<celID>.json`, `-animation.json` and `-interpolation.json`, recorded in the manifest as
-package-relative paths — **the format version is the `/`**, which is field-presence versioning
-(KEYFRAMES §3.5) inside a field that already existed. A bare name still means a pre-(57) package and
-resolves out of `images/` forever, because `Backups/` and `Trash/` are never migrated and a
-seven-day-old backup has to open. `tidyEveryProject()` runs from `runStartupMaintenance` and moves —
-never copies, never deletes — so every file is complete at exactly one of two known addresses at every
-instant. Two of point 3's sweeps came with it: clips go to `videos/`, and every content directory is
-created lazily, so a pure-vector document no longer ships an empty `images/`.
-
-**Point 2 is built.** `ProjectPackageName.reconciled(_:title:projectID:)` is the rule and it answers
-nil far more often than a URL — the stem already *is* the title, or it is a disambiguated rendering of
-it (`Boat 2` for `Boat`), which is what stops a second project called Boat being renamed back and
-forth on every launch forever. Two triggers use it: the **save** asks the narrow question *did the
-title change in this save?*, which is the owner's complaint stated exactly; the **launch pass** asks
-the broad one *is this stem an acceptable rendering of the title today?*, because a project retitled
-under a build older than this one has no change event left to catch. After the first pass the two
-agree forever, since nothing but a title ever names a package.
-
-**The fork two reviewers found is closed by `PackageRenameGate`, not by the re-run they suggested.**
-Their scenario is real — the pass renames from the stale title while the save renames from the new
-one, leaving two packages with one manifest id and a gallery `ForEach` holding two rows of one
-identity. But re-running `reconciled` before the swap does not close it: the second answer is computed
-from the same stale URL and returns the same name. What closes it is that **the launch pass never
-renames a package this process has open**, checked and renamed under one lock so a package cannot
-become open in between; a package the artist is working in then has exactly one name-giver. The
-re-run is in `writeAtomically` anyway, because it does close the narrower window where another *save*
-took the name. The honest cost of the refusal: a package merely opened and not retitled keeps its
-stale name until the next launch, which is pinned by a test rather than left to be discovered.
-
-And the launch pass skips a library root that is ubiquitous or on another volume
-(`ProjectPackageLayout.migrationIsSafe(at:)`), because `rename(2)`'s atomicity — the whole
-crash-resume argument, and now the directory rename's too — is a local-volume guarantee a File
-Provider need not honour. Such a library is not stranded: a save stages a *complete* package, so it
-lands in the new layout the next time the artist saves. **Verifying the pass against a real iCloud or
-external root is what would let that gate be widened, and nobody has.**
-
-**Point 3 is built, and it turned out to be one item rather than a list.** Every other rename anyone
-proposed was declined and each declined for the same shape of reason — the name is recorded somewhere
-(`brushtable.json` → `brushes/table.json`, the `Backups/<uuid>/` lookup key, the `Trash/` stem a regex
-parses), or it lives inside a payload that would have to be parsed to migrate it (the placed-image
-PNGs, a clip's `assetFileName`), or it trades a UUID nobody can read for a different UUID nobody can
-read (a directory per cel, `_raster.png` → `.png`). Naming files after layer and frame is the only
-genuinely legible scheme and it makes every filename depend on mutable artist-typed text.
-
-What was left was **empty folders**, and the launch pass was creating them itself:
-`ProjectPackageLayout.pruneEmptyContentDirectories` `rmdir`s any of `drawings/`, `images/`, `videos/`
-that has nothing in it, at the end of `tidy` and at the end of `writePackage`. The migration is the
-loud case — a pre-(57) vector-only package keeps *nothing* in `images/` but the three sidecars, so
-moving them into `drawings/` left an empty `images/` standing beside it at exactly the launch the
-artist opens Files to check the update. The writer is the quiet one: the role scan creates a
-directory the snapshot says the document needs, and the encode or the asset copy that was to fill it
-can still fail. `rmdir(2)` rather than list-then-remove, because the kernel refuses a non-empty
-directory in the same call, so the sweep cannot reach a file under any interleaving.
-
-**Not swept, deliberately:** `Backups/` and `Trash/` exist empty from first launch, because
-`ProjectBackupManager`'s directory accessors create on read. Left alone — the emptiness is honest
-(that *is* the trash, and it is empty), and making them lazy would move the create into every writer
-for a cosmetic nil. And `manifest.json` is compact rather than pretty-printed: the gallery decodes
-every manifest in the library to list it, so doubling those bytes is a real cost on a path
-PERFORMANCE §1 has already been tuned against, and the owner's complaint was about where a file lives
-rather than how it reads inside.
-
----
-
 ## (56) Strokes still cost too much per edit, and some of them vanish
 
 **Status** — **the padding theory is refuted and the title it was filed under was wrong.** Nothing on
@@ -163,8 +76,26 @@ operation's own pass. §16 took the onion skin's pixel work out of both. The rem
 whatever else those two passes still do.
 
 **Left to build**
-- [ ] Get per-edit main-thread busy from 20-121 ms to unnoticeable, at any stroke, cel and layer
-      count. Measure on the device — see §16's note on why three Mac-measured wins delivered nothing.
+- [ ] Get per-edit main-thread busy to unnoticeable, at any stroke, cel and layer count. Measure on
+      the device — see §17.1 on why three Mac-measured wins delivered nothing.
+      **The stroke-count axis is closed.** The cel thumbnail was the fifth renderer and the last one
+      drawing on the main thread; it is off it (PERFORMANCE.md §18). MEASURED on the owner's iPad in
+      Release: **115.4 → 41.2 ms an edit at forty strokes a cel**, 76.7 → 49.9 at one, so forty strokes
+      now cost *less* per edit than one.
+      **What is left is named rather than implied, and it is not ours.** ~43 ms an edit is SwiftUI's own
+      view-graph update plus the CATransaction commit at the end of it — **87% of what an edit costs on
+      the main thread** — bounded by four measurements: it is on-CPU, entirely in the runloop's source
+      half, in the gaps *between* every span this app can place, and fixed across strokes, cels, layers
+      and canvas area. No span this app can add will attribute it further.
+      **So the next lever is to raise that pass once an edit instead of twice.** `installThumbnail`
+      writes `@Published layers`, which invalidates every view observing `CanvasManager` and raises the
+      whole-editor pass a second time (~8-12 ms, the 401 ms burst the owner can point at). It was
+      deliberately not attempted in a hurry: `Layer`/`Cel` are structs read by the timeline (whose
+      `TimelineLayoutKey` carries thumbnail object identity) and by the layer panel, and a side-channel
+      store shadowing `Cel.thumbnail` is the duplicate-truth spaghetti the owner's constraint rules out.
+      PERFORMANCE.md §18.6.
+      **One thing outside every number above**: the layer rail is closed in `PlaybackProbe`, so
+      `LayerPanel.body` and `LayerStackListView.reload` have never executed under measurement.
 - [ ] **The disappearing strokes, which nothing so far has addressed.** BUGS.md's *"Starting a stroke
       before the last one has rendered leaves the last one off screen"* is the mechanism: the base
       slot still holds the picture from before stroke *n* while the new stroke has taken the scratch
