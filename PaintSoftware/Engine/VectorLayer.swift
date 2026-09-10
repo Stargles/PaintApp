@@ -1362,7 +1362,7 @@ final class VectorCanvas {
     ///
     /// **Only strokes are ever in here**, because only strokes are ever in `paintedBounds` — a fill,
     /// an image, a text object and a video are always drawn and never measured, so they cannot escape
-    /// a clip either and must not be bounded by a hint. `arrivingInk(ofArrivalsIn:standing:)` reads
+    /// a clip either and must not be bounded by a hint. `inkOfArrivals(in:standing:)` reads
     /// this table in its **stroke arm and nowhere else**, so that invariant is structural rather than
     /// asserted: a non-stroke arrival is bounded by `derivedFootprint(of:)`, off its own stored
     /// geometry, and never by a rectangle left behind under its id.
@@ -2026,8 +2026,7 @@ final class VectorCanvas {
     /// from a snapshot, so its dabs land where the walk that measured this rectangle put them.
     /// MEASURED — `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the
     /// operand that would move if this were an estimate rather than a measurement.
-    private func arrivingInk(ofArrivalsIn newValue: [VectorElement],
-                             standing: Set<UUID>) -> CGRect? {
+    private func inkOfArrivals(in newValue: [VectorElement], standing: Set<UUID>) -> CGRect? {
         var union = CGRect.null
         for element in newValue where !standing.contains(element.id) {
             if let stroke = element.stroke {
@@ -2081,9 +2080,9 @@ final class VectorCanvas {
     /// draw nothing paints nowhere, so it contributes nothing to a union. The empty-string and
     /// zero-box tests below are `draw(text:into:quality:)`'s own, spelled the same way round.
     ///
-    /// Strokes answer nil, which is not a limitation but the rule: see `arrivingInk`.
+    /// Strokes answer nil, which is not a limitation but the rule: see `inkOfArrivals(in:standing:)`.
     private static func derivedFootprint(of element: VectorElement) -> CGRect? {
-        /// The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
+        // The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
         let slack: CGFloat = 1
         switch element {
         case .stroke:
@@ -2119,8 +2118,8 @@ final class VectorCanvas {
     /// The tightest damage a restore to `newValue` can prove. Caller must hold `lock`.
     ///
     /// Three things make it `.everything`: the survivors are re-ordered, something arrives that
-    /// neither the caller nor `arrivingInk` can bound, or a stroke departs that was never measured,
-    /// which is `regionDamage(replacing:)`'s own answer.
+    /// neither the caller nor `inkOfArrivals(in:standing:)` can bound, or a stroke departs that was
+    /// never measured, which is `regionDamage(replacing:)`'s own answer.
     ///
     /// **A departing fill, image or video used to be a fourth and is not any more** — TODO (41). The
     /// reason it was is that `renderLocalContent` measures no footprint for those kinds, and the reason
@@ -2174,11 +2173,11 @@ final class VectorCanvas {
 
         let arrivingInk: CGRect
         if !newValue.contains(where: { !standing.contains($0.id) }) {
-            // Nothing arrives, so the vacated ink is the whole of the difference and it is measured.
+            // Nothing arrives, so what departs is the whole of the difference.
             arrivingInk = .null
         } else if let changedInk {
             arrivingInk = changedInk
-        } else if let derived = self.arrivingInk(ofArrivalsIn: newValue, standing: standing) {
+        } else if let derived = inkOfArrivals(in: newValue, standing: standing) {
             // **The caller has no rectangle and the arrivals can supply one between them.** A redone
             // append is this case: the gesture declared `.appended`, so `foldGestureDamage` handed
             // both closures a nil, and the ink coming back is ink this canvas measured on the walk

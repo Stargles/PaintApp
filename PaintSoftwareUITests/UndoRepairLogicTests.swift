@@ -333,7 +333,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// from the stroke's geometry is still what BRUSH.md §12 stage 8 refuted and is still not what
     /// happens here — this is the measurement, not a derivation from the brush.
     ///
-    /// Mutation that reddens it: return nil from `arrivingInk(ofArrivalsIn:standing:)`, or stop calling
+    /// Mutation that reddens it: return nil from `inkOfArrivals(in:standing:)`, or stop calling
     /// `rememberVacatedInk`.
     func testRedoingAnAppendIsBoundedByWhatItPaintedBeforeItLeft() {
         let canvas = Self.drawnCanvas(48)
@@ -357,7 +357,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// walk re-measures a returning stroke and widens the clip if it escaped. Nothing measures a fill,
     /// an image, a text object or a video, so nothing could correct a hint about one — which is why
     /// those four are bounded by `derivedFootprint(of:)`, off geometry the element carries with it,
-    /// and why `arrivingInk` reads `vacatedInk` in its stroke arm and nowhere else.
+    /// and why `inkOfArrivals(in:standing:)` reads `vacatedInk` in its stroke arm and nowhere else.
     ///
     /// **Two operands, and the second is the one that makes it a test rather than a restatement.**
     /// `rememberedInkCount` is 0 across the whole round trip — nothing about the fill ever enters the
@@ -523,7 +523,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// `testUndoingACutStampsFarFewerDabsThanTheCelHolds`, on the press that was still paying the
     /// whole cel after that one stopped.
     ///
-    /// Mutation that reddens it: return nil from `arrivingInk(ofArrivalsIn:standing:)`, which makes the two counts equal.
+    /// Mutation that reddens it: return nil from `inkOfArrivals(in:standing:)`, which makes the two counts equal.
     func testRedoingAnAppendStampsFarFewerDabsThanTheCelHolds() {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
