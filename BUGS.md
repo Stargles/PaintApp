@@ -3,6 +3,30 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## `LassoFillLogicTests`' empty-fill test only passes when its siblings run first (2026-09-10)
+
+**MEASURED three ways on one machine, and it is pre-existing** — it reproduces identically on `main`
+at `01ded1b`, a commit whose full suite was clean:
+
+| how it is run | result |
+|---|---|
+| the whole `LassoFillLogicTests` class alone | **53 passed, 0 failed** |
+| `testAnEmptyLassoFillShowsTheFenceAndTheCollarBesideTheSentence` **alone** | **fails**, on `main` and on a branch alike |
+| inside the full suite, under four parallel clones | fails |
+
+It fails at `XCTUnwrap(manager.lassoFillDiagnostic, "The picture was raised")` — the diagnostic is nil,
+so the fill had not finished by the time `settle()` returned. The class has no `setUp` and no statics,
+so this is not the `UserDefaults`-static shape recorded in CLAUDE.md; it reads as a fixed-pump `settle()`
+being long enough once fifty sibling tests have warmed the process and not long enough cold.
+
+**Why this matters more than one flake.** The fast tier is green because a class is indivisible and this
+test always runs after its siblings there — so **the gate cannot see it**, and the full suite is the only
+thing that can. It has now cost one full-suite triage. The fix is presumably for `settle()` to wait on
+the condition rather than pump a fixed number of turns; that is a change to a shared helper, so it wants
+its own pass and a check of every other caller that depends on the current timing.
+
+**Do not read a red here as a finding about a branch** until it has been run alone against `main`.
+
 ## A build older than TODO (57) opens a (57) package with the drawings deleted (2026-09-09)
 
 **Accepted, one-way, and stated here rather than left silent** — the alternative was not to do

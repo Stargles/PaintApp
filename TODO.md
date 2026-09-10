@@ -132,58 +132,6 @@ whatever else those two passes still do.
 
 ---
 
-## (36) Store projects in a folder the artist chooses
-
-**Status** — **fast-tracked out of Later by the owner 2026-09-07**, who gave the reason: every test
-build that lands on the iPad takes their saved work with it.
-
-> *"Every time a test build gets uploaded to Ipad currently, everything is wiped. Thus, this task
-> should be fasttracked out of long term. It should ideally behave just like any other programs file
-> storage/save. It has a default folder storage location where it stores the files, but they can be
-> changed. I'd like the option to organize the files into folders. May be helpful for organizing
-> things into projects, sequences, scenes, shots, etc."*
-
-**This is a data-loss item, not a convenience one.** Projects live in the app's own container today
-(`Documents/Projects`), which is exactly the thing a reinstall is entitled to replace — and on
-2026-09-07 a measurement pass wiped that container outright, destroying the owner's `AnimationTest`
-document with no recovery. A chosen folder puts the work **outside** the container, where a build
-cannot reach it.
-
-**No dependency remains.** The stated ordering was counterfactual: RENDER stage 6 shipped without a
-chosen folder by delivering through `ShareLink`. `BrushStorage` already documents the security-scoped
-bookmark seam this needs, and `BrushStorage`'s relocatable storage is a worked example of the same
-pattern at a smaller scale.
-
-**Built 2026-09-07, all four parts.** `ProjectLocation` owns one root that
-`ProjectBackupManager.documentsDirectory` reads, resolved before anything reads it; the gallery browses
-an arbitrarily deep tree with breadcrumb, create/rename/delete and **Move to...**; migration is copy →
-verify → atomic rename → remove, per item, so **every project is complete in at least one root at every
-instant**; and the reinstall test asserts the defect first (a container project destroyed, the gallery
-empty) and then the fix.
-
-**One limitation, deliberate and recorded rather than hidden.** The **bookmark does not survive a
-reinstall** — it lives in the defaults plist, which is inside the container — so the artwork survives
-and recovery is exactly one trip through the picker, which the test pins as one.
-
-**A hole in the `-resetGallery` guard was found and closed by this work**: the flag resolves its three
-directories *through* `ProjectLocation`, so on a device that had adopted a folder it would have reached
-outside the container and deleted the real library. It forgets the bookmark before wiping now, which
-makes it container-only by construction.
-
-**Restore-to-origin built 2026-09-10, which was the last box.** The origin marker this asked for does
-not exist, because **the trash mirrors the folder path instead of recording it**: a project deleted
-from `Projects/Scene 3/Shot 1/` lands at `Trash/Scene 3/Shot 1/`, so the origin *is* where the entry
-sits and there is nowhere for a second opinion to live. An entry written before this — one at `Trash/`
-itself, which is every entry the shipped build made — reads as "the top of the tree" and restores
-exactly as it always did, so nothing was migrated and nothing could be lost by migrating. The restore
-is a `rename(2)` between two siblings of one root, so the package is complete in one place at every
-instant; it never overwrites (a taken name disambiguates *in that folder*, and the test asserts the
-incumbent's own manifest id afterwards); and it never invents (an origin folder that has gone is
-reported in a sentence naming it, not silently recreated). Each Recently Deleted row says where its
-project came from before the artist commits to restoring it.
-
----
-
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
