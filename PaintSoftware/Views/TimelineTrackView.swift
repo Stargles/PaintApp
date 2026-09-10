@@ -3005,6 +3005,18 @@ private final class CelBlockView: UIView {
         leftHandleMarker.isAccessibilityElement = true
         rightHandleMarker.accessibilityIdentifier = base + ".rightHandle"
         rightHandleMarker.isAccessibilityElement = true
+        // **The picture, made queryable — the one thing on this block a test could not otherwise
+        // see.** `thumbnailView.isHidden` follows the tile being nil (see `setThumbnail`), and a
+        // hidden view does not exist to XCUITest, so "does this block carry a picture" is
+        // `exists` on this element and nothing has to read a pixel.
+        //
+        // It is here because PERFORMANCE.md §18.6 took the tile out of `TimelineLayoutKey`: a
+        // landed thumbnail now reaches the screen through `Coordinator.applyInstalledThumbnail`
+        // alone, which is view code no logic test can reach. `layerPanel.row.N.current` is the same
+        // idiom — an identified, otherwise-invisible element standing for a state the artist can
+        // see and a test could not.
+        thumbnailView.accessibilityIdentifier = base + ".tile"
+        thumbnailView.isAccessibilityElement = true
     }
 
     func updateHandlePositions(handleWidth: CGFloat) {
