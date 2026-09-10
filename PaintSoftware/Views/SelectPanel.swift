@@ -47,6 +47,12 @@ struct SelectPanel: View {
     /// membership picker and the tolerance slider is one line instead of two; the panel's order —
     /// how you select, what the loop then catches, what to do with it — is unchanged, it is just
     /// read left-to-right in the first band instead of top-to-bottom over three.
+    ///
+    /// **Four since TODO (21)'s membership editing**, and the new one obeys item (49) rather than
+    /// relaxing it: `animationGroupBand` is one flat row whose destinations scroll sideways, so it
+    /// costs the panel the same height on a document with one animation group and on one with six.
+    /// It sits between the loop rule and the action row because it is a *fourth* thing to do with the
+    /// loop rather than a rule the action row obeys.
     var body: some View {
         VStack(spacing: 0) {
             if canvasManager.selectionMode == .automatic {
@@ -81,6 +87,8 @@ struct SelectPanel: View {
             .padding(.top, 10)
 
             divider
+
+            animationGroupBand
 
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
@@ -184,6 +192,116 @@ struct SelectPanel: View {
         .padding(.trailing, 6)
     }
 
+    /// **TODO (21) — "Animation Group": add, remove, and move a selection between animated groups.**
+    ///
+    /// **It lives here because all three operations act on a selection**, which is the owner's own
+    /// framing — *"the ability to add new selections to an animation group … and remove selections
+    /// from groups"* — and it is the same argument §5.26 made for moving the membership picker into
+    /// this panel: one property, one control, in the panel whose subject is the loop. The Move bar was
+    /// the alternative and is wrong twice over: a membership edit is not a transform, and `DrawingView`
+    /// hides this panel for exactly as long as a piece floats, so the two controls are never on screen
+    /// together and an artist refused by §2.29 would have had to put the piece down to find the fix.
+    ///
+    /// **One flat band, not a third stack of rows** — the owner on item (49): *"too tall and obstructs
+    /// your view. Make all of them wider and flatter."* The readout is two `.caption`-sized lines in a
+    /// `fixedSize` column on the left and the destinations scroll horizontally beside it, so the band
+    /// costs one row however many groups the document has.
+    ///
+    /// **Chips rather than a `Picker` or a `Menu`, and each alternative fails on something real.** A
+    /// segmented `Picker` needs the current value to be one of its segments and this one can honestly
+    /// be *Mixed* — a loop may hold ink from two groups, and the edit is still perfectly well defined
+    /// for it. A `Menu` is a system presentation over a live canvas, which is the family
+    /// MENU_PRESENTATION_CENSUS.md found seven defects in, and it would hide every destination behind
+    /// a tap for no gain at the two-or-three groups a document actually has.
+    ///
+    /// **The readout is a *value*, not just a label.** `selectionAnimationGroupName` resolves what the
+    /// loop has caught, so an XCUITest asserting on it goes red if the control stops resolving —
+    /// whereas an `exists` assertion on a chip would stay green against a feature that had been
+    /// deleted from underneath it.
+    private var animationGroupBand: some View {
+        let reason = canvasManager.animationGroupEditUnavailableReason
+        let live = reason == nil && hasSelection
+        // Read once and used for the readout and for every chip's outline, so the sentence and the
+        // ring can never disagree — `recolorReason`'s rule one property up. It is memoized behind
+        // three gates (`selectionAnimationGroup`), so reading it here rather than per chip costs one
+        // struct comparison a body pass on a document with no animation groups at all.
+        let current = canvasManager.selectionAnimationGroup
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Animation Group")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                Text(canvasManager.selectionAnimationGroupName)
+                    .font(.caption2)
+                    .foregroundColor(live ? .gray : .white.opacity(0.3))
+                    .accessibilityIdentifier("selectPanel.animationGroupReadout")
+                    .accessibilityValue(canvasManager.selectionAnimationGroupName)
+            }
+            .fixedSize()
+
+            Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 36)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    groupChip(title: "No Group", tint: nil, enabled: live,
+                              isCurrent: live && current == .untagged,
+                              identifier: "selectPanel.animationGroup.none") {
+                        canvasManager.setAnimationGroupOfSelection(.none)
+                    }
+                    ForEach(Array(canvasManager.animationGroups.enumerated()), id: \.element.id) { index, group in
+                        groupChip(title: group.displayName, tint: Color(group.tagColor.uiColor),
+                                  enabled: live, isCurrent: live && current == .one(group.id),
+                                  identifier: "selectPanel.animationGroup.\(index)") {
+                            canvasManager.setAnimationGroupOfSelection(.existing(group.id))
+                        }
+                    }
+                    // **Never current, by construction**: a fresh group is by definition not the one
+                    // the loop's ink is already in, which is also why `setAnimationGroupOfSelection`
+                    // cannot skip it as a no-op.
+                    groupChip(title: "New Group", tint: nil, enabled: live, isCurrent: false,
+                              identifier: "selectPanel.animationGroup.new") {
+                        canvasManager.setAnimationGroupOfSelection(.newGroup)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    /// One destination. The tag colour is drawn as a dot rather than as the chip's fill, which is
+    /// `AnimationGroup.tagColor`'s own argument — the swatch identifies the group, and a chip filled
+    /// with it would be saying two things at once with one colour.
+    ///
+    /// **`isCurrent` is a ring rather than a fill, and it is not a `Picker`'s selection.** It marks
+    /// where the loop's ink *already is*, which is often no chip at all: the loop can hold two groups
+    /// at once (`SelectionAnimationGroup.mixed`), and then no chip is ringed and the readout says
+    /// Mixed. A control that promised one-of-N would have to lie about that case.
+    private func groupChip(title: String, tint: Color?, enabled: Bool, isCurrent: Bool,
+                           identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let tint {
+                    Circle().fill(tint).frame(width: 8, height: 8)
+                }
+                Text(title)
+                    .font(.caption2)
+                    .lineLimit(1)
+            }
+            .foregroundColor(enabled ? .white : .white.opacity(0.3))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(enabled ? 0.12 : 0.05))
+            .cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.blue, lineWidth: isCurrent ? 1.5 : 0))
+            .contentShape(Rectangle())
+        }
+        .disabled(!enabled)
+        .accessibilityIdentifier(identifier)
+    }
+
     /// A plain iOS-switch look-alike (capsule track + circular knob) purely for display — the
     /// enclosing Button owns the actual tap handling, see the comment above its call site.
     private var switchIndicator: some View {
@@ -231,7 +349,11 @@ struct SelectPanel: View {
         if !hasSelection {
             return "Draw a selection on the canvas with the mode above, or tap Move to transform the whole layer."
         }
-        return recolorReason ?? applyBrushReason
+        // The animation-group refusal is last because it refuses on exactly the two conditions the
+        // other two do — a non-vector cel and an in-between — so with a selection in hand it is never
+        // independently non-nil. Reading all three is what keeps that a fact rather than an assumption,
+        // which is `applyBrushReason`'s own note one property up.
+        return recolorReason ?? applyBrushReason ?? canvasManager.animationGroupEditUnavailableReason
     }
 
     /// `enabled` is *additional* to `hasSelection`, never instead of it — every tab in this row is

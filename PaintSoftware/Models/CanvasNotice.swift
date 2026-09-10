@@ -209,6 +209,50 @@ struct CanvasNotice: Identifiable, Equatable {
         /// owner found three of in a minute, where the model is right at every step and the artist
         /// cannot get from one step to the next. The blue button is the state; this is the road.
         case recordingArmed
+
+        /// **A selection joined, left, or changed animation group** — TODO (21)'s membership editing,
+        /// ruled 2026-09-10.
+        ///
+        /// Informational, like `recordingArmed` and `resizeResampled`, and it is **not optional
+        /// politeness**. The whole design of the edit is that the drawing stays exactly where it looks
+        /// on the frame the artist is standing on, so the only thing they can see happen is *nothing*
+        /// — which is indistinguishable from a control that does not work. That is the "a refusal with
+        /// no notice" defect this file carries four cases of, wearing its positive costume: an action
+        /// whose entire visible effect is deferred to another frame has to say what it did.
+        case animationGroupMembershipChanged(AnimationGroupEdit)
+
+        /// **The membership edit could not keep the drawing where it looks, so it did not happen.**
+        ///
+        /// Both arms are whole-edit refusals rather than per-element ones, and that is the requirement
+        /// rather than caution: every key on both tracks changes meaning at once, so a membership edit
+        /// applied to some of the loop's ink and not the rest is a corrupted document.
+        case animationGroupEditRefused(AnimationGroupEditRefusal)
+    }
+
+    /// Which of the three operations happened, in the artist's own nouns — the group's display name,
+    /// never an id.
+    ///
+    /// **Three cases and not one with two optionals**, because the sentence differs in what the artist
+    /// needs told: joining says what it will follow, leaving says that it has stopped following
+    /// anything, and moving has to name both ends or the artist cannot tell a move from a join.
+    enum AnimationGroupEdit: Equatable {
+        case joined(String)
+        case moved(from: String, to: String)
+        case left(String)
+    }
+
+    /// Why a membership edit was refused. Both are properties of the *pose at this frame* rather than
+    /// of the drawing, which is why both sentences name a frame or a kind and neither says "can't".
+    enum AnimationGroupEditRefusal: Equatable {
+        /// The destination group's pose at this frame is singular — it has collapsed its members to a
+        /// line — so there is no geometry that reproduces where the drawing looks. Reachable only from
+        /// a pose an artist authored by dragging a box onto itself, and scrubbing one frame clears it.
+        case destinationIsFlatOnThisFrame
+        /// The compensation is **projective** and the loop caught a placed image or a video. Their
+        /// whole placement is six numbers and a mirror bit where a homography needs eight, so there is
+        /// nowhere for the perspective residue to live — `VectorCanvas.posing(_:through:)`'s two
+        /// declining kinds, and `distortUnavailableReason` refuses the same pair one tier over.
+        case aPlacedImageCannotFollowAKeystone
     }
 
     init(_ kind: Kind) {
@@ -226,8 +270,13 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingToPick:    return "Nothing to pick up there."
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
-        case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it."
-        case .animationGroupNotAlone: return "The loop holds an animated group and ink that isn't part of it — a group moves on its own, so loop around just one group."
+        // **Each now names the second way out as well**, and that is TODO (21)'s membership editing
+        // rather than a rewording. Until 2026-09-10 the only fix either sentence could offer was to
+        // redraw the loop, because membership was unreachable; an artist who wanted *this ink out of
+        // that group* had nowhere to go and the app said nothing about it. The loop fix stays first in
+        // both, since it is what an artist who meant to move the whole group wants.
+        case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it, or change what it belongs to under Select ▸ Animation Group."
+        case .animationGroupNotAlone: return "The loop holds an animated group and ink that isn't part of it — a group moves on its own, so loop around just one group, or put them in the same one under Select ▸ Animation Group."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):
@@ -243,6 +292,25 @@ struct CanvasNotice: Identifiable, Equatable {
         // looking at. A sentence that named only the slider is what shipped before stage 10, and it
         // would have sent an artist who armed the recorder to draw into a settings panel instead.
         case .recordingArmed:   return "Recorder armed — draw on the canvas, or put your pencil on a layer's opacity or effect slider, and playback starts with it."
+        // **Each sentence says the invisible half out loud**: that nothing moved on this frame is the
+        // *design*, and that the change shows up when the artist scrubs is the thing they have to be
+        // told or they will read the edit as having failed.
+        case .animationGroupMembershipChanged(let edit):
+            switch edit {
+            case .joined(let group):
+                return "Added to \(group) — it hasn't moved on this frame, and it follows \(group) on the others."
+            case .moved(let from, let to):
+                return "Moved from \(from) to \(to) — it hasn't moved on this frame, and it follows \(to) on the others."
+            case .left(let group):
+                return "Taken out of \(group) — it stays where it is now and stops moving with the group."
+            }
+        case .animationGroupEditRefused(let refusal):
+            switch refusal {
+            case .destinationIsFlatOnThisFrame:
+                return "That group's animation flattens to nothing on this frame, so there's no way to keep the drawing where it looks — scrub a frame and try again."
+            case .aPlacedImageCannotFollowAKeystone:
+                return "A placed image or video can't follow an animation that keystones — leave those out of the loop."
+            }
         }
     }
 
@@ -314,6 +382,11 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, and here it is the sentence itself that rules the button out: what it asks
         // for is a pencil on a slider, which is the one thing in this app no button can do.
         case .recordingArmed:   return nil
+        // Nor either of the membership notices. The success one reports what already happened and the
+        // only thing a button could offer — undo — is on the top toolbar where it always is; both
+        // refusals name a frame to scrub to or ink to leave out of the loop, and neither is a tap this
+        // banner could make on the artist's behalf.
+        case .animationGroupMembershipChanged, .animationGroupEditRefused: return nil
         }
     }
 
@@ -345,6 +418,19 @@ struct CanvasNotice: Identifiable, Equatable {
         // model, where the fast tier can compare the case itself rather than a string.
         case .recordingRefused: return "recordingRefused"
         case .recordingArmed:   return "recordingArmed"
+        // **Three codes rather than one, and one of them is the *kind* of edit.** `videoBakeRefused`'s
+        // precedent says a refusal gets one code and a test that cares which reads the model — that
+        // holds for the refusal here. The success one is different: an add, a remove and a move are
+        // three different things to have happened, and the whole reason the notice exists is that the
+        // canvas looks identical after all three, so a test with only `"…Changed"` to read could not
+        // tell them apart at all.
+        case .animationGroupMembershipChanged(let edit):
+            switch edit {
+            case .joined: return "animationGroupJoined"
+            case .moved:  return "animationGroupMoved"
+            case .left:   return "animationGroupLeft"
+            }
+        case .animationGroupEditRefused: return "animationGroupEditRefused"
         }
     }
 

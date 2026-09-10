@@ -82,6 +82,12 @@ struct CanvasNoticeBanner: View {
         // The timeline's own glyph: the message is about which frame the artist is standing on, and
         // the fix is a scrub rather than anything on the canvas.
         case .cannotMoveDerivedFrame: return "film"
+        // **The timeline's glyph rather than the lasso's, and that is the message itself.** Both of
+        // these are about *when* rather than about what the loop caught: the change the artist just
+        // made is invisible on the frame they are standing on by design, and the whole content of the
+        // sentence is that it shows up when they scrub. The refusal shares it because its one way out
+        // is also a scrub.
+        case .animationGroupMembershipChanged, .animationGroupEditRefused: return "film"
         // The two cases in this switch where something genuinely has gone wrong — a save that did not
         // land, and a resize that found an element it could not read — so they get the warning
         // triangle none of the others use.

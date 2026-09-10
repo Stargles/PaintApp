@@ -137,6 +137,13 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// KEYFRAMES.md §3.4. Named apart from `.renameLayer` because a group is not a layer and an
     /// artist reading the history has to be able to tell which of the two they renamed.
     case renameAnimationGroup
+    /// **A selection joining, leaving, or changing animation group** (`setAnimationGroupOfSelection`)
+    /// — TODO (21)'s membership editing, ruled 2026-09-10. One label for all three operations, which
+    /// is the `.recolorSelection` precedent rather than a shortcut: the artist's question when they
+    /// read the history is *which edit am I putting back*, and all three are the same edit with the
+    /// destination filled in differently. Named apart from `.renameAnimationGroup` because renaming a
+    /// group and moving a drawing between groups are two entirely different things to want back.
+    case animationGroupMembership
     case rasterize
     /// TODO item (9): "Resize Canvas". **One step for the whole document**, whose undo is the
     /// inverse resize rather than a restoration of captured pixels — CANVAS_RESIZE.md §5 rule 10.
@@ -253,6 +260,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .deleteFolder: return "delete folder"
         case .renameFolder: return "rename folder"
         case .renameAnimationGroup: return "rename animation group"
+        case .animationGroupMembership: return "animation group change"
         case .rasterize: return "rasterize layer"
         case .resizeCanvas: return "resize canvas"
         case .bakePrecision: return "bake precision"

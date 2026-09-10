@@ -497,16 +497,81 @@ list — so a document with four of them offered four rows differing by a number
 `CanvasManager.renameAnimationGroup` is the writer and a long press on the group's header is the way in.
 **`tagColor` was specified here and displayed nowhere**: the swatch on a *channel* row is
 `TimelineGraphBand.colour(forDescriptorIndex:)`, the band's curve colour, which is a different thing
-keyed on a different input. The group header draws the tag now. **What is still missing is membership
-editing** — adding an element to a group or taking one out — and it is not a UI gap but an unruled one:
-§2.29 settles that splitting one animated group into two is *"a different feature"*, and retagging is
-that question from the other side, since every key on both tracks changes meaning. §2.11's *"reassignable
-by a tap"* is one line and its consequences are not settled; it needs a design conversation.
+keyed on a different input. The group header draws the tag now.
+
+**Membership editing was the last thing missing here and was ruled on 2026-09-10** — see §3.4.1.
 
 **It must go on every element kind, not just strokes.** `motionGroupID` today is on `VectorStroke` and
 `VectorTextElement` only, so fills and placed images ride the recipe's first binding and cannot be
 tinted by the group overlay — VECTOR_INTERPOLATION.md items 11/41 already ask for this to be fixed.
 Doing it once serves both features.
+
+### 3.4.1 Membership editing — ruled and shipped 2026-09-10
+
+The owner, asked in artist terms whether a drawing moved between animated groups should stay where it
+looks on screen or snap to the new group's motion:
+
+> *"stay where it looks like on screen for animation groups. I'm not sure how you plan to implement
+> putting one thing out of one animation and in to another animation group but I'll let you take the
+> wheel. Along with that, the ability to add new selections to an animation group (not only from
+> another animation group) and remove selections from groups will be useful. I will let you take it
+> first, then notify you if there is any UX changes I want in the future."*
+
+**Three operations, one write.** Add a selection to a group, remove one from a group, move one between
+two. They are the same arithmetic with one or both ends set to "no group".
+
+**What "stays where it looks on screen" means, and this is an interpretation rather than a quote.**
+Read literally as *every* frame it is self-defeating — an element that looks identical at every frame
+after joining a group has not joined it in any observable sense — and it is not expressible anyway,
+because only groups carry tracks and per-frame compensation would need a per-element track that does
+not exist. The reading built is re-parenting's: **appearance is preserved at the frame the artist is
+standing on, and from there the element follows its new group.**
+
+**The arithmetic, and why only the group factor is in it.** `posed(_:through:inheriting:)` shows an
+element at `g · G · C · I` — its group channel, then the cel channel, then the inherited container
+pose, groups first. Membership changes only `G`, so preserving the product at frame `F` means
+
+```
+    g′ · G_new(F) = g · G_old(F)      ⟹      g′ = g · G_old(F) · G_new(F)⁻¹
+```
+
+and `C` and `I` cancel exactly, because both carry every element on the cel and neither knows what
+group anything is in. A compensation that folded them in would be right at this frame and wrong at
+every other, having baked the cel's own animation into one element's rest geometry. A channel with no
+track, or one resting at `F`, contributes the identity, so joining a group that is not animated on this
+cel rewrites nothing.
+
+**Where it lives.** A fourth flat band in `SelectPanel` — a readout naming what the loop caught, then
+chips for No Group, each existing group, and New Group. All three operations act on a *selection*,
+which is the owner's own framing, and it is §5.26's argument for the membership picker's home applied
+to a fourth consumer. The Move bar was the alternative and is wrong twice: a membership edit is not a
+transform, and `DrawingView` hides this panel for exactly as long as a piece floats, so an artist
+refused by §2.29 would have had to put the piece down to find the fix. It obeys
+`selectionMembership` with no exception, per §5.26.
+
+**It says what it did, and that is not politeness.** The whole design is that nothing moves at the
+frame the artist is on, so without a notice the artist taps a control and watches the canvas not
+change — indistinguishable from a control that is broken. `CanvasNotice.animationGroupMembershipChanged`
+carries which of the three operations happened.
+
+**The two edges §2.29 left open, decided:**
+
+  * **A remove that empties a group keeps the group and keeps its track.** Deleting the registry entry
+    and the channel once the last member leaves destroys an authored animation on a verb the artist
+    reached for to move one drawing — §3.5's *"a picker that silently destroys the other mode's setting
+    is what a picker must not do"*. Keeping it also makes the round trip exact: `g · G(F) · G(F)⁻¹` is
+    `g`, so out-and-back-in at one frame is the identity. An empty group's track is inert in every
+    reader and stays listed, which is what lets the artist put something back into it.
+  * **An add cannot make a track meaningless, but a pose can make the edit impossible**, and that is
+    refused **whole**: a singular destination pose at this frame has no inverse, and a projective
+    compensation has nowhere to live on a placed image or a video. Never a partial edit — every key on
+    both tracks changes meaning at once, so half of one is a corrupted document. Adding every element
+    on a cel to one group merely makes that channel do what `.cel`'s does, which composes correctly and
+    is redundant rather than wrong.
+
+**No track is ever written**, so §2.28's union is untouched by construction and is still computed by
+the one accessor. **§2.29's refusal survives**; both its sentences now name this band as the second way
+out, because until this shipped the only fix either could offer was to redraw the loop.
 
 ### 3.5 Persistence
 

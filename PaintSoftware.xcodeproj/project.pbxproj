@@ -44,6 +44,8 @@
 		40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */; };
 		A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */; };
 		CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */; };
+		73BFF7457F61F47AB159E23C /* AnimationGroupMembershipLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */; };
+		2AABA690B3AC8120CFB1A9D1 /* AnimationGroupMembershipUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */; };
 		FA5E22753C4B7D504B335D8F /* TwoAnimationGroupMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */; };
 		4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */; };
 		E600A079E7FD19755BD9EC47 /* LassoFillLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */; };
@@ -347,6 +349,7 @@
 		744DEF6FCE41C5843269CB69 /* PaintSoftware/Engine/Deform/PoseInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */; };
 		A0AAFEC106A5B72078BC315E /* PaintSoftware/Models/TransformTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */; };
 		375499CA02B7EBD027F502C3 /* PaintSoftware/Models/AnimationGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */; };
+		DB3F9C57D7F36FE0ECB93138 /* PaintSoftware/Models/AnimationGroupMembership.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03B230A1423BE6C2D82E5CC /* PaintSoftware/Models/AnimationGroupMembership.swift */; };
 		A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */; };
 		E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */; };
 		D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */; };
@@ -438,6 +441,8 @@
 		BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImportedImageMoveBoxLogicTests.swift; sourceTree = "<group>"; };
 		DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PosedLassoMoveLogicTests.swift; sourceTree = "<group>"; };
 		B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartialAnimationGroupMoveLogicTests.swift; sourceTree = "<group>"; };
+		9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationGroupMembershipLogicTests.swift; sourceTree = "<group>"; };
+		7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationGroupMembershipUITests.swift; sourceTree = "<group>"; };
 		487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TwoAnimationGroupMoveLogicTests.swift; sourceTree = "<group>"; };
 		84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlacedImageShapeLogicTests.swift; sourceTree = "<group>"; };
 		71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LassoFillLogicTests.swift"; sourceTree = "<group>"; };
@@ -744,6 +749,7 @@
 		2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/PoseInterpolation.swift; sourceTree = "<group>"; };
 		10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformTrack.swift; sourceTree = "<group>"; };
 		53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationGroup.swift; sourceTree = "<group>"; };
+		C03B230A1423BE6C2D82E5CC /* PaintSoftware/Models/AnimationGroupMembership.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationGroupMembership.swift; sourceTree = "<group>"; };
 		EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformChannel.swift; sourceTree = "<group>"; };
 		636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformKeyframes.swift; sourceTree = "<group>"; };
 		D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseInterpolationLogicTests.swift; sourceTree = "<group>"; };
@@ -914,6 +920,8 @@
 				BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */,
 				DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */,
 				B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */,
+				9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */,
+				7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */,
 				487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */,
 				84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */,
 				EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */,
@@ -1152,6 +1160,7 @@
 				636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */,
 				EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */,
 				53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */,
+				C03B230A1423BE6C2D82E5CC /* PaintSoftware/Models/AnimationGroupMembership.swift */,
 				10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */,
 				2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */,
 				DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */,
@@ -1434,6 +1443,8 @@
 				40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */,
 				A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */,
 				CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */,
+				73BFF7457F61F47AB159E23C /* AnimationGroupMembershipLogicTests.swift in Sources */,
+				2AABA690B3AC8120CFB1A9D1 /* AnimationGroupMembershipUITests.swift in Sources */,
 				FA5E22753C4B7D504B335D8F /* TwoAnimationGroupMoveLogicTests.swift in Sources */,
 				4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */,
 				7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */,
@@ -1605,6 +1616,7 @@
 				E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */,
 				A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */,
 				375499CA02B7EBD027F502C3 /* PaintSoftware/Models/AnimationGroup.swift in Sources */,
+				DB3F9C57D7F36FE0ECB93138 /* PaintSoftware/Models/AnimationGroupMembership.swift in Sources */,
 				A0AAFEC106A5B72078BC315E /* PaintSoftware/Models/TransformTrack.swift in Sources */,
 				744DEF6FCE41C5843269CB69 /* PaintSoftware/Engine/Deform/PoseInterpolation.swift in Sources */,
 				DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */,

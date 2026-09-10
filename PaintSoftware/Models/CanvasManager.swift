@@ -146,6 +146,15 @@ final class CanvasManager: ObservableObject {
     /// costs a project that never animates nothing.
     @Published var animationGroups: [AnimationGroup] = []
 
+    /// **One entry behind `selectionAnimationGroup`** — see that accessor for the three gates in front
+    /// of it and why it needs a memo at all. Here rather than in `AnimationGroupMembership.swift`
+    /// because a Swift extension cannot declare stored properties, which is the same reason
+    /// `structureUndoDepth` lives in this file.
+    ///
+    /// **Deliberately not `@Published`.** It is derived from published state and it is written from a
+    /// getter a SwiftUI body calls, so publishing it would invalidate the view that is mid-evaluation.
+    var selectionAnimationGroupMemo: SelectionAnimationGroupMemo?
+
     /// Every guide stroke in the document. Document-level for the same reason, and because a guide
     /// is meant to be *referenced* by several intervals rather than copied into each, which only
     /// works if it has one home and a stable id.

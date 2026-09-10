@@ -268,6 +268,12 @@ pose key has a node.
       makes a group's track meaningless, are both edges to decide and state. Every key on both tracks
       changes meaning, so **one membership edit is one undo step** and the §2.28 union must still be
       computed by the one accessor rather than patched.
+
+      **Built 2026-09-10 on `tmp/groups`, and the design shipped is in KEYFRAMES.md §3.4.1** — the
+      compensation `g · G_old(F) · G_new(F)⁻¹`, a fourth flat band in the Select panel, a notice that
+      says which of the three operations happened (because the whole visible effect at this frame is
+      that nothing moved), an emptied group kept rather than deleted, and an edit whose compensation
+      cannot be carried refused whole. Delete this row when it merges.
 **Spec** KEYFRAMES.md — **§2 is thirty owner rulings and §8 is the build order.** Four rulings
 are superseded and kept; the file says which.
 
