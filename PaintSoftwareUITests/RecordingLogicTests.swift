@@ -260,6 +260,33 @@ final class RecordingLogicTests: XCTestCase {
         manager.stopRecording()
     }
 
+    /// **Armed, and playback is already running when the pencil lands.** The take starts from the
+    /// playhead where it is rather than snapping back to the top, so what the artist recorded is the
+    /// stretch they were watching — and it is the only answer that keeps `ValueRecording.resampled`
+    /// honest, since its i-th stop *is* `startFrame + i`.
+    ///
+    /// The two operands are the frame the playhead had reached before the landing and the take's
+    /// `startFrame`, and they are equal — which can go red, because the obvious alternative
+    /// (calling `play()` unconditionally) would replay from the entry frame and make it 0.
+    func testALandingWhilePlaybackIsAlreadyRunningTakesFromThePlayheadWhereItIs() {
+        let (manager, clock) = self.manager()
+        manager.armRecording()
+        manager.play()
+        let epoch = clock.now
+        clock.now = epoch + 5.5 / Double(manager.fps)
+        manager.tickPlayback()
+        let reached = manager.currentFrame
+        XCTAssertGreaterThan(reached, 0, "Setup: playback really moved before the pencil landed")
+
+        let began = manager.beginArmedTake(on: target(manager))
+
+        XCTAssertTrue(began)
+        XCTAssertEqual(manager.recordingTake?.startFrame, reached,
+                       "The take covers the stretch the artist was watching, not the whole scene again")
+        XCTAssertTrue(manager.isPlaying, "…and the clock it is timed against never stopped")
+        manager.stopRecording()
+    }
+
     /// A landing on a *different* target mid-take is answered honestly rather than folded in —
     /// `RecordingTake.target`'s rule, reached from the trigger.
     func testALandingOnADifferentTargetDuringATakeAnswersFalse() {
