@@ -3,6 +3,25 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## `FrameBakeKeyLogicTests`' mask-order test can fail to build its own fixture (2026-09-10)
+
+`testTwoMaskStacksInEitherIterationOrderAreOneDigest` perturbs a two-key `Dictionary`'s bucket layout
+until it finds a **second** iteration order to hash, then asserts both orders digest the same. It fails
+with its own message — *"No second iteration order was found, so this test would prove nothing"* — when
+sixty-four perturbations all come back in the original order. Swift seeds its hasher per process, so
+that is a property of the run rather than of the code.
+
+**Its own comment says this cannot happen**: *"Each attempt is about even money, so sixty-four of them
+make a false negative vanishing."* MEASURED 2026-09-10, Release fast tier: it happened. Either the
+attempts are not independent (a decoy inserted and removed at `minimumCapacity: 2 + attempt` may leave
+the same layout for many consecutive capacities, which would make sixty-four attempts far fewer than
+sixty-four trials) or they are not even money. **Passed clean in isolation immediately after, 17/17**,
+and again in the same session's Debug fast tier.
+
+**Do not read a red here as a finding about a branch.** The fix is presumably to perturb with something
+actually independent — a fresh `UUID` decoy per attempt rather than a capacity sweep — and to say so
+in the failure message; it is a test-only change and wants its own pass.
+
 ## `LassoFillLogicTests`' empty-fill test only passes when its siblings run first (2026-09-10)
 
 **MEASURED three ways on one machine, and it is pre-existing** — it reproduces identically on `main`
