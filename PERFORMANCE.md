@@ -4535,3 +4535,111 @@ backfill's `install` compares `LayerContentVersion(cel: live)` — no `derived:`
 captured *with* `derived?.identity`, so a cel that derives its content can never compare equal and is
 skipped by every backfill. Harmless (the debounced regen paints it) and quiet, which is why it wants
 its own test rather than a drive-by edit.
+
+### 18.7 An edit raised two whole-editor passes and now raises one (2026-09-10)
+
+§18.6 named this as the next lever and refused it, correctly: *"`installThumbnail` writes through
+`layers`, and `Layer`/`Cel` are structs read by the timeline … A side-channel store shadowing
+`Cel.thumbnail` done in a hurry is the duplicate-truth spaghetti the owner's 'no spaghetti'
+constraint rules out."* The caution was right about the *store*; it was not the only shape available.
+
+Everything below is **MEASURED on the owner's iPad 9** (`iPad12,1`, A13, 3 GB, iOS 26.5.2),
+**`-configuration Release`**, through `PlaybackProbe -probeMode edit -probeEdits 6` — 18 operations a
+run, six stroke commits, six undos, six redos — with no test runner attached. Control is `4708f2b`
+(`origin/main`); both builds were installed on the same device and run back to back.
+
+#### The count, which is the finding
+
+Per 18-operation run at 2048², 3 layers, 2 frames, one stroke a cel — **span *counts*, not
+milliseconds**:
+
+| span | control | fixed |
+|---|---|---|
+| `bodyDrawing` | 36 | **18** |
+| `bodyTimeline` | 36 | **18** |
+| `bodyToolbars` | 72 | **36** |
+| `updateUIView` | 36 | **18** |
+| `timelineTrack` | 36 | **18** |
+| `timelineKey` | 36 | **18** |
+| `timelineRebuild` | 18 | **0** |
+| `timelineTilePaint` | — | **18** |
+| `thumbnailFlush` / `thumbnailInstall` | 18 / 18 | 18 / 18 |
+
+**An edit raised exactly two whole-editor SwiftUI passes and now raises exactly one**, and the tiles
+still arrive exactly once per operation. The same halving holds at forty strokes a cel. This is the
+report answering the question in the currency that is not a duration, which is what makes it a fact
+about the composition rather than about the machine.
+
+#### The duration
+
+| document | control | fixed | on-CPU | unattributed/edit |
+|---|---|---|---|---|
+| 2048², 3L, **1 stroke/cel** | **49.9 ms** (50.2, 49.5) | **35.7 ms** (35.6, 35.9, 36.1, 35.2) | 39.1 → 25.9 | 43.5 → 34.2 |
+| 2048², 3L, **40 strokes/cel** | **42.1 ms** (42.1, 42.1) | **34.2 ms** (34.0, 34.3) | 30.9 → 26.4 | 38.4 → 33.0 |
+
+Four runs on the fixed side of the first row spread 0.9 ms and two on the control side 0.7 ms,
+against a 14.2 ms gap — so this is not the two-sample reading §12 and §15.5 both warn about.
+
+**And the burst the owner can point at is gone.** Counting main-thread stalls of 10 ms or more
+landing 300–800 ms after an operation — the 400 ms debounce and the pass it raised — the control has
+**29 across 36 operations** and the fixed build **0 across 72**. Opened up, a control commit reads
+`[425+16] [1239+27]` and a fixed one reads `[1239+27]`: the second number is the *next* operation
+arriving at the end of the interval, and the first is the one this pass removed.
+
+**At forty strokes a cel the control shows no such burst and still costs 8 ms more**, which is worth
+saying because it is the banner-versus-count trap in miniature: the heavier render lands at a less
+predictable moment and the pass is spread across wake-ups rather than concentrated into one ≥10 ms
+stall. The burst count is a symptom; the span count is the fact, and there it is 36 → 18 either way.
+
+#### What the storage is
+
+`ThumbnailTile` is a small final class. `Cel` and `Layer` each hold one as a `let` with a default, and
+`thumbnail` is a `nonmutating` accessor over it — so **there is one place a tile is kept and
+`Cel.thumbnail` is still the way to read and write it.** That is the difference from a side-channel
+store keyed by cel id: nothing can hold a second opinion, because there is nowhere else to hold one.
+MEASURED as a count in `ThumbnailRenderLogicTests`: `CanvasManager.objectWillChange` fires **0** times
+across an `installThumbnail` and **1** across an ordinary stored write to the same cel, in the same
+test, under the same subscription.
+
+What it changes is *semantics*, and that is documented rather than incidental: **two `Cel` values with
+the same `id` share one cell**, so a copy taken for an undo snapshot or an off-actor render batch
+reads the tile the live cel has now. For a picture *derived* from a cel's content that is the answer
+you want. It is also why a **duplicate** — a new cel with a new `id` — is given the image explicitly
+after construction rather than by carrying the field across; `Cel(...)` mints its own cell.
+
+Nothing publishing means nothing tells the views, so `CanvasManager.thumbnailInstalled` does.
+`installThumbnail` and `clearThumbnail` are its only senders; the track repaints the one block view
+that owns the cel (`timelineTilePaint`, **0.2 ms**) and the rail marks itself for a coalesced reload.
+The tile leaves `TimelineLayoutKey` as well — the second input after `currentFrame` that moves faster
+than the layout and decides nothing the layout decides — which is why `timelineRebuild` goes to zero
+rather than merely moving.
+
+#### Two things §18.6 and the brief for this pass had wrong
+
+**The install work was not 8–12 ms; it was 0.2.** `thumbnailInstall` MEASURED at 0.2 ms mean on both
+sides of this change. Every millisecond bought here is the *pass*, and none of it is the write.
+
+**And "one whole-editor pass" is not ~43 ms, because the two passes are not the same pass.** §18.6
+bounded the unattributed remainder at ~43 ms an edit and called it the cost of raising one; it is the
+cost of raising **both**. Removing the tile's pass buys 14.2 ms and leaves 34.2 — the edit's own pass
+is the dearer of the two, since it re-composites the canvas where the tile's only rebuilt the
+timeline. Anyone reading §18.6 as "there is another 43 ms here" will be disappointed by 14.
+
+#### Memory: unchanged
+
+`phys_footprint`, which is a proxy and includes the autorelease pool. Peak / end / growth MB, every
+run: control 469/462/185 and 465/458/184; fixed 467/462/185, 467/462/188, 465/460/186, 465/460/186 at
+one stroke, and 463/458/184, 464/458/184 at forty. The change adds one small object per cel and per
+layer and no buffer, which is what the numbers say.
+
+#### What is still not measured
+
+**The layer rail is closed in `PlaybackProbe`**, so `LayerPanel.body` and `LayerStackListView.reload`
+have never executed under any measurement here — §18.6 said so and it is still true. The rail's
+coalesced reload is therefore unmeasured, and its correctness rests on `LayerRowModel` comparing the
+tile object it already compared.
+
+**`Layer.thumbnail` is a mirror of the active cel's**, written by the same call — a genuine second
+truth, pre-existing, neither introduced nor removed here. It is why the rail shows the last-installed
+tile for a layer with no cel at the playhead. Deleting the field and deriving the row's picture from
+`activeCelIndex` is a two-line change and a visible behaviour change, so it wants its own pass.
