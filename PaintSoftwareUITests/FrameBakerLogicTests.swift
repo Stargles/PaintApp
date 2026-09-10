@@ -547,6 +547,37 @@ final class FrameBakerLogicTests: XCTestCase {
                        "An animated effect parameter must dirty the document even when frame 0 is unmoved.")
     }
 
+    /// **The same gap, on TODO (21)'s second channel kind** — a keyframed layer opacity.
+    ///
+    /// `Layer.opacity(atFrame:)` is a third frame-dependent term in the tree beside the two effect
+    /// resolvers, so an opacity curve that leaves frame 0 where it was is invisible at the probe
+    /// frame in exactly the way the test above describes. Without `channelTracks` in
+    /// `StructuralStamp` the baker keeps every frame it has and the artist's fade never appears in
+    /// playback — a permanent miss with nothing to explain it, which is this section's own
+    /// description of a missing stamp field.
+    ///
+    /// The premise is proved rather than assumed, as above: the curve's first key holds the value
+    /// the layer already stores, so the probe frame's tree is asserted identical either side of the
+    /// edit and a green result cannot come from the tree having noticed.
+    func testAnOpacityCurveEditIsCaughtEvenThoughTheProbeFrameCannotSeeIt() {
+        let manager = perFrameDocument(frames: 10)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        let treeBefore = manager.renderTree(atFrame: 0)
+        manager.layers[0].channelTracks[TargetChannel.opacity.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: manager.layers[0].opacity),
+                                  .init(frame: 7, value: 0.25)])
+        XCTAssertEqual(manager.renderTree(atFrame: 0), treeBefore,
+                       "The premise: the probe frame's tree must be unchanged, or this test proves nothing.")
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), Array(0..<10),
+                       "An animated opacity must dirty the document even when frame 0 is unmoved.")
+    }
+
     /// **The six fields of `StructuralStamp` no fixture reached, one test each.**
     ///
     /// They share a shape, and it is the shape that makes them dangerous: none is a cel's content,

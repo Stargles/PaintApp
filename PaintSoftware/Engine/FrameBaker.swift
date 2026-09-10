@@ -836,10 +836,10 @@ final class FrameBaker {
     /// pixel reaches the tree, and therefore reaches this, with no edit here.
     ///
     /// **Frame 0, fixed, rather than the playhead**, so that scrubbing does not read as a structural
-    /// change. The tree is frame-invariant except for `Layer.layerEffect(atFrame:)` and
-    /// `LayerFolder.resolvedEffect(atFrame:)`, and the two fields below close exactly that gap: an
-    /// effect track edited so that frame 7 changes and frame 0 does not is invisible in the tree at
-    /// frame 0 and plain in `effectTracks`.
+    /// change. The tree is frame-invariant except for `Layer.layerEffect(atFrame:)`,
+    /// `LayerFolder.resolvedEffect(atFrame:)` and `Layer.opacity(atFrame:)`, and the track fields
+    /// below close exactly that gap: a curve edited so that frame 7 changes and frame 0 does not is
+    /// invisible in the tree at frame 0 and plain in the dictionary.
     private struct StructuralStamp: Equatable {
         let tree: [RenderNode]
         /// The animated half of every layer's **and every folder's** effect, which a single probe
@@ -849,6 +849,12 @@ final class FrameBaker {
         /// observable respect. A folder's grade is carried by no `LayerContentVersion`, so this is
         /// the only place an animated one can be seen at all.
         let effectTracks: [[String: AnimationCurve]]
+        /// **The same gap, for the same reason, on TODO (21)'s second channel kind.** An opacity
+        /// curve edited so that frame 7 changes and frame 0 does not is invisible in a tree sampled
+        /// at frame 0 — `Layer.opacity(atFrame:)` is a third frame-dependent term beside the two
+        /// named above — so without this the baker keeps serving the frames it has and the artist's
+        /// fade never appears in playback. Layers then folders, `effectTracks`' shape exactly.
+        let channelTracks: [[String: AnimationCurve]]
         let keyframeMarks: [[Int]]
         let canvasSize: CGSize?
         let canvasPadding: CGFloat
@@ -871,6 +877,7 @@ final class FrameBaker {
         init(_ manager: CanvasManager) {
             tree = manager.renderTree(atFrame: 0)
             effectTracks = manager.layers.map(\.effectTracks) + manager.folders.map(\.effectTracks)
+            channelTracks = manager.layers.map(\.channelTracks) + manager.folders.map(\.channelTracks)
             keyframeMarks = manager.layers.map(\.keyframeMarks) + manager.folders.map(\.keyframeMarks)
             canvasSize = manager.canvasSize
             canvasPadding = manager.canvasPadding
