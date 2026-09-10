@@ -2751,8 +2751,33 @@ final class CanvasManager: ObservableObject {
     /// own gallery thumbnail and stores each cel's pixels directly, so a pending regen can't put a
     /// stale image on disk. (`flushPendingThumbnailRegens()` exists for callers needing sync
     /// freshness.)
+    ///
+    /// **The publish is the other half of the contract and it is not about the thumbnail.** The
+    /// paragraph above this function has always said this hook exists *"to trigger a thumbnail regen
+    /// **and force the `@Published layers` diff** that in-place texture mutation alone wouldn't
+    /// otherwise produce"* — and until PERFORMANCE.md §18.6 the diff came for free, because the
+    /// debounced install wrote `Cel.thumbnail` through `@Published layers` 400 ms later. §18.6 moved
+    /// the tile into a `ThumbnailTile` reference cell so that install publishes nothing, which left
+    /// a brush lift raising **no SwiftUI pass at all** on every stroke after the first on a cel
+    /// (the first spawns a cel, which publishes; `refreshUndoRedoState` publishes only when `canUndo`
+    /// *moves*, so it is silent as soon as anything undoable has happened).
+    ///
+    /// A pass is not cosmetic here — it is the clock. `CanvasView.reconcileLayers` is the only caller
+    /// of `syncFrameBake`, which un-suspends `FrameBaker` and calls `noteDocumentChanged()`
+    /// (RENDER.md §3.6), and it is the only caller of `updateSandwich`, `updateOnionSkin` and
+    /// `updateInterpolationPreviews`. With no pass the frame the stroke landed on is never marked
+    /// dirty, never baked, and `updateSandwich`'s trap 2 holds the mid-stroke pair forever; the
+    /// Behind onion ghost is never re-cut against the ink that was just drawn.
+    ///
+    /// So the send is explicit, at the lift, rather than a side effect of a *derived* picture landing
+    /// later — which is what `celContentChangedOutsideStroke` (this function's outside-a-stroke twin,
+    /// same two lines) has always done, and what `importedImageElement`, the video insert and
+    /// `PlaybackProbe.commitStroke` each spell out beside their own `scheduleThumbnailRegen`.
+    /// **It costs no pass that `origin/main` did not already pay**: main raised exactly one per brush
+    /// stroke, at +400 ms, and this is the same one moved to the moment it is about.
     func strokeEnded(layerIndex: Int, celIndex: Int) {
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+        objectWillChange.send()
     }
 
     func scheduleThumbnailRegen(layerIndex: Int, celIndex: Int) {

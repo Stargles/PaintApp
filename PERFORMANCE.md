@@ -4643,3 +4643,42 @@ tile object it already compared.
 truth, pre-existing, neither introduced nor removed here. It is why the rail shows the last-installed
 tile for a layer with no cel at the playhead. Deleting the field and deriving the row's picture from
 `activeCelIndex` is a two-line change and a visible behaviour change, so it wants its own pass.
+
+#### The pass that was silently load-bearing, and the probe that could not see it
+
+**Eight XCUITests reddened on the full suite at `4476fad` and the cause was not the tile.** Five of
+them said the same thing — the canvas never left `updateSandwich`'s mid-stroke pair, because the frame
+the stroke landed on was never baked — and a sixth said the Behind onion ghost was never re-cut
+against the ink just drawn. **Every one of them is one missing SwiftUI pass.**
+
+A brush stroke's ink goes into the `RasterLayerTexture` / `VectorCanvas` the cel *already references*,
+so `@Published layers` does not move and **nothing about the model announces that a drawing changed**.
+`CanvasManager.strokeEnded`'s own header paragraph has said so since it was written — it exists *"to
+trigger a thumbnail regen **and force the `@Published layers` diff** that in-place texture mutation
+alone wouldn't otherwise produce"* — but it never sent anything itself. The diff came from the
+debounced tile install writing `Cel.thumbnail` through `layers` 400 ms later. Take that publish away
+and a lift raises **no pass at all** on every stroke after the first on a cel: the first spawns a cel,
+which publishes, and `refreshUndoRedoState` publishes only when `canUndo` *moves*, so it is silent as
+soon as anything undoable has happened.
+
+A pass is the clock, not a repaint. `CanvasView.reconcileLayers` runs only from one, and it is the
+only caller of `CanvasManager.syncFrameBake` — which un-suspends `FrameBaker` and calls
+`noteDocumentChanged()`, RENDER.md §3.6 — as well as of `updateSandwich`, `updateOnionSkin` and
+`updateInterpolationPreviews`. The fix is one line: `strokeEnded` sends `objectWillChange` beside its
+`scheduleThumbnailRegen`, which is exactly what `celContentChangedOutsideStroke` (its
+outside-a-stroke twin), `importedImageElement` and the video insert have always done.
+
+**The count above is unaffected and the 14.2 ms stands**, and the reason is worth stating rather than
+asserting: `PlaybackProbe.commitStroke` does not call `strokeEnded` at all. It commits through the
+shape tool's seam and then sends `objectWillChange` *itself*, two lines that already model this fix.
+So the probe measured a path that carried the publish while the artist's brush path did not — which is
+why 36 → 18 was a true reading of the probe and the app was still broken. One pass per brush stroke is
+what `origin/main` already paid, at +400 ms; this is the same one moved to the moment it is about, so
+the burst 300–800 ms after an operation stays at zero.
+
+**The general shape, because it is the one this file keeps rediscovering:** a fixture that reaches the
+model through a different seam than the artist does is measuring a different program. The probe's
+seam publishes; the brush's does not; the difference is invisible in every number on this page.
+`ThumbnailRenderLogicTests.testAStrokeLiftRepublishesTheDocumentEvenThoughTheInkItselfDidNot` is the
+pin, and its two operands are the emissions across the ink (0) and across the lift (1) — the first is
+what stops the second being true of any implementation whatever.

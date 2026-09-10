@@ -743,6 +743,69 @@ final class ThumbnailRenderLogicTests: XCTestCase {
                        + "and the zero it reported is meaningless")
     }
 
+    /// **Making the install silent took the only publish a brush stroke had, and this is the pin
+    /// that says the lift has to supply one itself.**
+    ///
+    /// The two operands are the number of `objectWillChange` emissions across **the ink** and across
+    /// **the lift**. The first must be 0 and the second 1, and neither is worth anything without the
+    /// other: a stroke's dabs land in the `VectorCanvas` (or `RasterLayerTexture`) the cel already
+    /// references, so `@Published layers` does not move and *nothing* about the model announces that
+    /// a drawing changed — which is the premise `strokeEnded`'s own header paragraph has always
+    /// stated (*"force the `@Published layers` diff that in-place texture mutation alone wouldn't
+    /// otherwise produce"*) and which the zero here is what actually establishes.
+    ///
+    /// Until PERFORMANCE.md §18.6 that diff arrived by accident: the debounced tile install wrote
+    /// `Cel.thumbnail` through `layers` 400 ms later. The tile is a reference cell now and the
+    /// install publishes nothing — pinned by the test directly above — so a lift with no send of its
+    /// own raises **no SwiftUI pass at all** on every stroke after the first on a cel.
+    ///
+    /// **What that costs is not cosmetic, and is why this test is worth more than its own subject.**
+    /// `CanvasView.reconcileLayers` runs only from a pass, and it is the only caller of
+    /// `CanvasManager.syncFrameBake` — which un-suspends `FrameBaker` and calls
+    /// `noteDocumentChanged()` (RENDER.md §3.6) — as well as of `updateSandwich`, `updateOnionSkin`
+    /// and `updateInterpolationPreviews`. With no pass the frame the stroke landed on is never marked
+    /// dirty and never baked, `updateSandwich`'s trap 2 holds the mid-stroke pair indefinitely, and
+    /// the Behind onion ghost is never re-cut against the ink just drawn. That is a full-suite
+    /// regression of eight XCUITests, and this three-line logic test is what stands where the fast
+    /// tier could have caught it.
+    ///
+    /// **The last hop is genuinely not reachable from here**: "a publish becomes a `updateUIView`"
+    /// is SwiftUI's, and `CanvasView.swift` is not compiled into this target. `BakeWiringUITests`,
+    /// `TimelineBakeIndicationUITests` and `SandwichCompositingUITests` are what cover it. What this
+    /// test owns is the operand those three cannot see: whether the model said anything at all.
+    func testAStrokeLiftRepublishesTheDocumentEvenThoughTheInkItselfDidNot() throws {
+        let manager = deferredManager()
+        let live = try XCTUnwrap(manager.layers[0].cels[0].vector,
+                                 "PREMISE: the fixture's cel has a tier to draw into")
+        var publishes = 0
+        let token = manager.objectWillChange.sink { _ in publishes += 1 }
+        defer { token.cancel() }
+
+        // Operand one — the ink. Held by reference and mutated in place, exactly as
+        // `StrokeCanvasView` commits a stroke into the canvas the cel handed it.
+        live.strokes = live.strokes + [Self.stroke(99, canvas: Self.deferredCanvas)]
+        live.bumpVersion()
+
+        XCTAssertEqual(publishes, 0,
+                       "committing a stroke into the cel's own `VectorCanvas` republished "
+                       + "\(publishes) time(s). If ink alone publishes then the assertion below is "
+                       + "true of any implementation whatever, including one where `strokeEnded` "
+                       + "says nothing — which is the case this test exists to redden.")
+
+        // Operand two — the lift.
+        let afterTheInk = publishes
+        manager.strokeEnded(layerIndex: 0, celIndex: 0)
+
+        XCTAssertEqual(publishes, afterTheInk + 1,
+                       "a stroke lift republished `CanvasManager` \(publishes - afterTheInk) time(s) "
+                       + "rather than once. At zero the editor takes no SwiftUI pass for the stroke, "
+                       + "so `CanvasView.reconcileLayers` never runs, `syncFrameBake` never "
+                       + "un-suspends the baker or marks the frame dirty, and the canvas stays on "
+                       + "`updateSandwich`'s mid-stroke pair with the artist's finished stroke never "
+                       + "baking. Above one, an edit is paying for two whole-editor rebuilds — "
+                       + "PERFORMANCE.md §18.7's finding, in reverse.")
+    }
+
     /// The silence is worth nothing if the tile does not arrive. Operands: the object on the cel
     /// afterwards, and the object handed to `installThumbnail` — identity, because a tile is
     /// replaced wholesale rather than edited.
