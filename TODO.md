@@ -48,90 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (56) Strokes still cost too much per edit, and some of them vanish
-
-**Status** — **the padding theory is refuted and the title it was filed under was wrong.** Nothing on
-this path reads `canvasPadding`; padding was only the owner's lever for pushing `canvasSize` toward
-`maxCanvasExtent`. Two of the three costs behind the original report are fixed and merged (§11.11b's
-lock, §16's onion skin); **what is left is a per-edit cost that is smaller but still visible, and the
-disappearing strokes, which are untouched.**
-
-> *"When I try to lay strokes down and undo it, I am met with a lot of lagspikes and stutter when the
-> brush is lifted. Sometimes, brushstrokes that I layed down dissapear."* — 2026-09-07
-
-> *"get to a point where there is no noticeable lag when placing strokes or undoing (somewhat
-> tolerable) no matter how many strokes or cels or layers etc are on canvas."* — 2026-09-09, which is
-> the acceptance criterion
-
-**What the device says now.** MEASURED on the owner's iPad 9 after §16: main-thread busy per edit
-**64-214 ms → 20-121 ms** at 4096², **91-152 → 46-93 ms** at 2048². Halved, and not yet "not
-noticeable". `CanvasManager.undo()` itself is **0.71-1.26 ms** — the press was never the cost, and
-§11.11b's lock fix holds. What the artist feels after an undo is the same cascade a stroke produces,
-because an undo changes the same layer's ink.
-
-**The two spikes the owner saw are identified and one of them is still there.** `PlaybackTrace`
-listed every main-thread stall over 10 ms across twelve operations: exactly two each, one at
-**401-402 ms** (the 400 ms debounced cel thumbnail, plus the SwiftUI pass it raises) and one from the
-operation's own pass. §16 took the onion skin's pixel work out of both. The remaining term is
-whatever else those two passes still do.
-
-**Left to build**
-- [ ] Get per-edit main-thread busy to unnoticeable, at any stroke, cel and layer count. Measure on
-      the device — see §17.1 on why three Mac-measured wins delivered nothing.
-      **The stroke-count axis is closed.** The cel thumbnail was the fifth renderer and the last one
-      drawing on the main thread; it is off it (PERFORMANCE.md §18). MEASURED on the owner's iPad in
-      Release: **115.4 → 41.2 ms an edit at forty strokes a cel**, 76.7 → 49.9 at one, so forty strokes
-      now cost *less* per edit than one.
-      **What is left is named rather than implied, and it is not ours.** ~43 ms an edit is SwiftUI's own
-      view-graph update plus the CATransaction commit at the end of it — **87% of what an edit costs on
-      the main thread** — bounded by four measurements: it is on-CPU, entirely in the runloop's source
-      half, in the gaps *between* every span this app can place, and fixed across strokes, cels, layers
-      and canvas area. No span this app can add will attribute it further.
-      **The second pass is gone — merged 2026-09-10, PERFORMANCE.md §18.7.** A tile lives in a
-      `ThumbnailTile` reference cell, so installing one is not a mutation of `@Published layers` and
-      does not invalidate every view observing `CanvasManager`. The evidence is a **count**: per 18
-      operations, `bodyDrawing`/`bodyTimeline`/`updateUIView`/`timelineTrack` went **36 → 18** and
-      `timelineRebuild` **18 → 0**, with tiles still installed 18/18. MEASURED on the owner's iPad in
-      Release: **49.9 → 35.7 ms an edit** at 2048², and the ≥10 ms stalls in the debounce window — the
-      owner's second flicker — **29 of 36 operations → 0 of 72**.
-      Two figures this file previously carried were wrong and are corrected: the install work was
-      **0.2 ms, not 8-12** (it measured 0.2 on both sides, so every millisecond bought is the pass and
-      none is the write), and one whole-editor pass is **not** ~43 ms — that was the cost of both.
-      Removing the tile's buys 14.2 and leaves 34.2, because the edit's own pass re-composites the
-      canvas where the tile's only rebuilt the timeline.
-      **What is left to try is named in §18.7**: `Layer.thumbnail` is a genuine pre-existing second
-      truth (a mirror of the active cel's tile, which is why the rail shows a stale picture for a layer
-      with no cel at the playhead), and deleting it to derive from `activeCelIndex` is small but a
-      visible behaviour change. The layer rail is also still **unmeasured** — it is closed in
-      `PlaybackProbe`, so `LayerPanel.body` and `LayerStackListView.reload` have never executed under
-      any measurement here.
-      **One thing outside every number above**: the layer rail is closed in `PlaybackProbe`, so
-      `LayerPanel.body` and `LayerStackListView.reload` have never executed under measurement.
-- [ ] **The disappearing strokes, which nothing so far has addressed.** BUGS.md's *"Starting a stroke
-      before the last one has rendered leaves the last one off screen"* is the mechanism: the base
-      slot still holds the picture from before stroke *n* while the new stroke has taken the scratch
-      overlay, so *n* is on screen nowhere until its render lands. That entry's own text says the
-      window *"scales with canvas area"*, which is why a big canvas made a two-order-of-magnitude-
-      smaller window reachable again.
-      **Ruled 2026-09-09, and the ruling refuses both options BUGS.md offered.** Asked to choose
-      between a second overlay for un-landed ink and a synchronous composite at pen-up, the owner:
-      > *"Your choice. Whatever it is, it must obey the fundamental design constraints: The main
-      > thread must not noticeably stutter at any given moment, and memory must stay well within
-      > limits at all canvas sizes, amount of cels, layers, strokes, etc. Code architecture must be
-      > clean, no spaghetti."*
-      A synchronous pen-up composite is main-thread stutter and reverses RENDER.md §2.13; a second
-      canvas-sized overlay is memory the 3 GB iPad already cannot spare at 6000². So the answer has to
-      cost neither, and both properties have to be **measured** rather than asserted.
-      **And the owner supplied the reproduction, which no session had.** 2026-09-09: *"the only time
-      I have observed them happen reliably on the ipad is in my the Test1, after setting the canvas
-      padding up (to max for instance). Test1 is a 4096 by 4096 canvas with three layers and a lot of
-      brushstrokes and images... Test1 is currently my source of truth."* That points at a **second
-      defect**: raising padding may take the 2026-09-04 incremental append away, so every pen-up falls
-      back to the full re-walk — 1129.6 ms rather than 2.57 ms, a window wide enough to hit every time.
-      Measure that before designing anything, because if it is true it is the larger half.
-
----
-
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
@@ -238,10 +154,18 @@ pose key has a node.
       keeps the arm. See KEYFRAMES §5.1, which also states the four things a new recordable surface has
       to implement — the trigger is `CanvasManager.beginArmedTake`, built once so that the Move box and
       stage 10's canvas plug in without rework.
-      **What is left is the Move box itself**, and the reason is unchanged: `ValueRecording` is
-      scalar-only while a transform channel stores `PoseQuad` keys, so resampling and tolerance both
-      need owner rulings. §5's *"slow motion is a capture-speed multiplier on the record control"* is
-      also still unbuilt.
+      **What is left is the Move box itself, and it no longer waits on the owner.** Put to them on
+      2026-09-10 as "resampling and tolerance for a quad" they answered *"i have no idea what the
+      question is"* — correctly, because that sentence is entirely ours. In artist terms it is only
+      this: recording a slider captures **one number** over time, and recording the Move box captures
+      **a shape** — four corners. Both then get thinned, so a straight drag lands as two keyframes
+      rather than sixty. The open part was never a preference; it was *"how much corner movement counts
+      as a change worth keeping"*, which is a **number a person can only judge by feel, after they can
+      see it**. So: build it with the slider's own thinning rule applied to the largest corner
+      movement, in canvas points, and let the owner tune it once a recorded drag exists to look at —
+      the same reasoning as [[render the cost, don't describe it]]. Do not hold the surface for a
+      ruling that cannot usefully be given in advance.
+      §5's *"slow motion is a capture-speed multiplier on the record control"* is also still unbuilt.
 - [ ] **Stage 10, the timing recorder (§7) — the owner gave the full brief on 2026-09-09 and it is
       larger than §7's laser pointer.** It sits on stage 7 and was left until its base is whole.
 
@@ -286,21 +210,30 @@ pose key has a node.
       channels since stage 2b — but **Add Keyframe** lives only on a layer row's cel menu and the
       timeline has no folder rows, so an artist cannot place the first key on a folder at all. Model
       correct, feature unreachable, which is the exact shape of the three defects the owner found in a
-      minute on 2026-09-03. **Needs an owner ruling on where a folder's keyframe button lives** before
-      anyone builds it.
+      minute on 2026-09-03. **Asked on 2026-09-10, the owner ruled *"You decide how to do it"*, so this
+      is a build item and not a question.** The obvious shape, not yet weighed against the code: a
+      folder already has an options menu, and a layer's Add Keyframe lives on its cel menu — so the
+      cheapest honest answer is probably the folder's own options menu, keyed at the playhead. Weigh
+      that against giving folders timeline rows, which is a much larger change and would also answer
+      several other things.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
       when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
       bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
 - [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
       because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
       `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
-- [ ] **Animation-group membership editing needs a design conversation first — but not the half the
-      owner remembered.** Asked on 2026-09-07 they recalled ruling *"if you make a selection and try to
-      move an already existing animation, then it refuses"*, and **that shipped on 2026-09-03**: §2.29,
-      a Move catching part of a group is refused and says so. What is still open is **retagging** an
-      element into or out of a group, which is the same question from the other side. §2.29 rules that
-      splitting one animated group into two is *"a different feature"*, and retagging an element is
-      that question from the other side — every key on both groups' tracks changes meaning.
+- [ ] **Animation-group membership editing — and this row's own wording is the reason it is still
+      open.** Put to the owner on 2026-09-10 as "animation-group retagging", they answered *"dont know
+      what the question is"*, which is fair: every word of the previous version was ours. **Ask it in
+      the artist's terms next time, roughly:** *you have two drawings that move together as one
+      animated thing. You want to take one of them out and put it in a different animated thing. When
+      you do, should it stay where it looks like it is on screen — which means the app rewrites its
+      motion to compensate — or should it snap to wherever the new group's motion puts it?* That is a
+      behaviour with two defensible answers and no safe default, which is why it is theirs.
+      The half that shipped 2026-09-03 is §2.29: a Move catching part of a group is refused and says
+      so. What is open is moving an element *between* groups, where every key on both tracks changes
+      meaning. §2.29 also rules that splitting one animated group into two is *"a different feature"*.
+      **Do not build until the question above has actually been asked and answered.**
 
 **Spec** KEYFRAMES.md — **§2 is thirty owner rulings and §8 is the build order.** Four rulings
 are superseded and kept; the file says which.
