@@ -702,13 +702,20 @@ final class UndoRepairLogicTests: XCTestCase {
     }
 
     /// **A video's placeholder is the branch that reaches outside its own rectangle**, by up to a
-    /// quarter of a local unit once the 0.5-unit line-width floor bites — which it does here, at a
-    /// placement scale of 6. That is what the one-local-unit inflation in `placedFootprint` covers,
-    /// and this is the fixture that would catch its removal.
+    /// quarter of a local unit once the 0.5-unit line-width floor bites. That is what the
+    /// one-local-unit inflation in `placedFootprint` covers, and **the scale here is chosen so that
+    /// the inflation is the only thing covering it**: `draw(video:)` strokes at `max(2/s, 0.5)` local
+    /// units about a line inset `1/s`, so the border stands `0.25 − 1/s` local units — `0.25·s − 1`
+    /// canvas points — proud of the natural rectangle. At `s = 12` that is **2 points**, which the one
+    /// point of float slack cannot absorb and the 12 points the inflation contributes can. MEASURED
+    /// by mutation: drop the inflation and this test reddens on the picture, not on the rectangle.
+    ///
+    /// A gentler scale would leave the mutation alive — at `s = 6` the overhang is half a point and
+    /// the slack hides it — which is the shape of a fixture that pins nothing.
     func testUndoingAndRedoingAVideoPlaceholderIsBoundedIncludingItsBorder() {
         assertARoundTripIsBoundedAndDrawsRight(
             .video(Self.videoElement(at: CGPoint(x: 70, y: 60),
-                                     natural: CGSize(width: 12, height: 8), scale: 6)),
+                                     natural: CGSize(width: 6, height: 4), scale: 12)),
             "video placeholder")
     }
 
