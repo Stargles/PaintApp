@@ -90,10 +90,29 @@ final class UnlandedInkUITests: PaintUITestCase {
 
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.60, dy: 0.42))
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.58), to: CGVector(dx: 0.60, dy: 0.58))
+        let held = canvasBytes(canvas)
+        attach(canvas, "both strokes, before either render has landed")
         // Two renders are queued on one serial background queue, each holding this delay.
         Thread.sleep(forTimeInterval: TimeInterval(Self.renderMillis) / 1000 * 3)
 
         attach(canvas, "both strokes, after both renders have landed")
+
+        // **The invariant itself, on the screen rather than on the model.** The held pictures are
+        // what the base will contain; when the base lands and they retire, the canvas must not
+        // change. A wrong alpha, a window an integral point out, or ink drawn twice for one frame
+        // all move this and nothing else in the suite would see them.
+        //
+        // MEASURED 0 of 255 across the paper both strokes are on, 2026-09-09. The bound is loose rather than
+        // exact for one honest reason: the held picture is the *live* walk's dabs and the base is
+        // the stored refit re-stamped at `StrokePathFit`'s 0.25 pt tolerance, so a curved stroke may
+        // differ by a fraction of a pixel at its edges. A straight drag does not, which is why these
+        // are straight.
+        let landed = canvasBytes(canvas)
+        let worst = worstChannelDifference(held, landed)
+        XCTAssertLessThanOrEqual(worst, 8,
+                                 "the paper must not change at the moment the base takes the ink "
+                                 + "over from the overlay — the artist should not be able to tell "
+                                 + "which of the two is drawing (worst channel \(worst) of 255)")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.47, dy: 0.42)),
                        "the first stroke is in the base by now and must still be drawn")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.47, dy: 0.58)),
@@ -123,6 +142,32 @@ final class UnlandedInkUITests: PaintUITestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.47, dy: 0.5)),
                        "a finished stroke is on screen the instant the pen lifts, whatever the "
                        + "rasterize is doing — RENDER.md §2.13")
+    }
+
+    /// The paper around both strokes, as flat RGBA8 — `rgbaPixel`'s buffer over a region instead of
+    /// one point, so two moments can be compared rather than sampled.
+    ///
+    /// **Cropped, and the crop is the difference between a measurement and a wrong answer.**
+    /// `canvas.host` spans the whole window, so an uncropped comparison includes the timeline —
+    /// where the cel's thumbnail is regenerated on a 400 ms debounce after a stroke and legitimately
+    /// changes between these two moments. MEASURED: worst channel **217** whole-window against
+    /// **0** over the paper, on the same pair of screenshots. That is a real difference about
+    /// something this test is not asking after, which is the shape CLAUDE.md calls measuring a proxy
+    /// and reporting it as the thing.
+    private func canvasBytes(_ element: XCUIElement) -> [UInt8] {
+        guard let cg = element.screenshot().image.cgImage else { return [] }
+        let region = CGRect(x: CGFloat(cg.width) * 0.30, y: CGFloat(cg.height) * 0.38,
+                            width: CGFloat(cg.width) * 0.35, height: CGFloat(cg.height) * 0.24)
+        guard let cropped = cg.cropping(to: region) else { return [] }
+        return CanvasFixture.rgbaBytes(cropped) ?? []
+    }
+
+    private func worstChannelDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
+        XCTAssertFalse(a.isEmpty, "Setup: the screenshot has pixels")
+        XCTAssertEqual(a.count, b.count, "Setup: two shots of one element are the same size")
+        var worst = 0
+        for i in 0..<min(a.count, b.count) { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
+        return worst
     }
 
     private func attach(_ element: XCUIElement, _ name: String) {
