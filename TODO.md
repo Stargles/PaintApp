@@ -242,14 +242,6 @@ pose key has a node.
       scalar-only while a transform channel stores `PoseQuad` keys, so resampling and tolerance both
       need owner rulings. §5's *"slow motion is a capture-speed multiplier on the record control"* is
       also still unbuilt.
-- [ ] **Layer opacity cannot be keyframed and should be.** The owner, 2026-09-09: *"layer opacity
-      should also be able to be keyframed, currently its not."* Every channel the graph editor carries
-      today is a **pose** channel — the six curves of a quad — and opacity is neither a pose nor stored
-      on a track. So this is a new channel *kind* rather than a new curve, and it is the first one, which
-      means it also settles the shape every later non-pose channel takes (a folder's opacity, an
-      effect's strength, a blend amount). Worth checking against KEYFRAMES §2 before designing: §2.28
-      computes "a keyframe" as the union of explicit marks and every frame a channel keys on, and a
-      second channel kind has to join that union rather than keep a list of its own.
 - [ ] **Stage 10, the timing recorder (§7) — the owner gave the full brief on 2026-09-09 and it is
       larger than §7's laser pointer.** It sits on stage 7 and was left until its base is whole.
 
@@ -289,6 +281,13 @@ pose key has a node.
       lifecycle, A is worth it and B duplicates ink-drawing for nothing; if it is not, take B and say so.
       **Prerequisite either way**: the owner's two-act arming above — record arms, the *pen landing*
       starts the take. This feature is that trigger's second surface, so build the trigger once.
+- [ ] **A folder's keyframes have no entry point, and that is now two channel kinds deep.** Folder
+      opacity animates and renders correctly (merged 2026-09-10), and so have a folder's *grade*
+      channels since stage 2b — but **Add Keyframe** lives only on a layer row's cel menu and the
+      timeline has no folder rows, so an artist cannot place the first key on a folder at all. Model
+      correct, feature unreachable, which is the exact shape of the three defects the owner found in a
+      minute on 2026-09-03. **Needs an owner ruling on where a folder's keyframe button lives** before
+      anyone builds it.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
       when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
       bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.

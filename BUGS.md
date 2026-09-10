@@ -22,6 +22,27 @@ and again in the same session's Debug fast tier.
 actually independent — a fresh `UUID` decoy per attempt rather than a capacity sweep — and to say so
 in the failure message; it is a test-only change and wants its own pass.
 
+## `InterpolationModelLogicTests`' scrub-memo test counts cels against a budget measured in bytes (2026-09-10)
+
+**MEASURED**: red inside the full suite under four parallel clones (`("3") is not equal to ("2")`),
+**passed clean in isolation** on the same binary and the same device seconds later.
+
+Its own assertion message names the reason it is fragile — *"The byte budget bounds it, and it is bytes
+rather than a count of cels"* — so the author knew the operand was a proxy. A byte budget evicts on
+memory pressure, and memory pressure under four clones is not the memory pressure of one test alone, so
+the count it is asserted against is a function of the machine as well as of the code.
+
+**The fix is to assert the thing the budget is about** — bytes held after the scrub, against the budget
+— rather than how many cels that happened to buy. Until then, read a red here the way this file already
+asks for the other two: run it alone before believing it is about a branch.
+
+**This is the third flake of the same family found in one day**, and they are all the same shape: a
+gate that cannot see them. See also `LassoFillLogicTests`' empty-fill test above and
+`FrameBakeKeyLogicTests`' digest test. **Two of the three are logic tests, which the fast tier does
+run** — so the fast tier is not blind to them by *selection*, it is blind because they only fail under
+the contention the full suite creates. That is worth stating plainly: a green fast tier is not evidence
+that a logic test is deterministic.
+
 ## `LassoFillLogicTests`' empty-fill test only passes when its siblings run first (2026-09-10)
 
 **MEASURED three ways on one machine, and it is pre-existing** — it reproduces identically on `main`
