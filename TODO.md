@@ -259,8 +259,45 @@ pose key has a node.
       effect's strength, a blend amount). Worth checking against KEYFRAMES §2 before designing: §2.28
       computes "a keyframe" as the union of explicit marks and every frame a channel keys on, and a
       second channel kind has to join that union rather than keep a list of its own.
-- [ ] **Stage 10**, the timing recorder (§7), which sits on stage 7 and was left until its base is
-      whole.
+- [ ] **Stage 10, the timing recorder (§7) — the owner gave the full brief on 2026-09-09 and it is
+      larger than §7's laser pointer.** It sits on stage 7 and was left until its base is whole.
+
+      > *"The user primes the recorder and selects the brush. Then as they put their pen on canvas, the
+      > recorder starts and the user can draw while recording. This is just useful for timing. The
+      > stroke will go on the cel of the layer that is active. The start and end of the stroke in the
+      > cel will be where the stroke started and ended while that cel was active."*
+
+      So one continuous gesture is **cut at cel boundaries by when it was drawn**, while playback runs
+      under the pen: each cel keeps the arc the artist drew during it. That is roughing timing out in
+      real ink, and it is a different thing from §7's laser-pointer trail — §7 is the *tail*, this is
+      the ink.
+
+      **The owner named the fork themselves and left the call to us**, with a hard ceiling on cost:
+      > *"it is possible that this feature by itself (with the brush) may require extensive changes to
+      > the engine. I do not want that. It is meant to be a relatively light feature. In the case that
+      > doing the stroke baking thing costs too much, then just do this alternative workflow: The user
+      > primes the record tool, then lays their pen down on the canvas (no need to select brush tool).
+      > It will then do basically the same record stroke as before, but this time you can make it a
+      > separate simple and specialized stroke engine, as part of the record tool instead of branching
+      > off the actual brushstroke tool. Might be better or worse for clean architecture. Your call."*
+
+      **A — the real brush, split live at each cel change.** The artist's own brush, so the ink is ink.
+      The cut is a mid-gesture commit: close the stroke on the outgoing cel, open one on the incoming
+      cel at the same point, carrying pressure and velocity so the seam does not show. Note this lands
+      squarely in the scratch/base overlay lifecycle — the same code the disappearing-strokes fix is in
+      — so the two must not be built at once.
+      **B — a specialised stroke engine inside the record tool.** No brush selection, no reach into the
+      shipped drawing path, and it is what §7 already specifies (a trail from `StrokeGeometry
+      .stampRadius(forPressure:brush:size:)` plus the capsule chain, with decay-since-touch-down
+      standing in for pressure). Cheap and contained, at the cost of a second thing that draws ink.
+
+      **Decide it on a measured cost, not a guess.** The one fact already in hand: nothing in the
+      gesture path refuses a touch while `isPlaying` — the only `isPlaying` guard in `CanvasView` is the
+      sandwich rebuild — so "draw while it plays" may need no gating work at all, which is the premise
+      option A's cost turns on. If a mid-gesture cel-boundary commit is a small change to the stroke
+      lifecycle, A is worth it and B duplicates ink-drawing for nothing; if it is not, take B and say so.
+      **Prerequisite either way**: the owner's two-act arming above — record arms, the *pen landing*
+      starts the take. This feature is that trigger's second surface, so build the trigger once.
 - [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
       when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
       bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
