@@ -170,9 +170,80 @@ final class UnlandedInkLogicTests: XCTestCase {
         var ink = UnlandedInk()
         ink.hold(Self.paint(id: 1, version: 3))
         ink.hold(Self.paint(id: 2, version: 4))
+        // **The `before` operand, and it is here because a mutation run put it here.** Neutering
+        // `hold` left this test green — "empty after `removeAll`" is true of a set that was never
+        // filled, so without this line the assertion below is about nothing.
+        XCTAssertEqual(ink.pictures.count, 2, "Setup: there is something to lose")
         ink.removeAll()
         XCTAssertTrue(ink.isEmpty, "held ink belongs to the canvas it was drawn on")
         XCTAssertNil(ink.baseHole, "and so does the hole it asked for")
+    }
+
+    // MARK: - Alpha, checked with pixels
+
+    /// **Two held pictures at two opacities composite the same as the base that will replace them —
+    /// checked on the bytes, not argued.** This is the assertion the design hangs on, and CLAUDE.md
+    /// names it as where an overlay design most likely breaks.
+    ///
+    /// The two operands are two genuinely different code paths, which is what stops this being an
+    /// assertion about arithmetic:
+    ///
+    /// * **truth** — `VectorCanvas.render()` of a display list holding both strokes, which walks
+    ///   `renderLocalContent` and merges each stroke inside its own transparency layer at its own
+    ///   opacity;
+    /// * **screen** — each stroke rendered *alone at full opacity* (which is what a `StrokeScratch`
+    ///   window holds: dabs at full flow, with the cap applied by the display) and then drawn one
+    ///   over the other at its own alpha, which is what Core Animation does to `heldInkView`'s
+    ///   siblings.
+    ///
+    /// The strokes overlap on purpose: over disjoint marks every compositing rule agrees and the
+    /// test would pass by accident.
+    func testHeldPicturesAtDifferentOpacitiesCompositeAsTheBaseWill() throws {
+        let faint = Self.mark(seed: 1, y: 40, opacity: 0.35)
+        let solid = Self.mark(seed: 2, y: 46, opacity: 1)
+
+        let truth = try Self.bytes(of: Self.render([faint, solid]))
+        let screen = try Self.bytes(of: Self.composite([
+            (Self.render([Self.atFullOpacity(faint)]), 0.35),
+            (Self.render([Self.atFullOpacity(solid)]), 1)
+        ]))
+
+        let worst = try Self.worstChannelDifference(truth, screen)
+        print("HELD ALPHA | two layers at their own alphas vs the display list: worst channel \(worst) of 255")
+        // Not zero, and the reason is one rounding: the base multiplies the stroke's opacity into
+        // its transparency layer in one 8-bit composite, and the screen does it in the layer's alpha
+        // instead — the same product, rounded at a different moment.
+        XCTAssertLessThanOrEqual(worst, 2,
+                                 "a held picture shown at its stroke's own opacity has to composite "
+                                 + "as the display list will merge it, or the artist watches the ink "
+                                 + "change shade the instant the render lands (worst channel \(worst))")
+    }
+
+    /// **And the single accumulating surface this design refused would not.** The obvious cheaper
+    /// answer — keep stamping the next stroke into the *same* window and show it at one alpha — is
+    /// refuted here rather than in prose: a surface holding both strokes can carry only one opacity,
+    /// so whichever it takes is wrong for the other.
+    ///
+    /// Operands: the same `truth`, against both strokes accumulated into one surface shown at the
+    /// newest stroke's alpha. The assertion is that they **differ**, and it is not an assertion about
+    /// mathematics because the difference is the faint stroke reaching full strength — a specific,
+    /// visible, wrong picture, which the bound below is chosen to name rather than to tolerate.
+    func testOneAccumulatingSurfaceCannotCarryTwoOpacities() throws {
+        let faint = Self.mark(seed: 1, y: 40, opacity: 0.35)
+        let solid = Self.mark(seed: 2, y: 46, opacity: 1)
+
+        let truth = try Self.bytes(of: Self.render([faint, solid]))
+        let accumulated = try Self.bytes(of: Self.composite([
+            (Self.render([Self.atFullOpacity(faint)]), 1),
+            (Self.render([Self.atFullOpacity(solid)]), 1)
+        ]))
+
+        let worst = try Self.worstChannelDifference(truth, accumulated)
+        print("HELD ALPHA | one accumulating surface vs the display list: worst channel \(worst) of 255")
+        XCTAssertGreaterThan(worst, 60,
+                             "the faint stroke would be drawn at full strength — this is the design "
+                             + "`UnlandedInk` refused, and it is refused on the pixels (worst channel "
+                             + "\(worst))")
     }
 
     // MARK: - Fixtures
@@ -195,5 +266,54 @@ final class UnlandedInkLogicTests: XCTestCase {
     private static func erase(id: Int, version: Int, window: CGRect) -> UnlandedInk.Picture {
         UnlandedInk.Picture(id: id, version: version, windowRect: window,
                             alpha: 1, replacesBase: true, image: pixel)
+    }
+
+    // MARK: - Pixel plumbing
+
+    /// Small on purpose: these run in the fast tier and the comparison is over every pixel.
+    private static let canvasSize = CGSize(width: 96, height: 72)
+
+    /// A short arc at `y`, overlapping its sibling. Deterministic — a fixed seed, fixed samples.
+    private static func mark(seed: UInt64, y: CGFloat, opacity: Double) -> VectorStroke {
+        let samples = StrokeSamples((0..<6).map { step -> VectorSample in
+            let t = CGFloat(step) / 5
+            return VectorSample(x: 14 + t * 66, y: y + sin(t * .pi) * 10, pressure: 1)
+        }, channels: .pressureOnly)
+        return VectorStroke(brush: Brush(name: "Held", tip: .round, size: 10,
+                                         dab: BrushDabSettings(spacing: 0.3)),
+                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                            size: 10, opacity: opacity, samples: samples, seed: seed)
+    }
+
+    /// The same stroke with the display's half of the cap removed — what a `StrokeScratch` window
+    /// holds, since the live tier stamps at full flow and `showOverlays` applies the opacity.
+    private static func atFullOpacity(_ stroke: VectorStroke) -> VectorStroke {
+        VectorStroke(brush: stroke.brush, color: stroke.color, size: stroke.size, opacity: 1,
+                     samples: stroke.samples, composite: stroke.composite, seed: stroke.seed)
+    }
+
+    private static func render(_ strokes: [VectorStroke]) -> UIImage {
+        let canvas = VectorCanvas(size: canvasSize)
+        for stroke in strokes { canvas.addStroke(stroke) }
+        return canvas.render()
+    }
+
+    /// Core Animation's sibling composite, on the CPU: each picture source-over at its own alpha, in
+    /// order, over nothing.
+    private static func composite(_ layers: [(UIImage, CGFloat)]) -> UIImage {
+        UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image { _ in
+            for (image, alpha) in layers { image.draw(at: .zero, blendMode: .normal, alpha: alpha) }
+        }
+    }
+
+    private static func bytes(of image: UIImage) throws -> [UInt8] {
+        try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(image.cgImage)))
+    }
+
+    private static func worstChannelDifference(_ a: [UInt8], _ b: [UInt8]) throws -> Int {
+        XCTAssertEqual(a.count, b.count, "two pictures of the same canvas have the same bytes")
+        var worst = 0
+        for i in 0..<min(a.count, b.count) { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
+        return worst
     }
 }

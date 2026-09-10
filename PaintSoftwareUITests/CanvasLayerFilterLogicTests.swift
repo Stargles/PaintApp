@@ -31,9 +31,16 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
     /// one of those image views must set `minificationFilter`, and every setting must be
     /// `.trilinear` — the count is the point, since an image view added without the line is exactly
     /// the regression.
+    ///
+    /// **The scan counts `UIImageView(`, not `UIImageView()`, and the difference is a real hole it
+    /// had.** `StrokeCanvasView`'s held-ink views are built with `UIImageView(image:)` inside a loop
+    /// rather than as stored `let`s, so under the narrower pattern they were not image views to this
+    /// test at all while their `minificationFilter` line still counted — the assertion failed with
+    /// "4 settings for 3 image views", which is the right alarm reached by the wrong arithmetic. A
+    /// view built with an argument is exactly as able to forget the filter as one built without.
     private static let artworkFiles: [(path: String, imageViews: Int)] = [
         ("PaintSoftware/Views/Canvas/LayerHostView.swift", 2),        // baked + fill tiers
-        ("PaintSoftware/Views/Canvas/StrokeCanvasView.swift", 3),     // the layer's picture, the live scratch, the float
+        ("PaintSoftware/Views/Canvas/StrokeCanvasView.swift", 4),     // the layer's picture, the live scratch, the float, one held un-landed stroke
         ("PaintSoftware/Views/CanvasView.swift", 2),                  // the sandwich pair, the onion-skin pair
         ("PaintSoftware/Views/ShapeOverlayView.swift", 1),            // the live shape preview
         ("PaintSoftware/Views/FloatingPieceOverlayView.swift", 1)     // the lifted raster piece
@@ -52,7 +59,7 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
         let root = try repositoryRoot()
         for (path, expected) in Self.artworkFiles {
             let source = try code(at: root.appendingPathComponent(path))
-            let imageViews = source.filter { $0.text.contains("UIImageView()") }
+            let imageViews = source.filter { $0.text.contains("UIImageView(") }
             let settings = source.compactMap { line -> (Int, String)? in
                 guard let value = Self.minificationValue(in: line.text) else { return nil }
                 return (line.number, value)
@@ -103,7 +110,7 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
         var unclassified: [String] = []
         for file in try swiftFiles(under: views) where !known.contains(file.lastPathComponent) {
             let source = try code(at: file)
-            guard source.contains(where: { $0.text.contains("UIImageView()") }) else { continue }
+            guard source.contains(where: { $0.text.contains("UIImageView(") }) else { continue }
             unclassified.append(file.lastPathComponent)
         }
 
