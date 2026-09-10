@@ -462,7 +462,7 @@ nonisolated enum ProjectPackageLayout {
         //    silent two-package fork this is the fix for.
         var renamedTo: String?
         if let renameTarget {
-            let landed = PackageRenameGate.renamingIdlePackage(at: url) { () -> URL? in
+            let landed = PackageRenameGate.renamingIdlePackage(at: url, projectID: projectID) { () -> URL? in
                 // `origin.name` **before** the move: it is `backupDirectory(forProjectAt:)`'s fallback
                 // for a package whose manifest has gone unreadable, and a crash between the two lines
                 // is better spent naming a package about to appear than one already gone.
@@ -750,9 +750,23 @@ nonisolated enum ProjectPackageName {
         if candidate.path.precomposedStringWithCanonicalMapping
             .compare(current.path.precomposedStringWithCanonicalMapping,
                      options: .caseInsensitive) == .orderedSame { return true }
-        // Occupied by this same project — which happens when two overlapping saves both aim here, and
-        // is the case `writeAtomically` turns into a restore point rather than a clobbering.
-        if let projectID, ProjectBackupManager.manifestID(at: candidate) == projectID { return true }
+        // **This project's own prior landing spot** — a name *this process* moved this package to,
+        // which is the case `writeAtomically` turns into a restore point rather than a clobbering.
+        //
+        // **The manifest id alone is not the discriminator, and asking it that way was a defect.**
+        // A manifest id says "some package carrying my id is here"; it cannot tell my own landing
+        // spot from a Files-app *Duplicate* of me — a byte-identical folder, the same internal id, a
+        // second gallery tile the artist deliberately made to branch a drawing. Under the id alone,
+        // retitling the original onto that name called it free, and `commitSwap` stashed the
+        // artist's separate project into `Backups/<id>/auto-*` and moved this one over it: a visible
+        // project gone from the gallery with no notice, recoverable only by opening the *other*
+        // project's Versions sheet. `PackageRenameGate` performs every rename this process makes and
+        // is therefore the one thing that can answer "did I put a package there myself"; a duplicate
+        // the artist made in Files is not something this process moved, so it answers no and the
+        // rename disambiguates to "Seagull 2" instead — visible, and destroying nothing.
+        if let projectID, PackageRenameGate.isOwnPriorLanding(candidate, projectID: projectID) {
+            return true
+        }
         return false
     }
 }
@@ -788,9 +802,34 @@ nonisolated enum ProjectPackageName {
 /// which costs only that the launch pass declines to rename something the artist opened during it —
 /// and the save renames that one anyway, the moment its title changes. The pass runs once per launch;
 /// leaving a name stale until the next one is the direction that loses nothing.
+///
+/// **The gate also remembers where it put things, and that is not bookkeeping — it is the second
+/// half of the same guarantee.** "One name-giver cannot fork" is true of the *renamer*; it says
+/// nothing about a *caller* still holding the address the package used to have. `ContentView`
+/// always is one: `saveIfNeeded` reads `canvasManager.projectURL` on the main actor and only
+/// corrects it from inside a save's own `Task { @MainActor }` completion, so two saves issued before
+/// that task has had a turn — a scene-phase save racing `returnToGallery`, which needs no
+/// contrivance at all — carry the *same* pre-rename URL. MEASURED 2026-09-09 before this record
+/// existed: the second save read no manifest at the vacated address, concluded the title had not
+/// changed, and rebuilt a complete package under the old name. Two packages, one manifest id, the
+/// artist's newest edits in the invisible one. So a rename is recorded here and every save resolves
+/// its target through it, which makes the invariant total: **no write can aim at an address this
+/// process has already moved this project away from.**
 nonisolated enum PackageRenameGate {
-    private static let lock = NSLock()
+    /// **Recursive**, because `renamingOpenPackage` holds it across `body()` and that body computes
+    /// `ProjectPackageName.reconciled`, which asks `isOwnPriorLanding` — the same lock, the same
+    /// thread. A plain `NSLock` deadlocks on the first retitling save.
+    private static let lock = NSRecursiveLock()
     private static var openPackages: Set<String> = []
+
+    /// Where a package this process has moved actually is: keyed by an address a caller may still be
+    /// holding, valued by the project that moved and where it went.
+    ///
+    /// **Kept fully resolved rather than chained**, so a lookup is one hop and cannot loop. When
+    /// `Seagull` moves to `Heron`, every entry already pointing at `Seagull` is repointed to `Heron`
+    /// in the same breath; an entry that would end up naming its own key is dropped, which is what
+    /// makes a retitle *back* (`Boat` → `Seagull` → `Boat`) terminate instead of cycling.
+    private static var moved: [String: (id: UUID, url: URL)] = [:]
 
     /// Case-folded and normalised, because the volume is: `boat.paintproj` and `Boat.paintproj` are
     /// one directory here, and a registry that thought otherwise would let the pass rename an open
@@ -813,22 +852,58 @@ nonisolated enum PackageRenameGate {
     /// rename here would be refusing the feature — but under the same lock the launch pass takes, so
     /// the two can never interleave. `body` returns the URL the package actually landed at, and the
     /// registry follows it there.
-    static func renamingOpenPackage(from url: URL, _ body: () -> URL?) -> URL? {
+    static func renamingOpenPackage(from url: URL, projectID: UUID, _ body: () -> URL?) -> URL? {
         lock.lock(); defer { lock.unlock() }
         let landed = body()
         if let landed, key(landed) != key(url) {
             openPackages.remove(key(url))
             openPackages.insert(key(landed))
+            record(move: url, to: landed, projectID: projectID)
         }
         return landed
     }
 
     /// The launch pass's side. Refuses outright when the package is open, and otherwise runs `body`
     /// under the lock so the answer cannot go stale between the check and the `rename(2)`.
-    static func renamingIdlePackage(at url: URL, _ body: () -> URL?) -> URL? {
+    ///
+    /// It records its move for the same reason the save's side does. The pass runs before any
+    /// document is open, so nothing is holding an address it invalidates *today* — but the guarantee
+    /// above is "every rename this process makes is recorded", and a guarantee with one renamer
+    /// exempted is not one.
+    static func renamingIdlePackage(at url: URL, projectID: UUID, _ body: () -> URL?) -> URL? {
         lock.lock(); defer { lock.unlock() }
         guard !openPackages.contains(key(url)) else { return nil }
-        return body()
+        let landed = body()
+        if let landed, key(landed) != key(url) {
+            record(move: url, to: landed, projectID: projectID)
+        }
+        return landed
+    }
+
+    /// **Where `url` is now, for `projectID`** — the address itself if this process has not moved it.
+    ///
+    /// Called at the top of `ProjectStore.writeAtomically`, on `saveQueue` rather than on the main
+    /// actor, and that is not a detail: `saveQueue` is serial, so resolving here is ordered *after*
+    /// any earlier save's rename. Resolving on the main actor when the save is issued would answer
+    /// from before that rename had happened and fix nothing.
+    ///
+    /// **The project id is half the question, not decoration.** A vacated name is free for anyone to
+    /// take, so a plain path-keyed forward would send a brand-new project titled "Boat" — landed at
+    /// the `Boat.paintproj` this project just left — off to `Seagull.paintproj` and straight over
+    /// somebody else's work. Only a caller carrying the id that did the moving is forwarded.
+    static func currentLocation(of url: URL, projectID: UUID) -> URL {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = moved[key(url)], entry.id == projectID else { return url }
+        return entry.url
+    }
+
+    /// **Did this process move `projectID`'s package to `url` itself?** `ProjectPackageName.isFree`'s
+    /// discriminator between a name that is this project's own to reclaim and a separate package
+    /// that merely carries the same manifest id — see that call site for the duplicate it protects.
+    static func isOwnPriorLanding(_ url: URL, projectID: UUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let target = key(url)
+        return moved.values.contains { $0.id == projectID && key($0.url) == target }
     }
 
     /// Whether this process has `url` open. Read by nothing in the app — it exists so a test can
@@ -838,11 +913,26 @@ nonisolated enum PackageRenameGate {
         return openPackages.contains(key(url))
     }
 
+    /// Caller holds `lock`.
+    private static func record(move from: URL, to: URL, projectID: UUID) {
+        let fromKey = key(from)
+        // Repoint everything that named the old address before inserting the new entry, so the map
+        // never holds a chain to walk. Keys are collected first rather than mutated mid-iteration.
+        for stale in moved.filter({ $0.value.id == projectID && key($0.value.url) == fromKey }).keys {
+            moved[stale] = (projectID, to)
+        }
+        moved[fromKey] = (projectID, to)
+        // An entry naming its own key is not a forwarding — it is where the package already is — and
+        // keeping one is how `Boat` → `Seagull` → `Boat` would become a cycle.
+        moved = moved.filter { key($0.value.url) != $0.key }
+    }
+
     /// **Test seam.** The registry is process-wide and has no `noteClosed`, so one suite's saves
     /// would otherwise silently disarm the launch pass for every suite that ran after it in the same
     /// process — a green test that measured nothing.
     static func resetForTesting() {
         lock.lock(); defer { lock.unlock() }
         openPackages.removeAll()
+        moved.removeAll()
     }
 }

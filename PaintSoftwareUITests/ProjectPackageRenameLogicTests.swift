@@ -122,6 +122,40 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         try? rewritten.write(to: manifestURL, options: .atomic)
     }
 
+    /// **Two saves the way `ContentView.saveIfNeeded` issues them, with nothing waited on between.**
+    ///
+    /// `saveIfNeeded` reads `canvasManager.projectURL` on the main actor and hands it to
+    /// `ProjectStore.save`, which returns as soon as it has queued the write. The property is only
+    /// corrected from inside that save's own `Task { @MainActor }` completion, and that task cannot
+    /// run while the main actor is still executing the turn that issues the second save — so **both
+    /// saves carry the same URL**, which is the whole precondition. The `wait(for:)` inside
+    /// `save(_:to:)` above is exactly what destroys that state, which is why no other test in this
+    /// suite can reach it.
+    ///
+    /// `between` runs after the first save has been queued and before the second is, so the two
+    /// snapshots differ and "which package holds the artist's newest edits" has an answer. It must
+    /// only ever add a *layer*: `SaveSnapshot` copies the layer array but not the `VectorCanvas`
+    /// objects inside it, so drawing a stroke here would mutate a canvas the first save's encode is
+    /// still reading.
+    private func twoOverlappingSaves(_ manager: CanvasManager, from url: URL,
+                                     between: () -> Void = {}) {
+        let first = expectation(description: "the first save's completion")
+        let second = expectation(description: "the second save's completion")
+        manager.projectURL = url
+        ProjectStore.save(manager, to: url) { first.fulfill() }
+        between()
+        // Read exactly as `saveIfNeeded` reads it — whatever the property says *now*, which is still
+        // the pre-rename URL because no completion has had a turn on the main actor yet.
+        ProjectStore.save(manager, to: manager.projectURL ?? url) { second.fulfill() }
+        wait(for: [first, second], timeout: 60)
+    }
+
+    /// The layer names in the package **on disk**, which is how "whose snapshot landed here" is
+    /// asked: the second save's document carries a layer the first's did not.
+    private func layerNames(at url: URL) -> [String] {
+        (ProjectStore.load(from: url)?.layers ?? []).map(\.name)
+    }
+
     /// The `.paintproj` directory names directly inside `Projects/`, in the case the filesystem
     /// reports — which is the only way to see a case-only rename at all.
     private func packageNames() -> [String] {
@@ -448,6 +482,113 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
                        "the marker follows the rename, written before the move rather than after it")
     }
 
+    /// **The same marker, on the save's rename rather than the launch pass's — and driven all the way
+    /// to the thing the marker exists for.**
+    ///
+    /// A review read `writeAtomically`'s rename branch, saw no `noteProjectRenamed` call, and
+    /// reported that `origin.name` therefore names the *pre-rename* folder until the project's next
+    /// save — so a manifest that became unreadable in between would leave `listBackups` returning
+    /// `[]` and launch repair unable to find a perfectly good backup one directory over. **That is
+    /// refuted here**, and the refutation is worth a test rather than a paragraph: the marker is
+    /// rewritten by `refreshLatestSnapshot`, which every landed `.liveProject` save runs against the
+    /// URL the package landed at.
+    ///
+    /// The assertion is not on the marker's bytes but on the lookup it backs, with the manifest made
+    /// unreadable first — which is the one situation the fallback exists to serve, and the only one
+    /// in which a stale marker is observable at all. Two operands: the restore points
+    /// `listBackups` finds for the renamed package whose manifest cannot be read, and the ones the
+    /// project actually has on disk.
+    func testABackupOfARenamedProjectIsStillFoundWhenItsManifestGoesUnreadable() throws {
+        let (manager, original) = savedProject(titled: "Boat")
+        let projectID = try XCTUnwrap(ProjectBackupManager.manifestID(at: original))
+        manager.projectName = "Seagull"
+        let landed = save(manager, to: original)
+        XCTAssertEqual(landed.lastPathComponent, "Seagull.paintproj", "Setup: the save renamed it")
+        let slots = try FileManager.default.contentsOfDirectory(
+            atPath: ProjectBackupManager.backupsDirectory(projectID: projectID).path)
+            .filter { $0.hasSuffix(".paintproj") }
+        XCTAssertFalse(slots.isEmpty, "Setup: the rename left restore points on disk, got \(slots)")
+
+        // The corruption the fallback exists for: the package is fine, its manifest is not, so the
+        // manifest-id lookup cannot answer and only `origin.name` can.
+        try Data("{ not json".utf8).write(to: landed.appendingPathComponent("manifest.json"))
+        XCTAssertNil(ProjectBackupManager.manifestID(at: landed),
+                     "Setup: the manifest is genuinely unreadable, so the primary lookup is out")
+
+        XCTAssertEqual(ProjectBackupManager.backupDirectory(forProjectAt: landed)?.lastPathComponent,
+                       projectID.uuidString,
+                       "the marker names the folder the save renamed the package TO, so the fallback "
+                       + "still finds this project's backups")
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: landed).count, slots.count,
+                       "and every restore point on disk is offered — a stale marker would report "
+                       + "none of them, exactly when they are needed")
+    }
+
+    // MARK: - (d2) A second package carrying the same manifest id
+
+    /// **A Files-app *Duplicate* is not this project's own prior landing spot, and the manifest id
+    /// alone cannot tell them apart.**
+    ///
+    /// `ProjectPackageName.isFree` lets a project reclaim a name occupied by a package carrying its
+    /// own id — which is right for a name this process itself moved the package to, and wrong for a
+    /// duplicate the artist made in Files to branch a drawing: byte-identical manifest, same internal
+    /// id, a second gallery tile they can see. Under the id alone, retitling the *original* onto that
+    /// name called it free and `commitSwap` stashed the artist's separate project into
+    /// `Backups/<id>/auto-*` and moved this one over it. The discriminator is `PackageRenameGate`,
+    /// which performs every rename this process makes and therefore knows the difference.
+    ///
+    /// Two operands: the `.paintproj` directories `Projects/` holds after the retitle-and-save, and
+    /// which of them carries which document — the duplicate still has one layer, the artist's
+    /// retitled project has the two it grew.
+    func testAFilesAppDuplicateSharingThisProjectsManifestIdIsNotSilentlyOverwritten() {
+        let (manager, original) = savedProject(titled: "Boat")
+        // What Files' "Duplicate" produces, then renamed there by hand: a separate, independently
+        // visible package with a byte-identical manifest — the same id included.
+        let duplicate = ProjectBackupManager.projectsDirectory
+            .appendingPathComponent("Seagull.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: original, to: duplicate),
+                      "Setup: a second package the artist can see in the gallery")
+        XCTAssertEqual(ProjectBackupManager.manifestID(at: duplicate),
+                       ProjectBackupManager.manifestID(at: original),
+                       "Setup: and it carries this project's manifest id, which is the whole hazard")
+
+        manager.addVectorLayer(name: "Later")
+        manager.projectName = "Seagull"
+        let landed = save(manager, to: original)
+
+        XCTAssertEqual(packageNames(), ["Seagull 2.paintproj", "Seagull.paintproj"],
+                       "the retitle disambiguates around the duplicate instead of moving over it — "
+                       + "two tiles in, two tiles out, got \(packageNames())")
+        XCTAssertEqual(landed.lastPathComponent, "Seagull 2.paintproj",
+                       "and it is the artist's own project that took the free name")
+        XCTAssertEqual(layerNames(at: duplicate), ["Ink"],
+                       "the duplicate still holds its own document, got \(layerNames(at: duplicate))")
+        XCTAssertEqual(layerNames(at: landed), ["Ink", "Later"],
+                       "and the retitled project holds its own, got \(layerNames(at: landed))")
+    }
+
+    /// The other half of the same discriminator, stated as a property: a name **this process** moved
+    /// the package to *is* this project's to take back, asked from the address the save left behind.
+    ///
+    /// It is the pin against over-correcting — deleting the clause rather than narrowing it would
+    /// answer "Seagull 2" here, for a name nothing but this project has ever occupied.
+    func testANameThisProcessRenamedThePackageIntoIsStillItsOwnToReclaim() throws {
+        let (manager, original) = savedProject(titled: "Boat")
+        manager.projectName = "Seagull"
+        let landed = save(manager, to: original)
+        let projectID = try XCTUnwrap(ProjectBackupManager.manifestID(at: landed))
+
+        XCTAssertEqual(ProjectPackageName.reconciled(original, title: "Seagull",
+                                                     projectID: projectID)?.path,
+                       landed.path,
+                       "asked from the stale address, the rule aims back at this project's own "
+                       + "landing spot rather than minting a second name for it")
+        XCTAssertTrue(PackageRenameGate.isOwnPriorLanding(landed, projectID: projectID),
+                      "and the registry is why — it performed that rename itself")
+        XCTAssertFalse(PackageRenameGate.isOwnPriorLanding(original, projectID: UUID()),
+                       "while a project this process never moved anywhere is told nothing")
+    }
+
     /// A kill between the directory rename and the sidecar moves is a real on-disk state — the pass
     /// runs on a detached task and iOS may background the app at any point in it — and it is the row
     /// of `tidy`'s own resume table that (57) part 2 adds. Both halves are asserted: the package
@@ -483,21 +624,40 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
     /// (`stashLiveProjectForSave` returns true trivially when the path does not exist), and renames
     /// its staged package **into the old path** — resurrecting the folder the artist renamed away
     /// from, as a second project.
-    func testTheNextSaveGoesToTheNewFolderRatherThanResurrectingTheOldName() {
+    ///
+    /// **The second save here is given the STALE pre-rename URL, which is the only version of this
+    /// test that can go red.** Its first draft passed `manager.projectURL` *after* waiting for the
+    /// first save's completion — i.e. the already-corrected URL — so its two operands were "a save
+    /// given the right URL" and "the right URL", and it proved a thing nobody doubted. The property
+    /// is corrected from inside a `Task { @MainActor }` that has not had a turn when the second save
+    /// is issued, and `ContentView` issues saves from scene-phase changes and `returnToGallery`
+    /// without co-ordinating them, so two carrying one URL is the ordinary case rather than a
+    /// contrivance.
+    ///
+    /// Two operands, both real: the `.paintproj` directories `Projects/` actually holds afterwards,
+    /// and the layer list of the package under the artist's own title — which says whether the
+    /// *second* save's document is the one the artist will reopen, or whether it was parked
+    /// invisibly under the old name while the gallery shows the older copy.
+    func testASecondSaveCarryingTheStaleURLCannotForkTheProjectIntoTwoPackages() {
         let (manager, original) = savedProject(titled: "Boat")
         manager.projectName = "Seagull"
-        let landed = save(manager, to: original)
-        XCTAssertEqual(manager.projectURL, landed,
-                       "the save updates the only in-memory holder before its completion runs, so "
-                       + "the gallery it hands to has already been told where the project is")
 
-        // Exactly what ContentView does next: save to whatever `projectURL` now says.
-        let second = save(manager, to: manager.projectURL ?? original)
+        twoOverlappingSaves(manager, from: original) {
+            manager.addVectorLayer(name: "Later")
+        }
 
-        XCTAssertEqual(second.lastPathComponent, "Seagull.paintproj", "the second save stays put")
         XCTAssertEqual(packageNames(), ["Seagull.paintproj"],
-                       "and no package reappears under the old name, got \(packageNames())")
-        assertInkSurvived(at: second, "after a second save following a rename")
+                       "one package under the artist's title — not one at Seagull and a resurrected "
+                       + "one at Boat sharing its manifest id, got \(packageNames())")
+        let landed = ProjectBackupManager.projectsDirectory
+            .appendingPathComponent("Seagull.paintproj")
+        XCTAssertTrue(layerNames(at: landed).contains("Later"),
+                      "and it holds the SECOND save's document, so the artist's newest edits are the "
+                      + "ones they reopen, got \(layerNames(at: landed))")
+        XCTAssertEqual(manager.projectURL?.path, landed.path,
+                       "the only in-memory holder of the URL ends up naming the package that exists, "
+                       + "got \(manager.projectURL?.lastPathComponent ?? "nil")")
+        assertInkSurvived(at: landed, "after two overlapping saves across a rename")
     }
 
     /// A small consequence worth pinning because it is the first time Recently Deleted reads

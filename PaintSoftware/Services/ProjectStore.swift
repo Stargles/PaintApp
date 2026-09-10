@@ -696,6 +696,11 @@ enum ProjectStore {
                 // naming a directory that no longer exists; the next save would then stage beside the
                 // new name and swap into the *old* one, resurrecting an orphan. `.versionSlot` is
                 // excluded because its landing is a backup slot, not the project.
+                //
+                // **Compared against the URL this call was given, not the one it wrote to**, which is
+                // what makes this the repair as well as the update: a save whose target
+                // `writeAtomically` had to forward off a stale address lands somewhere the caller
+                // never named, and this is where the caller is told.
                 if let landed, landed != url, decision != .writeAside {
                     canvasManager.projectURL = landed
                 }
@@ -746,6 +751,24 @@ enum ProjectStore {
                                         startedAt saveStarted: CFAbsoluteTime,
                                         snapshotSeconds: Double) -> URL? {
         let fm = FileManager.default
+        // **Where the package actually is, not where the caller last saw it** — TODO (57) part 2, and
+        // it is the first line of the function because every other line below reads `url`.
+        //
+        // `ContentView.saveIfNeeded` reads `canvasManager.projectURL` on the main actor and hands it
+        // here; the property is corrected from inside a save's own `Task { @MainActor }` completion,
+        // which cannot have run for a save queued in the same turn. So two saves arrive carrying the
+        // same pre-rename URL — a scene-phase save and `returnToGallery`'s, say — and MEASURED
+        // 2026-09-09, before this line existed, the second one forked the project: `loadManifest`
+        // found nothing at the vacated address, `titleChanged` came out false rather than true (`nil
+        // == true`), the rename branch was skipped entirely, and `commitSwap` rebuilt a whole valid
+        // package under the old name with the artist's *newer* edits in it — invisible beside the
+        // one the gallery shows.
+        //
+        // Resolved **here, on `saveQueue`**, rather than where the save is issued: the queue is
+        // serial, so this line runs after any earlier save's rename has finished. The same question
+        // asked on the main actor would be asked before that rename and would answer the stale
+        // address, which is why narrowing the window was never the fix.
+        let url = PackageRenameGate.currentLocation(of: url, projectID: snapshot.projectID)
         // Minted here rather than by the caller so it is chosen on `saveQueue` — it lists a directory
         // to pick a free name, and the caller is the artist's own thread.
         let stagedTarget: URL
@@ -830,15 +853,33 @@ enum ProjectStore {
                     return nil
                 }
                 // **The rename's own restore point, and it is not decoration** — TODO (57) part 2.
-                // `saveQueue` is serial, but `ContentView.saveIfNeeded` reads
-                // `canvasManager.projectURL` on the main actor *before* the previous save's
-                // completion has updated it, so two overlapping saves can arrive with a stale `url`.
-                // `reconciled`'s "a package carrying my own id is me" clause then aims the second
-                // save at the first one's landing, and this line makes that occupant a restore point
-                // instead of something the `moveItem` below destroys.
+                // `reconciled` may aim this save at a name something already occupies — its own
+                // prior landing spot, which `ProjectPackageName.isFree` allows deliberately — and
+                // this line makes that occupant a restore point instead of something the `moveItem`
+                // below destroys.
                 if target != url, fm.fileExists(atPath: target.path) {
                     _ = ProjectBackupManager.stashLiveProjectForSave(projectURL: target,
                                                                      projectID: snapshot.projectID)
+                }
+                // **`origin.name` before the move**, which is `ProjectPackageLayout.tidy` step 5's
+                // rule and now the save's too. The marker is `backupDirectory(forProjectAt:)`'s
+                // fallback for a package whose manifest has gone unreadable — the one case where the
+                // primary manifest-id lookup cannot answer — and a crash between the two lines is
+                // better spent naming a package about to appear than one already gone.
+                // A review reported the save's rename as leaving the marker stale until the project's
+                // next save, and that is **refuted**: `refreshLatestSnapshot` rewrites it a few
+                // lines below, against the URL the package landed at. MEASURED 2026-09-09 by
+                // deleting each write in turn — with only this one, the suite is green; with only
+                // that one, the suite is green; so **no test in this repo can catch a mutation of
+                // this line**, and it stays anyway, because the end state is not what it is for. It
+                // is for the kill *inside* the rename, where the two orders differ and nothing on
+                // disk records which happened. The end state the pair produces is pinned by
+                // `ProjectPackageRenameLogicTests`' backup-of-a-renamed-project test, driven all the
+                // way through `listBackups` with an unreadable manifest rather than read off the
+                // marker's own bytes.
+                if target != url {
+                    ProjectBackupManager.noteProjectRenamed(projectID: snapshot.projectID,
+                                                            to: target.lastPathComponent)
                 }
             }
             do {
@@ -849,6 +890,14 @@ enum ProjectStore {
                 // way, so there is nothing to undo — restoring here would move a *backup* over a live
                 // project that is perfectly fine.
                 if destination == .liveProject {
+                    // The marker first, and it is load-bearing rather than tidy: `url` no longer
+                    // holds a package, so `backupDirectory(forProjectAt:)` cannot read a manifest id
+                    // there and falls through to exactly this string. Pointed at a name that never
+                    // appeared, the restore below would find no backup folder at all.
+                    if target != url {
+                        ProjectBackupManager.noteProjectRenamed(projectID: snapshot.projectID,
+                                                                to: url.lastPathComponent)
+                    }
                     _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
                 }
                 try? fm.removeItem(at: stageURL)
@@ -867,7 +916,7 @@ enum ProjectStore {
             // mutual-exclusion point between this rename and the launch pass's, and it is what makes
             // the registry follow the package to its new name in the same critical section as the
             // `moveItem`. See that type for the two-package fork neither check alone prevents.
-            landed = PackageRenameGate.renamingOpenPackage(from: url) {
+            landed = PackageRenameGate.renamingOpenPackage(from: url, projectID: snapshot.projectID) {
                 guard titleChanged,
                       let renamed = ProjectPackageName.reconciled(url, title: snapshot.projectName,
                                                                   projectID: snapshot.projectID) else {
