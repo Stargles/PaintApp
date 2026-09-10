@@ -219,7 +219,139 @@ final class ProjectStorageUITests: PaintUITestCase {
         shot(app, "4-reopened-under-the-new-name")
     }
 
+    /// **TODO (36)'s last line, driven through a finger, in the two acts an artist actually meets.**
+    ///
+    /// Every other test of this change reaches `ProjectBackupManager` and asserts a URL. None of them
+    /// can answer the question CLAUDE.md says three shipped-and-unusable features failed: *can the
+    /// artist see where a restore will go, and does the project actually appear there?*
+    ///
+    /// Act one is the item: delete a project out of a folder, and put it back into that folder.
+    /// **`XCTAssertFalse(… tileMenu … .exists)` at the top of the tree is the assertion the shipped
+    /// build fails** — it put every restore there. Act two is the case the item's requirements single
+    /// out: the folder is gone by the time the restore happens, so the project goes to the top of the
+    /// tree *and is told about it*. Both halves are asserted on what is drawn — a label the artist
+    /// reads and an alert they have to dismiss — so the feature cannot pass here while being
+    /// unreachable on screen.
+    ///
+    /// One launch rather than two: `xcodebuild` distributes work per test *class*, so a second
+    /// launch in this class costs its whole cold start for one more act of the same story.
+    func testARestoredProjectGoesBackIntoTheFolderItWasDeletedFrom() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+
+        makeFolder(app, named: "Scene 7")
+        let folderTile = app.buttons["gallery.folderTile.Scene 7"]
+        XCTAssertTrue(folderTile.waitForExistence(timeout: 10), "the folder to file the project in")
+        folderTile.tap()
+
+        // A canvas made in here, so the project genuinely lives in the folder rather than being
+        // moved into one — the fixture an artist can actually build.
+        app.buttons["gallery.newCanvasButton"].tap()
+        let create = app.buttons["sizePicker.createButton"]
+        XCTAssertTrue(create.waitForExistence(timeout: 10))
+        create.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
+        returnToGallery(app)
+
+        app.buttons["gallery.folderTile.Scene 7"].tap()
+        let tileMenu = app.buttons["gallery.tileMenu.Untitled"]
+        XCTAssertTrue(tileMenu.waitForExistence(timeout: 15),
+                      "PREMISE: the project is inside Scene 7 before anything is deleted")
+        deleteFromTileMenu(app, identifier: "gallery.tileMenu.Untitled")
+        XCTAssertTrue(tileMenu.waitForNonExistence(timeout: 10), "and it leaves the folder")
+
+        // ── Act one: it goes back where it came from, and the row said so first.
+        app.buttons["gallery.recentlyDeletedButton"].tap()
+        let origin = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "gallery.trashOrigin.")).firstMatch
+        XCTAssertTrue(origin.waitForExistence(timeout: 10),
+                      "the Recently Deleted row says where the project came from")
+        XCTAssertEqual(origin.label, "In Projects / Scene 7",
+                       "and names the folder — the only place the artist can see, before committing "
+                       + "to a restore, where it is going to land")
+        shot(app, "06-recently-deleted-names-the-origin")
+
+        tapRestore(app)
+        XCTAssertFalse(app.alerts["Restored"].waitForExistence(timeout: 3),
+                       "a restore that landed where it was asked to interrupts nobody")
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 15),
+                      "the restored project is drawn inside the folder it was deleted from")
+        shot(app, "07-restored-inside-the-folder")
+
+        app.buttons["gallery.breadcrumbBack"].tap()
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 7"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["gallery.tileMenu.Untitled"].exists,
+                       "and it is not at the top of the gallery, which is where every restore went "
+                       + "before this item")
+
+        // It has to open, not merely be drawn.
+        app.buttons["gallery.folderTile.Scene 7"].tap()
+        let restoredTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(restoredTile.waitForExistence(timeout: 10))
+        restoredTile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25),
+                      "the restored project opens from the folder it was restored into")
+        returnToGallery(app)
+
+        // ── Act two: the folder is gone by the time the restore happens.
+        app.buttons["gallery.folderMenu.Scene 7"].tap()
+        let deleteFolder = app.buttons["Delete"]
+        XCTAssertTrue(deleteFolder.waitForExistence(timeout: 10), "the folder's own menu offers a delete")
+        deleteFolder.tap()
+        let confirmFolder = app.alerts.buttons["Delete"]
+        XCTAssertTrue(confirmFolder.waitForExistence(timeout: 10))
+        confirmFolder.tap()
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 7"].waitForNonExistence(timeout: 10),
+                      "PREMISE: the folder — and with it the project's origin — is gone")
+
+        app.buttons["gallery.recentlyDeletedButton"].tap()
+        tapRestore(app)
+        let notice = app.alerts["Restored"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 10),
+                      "a restore that could not go home has to say so — going quietly to the top of "
+                      + "the tree is the defect this item exists to fix")
+        let sentence = notice.staticTexts.element(boundBy: notice.staticTexts.count - 1).label
+        XCTAssertTrue(sentence.contains("Scene 7"),
+                      "and it names the folder that is missing, rather than only the fact: \(sentence)")
+        shot(app, "08-restored-to-the-top-with-a-notice")
+        notice.buttons["OK"].tap()
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 15),
+                      "and the project is at the top of the gallery, where the notice said it is")
+        XCTAssertFalse(app.staticTexts["gallery.breadcrumbPath"].exists,
+                       "which is the top of the tree, not some folder we are still standing in")
+    }
+
     // MARK: - Helpers
+
+    /// Deletes a project through its tile menu, confirming the alert. Both call sites are in the same
+    /// test and the sequence is five taps, which is exactly when a helper stops being noise.
+    private func deleteFromTileMenu(_ app: XCUIApplication, identifier: String) {
+        app.buttons[identifier].tap()
+        let deleteItem = app.buttons["Delete"]
+        XCTAssertTrue(deleteItem.waitForExistence(timeout: 10),
+                      "the tile menu offers Delete (looking for the menu item after tapping \(identifier))")
+        deleteItem.tap()
+        let confirm = app.alerts.buttons["Delete"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10),
+                      "and deleting asks for confirmation before anything leaves the gallery")
+        confirm.tap()
+    }
+
+    /// Taps the one Restore button in Recently Deleted. By identifier prefix, because the identifier
+    /// carries the entry's trash-relative path and the timestamp in it is minted at delete time.
+    private func tapRestore(_ app: XCUIApplication) {
+        let restore = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "gallery.trashRestore.")).firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 10),
+                      "Recently Deleted lists the deleted project with a Restore control")
+        restore.tap()
+    }
 
     /// Keeps a screenshot in the result bundle so a person can look at what the test drove. These are
     /// what CLAUDE.md's *"drive it in the simulator and look at it"* asks for, taken from inside the

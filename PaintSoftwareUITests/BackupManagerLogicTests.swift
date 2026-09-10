@@ -232,8 +232,12 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
 
         let restored = ProjectBackupManager.restoreFromTrash(trashURL!)
-        XCTAssertEqual(restored?.lastPathComponent, "KeepMe.paintproj")
-        XCTAssertTrue(ProjectBackupManager.validateProject(at: restored!))
+        XCTAssertEqual(restored?.url.lastPathComponent, "KeepMe.paintproj")
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: restored!.url))
+        XCTAssertEqual(restored?.origin, [],
+                       "a project deleted from the top of the tree came from the top of the tree")
+        XCTAssertNil(restored?.notice,
+                     "and a restore that landed where it was asked to has nothing to explain")
     }
 
     func testExpiredTrashPurgedWithItsBackupHistory_RecentKept() {

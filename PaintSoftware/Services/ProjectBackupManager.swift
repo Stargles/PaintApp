@@ -100,6 +100,10 @@ nonisolated enum ProjectBackupManager {
     /// **It does not descend into a package**, which `FileManager.enumerator` would: a `.paintproj` is
     /// a directory, and walking into one would return its `images/` folder as a candidate and cost a
     /// recursive stat of every PNG in the library on each launch.
+    ///
+    /// **`Trash/` is walked by this too, and that is deliberate rather than opportunistic** — TODO
+    /// (36)'s last line. A trash entry is filed under the same folder path its project had, so the
+    /// two trees have exactly one shape between them and exactly one walker for it.
     static func allProjectPackages(in directory: URL? = nil) -> [URL] {
         let root = directory ?? projectsDirectory
         guard let items = try? FileManager.default.contentsOfDirectory(
@@ -129,6 +133,26 @@ nonisolated enum ProjectBackupManager {
     static func isDirectory(_ url: URL) -> Bool {
         var flag: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &flag) && flag.boolValue
+    }
+
+    /// **`directory`'s path components below `root`, or nil when it is not below `root` at all.**
+    /// `Projects/Scene 3/Shot 1` under `Projects` is `["Scene 3", "Shot 1"]`; `Projects` itself is
+    /// `[]`, which is the top of the tree and not the same answer as nil.
+    ///
+    /// **No Unicode normalisation step, deliberately**, where `ProjectPackageName.stem` needs one.
+    /// That one compares a name against `fileExists` — a syscall, which compares bytes. This compares
+    /// `String`s in Swift, and Swift's `==` is canonical-equivalence-aware, so a decomposed component
+    /// handed back by the volume already equals the precomposed one the root was built from. A
+    /// `precomposedStringWithCanonicalMapping` here would be a line no test could ever take red.
+    ///
+    /// Nil is a *safe* answer everywhere it is used: a trash entry whose origin is unknown goes to
+    /// `Trash/` itself, and an entry at `Trash/` itself restores to the top of the tree.
+    static func folderComponents(of directory: URL, under root: URL) -> [String]? {
+        let rootParts = root.standardizedFileURL.pathComponents
+        let directoryParts = directory.standardizedFileURL.pathComponents
+        guard directoryParts.count >= rootParts.count,
+              Array(directoryParts.prefix(rootParts.count)) == rootParts else { return nil }
+        return Array(directoryParts.dropFirst(rootParts.count))
     }
 
     // MARK: - Launch-time maintenance
@@ -459,41 +483,166 @@ nonisolated enum ProjectBackupManager {
 
     struct TrashItem: Identifiable {
         let url: URL
-        var id: String { url.lastPathComponent }
+        /// **The entry's path relative to `Trash/`, not its filename.** Two projects called "Boat"
+        /// deleted from two different folders in the same second produce the same filename, and a
+        /// `ForEach` given two rows with one identity draws one of them never — the failure
+        /// `ProjectSummary` already carries a note about. The relative path is unique by
+        /// construction, because it is a path.
+        let id: String
         let displayName: String
+        /// **The folder it was deleted from, relative to `Projects/`.** Empty means the top of the
+        /// tree — which is also what an entry deleted by a build that had no folders answers, and
+        /// that is the right answer for it rather than a fallback.
+        let originComponents: [String]
         let deletedAt: Date
         let sizeBytes: UInt64
+
+        /// Where the row says it came from, in the breadcrumb's own vocabulary.
+        var originDisplay: String {
+            (["Projects"] + originComponents).joined(separator: " / ")
+        }
     }
 
-    /// Moves a package into Trash (never a hard delete). Returns the trash URL.
+    /// **Moves a package into Trash (never a hard delete), under a mirror of the folder path it was
+    /// filed in.** Returns the trash URL.
+    ///
+    /// A project deleted from `Projects/Scene 3/Shot 1/` lands at `Trash/Scene 3/Shot 1/`, and that
+    /// mirrored path **is** the origin marker TODO (36)'s last line asked for. It is not stored
+    /// anywhere: it is where the entry is. A marker in the filename would have to escape `/` and
+    /// would blow the 255-byte component limit on a deep path; one in the manifest would mean writing
+    /// into artwork on the way to deleting it, and a damaged package could not take one; one in a
+    /// sidecar beside the entry can be separated from it by any operation that moves one and not the
+    /// other — `ProjectLibraryMigration.uniqueURL` renames a colliding item, and it would rename the
+    /// two halves apart. A location cannot disagree with itself.
+    ///
+    /// Falling back to `Trash/` itself when the mirror cannot be made is deliberate and is the only
+    /// direction that is safe: a delete must never fail because a directory could not be created, and
+    /// an entry at `Trash/` restores to the top of the tree, which is exactly what the shipped build
+    /// does for every entry.
     @discardableResult
     static func moveToTrash(_ url: URL, tag: String) -> URL? {
         let fm = FileManager.default
+        let directory = trashFolder(mirroring: url.deletingLastPathComponent())
         let base = url.deletingPathExtension().lastPathComponent
-        var candidate = trashDirectory.appendingPathComponent("\(base)__\(tag)__\(timestampString()).paintproj")
+        var candidate = directory.appendingPathComponent("\(base)__\(tag)__\(timestampString()).paintproj")
         if fm.fileExists(atPath: candidate.path) {
-            candidate = trashDirectory.appendingPathComponent("\(base)__\(tag)__\(timestampString())-\(UUID().uuidString.prefix(4)).paintproj")
+            candidate = directory.appendingPathComponent("\(base)__\(tag)__\(timestampString())-\(UUID().uuidString.prefix(4)).paintproj")
         }
         return (try? fm.moveItem(at: url, to: candidate)).map { candidate }
     }
 
+    /// The directory under `Trash/` that mirrors `projectFolder`'s path under `Projects/`, created if
+    /// it is not there. `Trash/` itself for a project at the top of the tree, for one filed somewhere
+    /// outside `Projects/` altogether, and for a mirror that could not be created.
+    private static func trashFolder(mirroring projectFolder: URL) -> URL {
+        guard let components = folderComponents(of: projectFolder, under: projectsDirectory),
+              !components.isEmpty else { return trashDirectory }
+        let mirror = components.reduce(trashDirectory) { $0.appendingPathComponent($1, isDirectory: true) }
+        try? FileManager.default.createDirectory(at: mirror, withIntermediateDirectories: true)
+        return isDirectory(mirror) ? mirror : trashDirectory
+    }
+
+    /// Every trash entry, however deep the folder it was deleted from was. The same walker the
+    /// project tree uses, pointed at the other tree — see `allProjectPackages`.
     static func listTrash() -> [TrashItem] {
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: trashDirectory, includingPropertiesForKeys: nil) else { return [] }
-        return urls.filter { $0.pathExtension == "paintproj" }.map { url in
+        allProjectPackages(in: trashDirectory).map { url in
             let parsed = parseTrashName(url.deletingPathExtension().lastPathComponent)
+            let origin = folderComponents(of: url.deletingLastPathComponent(), under: trashDirectory) ?? []
             return TrashItem(url: url,
+                             id: (origin + [url.lastPathComponent]).joined(separator: "/"),
                              displayName: parsed?.base ?? url.deletingPathExtension().lastPathComponent,
+                             originComponents: origin,
                              deletedAt: parsed?.date ?? fileDate(url),
                              sizeBytes: directorySize(url))
         }.sorted { $0.deletedAt > $1.deletedAt }
     }
 
-    /// Moves a trashed package back into Projects under a non-colliding name. Returns the new URL.
+    /// **What a restore did**, so the gallery can say it instead of the artist finding out later.
+    /// Every field is derived from where the project ended up, not from an intention recorded
+    /// earlier — so there is nothing here that can be true of a restore that did not happen.
+    struct TrashRestore {
+        /// Where the project is now.
+        let url: URL
+        /// The folder it came from, relative to `Projects/`. Empty is the top of the tree.
+        let origin: [String]
+        /// The folder path it asked for and could not have, because it is no longer there. Nil when
+        /// the project landed exactly where it was deleted from — including at the top of the tree,
+        /// which is not a displacement.
+        let missingOriginFolder: String?
+        /// The name it had to take because its own was occupied. Nil when it kept its own.
+        let renamedTo: String?
+
+        /// The sentence the artist is shown, or nil when the restore needs no explanation. **This
+        /// being nil in the ordinary case is the point**: a notice on every restore is one nobody
+        /// reads by the third time.
+        var notice: String? {
+            var parts: [String] = []
+            if let missingOriginFolder {
+                parts.append("The folder it was deleted from — “\(missingOriginFolder)” — is not "
+                             + "there any more, so it has been put at the top of the gallery.")
+            }
+            if let renamedTo {
+                parts.append("Something was already there under its old name, so it is now called "
+                             + "“\(renamedTo)”. Nothing was replaced.")
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: " ")
+        }
+    }
+
+    /// **Puts a trashed package back in the folder it was deleted from** — TODO (36)'s last line.
+    ///
+    /// The move is a `rename(2)`: `Trash/` and `Projects/` are siblings under one root, so it is
+    /// atomic and the package is complete in exactly one place at every instant. Nothing is ever
+    /// overwritten — a name already taken at the origin disambiguates the way a second project of the
+    /// same name always has — and nothing is created: an origin folder that has gone is reported, not
+    /// re-invented, because a folder appearing that the artist deleted is a side effect they did not
+    /// ask for and cannot see coming.
+    ///
+    /// Returns nil only when the move itself failed, in which case the entry is still in Trash,
+    /// still complete, and still listed.
     @discardableResult
-    static func restoreFromTrash(_ trashURL: URL) -> URL? {
-        let parsed = parseTrashName(trashURL.deletingPathExtension().lastPathComponent)
-        let destination = uniqueProjectURL(baseName: parsed?.base ?? "Recovered")
-        return (try? FileManager.default.moveItem(at: trashURL, to: destination)).map { destination }
+    static func restoreFromTrash(_ trashURL: URL) -> TrashRestore? {
+        let fm = FileManager.default
+        let base = parseTrashName(trashURL.deletingPathExtension().lastPathComponent)?.base ?? "Recovered"
+        let origin = folderComponents(of: trashURL.deletingLastPathComponent(), under: trashDirectory) ?? []
+        let wanted = origin.reduce(projectsDirectory) { $0.appendingPathComponent($1, isDirectory: true) }
+        // The filesystem answers this, every time, at the moment of the restore. The mirrored path
+        // says where the project *was*; only `isDirectory` says whether that place still exists, and
+        // it is the one that wins.
+        let originIsThere = origin.isEmpty || isDirectory(wanted)
+
+        let destination = uniqueProjectURL(baseName: base, in: originIsThere ? wanted : projectsDirectory)
+        guard (try? fm.moveItem(at: trashURL, to: destination)) != nil else { return nil }
+        pruneEmptyTrashFolders()
+        let landedStem = destination.deletingPathExtension().lastPathComponent
+        return TrashRestore(url: destination,
+                            origin: origin,
+                            missingOriginFolder: originIsThere ? nil : origin.joined(separator: " / "),
+                            renamedTo: landedStem == base ? nil : landedStem)
+    }
+
+    /// **Removes folders under `Trash/` that a purge or a restore emptied**, bottom-up, and only when
+    /// there is genuinely nothing left in them. A mirror folder is not a record of anything on its
+    /// own — an empty one would say a project came from somewhere while holding no project — and it
+    /// is the one piece of this design that would otherwise accumulate for ever. `Trash/` itself is
+    /// never removed.
+    static func pruneEmptyTrashFolders() {
+        _ = pruneEmptyFolders(in: trashDirectory)
+    }
+
+    /// Whether `directory` is empty once its own empty sub-folders have been swept. Hidden files
+    /// count as contents, so a `.DS_Store` keeps a folder — the safe direction.
+    @discardableResult
+    private static func pruneEmptyFolders(in directory: URL) -> Bool {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return false
+        }
+        var remaining = items.count
+        for item in items where item.pathExtension != "paintproj" && isDirectory(item) {
+            if pruneEmptyFolders(in: item), (try? fm.removeItem(at: item)) != nil { remaining -= 1 }
+        }
+        return remaining == 0
     }
 
     /// Permanently destroys trash items older than `trashRetentionInterval`. When a trashed project
@@ -513,6 +662,7 @@ nonisolated enum ProjectBackupManager {
             }
             try? FileManager.default.removeItem(at: item.url)
         }
+        pruneEmptyTrashFolders()
     }
 
     private static func deleteBackupDirectories(whoseOriginIs projectFileName: String) {
@@ -524,12 +674,16 @@ nonisolated enum ProjectBackupManager {
         }
     }
 
-    static func uniqueProjectURL(baseName: String) -> URL {
+    /// A free package name for `baseName` **inside `directory`**. Per-folder, for
+    /// `ProjectStore.createNewProjectURL`'s reason: two shots both called "Rough" in different scenes
+    /// is the ordinary case once there are folders, and the app renaming one of them would be the app
+    /// renaming the artist's work for nothing.
+    static func uniqueProjectURL(baseName: String, in directory: URL) -> URL {
         let base = baseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : baseName
-        var candidate = projectsDirectory.appendingPathComponent("\(base).paintproj")
+        var candidate = directory.appendingPathComponent("\(base).paintproj")
         var suffix = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = projectsDirectory.appendingPathComponent("\(base) \(suffix).paintproj")
+            candidate = directory.appendingPathComponent("\(base) \(suffix).paintproj")
             suffix += 1
         }
         return candidate
@@ -576,6 +730,8 @@ nonisolated enum ProjectBackupManager {
                 total = total > c.size ? total - c.size : 0
             }
         }
+        // The cap deletes trash entries too, so it can empty a mirror folder like a purge can.
+        pruneEmptyTrashFolders()
     }
 
     // MARK: - Validation

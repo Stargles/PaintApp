@@ -56,11 +56,19 @@ struct ProjectVersionsView: View {
 /// The Trash: projects deleted from the gallery (or replaced by a restore / auto-repaired after
 /// corruption) are kept here for `ProjectBackupManager.trashRetentionInterval` (7 days) before
 /// being permanently purged, and can be put back at any time until then.
+///
+/// **A restore goes back to the folder the project was deleted from** — TODO (36)'s last line. Two
+/// things on screen carry that: each row says where it came from *before* the artist commits to
+/// restoring, and a restore that could not land where it asked says so afterwards. Neither is
+/// decoration — a restore that quietly went somewhere else is exactly the defect this closed.
 struct RecentlyDeletedView: View {
     var onRestored: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var items: [ProjectBackupManager.TrashItem] = []
+    /// What the last restore has to explain, if anything. Nil for the ordinary restore, which needs
+    /// no words at all.
+    @State private var notice: String?
 
     var body: some View {
         NavigationStack {
@@ -81,12 +89,21 @@ struct RecentlyDeletedView: View {
                             }
                             .font(.caption)
                             .foregroundColor(.gray)
+                            // Where it will go back to, said before the artist decides to restore
+                            // rather than after — the row is the only place they can see it.
+                            Text("In \(item.originDisplay)")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .accessibilityIdentifier("gallery.trashOrigin.\(item.id)")
                         }
                         Spacer()
                         Button("Restore") {
-                            if ProjectBackupManager.restoreFromTrash(item.url) != nil {
+                            if let restore = ProjectBackupManager.restoreFromTrash(item.url) {
                                 onRestored()
                                 reload()
+                                notice = restore.notice
                             }
                         }
                         .accessibilityIdentifier("gallery.trashRestore.\(item.id)")
@@ -102,6 +119,13 @@ struct RecentlyDeletedView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: reload)
+        .alert("Restored", isPresented: Binding(
+            get: { notice != nil }, set: { if !$0 { notice = nil } }
+        )) {
+            Button("OK", role: .cancel) { notice = nil }
+        } message: {
+            Text(notice ?? "")
+        }
     }
 
     private func reload() {
