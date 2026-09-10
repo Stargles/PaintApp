@@ -341,7 +341,7 @@ polygon* and what is wanted here is a **partition of one polyline's parameter do
 strictly easier problem: walk the samples, ask "inside?" at each, and bisect where the answer flips.
 
 `StrokeGeometry.splitRuns(_:inside:)` is that walk, it is already written, and its doc comment says
-what it is for (`StrokeGeometry.swift:885-897`):
+what it is for (`StrokeGeometry.swift`):
 
 > "used to stop a **selection clip** from bridging a stroke that exits the selection and re-enters it"
 
@@ -357,7 +357,7 @@ The four cases the owner will hit, and what falls out with no branch:
   they abut exactly, because both walks bisect the same crossings.
 - **Entirely inside** → one run in, zero out. The stroke is *not split at all*: recognise this
   before splitting and move the element as it stands, so a whole-stroke move mints no new geometry
-  and no new ids. This is `isEntirelyCovered`'s role in the eraser (`VectorEraser.swift:344-355`),
+  and no new ids. This is `isEntirelyCovered`'s role in the eraser (`VectorEraser.swift:389`),
   done far more cheaply here because a polygon membership test needs no coverage integral.
 - **Entirely outside** → zero runs in. The element is untouched, and the spatial-index prefilter
   (§4 rule 6) means most of the layer never reaches the test at all.
@@ -368,7 +368,7 @@ The four cases the owner will hit, and what falls out with no branch:
   the whole thing in one step, so it is accepted rather than filtered.
 
 **`splitRuns`' one known limit is inherited, and it is written down where it lives**
-(`StrokeGeometry.swift:891-895`): a segment that crosses the boundary *twice* between two stored
+(`StrokeGeometry.swift:925-927`): a segment that crosses the boundary *twice* between two stored
 samples — a thin concave spur of the loop clipping a coarsely-sampled stroke — is missed, because
 one bisection assumes one sign change. The raster path is pixel-exact via
 `PixelOps.maskedComposite`; vector geometry has no per-pixel mask to composite against. This is
@@ -423,7 +423,7 @@ agree. **Do not build it speculatively.**
 ### The cut is exact, and `conservativeCuts` must *not* be used
 
 The eraser insets every clean cut by the stroke's own half-width (`VectorEraser.conservativeCuts`,
-`VectorEraser.swift:381-402`). That inset exists for one reason and the reason does not apply here:
+`VectorEraser.swift:426`). That inset exists for one reason and the reason does not apply here:
 a cut end renders as a **round cap** while the eraser removed ink along a **straight band edge**, so
 a naive cut loses ink up to half a width past the covered span — ink the eraser never touched. The
 inset pushes the cut inward so the lost ink lands back under the **retained alpha punch**, and the
@@ -442,7 +442,7 @@ Two consequences follow and both are decisions, not bugs:
   correct: a stroke has round caps, and a piece of a stroke is a stroke.
 - **The cut is exact rather than pixel-neutral**, which is the opposite of the eraser's requirement
   and is why none of Mode 1's exactness machinery is inherited. `supportsCleanCut` and
-  `supportsSplitting` (`VectorEraser.swift:243-254`, `:269-271`) are gates on whether a split can be
+  `supportsSplitting` (`VectorEraser.swift:310`) are gates on whether a split can be
   made *invisible*; here the split is supposed to be visible, so **neither gate applies** and a
   scattering, textured or soft brush splits exactly like a hard round one.
 
@@ -451,7 +451,7 @@ Two consequences follow and both are decisions, not bugs:
 This is the one non-obvious mechanical decision in the whole feature, and getting it wrong produces
 a bug that reads as a rendering glitch.
 
-`VectorCanvas.stamp` reads the lattice, not the stroke (`VectorLayer.swift:1668-1681`):
+`VectorCanvas.stamp` reads the lattice, not the stroke (`VectorLayer.swift:6339-6353`):
 
 ```swift
 let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
@@ -460,8 +460,8 @@ let source = lattice?.samples ?? stroke.samples
 
 So a piece carrying a `DabLattice` renders at the **parent's** sample positions, filtered to its own
 range. Translate a piece's `samples` and leave its lattice alone and it **renders where it used to
-be**. That is why both eraser modes that remove geometry set `piece.lattice = nil`
-(`VectorLayer.swift:1150` and `:1237`).
+be**. That is why both eraser modes that remove geometry set `piece.lattice = nil` in the one
+`detachedPiece(of:samples:startParameter:)` they share (`VectorLayer.swift:3033-3048`).
 
 Nil-ing it is the wrong fix here, because it throws away the thing the lattice exists for: a piece
 that re-anchors its own lattice re-phases every dab along its whole length, and for a scattering
@@ -473,10 +473,11 @@ half's texture change — the exact defect `DabLattice` was built to prevent.
 - The piece **left behind** keeps the parent's lattice verbatim. Its dabs are bit-identical to what
   they were, because nothing about its walk changed.
 - The piece that **moves** keeps the parent's lattice with `lattice.samples` translated by the same
-  delta as its own `samples`. `parameters` and `seedID` are untouched — a parameter is an index into
-  the parent's domain and a rigid translation does not change it, and the seed must stay the
-  parent's so `BrushStamper` replays the same RNG sequence (`BrushStamper.swift:161-162`,
-  `DiscardedDabTarget` at `:297-309`).
+  delta as its own `samples`. `parameters` are untouched — a parameter is an index into
+  the parent's domain and a rigid translation does not change it — and since BRUSH.md §4 the RNG seed
+  lives on `VectorStroke.seed`/`arcOffset` rather than on the lattice, so a copied piece keeps the
+  parent's seed by construction and `BrushStamper` replays the same RNG sequence with no lattice field
+  to preserve.
 
 Under a **pure translation** that makes the moved half's ink a rigid translate of what it was, dab
 for dab, at zero tolerance. That is a stronger guarantee than the feature needs and it is free.
@@ -508,7 +509,7 @@ five built-ins have neither.
 `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
 
 **One artefact this creates, named because it is deterministic and nobody would look for it.**
-`BrushStamper`'s doc says the boundary is inclusive (`BrushStamper.swift:157-159`): *"a dab exactly
+`BrushStamper`'s doc says the boundary is inclusive (`BrushStamper.swift:99-100`): *"a dab exactly
 on a boundary is drawn, so two pieces cut at `low`/`high` render, between them, every dab of the
 original except those strictly inside `(low, high)`."* The eraser always removes a span, so its two
 ranges never abut. A **move** split produces ranges `[0, c]` and `[c, end]` that abut at `c`, so a
@@ -524,7 +525,7 @@ moved piece.
 contour extracted from the GPU fill mask"* (`VectorLayer.swift:133-160`). Not a bitmap, not a
 re-evaluated seed-and-tolerance recipe. It is drawn by `cg.addPath(path); cg.fillPath()`
 (`VectorLayer.swift:1542-1555`). The GPU flood runs once at commit and `PixelOps.pathFromAlphaMask`
-traces its result into a path (`PixelOps.swift:586-599`, called at `CanvasManager+Fill.swift:404`).
+traces its result into a path (`PixelOps.swift:1005`, called at `CanvasManager+Fill.swift:536`).
 
 The deployment target is **iOS 26.5** (`project.pbxproj:1001`), and `CGPath.intersection(_:using:)`
 / `.subtracting(_:using:)` have been available since iOS 16. So:
@@ -568,11 +569,11 @@ Three decisions fall out:
   multiplies the display list, and nothing in the owner's ask asks for it.
 
 **A fill has no transform field.** `VectorFillElement` is `{id, pathData, color, opacity,
-evenOddFill}` (`VectorLayer.swift:136-144`); unlike `VectorImageElement` it carries no
+evenOddFill}` (`VectorLayer.swift:494`); unlike `VectorImageElement` it carries no
 `LayerTransform`. So moving a fill means re-archiving a translated `CGPath`. That is fine — it is
 one `copy(using:)` and one `NSKeyedArchiver` round trip, done once at commit, not per frame — and it
 is the same thing `addFill(canvasSpacePath:)` already does when it maps a canvas-space path into
-local space (`VectorLayer.swift:687-694`).
+local space (`VectorLayer.swift`).
 
 **Fills are therefore the *easy* half of this feature, not the hard half.** The brief guessed the
 opposite. Strokes need a parametric walk, a bisection, a dab lattice and an id policy; a fill needs
@@ -640,7 +641,7 @@ is the fourth operation to inherit it for free, and it should.
 strokes, and `collectResidueGarbage()` runs after the commit.** No branch.
 
 The alternative — leave punches where they are — is rejected concretely, not by preference. A punch
-masks only what is *beneath it* in the list (`collectResidueGarbage`, `VectorLayer.swift:1046-1048`),
+masks only what is *beneath it* in the list (`collectResidueGarbage`, `VectorLayer.swift:3137`),
 so ink moved out from under a punch **heals**: the hole the artist deliberately erased closes up,
 and a new hole opens in whatever the punch is now sitting on. Worse, the stranded punch then has
 nothing beneath it, so the next erase's garbage collector deletes it outright — and the healing
@@ -659,28 +660,31 @@ and CSP both cut vector geometry outright and have no punch object to strand.
 ### Identity: fresh ids, in-place splice, tags inherited
 
 **Both pieces mint fresh `UUID`s.** That is what Modes 2 and 3 already do (`piece.id = UUID()`,
-`VectorLayer.swift:1146` and `:1234`). The tempting alternative — the stationary piece keeps the
-parent's id — buys nothing: dab phase and the RNG sequence come from `lattice?.seedID ?? stroke.id`
-(`VectorLayer.swift:1679`) and both pieces carry the parent's `seedID` in their lattice, so renders
+`VectorLayer.swift:3019` and `:3045`). The tempting alternative — the stationary piece keeps the
+parent's id — buys nothing: since BRUSH.md §4 separated the two, dab phase and the RNG sequence come
+from `VectorStroke.seed` and `arcOffset` (`dabRandom`, `VectorLayer.swift:90`) rather than from the id,
+and both pieces carry the parent's `seed` by being copied above, so renders
 are unaffected; and it makes "which one is the original" a coin flip the moment a lasso cuts one
 stroke into three.
 
 **The pieces replace the parent in place.** `_elements.replaceSubrange(index...index, with: pieces)`
 — `cutToIntersection`'s own splice, applied in descending index so an earlier one cannot invalidate
-a later one (`VectorLayer.swift:1243-1248`). Two things are forbidden:
+a later one (`VectorLayer.swift:4847`). Two things are forbidden:
 
 - **Do not append the moved piece to the end of the list.** Appending puts it above every `.erase`
   punch, so a hole punched in that stroke silently stops applying — a punch masks only what is
   beneath it.
 - **Do not route through the `strokes` kind-filtered setter.** It gathers the whole bucket back at
-  the first stroke's index (`splicing`, `VectorLayer.swift:438-453`), which is order-stable only for
+  the first stroke's index (`splicing`, `VectorLayer.swift`), which is order-stable only for
   a *contiguous* bucket, and strokes are interleaved with `.erase` punches and text by construction.
   `ADD_TEXT.md` §3 stage 3 records the identical caveat for text and reaches the identical
   conclusion: **the whole `elements` array is what undo swaps.**
 
-**`Kind`'s rawValues are untouched and stay untouched.** `fill = 0, image = 1, text = 2, stroke = 3`
-(`VectorLayer.swift:414-419`) governs `insertionIndex` only — where a *newly added* element belongs
-(`:433-435`). An in-place replacement never calls it. So `ADD_TEXT.md` §3 stage 3's load-bearing
+**`Kind`'s rawValues are untouched by this feature and stay untouched.** `fill = 0, image = 1,
+video = 2, text = 3, stroke = 4` today — `video` joined the enum since this was written, but `.stroke`
+is still highest (`VectorLayer.swift:1615-1621`) — governs `insertionIndex` only — where a *newly
+added* element belongs (`VectorLayer.swift:1642`). An in-place replacement never calls it. So
+`ADD_TEXT.md` §3 stage 3's load-bearing
 rule — *"keeping `.stroke` highest is what makes a brush stroke drawn after an erase still land at
 the end of the list"* — is not merely preserved by this feature, it is not touched by it.
 
@@ -699,12 +703,12 @@ non commit stage with move nodes. You can move it freely, and when it bakes it s
 commit."* **That lifecycle is already built and shipped, for raster selections, and the vector path
 should adopt it rather than grow a parallel one.**
 
-`FloatingPiece` (`SelectionModels.swift:98-129`) is a lifted, uncommitted piece of content with its
+`FloatingPiece` (`SelectionModels.swift`) is a lifted, uncommitted piece of content with its
 own `FloatingTransform` and `TransformMode`. `FloatingPieceOverlayView` draws the dashed box, the
 four corner and four edge handles and the rotate knob, and commits on a tap outside
-(`FloatingPieceOverlayView.swift:249-256`). `commitFloatingPieceIfNeeded()` bakes it
-(`SelectionModels.swift:322-351`) and is reached from `commitAllInteractiveState()`
-(`CanvasManager.swift:789-792`), so a tool switch, a layer or frame change, a save and app
+(`handleTapOutside`, `FloatingPieceOverlayView.swift:358`). `commitFloatingPieceIfNeeded()` bakes it
+(`SelectionModels.swift`) and is reached from `commitAllInteractiveState()`
+(`Models/CanvasManager.swift`), so a tool switch, a layer or frame change, a save and app
 backgrounding all settle it with no per-caller retrofit. `CanvasView.updateFloatingOverlay()` even
 places the overlay at the **source layer's** z-position rather than above everything
 (`CanvasView.swift:1552-1568`), which is the detail nobody would think to build twice.
@@ -719,7 +723,7 @@ floating" flag means auditing every one of those and getting one of them wrong.*
 **Exactly one thing does not generalise, and it is the payload.** `FloatingPiece` holds
 `pieceImage: UIImage`, `baseSize` and `remainderPreview: UIImage?` — two bitmaps, the second of them
 **canvas-sized**, produced by `PixelOps.maskedPiece` and swapped into the source layer by
-`bakedImageToDisplay` (`CanvasView.swift:1495-1504`). Adopting *that* verbatim is the one thing this
+`bakedImageToDisplay` (`CanvasView.swift:2021`). Adopting *that* verbatim is the one thing this
 feature must not do, because it is `beginMove()`'s rasterization wearing a different hat.
 
 So: **`FloatingPiece` gains a `content` enum; everything else on it is already kind-agnostic.**
@@ -760,8 +764,8 @@ learned twice: `setVectorTransform` before `b100d65` pushed a step per gesture-`
 `beginStructureGesture`/`commitStructureGesture`, under a comment that states the rule verbatim:
 *"One undo step per whole move/scale/rotate drag, not per intermediate value."*
 `FloatingPieceOverlayView` has no such pair — every one of its handlers falls into `default: break`
-on `.ended` (`FloatingPieceOverlayView.swift:132, 154, 172, 186`) — so `updateFloatingTransform`
-(`SelectionModels.swift:299-301`) writes a transform and records nothing, ever. **Adding the pair
+on `.ended` (`FloatingPieceOverlayView.swift:272, 293, 326, 345`) — so `updateFloatingPose`
+(renamed since; `SelectionModels.swift:954`) writes a transform and records nothing, ever. **Adding the pair
 that the sibling overlay already has is the whole mechanism**, not a new one.
 
 **The shape, and the reason it is not the obvious one:**
@@ -804,7 +808,7 @@ method mentions `floatingPiece` **nowhere** today, so undo while a *raster* piec
 reaches past it — a pre-existing inconsistency this ruling exposes rather than creates, and one the
 raster path should inherit the fix for.
 
-**`refreshUndoRedoState` needs no float term** (`CanvasManager.swift:2314-2330`), and the difference
+**`refreshUndoRedoState` needs no float term** (`CanvasManager.swift:3934`), and the difference
 from the fill and the shape is worth stating: those are *lifted but unrecorded*, so the Undo
 affordance has to be lit by hand. A float's nudges are already on the committed stack, so
 `history.canUndo` is already true. A float with **zero** nudges has genuinely changed nothing an
@@ -853,9 +857,11 @@ it as such, do not fix it here.
 
 ### Interpolation: out of scope, and the guard already exists
 
-`toggleMove()` already refuses on a derived cel (`TopToolbar.swift:139-142`), and it must keep doing
-so: an in-between stores an `InterpolationRecipe`, not ink, so there is no display list to split.
-Reuse the guard verbatim.
+A derived cel is already refused, and it must keep being refused: an in-between stores an
+`InterpolationRecipe`, not ink, so there is no display list to split. The guard used to be spelled
+again in `toggleMove()` (`TopToolbar.swift`) but is not any more — both lifts now go through
+`CanvasManager.activeVectorMoveTarget()` (`Models/CanvasManager+LassoMove.swift:1458`), which raises
+`CanvasNotice.cannotMoveDerivedFrame` at line 1463. Reuse that guard verbatim.
 
 On a **keyframe**, splitting a stroke changes the stroke count, which changes correspondence. What
 that costs is bounded and is already written down (`VECTOR_INTERPOLATION.md` §3.4): tier 0 is a
@@ -881,7 +887,7 @@ is the whole obligation.
 **Reuse `beginMove()` — rasterize the vector cel, lift pixels, move them.** It is the shortest
 diff and it would work on the first try. It also destroys the layer: `beginMove` flattens through
 `PixelOps.rasterize` and `commitFloatingPieceIfNeeded` lands the result in `Cel.raster`
-(`SelectionModels.swift:225-254`, `:333-345`), so the artist's vector strokes become pixels on a
+(`SelectionModels.swift`), so the artist's vector strokes become pixels on a
 layer still labelled `.vector`. The owner's whole complaint is that a vector layer is not behaving
 like one. This was also not hypothetical — it is what `beginDuplicate()` did until item (33) gave
 it a vector arm (§0).
@@ -899,7 +905,7 @@ more powerful machine and it is the wrong one. `coveredSpans` steps probes at th
 radius because a *footprint* can enter and leave a single segment several times
 (`VectorEraser.swift:116-171`); a polygon membership test is one boolean per point, and
 `splitRuns`' doc says exactly why one bisection per sign change suffices
-(`StrokeGeometry.swift:891-895`). Using `coveredSpans` would multiply the probe count by the ratio
+(`StrokeGeometry.swift:925-927`). Using `coveredSpans` would multiply the probe count by the ratio
 of segment length to eraser radius for no additional correctness, and would need a `probeStep` that
 a lasso does not have.
 
@@ -944,7 +950,7 @@ over-selection at least shows the artist what happened.
 
 **Leave `.erase` punches where they are.** Moving ink out from under a punch heals a hole the artist
 deliberately made — and then `collectResidueGarbage()` deletes the now-orphaned punch
-(`VectorLayer.swift:1046-1082`), making the healing permanent rather than one undo press away.
+(`collectResidueGarbage`, `VectorLayer.swift:3137`), making the healing permanent rather than one undo press away.
 
 **Hang the undo off `isVectorTransforming`'s `didSet`, copying `b100d65`.** That bracket stores two
 affines and its own doc says that is sufficient *because a transform touches nothing else in the cel*
@@ -999,7 +1005,7 @@ vector preview is a bitmap, so it needs no branch. A third overlay would also be
 
 **A `formatVersion`, or any persistence change at all.** There is none: a split produces
 `VectorStroke`s and `VectorFillElement`s, which are exactly what the display list and
-`VectorCanvasData.ElementData` already hold (`VectorLayer.swift:1708-1745`). **This feature adds no
+`VectorCanvasData.ElementData` already hold (`VectorLayer.swift:6433`). **This feature adds no
 new persisted type, no new discriminator, and no new file.** An older build opening a project
 containing split strokes sees strokes.
 
@@ -1152,7 +1158,7 @@ split here happens exactly once.
    drawn into an overlay whose backing store is **the pieces' own bounding box**, never the canvas —
    the position `ADD_TEXT.md` §4 rule 2 reaches for text, for the same reason. A 60 Hz drag assigns
    a transform. This is what `FloatingPieceOverlayView` already does: `layoutFromPiece()` sets
-   `pieceImageView.transform` and touches no pixels (`FloatingPieceOverlayView.swift:85-119`).
+   `pieceImageView.transform` and touches no pixels (`FloatingPieceOverlayView.swift:152`).
 3. **The float's `preview` bitmap is minted once, at lift, at the pieces' bbox** — never at canvas
    size, and never again during the float. This is where the vector case is *cheaper* than the raster
    one it borrows from: raster's `remainderPreview` is a canvas-sized `UIImage` from
@@ -1173,7 +1179,7 @@ split here happens exactly once.
    (`StrokeSpatialIndex.swift:4-11`). A small loop on a dense drawing must not touch every element.
    Only elements the index returns get the per-sample walk.
 7. **The lasso path is mapped into layer-local space once**, via `VectorCanvas.localPath(fromCanvas:)`
-   (`VectorLayer.swift:698-703`), and the *local* path is what every probe tests against. Mapping per
+   (`VectorLayer.swift:2589`), and the *local* path is what every probe tests against. Mapping per
    probe would put a matrix multiply inside the 40-iteration bisection.
 8. **Budget the boolean, and know when it is skipped.** MEASURED (Mac, `swiftc -O`, 2026-08-21):
    0.86 ms + 1.27 ms for an 8000-point fill against a 1500-point loop; 0.20 + 0.29 ms at 2000 vs 400.
@@ -1697,7 +1703,7 @@ the loop is asked in rather than about which rule it is asked under.
 
 **Engineering risks:**
 
-- **`splitRuns`' double-crossing limit** (`StrokeGeometry.swift:891-895`) is inherited, not
+- **`splitRuns`' double-crossing limit** (`StrokeGeometry.swift:925-927`) is inherited, not
   introduced. A thin concave spur of the loop clipping a coarse stroke between two samples is
   missed. It is already the accepted behaviour for drawing inside a selection; adopting the same
   primitive keeps the two consistent rather than adding a second, different approximation.
@@ -1710,7 +1716,7 @@ the loop is asked in rather than about which rule it is asked under.
   (session 55), so the failure mode is graceful; the cheap fix if it ever bites is in §1 and should
   not be built first.
 - **A traced fill contour is not a tidy polygon.** `pathFromAlphaMask` walks an alpha threshold
-  (`PixelOps.swift:586-599`), so a real fill can carry thousands of near-collinear points. The
+  (`PixelOps.swift:1005`), so a real fill can carry thousands of near-collinear points. The
   boolean cost measured in §4 rule 8 used 8000 points precisely to bound this, but the owner's own
   fills are the only honest test, and there is no simplification pass anywhere in the pipeline
   today.

@@ -12,7 +12,7 @@ the build order.
   logic test tier with no view — and `makeRenderRequest` is frame-parametric. What is missing is a driver
   loop, an encoder and a destination, not a renderer.
 - **Compositing already runs off the main thread**: `Compositor.composite` runs on `CanvasView.sandwichQueue`
-  (`Views/CanvasView.swift:1469`, `:1514-1516`) and is pure over a `RenderRequest` that holds no live model
+  (`Views/CanvasView.swift`) and is pure over a `RenderRequest` that holds no live model
   object. What runs on main is everything that *feeds* it — see §3.1.
 - **Nothing propagates a content version to an ancestor and frame-scoped invalidation does not exist.**
   LAYER_COMPOSITING §9.1 describes both as built; `RenderTree.swift:116-118` records the rejection of the
@@ -121,7 +121,7 @@ main thread ran, in order (`Views/Canvas/StrokeCanvasView.swift:919-996`, `Views
 
 **Those last two used to thrash the flatten memo and no longer do**, which is worth stating because it is the one
 figure in this section that moved rather than merely being described. `RasterizeKey` carries width and height
-(`PixelOps.swift:156-157`), so the sandwich at its reduced size and a *native* thumbnail minted separate canvas-sized
+(`PixelOps.swift`), so the sandwich at its reduced size and a *native* thumbnail minted separate canvas-sized
 entries per cel in one 192 MiB memo — six layers at 4096² needing 201 MiB reduced plus 384 MiB native, so the memo
 never held one frame and every rebuild was cold. At 2048x1024 the same six entries are 48 MiB and everything hit,
 which is why the freeze read as a large-canvas symptom. Both consumers are now bounded, and the live mask resolves at
@@ -134,7 +134,7 @@ images on screen. Nothing on it is proportional to canvas area.
 ### 3.2 The recipe — how pixel work leaves the main actor without a race
 
 The model is `@MainActor`. The baker must not read it mid-edit, and copying every cel's pixels to hand over (what
-`ProjectStore.SaveSnapshot` does, `Services/ProjectStore.swift:134-305`) is the cost we are removing. The seam is
+`ProjectStore.SaveSnapshot` does, `Services/ProjectStore.swift`) is the cost we are removing. The seam is
 that the expensive state is already copy-on-write: a vector cel's `_elements` is an array, and a raster cel's
 `CGContext.makeImage()` is a copy-on-write snapshot until the next stamp.
 
@@ -163,8 +163,8 @@ carrying everything the live canvas's own `SandwichKey` compares — **`frame` i
   **store format version** — a persistent store must carry what a
   process-lifetime cache could ignore.
 
-`frame` affects no pixel: the compositor reads it only to rebuild sub-requests (`Compositor.swift:1039`,
-`Engine/MaskResolver.swift:179`). Leaving it out is what makes a nine-frame hold one file. It is safe only while the
+`frame` affects no pixel: the compositor reads it only to rebuild sub-requests (`Compositor.swift:1103-1106`,
+`Engine/MaskResolver.swift:191-196`). Leaving it out is what makes a nine-frame hold one file. It is safe only while the
 tree and the leaf versions capture every frame-dependent input, which is why the folder grade is in the tree and why a
 future pose must be a `DerivedCelContent` whose identity includes the frame (KEYFRAMES §8).
 
@@ -187,15 +187,15 @@ carrying the accumulator across the cut is **exact**, with four rules:
    and blends in as one unit. Never cut inside it; if it alone exceeds the budget, chunk *its* children into its own
    transparent accumulator and recurse.
 2. **A `.stack` folder is transparent to chunking** — it recurses onto the caller's accumulator
-   (`MetalCompositor.swift:762-772`).
+   (`MetalCompositor.swift:883-893`).
 3. **Ink-input effects pin sources.** Outline always, and Bloom by default, re-walk `tree.split(atLeaf:).below` from
-   the leaf sources to build an ink-only, paper-free input (`MetalCompositor.swift:656-679`,
-   `Compositor.swift:1031-1059`; EFFECT_BACKDROP §3). A chunk that discarded those sources cannot rebuild it. When the
+   the leaf sources to build an ink-only, paper-free input (`MetalCompositor.swift:762-799`,
+   `Compositor.swift:795-816`; EFFECT_BACKDROP §3). A chunk that discarded those sources cannot rebuild it. When the
    root walk contains an ink-input node, the baker carries a **second accumulator without paper** alongside the first
    (EFFECT_BACKDROP §3 option C); inside a buffered scope the input degrades to backdrop already, so the rule is
    root-only.
 4. **Masks are resolved before the walk.** A mask's source stack may name a layer anywhere in the document, including
-   above the masked node (`RenderRequest.swift:352-355`, `MaskResolver.swift:176-181`). Coverage is 1 byte per pixel
+   above the masked node (`RenderRequest.swift:387-395`, `MaskResolver.swift:176-181`). Coverage is 1 byte per pixel
    and already cached; resolving every mask first, from its own small source subset, releases the constraint.
 
 The accumulator crosses a chunk boundary as a **synthetic leaf**: chunk k's `RenderRequest` is
@@ -263,7 +263,7 @@ way — MEASURED, 11 tests, **0 skipped**, on the iOS 26.5 simulator.
 
 Nothing was found that the chunking gets wrong on Metal but right on CoreGraphics.
 
-The compositor's own intermediates were never the problem: `peakCompositeTextures` (`RenderTree.swift:543-552`) is
+The compositor's own intermediates were never the problem: `peakCompositeTextures` (`RenderTree.swift`) is
 2 for a flat stack of any length and grows with depth. The problem is `sources`, one canvas per visible leaf, all
 live at once — 840 MB for 100 leaves at 2048x1024 against a 192 MiB budget. Chunking the snapshot is the whole win.
 
@@ -273,7 +273,7 @@ live at once — 840 MB for 100 leaves at 2048x1024 against a 192 MiB budget. Ch
 under `Library/Caches/PaintApp/bakes/<projectID>/<resolution>/`. Deleted at launch (§2.11) unless the artist chose to
 keep it, in which case it lives in `Documents/Projects/<Name>.paintbake/` beside the package — never inside it,
 because every save rebuilds the package through a staging directory and `validateProject` gates the swap on
-manifest-named files (`ProjectStore.swift:545-634`).
+manifest-named files (`ProjectBackupManager.swift`).
 
 **Format (§2.7, decided): lossless, one frame per file, BGRA premultiplied rows compressed with LZ4** through Apple's
 `Compression` framework (`COMPRESSION_LZ4`), a 32-byte header carrying width, height, bytes-per-row, format version
@@ -819,8 +819,8 @@ export, and none of it should ride in on export's back.
 ### 3.10 What a composite is not
 
 Floating Move pieces, lasso floats, motion-group overlays, guides and onion skins are drawn outside every cel and are
-in no composite (`RenderRequest.swift:741-789`). A baked frame is the artwork, not the screen. `sandwichEngagesOnCanvas`
-(`RenderRequest.swift:815-819`) is the live-canvas predicate and is not the bake predicate: a document with one plain
+in no composite (`RenderRequest.swift:882-923`). A baked frame is the artwork, not the screen. `sandwichEngagesOnCanvas`
+(`RenderRequest.swift`) is the live-canvas predicate and is not the bake predicate: a document with one plain
 vector layer still bakes, because play and export need it.
 
 ## 4. Shared engine state the baker inherits
@@ -834,7 +834,7 @@ vector layer still bakes, because play and export need it.
   are accessors over a lock, and the tuning is one `AlphaMask.Tuning` snapshot so `coverage(forSourceAlpha:)` cannot
   read a pair from two different writes. The bake key (§3.3) reads them through those accessors. Nothing on a render
   queue touches a plain static.
-- `UndoHistory` has no lock (`Models/UndoHistory.swift:107`); the baker never records undo.
+- `UndoHistory` has no lock (`Models/UndoHistory.swift`); the baker never records undo.
 - `textureBudgetBytes` being static is correct and stays (`Compositor.swift:120-126`): the request and the engine
   must agree on one number, and the baker reads the same one.
 

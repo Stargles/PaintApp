@@ -70,7 +70,7 @@ the answer is worth:
    later the owner settled item (8) at **16 bits**, with this ruling as part of why. See the correction
    in §6.
 3. **`ImageRef`'s synthesized `Codable` does not "break every existing document."** ADD_TEXT stage 2's
-   per-element decode (`VectorCanvasData.LossySlot`, `VectorLayer.swift:2810-2830`) contains a failed
+   per-element decode (`VectorCanvasData.LossySlot`, `VectorLayer.swift:6556-6558`) contains a failed
    element to *that element*. A new non-optional field on `ImageRef` would therefore **silently drop
    every placed image from every existing document, count it in `DecodeReport.malformedCount`, and
    write the loss to disk on the next save** — narrower in blast radius and worse in kind than a
@@ -81,7 +81,7 @@ the answer is worth:
 
 ## 1. What `_transform` actually buys today
 
-`VectorCanvas` is *"the vector content of one cel"* (`VectorLayer.swift:227`). `_transform` is
+`VectorCanvas` is *"the vector content of one cel"* (`VectorLayer.swift:1039`). `_transform` is
 declared at `:246`, accessed through `transform` at `:353-356`, and its doc says what it is for:
 *"Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp"*
 (`:351`).
@@ -121,9 +121,11 @@ Twenty-two sites in the app, all but two of them inside `VectorLayer.swift`.
 test**: `BrushEngineLogicTests.swift:537`), and the persistence triple
 `VectorCanvasData` `:2891` / `:2908` / `:2941-2943`.
 
-Outside `VectorLayer.swift` there are exactly two readers of the value:
-`CanvasManager.setVectorTransform` / `closeVectorTransformBracket` (`CanvasManager.swift:335-400`) and
-`CanvasView.Coordinator`'s two calls into the Core Animation latch (`:1672`, `:1702`).
+Outside `VectorLayer.swift` there are exactly two readers of the value, at the time of this audit:
+`CanvasManager.setVectorTransform` / `closeVectorTransformBracket` (`CanvasManager.swift`) and
+`CanvasView.Coordinator`'s two calls into the Core Animation latch (`:1672`, `:1702`). **`setVectorTransform`
+is gone now** — deleted in stage 2 once `resized(to:offset:)` and the float made it permanently unreachable
+(`VectorLayer.swift:6636`, `:6749`) — which is this ruling having been acted on rather than a fresh gap.
 
 **That is the owner's argument, counted.** Eleven inversions against five forward reads; of the five,
 one is a round trip to the writer, one exists for a single eraser preview, and the two that matter
@@ -136,7 +138,7 @@ come from.
 |---|---|---|
 | **Whole-cel Move** (`isVectorTransforming`) | yes — it is the only writer, `CanvasManager.swift:352` | **No.** It needs a way to move content. It writes the affine because that was the cheap way to do it in 2026-08. The undo bracket restores an affine (`:367-372`), which is the one thing that is genuinely simpler today. |
 | **Lasso float** | reads it as `baseTransform` (`CanvasManager+LassoMove.swift:185`) and divides it back out of every nudge (`:249-251`) | **No — and it already proves the ruling works.** A nudge maps element geometry through `VectorCanvas.mapping(_:throughSimilarity:)` and writes it back. It is precisely "the objects' coordinates change", shipped, tested, and exact to 1.3e-13 pt (`VectorLayer.swift:1585`). It reads `baseTransform` only to cancel it. |
-| **Interpolation** | **no — it drops it on the floor.** `interpolationContentProvider` returns `.vector?.elements` raw (`CanvasManager+Interpolation.swift:577`), and `InterpolationEvaluator.render` takes `content` + `size` and no affine (`:1247-1250`) | No. See §2 defect C: this is a live correctness bug caused by the transform's existence. |
+| **Interpolation** | **no — it drops it on the floor.** `interpolationContentProvider` returns `.vector?.elements` raw (`CanvasManager+Interpolation.swift:545`), and `InterpolationEvaluator.render` takes `content` + `size` and no affine (`Engine/InterpolationEvaluator.swift:773-777`) | No. See §2 defect C: this is a live correctness bug caused by the transform's existence. |
 | **Onion skin, gallery thumbnails, export, flatten, merge** | indirectly, via `PixelOps.rasterize(cel:)` → `cel.vector?.render()` (`PixelOps.swift:276`) | **No.** They ask for a picture. Identity costs them nothing; `render()` already branches on `_transform.isIdentity` and skips the pass. |
 | **Interactive fill's reference composite** | indirectly, `CanvasManager+Fill.swift:848` | No, same reason. The fill's own path goes in through `addFill(canvasSpacePath:)`, which inverts. |
 | **Vector eraser (all three modes)** | via `erase`, `cutToIntersection`, `eraseHybrid`, `cutPreviewEdits` | **No.** Every one of them inverts a canvas-space gesture into storage on the way in, and the preview maps back out. Identity deletes eight lines. |
@@ -178,7 +180,7 @@ joined the two. **Two doc comments in this tree contradict each other and the wr
 reader of the Move path will meet.**
 
 **C. Interpolation ignores the transform entirely.** The content provider hands the evaluator the raw
-local display list (`CanvasManager+Interpolation.swift:577`) and the evaluator takes no affine
+local display list (`CanvasManager+Interpolation.swift:545`) and the evaluator takes no affine
 (`:1247-1250`). Two keyframes whose cels carry different transforms are therefore registered and
 blended in two different coordinate frames, and the in-between is drawn in neither. `registrationFrame`
 and the ARAP lattice are all built from `registrationPoints(of:)` (`:1212`), which reads
@@ -301,7 +303,7 @@ not held resident). §4 prices it.
 
 ### Is `_transform` per-cel or per-layer-across-all-cels? **Per cel.** Three pieces of evidence:
 
-1. `VectorCanvas` is *"The vector content of **one cel** on a `.vector` layer"* (`VectorLayer.swift:227`),
+1. `VectorCanvas` is *"The vector content of **one cel** on a `.vector` layer"* (`VectorLayer.swift:1039`),
    held at `Cel.vector`, and every cel of a layer has its own.
 2. `setVectorTransform` resolves `activeCelIndex(inLayer:atFrame:)` and writes that one cel's canvas
    (`CanvasManager.swift:336-338`, `:352`).
@@ -346,10 +348,10 @@ does not need measuring.
 
 **The undo step, priced honestly.** Two options:
 
-- *Whole-array swap*, which is what `registerVectorElementsUndo` (`CanvasManager+Text.swift:411`)
+- *Whole-array swap*, which is what `registerVectorElementsUndo` (`CanvasManager+Text.swift:463`)
   already does for every other vector mutation, and what `applyToVectorFloat` does per nudge. At 24
   bytes a sample that is **~209 KB per Move gesture** on the measured cel. `UndoBudget`'s floor is 64
-  MiB (`UndoHistory.swift:85`), so ~300 whole-cel Moves before the oldest trims. Acceptable, and it is
+  MiB (`UndoHistory.swift:96`), so ~300 whole-cel Moves before the oldest trims. Acceptable, and it is
   the shape every neighbouring path already uses.
 - *Store the inverse similarity* — 32 bytes a step, and exactly invertible. **MEASURED** (scratch
   `swiftc`, 2026-08-27, 200 trials × 200 composed gestures, scale ∈ [0.3, 3],
@@ -383,7 +385,7 @@ They survive, both of them, and the distinction is sharp enough to state as a ru
 - `splitForLassoMove` tests `image.transform.position` for containment (`:1505`);
 - `contentBounds(of:)` reads it to size the box (`:1333-1335`);
 - `draw(image:into:)` concatenates it (`:2596`);
-- `registrationPoints(of:)` contributes it (`CanvasManager+Interpolation.swift:1221`).
+- `registrationPoints(of:)` contributes it (`Models/CanvasManager+Interpolation.swift:1179`).
 
 **Nobody inverts it.** A placed photograph *is* a rectangle with a pose; the pose is the object's
 identity, not a lens the storage is viewed through. The same rectangle exists in Illustrator, in
@@ -436,7 +438,7 @@ exactly one of the three:
 | **1. Layer-local storage.** `8192 / 0.02 = 409,600 pt` (TODO.md:73-78) | **Gone.** There is no local space, so there is no `1/k` term. | Gone, same as before — and this is the reason the final field can be sized to the addressable canvas at all, rather than to some multiple of it. |
 | **2. Touches keep being delivered outside the view.** Nothing clamps a sample to the canvas rect | **Unchanged**, and worse than it looks: I could find **no clamp on canvas zoom anywhere in `CanvasView.swift`** — no `minimumZoomScale`, no clamp in `handlePinch` (`:3129`) — and five overlays guard with `max(canvasScale, 0.01)`, which is the code contemplating 1 screen point = 100 canvas points. A drag across a 1366 pt screen at that zoom records ~136,600 canvas points. (INFERRED — an absence of evidence; a clamp may live somewhere I did not find, and this is §9's fourth question.) | Still unclamped in the tree (§9.4, and filed to BUGS.md per TODO.md), but no longer a bit-width problem: the encoder **saturates instead of wrapping** at the field boundary (TODO.md — *"if you draw outside the 16k, it should not wrap but rather clamp"*), so an out-of-range sample flattens against ±8,192 pt instead of demanding more bits to represent it. |
 | **3. A shrink parks content outside the bounds.** `setCanvasPadding` crops the raster tiers and leaves vector elements where they are | **Unchanged.** Bounded by the *old* extent, so ≤ 8192. | Unchanged, and already inside the field: the old extent is ≤ 8192 by construction, and the centred field covers ±8,192 exactly. |
-| **4. (not in that list, and it should be) The lasso float's scale has a floor and no ceiling.** `uniformlyScaled` clamps with `max(…, minimumScale)` and nothing above (`ObjectTransformFrame.swift:312`); `stretched` the same per axis (`:340-341`) | **Unchanged**, and it already writes into element geometry today. Repeated grow gestures are unbounded in principle. | Still unbounded in principle, same as reason 2 — the saturating clamp is what makes an unbounded reason survivable without an unbounded field. |
+| **4. (not in that list, and it should be) The lasso float's scale has a floor and no ceiling.** `uniformlyScaled` clamps with `max(…, minimumScale)` and nothing above (`ObjectTransformFrame.swift:881`); `stretched` the same per axis (`:340-341`) | **Unchanged**, and it already writes into element geometry today. Repeated grow gestures are unbounded in principle. | Still unbounded in principle, same as reason 2 — the saturating clamp is what makes an unbounded reason survivable without an unbounded field. |
 
 **The honest bound, and it held up.** Retiring reason 1 takes the *accidentally* reachable worst case
 from 409,600 pt — one corner drag — down to whatever reason 2 allows, which on the evidence above is
@@ -621,7 +623,7 @@ defects come back and two costs that did not exist when §2 was written come wit
 |---|---|
 | **A. Drawing on a transformed cel silently loses ink** | **Returns, on the crop arm.** `render()` rasterizes the display list into a context of exactly `size` in *local* space (`VectorLayer.swift:2982`) and applies `_transform` to that finished bitmap afterwards (`:2882`). A crop's offset is negative, so local content occupies `[0, oldSize]` while the renderer keeps `[0, newSize]` — the part of the drawing that the crop was supposed to keep is clipped *before* the shift moves it in. The same arithmetic runs the other way for ink drawn afterwards: `addStroke(canvasSpaceStroke:)` stores `canvas − d`, so on a cropped cel a stroke near the far edge stores a local coordinate past `size` and is clipped. The scale factor is not what makes defect A; the *offset between local and canvas space* is, and a translation is nothing but that offset. |
 | **B. Scaling up is a bitmap magnify** | **Does not return.** A translation moves the bitmap and resamples nothing — with whole-point offsets (CANVAS_RESIZE.md §5 rule 4) not even a filtered one. This is the one the instinct is right about. |
-| **C. Interpolation ignores the transform** | **Returns.** `interpolationContentProvider` still hands the evaluator the raw display list (`CanvasManager+Interpolation.swift:577`) and `InterpolationEvaluator.render` still takes no affine. A resize gives *every* cel the same transform, so registration stays consistent — and that makes it worse rather than better: keyframes render shifted by `d` and every in-between renders unshifted, so the whole document's in-betweens pop by `d` the moment the canvas is resized. Uniform, silent, and on a path with no test that would see it. |
+| **C. Interpolation ignores the transform** | **Returns.** `interpolationContentProvider` still hands the evaluator the raw display list (`CanvasManager+Interpolation.swift:545`) and `InterpolationEvaluator.render` still takes no affine. A resize gives *every* cel the same transform, so registration stays consistent — and that makes it worse rather than better: keyframes render shifted by `d` and every in-between renders unshifted, so the whole document's in-betweens pop by `d` the moment the canvas is resized. Uniform, silent, and on a path with no test that would see it. |
 
 **And two costs that are new since §2 was written.**
 

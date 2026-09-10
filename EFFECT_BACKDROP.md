@@ -11,7 +11,7 @@ settled — §5's four questions were answered the same day and two of them over
 > own build order (§6) ran**, and §6 has since shipped (`2a0379d`, `d90b329`, `5c00201`). Its first
 > bullet in particular — *"The paper is not in the composite"* — **is no longer true**:
 > `SandwichRecipe.resolve()` now builds `full` and `below` with `background: paper`
-> (`Engine/FrameRecipe.swift:230-231`), both backends fill it, and `EffectLayerLogicTests:1491` is
+> (`Engine/FrameRecipe.swift:289-290`), both backends fill it, and `EffectLayerLogicTests:1491` is
 > `testEveryBlendModeBlendsAgainstThePaper`. Only the disengaged Core Animation path still has the
 > paper as a plain view. **A shipped spec's what-is-already-true section is the most
 > confidently-worded stale text in the repo** — it carries the commits it was verified at, so it reads
@@ -29,7 +29,7 @@ Every line here was opened by two agents independently, at commit `500a53e`/`f51
   canvas paints its own `paperView`, a background in `below` would be a second one, and a background in
   `above` would be an opaque sheet over everything beneath it. **That last clause stays true under every
   option below** — `above` keeps `background: nil` whatever we do.
-- **`RenderBackground` was designed for this disagreement.** Its doc (`RenderRequest.swift:249-259`)
+- **`RenderBackground` was designed for this disagreement.** Its doc (`RenderRequest.swift:318`)
   says the two consumers disagree and both are right, which is why it is a request-level choice. **The
   only caller in the app that passes a background today is the eyedropper**
   (`CanvasManager+Eyedropper.swift:52`) — which is why README can say the eyedropper samples the
@@ -75,7 +75,7 @@ This is not a choice. If an artist brightens the canvas, the result **is** opaqu
 a transparent region to see through, because the thing that was transparent has been graded into a
 colour. Any design that produces the correct picture produces an opaque one.
 
-**That hides the "Behind" onion skin.** `onionSkin` is added to the container at `CanvasView.swift:49-50`,
+**That hides the "Behind" onion skin.** `onionSkin` is added to the container at `CanvasView.swift:76-77`,
 *before* `sandwichBelow` (`:57-58`) and `sandwichAbove` (`:59-60`); the comment at `:54-56` states the
 invariant outright — the disengaged z-order is `onionSkin < below < above < chrome` — and
 `updateOnionSkin` routes the `.behind` placement to exactly that lower view (`:2311-2315`). The Behind
@@ -303,7 +303,7 @@ the owner 2026-08-27:
 | Effect | Input | Fixed or chosen |
 |---|---|---|
 | Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise, Chromatic Aberration, Blur | `.backdrop` | fixed |
-| **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:684-693`, CPU twin `EffectKernels.swift:455-471`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
+| **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:711-719`, CPU twin `EffectKernels.swift:473-489`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
 | **Sobel** | `.backdrop` | **fixed — and it was the artist's choice for a few hours on 2026-08-27.** *"Same with sobel, defaulting this time to taking in the canvas color"* got the default right and the control wrong; the owner deleted the control the same day (*"drop it"*), and §5.2 keeps both rulings. So Sobel's shipped look still changes — bright edges on black, which is what an edge detector conventionally is — but there is no other setting. **Bright-edges-on-black also needs the alpha rule**: see §2.2, whose original claim that it came for free was false and shipped as a transparent canvas. With one mode left that rule is unconditional and needs no parameter |
@@ -318,7 +318,7 @@ asked for.
 The property must be an **exhaustive switch over the effect case with no `default:`**, for the reason
 CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of exceptions
 rots, and a fourteenth effect added later must be forced to answer the question rather than inherit a
-default that happens to be wrong for it. `Effect.reshapesCoverage` (`Effect.swift:126-129`) is the
+default that happens to be wrong for it. `Effect.reshapesCoverage` (`Models/Effect.swift:135`) is the
 existing property of this shape and the new one should sit beside it. Where the answer is the artist's,
 the stored value lives in that effect's own parameter struct (`Bloom`) and is **persisted**, so it is a
 document change and needs a decode default for files written before it existed. **`Sobel` briefly had

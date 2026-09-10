@@ -104,9 +104,9 @@ different shape.
 
 | primitive | file:line | what it does | scales? |
 |---|---|---|---|
-| `RasterLayerTexture.resized(to:placing:)` | [`RasterLayerTexture.swift:380`](PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: content)` into a `newSize` renderer, raising `interpolationQuality` only when `content.size != size`. A blank texture stays blank and allocates nothing. | **yes**, when the rect is a different size |
-| `PixelOps.resizedCanvasImage(_:to:placing:)` | [`PixelOps.swift:414`](PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **yes** |
-| `VectorCanvas.resized(to:placing:)` | [`VectorLayer.swift:624`](PaintSoftware/Engine/VectorLayer.swift) | derives `k` from the placement rect and **bakes** `_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an identity-transform canvas. Lossless at `k == 1`, exact at any `k`. | **yes** |
+| `RasterLayerTexture.resized(to:placing:)` | [`RasterLayerTexture.swift:913`](PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: content)` into a `newSize` renderer, raising `interpolationQuality` only when `content.size != size`. A blank texture stays blank and allocates nothing. | **yes**, when the rect is a different size |
+| `PixelOps.resizedCanvasImage(_:to:placing:)` | [`PixelOps.swift:754`](PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **yes** |
+| `VectorCanvas.resized(to:placing:)` | [`VectorLayer.swift:1575`](PaintSoftware/Engine/VectorLayer.swift) | derives `k` from the placement rect and **bakes** `_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an identity-transform canvas. Lossless at `k == 1`, exact at any `k`. | **yes** |
 
 **That last row is stage 2's correction to this section, and it went in the feature's favour.** It read
 *"appends a translation to the canvas-level `_transform`; touches no element"* until stage 2 checked
@@ -159,15 +159,15 @@ the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widt
 ### Two existing defects on this path, which a resize inherits unless it fixes them
 
 1. **`flipCanvas` does not mirror vector content at all.**
-   [`CanvasManager+Document.swift:73-76`](PaintSoftware/Models/CanvasManager+Document.swift) says so
+   [`CanvasManager+Document.swift:837`](PaintSoftware/Models/CanvasManager+Document.swift) says so
    in its own comment and flags it as a follow-up. A resize must not inherit the shape of that
    omission: every tier, or none.
 2. **`setCanvasPadding` misses two things that hold canvas coordinates.** `guideStrokes`
-   (`CanvasManager.swift:71`, document-level, `TimedSample.x/y` in absolute canvas points) are not
+   (`CanvasManager.swift:152`, document-level, `TimedSample.x/y` in absolute canvas points) are not
    transformed, so growing the padding leaves every interpolation guide 
-   `delta` points off its artwork. And `copiedCel` (`CanvasManager.swift:481`) is a canvas-sized
+   `delta` points off its artwork. And `copiedCel` (`CanvasManager.swift:715`) is a canvas-sized
    clipboard payload that nothing clears; `pasteCel`
-   ([`CanvasManager+Timeline.swift:141-147`](PaintSoftware/Models/CanvasManager+Timeline.swift)) does
+   ([`CanvasManager+Timeline.swift:257`](PaintSoftware/Models/CanvasManager+Timeline.swift)) does
    no size check, so a copy-resize-paste installs a cel whose `RasterLayerTexture.size` is the old
    canvas's. Both are one line each in the generalised loop, and stage 1 fixes both.
 
@@ -175,9 +175,9 @@ the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widt
 
 **The raster tier already rescales on load, non-uniformly, silently.** `decodeCel` builds every
 texture as `RasterLayerTexture.load(from: image, size: canvasSize)`
-([`ProjectStore.swift:1088`](PaintSoftware/Services/ProjectStore.swift)), and `setContents` draws the
+([`ProjectStore.swift:1693`](PaintSoftware/Services/ProjectStore.swift)), and `setContents` draws the
 decoded PNG as `image.draw(in: CGRect(origin: .zero, size: size))`
-([`RasterLayerTexture.swift:231-247`](PaintSoftware/Engine/RasterLayerTexture.swift)). So a PNG whose
+([`RasterLayerTexture.swift:784-796`](PaintSoftware/Engine/RasterLayerTexture.swift)). So a PNG whose
 dimensions disagree with `manifest.canvasWidth/Height` is **stretched to fit, aspect and all**.
 
 The vector tier does not do this — `VectorCanvas(size: canvasSize, elements: …)` leaves elements
@@ -212,24 +212,24 @@ closed off explicitly: **the header and every buffer move together, in one opera
 
 | tier | where | crop/expand | scale |
 |---|---|---|---|
-| `Cel.raster` | `Cel.swift:9`, `RasterLayerTexture` | redraw at offset; blank stays blank and free | **resample** — lossy, irreversible |
-| `Cel.fillImage` | `Cel.swift:12` | redraw at offset | **resample** — lossy |
-| `Cel.bakedImage` | `Cel.swift:15` | redraw at offset | **resample** — lossy |
+| `Cel.raster` | `Cel.swift:45`, `RasterLayerTexture` | redraw at offset; blank stays blank and free | **resample** — lossy, irreversible |
+| `Cel.fillImage` | `Cel.swift:48` | redraw at offset | **resample** — lossy |
+| `Cel.bakedImage` | `Cel.swift:51` | redraw at offset | **resample** — lossy |
 | `Cel.vector` elements | `VectorLayer.swift:244` | `mapping(_:throughSimilarity:)` per element, with the translation baked in | the same call with `k != 1` — **exact** |
-| `VectorCanvas._transform` | `VectorLayer.swift:245` | **comes out identity in both arms.** `resized(to:placing:)` bakes it into the elements (TODO item (12) stage 3), so nothing in the app produces a non-identity cel transform | same |
-| `VectorCanvas.size` | `VectorLayer.swift:233` | new size | new size |
-| `Cel.thumbnail` | `Cel.swift:26` | nil it; `startThumbnailBackfill()` | same |
+| `VectorCanvas._transform` | `VectorLayer.swift:1082` | **comes out identity in both arms.** `resized(to:placing:)` bakes it into the elements (TODO item (12) stage 3), so nothing in the app produces a non-identity cel transform | same |
+| `VectorCanvas.size` | `VectorLayer.swift:1045` | new size | new size |
+| `Cel.thumbnail` | `Cel.swift:128` | nil it; `startThumbnailBackfill()` | same |
 | `Cel.interpolation` lattices | `InterpolationRecipe.swift:109` → `Lattice.swift:40-45` | `restOrigin` + `vertices` translate | `restOrigin`, `vertices` through `M`; `restCellSize *= k`; `cols`/`rows`/`activeCells` untouched |
 | `LocalEdit.stroke` | `InterpolationRecipe.swift:142` | translate | through the same `mapping` — **it lives in the lattice's rest space, so it moves *with* the lattice; mapping it a second time in canvas space is the trap** |
 | `MotionGroup` | `MotionGroup.swift` | — | — (ids, name, colour, mode; no geometry) |
 | `InterpolationRecipe.t` / `SpacingCurve` | `InterpolationRecipe.swift:188`, `:64` | — | — (normalised 0…1) |
-| `guideStrokes[].samples` | `CanvasManager.swift:71`, `GuideStroke.swift` | translate — **missed today** | through `M` (`x`,`y` only; `pressure`/`time` are unit-free) |
+| `guideStrokes[].samples` | `CanvasManager.swift:152`, `GuideStroke.swift` | translate — **missed today** | through `M` (`x`,`y` only; `pressure`/`time` are unit-free) |
 | `AlphaMask` | `AlphaMask.swift:31` | — | — **nothing at all.** A mask is a list of source UUIDs resolved at render time (LAYER_COMPOSITING.md §6.1); its coverage cache is keyed on width/height (`MaskResolver.swift:88-90`) and self-invalidates |
-| `Layer`/`LayerFolder` effects, blend modes, opacity, `compositorRole` | `ProjectManifest.swift:242-336`, `:131-230` | — | — (no geometry) |
+| `Layer`/`LayerFolder` effects, blend modes, opacity, `compositorRole` | `ProjectManifest.swift:186` | — | — (no geometry) |
 | `ViewPreset` | `ViewPreset.swift` | — | — (visibility dictionaries) |
 | onion skin | `OnionSkinSource.swift:843-899` | — | — (derived per frame, cache keyed on `(cel, canvasSize, size)`) |
-| `selection`, `floatingPiece`, `vectorFloat`, `shapePreviewTexture`, interactive fill/shape/text | `SelectionModels.swift:125-200`, `CanvasManager.swift:2235` | **bake, then discard** — `commitAllInteractiveState()` + `selection = nil`, exactly as `setCanvasPadding:28-29` already does | same |
-| `copiedCel` | `CanvasManager.swift:481` | **clear it** — see §0 | same |
+| `selection`, `floatingPiece`, `vectorFloat`, `shapePreviewTexture`, interactive fill/shape/text | `CanvasManager.swift` (`selection`, `floatingPiece`, `vectorFloat`, `shapePreviewTexture` are all declared there, not on `SelectionModels`) | **bake, then discard** — `commitAllInteractiveState()` + `selection = nil`, exactly as `setCanvasPadding:28-29` already does | same |
+| `copiedCel` | `CanvasManager.swift:715` | **clear it** — see §0 | same |
 | `canvasPadding` | `CanvasManager.swift:27` | preserved literally, in points | preserved literally — see §5 |
 | every size-keyed cache | `PixelOps.RasterizeKey`, `MaskResolver.CacheKey`, `EffectPipelines.scratchSize`, `OnionSkinRasterCache` | self-invalidating; purge to reclaim the bytes | same |
 | compositor admission | `MetalCompositor.swift:516-525` | — | **re-checked implicitly, and the gate is about memory, not speed** — jetsam kills the process before `Metal.makeTexture` would return nil (`:505-506`). Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, a threshold set by the document's layer/effect structure as much as by the canvas. Nothing is shrunk below it — a frame that does not fit is composited in horizontal strips at full size (RENDER §3.8), so growing the canvas costs passes rather than sharpness; the dialog warns and proceeds — §5 rule 14, §6 Q5 |
@@ -308,7 +308,7 @@ original offset (residual 0.0 pt over the cases tried).
 **One map, expressed once.** Not "a draw rect for the raster and a scale factor for the vector" —
 those are the same `M` written twice, and two expressions of one geometry are how they come to
 disagree. The precedent is explicit: `RasterLayerTexture.flippedImage`'s doc comment
-(`RasterLayerTexture.swift:339-345`) says it exists as one function because *"a canvas flip has to
+(`RasterLayerTexture.swift:878`) says it exists as one function because *"a canvas flip has to
 move all three raster tiers … in exact lockstep, or content lands on the wrong side of the canvas
 relative to the rest."*
 
@@ -332,7 +332,7 @@ one-shot whole-document resample the difference is worth the milliseconds).
 ### The vector side scales the *elements*, and must not scale `_transform`
 
 `VectorCanvas.render()` renders the display list into a canvas-sized bitmap **first**, then applies
-`_transform` to that bitmap (`VectorLayer.swift:2219-2228`). So a scale folded into `_transform` — the
+`_transform` to that bitmap (`VectorLayer.swift`). So a scale folded into `_transform` — the
 obvious generalisation of `resized(to:offset:)` — is a **bitmap resample of the vector render**: the
 strokes are stamped at their old sizes into a bigger buffer and then blown up. Every reason the vector
 tier exists is lost in one line, invisibly, and the result still *looks* right at a glance.
@@ -386,7 +386,7 @@ Three consequences, the first two settled in §5:
 ### The spacing floor: a large downscale changes how a stroke stamps, not only where
 
 `BrushStamper.stampSpacing` is `max(brushSize · spacingFraction, 1)`
-([`BrushStamper.swift:67`](PaintSoftware/Engine/BrushStamper.swift)). The `1` is an **absolute** floor
+([`BrushStamper.swift:18-19`](PaintSoftware/Engine/BrushStamper.swift)). The `1` is an **absolute** floor
 in canvas points and does not scale. Below `brushSize · spacingFraction == 1` the dab spacing stops
 tracking the brush size, so a scaled stroke gets a different dab count.
 
@@ -641,7 +641,7 @@ do not, for three independent reasons, none of them exotic:
 
 1. **Vector geometry is stored in layer-local space, not canvas space.** `addStroke(canvasSpaceStroke:)`
    maps incoming samples through `_transform.inverted()` and divides `size` by the transform's scale
-   ([`VectorLayer.swift:573-585`](PaintSoftware/Engine/VectorLayer.swift)). A layer the artist has
+   (`VectorLayer.swift`, `_transform`). A layer the artist has
    scaled to 0.1× with the Move tool stores local coordinates **ten times the canvas extent**, by
    construction and correctly.
 2. **Touches keep being delivered outside the view they began in.** Nothing clamps a sample to the
@@ -1063,7 +1063,7 @@ mapper.
    correction matters more than the choice.
 
    **The gate is about memory, not speed.** `MetalCompositor.attempt` refuses before it allocates
-   anything (`MetalCompositor.swift:516-525`) because `Metal.makeTexture` does not return nil under
+   anything (`MetalCompositor.swift:596-609`) because `Metal.makeTexture` does not return nil under
    this pressure — jetsam kills the process first (`:505-506`; `RenderTree.swift:522-531` makes the
    same point independently). "Just take longer" was never one of the options at the point the guard
    sits: the alternative to refusing is the app dying.

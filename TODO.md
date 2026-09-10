@@ -392,7 +392,24 @@ and "Left to build" bullet checked out. **That list is history, not the current 
       other ink, because by then it is ink"*, and they do not — `splitForLassoMove` refuses `.image`
       exactly as it refuses `.video`, by centre and whole. Stage 8 recorded it in VIDEO.md §9 with the
       two ways to make the sentence true rather than picking one.
-- [ ] **Citation rot.** ~10 of one deleted item's 15 anchors and 5 of another's 11 had drifted, two
+      **Sweep completed, 2026-09-10** (branch `tmp/specs`): re-checked VIDEO.md §2.10/§9 against
+      current `splitForLassoMove` — still true, left alone. Six new contradictions found and fixed
+      across the rest of the corpus, all in the shape this box already names — a spec describing a
+      refusal, a field or a wiring gap that has since shipped or moved: **KEYFRAMES.md** §4.4's "Two
+      placed-object refusals ride along" (the refusal was never built; `VectorImageElement` got a
+      stored shape instead, per its own "What the model pass found" item 3 — the original passage
+      hadn't been updated to match) and §4.1's `renderTree` census (describes a pre-stage-0 "computed
+      var"; the function has taken `atFrame:` since `654f863`); **LASSO_MOVE.md**'s `Kind` rawValues
+      list (missing the `video` case added since), two `DabLattice.seedID` references (the field moved
+      to `VectorStroke.seed`/`arcOffset` under BRUSH.md §4), `toggleMove()`'s derived-cel refusal (moved
+      to `CanvasManager.activeVectorMoveTarget`) and `updateFloatingTransform` (renamed
+      `updateFloatingPose`) — the last two reused in **VECTOR_INTERPOLATION.md** item 26, which cited
+      the same stale `toggleMove` location, and item 34, whose "nothing sets" claim is now only half
+      true (`visibilityThreshold` is set, by local edits, for an unrelated reason); and **ADD_TEXT.md**'s
+      "`ActionsMenu` gains the ability to enter a mode" section, describing `activePanel` as unthreaded
+      when Stage 1 (marked done four lines later in the same file) already threads it. Full table in
+      the session report.
+- [x] **Citation rot.** ~10 of one deleted item's 15 anchors and 5 of another's 11 had drifted, two
       because a file moved directory. Sweep the specs the same way and prefer symbols to line numbers.
       **Partial pass, 2026-09-07**: swept ARCHITECTURE_REVIEW.md's finding 3, the section this branch's
       own `dc3834d` re-affirmed as "kept as written... still accurate" — the prose was accurate but nine
@@ -402,9 +419,24 @@ and "Left to build" bullet checked out. **That list is history, not the current 
       only `ProjectBackupManager.swift:460` was already right), now fixed. Finding 4's two
       (`ProjectStore.swift:160→185`, `ProjectManifest.swift:242→304`) were dropped rather than
       repaired, since the symbol is already named in the same sentence — "prefer symbols to line
-      numbers" applied rather than just restated. The rest of the spec corpus — RENDER.md, KEYFRAMES.md,
-      LASSO_MOVE.md, CANVAS_RESIZE.md, LAYER_TRANSFORM.md, VIDEO.md, EFFECT_BACKDROP.md,
-      VECTOR_INTERPOLATION.md, LASSO_FILL.md, BRUSH.md, ADD_TEXT.md — is unswept.
+      numbers" applied rather than just restated.
+      **Rest of the corpus swept 2026-09-10** (branch `tmp/specs`). RENDER.md, KEYFRAMES.md,
+      LASSO_MOVE.md, CANVAS_RESIZE.md, LAYER_TRANSFORM.md and EFFECT_BACKDROP.md, ADD_TEXT.md each carry
+      `FILE:LINE` anchors — 314 counted across the eight (VIDEO.md included); VECTOR_INTERPOLATION.md,
+      LASSO_FILL.md and BRUSH.md cite files and symbols with no line numbers, so the sweep there was a
+      symbol-existence check rather than a line check. **~130 of the 314 numbered anchors were flagged
+      as drifted by distance-from-declaration; on manual check the large majority were real rot** (a
+      handful were false positives — a citation into a doc comment a few lines above a declaration my
+      checker matched instead) **and were fixed by dropping the line number where the sentence already
+      names the symbol, or correcting it where it did not**, per the rule above. The remaining ~184
+      anchors were spot-checked rather than each individually re-derived, given the corpus's size;
+      several more rotted ones turned up that way and were fixed (listed with the contradictions
+      above and in the session report). Two clusters were confirmed rotted but left unresolved because
+      the described code has been refactored away rather than moved — RENDER.md §3.1's pre-stage-2
+      pen-up table (several citations land on unrelated doc comments the surrounding files' growth has
+      shifted past) and LAYER_TRANSFORM.md's `render()`/`_transform` bitmap-application claim (the
+      literal `ctx.concatenate(_transform)` this cites no longer exists as such) — both noted in place
+      rather than guessed at.
 - [x] **Dangling references.** Neither was rot. (10a) and (38) are **completed** items whose numbers
       survive in several citations each — (10a) in eight, corrected 2026-09-07 from the nine recorded
       here; (38)'s six was not re-verified, since a bare "(38)" also matches unrelated numeric literals

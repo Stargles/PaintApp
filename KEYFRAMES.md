@@ -92,7 +92,7 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
 8. **The two meanings of "keyframe" are separated in the UI as "animation keyframes" (this feature) and
    "interpolation keyframes" (the existing reference cels).** The collision is real and is in the code:
    `CanvasManager.interpolationReferences` is documented as *"the cels the artist has flagged as
-   keyframes"* and groups them into `interpolationKeyframes` (`Models/CanvasManager.swift:114-119`).
+   keyframes"* and groups them into `interpolationKeyframes` (`Models/CanvasManager+Interpolation.swift`).
 9. **Bake is destructive and undoable.** The animated cel is replaced by the baked one-frame cels and
    the animation is gone, in one undo step. Consistent with Commit, which is one-way by design
    (`InterpolationEvaluator.flattened`) — and the reason to bake is to hand-edit the in-betweens, so a
@@ -158,7 +158,7 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     of the same timeline, so the button, the frames it writes onto and the curve it opens are all in
     one place. It is chrome and **not a `Tool`** — and not an `ActivePanel` case either. The shipped
     precedent is exact: onion skin, interpolate and loop are `@Published` flags on `CanvasManager` with
-    buttons in that same strip (`AnimationTimeline.swift:406`, `:440`, `:455`), touching none of the
+    buttons in that same strip (`AnimationTimeline.swift:777`, `:1254`, `:806`), touching none of the
     `Tool` switches. **Note that strip is written out twice** — `collapsedBar` and `miniToolbar` — and a
     button added to one is invisible in the other.
 23. **A channel that is already animated keys on every edit, in or out of Animate mode. Animate mode is
@@ -447,7 +447,7 @@ returns a new `t` fed to lattice deformation, its input is clamped to 0…1
 mid-scrub, and both ends are pinned. Reusing it for bloom intensity silently imposes all three, and
 **overshoot — the thing a bezier graph editor exists to give you — is structurally excluded.**
 
-What *is* reused: `CurveEditor`'s gesture grammar verbatim (`Views/EffectSection.swift:665-885` —
+What *is* reused: `CurveEditor`'s gesture grammar verbatim (`Views/EffectSection.swift` —
 `DragGesture(minimumDistance: 0)`, `hitRadius` 22 pt, `tapSlop` 5 pt, drag moves / tap-on-handle deletes
 / tap-on-empty adds, and its `Self.encode(points)` accessibility-value convention that the UI suite
 reads); and `SpacingChart`'s **write-back discipline** — begin/drag/commit as one undo bracket, and a
@@ -485,10 +485,10 @@ display name, tag colour — persisted in the manifest, with membership as an `a
 **field on the element**. That split is the codebase's own settled shape: `MotionGroup` is identity,
 `MotionGroupBinding` inside the recipe is the geometry, and `motionGroupID`'s doc gives the reason for
 the field — *"so it survives copy/duplicate/split/undo automatically and a cut piece keeps its parent's
-tag"* (`Engine/VectorLayer.swift:52-54`).
+tag"* (`Engine/VectorLayer.swift`).
 
 **That reason is load-bearing here and not merely tidy.** Element ids **do not survive a lasso lift** —
-the split mints fresh UUIDs on both pieces (`VectorLayer.swift:1146`, `:1234`) — so a channel keyed to
+the split mints fresh UUIDs on both pieces (`VectorLayer.swift:3019`, `:3045`) — so a channel keyed to
 raw element ids is orphaned the moment the artist re-lassoes. A field is the only thing that survives.
 
 **The identity is reachable now, and half of it had never been drawn.** A minted group is called
@@ -512,12 +512,12 @@ Doing it once serves both features.
 
 - **The track sidecar.** A cel's animation goes in its own file beside the interpolation recipe, named
   from a new **optional** `CelManifest.animationFileName`, exactly as `interpolationFileName` works
-  (`Models/ProjectManifest.swift:373-375`, written only when non-nil at
-  `Services/ProjectStore.swift:829-838`). The stated reason applies verbatim: `manifest.json` is read in
+  (`Models/ProjectManifest.swift`, written only when non-nil at
+  `Services/ProjectStore.swift`). The stated reason applies verbatim: `manifest.json` is read in
   full for every gallery tile, so bulky per-cel data does not belong in it. A missing or unreadable
   sidecar costs the link, not the drawing.
 - **Add it to the validator on day one.** `ProjectBackupManager.ManifestSkeleton.Cel`
-  (`Services/ProjectBackupManager.swift:466-477`) checks the raster, fill, baked and vector files but
+  (`Services/ProjectBackupManager.swift`) checks the raster, fill, baked and vector files but
   **never `interpolationFileName`** — a cel whose recipe sidecar is missing still validates and the
   atomic save proceeds. That is a real, existing, silent gap. Do not inherit it: add
   `animationFileName` to the skeleton in the same commit that adds it to the manifest, and consider
@@ -598,10 +598,13 @@ same resolved number — §2.23's dead-control argument, which is why the panel 
 
 ### 4.1 `renderTree(atFrame:)` — the one structural change, and it is small
 
-`renderTree` is a computed var with a single private producer (`Models/RenderTree.swift:751-761`,
-recursing at `:832`). The effect is read at `:784` (`layer.layerEffect`) and `:891` (`folder.effect`),
-**where the frame is not in scope** — so §2.4 forces the tree to become a function of the frame. That is
-the whole cost, and it is six production call sites, five of which already hold a frame.
+**Stage 0 (§8), merged `654f863`: `renderTree` is `renderTree(atFrame:)` today**, not the computed var
+this paragraph describes — kept as the rationale for why that diff was small. It was a computed var with
+a single private producer (`Models/RenderTree.swift`, `renderTreeAndPoses(atFrame:)`). The effect was
+read at `layer.layerEffect` and `folder.effect` **where the frame was not in scope** — so §2.4 forced the
+tree to become a function of the frame; both are now `layer.layerEffect(atFrame:)` and
+`folder.resolvedEffect(atFrame:)`. That was the whole cost, and it was six production call sites, five of
+which already held a frame.
 
 **Invalidation is free.** `SandwichKey` (`Views/CanvasView.swift`) already carries the resolved
 `[RenderNode]` **and** the frame, and `FrameBakeKey` (`Engine/FrameBakeKey.swift`) encodes the same tree
@@ -609,7 +612,7 @@ field by field with no frame at all. `RenderNode` is `Equatable` and its `effect
 verbatim, so a per-frame-resolved effect moves both with no new plumbing.
 
 **The template already exists and says so.** `ValueFill.resolvedColor(atFrame:)`
-(`Models/Layer.swift:203`) is `{ color }` today, and its doc comment cut this seam deliberately:
+(`Models/Layer.swift`) is `{ color }` today, and its doc comment cut this seam deliberately:
 *"a keyframe phase would then have to cut this seam under a deadline instead of finding it already
 cut."* `Effect.resolved(atFrame:)` is the same shape one level over.
 
@@ -633,9 +636,9 @@ instead of once per edit. The key now also carries the node grades in the mask s
 (`MaskResolver.nodeEffects(readBy:of:)`).
 
 **One thing §2.4 did not cover, now ruled and built, and one nobody has.** `LayerFolder.effect`
-(`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891`, and §2.21
+(`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:1057`, and §2.21
 gives it the same track a layer's effect gets — stage 2b. And
-`RenderTree.peakCompositeTextures` (`Models/RenderTree.swift:543`) is frame-invariant **only for as
+`RenderTree.peakCompositeTextures` (`Models/RenderTree.swift`) is frame-invariant **only for as
 long as a key cannot turn an effect on or off**; it branches on `node.effect != nil`, and the strip
 planner, the chunk planner and `MetalCompositor`'s admission gate all spend its answer — so the day a
 track can add a grade, how a frame is cut up becomes a function of the playhead, and a document
@@ -712,7 +715,7 @@ whole animation *by construction*. The per-frame walk arithmetic disappears, lea
 four adds per dab.
 
 **This is not an invention — the tree already does it one level down.** `DabLattice`
-(`Engine/VectorLayer.swift:82-126`) stores a cut piece's *parent's whole walk* and filters it, and
+(`Engine/VectorLayer.swift`) stores a cut piece's *parent's whole walk* and filters it, and
 `BrushStamper.swift:144-162` states the rule to generalise: *"a filter over the original walk, not a
 re-derivation"*, with its acceptance test asserted at zero tolerance. Generalising "the walk that
 defines the lattice" from a cut parent to a rest pose is a small, well-precedented change. What is
@@ -734,7 +737,7 @@ expensive half of vector Distort.
 it. It is a homography whose `|det J|` varies across one stroke, and that is the case no scalar answers.
 
 **Build the pose as a point map, not a `CGAffineTransform`.** `drawn(_:through:widthScale:)`
-(`VectorLayer.swift:2262`) and every CTM seam take an affine and cannot hold a homography; `CGContext`
+(`VectorLayer.swift`) and every CTM seam take an affine and cannot hold a homography; `CGContext`
 has no projective CTM at all. One evaluator over `Homography.map` + `localScale(at:)` serves Uniform,
 Freeform and Distort. Three separate arms do not.
 
@@ -981,12 +984,12 @@ composite time by `needsOwnBuffer` / `isIsolated`. A pose applied at rasterisati
 bounded by, so the scope must be computed structurally in `renderNodes` and carried per layer index —
 get it wrong and the pose silently leaves its folder with nothing downstream to stop it.
 
-**Two placed-object refusals ride along.** `mapping(_:throughStretch:)` `assertionFailure`s on a placed
-image (`VectorLayer.swift:2247`) and `canBeStretched` returns false for `.image` — so a transform layer
-over a cel holding a photo trips an assert in debug and silently leaves the photo behind in release,
-while the strokes around it move. That is Move stage 3c's gate
-(`VectorImageElement.transform` is a `LayerTransform` with nowhere for a second axis), and it must be
-refused out loud here rather than left to assert.
+**Two placed-object refusals were expected to ride along, and "What the model pass found" item 3 above
+records that this did not happen.** `mapping(_:throughStretch:)` no longer `assertionFailure`s on a
+placed image and `canBeStretched` does not exist: LASSO_MOVE.md stage 3c instead gave
+`VectorImageElement` a stored shape (`aspect`, `stretchAxis`, `mirrored`), so a transform layer over a
+cel holding a photo poses it along with the strokes around it rather than refusing or asserting —
+`TransformLayerLogicTests.testAPlacedImageFollowsAContainerPoseRatherThanBeingRefused` pins it.
 
 ### 4.5 The caching trap — pin this on day one
 
@@ -1264,7 +1267,7 @@ into `beginArmedTake` without touching it.
 §2.9. Destructive, undoable, one step. **It exists so the artist can draw on the in-betweens.**
 It is not the answer to a slow preview and must never be offered as one — that is §4.6.
 
-**Follow `bakePreciseStrokes` exactly** (`Models/CanvasManager+Document.swift:982-1049`): call
+**Follow `bakePreciseStrokes` exactly** (`Models/CanvasManager+Document.swift`): call
 `commitAllInteractiveState()` first so a float under the artist's finger is not baked mid-motion; walk
 and **collect** per-cel edits; mutate; register **one** `recordUndo` over all of them. Its own comment
 states the reason — *"rather than registering per cel, which would cost the artist one press per cel to
@@ -1562,8 +1565,8 @@ frame of it — the same argument interpolation's identity already makes for omi
   - **`relayout()` early-returns whenever `TimelineLayoutKey` is unchanged** (`:194-217`), and the key
     holds no curve data and no `currentFrame`. Drawer state that is not in the key renders once and never
     again — the same family as `InterpolationPreviewKey` above, reached from the other side.
-  - **The content-height formula exists twice** — `contentHeight` in SwiftUI (`AnimationTimeline.swift:169-171`)
-    sizes the host, `totalHeight` in `relayout` (`TimelineTrackView.swift:192`) sizes the scroll content,
+  - **The content-height formula exists twice** — `contentHeight` in SwiftUI (`AnimationTimeline.swift:161`)
+    sizes the host, `totalHeight` in `relayout` (`TimelineTrackView.swift`) sizes the scroll content,
     the playhead and the row bands. A drawer added to one clips or leaves dead space.
   - **The pinned name column aligns by a hard-coded `Color.clear.frame(height: rulerHeight)` spacer**
     (`AnimationTimeline.swift:553-554`). Anything inserted above the ruler shifts every row down while the
@@ -2332,7 +2335,7 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 
   **Normalised against what, sharpened 2026-08-29.** Two readings of "fill the band" survive the ruling —
   the channel's declared `uiRange`, or the extent of the keys actually present — and the tree already
-  answers it. `Effect.swift:1300-1301` says to draw the y axis over **`uiRange`** and to allow a key
+  answers it. `Models/Effect.swift` says to draw the y axis over **`uiRange`** and to allow a key
   anywhere in `modelDomain`, which is a note written before this feature and for it. Fitting to the key
   extent instead would rescale the axis on every drag, so a key would move under the finger that is not
   dragging it. Take `uiRange`, fall back to the key extent only for a parameter whose `uiRange` is nil,

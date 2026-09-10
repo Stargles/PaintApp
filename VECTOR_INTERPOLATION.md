@@ -138,8 +138,10 @@ Things that are cheap to break and expensive to relearn.
   automatic stroke matcher would be past the state of the art, not catch-up. Our motion-group UI is
   the same mechanism.
 - **The paper's answer to unmatched content is to fade it out**, farthest-from-target first, via
-  per-vertex temporal thresholds. `VectorStroke.visibilityThreshold` and
-  `.sampleVisibilityThresholds` exist and **nothing sets them** (§4 item 34).
+  per-vertex temporal thresholds. `VectorStroke.sampleVisibilityThresholds` exists and nothing sets it
+  for that purpose — `visibilityThreshold` (the whole-stroke field) is now set, but by local edits'
+  fade-in gating (`CanvasManager+Interpolation.swift`, `τ = t`), a different feature reusing the same
+  field (§4 item 34).
 
 Standing permission from the product owner: fork those repos and experiment on the forks.
 
@@ -193,8 +195,12 @@ stroke *X* pairs with stroke *Y*.)
 
 **34. Temporal visibility thresholds — the honest answer to unmatched content.** The paper fades
 unmatched strokes out progressively, farthest-from-the-target first, via per-vertex thresholds
-diffused from a seed set. `VectorStroke.visibilityThreshold` / `.sampleVisibilityThresholds` have
-existed since Phase 2 and nothing sets them. This is the closest correspondence between our model and
+diffused from a seed set. `VectorStroke.sampleVisibilityThresholds` has existed since Phase 2 and
+nothing sets it for that purpose. `visibilityThreshold` (the whole-stroke field) is no longer unused —
+`CanvasManager.recordLocalEdit(canvasSpaceStroke:)` now sets it to `τ = t` so a local edit drawn at
+an in-between does not show on earlier frames, a real but unrelated use of the same field
+(`InterpolationEvaluator.swift:510-521` reads both). This is the closest correspondence between our
+model and
 the paper's, it is the honest answer to "two lines become one" (one line *retracts* rather than
 merging), and it is what finally gives the thickness-fade toggle unmatched strokes to act on. Cheap
 relative to its value; depends on tier 0 to know which strokes are unmatched.
@@ -292,8 +298,9 @@ features.** It reaches well past interpolation (it is really about what a vector
 
 Item 18's seam was expected to constrain this and **does not** — checked when the seam was built. The
 seam's currency is *pixels*, forced by fact 9 rather than by anything item 26 decides, and none of the
-four destructive raster paths can reach a derived cel today: Move refuses an in-between outright
-(`TopToolbar.toggleMove`, `CanvasManager.activeVectorMoveTarget`), and recolour and clear take their
+four destructive raster paths can reach a derived cel today: Move refuses an in-between outright — the
+guard used to be spelled again in `TopToolbar.toggleMove` but now lives only in
+`CanvasManager.activeVectorMoveTarget`, which both lifts go through — and recolour and clear take their
 vector arm on a vector layer. Only the magic wand's read-only flatten was reachable, and it now goes
 through the provider. So item 26 can be designed whenever the owner wants it, with no migration owed
 to the seam.
