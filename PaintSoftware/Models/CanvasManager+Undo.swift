@@ -181,11 +181,18 @@ extension CanvasManager {
 
     /// Closes a bracket, recording the step only when the outermost one closes. An inner `label` is
     /// discarded rather than winning: the step belongs to the action that spans the others.
+    ///
+    /// **`pendingGestureLabel` beats the argument**, and that is the same rule rather than an
+    /// exception to it: an action that spans the bracket may have already ended and left its name
+    /// behind. See that property for the one case, which is a live take that ran out of scene while
+    /// the artist was still holding the slider that started it.
     func commitStructureGesture(label: HistoryActionLabel) {
         if structureGestureDepth > 0 { structureGestureDepth -= 1 }
         guard structureGestureDepth == 0, let before = gestureSnapshot else { return }
+        let claimed = pendingGestureLabel
+        pendingGestureLabel = nil
         gestureSnapshot = nil
-        recordStructureChange(label: label, from: before, to: captureStructure())
+        recordStructureChange(label: claimed ?? label, from: before, to: captureStructure())
     }
 
     /// Drops a gesture's snapshot without recording anything — for a drag that ended up changing
@@ -195,6 +202,7 @@ extension CanvasManager {
     func cancelStructureGesture() {
         if structureGestureDepth > 0 { structureGestureDepth -= 1 }
         guard structureGestureDepth == 0 else { return }
+        pendingGestureLabel = nil
         gestureSnapshot = nil
     }
 }

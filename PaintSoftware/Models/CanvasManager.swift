@@ -180,12 +180,20 @@ final class CanvasManager: ObservableObject {
     /// transient *because* it has no meaning with the editor closed, so a filter that outlived the
     /// band would be exactly the state the ruling refuses. The other half of the same rule is
     /// `Filter.hidden(on:)`, which answers `[]` for any band but the one it was authored on.
+    /// **Closing the band also disarms the recorder**, for a stricter version of the same reason.
+    /// The record button is a control *of* the graph editor since the owner's 2026-09-09 ruling, so
+    /// closing the band takes the only thing on screen that says the recorder is armed — and an
+    /// invisible armed mode is the trap §2.1 was withdrawn over (*"a mode reached by a hold has to
+    /// be advertised or it is undiscoverable"*), reached from the other side: here the mode would be
+    /// advertised, and then the advertisement would be deleted while the mode stayed. The next
+    /// slider the artist touched would start a take they had forgotten arming.
     @Published var isGraphEditorOpen: Bool = false {
         didSet {
             if !isGraphEditorOpen {
                 graphChannelFilter = .none
                 graphChannelFold = .none
                 isGraphChannelListOpen = false
+                isRecordingArmed = false
             }
         }
     }
@@ -1115,6 +1123,24 @@ final class CanvasManager: ObservableObject {
     /// because they live in `CanvasManager+Recording.swift` and `private(set)` is file-scoped.
     /// `RecordingLogicTests` pins that it never disagrees with `recordingTake`.
     @Published var isRecording: Bool = false
+
+    /// **Whether the recorder is armed and waiting for a pencil** — the owner's 2026-09-09 ruling,
+    /// which split arming from starting: *"You press the record button and it turns blue, but
+    /// nothing happens. Then, you go and put your pencil on a slider or move box, and playback
+    /// automatically starts."*
+    ///
+    /// **Armed is not recording, and the two are never both true.** Arming moves nothing — no
+    /// playback, no take, no undo step, no snapshot — and the whole of what it does is make the next
+    /// landing on a recordable surface start a take. `beginArmedTake` is the one transition between
+    /// them and it clears this flag as it sets `isRecording`.
+    ///
+    /// **An arm ends in exactly three ways**, and they are worth stating together because a mode
+    /// that leaks into a later gesture is a trap and a mode that vanishes unannounced is another:
+    /// a take begins, the record button is pressed again, or the graph editor closes (see
+    /// `isGraphEditorOpen`, which is where the button lives). Nothing else drops it — an artist may
+    /// arm, scrub, pick another tool, undo, and then land on a slider, and the take they get is the
+    /// one they asked for, with the button blue the whole time to say so.
+    @Published var isRecordingArmed: Bool = false
 
     /// The armed take, and the reason it is **not** `@Published`: every recorded sample writes it, at
     /// the control's own rate, and publishing that would redraw the timeline once per sample of a
@@ -3915,6 +3941,24 @@ final class CanvasManager: ObservableObject {
     /// Without the depth, that drag's `begin` overwrites the session's baseline and its `commit`
     /// records a step from the wrong one, leaving the session with nothing to commit at all.
     var structureGestureDepth = 0
+
+    /// **A label claimed for the *outermost* bracket by an inner action that spans it**, honoured by
+    /// `commitStructureGesture` when the last bracket closes.
+    ///
+    /// It exists for one shape that only the live take reaches, and reaches every time. A take now
+    /// begins under the artist's finger (KEYFRAMES.md §5, and the owner's 2026-09-09 ruling), so the
+    /// recorder's bracket opens on the slider's touch-down and the slider's own bracket opens
+    /// *inside* it a moment later. The take then ends at the end of the scene — usually while the
+    /// finger is still down. `stopRecording`'s `commitStructureGesture(label: .recordAnimation)`
+    /// therefore closes at depth 2, which merely decrements; the step is recorded later, when the
+    /// artist lets go, under **the slider's** label. That is precisely the undo step that lies:
+    /// `.recordAnimation` exists so an artist who recorded a bloom does not read "Adjust Layer
+    /// Effect" and conclude the grade itself has gone.
+    ///
+    /// Claiming rather than forcing, because the rule is still `commitStructureGesture`'s — the step
+    /// belongs to the action that spans the others, and here that action is the take, which cannot
+    /// be present to say so at the moment the bracket finally closes.
+    var pendingGestureLabel: HistoryActionLabel?
 
     /// Whether the open mask-edit session has already opened its undo bracket (§6.6). Nil-until-used
     /// rather than opened in `beginMaskEdit`, because the session now begins whenever a layer's

@@ -1148,6 +1148,59 @@ restarted, because `togglePlayback()` captures `1.0 / fps` once (`AnimationTimel
 of the velocity→easing mapping, which has *"never met a real stylus"*. Smoothing is part of this feature,
 not polish on top of it.
 
+### 5.1 Arming and starting are two acts — the owner's ruling of 2026-09-09, and it is the whole entry
+
+> *"Right now I dont like where the record button is, and its behavior. The behavior should be this: You
+> open up graph editor and it displays the record button option. You press the record button and it turns
+> blue, but nothing happens. Then, you go and put your pencil on a slider or move box, and playback
+> automatically starts, recording the movement then putting it on the graph. Currently when you press
+> record it instantly plays the playback, giving you no time to adjust the sliders or move box."*
+
+**This reverses what TODO (21) had called "the design"** — that a take is over before a person can react
+on a short document, because §5 runs a take over the scene you have. It is not the design. The fix is not
+a countdown and not a longer scene: it is that **the pencil landing on the surface is what starts the
+take**, so the artist has already positioned themselves when the clock starts.
+
+Three states, not two: **idle → armed → recording**. The button is white, then blue, then red, and
+`accessibilityValue` says `idle` / `armed` / `recording`. **An arm ends in exactly three ways** — a take
+begins, the button is pressed again, or the graph editor closes — and nothing else drops it, so an artist
+may arm and then scrub, undo, switch tools and open two panels on the way to the slider. Arming writes no
+document state at all: no playback, no take, no undo step, and **no gesture bracket**, which is the one
+that would bite (an abandoned arm would otherwise strand a snapshot for the next unrelated gesture to
+commit a step spanning both).
+
+**The button belongs to the graph editor.** It is rendered beside `graphEditorButton` and
+`graphChannelsButton`, from both `collapsedBar` and `miniToolbar` (§2.22), and only while
+`isGraphEditorOpen`. Closing the band disarms, because the button is the only thing on screen that says
+the recorder is armed and an unadvertised mode is what §2.1 was withdrawn over.
+
+**What a new recordable surface has to implement**, and it is deliberately one line plus a routing hook:
+
+1. On **touch-down** — not on the first value change — call
+   `canvasManager.beginArmedTake(on: <the KeyframeTarget it writes to>, isRecordable: <can this
+   control contribute a sample?>)`, *before* the surface opens its own undo bracket, so the take's
+   bracket is the outer one.
+2. Read the answer only if it needs to. `false` with nothing raised means the recorder was not armed and
+   the surface behaves exactly as it does today; `false` with a notice means the landing was refused out
+   loud and **the arm survives**; `true` means a take is running against that target and playback with it.
+3. Keep routing its continuous values through a recorder intercept. The slider's is
+   `CanvasManager.recordParameterSample`, reached from `applyEffectParameterEdit`, which returns whether
+   the recorder consumed the routing decision. **A quad surface needs its own intercept**, because
+   `ValueRecording` is scalar-only — that is the unbuilt part of the Move box, not the trigger.
+4. Nothing on touch-up. A take ends at the end of the scene, or on the record button, or when playback
+   stops for any of the four other reasons `stopPlayback` lists.
+
+**The undo step's name survives the take ending mid-drag**, which is now the common case rather than a
+corner: the recorder's bracket is the outer one, so `stopRecording`'s commit merely decrements while the
+artist is still holding the slider, and the step is recorded on their lift under *their* label.
+`CanvasManager.pendingGestureLabel` is the claim that keeps it `.recordAnimation` — the exact lie that
+label exists to prevent, reached by a door the two-act arming opened.
+
+**The Move box is still unbuilt and this changes nothing about why.** `ValueRecording` is scalar-only
+while a transform channel stores `PoseQuad` keys, so resampling and tolerance both want owner rulings.
+What the ruling above buys is that the trigger is built once: the Move box and the canvas (stage 10) plug
+into `beginArmedTake` without touching it.
+
 ---
 
 ## 6. Bake

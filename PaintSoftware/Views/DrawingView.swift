@@ -440,6 +440,16 @@ struct DrawingView: View {
                         canvasManager.commitStructureGesture(
                             label: effectEditWroteKeyframe ? .effectKeyframes : .valueLayerEffect)
                     },
+                    // **The slider is §5's first recordable surface, and this line is all of what it
+                    // implements** — KEYFRAMES.md §5 and the owner's 2026-09-09 ruling. The pencil
+                    // landing is the trigger; whether that becomes a take is entirely the model's
+                    // answer (`beginArmedTake`), including the refusal it says out loud when the
+                    // control is a stepped field no curve can drive. This file is not compiled into
+                    // `PaintSoftwareUITests`, so nothing here decides anything.
+                    onSliderTouchDown: { parameter in
+                        canvasManager.beginArmedTake(on: editing.target,
+                                                     isRecordable: parameter.isScalarAnimatable)
+                    },
                     onBack: { showingEffectSettings = false },
                     onClose: { layerOptionsID = nil })
                 .bottomDockCard(width: width)
@@ -614,7 +624,8 @@ struct DrawingView: View {
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
              .nothingWhollyInside, .cannotMoveDerivedFrame, .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
-             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .recordingRefused:
+             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .recordingRefused,
+             .recordingArmed:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner
             // never offers a button that would land here. Every case is spelled out rather than
             // defaulted so that adding a new kind is a compile error here, not a silent no-op.

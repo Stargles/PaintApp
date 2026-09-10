@@ -188,6 +188,20 @@ struct EffectSettingsBar: View {
     /// brackets a whole picking session — see `LayerOptionsPanel.valueColorRow`.
     var onEditBegan: () -> Void
     var onEditEnded: () -> Void
+    /// **The pencil landing on a slider** — KEYFRAMES.md §5 and the owner's 2026-09-09 ruling, which
+    /// made *this* the moment a live take begins rather than the record button.
+    ///
+    /// Reported at touch-down, before `onEditBegan`, and **for every slider including the ones no
+    /// curve can drive**: the parameter rides along so the model can tell the two apart and answer a
+    /// landing on a stepped field out loud (`RecordingRefusal.notRecordable`) rather than by doing
+    /// nothing. A stepped field looks exactly like a recordable one, which is the whole reason the
+    /// filtering is not done here.
+    ///
+    /// **Sliders only, and that is a line rather than an omission.** A toggle, a picker and the
+    /// colour swatch call `onEditBegan` too, but none of them is a *landing*: each is one discrete
+    /// act that opens and closes its bracket in the same breath, and there is no motion for a take
+    /// to capture. Starting playback on a toggle flip would be a mode the artist did not ask for.
+    var onSliderTouchDown: (EffectParameter) -> Void = { _ in }
     var onBack: () -> Void
     var onClose: () -> Void
 
@@ -384,7 +398,8 @@ struct EffectSettingsBar: View {
             sliderRow(parameter.name, value, range,
                       parameter.controlIdentifier ?? parameter.id,
                       format: parameter.format ?? "%.2f",
-                      isAnimated: animatedChannelIDs.contains(parameter.id)) { newValue in
+                      isAnimated: animatedChannelIDs.contains(parameter.id),
+                      onTouchDown: { onSliderTouchDown(parameter) }) { newValue in
                 onParameterChange(parameter, newValue)
             }
         }
@@ -417,6 +432,7 @@ struct EffectSettingsBar: View {
     private func sliderRow(_ label: String, _ value: Double, _ range: ClosedRange<Double>,
                            _ identifier: String, format: String = "%.2f",
                            isAnimated: Bool = false,
+                           onTouchDown: @escaping () -> Void = {},
                            onChange change: @escaping (Double) -> Void) -> some View {
         HStack(spacing: BottomDock.rowSpacing) {
             // The channel marker, and it is the whole of what this stage shows about a track: the
@@ -437,8 +453,12 @@ struct EffectSettingsBar: View {
             }
             .frame(width: BottomDock.sliderLabelWidth, alignment: .leading)
 
+            // **`onTouchDown` before `onEditBegan`, and the order is load-bearing.** The take's undo
+            // bracket has to be the outer one of the pair — `commitStructureGesture`'s rule is that
+            // the step belongs to the action that spans the others, and a take spans this drag and
+            // any others the artist makes before the scene runs out.
             Slider(value: Binding(get: { value }, set: change), in: range) { editing in
-                if editing { onEditBegan() } else { onEditEnded() }
+                if editing { onTouchDown(); onEditBegan() } else { onEditEnded() }
             }
             .accessibilityIdentifier("effectSettings.\(identifier)")
             // The number, not the label — a test asserting a drag landed reads this rather than

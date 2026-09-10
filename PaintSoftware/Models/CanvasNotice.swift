@@ -197,6 +197,18 @@ struct CanvasNotice: Identifiable, Equatable {
         /// artist has *spent the take*, and nothing on screen says whether the feature is broken or
         /// they simply forgot to touch a control. Each `RecordingRefusal` names its own way out.
         case recordingRefused(CanvasManager.RecordingRefusal)
+
+        /// **The recorder armed, and this is the only thing that says what to do next** —
+        /// KEYFRAMES.md §5 and the owner's 2026-09-09 ruling, which made arming and starting two
+        /// separate acts.
+        ///
+        /// Informational rather than a refusal, like `historyUndo` and `resizeResampled`: nothing
+        /// went wrong. It exists because the trigger the ruling introduces — *put the pencil on a
+        /// slider* — is not on the button that arms it and could not be: the slider is in another
+        /// panel, raised from another menu. Without this sentence the feature is the closed loop the
+        /// owner found three of in a minute, where the model is right at every step and the artist
+        /// cannot get from one step to the next. The blue button is the state; this is the road.
+        case recordingArmed
     }
 
     init(_ kind: Kind) {
@@ -225,6 +237,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .recordingRefused(let refusal): return refusal.message
+        case .recordingArmed:   return "Recorder armed — put your pencil on a slider in a layer's effect settings and playback starts with it."
         }
     }
 
@@ -286,12 +299,15 @@ struct CanvasNotice: Identifiable, Equatable {
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
         case .videoBakeRefused: return nil
-        // Nor this one, and each of its four cases fails the button test for its own reason. Two
+        // Nor this one, and each of its six cases fails the button test for its own reason. Two
         // name a thing to do *while recording* — open a layer's effect settings, move the slider —
         // which is not an action after the fact; one says the take was too short, whose fix is to
         // record for longer; and `noTarget` could offer "Add Layer", except that an artist with no
         // layer at all is not mid-take and the layer panel is already on screen.
         case .recordingRefused: return nil
+        // Nor this one, and here it is the sentence itself that rules the button out: what it asks
+        // for is a pencil on a slider, which is the one thing in this app no button can do.
+        case .recordingArmed:   return nil
         }
     }
 
@@ -322,6 +338,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // refused reads this, and a test that cares *which* refusal reads `RecordingRefusal` off the
         // model, where the fast tier can compare the case itself rather than a string.
         case .recordingRefused: return "recordingRefused"
+        case .recordingArmed:   return "recordingArmed"
         }
     }
 

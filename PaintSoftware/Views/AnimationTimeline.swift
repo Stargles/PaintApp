@@ -752,8 +752,6 @@ struct AnimationTimeline: View {
             }
             .accessibilityIdentifier("timeline.playButton")
 
-            recordButton
-
             Button(action: { canvasManager.stepFrame(by: 1) }) {
                 Image(systemName: "forward.frame.fill")
             }
@@ -813,30 +811,41 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.loopButton")
     }
 
-    /// **Arm and disarm a live take** — KEYFRAMES.md §5, stage 7.
+    /// **Arm and disarm a live take** — KEYFRAMES.md §5, stage 7, rebuilt to the owner's 2026-09-09
+    /// ruling.
     ///
-    /// **In the transport group, beside play, and not a `Tool`.** §2.22's shipped precedent, stated
-    /// for the keyframe button and true for the same reasons here: recording is a transport state,
-    /// it writes at the playhead, and every switch over `Tool` is exhaustive with no `default:` on
-    /// purpose. Being inside `transportControls` also means it is drawn in both bars for free, which
-    /// is the trap that section exists to name.
+    /// **A control of the graph editor, beside its own button, shown while the band is open** — the
+    /// owner rejected its old home outright: *"Right now I dont like where the record button is…
+    /// You open up graph editor and it displays the record button option."* It sat in
+    /// `transportControls` on the argument that recording is a transport state; the ruling is that it
+    /// is a graph-editor state, and the artist's own reading is the one that decides. The `if` is
+    /// duplicated in both bars for the same reason `graphChannelsButton`'s is (§2.22): a control
+    /// added to only one is invisible in the other.
     ///
-    /// **A visible mode, not a hidden one.** §2.1 was withdrawn partly because *"a mode reached by a
-    /// hold has to be advertised or it is undiscoverable"*; this one is a red dot that fills while it
-    /// is armed, so there is no state the artist can be in without seeing it.
+    /// **Three states, drawn and exposed.** White and hollow when idle; **blue** and filled when
+    /// armed, which is the owner's own word for it; red and filled while a take runs. The
+    /// `accessibilityValue` says the same three things, so a test can pin the *state* rather than
+    /// the glyph — and it fails if this control stops being drawn while the model stays right, which
+    /// is the assertion this repo's three unusable features were missing.
     ///
-    /// **Pressing it starts playback**, because a take with no clock records a constant — see
-    /// `startRecording`.
+    /// **Pressing it moves nothing.** That is the whole of the ruling: arming and starting are two
+    /// acts, and the second one is the pencil landing on a slider — see
+    /// `CanvasManager.beginArmedTake`. Pressing it *again* disarms; pressing it during a take stops
+    /// the take. All three branches are `CanvasManager.toggleRecording`, in the model, because this
+    /// file is not compiled into `PaintSoftwareUITests`.
     private var recordButton: some View {
-        Button(action: {
-            if canvasManager.isRecording { canvasManager.stopRecording() }
-            else { canvasManager.startRecording() }
-        }) {
-            Image(systemName: canvasManager.isRecording ? "record.circle.fill" : "record.circle")
+        Button(action: canvasManager.toggleRecording) {
+            Image(systemName: canvasManager.isRecording || canvasManager.isRecordingArmed
+                  ? "record.circle.fill"
+                  : "record.circle")
         }
-        .foregroundColor(canvasManager.isRecording ? .red : .white)
+        .foregroundColor(canvasManager.isRecording
+                         ? .red
+                         : (canvasManager.isRecordingArmed ? .blue : .white))
         .accessibilityIdentifier("timeline.recordButton")
-        .accessibilityValue(canvasManager.isRecording ? "recording" : "idle")
+        .accessibilityValue(canvasManager.isRecording
+                            ? "recording"
+                            : (canvasManager.isRecordingArmed ? "armed" : "idle"))
     }
 
     /// **The document's frame rate, and the way in to changing it** — KEYFRAMES.md §2.7, *"an
@@ -1287,7 +1296,12 @@ struct AnimationTimeline: View {
                 loopButton
                 interpolateButton
                 graphEditorButton
-                if canvasManager.isGraphEditorOpen { graphChannelsButton }
+                if canvasManager.isGraphEditorOpen {
+                    graphChannelsButton
+                    // The recorder belongs to the graph editor since the owner's 2026-09-09 ruling,
+                    // so it appears and disappears with the band — in both bars, §2.22.
+                    recordButton
+                }
                 Spacer()
                 frameLabel
                 // Rendered from both bars, like every other control in this group (§2.22). The rate
@@ -1313,7 +1327,10 @@ struct AnimationTimeline: View {
                 graphEditorButton
                 // Rendered from both bars, like every other button in this group: a control added to
                 // only one is invisible in the other state.
-                if canvasManager.isGraphEditorOpen { graphChannelsButton }
+                if canvasManager.isGraphEditorOpen {
+                    graphChannelsButton
+                    recordButton
+                }
 
                 Spacer()
 

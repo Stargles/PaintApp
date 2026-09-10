@@ -76,6 +76,273 @@ final class RecordingLogicTests: XCTestCase {
                                                 newValue: value, atFrame: manager.currentFrame)
     }
 
+    // MARK: - Arming is not starting — the owner's ruling of 2026-09-09
+
+    /// **The whole of the ruling, as one assertion each.** *"You press the record button and it
+    /// turns blue, but nothing happens."*
+    ///
+    /// The operands are the four things a take moves — the transport, the playhead, the take itself
+    /// and the undo stack — read before and after the press. The fifth is `structureGestureDepth`,
+    /// and it is the one that would have gone unnoticed: arming used to open a gesture bracket, and
+    /// an arm the artist abandons would strand that snapshot for the next unrelated gesture to
+    /// commit a step spanning both, which is the failure `cancelStructureGesture` exists to name.
+    func testArmingTheRecorderMovesNothingAtAll() {
+        let (manager, _) = self.manager()
+        let frameBefore = manager.currentFrame
+        let stepsBefore = manager.history.undoStack.count
+
+        let refusal = manager.armRecording()
+
+        XCTAssertNil(refusal)
+        XCTAssertTrue(manager.isRecordingArmed, "Armed…")
+        XCTAssertFalse(manager.isRecording, "…and that is not recording")
+        XCTAssertFalse(manager.isPlaying, "Nothing moved: the transport is still stopped")
+        XCTAssertEqual(manager.currentFrame, frameBefore, "…and the playhead is where the artist left it")
+        XCTAssertNil(manager.recordingTake, "…and no take is open")
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore,
+                       "Arming costs no undo step — `fps`'s own precedent")
+        XCTAssertEqual(manager.structureGestureDepth, 0,
+                       "…and opens no gesture bracket, which an abandoned arm would strand")
+    }
+
+    /// **The armed state is announced, and the announcement is the only thing that says what to do
+    /// next.** The trigger is a pencil on a slider in another panel, so a blue button alone is the
+    /// closed loop that shipped three unusable features.
+    func testArmingRaisesTheNoticeThatNamesTheTrigger() {
+        let (manager, _) = self.manager()
+
+        manager.armRecording()
+
+        XCTAssertEqual(manager.notice?.kind, .recordingArmed)
+        XCTAssertTrue(manager.notice?.message.contains("slider") == true,
+                      "The sentence names the surface the artist has to touch, or it says nothing useful")
+    }
+
+    /// The two refusals are answered at the press rather than after a walk to a slider. Operands:
+    /// the returned case and the flag, which must stay *down* — an armed button over a document that
+    /// can never record is worse than no button.
+    func testArmingRefusesAOneFrameSceneAndDoesNotArm() {
+        let (manager, _) = self.manager(frames: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 1)])
+
+        let refusal = manager.armRecording()
+
+        XCTAssertEqual(refusal, .noScene)
+        XCTAssertFalse(manager.isRecordingArmed, "A refused press leaves nothing armed")
+        XCTAssertEqual(manager.notice?.kind, .recordingRefused(.noScene))
+    }
+
+    func testArmingRefusesWithNoTargetAndDoesNotArm() {
+        let manager = CanvasFixture.manager(layerCount: 0)
+
+        let refusal = manager.armRecording()
+
+        XCTAssertEqual(refusal, .noTarget)
+        XCTAssertFalse(manager.isRecordingArmed)
+        XCTAssertEqual(manager.notice?.kind, .recordingRefused(.noTarget))
+    }
+
+    /// The button's three states and both directions, in the model — `AnimationTimeline` is not
+    /// compiled into this target, so a `switch` written there would be pinned by nothing.
+    func testTheRecordButtonWalksIdleThenArmedThenIdleAgain() {
+        let (manager, _) = self.manager()
+
+        manager.toggleRecording()
+        XCTAssertTrue(manager.isRecordingArmed, "First press arms")
+        XCTAssertFalse(manager.isPlaying)
+
+        manager.toggleRecording()
+        XCTAssertFalse(manager.isRecordingArmed, "Second press disarms")
+        XCTAssertFalse(manager.isRecording)
+
+        manager.armRecording()
+        manager.beginArmedTake(on: target(manager))
+        XCTAssertTrue(manager.isRecording, "Setup: a take is running")
+
+        manager.toggleRecording()
+        XCTAssertFalse(manager.isRecording, "A press during a take stops it")
+        XCTAssertFalse(manager.isRecordingArmed, "…and does not leave it armed for another")
+    }
+
+    // MARK: - The trigger every recordable surface shares
+
+    /// **The landing is what starts the take, and playback starts with it** — the second half of the
+    /// ruling. Operands: `isRecording`/`isPlaying` before and after one call, with the arm the only
+    /// thing that changed between the two runs of it (see the test below, which is the same call
+    /// with nothing armed).
+    func testAPencilLandingOnASliderStartsTheTakeAndPlaybackWhenArmed() {
+        let (manager, _) = self.manager()
+        let tgt = target(manager)
+        manager.armRecording()
+        XCTAssertFalse(manager.isPlaying, "Setup: arming moved nothing")
+
+        let began = manager.beginArmedTake(on: tgt)
+
+        XCTAssertTrue(began)
+        XCTAssertTrue(manager.isRecording, "The take runs from the moment the pencil lands")
+        XCTAssertTrue(manager.isPlaying, "…and playback starts with it, not before it")
+        XCTAssertFalse(manager.isRecordingArmed, "The arm is spent — one arm, one take")
+        XCTAssertEqual(manager.recordingTake?.target, tgt)
+        manager.stopRecording()
+    }
+
+    /// The other operand of the pair above: the identical landing with nothing armed. A surface that
+    /// reports every touch-down must be free when the recorder is idle, or every slider in the app
+    /// would start playback.
+    func testAPencilLandingWithNothingArmedStartsNothingAndSaysNothing() {
+        let (manager, _) = self.manager()
+
+        let began = manager.beginArmedTake(on: target(manager))
+
+        XCTAssertFalse(began)
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertFalse(manager.isPlaying, "An unarmed touch-down is not a transport command")
+        XCTAssertNil(manager.notice, "…and it is not an error either, so nothing is said")
+    }
+
+    /// **Armed, and the pencil lands on a control no curve can drive.** A stepped field draws as a
+    /// slider, so silence here is the "refusal with no notice" defect wearing the most convincing
+    /// costume it has. The arm survives, and the sentence says so, because the artist's next act is
+    /// to land somewhere else.
+    func testALandingOnANonRecordableControlIsRefusedOutLoudAndKeepsTheArm() {
+        let (manager, _) = self.manager()
+        manager.armRecording()
+
+        let began = manager.beginArmedTake(on: target(manager), isRecordable: false)
+
+        XCTAssertFalse(began)
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertFalse(manager.isPlaying, "Nothing started…")
+        XCTAssertTrue(manager.isRecordingArmed, "…and the artist is still armed for the next slider")
+        XCTAssertEqual(manager.notice?.kind, .recordingRefused(.notRecordable))
+        XCTAssertTrue(manager.notice?.message.contains("armed") == true,
+                      "The sentence has to say the arm survived, or the artist cannot tell")
+    }
+
+    /// **The document changed under the arm.** Both of `armRecording`'s refusals are re-checked at
+    /// the landing, because an arm may wait indefinitely — and the arm is kept, since "the scene got
+    /// shorter while you walked to the slider" is not one of the three ways an arm ends.
+    func testALandingOnToASceneThatShrankUnderTheArmIsRefusedAndTheArmSurvives() {
+        let (manager, _) = self.manager()
+        manager.armRecording()
+        XCTAssertTrue(manager.isRecordingArmed, "Setup: armed over a scene with room in it")
+
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 1)])
+        CanvasFixture.setCelLayout(manager, layerIndex: gradeIndex, [(start: 0, length: 1)])
+        XCTAssertEqual(manager.playbackEndFrame, manager.playbackStartFrame, "Setup: one frame now")
+
+        let began = manager.beginArmedTake(on: target(manager))
+
+        XCTAssertFalse(began)
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertTrue(manager.isRecordingArmed)
+        XCTAssertEqual(manager.notice?.kind, .recordingRefused(.noScene))
+    }
+
+    /// A second slider grabbed mid-take joins the take rather than restarting it — §2.27's *"the
+    /// user modifies another slider while on B"* reached from the trigger's side. The operand that
+    /// makes this a real pin is the sample already caught: a restart would drop it.
+    func testASecondLandingDuringALiveTakeJoinsItRatherThanRestartingIt() {
+        let (manager, clock) = self.manager()
+        let tgt = target(manager)
+        manager.armRecording()
+        manager.beginArmedTake(on: tgt)
+        let startFrame = manager.recordingTake?.startFrame
+        drag(manager, clock, tgt, brightnessID, to: 1.5, at: clock.now + 0.1)
+        XCTAssertEqual(manager.recordingTake?.channels[brightnessID]?.samples.count, 1, "Setup")
+
+        let began = manager.beginArmedTake(on: tgt)
+
+        XCTAssertTrue(began, "The surface is told the take is live, so it keeps reporting")
+        XCTAssertEqual(manager.recordingTake?.startFrame, startFrame, "…and it is the same take")
+        XCTAssertEqual(manager.recordingTake?.channels[brightnessID]?.samples.count, 1,
+                       "The earlier sample survived the second landing")
+        manager.stopRecording()
+    }
+
+    /// A landing on a *different* target mid-take is answered honestly rather than folded in —
+    /// `RecordingTake.target`'s rule, reached from the trigger.
+    func testALandingOnADifferentTargetDuringATakeAnswersFalse() {
+        let (manager, _) = self.manager()
+        manager.armRecording()
+        manager.beginArmedTake(on: target(manager))
+
+        let began = manager.beginArmedTake(on: .layer(id: UUID()))
+
+        XCTAssertFalse(began, "This surface is not the one the take is aimed at")
+        XCTAssertTrue(manager.isRecording, "…and saying so did not end the take")
+        manager.stopRecording()
+    }
+
+    // MARK: - What an arm survives, and what ends it
+
+    /// **An arm ends in exactly three ways** — a take begins, the button is pressed again, or the
+    /// graph editor closes. Everything else the artist does in between leaves it standing, and this
+    /// is the half that says so: scrubbing, undoing and switching layers are all things an artist
+    /// does *while* deciding what to record.
+    func testAnArmSurvivesScrubbingAndUndoing() {
+        let (manager, _) = self.manager()
+        // A real step to take back, so the undo below actually undoes something — an undo against an
+        // empty stack is silent and would have made this assertion measure nothing.
+        let originalName = manager.layers[0].name
+        manager.withStructureUndo(label: .renameLayer) { manager.layers[0].name = "renamed" }
+        manager.armRecording()
+
+        manager.goToFrame(4)
+        XCTAssertTrue(manager.isRecordingArmed, "Scrubbing is deciding where to record from")
+
+        manager.undo()
+        XCTAssertEqual(manager.layers[0].name, originalName, "Setup: the undo really fired")
+        XCTAssertTrue(manager.isRecordingArmed, "…and an undo is not a recording decision at all")
+
+        // …and the take it eventually starts begins from where the scrub left the playhead, which is
+        // the same rule as arming mid-playback.
+        manager.beginArmedTake(on: target(manager))
+        XCTAssertEqual(manager.recordingTake?.startFrame, 4)
+        manager.stopRecording()
+    }
+
+    /// **Closing the graph editor disarms**, because the button lives there since the owner's
+    /// ruling and an armed mode with nothing on screen to say so is the trap §2.1 was withdrawn
+    /// over. The operand is the flag either side of one write to `isGraphEditorOpen`, with the
+    /// open case in the same test so the rule cannot be satisfied by disarming on every write.
+    func testClosingTheGraphEditorDropsTheArmBecauseTheButtonGoesWithIt() {
+        let (manager, _) = self.manager()
+        manager.isGraphEditorOpen = true
+        manager.armRecording()
+        XCTAssertTrue(manager.isRecordingArmed, "Setup: armed with the band open")
+
+        manager.isGraphEditorOpen = false
+
+        XCTAssertFalse(manager.isRecordingArmed,
+                       "The only control that says the recorder is armed just left the screen")
+
+        manager.isGraphEditorOpen = true
+        manager.armRecording()
+        XCTAssertTrue(manager.isRecordingArmed, "…and opening it again is not itself a disarm")
+    }
+
+    /// `isRecordingArmed` and `isRecording` are never both true — the pair `isRecording`'s own doc
+    /// makes of `recordingTake`, one property over.
+    func testArmedAndRecordingAreNeverBothTrue() {
+        let (manager, clock) = self.manager()
+        let tgt = target(manager)
+        XCTAssertFalse(manager.isRecordingArmed && manager.isRecording)
+
+        manager.armRecording()
+        XCTAssertFalse(manager.isRecordingArmed && manager.isRecording)
+
+        manager.beginArmedTake(on: tgt)
+        XCTAssertFalse(manager.isRecordingArmed && manager.isRecording)
+        XCTAssertTrue(manager.isRecording)
+
+        drag(manager, clock, tgt, brightnessID, to: 0.5, at: clock.now + 0.5)
+        XCTAssertFalse(manager.isRecordingArmed && manager.isRecording)
+
+        manager.stopRecording()
+        XCTAssertFalse(manager.isRecordingArmed || manager.isRecording)
+    }
+
     // MARK: - Arming
 
     func testStartRecordingRefusesWithNoTargetAndRaisesANotice() {
@@ -332,6 +599,79 @@ final class RecordingLogicTests: XCTestCase {
 
         XCTAssertNil(manager.keyframeState(of: tgt).tracks[brightnessID], "The whole take is one step back")
         XCTAssertEqual(storedValue(manager, tgt, brightnessID), original)
+    }
+
+    // MARK: - The step's name when the take ends inside the gesture that started it
+
+    /// **The case arming-on-touch-down made the common one, and it is where the undo step would
+    /// start lying.**
+    ///
+    /// A take now begins on the slider's touch-down, so the recorder's bracket is the outer one and
+    /// the slider's is open inside it. The scene then runs out while the finger is still down —
+    /// which is what usually happens, since the artist drags for the whole take — so
+    /// `stopRecording`'s `commitStructureGesture(label: .recordAnimation)` closes at depth 2 and
+    /// merely decrements. The step is recorded when the artist lets go, under **the slider's**
+    /// label. `.recordAnimation` exists precisely so an artist who recorded a bloom does not read
+    /// "Adjust Layer Effect" and conclude the grade itself has gone.
+    ///
+    /// **The two operands are the label the recorder claimed and the label the slider offered**, and
+    /// they differ — which is what makes the assertion able to go red, and what makes a red one mean
+    /// the code is wrong rather than the definition.
+    func testATakeThatEndsWhileTheSliderIsStillHeldKeepsItsOwnUndoLabel() {
+        let (manager, clock) = self.manager(frames: 48)
+        let tgt = target(manager)
+        let before = manager.history.undoStack.count
+        manager.armRecording()
+
+        // The slider's touch-down, in the order `EffectSettingsBar` reports it: the trigger first,
+        // so the take's bracket is the outer one, then the slider's own.
+        manager.beginArmedTake(on: tgt)
+        manager.beginStructureGesture()
+        let epoch = clock.now
+        drag(manager, clock, tgt, brightnessID, to: 0.2, at: epoch)
+        drag(manager, clock, tgt, brightnessID, to: 1.8, at: epoch + 1.0)
+
+        // The scene runs out, finger still down.
+        clock.now = epoch + 47.5 / Double(manager.fps)
+        manager.tickPlayback()
+        XCTAssertFalse(manager.isRecording, "Setup: the take ended at the end of the scene")
+        XCTAssertEqual(manager.history.undoStack.count, before,
+                       "Setup: and it could not record its step, because the artist is still holding on")
+
+        // The artist lets go. `DrawingView` offers the label a plain drag would earn.
+        manager.commitStructureGesture(label: .valueLayerEffect)
+
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "One step for the whole take")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation,
+                       "The step belongs to the take that spanned the drag, not to the drag")
+        XCTAssertNotNil(manager.keyframeState(of: tgt).tracks[brightnessID],
+                        "…and it is a step over a curve, which is what makes the wrong name a lie")
+    }
+
+    /// The other operand of the claim: an ordinary slider drag with no take anywhere near it still
+    /// commits under the label its caller passed. Without this, a claim that simply never cleared
+    /// — or one hard-wired to `.recordAnimation` — would pass the test above.
+    func testAnOrdinarySliderDragAfterATakeStillEarnsItsOwnUndoLabel() {
+        let (manager, clock) = self.manager(frames: 48)
+        let tgt = target(manager)
+        manager.armRecording()
+        manager.beginArmedTake(on: tgt)
+        manager.beginStructureGesture()
+        let epoch = clock.now
+        drag(manager, clock, tgt, brightnessID, to: 0.2, at: epoch)
+        drag(manager, clock, tgt, brightnessID, to: 1.8, at: epoch + 1.0)
+        clock.now = epoch + 47.5 / Double(manager.fps)
+        manager.tickPlayback()
+        manager.commitStructureGesture(label: .valueLayerEffect)
+        XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation, "Setup")
+
+        // A second drag, this time with nothing armed and nothing recording.
+        manager.beginStructureGesture()
+        drag(manager, clock, tgt, contrastID, to: 1.4, at: clock.now + 0.1)
+        manager.commitStructureGesture(label: .valueLayerEffect)
+
+        XCTAssertEqual(manager.history.undoStack.last?.label, .valueLayerEffect,
+                       "The claim was spent on the take's own step and does not colour the next drag")
     }
 
     // MARK: - Refusals

@@ -102,6 +102,9 @@ struct CanvasNoticeBanner: View {
         // because the message is about the thing the artist was just doing and the fix — arm again
         // and touch a control this time — is that same button.
         case .recordingRefused: return "record.circle"
+        // The same glyph, because it is the same button: this one says the recorder is *waiting*,
+        // and what the artist does next is put a pencil on a slider.
+        case .recordingArmed:   return "record.circle"
         }
     }
 }

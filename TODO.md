@@ -228,14 +228,20 @@ pose key has a node.
       > graph. Currently when you press record it instantly plays the playback, giving you no time to
       > adjust the sliders or move box."*
 
-      So **arming and starting are two separate acts**, and the second one is the pencil landing on the
-      surface, not a button. Pressing record arms it and turns it blue; nothing moves. The take begins
-      on first touch of a slider or the Move box, and playback starts *with* it. That removes the
-      "take is over before you can react" problem at its root rather than papering it with a countdown,
-      and it makes §5's *"one mechanism, two surfaces"* the thing that decides when recording starts.
-      The button's **placement** is also rejected — it belongs to the graph editor, shown when the
-      graph editor is open. Note this interacts with the unbuilt Move-box surface above: arming has to
-      wait for either surface, so building the trigger before the Move-box half means building it twice.
+      **That ruling is built and merged (2026-09-09), and only the Move-box surface is left of stage 7.**
+      Arming and starting are two acts: the record button lives beside the graph editor's own button and
+      is shown only while the band is open, pressing it turns it blue and moves nothing at all, and the
+      take begins when the pencil lands on a slider — with playback starting at that instant. An arm ends
+      in exactly three ways (a take begins, the button is pressed again, the graph editor closes) and
+      survives everything else, so an artist can arm and then walk two menus to the slider. Arming costs
+      no undo step and opens no gesture bracket. A landing on a *stepped* slider is refused out loud and
+      keeps the arm. See KEYFRAMES §5.1, which also states the four things a new recordable surface has
+      to implement — the trigger is `CanvasManager.beginArmedTake`, built once so that the Move box and
+      stage 10's canvas plug in without rework.
+      **What is left is the Move box itself**, and the reason is unchanged: `ValueRecording` is
+      scalar-only while a transform channel stores `PoseQuad` keys, so resampling and tolerance both
+      need owner rulings. §5's *"slow motion is a capture-speed multiplier on the record control"* is
+      also still unbuilt.
 - [ ] **Layer opacity cannot be keyframed and should be.** The owner, 2026-09-09: *"layer opacity
       should also be able to be keyframed, currently its not."* Every channel the graph editor carries
       today is a **pose** channel — the six curves of a quad — and opacity is neither a pose nor stored
