@@ -423,6 +423,10 @@ final class ProjectFolderLogicTests: XCTestCase {
         _ = ProjectBackupManager.restoreFromTrash(first)
         XCTAssertTrue(ProjectBackupManager.isDirectory(mirror),
                       "one entry left, so the mirror stays — sweeping it would strand the other")
+        XCTAssertEqual(ProjectBackupManager.listTrash().map(\.displayName), ["Two"],
+                       "and the entry inside it is still there — the sweep is `rmdir(2)`, which the "
+                       + "kernel refuses on a folder holding anything, where `removeItem` would have "
+                       + "taken the package with it")
 
         ProjectBackupManager.purgeExpiredTrash(now: Date(timeIntervalSinceNow: 8 * 24 * 60 * 60))
         XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty, "PREMISE: the purge emptied the trash")

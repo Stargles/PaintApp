@@ -621,28 +621,36 @@ nonisolated enum ProjectBackupManager {
                             renamedTo: landedStem == base ? nil : landedStem)
     }
 
-    /// **Removes folders under `Trash/` that a purge or a restore emptied**, bottom-up, and only when
-    /// there is genuinely nothing left in them. A mirror folder is not a record of anything on its
-    /// own — an empty one would say a project came from somewhere while holding no project — and it
-    /// is the one piece of this design that would otherwise accumulate for ever. `Trash/` itself is
-    /// never removed.
+    /// **Removes mirror folders under `Trash/` that a purge or a restore emptied**, depth-first. A
+    /// mirror folder is not a record of anything on its own — an empty one would say a project came
+    /// from somewhere while holding no project — and it is the one piece of this design that would
+    /// otherwise accumulate for ever. `Trash/` itself is never asked, because only items *inside* a
+    /// scanned directory are.
+    ///
+    /// **`rmdir(2)` rather than `contentsOfDirectory` then `removeItem`**, which is
+    /// `ProjectPackageLayout.pruneEmptyContentDirectories`' reason reached one door over and with
+    /// more at stake here. The kernel refuses a non-empty directory itself, in one call, with no
+    /// window between the check and the removal — and `FileManager.removeItem` is **recursive**, so a
+    /// check-then-remove would delete a whole package that a `moveToTrash` landed in the mirror
+    /// microseconds after the check said it was empty. That interleaving is reachable rather than
+    /// theoretical: `runStartupMaintenance` is detached and calls `purgeExpiredTrash` while the
+    /// gallery is already on screen with a Delete on every tile. `ENOTEMPTY` and `ENOENT` are both
+    /// the ordinary answer and neither is worth reading — a hidden file keeps its folder, which is
+    /// the safe direction.
     static func pruneEmptyTrashFolders() {
-        _ = pruneEmptyFolders(in: trashDirectory)
+        pruneEmptyFolders(under: trashDirectory)
     }
 
-    /// Whether `directory` is empty once its own empty sub-folders have been swept. Hidden files
-    /// count as contents, so a `.DS_Store` keeps a folder — the safe direction.
-    @discardableResult
-    private static func pruneEmptyFolders(in directory: URL) -> Bool {
-        let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
-            return false
-        }
-        var remaining = items.count
+    private static func pruneEmptyFolders(under directory: URL) {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil) else { return }
         for item in items where item.pathExtension != "paintproj" && isDirectory(item) {
-            if pruneEmptyFolders(in: item), (try? fm.removeItem(at: item)) != nil { remaining -= 1 }
+            pruneEmptyFolders(under: item)
+            _ = item.withUnsafeFileSystemRepresentation { path -> Int32 in
+                guard let path else { return -1 }
+                return rmdir(path)
+            }
         }
-        return remaining == 0
     }
 
     /// Permanently destroys trash items older than `trashRetentionInterval`. When a trashed project
