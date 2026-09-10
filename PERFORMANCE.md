@@ -3228,6 +3228,94 @@ nothing at all**: since RENDER.md §3.9 its only pixel source is the bake store,
 **What is left is `cel.derived`**, the other branch of the same line, which still renders at canvas
 size — see BUGS.md.
 
+### 11.11d The four kinds the walk never measures, bounded off their own geometry (2026-09-10)
+
+TODO (41)'s first box. `restoreDamage`'s departing loop opened `guard let stroke = element.stroke else
+{ return .everything }`, so **a departing fill, placed image, text object or video forced the whole-cel
+walk whatever rectangle the caller passed** — the undo of a fill and the undo of a text commit paid the
+cel that §11.11a had just stopped charging for a stroke.
+
+**The item's own proposed fix was to measure a fill's path bounds into `paintedBounds`, and that turned
+out to be the wrong table.** `paintedBounds` is a *promise that the element has not changed since*, and
+the walk skips on it; an entry there is a thing that has to be forgotten at every rewrite site and
+cleared on every `.everything`. None of that is needed, because the geometry these four are drawn from
+is stored **on the element**, and a restore is handed the element. `VectorCanvas.derivedFootprint(of:)`
+is a pure function of the value — no table, no lifetime, nothing to invalidate — and both directions of
+a restore call it. So the box is closed by deleting a guard rather than by adding a cache.
+
+**The containment argument, per kind, because the safety bar here is higher than anywhere else in §11.**
+An under-declared rectangle for a *stroke* costs a second walk: `renderLocalContent` measures what it
+draws and widens the clip when something escapes. Neither half of that reaches these four — the walk
+takes no measurement of them, and a **departure**'s damage is stale pixels *outside* the clip, where by
+construction nothing draws and so no escape could be detected even for a stroke. A rectangle that is too
+small here is a ghost on the canvas with no retry behind it.
+
+| kind | bound | why it holds |
+|---|---|---|
+| fill | `cgPath.boundingBoxOfPath` + 1 | antialiasing is per-pixel coverage *of the path*, so a pixel the path does not reach gets none. Exact by construction, which is what separates it from a dab walk. |
+| placed image | `quad(of:)`'s bbox + 1 | the bound and the picture read the *same* `placement` through the *same* function, so they cannot drift |
+| video | the same, source rect inflated 1 local unit first | the placeholder's border is stroked at `max(2/s, 0.5)` local units about a line inset `1/s`, so above `s = 4` its outer edge stands `0.25 − 1/s` local units proud of the natural rectangle |
+| text, `autoSize` clear | `frame.boundingBox` + 1 | all three arms of `draw(text:…)` pass `clip: !autoSize` into a real `CGContext.clip` on the box |
+| **text, `autoSize` set** | **`.everything`, deliberately** | the box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, a *typographic* extent, and glyph ink runs past it by whatever a font's italic overhang, swashes or accents care to. `TextMeasure.inkBounds` claims a superset from line boxes and is right in practice, but "in practice" is a claim about font files rather than about this code. |
+
+**MEASURED, Release, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048×1024, §11's fixture** —
+`UndoRepairBench.testUndoAndRedoAfterAFill`. A 300 × 200 pt ellipse, which is 2.9% of the canvas and the
+shape of a lasso fill on the owner's document. Both arms in one process on one canvas, alternating undo
+and redo, median of three presses; **two whole runs on an idle machine (96.9% idle, no other
+`xcodebuild` alive), agreeing to within 2%** — the second run's figures are in brackets.
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after |
+|---|---|---|---|---|---|---|
+| 200 | 47,200 | **8,496** | 108.3 (106.6) | **11.0 (10.4)** | 108.3 (106.9) | **11.1 (10.5)** |
+| 500 | 118,000 | **24,544** | 269.9 (263.9) | **24.2 (24.0)** | 269.2 (264.1) | **24.5 (24.1)** |
+| 1000 | 236,000 | **46,492** | 536.8 (529.8) | **44.6 (43.7)** | 539.1 (526.0) | **44.7 (44.1)** |
+| 2000 | 472,000 | **93,928** | 1071.9 (1049.6) | **89.5 (88.1)** | 1074.3 (1055.7) | **88.4 (88.4)** |
+
+**9.8–12.1×, and it is far larger than §11.11's 1.8–6.7× for the eraser's undo for a reason the
+rectangle column states.** That table's rectangle grew with density — 3.5% of the canvas at 200 strokes,
+32–36% at 2,000 — because it is the union of the footprints of every stroke a cut replaced. **A fill's
+rectangle does not grow with anything**: it is the fill, 2.9% at every stroke count, so the saving holds
+its shape all the way up rather than eroding. `repairsWidened` and `repairsAbandoned` are 0 in every row,
+which is the operand that would move if the bound were an estimate.
+
+INFERRED through §11.2's measured 1.32 device ratio: on the owner's iPad 9 the undo of a fill at 1,000
+strokes goes from **~709 ms to ~59 ms**, and at 2,000 from **~1.41 s to ~118 ms**.
+
+**The fill arm puts an `NSKeyedUnarchiver` round trip on the main thread inside the canvas's lock, and
+it costs nothing measurable.** `VectorFillElement` stores its path as archiver `Data`, so asking where a
+fill is means decoding a `UIBezierPath` — during a press §11.11a measured at 0.44–7.84 ms, and a lasso
+fill's contour is not four points. MEASURED, `UndoRepairBench.testWhatTheFillArmAddsToThePressItself`,
+Release, n = 2000, `restoreElements` timed **alone** with no render, alternating, median of five, two
+runs on a 98% idle machine:
+
+| what departs | undo press | redo press |
+|---|---|---|
+| fill, 4-point path | 4.01 / **3.78** ms | 4.49 / **4.16** ms |
+| fill, 250-point path | 3.79 / **3.78** ms | 4.09 / **4.08** ms |
+| fill, 1500-point path | 3.82 / **3.79** ms | 4.12 / **4.12** ms |
+| one stroke (control, unarchives nothing) | 3.77 / **3.75** ms | 4.15 / **4.09** ms |
+
+**Flat across a 375× range of path size and equal to the control**, and in the first run the *4-point*
+path was the slowest row, which is what noise looks like. The press is six passes over a 2,000-element
+display list at ~2 µs an element (§11.11a); one path decode disappears into that. Worth having the
+number rather than the assumption, because the same reasoning would not survive a fill arm that reached
+for a *render* — which is why `TextMeasure` exists as measure-only and why nothing here calls it.
+
+**The redo column is the same size and that is not a duplicate row.** The bench passes `changedInk: nil`
+on purpose, to measure the mechanism rather than `CanvasManager+Fill`, which does pass `addFill`'s
+rectangle — so the *shipped* redo of a lasso fill was already bounded and only the undo moved. What the
+nil arm prices is every other departure and arrival of these kinds that has no caller rectangle: a
+placed image, a video, Clear-on-selection, and a text object whose box has been resized.
+
+**Two things this does not touch, and they are the rest of TODO (41).** An `autoSize` text object still
+pays the cel in both directions — the row above says why, and the route to closing it is a *measurement*
+of glyph ink rather than a bound derived from the box. And a **rewrite in place** (Recolour, Apply Brush,
+a text re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, every lasso-move
+nudge) still cannot be bounded by this mechanism at all: it preserves the element's id by design, so the
+id-difference analysis sees no departure and no arrival, and `derivedFootprint` cannot help — the
+element's *old* geometry is gone by the time anybody asks. That case needs the old footprint forgotten
+and the new one bounded, which is two rectangles from a place that currently supplies neither.
+
 ### 11.12 The disappearing strokes: what the window actually is, on the owner's own document (2026-09-09)
 
 §11.4 read the defect off the source and §11.8 shrank it by two orders of magnitude without closing

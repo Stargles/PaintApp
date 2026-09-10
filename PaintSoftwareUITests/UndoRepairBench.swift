@@ -342,6 +342,173 @@ final class UndoRepairBench: XCTestCase {
                 rectangleShare(canvas))
     }
 
+    // MARK: - A fill — the press TODO (41)'s first box was about
+
+    /// **Fill, undo, redo**, at the four stroke counts the rest of this file uses.
+    ///
+    /// The **before** arm is `bumpVersion()`, and here that is not merely a stand-in for the old code
+    /// — it *is* what the old code did. `restoreDamage`'s departing loop refused anything that was not
+    /// a stroke, so a departing fill returned `.everything` whatever rectangle the caller passed, and
+    /// `.everything` is exactly what `bumpVersion()` declares. So both arms measure the same two
+    /// presses on the same canvas in one process, alternating, which is this file's whole method.
+    ///
+    /// **`changedInk` is nil on purpose, and it is not the same nil as the drawn stroke's.** The fill
+    /// commit does pass `addFill`'s rectangle in the shipped app, and passing it here would measure
+    /// the *caller's* answer rather than the canvas's. Nil is what isolates the change: the arriving
+    /// half is bounded by `derivedFootprint(of:)` reading the fill's own path, as the departing half
+    /// now is, so the row below is about the mechanism rather than about `CanvasManager+Fill`.
+    ///
+    /// The fill is a 300 × 200 pt ellipse — the shape of a lasso fill on the owner's canvas, and 2.9%
+    /// of it, so the rectangle share column should read about that.
+    func testUndoAndRedoAfterAFill() {
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+
+        for n in Self.strokeCounts {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let wholeLayerDabs = canvas.lastRenderDabCount
+
+                let before = canvas.elements
+                let ellipse = CGPath(ellipseIn: CGRect(x: 700, y: 380, width: 300, height: 200),
+                                     transform: nil)
+                canvas.addFill(VectorFillElement(path: ellipse,
+                                                 color: CodableColor(red: 0.85, green: 0.3,
+                                                                     blue: 0.1, alpha: 1),
+                                                 opacity: 1))
+                _ = canvas.render()
+                let after = canvas.elements
+
+                let old = measureBumpVersionArm(canvas, before: before, after: after)
+                let new = measureRestoreElementsArm(canvas, before: before, after: after,
+                                                    changedInk: nil)
+
+                report("fill + undo + redo — n=\(n)", [
+                    ("strokes", "\(n)"),
+                    ("wholeLayerDabs", "\(wholeLayerDabs)"),
+                    ("undoBefore", ms(old.undoSeconds)),
+                    ("undoDabsBefore", "\(old.undoDabs)"),
+                    ("redoBefore", ms(old.redoSeconds)),
+                    ("redoDabsBefore", "\(old.redoDabs)"),
+                    ("undoAfter", ms(new.undoSeconds)),
+                    ("undoDabsAfter", "\(new.undoDabs)"),
+                    ("redoAfter", ms(new.redoSeconds)),
+                    ("redoDabsAfter", "\(new.redoDabs)"),
+                    ("rectangle", new.rectangle),
+                    ("repairsWidened", "\(new.widened)"),
+                    ("repairsAbandoned", "\(new.abandoned)"),
+                    ("undoSpeedup", String(format: "%.1fx",
+                                           old.undoSeconds / max(new.undoSeconds, 1e-9))),
+                    ("redoSpeedup", String(format: "%.1fx",
+                                           old.redoSeconds / max(new.redoSeconds, 1e-9))),
+                ])
+
+                XCTAssertEqual(Double(old.undoDabs), Double(wholeLayerDabs), accuracy: 300,
+                               "the before arm at n=\(n) must re-stamp the whole cel on the undo — "
+                               + "that is the press this row exists to price")
+                XCTAssertEqual(new.repairs, 6,
+                               "three pairs, six presses, and every one must have repaired a "
+                               + "rectangle rather than declared one and walked the cel anyway")
+                XCTAssertEqual(new.abandoned, 0,
+                               "an abandoned repair at n=\(n) pays both walks and hides a bad bound")
+                XCTAssertLessThan(new.undoDabs * 2, old.undoDabs,
+                                  "the after arm at n=\(n) re-stamped \(new.undoDabs) dabs on the "
+                                  + "undo against the before arm's \(old.undoDabs)")
+            }
+        }
+    }
+
+    /// **What the press itself now costs, because the fill arm added work to it.**
+    ///
+    /// `derivedFootprint(of:)`'s fill arm reads `VectorFillElement.cgPath`, which is an
+    /// `NSKeyedUnarchiver` round trip of a `UIBezierPath` — the path is stored as archiver `Data`, so
+    /// asking where a fill is means decoding it. That runs **on the main thread, inside the canvas's
+    /// lock**, during an undo press that §11.11a measured at 0.44–7.84 ms across 200–4,000 strokes. A
+    /// lasso fill's path is not four points; it is the traced contour of a flood fill, so this is
+    /// worth a number rather than an assumption.
+    ///
+    /// Times `restoreElements` **alone**, with no render, alternating so every step is a real
+    /// transition. The stroke arm is the control: it reaches the same method and does no unarchiving.
+    func testWhatTheFillArmAddsToThePressItself() {
+        let n = 2000
+        for points in [4, 250, 1500] {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let before = canvas.elements
+                canvas.addFill(VectorFillElement(path: Self.contour(points: points),
+                                                 color: CodableColor(red: 0.8, green: 0.3,
+                                                                     blue: 0.1, alpha: 1),
+                                                 opacity: 1))
+                let after = canvas.elements
+
+                var undo: [Double] = [], redo: [Double] = []
+                for _ in 0..<5 {
+                    autoreleasepool {
+                        var start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(before, changedInk: nil)
+                        undo.append(CFAbsoluteTimeGetCurrent() - start)
+                        start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(after, changedInk: nil)
+                        redo.append(CFAbsoluteTimeGetCurrent() - start)
+                    }
+                }
+                undo.sort(); redo.sort()
+                report("press alone, fill of \(points) points — n=\(n)", [
+                    ("pathPoints", "\(points)"),
+                    ("undoPress", ms(undo[2])),
+                    ("redoPress", ms(redo[2])),
+                ])
+            }
+        }
+
+        // The control: the same two presses over a stroke, which unarchives nothing.
+        autoreleasepool {
+            let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+            _ = canvas.render()
+            let before = canvas.elements
+            canvas.addStroke(Self.benchStroke(n))
+            let after = canvas.elements
+            _ = canvas.render()
+
+            var undo: [Double] = [], redo: [Double] = []
+            for _ in 0..<5 {
+                autoreleasepool {
+                    var start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(before, changedInk: nil)
+                    undo.append(CFAbsoluteTimeGetCurrent() - start)
+                    start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(after, changedInk: nil)
+                    redo.append(CFAbsoluteTimeGetCurrent() - start)
+                }
+            }
+            undo.sort(); redo.sort()
+            report("press alone, one stroke (control) — n=\(n)", [
+                ("undoPress", ms(undo[2])),
+                ("redoPress", ms(redo[2])),
+            ])
+        }
+    }
+
+    /// A closed contour of `points` vertices around a 300 × 200 ellipse — the shape and the vertex
+    /// count of a traced flood fill, so the archived path is the size a real one is.
+    private static func contour(points: Int) -> CGPath {
+        let box = CGRect(x: 700, y: 380, width: 300, height: 200)
+        guard points > 4 else { return CGPath(ellipseIn: box, transform: nil) }
+        let path = CGMutablePath()
+        for step in 0..<points {
+            let t = CGFloat(step) / CGFloat(points) * 2 * .pi
+            // A wobble on the radius, so the vertices are not co-linear and the archive is not
+            // compressible into something unrepresentative.
+            let r = 1 + 0.04 * sin(t * 9)
+            let p = CGPoint(x: box.midX + cos(t) * box.width / 2 * r,
+                            y: box.midY + sin(t) * box.height / 2 * r)
+            if step == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
     // MARK: - A drawn stroke — the commonest undo/redo pair there is
 
     /// **Draw, undo, redo.** Not an eraser at all, which is the correction the owner had to make

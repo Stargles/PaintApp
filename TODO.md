@@ -155,12 +155,28 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 51 ms**, at 4,000 **2,275 → 171 ms**.
 
 **Left to build — and note this item's earlier "there is no design left to do" was wrong twice.**
-- [ ] **A departing fill, image, text object or video forces `.everything`** whatever rectangle the
-      caller passes, because `renderLocalContent` measures no footprint for those kinds. So the undo of
-      a fill and the undo of a text commit still pay the whole cel, while their redos no longer do.
-      The fix is to measure a fill's path bounds into `paintedBounds` — exact, unlike a dab walk — and
-      teach `restoreDamage`'s departing loop to accept it. A text object's glyph extent and a placed
-      image's quad are the same question.
+- [x] **A departing fill, image or video forced `.everything`.** Closed 2026-09-10, PERFORMANCE.md
+      §11.11d. **The fix this box proposed — measure a fill's path bounds into `paintedBounds` — was
+      the wrong table, which is the third time this item's design has been wrong.** `paintedBounds` is
+      a *promise that the element has not changed*, so an entry there has to be forgotten at every
+      rewrite site and cleared on every `.everything`; none of that is needed, because the geometry
+      these kinds are drawn from is stored **on the element** and a restore is handed the element.
+      `VectorCanvas.derivedFootprint(of:)` is a pure function of the value, and the box closed by
+      deleting a guard rather than by adding a cache. MEASURED in Release: the undo of a fill at 1,000
+      strokes **537 → 45 ms**, at 2,000 **1,072 → 90 ms**, 9.8–12.1× across the range — larger than the
+      eraser's 1.8–6.7× because a fill's rectangle does not grow with density the way a cut's does.
+- [ ] **An `autoSize` text object still pays the cel, in both directions**, and it is the one of the
+      four left on `.everything` on purpose. All three arms of `draw(text:into:quality:)` pass
+      `clip: !frame.autoSize` into a real `CGContext.clip`, so a **sized** box bounds its own glyphs by
+      proof — but a pristine box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, which is
+      a *typographic* extent, and glyph ink runs past it by whatever a font's italic overhang, swashes
+      or accents care to. Nothing measures a text object and a departure has no escape check behind it,
+      so a rectangle that missed those pixels would be a permanent ghost. Closing it wants a
+      **measurement** of glyph ink — `CTLineGetImageBounds` per line, which is what CoreGraphics
+      actually rasterizes — not a bound derived from the box. `TextMeasure.inkBounds` is the obvious
+      place for it and is deliberately *not* used here: it builds a superset out of line boxes
+      (ascent + descent over typographic width), which is right in practice and is a claim about font
+      files rather than about this code.
 - [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
       re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
       lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
@@ -171,9 +187,12 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
       fix. Bounding them needs a different idea: an id whose *content* changed needs its old footprint
       forgotten and its new one bounded, and no rectangle from a caller supplies that.
 - [ ] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
-      strokes**, which is why the "measure what was replaced" recipe never reached them.
+      strokes**, which is why the "measure what was replaced" recipe never reached them. **Three
+      quarters of this is answered by §11.11d** — a fill, a placed image and a video no longer need
+      that recipe, because they carry their own extent. What is left of it is the `autoSize` text box
+      above, which is the row this observation still describes.
 
-**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a.
+**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a, §11.11d.
 
 ---
 
