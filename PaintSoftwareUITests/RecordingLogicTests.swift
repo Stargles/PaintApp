@@ -210,9 +210,9 @@ final class RecordingLogicTests: XCTestCase {
 
         let began = manager.beginArmedTake(on: target(manager), isRecordable: false)
 
-        XCTAssertFalse(began)
-        XCTAssertFalse(manager.isRecording)
-        XCTAssertFalse(manager.isPlaying, "Nothing started…")
+        XCTAssertFalse(began, "A stepped field is not a surface a take can begin on")
+        XCTAssertFalse(manager.isRecording, "…so no take opened")
+        XCTAssertFalse(manager.isPlaying, "…and nothing started the transport either")
         XCTAssertTrue(manager.isRecordingArmed, "…and the artist is still armed for the next slider")
         XCTAssertEqual(manager.notice?.kind, .recordingRefused(.notRecordable))
         XCTAssertTrue(manager.notice?.message.contains("armed") == true,

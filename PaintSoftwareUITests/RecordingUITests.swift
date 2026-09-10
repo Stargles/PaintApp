@@ -197,8 +197,9 @@ final class RecordingUITests: PaintUITestCase {
         // first of those and playback starts with it.
         slider.adjust(toNormalizedSliderPosition: 0.9)
 
-        // The take ends itself at the end of the scene; the button going back to white is how the
-        // artist knows, and it is the only signal that does not require them to look at the timeline.
+        // The take ends itself at the end of the scene, and the button going back to white is how the
+        // artist knows — the same control they armed, in the same place, which is the argument for
+        // it carrying all three states rather than only two.
         let idleAgain = expectation(for: NSPredicate(format: "value == 'idle'"), evaluatedWith: record)
         wait(for: [idleAgain], timeout: 30)
 
@@ -210,9 +211,9 @@ final class RecordingUITests: PaintUITestCase {
                       + "output, read off what is drawn rather than off the model. Got \"\(landed)\"")
 
         // **"…then putting it on the graph"** — the owner's own last clause, asserted where the
-        // artist would look for it. The channel list held *"This layer animates nothing"* before the
-        // take; the row's own value is the second half, because a row can exist over a curve that
-        // animates nothing and says so with a `,flat` suffix.
+        // artist would look for it. The row's *value* is the second half of it, because a row can
+        // exist over a curve that animates nothing and says so with a `,flat` suffix — so the
+        // existence of a row is not by itself the claim being made.
         //
         // **The slider's value is deliberately not the assertion here, and that is a correction
         // rather than an omission.** It was, and it read 1.8003 against the 1.0 the base was

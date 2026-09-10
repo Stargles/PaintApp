@@ -85,7 +85,7 @@ extension CanvasManager {
 
         /// **What the artist reads, and each one names what to do next.** A refusal that says only
         /// that something did not happen is worth very little — §2.29/§2.30's two notices are apart
-        /// from each other for exactly this reason, and these four are apart for the same one.
+        /// from each other for exactly this reason, and these six are apart for the same one.
         var message: String {
             switch self {
             case .noTarget:

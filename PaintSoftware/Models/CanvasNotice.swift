@@ -302,8 +302,9 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, and each of its six cases fails the button test for its own reason. Two
         // name a thing to do *while recording* — open a layer's effect settings, move the slider —
         // which is not an action after the fact; one says the take was too short, whose fix is to
-        // record for longer; and `noTarget` could offer "Add Layer", except that an artist with no
-        // layer at all is not mid-take and the layer panel is already on screen.
+        // record for longer; `notRecordable` asks for a pencil somewhere else, which is not a tap
+        // anything here could make; and `noTarget` could offer "Add Layer", except that an artist
+        // with no layer at all is not mid-take and the layer panel is already on screen.
         case .recordingRefused: return nil
         // Nor this one, and here it is the sentence itself that rules the button out: what it asks
         // for is a pencil on a slider, which is the one thing in this app no button can do.
