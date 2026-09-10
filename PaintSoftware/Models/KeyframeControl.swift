@@ -1222,16 +1222,6 @@ extension CanvasManager {
         }
     }
 
-    /// **This channel at one frame** — the value the canvas is actually showing, which is what a
-    /// panel must display while a curve exists (§2.23's dead-control argument: a settings bar that
-    /// shows the stored base under a live curve offers a number the artist cannot move).
-    func resolvedValue(of target: KeyframeTarget, channel: TargetChannel, atFrame frame: Int) -> Double? {
-        switch target {
-        case .layer(let id): return layers.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
-        case .folder(let id): return folders.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
-        }
-    }
-
     /// `keyframeWrite(_:parameter:atFrame:)` for a target channel — the *same* rule with the same
     /// four inputs, read off the other store.
     ///
