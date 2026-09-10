@@ -1362,13 +1362,16 @@ final class VectorCanvas {
     ///
     /// **Only strokes are ever in here**, because only strokes are ever in `paintedBounds` — a fill,
     /// an image, a text object and a video are always drawn and never measured, so they cannot escape
-    /// a clip either and must not be bounded by a hint. `rememberedInk(ofArrivalsIn:standing:)` asks
-    /// each arrival for its `stroke` rather than trusting that — MEASURED by a two-mutation
-    /// experiment: dropping the check alone leaves the suite green, because nothing puts a non-stroke
-    /// in the table today, and dropping it *together with* a fallback rectangle for unmeasured
-    /// departures reddens `testRedoingAFillIsNotBoundedByAHintBecauseAFillIsNeverMeasured`. So it is
-    /// what stands between a future measurement of some other kind and a rectangle no escape check
-    /// can correct.
+    /// a clip either and must not be bounded by a hint. `arrivingInk(ofArrivalsIn:standing:)` reads
+    /// this table in its **stroke arm and nowhere else**, so that invariant is structural rather than
+    /// asserted: a non-stroke arrival is bounded by `derivedFootprint(of:)`, off its own stored
+    /// geometry, and never by a rectangle left behind under its id.
+    ///
+    /// That used to be spelled as an `element.stroke` guard on a single lookup, and the guard was
+    /// MEASURED load-bearing by a two-mutation experiment: dropping it alone left the suite green,
+    /// because nothing puts a non-stroke in the table, and dropping it *together with* a fallback
+    /// rectangle for unmeasured departures reddened a test. The split arms make the same statement in
+    /// a way no single mutation can undo — TODO (41).
     ///
     /// **Entries live until their id comes back or the table is dropped whole.** Keeping only the last
     /// restore's would make exactly the first redo of a run cheap and leave the rest at `.everything`,
@@ -2002,33 +2005,129 @@ final class VectorCanvas {
         if vacatedInk.count > Self.vacatedInkLimit { vacatedInk.removeAll(keepingCapacity: false) }
     }
 
-    /// The union of what `arriving` last painted before it left the list, or nil when any of them is
-    /// not a stroke or has no remembered rectangle — in which case the caller cannot bound the half
+    /// The union of what the elements `newValue` carries and the standing list does not will paint,
+    /// or nil when any one of them cannot be bounded — in which case the caller cannot bound the half
     /// of a restore it did not measure. Caller must hold `lock`.
     ///
-    /// **No margin, unlike `regionDamage(replacing:)`'s.** That one widens because a cut piece
-    /// re-anchors its dab walk and stamps at arc offsets its parent's did not. Nothing re-anchors
-    /// here: the element arriving is the same `VectorStroke` *value* that left, restored from a
-    /// snapshot, so its dabs land where the walk that measured this rectangle put them. MEASURED —
-    /// `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the operand
-    /// that would move if this were an estimate rather than a measurement.
-    private func rememberedInk(ofArrivalsIn newValue: [VectorElement],
-                               standing: Set<UUID>) -> CGRect? {
+    /// **Two different arguments, one per kind, and the split is structural rather than stylistic.**
+    /// A stroke's extent is a dab walk, which BRUSH.md §12 stage 8 refuted deriving from the brush, so
+    /// the only rectangle that can be had for one is the *measurement* `vacatedInk` kept while its id
+    /// was out of the list. Everything else is drawn from stored geometry that this element carries
+    /// with it, so its rectangle is derived rather than remembered — `derivedFootprint(of:)`, whose
+    /// doc carries the containment proof for each kind.
+    ///
+    /// **`vacatedInk` is read in the stroke arm and nowhere else**, which is what keeps the invariant
+    /// its doc comment argues for: a hint the escape check can correct is spent only on the kind the
+    /// escape check watches. A fill's rectangle never goes through that table at all.
+    ///
+    /// **No margin on the stroke arm, unlike `regionDamage(replacing:)`'s.** That one widens because a
+    /// cut piece re-anchors its dab walk and stamps at arc offsets its parent's did not. Nothing
+    /// re-anchors here: the element arriving is the same `VectorStroke` *value* that left, restored
+    /// from a snapshot, so its dabs land where the walk that measured this rectangle put them.
+    /// MEASURED — `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the
+    /// operand that would move if this were an estimate rather than a measurement.
+    private func arrivingInk(ofArrivalsIn newValue: [VectorElement],
+                             standing: Set<UUID>) -> CGRect? {
         var union = CGRect.null
         for element in newValue where !standing.contains(element.id) {
-            guard let stroke = element.stroke, let rect = vacatedInk[stroke.id] else { return nil }
+            if let stroke = element.stroke {
+                guard let rect = vacatedInk[stroke.id] else { return nil }
+                union = union.union(rect)
+                continue
+            }
+            guard let rect = Self.derivedFootprint(of: element) else { return nil }
             union = union.union(rect)
         }
         return union.isNull ? nil : union
     }
 
+    /// **Where a non-stroke element's ink provably lies, read off its own stored geometry** — or nil
+    /// when no rectangle can be proven and the caller must fall back to `.everything`. TODO (41).
+    ///
+    /// **The bar here is higher than for anything `paintedBounds` holds, and it is worth saying why
+    /// before the per-kind arguments.** A stroke's rectangle is corrected in flight: `renderLocalContent`
+    /// draws every element it has no measurement for, measures it, and widens the clip if it escaped
+    /// (`LocalContent.escaped`). That check watches *strokes only* — the walk takes no measurement of a
+    /// fill, an image, a text object or a video — and it could not help a **departure** in any case,
+    /// because what a departure leaves behind is stale pixels *outside* the clip, where by construction
+    /// nothing draws and so nothing can notice. So a rectangle here that is too small is a corrupted
+    /// picture with no retry behind it, where one that is too large is only slow. Every arm below is
+    /// therefore a containment argument, and the one arm that has none refuses.
+    ///
+    /// * **A fill** is `cg.addPath(path); cg.fillPath()` and nothing else. Antialiasing is per-pixel
+    ///   coverage *of the path*, so a pixel the path does not reach gets none: the ink is inside
+    ///   `boundingBoxOfPath`. The one point of slack is `addFill(canvasSpacePath:)`'s, for its
+    ///   measured reason — the stored path is float32, so 20.3 comes back 20.299999237.
+    /// * **A placed image and a video** are both `concatenate(placement)` then a draw confined to
+    ///   `CGRect(-natural/2, natural/2)`, which is exactly the rectangle `quad(of:)` maps — the shared
+    ///   function, so the bound and the picture cannot drift apart. The source rect is inflated by one
+    ///   *local* unit before mapping, which covers the one thing that reaches outside it: the video
+    ///   placeholder's border is stroked at `max(2/scale, 0.5)` local units about a line inset
+    ///   `1/scale`, so when the floor bites (`scale > 4`) its outer edge stands `0.25 - 1/scale < 0.25`
+    ///   local units proud of the rect. A decoded frame and a placed image stand none.
+    /// * **A text object is bounded only when its box clips**, and that is the honest half of this
+    ///   function. `draw(text:into:quality:)` has three arms — an affine concatenate, a warp, and a
+    ///   translated bounding-box draw — and all three pass `clip: !frame.autoSize` down to
+    ///   `TextLayout.draw`, which turns it into a `CGContext.clip` on the box. A hard clip is a proof:
+    ///   with it the ink is inside the box quad, whose hull is `frame.boundingBox`. **Without it there
+    ///   is no bound at all** — an `autoSize` box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`,
+    ///   which is a *typographic* extent, and glyph ink runs past it by however much a font's italic
+    ///   overhang, swashes or accents care to. `TextMeasure.inkBounds` claims a superset of the outline
+    ///   from line boxes and is right in practice, but "in practice" is a claim about font files rather
+    ///   than about this code, and a departure has no escape check to correct it. So an `autoSize`
+    ///   object answers nil and its restore pays the cel. That is the remaining half of this box.
+    ///
+    /// **A `.null` answer is a real answer and not a refusal**: an element the walk's own guards make
+    /// draw nothing paints nowhere, so it contributes nothing to a union. The empty-string and
+    /// zero-box tests below are `draw(text:into:quality:)`'s own, spelled the same way round.
+    ///
+    /// Strokes answer nil, which is not a limitation but the rule: see `arrivingInk`.
+    private static func derivedFootprint(of element: VectorElement) -> CGRect? {
+        /// The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
+        let slack: CGFloat = 1
+        switch element {
+        case .stroke:
+            return nil
+        case .fill(let fill):
+            guard let path = fill.cgPath else { return .null }
+            return path.boundingBoxOfPath.insetBy(dx: -slack, dy: -slack)
+        case .image(let image):
+            return placedFootprint(of: image, slack: slack)
+        case .video(let video):
+            return placedFootprint(of: video, slack: slack)
+        case .text(let text):
+            let box = text.frame.boundingBox
+            guard !text.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return .null }
+            guard !text.frame.autoSize else { return nil }
+            return box.insetBy(dx: -slack, dy: -slack)
+        }
+    }
+
+    /// `quad(of:)`'s rectangle, grown by one local unit before it is mapped and by `slack` after —
+    /// see `derivedFootprint(of:)` for what each of the two covers.
+    private static func placedFootprint(of element: some PlacedRectangle, slack: CGFloat) -> CGRect {
+        let size = element.naturalSize
+        guard size.width > 0, size.height > 0 else { return .null }
+        var t = element.placement
+        let source = CGRect(x: -size.width / 2, y: -size.height / 2,
+                            width: size.width, height: size.height).insetBy(dx: -1, dy: -1)
+        let mapped = CGPath(rect: source, transform: &t).boundingBoxOfPath
+        guard !mapped.isNull, !mapped.isInfinite else { return .null }
+        return mapped.insetBy(dx: -slack, dy: -slack)
+    }
+
     /// The tightest damage a restore to `newValue` can prove. Caller must hold `lock`.
     ///
-    /// Four things make it `.everything`: something departs that the walk never measures (a fill, an
-    /// image, a text object or a video — `renderLocalContent` deliberately measures no footprint for
-    /// them), the survivors are re-ordered, something arrives that neither the caller nor `vacatedInk`
-    /// can bound, or a stroke departs that was never measured, which is `regionDamage(replacing:)`'s
-    /// own answer.
+    /// Three things make it `.everything`: the survivors are re-ordered, something arrives that
+    /// neither the caller nor `arrivingInk` can bound, or a stroke departs that was never measured,
+    /// which is `regionDamage(replacing:)`'s own answer.
+    ///
+    /// **A departing fill, image or video used to be a fourth and is not any more** — TODO (41). The
+    /// reason it was is that `renderLocalContent` measures no footprint for those kinds, and the reason
+    /// that stopped mattering is that it does not have to: their extent is stored geometry rather than
+    /// a dab walk, so `derivedFootprint(of:)` reads it off the element itself. A departing **text**
+    /// object is still the fourth whenever its box does not clip; that arm's proof and its refusal are
+    /// both in `derivedFootprint(of:)`.
     ///
     /// **The union on the last line is the one thing here that reads as redundant and is not**, so
     /// the experiment is recorded rather than the argument. Reasoning about one stroke says it *is*
@@ -2050,9 +2149,19 @@ final class VectorCanvas {
                                changedInk: CGRect?) -> Damage {
         var departing: [VectorStroke] = []
         departing.reserveCapacity(departed.count)
+        // The two halves of a departure are bounded by two different arguments — a stroke by the
+        // measurement the last walk took of it, everything else by the geometry it stores — so they
+        // are accumulated separately and unioned at the end. `departed` is filtered out of
+        // `_elements`, so these are the values standing on the canvas right now: the geometry read
+        // here is the geometry the standing picture was drawn from.
+        var derivedDeparted = CGRect.null
         for element in departed {
-            guard let stroke = element.stroke else { return .everything }
-            departing.append(stroke)
+            if let stroke = element.stroke {
+                departing.append(stroke)
+                continue
+            }
+            guard let rect = Self.derivedFootprint(of: element) else { return .everything }
+            derivedDeparted = derivedDeparted.union(rect)
         }
         // **Two lists holding the same ids in a different order draw different pixels**, and neither
         // an arrival nor a departure says so — z-position is what a display list means. Comparing the
@@ -2069,18 +2178,21 @@ final class VectorCanvas {
             arrivingInk = .null
         } else if let changedInk {
             arrivingInk = changedInk
-        } else if let remembered = rememberedInk(ofArrivalsIn: newValue, standing: standing) {
-            // **The caller has no rectangle and the canvas remembers one.** A redone append is this
-            // case and nothing else is: the gesture declared `.appended`, so `foldGestureDamage`
-            // handed both closures a nil, and the ink coming back is ink this canvas measured on the
-            // walk that first drew it. See `vacatedInk` for why a stale answer here costs a retry
-            // rather than a picture.
-            arrivingInk = remembered
+        } else if let derived = self.arrivingInk(ofArrivalsIn: newValue, standing: standing) {
+            // **The caller has no rectangle and the arrivals can supply one between them.** A redone
+            // append is this case: the gesture declared `.appended`, so `foldGestureDamage` handed
+            // both closures a nil, and the ink coming back is ink this canvas measured on the walk
+            // that first drew it. See `vacatedInk` for why a stale answer there costs a retry rather
+            // than a picture, and `derivedFootprint(of:)` for why a fill needs no such retry.
+            arrivingInk = derived
         } else {
             return .everything
         }
-        guard !departing.isEmpty else { return .region(arrivingInk) }
-        guard case .region(let vacated) = regionDamage(replacing: departing) else { return .everything }
+        var vacated = derivedDeparted
+        if !departing.isEmpty {
+            guard case .region(let measured) = regionDamage(replacing: departing) else { return .everything }
+            vacated = vacated.union(measured)
+        }
         return .region(vacated.union(arrivingInk))
     }
 

@@ -548,9 +548,12 @@ extension CanvasManager {
                                        layerID: layerID, celID: celID, label: label,
                                        // One fill appended and nothing rewritten, and `addFill` says
                                        // exactly where it went — so redoing this costs the fill's own
-                                       // rectangle rather than every dab on the cel. The *undo* is
-                                       // still `.everything`, because a departing fill carries no
-                                       // measured footprint; see `restoreDamage`.
+                                       // rectangle rather than every dab on the cel. **The undo costs
+                                       // the same rectangle since TODO (41)**, and not because of
+                                       // this argument: a departing fill is bounded by
+                                       // `VectorCanvas.derivedFootprint(of:)`, which reads the very
+                                       // path that is about to leave the list. Passing `landed` is
+                                       // still right — it is free, and it is the arriving half.
                                        swap: .addsAndRemoves(ink: landed))
         } else {
             let cel = layers[layerIndex].cels[celIndex]

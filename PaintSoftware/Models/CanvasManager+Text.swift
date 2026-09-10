@@ -391,13 +391,13 @@ extension CanvasManager {
                                    // **A re-edit is a same-id rewrite and a new object is not.**
                                    // `upsertTextLocked` replaces `_elements[index]` under the id the
                                    // artist is editing, so `editingID` is exactly the question
-                                   // `ElementSwap` asks. **The new-object arm buys nothing today and
-                                   // is written down anyway**: a text object's extent is its glyphs,
-                                   // nothing measures those, and `vacatedInk` holds strokes alone —
-                                   // so `restoreDamage` answers `.everything` in both directions
-                                   // exactly as `bumpVersion()` did. What the line is worth is the
-                                   // other arm, which was silently unsafe, and a place for a glyph
-                                   // measurement to land if one is ever taken.
+                                   // `ElementSwap` asks. **The new-object arm buys the sized boxes
+                                   // and nothing else, which is TODO (41) as far as it goes**: all
+                                   // three arms of `draw(text:into:quality:)` clip to the box when
+                                   // `autoSize` is clear, so `derivedFootprint(of:)` bounds one of
+                                   // those exactly and answers nil for a pristine box, whose glyph
+                                   // ink nothing clips and nothing measures. A box the artist has
+                                   // never resized therefore still pays the cel in both directions.
                                    swap: editingID == nil ? .addsAndRemoves(ink: nil) : .rewritesInPlace)
         // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
         // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
@@ -440,8 +440,15 @@ extension CanvasManager {
         ///   that the old one does not, or nil when the caller cannot prove one. Nil is right — not
         ///   merely permitted — when what arrives is a **stroke that has been in this canvas before**:
         ///   `VectorCanvas.vacatedInk` kept what it painted on the way out and bounds it exactly,
-        ///   where a caller could only estimate. Nil is wrong for a fill, an image or a text object,
-        ///   which the walk never measures and which therefore has nothing behind it.
+        ///   where a caller could only estimate.
+        ///
+        ///   **Since TODO (41) nil is also right for a fill, a placed image and a video**, whose
+        ///   extents are stored geometry rather than a dab walk: `VectorCanvas.derivedFootprint(of:)`
+        ///   reads each off the element itself, so a caller passing a rectangle for one of those is
+        ///   supplying an answer the canvas already has. A rectangle is still worth passing where the
+        ///   caller has one anyway — `addFill(canvasSpacePath:)` returns it — because it costs
+        ///   nothing and covers the arrival of an element the canvas has never seen. Nil is still
+        ///   wrong for an **`autoSize` text object**, whose glyphs nothing clips and nothing measures.
         case addsAndRemoves(ink: CGRect?)
     }
 

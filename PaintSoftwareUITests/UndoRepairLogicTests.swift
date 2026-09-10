@@ -23,11 +23,18 @@ import CoreGraphics
 ///    still draw differently are the two things that have to be caught rather than assumed: an
 ///    element rewritten in place under its own id (which is why `detachedPiece` minting a fresh id is
 ///    pinned here as a property of the *cut*, not left as a remark), and survivors re-ordered.
-/// 3. **An under-declared rectangle is not a wrong picture, it is a second walk.** `renderLocalContent`
-///    measures every element it draws that it has no footprint for and widens the clip when one
-///    escapes. So the picture assertions below cannot fail for a rectangle that is merely too small —
-///    `regionRepairsWidened` is the operand that can, and it is asserted alongside every one of them.
-///    Without it these tests would be green against a caller that declared `.null`.
+/// 3. **For a stroke, an under-declared rectangle is not a wrong picture, it is a second walk.**
+///    `renderLocalContent` measures every element it draws that it has no footprint for and widens the
+///    clip when one escapes. So the picture assertions in sections (1) and (2) cannot fail for a
+///    rectangle that is merely too small — `regionRepairsWidened` is the operand that can, and it is
+///    asserted alongside every one of them. Without it those tests would be green against a caller
+///    that declared `.null`.
+/// 4. **For the other four kinds it *is* a wrong picture, and section (1b) is where that matters.**
+///    The walk takes no measurement of a fill, an image, a text object or a video, so nothing widens
+///    a clip on their account; and a **departure**'s damage is stale pixels *outside* the clip, where
+///    by construction nothing draws and so no escape could be detected even for a stroke. The bound
+///    for those is therefore a containment proof rather than a retry, and section (1b)'s picture
+///    assertions are load-bearing rather than belt-and-braces.
 final class UndoRepairLogicTests: XCTestCase {
 
     // MARK: - The scene
@@ -326,7 +333,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// from the stroke's geometry is still what BRUSH.md §12 stage 8 refuted and is still not what
     /// happens here — this is the measurement, not a derivation from the brush.
     ///
-    /// Mutation that reddens it: return nil from `rememberedInk(of:)`, or stop calling
+    /// Mutation that reddens it: return nil from `arrivingInk(ofArrivalsIn:standing:)`, or stop calling
     /// `rememberVacatedInk`.
     func testRedoingAnAppendIsBoundedByWhatItPaintedBeforeItLeft() {
         let canvas = Self.drawnCanvas(48)
@@ -344,38 +351,46 @@ final class UndoRepairLogicTests: XCTestCase {
                       + "the owner reported")
     }
 
-    /// **A hint only exists for ink the walk measures, so a returning fill still says `.everything`.**
+    /// **A fill's rectangle never goes through the hint table**, whichever way the press goes.
     ///
-    /// `renderLocalContent` measures footprints for strokes alone, on its own stated grounds, and a
-    /// fill is therefore never in `paintedBounds` and never in `vacatedInk`. It is also the kind that
-    /// *cannot* be caught by the escape check — it is always drawn and never measured — so bounding
-    /// one on a hint would be a wrong picture rather than a retry. `rememberedInk(ofArrivalsIn:
-    /// standing:)` asks each arrival for its `stroke` rather than looking the id up and hoping.
+    /// `vacatedInk` is a *hint*: it says where an id last painted, and it is safe only because the
+    /// walk re-measures a returning stroke and widens the clip if it escaped. Nothing measures a fill,
+    /// an image, a text object or a video, so nothing could correct a hint about one — which is why
+    /// those four are bounded by `derivedFootprint(of:)`, off geometry the element carries with it,
+    /// and why `arrivingInk` reads `vacatedInk` in its stroke arm and nowhere else.
     ///
-    /// **Reddening this took two mutations, and finding that out is what the sweep is for.** Dropping
-    /// the `element.stroke` guard on its own leaves it green, because nothing puts a fill in the table
-    /// to be found — the guard is protecting an invariant that holds one level down. It is
-    /// load-bearing rather than dead, and the pair that shows it is: record a fallback rectangle for
-    /// a departing element with no measured footprint (`vacatedInk[element.id] = CGRect(origin: .zero,
-    /// size: size)` in `rememberVacatedInk`) **and** drop the guard, and this goes red; record the
-    /// fallback with the guard in place and it stays green. So the guard is what stands between a
-    /// future measurement of some other kind and a rectangle no escape check can correct.
-    func testRedoingAFillIsNotBoundedByAHintBecauseAFillIsNeverMeasured() {
+    /// **Two operands, and the second is the one that makes it a test rather than a restatement.**
+    /// `rememberedInkCount` is 0 across the whole round trip — nothing about the fill ever enters the
+    /// table — *and* both presses are still bounded, so the rectangle demonstrably came from
+    /// somewhere else. Either half alone is green under an implementation that is wrong in the other
+    /// direction. Mutation that reddens it: measure fills into `paintedBounds` in
+    /// `renderLocalContent`, which is the change that would put one in the table.
+    ///
+    /// This replaces `testRedoingAFillIsNotBoundedByAHintBecauseAFillIsNeverMeasured`, whose
+    /// assertion was that the redo said `.everything`. TODO (41) is the reason it no longer does; the
+    /// invariant that test was really protecting is the one above, and it is unchanged.
+    func testAFillIsNeverPutInTheHintTableAndIsBoundedAnyway() {
         let canvas = Self.drawnCanvas(12)
         let withoutFill = canvas.elements
-        canvas.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 20, y: 20, width: 40, height: 30),
-                                                      transform: nil),
-                                         color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1),
-                                         opacity: 1))
+        canvas.addFill(Self.fillElement(CGRect(x: 20, y: 20, width: 40, height: 30)))
         let withFill = canvas.elements
         _ = canvas.render()
+        XCTAssertEqual(canvas.rememberedInkCount, 0, "control: nothing has left the list yet")
 
         canvas.restoreElements(withoutFill, changedInk: nil)
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "the undo of a fill must be bounded by the fill's own path, which is exact")
+        XCTAssertEqual(canvas.rememberedInkCount, 0,
+                       "a departing fill must leave no hint behind: the walk never measured it, so a "
+                       + "rectangle under its id would be one nothing could correct")
         _ = canvas.render()
+
         canvas.restoreElements(withFill, changedInk: nil)
-        XCTAssertEqual(canvas.lastDamage, .everything,
-                       "a fill arriving with no rectangle from its caller has nothing that could "
-                       + "bound it, and no escape check to catch a guess")
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "the fill coming back is bounded by the same path it departed with, and no "
+                      + "caller rectangle was passed either way")
+        XCTAssertEqual(canvas.rememberedInkCount, 0,
+                       "and it must not be put in the table on the way back in either")
     }
 
     /// **A run of undos followed by a run of redos: every redo is bounded, not just the first.**
@@ -508,7 +523,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// `testUndoingACutStampsFarFewerDabsThanTheCelHolds`, on the press that was still paying the
     /// whole cel after that one stopped.
     ///
-    /// Mutation that reddens it: return nil from `rememberedInk(of:)`, which makes the two counts equal.
+    /// Mutation that reddens it: return nil from `arrivingInk(ofArrivalsIn:standing:)`, which makes the two counts equal.
     func testRedoingAnAppendStampsFarFewerDabsThanTheCelHolds() {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
@@ -528,26 +543,286 @@ final class UndoRepairLogicTests: XCTestCase {
                           + "the cel's \(fullDabs) — the bound is not binding")
     }
 
-    /// **A departing fill cannot be bounded, because the walk deliberately never measured it.**
-    ///
-    /// `renderLocalContent` measures footprints for strokes only — fills, images, text and video are
-    /// always drawn, on the stated grounds that they are a handful per cel and a bound for them would
-    /// be a second thing that can be wrong. So a restore that drops one has no rectangle for it.
-    /// Mutation that reddens it: skip the non-stroke guard in `restoreDamage`.
-    func testARestoreThatDropsAFillSaysEverything() {
-        let canvas = Self.drawnCanvas(12)
-        canvas.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 20, y: 20, width: 40, height: 30),
-                                                      transform: nil),
-                                         color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1),
-                                         opacity: 1))
-        _ = canvas.render()
-        let withFill = canvas.elements
-        let withoutFill = withFill.filter { if case .fill = $0 { return false } else { return true } }
-        XCTAssertEqual(withoutFill.count, withFill.count - 1, "the fixture must actually hold a fill")
+    // MARK: - (1b) The four kinds the walk never measures — TODO (41)
+    //
+    // `renderLocalContent` measures footprints for strokes only: a fill, a placed image, a text
+    // object and a video are always drawn and never measured, on the stated grounds that they are a
+    // handful per cel and a bound for them would be a second thing that can be wrong. That left a
+    // **departing** one of the four forcing `.everything` whatever rectangle the caller passed, so
+    // the undo of a fill and the undo of a text commit paid the whole cel while their redos did not.
+    //
+    // **The correctness bar here is higher than anywhere else in this file, and paragraph 3 of the
+    // header is why.** An under-declared rectangle for a *stroke* is a second walk, because the walk
+    // measures what it draws and widens the clip when something escapes. Neither half of that reaches
+    // these four: the walk takes no measurement of them, and a departure's damage is stale pixels
+    // *outside* the clip, where by construction nothing draws and so nothing can notice. So every
+    // test below asserts the **picture** against a cold full re-walk, and asserts `regionRepairs`
+    // moved as well — without that second operand the picture assertion is green under `.everything`,
+    // which draws the right picture by walking the whole cel.
 
-        canvas.restoreElements(withoutFill, changedInk: CGRect(x: 20, y: 20, width: 40, height: 30))
-        XCTAssertEqual(canvas.lastDamage, .everything,
-                       "an unmeasured departure is exactly the case Damage's own rule says to pay for")
+    /// A fill the whole of whose ink is inside its own path, which is every fill.
+    private static func fillElement(_ rect: CGRect, evenOdd: Bool = false) -> VectorFillElement {
+        VectorFillElement(path: CGPath(ellipseIn: rect, transform: nil),
+                          color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1),
+                          opacity: 1, evenOddFill: evenOdd)
+    }
+
+    private static func solidImage(_ color: UIColor, side: CGFloat) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+    }
+
+    private static func imageElement(at position: CGPoint, side: CGFloat = 24,
+                                     scale: CGFloat = 1, rotation: CGFloat = 0) -> VectorImageElement {
+        VectorImageElement(image: solidImage(.systemTeal, side: side),
+                           transform: LayerTransform(position: position, scale: scale,
+                                                     rotation: rotation))
+    }
+
+    /// **The placeholder branch by default**, because it is the harder one to bound: `draw(video:)`
+    /// strokes a border whose width is floored at 0.5 *local* units, so above a placement scale of 4
+    /// its outer edge stands proud of the natural rectangle. A decoded frame stands none — pass one
+    /// to exercise that arm.
+    private static func videoElement(at position: CGPoint, natural: CGSize = CGSize(width: 32, height: 18),
+                                     scale: CGFloat = 1, rotation: CGFloat = 0,
+                                     frame: UIImage? = nil) -> VectorVideoElement {
+        var element = VectorVideoElement(assetURL: URL(fileURLWithPath: "/dev/null"),
+                                         assetFileName: "null", naturalSize: natural,
+                                         sourceStart: .zero,
+                                         sourceEnd: SourceTime(value: 1, timescale: 1), speed: 1,
+                                         transform: LayerTransform(position: position, scale: scale,
+                                                                   rotation: rotation))
+        element.displayFrame = frame
+        return element
+    }
+
+    private static func textElement(_ string: String = "Words", at origin: CGPoint,
+                                    size: CGSize = CGSize(width: 70, height: 30),
+                                    autoSize: Bool) -> VectorTextElement {
+        VectorTextElement(recipe: TextRecipe(string: string, font: .system,
+                                             typography: Typography(pointSize: 20)),
+                          frame: TextFrame(origin: origin, size: size, autoSize: autoSize))
+    }
+
+    /// **Drops `element` off a drawn canvas and puts it back, asserting both presses bounded
+    /// themselves and both drew what a cold full re-walk draws.**
+    ///
+    /// The undo is the case TODO (41) names — the element departs, and no caller rectangle exists for
+    /// it — and the redo is its mirror, with `changedInk` nil so the arriving half has to come from
+    /// the same geometry. Every assertion names the element and what it is about, because the line
+    /// number here says only "the shared helper".
+    ///
+    /// **`bumpVersion()` after the assignment, and the `diff` guard after that, are both there
+    /// because this fixture measured nothing the first time it was written.** The `elements` setter
+    /// deliberately does not invalidate — its callers follow with `bumpVersion()` — so without it the
+    /// canvas hands back its standing memo, the new element is never drawn, its footprint is never
+    /// measured, and every assertion below passes against a picture the element is not in. Four of
+    /// these tests were green that way. The guard is the operand that says the fixture is real: with
+    /// the element in the list the canvas draws *something different*.
+    private func assertARoundTripIsBoundedAndDrawsRight(
+        _ element: VectorElement, _ what: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let canvas = Self.drawnCanvas(24)
+        let without = canvas.elements
+        let bare = canvas.render()
+        canvas.elements = without + [element]
+        canvas.bumpVersion()
+        let standing = canvas.render()
+        if let d = diff(bare, standing, "\(what) fixture", file: file, line: line) {
+            XCTAssertGreaterThan(d.bytes, 0,
+                                 "\(what): fixture precondition — adding it to the display list "
+                                 + "changed no pixel, so nothing below is about a \(what) at all",
+                                 file: file, line: line)
+        }
+        let with = canvas.elements
+
+        for (press, target) in [("undo", without), ("redo", with)] {
+            let repairsBefore = canvas.regionRepairs
+            let abandonedBefore = canvas.regionRepairsAbandoned
+            canvas.restoreElements(target, changedInk: nil)
+            XCTAssertTrue(isRegion(canvas.lastDamage),
+                          "\(what): the \(press) declared \(canvas.lastDamage) — a \(what) carries "
+                          + "its own extent in its stored geometry, so neither direction has to pay "
+                          + "the cel", file: file, line: line)
+            let repaired = canvas.render()
+            XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
+                           "\(what): the \(press) declared a rectangle and then walked the cel "
+                           + "anyway, so nothing below is testing a bound", file: file, line: line)
+            XCTAssertEqual(canvas.regionRepairsAbandoned, abandonedBefore,
+                           "\(what): the \(press)'s repair was abandoned, which pays both walks and "
+                           + "hides a rectangle that did not hold", file: file, line: line)
+            assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                               inside: canvas.lastRepairedRegion,
+                                               "a \(press)ne \(what)", file: file, line: line)
+        }
+    }
+
+    /// **The headline: undoing a fill costs the fill's own path, not the cel.**
+    ///
+    /// A fill is `addPath` + `fillPath` and nothing else, and antialiasing is per-pixel coverage *of
+    /// the path* — a pixel the path does not reach gets none — so `boundingBoxOfPath` contains every
+    /// pixel it can touch. That is the one kind of the four whose bound is exact by construction
+    /// rather than by a clip.
+    ///
+    /// Mutation that reddens it: restore the `guard let stroke = element.stroke else { return
+    /// .everything }` in `restoreDamage`'s departing loop.
+    func testUndoingAndRedoingAFillBothDeclareARectangleAndDrawTheRightPicture() {
+        assertARoundTripIsBoundedAndDrawsRight(.fill(Self.fillElement(CGRect(x: 22.3, y: 18.7,
+                                                                            width: 44.4, height: 33.2))),
+                                               "fill")
+    }
+
+    /// An even-odd fill with a hole in it — the same path rule, and the arm `evenOddFill` selects.
+    func testUndoingAndRedoingAFillWithAHoleIsBoundedTheSameWay() {
+        let outer = CGPath(rect: CGRect(x: 20, y: 20, width: 60, height: 50), transform: nil)
+        let ring = CGMutablePath()
+        ring.addPath(outer)
+        ring.addEllipse(in: CGRect(x: 35, y: 32, width: 30, height: 26))
+        assertARoundTripIsBoundedAndDrawsRight(
+            .fill(VectorFillElement(path: ring,
+                                    color: CodableColor(red: 0.1, green: 0.5, blue: 0.9, alpha: 1),
+                                    opacity: 0.8, evenOddFill: true)),
+            "even-odd fill")
+    }
+
+    /// **A placed image is bounded by the quad `draw(image:into:)` itself maps.**
+    ///
+    /// Both read `PlacedRectangle.placement` applied to the natural-size rect, through the *same*
+    /// `quad(of:)`, so the bound and the picture cannot drift apart the way two spellings of one
+    /// matrix can. The rotation is what makes it a real test: an axis-aligned box would be green
+    /// against a bound that ignored `placement` entirely.
+    func testUndoingAndRedoingAPlacedImageIsBoundedByItsOwnQuad() {
+        assertARoundTripIsBoundedAndDrawsRight(
+            .image(Self.imageElement(at: CGPoint(x: 60, y: 55), side: 28, scale: 1.4,
+                                     rotation: .pi / 7)),
+            "rotated placed image")
+    }
+
+    /// **A video's placeholder is the branch that reaches outside its own rectangle**, by up to a
+    /// quarter of a local unit once the 0.5-unit line-width floor bites — which it does here, at a
+    /// placement scale of 6. That is what the one-local-unit inflation in `placedFootprint` covers,
+    /// and this is the fixture that would catch its removal.
+    func testUndoingAndRedoingAVideoPlaceholderIsBoundedIncludingItsBorder() {
+        assertARoundTripIsBoundedAndDrawsRight(
+            .video(Self.videoElement(at: CGPoint(x: 70, y: 60),
+                                     natural: CGSize(width: 12, height: 8), scale: 6)),
+            "video placeholder")
+    }
+
+    /// The decoded arm of the same element — one `UIImage.draw(in:)` inside the placement, exactly
+    /// as a placed image, so it must bound the same way.
+    func testUndoingAndRedoingAVideoShowingAFrameIsBoundedTheSameWay() {
+        assertARoundTripIsBoundedAndDrawsRight(
+            .video(Self.videoElement(at: CGPoint(x: 65, y: 58),
+                                     natural: CGSize(width: 32, height: 18), scale: 1.5,
+                                     rotation: .pi / 9,
+                                     frame: Self.solidImage(.systemPink, side: 32))),
+            "video showing a frame")
+    }
+
+    /// **A text object whose box clips is bounded by the box, and that is a proof rather than an
+    /// estimate.** All three arms of `draw(text:into:quality:)` pass `clip: !frame.autoSize` down to
+    /// `TextLayout.draw`, which turns it into a `CGContext.clip` on the layout box — so with the bit
+    /// clear, no glyph can put a pixel outside the box quad whatever the font does.
+    func testUndoingAndRedoingASizedTextObjectIsBoundedByTheBoxThatClipsIt() {
+        assertARoundTripIsBoundedAndDrawsRight(
+            .text(Self.textElement("Hello there", at: CGPoint(x: 24, y: 30),
+                                   size: CGSize(width: 90, height: 34), autoSize: false)),
+            "sized text object")
+    }
+
+    /// **The half of this box that is deliberately not closed, and its pair is what makes it a
+    /// statement about the clip rather than about text.**
+    ///
+    /// An `autoSize` box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, which is a
+    /// *typographic* extent; glyph ink runs past it by however much a font's italic overhang, swashes
+    /// or accents care to, and `TextLayout.draw` is handed `clip: false` for exactly that box. There
+    /// is no escape check behind a departing text object, so a rectangle that missed those pixels
+    /// would be a ghost of the old glyphs, permanently. `.everything` is the honest answer.
+    ///
+    /// The same string in the same place with the bit *clear* is bounded, which is the operand that
+    /// says this is about `autoSize` and not about the fixture being unbounded some other way.
+    func testADepartingAutoSizeTextObjectStillSaysEverythingAndASizedOneDoesNot() {
+        for (autoSize, expectRegion) in [(true, false), (false, true)] {
+            let canvas = Self.drawnCanvas(12)
+            let without = canvas.elements
+            let bare = canvas.render()
+            canvas.elements = without + [.text(Self.textElement("Overhang", at: CGPoint(x: 30, y: 40),
+                                                                autoSize: autoSize))]
+            canvas.bumpVersion()
+            let standing = canvas.render()
+            if let d = diff(bare, standing, "autoSize=\(autoSize) fixture") {
+                XCTAssertGreaterThan(d.bytes, 0,
+                                     "fixture precondition: the text object with autoSize="
+                                     + "\(autoSize) must actually put glyphs on the canvas")
+            }
+
+            canvas.restoreElements(without, changedInk: nil)
+            XCTAssertEqual(isRegion(canvas.lastDamage), expectRegion,
+                           "a text object with autoSize=\(autoSize) declared \(canvas.lastDamage): "
+                           + "a box that clips bounds its own glyphs and a box that does not cannot "
+                           + "bound them at all")
+        }
+    }
+
+    /// **One gesture that drops a fill and a stroke together**, which is the shape that exercises the
+    /// union of the two halves rather than either alone: the stroke's rectangle comes from
+    /// `paintedBounds` and the fill's from its path, and a restore that used one and forgot the other
+    /// would leave a ghost of whichever it dropped.
+    ///
+    /// The fixture puts them in opposite corners on purpose, so a rectangle that covers only one is
+    /// nowhere near the other.
+    func testARestoreThatDropsAFillAndAStrokeTogetherBoundsBothOfThem() {
+        let canvas = Self.drawnCanvas(24)
+        let base = canvas.elements
+        let bare = canvas.render()
+        canvas.elements = base + [.stroke(Self.mark(41)),
+                                  .fill(Self.fillElement(CGRect(x: 8, y: 8, width: 26, height: 22)))]
+        // See `assertARoundTripIsBoundedAndDrawsRight`: the setter does not invalidate, so without
+        // this the canvas hands back its memo and neither of the two is ever drawn or measured.
+        canvas.bumpVersion()
+        let standing = canvas.render()
+        if let d = diff(bare, standing, "mixed fixture") {
+            XCTAssertGreaterThan(d.bytes, 0, "fixture precondition: the added stroke and fill paint")
+        }
+
+        let repairsBefore = canvas.regionRepairs
+        canvas.restoreElements(base, changedInk: nil)
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "a mixed departure must union the measured half with the derived one, not "
+                      + "give up because one of the two is not a stroke")
+        let repaired = canvas.render()
+        XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
+                       "the mixed undo must repair rather than declare a rectangle and walk anyway")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "a fill and a stroke leaving together")
+    }
+
+    /// **The payoff, counted in dabs** — the sibling of
+    /// `testUndoingACutStampsFarFewerDabsThanTheCelHolds`, on the press this box was about.
+    ///
+    /// `.everything` and a canvas-sized rectangle draw the same right picture, so a picture assertion
+    /// cannot tell them apart; this is the operand that can. Mutation that reddens it: return
+    /// `CGRect(origin: .zero, size: size)` from `derivedFootprint`'s fill arm — still a correct
+    /// picture, and worth nothing.
+    func testUndoingAFillStampsFarFewerDabsThanTheCelHolds() {
+        let canvas = Self.drawnCanvas(48)
+        let without = canvas.elements
+        canvas.addFill(Self.fillElement(CGRect(x: 20, y: 20, width: 34, height: 26)))
+        _ = canvas.render()
+
+        canvas.restoreElements(without, changedInk: nil)
+        _ = canvas.render()
+        let repairDabs = canvas.lastRenderDabCount
+        let fullDabs = fullReWalk(of: canvas).dabs
+        XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
+        XCTAssertLessThan(repairDabs * 3, fullDabs,
+                          "undoing a fill on a 48-mark grid re-stamped \(repairDabs) dabs against "
+                          + "the cel's \(fullDabs) — the bound is not binding")
     }
 
     // MARK: - (2) The two ways a same-id list still draws differently
