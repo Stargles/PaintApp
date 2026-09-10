@@ -37,13 +37,14 @@ struct TargetChannel: Identifiable {
     let id: String
 
     /// The artist-facing label. What the graph editor's channel list draws for this row.
+    ///
+    /// **There is deliberately no `controlIdentifier` beside it**, which `EffectParameter` carries
+    /// for a reason that does not apply here: that table drives twenty-five generated slider rows,
+    /// so each has to name its own accessibility identifier. Each channel of *this* kind is edited
+    /// from a bespoke control that already spells one (`layerPanel.row.<n>.opacity`), and a field
+    /// nothing reads is a promise nothing keeps. Add it back the day a channel here has no surface
+    /// of its own.
     let name: String
-
-    /// The suffix of the control's accessibility identifier, so a test can name the surface this
-    /// channel is edited from. Separate from `id` for `EffectParameter.controlIdentifier`'s reason:
-    /// one is what a document stores and the other is what an XCUITest taps, and neither may be
-    /// changed to make it match the other.
-    let controlIdentifier: String
 
     /// What the control offers, and the range the band draws its Y axis over.
     let uiRange: ClosedRange<Double>
@@ -58,7 +59,15 @@ struct TargetChannel: Identifiable {
     /// Animation.
     let modelDomain: ClosedRange<Double>
 
-    /// The `String(format:)` a readout prints this with.
+    /// The `String(format:)` a readout prints this with — `TimelineGraphBand.readout(value:format:)`
+    /// applies it to the **stored** value, exactly as `EffectParameter.format` is applied to a
+    /// radius in points.
+    ///
+    /// **So opacity's is `"%.2f"` and not `"%.0f%%"`, which is a trap rather than a preference.**
+    /// The value is stored 0…1 and the formatter has no scale factor, so a percentage format would
+    /// print a half-faded layer as `"0%"` — a readout that is wrong by a factor of a hundred at
+    /// every value the artist can drag to. The slider in the layer panel is a `UISlider`, which
+    /// derives its own percentage from its min and max and is unaffected.
     let format: String
 
     /// The undo step an ordinary edit of this value records — "change opacity". Carried on the
@@ -84,10 +93,9 @@ struct TargetChannel: Identifiable {
     static let opacity = TargetChannel(
         id: "opacity",
         name: "Opacity",
-        controlIdentifier: "opacity",
         uiRange: 0...1,
         modelDomain: 0...1,
-        format: "%.0f%%",
+        format: "%.2f",
         editLabel: .opacity,
         keyframeLabel: .opacityKeyframes,
         layerPath: \Layer.opacity,

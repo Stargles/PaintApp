@@ -515,6 +515,35 @@ final class OpacityChannelLogicTests: XCTestCase {
                        "…and the timeline loses the indicator with it")
     }
 
+    /// **A dragged node's readout says the number it is on** — and for a 0…1 channel that is a trap
+    /// worth a test.
+    ///
+    /// `TimelineGraphBand.readout(value:format:)` applies the descriptor's `String(format:)` to the
+    /// **stored** value, with no scale factor anywhere. A percentage format on opacity therefore
+    /// prints a half-faded layer as `"0%"` — wrong by a factor of a hundred at every value the
+    /// artist can drag to, and invisible to every other test here because the model would be right.
+    ///
+    /// The two operands are the readout string and the value it claims to show, compared by parsing
+    /// the string back: a readout that does not round-trip is not a readout. Stated over
+    /// `TargetChannel.all` rather than over opacity, so the next channel added to the table inherits
+    /// the check instead of the trap.
+    func testEveryTargetChannelsReadoutRoundTripsToTheValueItShows() {
+        for channel in TargetChannel.all {
+            let span = channel.uiRange.upperBound - channel.uiRange.lowerBound
+            for step in 0...4 {
+                let value = channel.uiRange.lowerBound + span * Double(step) / 4
+                let text = TimelineGraphBand.readout(value: value, format: channel.format)
+                guard let shown = Double(text) else {
+                    XCTFail("\(channel.id): the readout \"\(text)\" for \(value) is not a number, so "
+                            + "the band would show the artist something they cannot act on")
+                    continue
+                }
+                XCTAssertEqual(shown, value, accuracy: span / 100,
+                               "\(channel.id): the readout \"\(text)\" does not say \(value)")
+            }
+        }
+    }
+
     // MARK: - Persistence — §3.5's field-presence versioning
 
     /// **The round trip, and both directions of the migration.**
