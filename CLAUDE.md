@@ -38,23 +38,29 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-09-09 at `e890fdc`**, fresh device, idle machine (86% idle), no clone debris:
-**3849 tests, 3799 passed, 2 failed, 48 skipped, 35.9 min.** Both failures passed clean in isolation
-at `totalTestCount: 2` and are environmental. **7,161 class-seconds across 208 classes**, so four
-clones hold **29.8 min** of ideal work against 35.9 of wall clock — a 20% scheduling gap.
+**MEASURED 2026-09-10 at `b79f879`**, fresh device, idle machine (95.6% idle), no clone debris:
+**3876 tests, 3824 passed, 0 failed, 52 skipped, 31.4 min** — a clean full run, the fourth in this
+file's history. **6,515 class-seconds across 211 classes**, so four clones hold **27.1 min** of ideal
+work against 31.4 of wall clock — a 16% scheduling gap.
 
 | class | seconds | tests |
 |---|---|---|
-| `BrushEditorUITests` | 586 | 11 |
-| `SandwichCompositingUITests` | 391 | 10 |
-| `SelectionAndMoveUITests` | 355 | 10 |
-| `LayerFolderAndMaskMenuUITests` | 290 | 9 |
-| `PerfBaselineTests` | 280 | 57 |
-| `GraphEditorGestureUITests` | 247 | 5 |
-| `LayerPanelControlsUITests` | 234 | 8 |
-| `MenuInterruptionUITests` | 233 | 5 |
-| `BrushMenuUITests` | 227 | 8 |
-| `BlendModesAndCompositorUITests` | 216 | 8 |
+| **`BrushEditorUITests`** | **711** | 11 |
+| `SandwichCompositingUITests` | 419 | 10 |
+| `SelectionAndMoveUITests` | 349 | 10 |
+| `LayerFolderAndMaskMenuUITests` | 340 | 9 |
+| `GraphEditorGestureUITests` | 242 | 5 |
+| `BrushMenuUITests` | 223 | 8 |
+| `LayerPanelControlsUITests` | 213 | 8 |
+| `PerfBaselineTests` | 209 | 57 |
+| `BlendModesAndCompositorUITests` | 204 | 8 |
+| `EraserAndPersistenceUITests` | 199 | 7 |
+
+**`BrushEditorUITests` is the one to watch and it is now watched twice**: 586 s the day before, 711 s
+here, on the same eleven tests. That is the "grows past the floor while nobody is looking" pattern
+repeating rather than a single noisy row, and at 711 s it is 44% of a clone's 27.1 min share — still
+under it, so still not the binding constraint, but it is the only class that has ever reached this
+fraction. **Re-take before adding a twelfth test to it.**
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
@@ -282,6 +288,27 @@ is synchronous — so the affirmative test times out, and its **inverted twin pa
 whatever the app does. That is how a "no readout appears on a sideways drag" test can be green against
 an app that shows one on every drag. If an assertion's window closes before the behaviour it names can
 occur, it is measuring the harness.
+
+**And a harness can take a different code path from the artist and look right the whole way.** This
+is the sharpest instance yet and it cost a full-suite red on 2026-09-10. A pass moved the cel
+thumbnail out of `@Published layers` to stop an edit raising a second SwiftUI pass; it worked, MEASURED
+on the device at 49.9 → 35.7 ms an edit. But a brush stroke's ink lands **in place**, in the texture
+the cel already references, so `@Published layers` never moves and *nothing in the model announces
+that a drawing changed*. That diff had been arriving **by accident**, 400 ms late, from the debounced
+tile install writing `Cel.thumbnail` through `layers`. Removing it meant a stroke lift raised no
+SwiftUI pass at all — and `reconcileLayers` is the only caller of `syncFrameBake`, `updateSandwich`,
+`updateOnionSkin` and `updateInterpolationPreviews`, so the frame was never dirtied and never baked.
+Six XCUITests said so; **the fast tier was green in Debug and Release, statically reconciled, with
+four mutations, and saw none of it.**
+
+**The device probe did not see it either, and that is the part to carry.** `PlaybackProbe.commitStroke`
+does not call `strokeEnded` — it commits through the shape seam and sends its own `objectWillChange`.
+So the harness supplied the publish the artist's own path had just lost, and measured a clean before
+and after while the app was broken. PERFORMANCE.md §17.1 already says a bench measuring a *component*
+cannot find a cost in a *composition*; this is one level worse, because the harness was driving the
+real editor and still did not execute the line that mattered. **Before trusting a probe about a change
+to a code path, check that the probe enters that path** — `strokeEnded`'s own header had claimed for
+months that it forced the diff, and it never sent anything.
 
 ### A feature is not finished because its model is correct — drive it before you call it done
 

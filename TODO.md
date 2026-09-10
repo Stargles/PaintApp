@@ -87,13 +87,24 @@ whatever else those two passes still do.
       the main thread** — bounded by four measurements: it is on-CPU, entirely in the runloop's source
       half, in the gaps *between* every span this app can place, and fixed across strokes, cels, layers
       and canvas area. No span this app can add will attribute it further.
-      **So the next lever is to raise that pass once an edit instead of twice.** `installThumbnail`
-      writes `@Published layers`, which invalidates every view observing `CanvasManager` and raises the
-      whole-editor pass a second time (~8-12 ms, the 401 ms burst the owner can point at). It was
-      deliberately not attempted in a hurry: `Layer`/`Cel` are structs read by the timeline (whose
-      `TimelineLayoutKey` carries thumbnail object identity) and by the layer panel, and a side-channel
-      store shadowing `Cel.thumbnail` is the duplicate-truth spaghetti the owner's constraint rules out.
-      PERFORMANCE.md §18.6.
+      **The second pass is gone — merged 2026-09-10, PERFORMANCE.md §18.7.** A tile lives in a
+      `ThumbnailTile` reference cell, so installing one is not a mutation of `@Published layers` and
+      does not invalidate every view observing `CanvasManager`. The evidence is a **count**: per 18
+      operations, `bodyDrawing`/`bodyTimeline`/`updateUIView`/`timelineTrack` went **36 → 18** and
+      `timelineRebuild` **18 → 0**, with tiles still installed 18/18. MEASURED on the owner's iPad in
+      Release: **49.9 → 35.7 ms an edit** at 2048², and the ≥10 ms stalls in the debounce window — the
+      owner's second flicker — **29 of 36 operations → 0 of 72**.
+      Two figures this file previously carried were wrong and are corrected: the install work was
+      **0.2 ms, not 8-12** (it measured 0.2 on both sides, so every millisecond bought is the pass and
+      none is the write), and one whole-editor pass is **not** ~43 ms — that was the cost of both.
+      Removing the tile's buys 14.2 and leaves 34.2, because the edit's own pass re-composites the
+      canvas where the tile's only rebuilt the timeline.
+      **What is left to try is named in §18.7**: `Layer.thumbnail` is a genuine pre-existing second
+      truth (a mirror of the active cel's tile, which is why the rail shows a stale picture for a layer
+      with no cel at the playhead), and deleting it to derive from `activeCelIndex` is small but a
+      visible behaviour change. The layer rail is also still **unmeasured** — it is closed in
+      `PlaybackProbe`, so `LayerPanel.body` and `LayerStackListView.reload` have never executed under
+      any measurement here.
       **One thing outside every number above**: the layer rail is closed in `PlaybackProbe`, so
       `LayerPanel.body` and `LayerStackListView.reload` have never executed under measurement.
 - [ ] **The disappearing strokes, which nothing so far has addressed.** BUGS.md's *"Starting a stroke
