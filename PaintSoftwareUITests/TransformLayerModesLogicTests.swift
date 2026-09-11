@@ -364,6 +364,23 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertNil(fx.manager.transformLayerMode(of: drawing), "a drawing has no pose to put a mode on")
     }
 
+    /// **A duplicate carries the mode, the speed and a typed share** — the door `transform` itself
+    /// fell through on 2026-09-11 (`duplicateLayer` names its fields by hand, and a field it does
+    /// not name defaults away). A duplicated Rotate layer with no speed is a wheel that has stopped,
+    /// silently, on a layer whose panel still says Rotate.
+    func testDuplicatingALayerCarriesTheModeTheSpeedAndATypedShare() {
+        let fx = rotatedRasterLayer(speed: 15)
+        fx.manager.layers[fx.drawn].parallaxShare = 0.4
+        fx.manager.duplicateLayer(at: fx.mover)
+        fx.manager.duplicateLayer(at: fx.drawn)
+        let wheels = fx.manager.layers.filter { $0.kind == .transform }
+        XCTAssertEqual(wheels.count, 2)
+        XCTAssertEqual(wheels.map { $0.transform?.mode }, [.rotate, .rotate], "the mode travels")
+        XCTAssertEqual(wheels.map(\.rotateSpeed), [15, 15], "…and the speed")
+        let drawings = fx.manager.layers.filter { $0.kind == .raster }
+        XCTAssertEqual(drawings.map(\.parallaxShare), [0.4, 0.4], "…and a typed share")
+    }
+
     // MARK: - The folder twin (§3.3)
 
     /// **A folder's pose takes the modes as well** (§3.3): a folder in Parallax shares its move over

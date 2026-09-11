@@ -959,6 +959,11 @@ extension CanvasManager {
                          // `layerEffect`, `layerTransform` and `valueFill` all read presence, and
                          // `nil` reads as "flat colour".
                          transform: source.transform,
+                         // TRANSFORM_LAYER.md §5's two scalar rows, through the same door: a
+                         // duplicated Rotate layer with no speed is a wheel that has stopped, and a
+                         // duplicated item with no typed share falls back to the position's.
+                         rotateSpeed: source.rotateSpeed,
+                         parallaxShare: source.parallaxShare,
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
