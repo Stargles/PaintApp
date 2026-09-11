@@ -53,13 +53,81 @@ final class TransformLayerModesUITests: PaintUITestCase {
         return CGPoint(x: sx / n / Double(w), y: sy / n / Double(h))
     }
 
-    /// The canvas's own centre and inset bounds in host-normalised coordinates — the box's centre,
-    /// since a transform layer's box is the canvas.
-    private func canvasFrame(_ canvas: XCUIElement) -> (centre: CGPoint, inset: (minX: Double, maxX: Double, minY: Double, maxY: Double)) {
-        let b = visibleCanvasBounds(canvas)
-        let pad = 0.03
-        return (CGPoint(x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2),
-                (b.minX + pad, b.maxX - pad, b.minY + pad, b.maxY - pad))
+    /// **The paper's edges in host-normalised coordinates, found by walking out from the host's
+    /// centre**, not estimated from the host's aspect and not the extent of every whitish pixel.
+    /// `canvas.host` is the whole screen under the toolbars: its screenshot carries the left rail's
+    /// white knobs and the top bar's white circle, so a whitish-extent scan reads 0.03…0.97 across;
+    /// `visibleCanvasBounds` assumes a square canvas filling the shorter side, which this document
+    /// is not; and **the canvas re-fits when the layer rail opens and closes**, so two screenshots
+    /// are only comparable in coordinates relative to the paper each one shows. The paper is one
+    /// solid white rectangle with the host's centre inside it, so its edges are where whitish stops
+    /// along the centre row and the centre column.
+    private func paperBounds(_ pixels: (bytes: [UInt8], width: Int, height: Int)) -> (minX: Double, maxX: Double, minY: Double, maxY: Double)? {
+        let (buf, w, h) = pixels
+        func whitish(_ x: Int, _ y: Int) -> Bool {
+            let o = y * w * 4 + x * 4
+            return buf[o] > 235 && buf[o + 1] > 235 && buf[o + 2] > 235
+        }
+        // **Never along the centre row or column, because the ink is there.** A walk stops at the
+        // first non-white pixel, and both tests below put ink on the centre row (and, after the
+        // turn, on the centre column), so the walk that found the paper before drawing lost half of
+        // it afterwards. The paper's top and left tenths carry no ink in either test: the vertical
+        // extent is provisionally read down the centre column, the horizontal extent is read along
+        // the row a tenth of the way down, and the vertical extent is then re-read down the column
+        // a tenth of the way in.
+        func run(_ fixed: Int, alongX: Bool) -> (Int, Int)? {
+            let limit = alongX ? w : h
+            var lo = limit / 2, hi = limit / 2
+            let at: (Int) -> Bool = alongX ? { whitish($0, fixed) } : { whitish(fixed, $0) }
+            guard at(lo) else { return nil }
+            while lo > 0, at(lo - 1) { lo -= 1 }
+            while hi < limit - 1, at(hi + 1) { hi += 1 }
+            return (lo, hi)
+        }
+        guard let (y0, y1) = run(w / 2, alongX: false),
+              let (minX, maxX) = run(y0 + (y1 - y0) / 10, alongX: true),
+              let (minY, maxY) = run(minX + (maxX - minX) / 10, alongX: false)
+        else { return nil }
+        return (Double(minX) / Double(w), Double(maxX) / Double(w), Double(minY) / Double(h), Double(maxY) / Double(h))
+    }
+
+    /// A host-normalised point as a fraction of the paper — (0.5, 0.5) is the box's centre whatever
+    /// the rail has done to the layout.
+    private func paperRelative(_ p: CGPoint, in paper: (minX: Double, maxX: Double, minY: Double, maxY: Double)) -> (u: Double, v: Double) {
+        ((Double(p.x) - paper.minX) / (paper.maxX - paper.minX), (Double(p.y) - paper.minY) / (paper.maxY - paper.minY))
+    }
+
+    /// The host-normalised region covering paper-relative rows `v0…v1`, inset 4% from the paper's
+    /// sides so the probe never reads the margin.
+    private func paperRegion(_ paper: (minX: Double, maxX: Double, minY: Double, maxY: Double), v0: Double, v1: Double)
+        -> (minX: Double, maxX: Double, minY: Double, maxY: Double) {
+        let w = paper.maxX - paper.minX, h = paper.maxY - paper.minY
+        return (paper.minX + 0.04 * w, paper.maxX - 0.04 * w, paper.minY + v0 * h, paper.minY + v1 * h)
+    }
+
+    /// The host-normalised point at paper-relative `(u, v)`.
+    private func hostPoint(_ paper: (minX: Double, maxX: Double, minY: Double, maxY: Double), u: Double, v: Double) -> CGVector {
+        CGVector(dx: paper.minX + u * (paper.maxX - paper.minX), dy: paper.minY + v * (paper.maxY - paper.minY))
+    }
+
+    /// The paper as the canvas shows it right now — a fresh capture and its walk, failing the test
+    /// rather than guessing when the host's centre is not on the paper.
+    private func currentPaper(_ canvas: XCUIElement, _ what: String) -> (pixels: (bytes: [UInt8], width: Int, height: Int), paper: (minX: Double, maxX: Double, minY: Double, maxY: Double))? {
+        guard let pixels = canvasPixels(canvas), let paper = paperBounds(pixels) else {
+            XCTFail("\(what): could not find the paper from the host's centre")
+            return nil
+        }
+        return (pixels, paper)
+    }
+
+    /// The rail is a toggle, and Done sometimes leaves it up and sometimes not — so this asks rather
+    /// than taps blind, and every measurement below is taken with it down.
+    private func closeRail(_ app: XCUIApplication) {
+        let list = app.tables["layerPanel.list"]
+        if list.exists {
+            app.buttons["toolbar.layersButton"].tap()
+            _ = list.waitForNonExistence(timeout: 5)
+        }
     }
 
     /// A short vertical band of ink at `x`, `y` — seven passes so it is a band rather than a hairline
@@ -99,17 +167,28 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     /// Puts the playhead on `frame` (1-based, as the label prints it) by tapping the transform
     /// layer's bar; a synthetic tap lands a frame off now and then, so it nudges until the label agrees.
+    ///
+    /// **Never taps a frame the playhead is already on**: a second tap on the selected cel raises
+    /// the cel menu (that is how `TransformLayerSpanUITests` marks a keyframe), and a menu over the
+    /// paper is dark pixels the probe would read as ink. If one comes up anyway it is dismissed by
+    /// tapping the frame label, which does nothing else.
     private func scrub(_ app: XCUIApplication, toFrame frame: Int, total: Int) {
         let cel = app.otherElements["timeline.cel.1.0"]
         XCTAssertTrue(cel.waitForExistence(timeout: 5), "The transform layer's bar is on the timeline")
         var dx = (Double(frame) - 0.5) / Double(total)
         for _ in 0..<6 {
+            if readFrameLabel(app)?.current == frame { break }
             cel.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
             guard let read = readFrameLabel(app) else { continue }
-            if read.current == frame { return }
+            if read.current == frame { break }
             dx += read.current < frame ? 0.5 / Double(total) : -0.5 / Double(total)
         }
-        XCTFail("Could not put the playhead on frame \(frame): label reads \(String(describing: readFrameLabel(app)))")
+        let menu = app.buttons["timeline.menu.Add Keyframe"]
+        if menu.exists {
+            app.staticTexts["timeline.frameLabel"].tap()
+            _ = menu.waitForNonExistence(timeout: 3)
+        }
+        XCTAssertEqual(readFrameLabel(app)?.current, frame, "the playhead is on frame \(frame)")
     }
 
     // MARK: - Parallax
@@ -123,22 +202,28 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let frame = canvasFrame(canvas)
+        guard let blank = currentPaper(canvas, "at launch") else { return }
 
         // Four bands on four layers, bottom to top: the born layer, then three more. Each band sits
-        // at its own row so the probe can tell them apart after they move by different amounts.
-        let rows = [frame.centre.y - 0.18, frame.centre.y - 0.06, frame.centre.y + 0.06, frame.centre.y + 0.18]
-        let x = 0.30
-        drawBand(on: canvas, x: x, y: rows[0])
+        // at its own paper row so the probe can tell them apart after they move by different amounts.
+        let rows = [0.2, 0.4, 0.6, 0.8]
+        let u = 0.3
+        func band(_ v: Double) {
+            let at = hostPoint(blank.paper, u: u, v: v)
+            drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy))
+        }
+        band(rows[0])
         for row in rows.dropFirst() {
             openLayerPanel(app)
             addVectorLayerFromOpenPanel(app)
-            app.buttons["toolbar.layersButton"].tap()
-            drawBand(on: canvas, x: x, y: row)
+            closeRail(app)
+            band(row)
         }
-        guard let before = canvasPixels(canvas) else { return XCTFail("Could not read the canvas") }
-        let regions = rows.map { (minX: frame.inset.minX, maxX: frame.inset.maxX, minY: $0 - 0.04, maxY: $0 + 0.04) }
-        let startColumns = regions.map { inkCentroid(before, in: $0)?.x }
+        guard let before = currentPaper(canvas, "before the drag") else { return }
+        let startColumns = rows.map { v in
+            inkCentroid(before.pixels, in: paperRegion(before.paper, v0: v - 0.06, v1: v + 0.06))
+                .map { paperRelative($0, in: before.paper).u }
+        }
         XCTAssertEqual(startColumns.compactMap { $0 }.count, 4, "Sanity: all four bands landed, read \(startColumns)")
 
         // The layer itself, from the + menu, then its options: Mode → Parallax.
@@ -146,39 +231,49 @@ final class TransformLayerModesUITests: PaintUITestCase {
         addTransformLayerFromAddMenu(app)
         pickMode(app, layerIndex: 4, mode: "parallax")
 
-        // **What the panel exposes**: the four items at their positional defaults, nearest first.
-        let list = app.otherElements["layerOptions.parallaxItems"]
+        // **What the panel exposes**: the four items at their positional defaults, nearest first,
+        // each slider and field drawn at the share its row says.
+        let list = app.descendants(matching: .any)["layerOptions.parallaxItems"]
         XCTAssertTrue(list.waitForExistence(timeout: 5), "Parallax puts the item list on the panel")
         let listed = (list.value as? String ?? "").split(separator: "|").map(String.init)
         XCTAssertEqual(listed.count, 4, "four items beneath the layer, read \(listed)")
         XCTAssertEqual(listed.map { $0.split(separator: "=").last.map(String.init) ?? "" }, ["100", "75", "50", "25"],
                        "the owner's defaults, top to bottom, none of them typed: \(listed)")
-        XCTAssertTrue(app.sliders["layerOptions.parallaxItem.3.slider"].exists, "…each with a slider of its own")
+        let backSlider = app.sliders["layerOptions.parallaxItem.3.slider"]
+        XCTAssertTrue(backSlider.exists, "…each with a slider of its own")
+        XCTAssertEqual(backSlider.value as? String, "25", "…drawn at the share the row says, not at the key path's 100")
+        XCTAssertEqual(app.textFields["layerOptions.parallaxItem.3.field"].value as? String, "25")
         attach(app, "1-parallax-item-list")
 
-        // The verb: the Move row raises the box, and the drag moves every band live.
+        // The verb: the Move row raises the box, and the drag moves every band live. The rail is up
+        // and the canvas has re-fitted beside it, so the drag is measured against the paper as it
+        // is *now*.
         let moveRow = app.buttons["layerOptions.transformMove"]
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5), "The Move row is still the way to the box")
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: frame.centre.y))
-        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: frame.centre.y))
+        guard let lifted = currentPaper(canvas, "with the box up") else { return }
+        let start = canvas.coordinate(withNormalizedOffset: hostPoint(lifted.paper, u: 0.45, v: 0.5))
+        let end = canvas.coordinate(withNormalizedOffset: hostPoint(lifted.paper, u: 0.75, v: 0.5))
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
         app.buttons["moveBar.doneButton"].tap()
-        app.buttons["toolbar.layersButton"].tap()   // the rail down, so the probe sees only canvas
+        closeRail(app)
         attach(app, "2-parallax-after-the-drag")
 
-        // **What is drawn**: each band moved by its share of what the top band moved.
-        guard let after = canvasPixels(canvas) else { return XCTFail("Could not read the canvas after the drag") }
+        // **What is drawn**: each band moved by its share of what the top band moved, in paper units.
+        guard let after = currentPaper(canvas, "after the drag") else { return }
         var shifts: [Double] = []
-        for (i, region) in regions.enumerated() {
-            guard let was = startColumns[i], let now = inkCentroid(after, in: region)?.x else {
+        for (i, v) in rows.enumerated() {
+            guard let was = startColumns[i],
+                  let now = inkCentroid(after.pixels, in: paperRegion(after.paper, v0: v - 0.06, v1: v + 0.06))
+                      .map({ paperRelative($0, in: after.paper).u }) else {
                 return XCTFail("Band \(i) was lost after the drag")
             }
             shifts.append(now - was)
         }
         let top = shifts[3]
-        XCTAssertGreaterThan(top, 0.08, "the nearest band followed the box a good way: shifts \(shifts)")
+        XCTAssertGreaterThan(top, 0.12, "the nearest band followed the box a good way (paper widths): \(shifts)")
+        XCTAssertLessThan(top, 0.36, "…and no further than the 0.3 the box was dragged: \(shifts)")
         XCTAssertEqual(shifts[2] / top, 0.75, accuracy: 0.08, "the second band moved three quarters: \(shifts)")
         XCTAssertEqual(shifts[1] / top, 0.50, accuracy: 0.08, "the third band moved half: \(shifts)")
         XCTAssertEqual(shifts[0] / top, 0.25, accuracy: 0.08, "the back band moved a quarter: \(shifts)")
@@ -196,21 +291,24 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let frame = canvasFrame(canvas)
+        guard let blank = currentPaper(canvas, "at launch") else { return }
         guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
+        attach(app, "0-launch")
 
-        // A band a fixed distance right of the centre, on the centre row.
-        let reach = 0.16
-        drawBand(on: canvas, x: frame.centre.x + reach, y: frame.centre.y, halfHeight: 0.04)
-        guard let rest = canvasPixels(canvas), let restCentroid = inkCentroid(rest, in: frame.inset) else {
-            return XCTFail("The band did not land")
+        // A band a quarter of the paper right of its centre, on the centre row.
+        let at = hostPoint(blank.paper, u: 0.75, v: 0.5)
+        drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
+        attach(app, "0-band-drawn")
+        guard let rest = currentPaper(canvas, "after drawing"),
+              let restCentroid = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.04, v1: 0.96))
+                  .map({ paperRelative($0, in: rest.paper) }) else {
+            return XCTFail("The band did not land: paper at launch \(blank.paper), drawn at \(at)")
         }
-        let w = Double(rest.width), h = Double(rest.height)
-        // In pixels, where the ink sits relative to the box's centre — the operand the turn acts on.
-        let dxPx = (restCentroid.x - frame.centre.x) * w
-        let dyPx = (restCentroid.y - frame.centre.y) * h
-        XCTAssertGreaterThan(dxPx, 0.08 * w, "Sanity: the band is right of centre")
-        XCTAssertEqual(abs(dyPx), 0, accuracy: 0.03 * h, "Sanity: …on the centre row")
+        XCTAssertEqual(restCentroid.u, 0.75, accuracy: 0.04, "Sanity: the band is right of centre")
+        XCTAssertEqual(restCentroid.v, 0.5, accuracy: 0.04, "Sanity: …on the centre row")
+        // The paper's aspect, which is what a quarter turn trades width for height by.
+        let aspect = (rest.paper.maxX - rest.paper.minX) * Double(rest.pixels.width)
+            / ((rest.paper.maxY - rest.paper.minY) * Double(rest.pixels.height))
 
         openLayerPanel(app)
         addTransformLayerFromAddMenu(app)
@@ -228,27 +326,43 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let caption = app.staticTexts["layerOptions.rotateSpeedCaption"]
         XCTAssertTrue(caption.label.contains("24.0 frames"), "…and says how long one turn takes: \(caption.label)")
         attach(app, "1-rotate-speed-typed")
-        app.buttons["toolbar.layersButton"].tap()   // the rail down
+        closeRail(app)
 
         // At the bar's first frame nothing has turned yet.
         scrub(app, toFrame: 1, total: total)
-        guard let first = canvasPixels(canvas), let atFirst = inkCentroid(first, in: frame.inset) else {
+        attach(app, "1b-at-frame-1")
+        guard let first = currentPaper(canvas, "at the first frame"),
+              let atFirst = inkCentroid(first.pixels, in: paperRegion(first.paper, v0: 0.04, v1: 0.96))
+                  .map({ paperRelative($0, in: first.paper) }) else {
             return XCTFail("The band vanished at the first frame")
         }
-        XCTAssertEqual(atFirst.x, restCentroid.x, accuracy: 0.02, "frame 1: the band is where it was drawn")
-        XCTAssertEqual(atFirst.y, restCentroid.y, accuracy: 0.02)
+        XCTAssertEqual(atFirst.u, restCentroid.u, accuracy: 0.03,
+                       "frame 1: the band is where it was drawn (paper \(first.paper), rest paper \(rest.paper))")
+        XCTAssertEqual(atFirst.v, restCentroid.v, accuracy: 0.03)
 
-        // Six frames in: a quarter turn clockwise puts what was to the right of centre below it.
+        // Six frames in: a quarter turn clockwise puts what was to the right of centre below it —
+        // as far below, in canvas units, as it was to the right.
         scrub(app, toFrame: 7, total: total)
-        guard let turned = canvasPixels(canvas), let atSeventh = inkCentroid(turned, in: frame.inset) else {
-            return XCTFail("The band vanished at the seventh frame")
-        }
+        let expectedU = 0.5 - (restCentroid.v - 0.5) / aspect
+        let expectedV = 0.5 + (restCentroid.u - 0.5) * aspect
+        // The posed frame reaches the canvas through the compositor a beat after the scrub, so the
+        // probe is repeated until the picture settles — and reports the last reading if it never does.
+        var atSeventh = atFirst
+        let deadline = Date().addingTimeInterval(8)
+        repeat {
+            guard let turned = currentPaper(canvas, "at the seventh frame"),
+                  let read = inkCentroid(turned.pixels, in: paperRegion(turned.paper, v0: 0.04, v1: 0.96))
+                      .map({ paperRelative($0, in: turned.paper) }) else {
+                return XCTFail("The band vanished at the seventh frame")
+            }
+            atSeventh = read
+            if abs(read.u - expectedU) < 0.04, abs(read.v - expectedV) < 0.04 { break }
+            Thread.sleep(forTimeInterval: 0.4)
+        } while Date() < deadline
         attach(app, "2-rotate-six-frames-in")
-        let expectedX = frame.centre.x + (-dyPx) / w
-        let expectedY = frame.centre.y + dxPx / h
-        XCTAssertEqual(atSeventh.x, expectedX, accuracy: 0.03,
+        XCTAssertEqual(atSeventh.u, expectedU, accuracy: 0.04,
                        "frame 7: the band is on the centre column — turned about the box's centre, not slid")
-        XCTAssertEqual(atSeventh.y, expectedY, accuracy: 0.03,
-                       "frame 7: …and below it, as far below as it was to the right")
+        XCTAssertEqual(atSeventh.v, expectedV, accuracy: 0.04,
+                       "frame 7: …and below it, as far below as it was to the right (aspect \(aspect))")
     }
 }

@@ -874,6 +874,13 @@ private struct ChannelScalarControl: View {
     let target: KeyframeTarget
     let channel: TargetChannel
     let identifier: String
+    /// **The value the control shows, supplied by the row rather than read off the channel here**,
+    /// because for a parallax share the number the artist is looking at is the *positional default*
+    /// when nothing has been typed — and the channel's own read of a nil share is the key path's
+    /// fallback (1), which is not what the row's label says. The first draft read the channel and
+    /// drew every untyped item's slider at 100% under a caption reading "25% (default)": a correct
+    /// value in the wrong place, CLAUDE.md's case 1.
+    let resolved: Double
     let display: (Double) -> String
     let parse: (String) -> Double?
     let write: (Double) -> KeyframeControl.Write
@@ -881,10 +888,6 @@ private struct ChannelScalarControl: View {
     @State private var dragValue: Double?
     @State private var wroteKeys = false
     @State private var fieldText = ""
-
-    private var resolved: Double {
-        canvasManager.resolvedValue(of: target, channel: channel, atFrame: canvasManager.currentFrame) ?? 0
-    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -912,7 +915,12 @@ private struct ChannelScalarControl: View {
             .tint(.blue)
             .accessibilityIdentifier("\(identifier).slider")
             .accessibilityValue(display(dragValue ?? resolved))
-            TextField("", text: $fieldText)
+            // **Empty until typed into, with the current number as its placeholder.** A field
+            // pre-filled with "0.0" puts the cursor wherever the tap lands and a typed "15" becomes
+            // "150.0" — so the number is shown as the prompt and the artist types a whole new one,
+            // which is also what a typed value means. Return commits and clears; anything that is
+            // not a number is dropped.
+            TextField(display(dragValue ?? resolved), text: $fieldText)
                 .keyboardType(.numbersAndPunctuation)
                 .multilineTextAlignment(.trailing)
                 .font(.caption.monospacedDigit())
@@ -923,22 +931,16 @@ private struct ChannelScalarControl: View {
                 .background(Color.white.opacity(0.08))
                 .cornerRadius(4)
                 .accessibilityIdentifier("\(identifier).field")
+                .accessibilityValue(display(dragValue ?? resolved))
                 .onSubmit {
-                    guard let typed = parse(fieldText) else {
-                        fieldText = display(resolved)
-                        return
-                    }
+                    defer { fieldText = "" }
+                    guard let typed = parse(fieldText) else { return }
                     // One bracket for the typed edit, the slider's own shape with no drag inside it.
                     _ = canvasManager.beginArmedTake(on: target, isRecordable: true)
                     canvasManager.beginStructureGesture()
                     let route = write(channel.clamped(typed))
                     canvasManager.commitStructureGesture(
                         label: route != .storedValue ? channel.keyframeLabel : channel.editLabel)
-                    fieldText = display(resolved)
-                }
-                .onAppear { fieldText = display(resolved) }
-                .onChange(of: resolved) { _, value in
-                    if dragValue == nil { fieldText = display(value) }
                 }
         }
     }
@@ -967,7 +969,7 @@ private struct RotateSpeedRow: View {
             }
             ChannelScalarControl(
                 canvasManager: canvasManager, target: target, channel: .rotateSpeed,
-                identifier: "layerOptions.rotateSpeed",
+                identifier: "layerOptions.rotateSpeed", resolved: speed,
                 display: { String(format: "%.1f", $0) },
                 parse: { Double($0.trimmingCharacters(in: .whitespaces)) },
                 write: { value in
@@ -1016,6 +1018,10 @@ private struct ParallaxItemsSection: View {
                     .font(.caption)
                     .foregroundColor(.gray)
             }
+            // One element for the header, carrying the whole list as its value — `name=share` per
+            // item, top to bottom, a `*` on a typed one — so a test can read what the artist sees
+            // without walking the rows. `.ignore` because a bare stack is not an element on its own.
+            .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("layerOptions.parallaxItems")
             .accessibilityValue(items.map { "\($0.name)=\(Int(($0.share * 100).rounded()))\($0.isExplicit ? "*" : "")" }
                                     .joined(separator: "|"))
@@ -1042,7 +1048,7 @@ private struct ParallaxItemsSection: View {
                     }
                     ChannelScalarControl(
                         canvasManager: canvasManager, target: item.target, channel: .parallaxShare,
-                        identifier: "layerOptions.parallaxItem.\(rank)",
+                        identifier: "layerOptions.parallaxItem.\(rank)", resolved: item.share,
                         display: { String(Int(($0 * 100).rounded())) },
                         parse: { text in
                             Double(text.trimmingCharacters(in: .whitespaces)

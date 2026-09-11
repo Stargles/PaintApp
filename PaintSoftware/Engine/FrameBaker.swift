@@ -840,6 +840,20 @@ final class FrameBaker {
     /// `LayerFolder.resolvedEffect(atFrame:)` and `Layer.opacity(atFrame:)`, and the track fields
     /// below close exactly that gap: a curve edited so that frame 7 changes and frame 0 does not is
     /// invisible in the tree at frame 0 and plain in the dictionary.
+    /// A container pose as much of it as reaches a pixel: the stored base, the whole track and the
+    /// mode — and not the baseline, for `StructuralStamp.containerPoses`' reason.
+    private struct ContainerPoseStamp: Equatable {
+        let pose: PoseQuad
+        let track: TransformTrack
+        let mode: TransformLayerMode
+
+        init(_ pose: LayerPose) {
+            self.pose = pose.pose
+            track = pose.track
+            mode = pose.mode
+        }
+    }
+
     private struct StructuralStamp: Equatable {
         let tree: [RenderNode]
         /// The animated half of every layer's **and every folder's** effect, which a single probe
@@ -856,6 +870,21 @@ final class FrameBaker {
         /// fade never appears in playback. Layers then folders, `effectTracks`' shape exactly.
         let channelTracks: [[String: AnimationCurve]]
         let keyframeMarks: [[Int]]
+        /// **The container poses, which reach no tree at all** — KEYFRAMES §4.4 emits a pose
+        /// *alongside* the tree so that it never reaches the compositor, which is right for the
+        /// render and was a hole here: a transform layer's box moved after the first sweep dirtied
+        /// nothing, and the sandwich's display key then missed on every frame with no bake ever
+        /// scheduled to fill it. TRANSFORM_LAYER.md's modes made it plain — a Rotate layer at a
+        /// constant speed re-poses every frame with no track to be seen, so `channelTracks` above
+        /// could not catch it either — and `TransformLayerModesUITests` caught it on the canvas.
+        /// Layers then folders, the other three fields' shape. The pose's `baseline` is left out:
+        /// it is §2.27's authoring state between two marks and reaches no pixel.
+        let containerPoses: [ContainerPoseStamp?]
+        /// **The two scalars the modes read as stored bases** — `Layer.rotateSpeed` and
+        /// `Layer.parallaxShare` on both homes. Their *curves* ride `channelTracks`; the typed
+        /// numbers live in these fields and nowhere the tree can see.
+        let rotateSpeeds: [Double]
+        let parallaxShares: [Double?]
         let canvasSize: CGSize?
         let canvasPadding: CGFloat
         /// **Guides, by value.** They are named from a recipe by id and edited in place keeping it,
@@ -879,6 +908,10 @@ final class FrameBaker {
             effectTracks = manager.layers.map(\.effectTracks) + manager.folders.map(\.effectTracks)
             channelTracks = manager.layers.map(\.channelTracks) + manager.folders.map(\.channelTracks)
             keyframeMarks = manager.layers.map(\.keyframeMarks) + manager.folders.map(\.keyframeMarks)
+            containerPoses = manager.layers.map { $0.layerTransform.map(ContainerPoseStamp.init) }
+                + manager.folders.map { $0.transform.map(ContainerPoseStamp.init) }
+            rotateSpeeds = manager.layers.map(\.rotateSpeed) + manager.folders.map(\.rotateSpeed)
+            parallaxShares = manager.layers.map(\.parallaxShare) + manager.folders.map(\.parallaxShare)
             canvasSize = manager.canvasSize
             canvasPadding = manager.canvasPadding
             guides = manager.guideStrokes

@@ -650,6 +650,72 @@ final class FrameBakerLogicTests: XCTestCase {
         }
     }
 
+    /// **A container pose reaches no tree, so it needs a field of its own — and it did not have one.**
+    ///
+    /// KEYFRAMES §4.4 emits a transform layer's pose *alongside* the tree so it never reaches the
+    /// compositor; `StructuralStamp` reads the tree, so a box moved after the first sweep dirtied
+    /// nothing and every frame was a permanent miss on the display path. Found by
+    /// `TransformLayerModesUITests` on the canvas rather than here: a Rotate layer at 15°/frame,
+    /// six frames in, drew the ink unturned. Four fields, one test each, the premise proved as the
+    /// two tests above prove theirs — the probe frame's tree is asserted identical either side.
+    private func assertIsAStructuralEditOfATransformLayer(
+        _ why: String, file: StaticString = #filePath, line: UInt = #line,
+        setup: (CanvasManager, Int) -> Void = { _, _ in },
+        _ edit: (CanvasManager, Int) -> Void) {
+        let manager = perFrameDocument(frames: 6)
+        manager.addTransformLayer()
+        let mover = manager.layers.count - 1
+        CanvasFixture.setCelLayout(manager, layerIndex: mover, [(start: 0, length: 6)])
+        setup(manager, mover)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [],
+                       "Setup: the sweep must start settled, or nothing below is attributable.",
+                       file: file, line: line)
+
+        let treeBefore = manager.renderTree(atFrame: 0)
+        edit(manager, mover)
+        XCTAssertEqual(manager.renderTree(atFrame: 0), treeBefore,
+                       "The premise: a container pose never reaches the tree, or this test proves nothing.",
+                       file: file, line: line)
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), Array(0..<6),
+                       "§3.6 rules a structural edit dirties every frame, and \(why).",
+                       file: file, line: line)
+    }
+
+    func testMovingATransformLayersBoxIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("the box poses every leaf beneath it at every frame") { manager, mover in
+            manager.layers[mover].transform?.pose = PoseQuad(
+                box: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+                mappedBy: CGAffineTransform(translationX: 8, y: 0))
+        }
+    }
+
+    func testSwitchingATransformLayersModeIsAStructuralEdit() {
+        // The speed is stored first and is inert in Move, so the mode is the one thing that moves.
+        assertIsAStructuralEditOfATransformLayer("Rotate and Move pose the same box differently",
+                                                 setup: { manager, mover in manager.layers[mover].rotateSpeed = 15 }) { manager, mover in
+            manager.layers[mover].transform?.mode = .rotate
+        }
+    }
+
+    func testATransformLayersRotateSpeedIsAStructuralEdit() {
+        // The mode is in place first with a speed of 0, so the speed is the one thing that moves.
+        assertIsAStructuralEditOfATransformLayer("a constant speed re-poses every frame with no track to be seen",
+                                                 setup: { manager, mover in manager.layers[mover].transform?.mode = .rotate }) { manager, mover in
+            manager.layers[mover].rotateSpeed = 15
+        }
+    }
+
+    func testATypedParallaxShareIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("a typed share is a stored number the tree cannot see",
+                                                 setup: { manager, mover in manager.layers[mover].transform?.mode = .parallax }) { manager, _ in
+            manager.layers[0].parallaxShare = 0.4
+        }
+    }
+
     /// A cel that **slid** dirties where it was as well as where it is. Both halves, because the
     /// frames it left show something else now.
     func testACelThatMovedDirtiesBothItsOldSpanAndItsNew() {
