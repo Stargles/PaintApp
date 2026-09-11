@@ -297,13 +297,14 @@ Whichever option in §3 is taken, an effect gains one property: **what its input
 - `.backdrop` — everything below, paper included.
 - `.ink` — everything below, paper excluded.
 
-**For eleven effects this is a fixed property. For two it is a control the artist can see**, ruled by
-the owner 2026-08-27:
+**For twelve effects this is a fixed property. For two it is a control the artist can see**, ruled by
+the owner 2026-08-27 (eleven and two at the time; Recolour arrived 2026-09-11 and is fixed):
 
 | Effect | Input | Fixed or chosen |
 |---|---|---|
 | Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise, Chromatic Aberration, Blur | `.backdrop` | fixed |
 | **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:711-719`, CPU twin `EffectKernels.swift:473-489`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
+| **Recolour** (TODO (60), 2026-09-11) | `.backdrop` | fixed — it reads colour, so it grades what the other grades grade. A from-colour the paper happens to match recolours the paper, which is what an adjustment layer means; the tolerance is the artist's control over it, and the from-eyedropper samples this same backdrop (`CanvasManager.eyedropperRecipe(for:)`) so what it picks is what the kernel will see |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
 | **Sobel** | `.backdrop` | **fixed — and it was the artist's choice for a few hours on 2026-08-27.** *"Same with sobel, defaulting this time to taking in the canvas color"* got the default right and the control wrong; the owner deleted the control the same day (*"drop it"*), and §5.2 keeps both rulings. So Sobel's shipped look still changes — bright edges on black, which is what an edge detector conventionally is — but there is no other setting. **Bright-edges-on-black also needs the alpha rule**: see §2.2, whose original claim that it came for free was false and shipped as a transparent canvas. With one mode left that rule is unconditional and needs no parameter |
