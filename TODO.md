@@ -148,14 +148,20 @@ together. The owner's own instruction is **"do whatever is cleanest"**.
 > the cel size is adjusted, then they are cropped out etc. This gets refuted if you have a good reason
 > to keep them in."*
 
-**Two readings, and they are different pieces of work.** (a) *Keyframes* that fall outside the active
-cel's span in the timeline are deleted, and shortening a cel crops the keys beyond its end. (b) Drawn
-*objects* that a transform or Move has pushed outside the canvas are deleted, and changing the canvas
-size crops what now falls outside. The sentence can carry either and "if the cel size is adjusted" reads
-like the first while "objects outside of the active cel" reads like the second.
-**Ask before building.** The owner explicitly invited a refutation, so whichever it is, weigh it: a
-transform track that outlives its cel is cheap to keep and expensive to lose, and ink pushed off-canvas
-is exactly what an artist pulls back next.
+**Settled 2026-09-10: it is the timeline, not the canvas.** Offered both readings — keys cropped to a
+cel's span, or ink cropped to the canvas — the owner chose **keyframes beyond the cel's span**: they are
+deleted, and shortening a cel crops the keys past its new end. Nothing here is about pixels.
+
+**They chose it with the objection in front of them**, which was put as *"a track that outlives its cel is
+cheap to keep and expensive to lose — you'd lengthen the cel again and find the animation gone."* So that
+is decided and is not to be re-litigated. **But build the mitigation rather than the bare rule**: the
+crop is a document edit, so it is **one undo step**, and an artist who shortens a cel and then lengthens
+it again within one undo gets their keys back. Say in the report what an artist sees when a crop discards
+keys — silently losing an animation is the shape this repo has shipped twice.
+
+**Left to build**
+- [ ] Keys outside a cel's span are deleted, and shortening a cel crops the keys past its new end.
+- [ ] The crop is one undo step, and it says what it discarded.
 
 ---
 
