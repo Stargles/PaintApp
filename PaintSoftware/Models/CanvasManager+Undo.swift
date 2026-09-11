@@ -177,14 +177,36 @@ extension CanvasManager {
     /// brackets every handle drag, and every discrete verb wraps itself) registers no step at all, so
     /// that sentence would be false and nothing is raised; the verb's return value is the whole
     /// report there.
+    ///
+    /// **Replaced inside a gesture, accumulated inside a discrete step — and the depth is what tells
+    /// them apart.** A handle drag calls its verb on every `.changed`, each call recomputes the whole
+    /// result from `gestureSnapshot`, and the crop is part of that result, so the last call's answer
+    /// is the drag's answer and a drag that went past a key and came back reports nothing. A discrete
+    /// step is the other shape: a merge splits both layers at every boundary the pair has, and a bake
+    /// splits a block once per frame, so one step can crop several times and the banner owes every
+    /// one of them. Until 2026-09-11 both shapes replaced, and a later split that cropped nothing set
+    /// this to nil over an earlier one that had — the crop went through and the banner did not.
+    /// `withStructureUndo` and `withInterpolationUndo` defer to an open gesture without raising the
+    /// depth, so inside a drag the depth is 0 whatever the verb wraps itself in, and inside a
+    /// discrete step it is at least 1.
     func noteKeyframeCrop(_ crop: KeyframeCrop) {
         guard structureUndoDepth > 0 || gestureSnapshot != nil else { return }
-        pendingKeyframeCrop = crop.isEmpty ? nil : crop
+        if structureUndoDepth == 0 {
+            pendingKeyframeCrop = crop.isEmpty ? nil : crop
+        } else if !crop.isEmpty {
+            var merged = pendingKeyframeCrop ?? KeyframeCrop()
+            merged.merge(crop)
+            pendingKeyframeCrop = merged
+        }
     }
 
-    /// Raises the parked crop, if any, against the step just recorded. Called from the two places a
-    /// structure step reaches the stack and nowhere else.
-    private func flushPendingKeyframeCrop() {
+    /// Raises the parked crop, if any, against the step just recorded. Called from the three places a
+    /// structure step reaches the stack — `withStructureUndo`, `withInterpolationUndo` and
+    /// `commitStructureGesture` — and nowhere else. **All three, because a bracket that parks and does
+    /// not raise leaks**: the crop stays on `pendingKeyframeCrop` and the next unrelated step announces
+    /// it as its own, promising an undo that would not bring the keys back. `withInterpolationUndo`
+    /// was that bracket until 2026-09-11 (a video bake splits under it), found by review.
+    func flushPendingKeyframeCrop() {
         guard let crop = pendingKeyframeCrop else { return }
         pendingKeyframeCrop = nil
         raise(.keyframesCropped(crop))

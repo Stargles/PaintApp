@@ -739,7 +739,10 @@ extension CanvasManager {
     /// **A cel takes a key only for a mark inside its own span.** Cel-local frame `n` on a cel of
     /// `frameCount` frames means the mark is on that cel; a mark before or after it addresses a
     /// different cel, or none, and keying there would put a handle at a negative frame that nothing
-    /// can draw and `splitCel`'s rule would then have to carry.
+    /// can draw and `splitCel`'s rule would then have to carry. **The neighbours a held pose is
+    /// seeded onto obey the same fence** — TODO (62), and until 2026-09-11 they did not: the nearest
+    /// keyframe below or above was taken from the layer's whole list, so a mark on another block
+    /// seeded a key past this cel's end or below 0. `seedAndKeyPose` carries the argument.
     private func poseDeltaForKeyframe(_ target: KeyframeTarget, atFrame frame: Int,
                                       keyframes placed: [Int]) -> (KeyframePoseDelta, KeyframePoseDelta) {
         var after = KeyframePoseDelta()
@@ -778,7 +781,7 @@ extension CanvasManager {
             guard cel.interpolation == nil else { continue }
             let local = frame - cel.startFrame
             guard local >= 0, local < cel.frameCount else { continue }
-            let localKeyframes = placed.map { $0 - cel.startFrame }
+            let localKeyframes = placed.map { $0 - cel.startFrame }.filter { (0..<cel.frameCount).contains($0) }
 
             let was = CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines)
             var now = was

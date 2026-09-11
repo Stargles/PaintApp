@@ -321,6 +321,15 @@ extension CanvasManager {
     /// `TransformTrack` extrapolates as a constant hold outside its first and last key, so a pose
     /// placed on the nearest keyframe below already holds at every one below that. Fewer keys, same
     /// animation, and no handles on frames the artist never touched.
+    ///
+    /// **And only neighbours inside this cel's span** — TODO (62): a key never lives outside
+    /// `0..<frameCount`. The layer's keyframes are the layer's, so the nearest one below or above the
+    /// playhead can sit on another block or on no block at all, and until 2026-09-11 it was seeded
+    /// here regardless: a mark at 15 seeded a key at cel-local 15 on a ten-frame cel, and a mark at 5
+    /// seeded one at -5 on the block starting at 10. Both were outside the span the moment they were
+    /// written, and the next span change cropped them with a banner naming a frame the artist never
+    /// keyed on that block. A neighbour past the cel's edge is not seeded; the pose holds from the
+    /// new key to the edge, which is what `TransformTrack`'s constant extrapolation does anyway.
     @discardableResult
     func seedAndKeyPose(layerID: UUID, celID: UUID, channel: TransformChannelID,
                         oldPose: PoseQuad, newPose: PoseQuad,
@@ -328,6 +337,9 @@ extension CanvasManager {
         let before = celPoseState(layerID: layerID, celID: celID)
         var state = before
         var track = state.tracks[channel.id] ?? TransformTrack()
+        let span = celIndices(forCel: celID, inLayer: layerID)
+            .map { 0..<layers[$0.layer].cels[$0.cel].frameCount } ?? 0..<Int.max
+        let keyframes = keyframes.filter { span.contains($0) }
         if let below = keyframes.last(where: { $0 < frame }), track.key(atFrame: below) == nil {
             track.setKey(TransformTrack.Key(frame: below, pose: oldPose))
         }

@@ -26,6 +26,10 @@ import CoreGraphics
 ///    the step lands, names the frames in the ruler's own 1-based numbers, and says undo brings them
 ///    back — which is asserted rather than assumed.
 ///
+/// A fourth section, from the 2026-09-11 review, pins the three places the first pass left open:
+/// a bracket that parked a crop and never raised it, a composite step whose later empty crop erased
+/// an earlier one's report, and a writer that was still minting keys outside the span.
+///
 /// Mutation notes are on each test: what was broken to watch it go red.
 ///
 /// `@MainActor` for `makeFrameRecipe`'s sake in the bake-key test; everything else is plain model.
@@ -75,10 +79,10 @@ final class CelSpanCropLogicTests: XCTestCase {
     }
 
     /// The x-offset the whole-cel channel shows at an **absolute** frame, or nil if unposed there.
-    private func shownDX(_ manager: CanvasManager, atFrame frame: Int) -> CGFloat? {
-        guard let index = manager.activeCelIndex(inLayer: 1, atFrame: frame) else { return nil }
-        let cel = manager.layers[1].cels[index]
-        guard let pose = manager.resolvedPose(layerID: manager.layers[1].id, celID: cel.id,
+    private func shownDX(_ manager: CanvasManager, atFrame frame: Int, layer: Int = 1) -> CGFloat? {
+        guard let index = manager.activeCelIndex(inLayer: layer, atFrame: frame) else { return nil }
+        let cel = manager.layers[layer].cels[index]
+        guard let pose = manager.resolvedPose(layerID: manager.layers[layer].id, celID: cel.id,
                                               channel: .cel, atFrame: frame) else { return nil }
         return pose.corners.p0.x - pose.box.minX
     }
@@ -559,5 +563,186 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
         XCTAssertNotEqual(try key(5), at5, "frame 5 draws a different pose now, and the bake must re-mint it")
         XCTAssertEqual(try key(0), at0, "frame 0 draws what it drew")
+    }
+
+    // MARK: - What the review found open (2026-09-11)
+
+    /// A cel of `length` frames at `start`, drawn, with no channel.
+    private func drawnCel(start: Int, length: Int) -> Cel {
+        let cel = Cel(id: UUID(), startFrame: start, frameCount: length, raster: .empty(size: size),
+                      vector: .empty(size: size))
+        cel.vector?.addStroke(stroke())
+        return cel
+    }
+
+    /// **`withInterpolationUndo` is a third door, and a door that parks must raise.** It lifts
+    /// `structureUndoDepth`, so a `splitCel` under it parks its crop; until the review it never
+    /// flushed, and the crop leaked to the next unrelated step — which announced it as its own and
+    /// promised an undo that would not have brought the key back.
+    ///
+    /// Watched failing with `flushPendingKeyframeCrop()` removed from `withInterpolationUndo`: the
+    /// crop stays parked, the split says nothing, and `addCel` raises it.
+    func testACropUnderTheInterpolationBracketIsAnnouncedThereAndNotByTheNextStep() {
+        let manager = fixture(keys: [(0, 0), (12, 120)])   // a legacy stray at 12
+        manager.withInterpolationUndo(label: .interpolate) {
+            manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
+        }
+        XCTAssertEqual(keyFrames(manager, cel: 1), [0], "Premise: the stray at 12 was cropped from the right half")
+        XCTAssertNil(manager.pendingKeyframeCrop, "the step that owns the crop is on the stack; nothing stays parked")
+        XCTAssertEqual(croppedNotice(manager)?.frames, [12], "announced against that step")
+
+        manager.notice = nil
+        XCTAssertTrue(manager.addCel(layerIndex: 1, startFrame: 20))
+        XCTAssertNil(manager.notice, "an unrelated step does not announce the split's crop as its own")
+    }
+
+    /// The same door as the artist reaches it: a video bake splits the block once per frame under
+    /// `withInterpolationUndo`. On a two-frame block carrying a legacy stray the one split crops it.
+    func testABakeAnnouncesItsOwnCropAndLeavesNothingParked() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cel-span-crop-bake-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        VideoImportStore.directoryOverride = directory.appendingPathComponent("staged", isDirectory: true)
+        defer {
+            VideoImportStore.directoryOverride = nil
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("clip.mp4")
+        try CanvasFixture.writeGreyClip(levels: (0..<6).map { UInt8(30 + $0 * 30) }, fps: 24, side: 64, to: url)
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.fps = 24
+        XCTAssertTrue(manager.insertVideo(at: url))
+        let start = manager.layers[1].cels[0].startFrame
+        manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: start + 2)
+        XCTAssertEqual(manager.layers[1].cels[0].frameCount, 2, "Premise")
+        manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id: track([(0, 0), (2, 20)])]
+
+        guard case .baked = manager.bakeVideoToCels(layerIndex: 1, celIndex: 0) else {
+            return XCTFail("Premise: the bake ran")
+        }
+        XCTAssertNil(manager.pendingKeyframeCrop, "nothing stays parked once the bake's step is recorded")
+        XCTAssertEqual(croppedNotice(manager)?.frames, [start + 2], "the bake's own step says what its split cropped")
+        manager.notice = nil
+        XCTAssertTrue(manager.addCel(layerIndex: 1, startFrame: 30))
+        XCTAssertNil(manager.notice, "an unrelated step does not announce the bake's crop as its own")
+    }
+
+    /// **A discrete step accumulates its crops; only a gesture replaces.** A merge splits both layers
+    /// at every boundary the pair has. The first split here crops a legacy stray; the second crops
+    /// nothing — and until the review `noteKeyframeCrop` replaced the parked crop with nil, so the
+    /// key went and the banner did not. The merge stays vector, so no other banner covers it.
+    ///
+    /// Watched failing with `noteKeyframeCrop` replacing at every depth: the notice is nil.
+    func testAMergeWhoseLaterSplitCropsNothingStillReportsTheEarlierCrop() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        manager.addVectorLayer()
+        manager.layers[1].cels = [Cel(id: UUID(), startFrame: 4, frameCount: 2, raster: .empty(size: size),
+                                      vector: .empty(size: size))]
+        manager.layers[2].cels = [drawnCel(start: 0, length: 10)]
+        manager.layers[2].cels[0].transformTracks = [TransformChannelID.cel.id: track([(0, 0), (4, 0), (12, 120)])]
+        manager.currentFrame = 4
+        XCTAssertEqual(shownDX(manager, atFrame: 8, layer: 2)!, 60, accuracy: 1e-9, "Premise: the stray drives frames 5..9")
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[1].id, manager.layers[2].id))
+        XCTAssertEqual(manager.layers.count, 2, "Premise: merged")
+        XCTAssertEqual(shownDX(manager, atFrame: 8)!, 0, accuracy: 1e-9,
+                       "Premise: the stray is gone and frame 8 no longer travels")
+        XCTAssertEqual(croppedNotice(manager)?.frames, [12], "the crop the merge made is announced")
+    }
+
+    /// **The mark workflow seeds neighbours inside the block, and only there.** Marks at 5 and 15 on
+    /// a layer whose first block is 0..<10: a Move at 5 takes the `.seedAndKey` arm, and the nearest
+    /// keyframe above the playhead is on the *next* block. Until the review it was seeded anyway, as a
+    /// key at cel-local 15 on a ten-frame cel — outside the span the moment it was written, and
+    /// cropped by the next resize with a banner naming a frame the artist never keyed on this block.
+    ///
+    /// Watched failing with the span filter removed from `seedAndKeyPose`: keys `[5, 15]`, and
+    /// frame 9 reads -8, on its way back to a pose the block never reaches.
+    func testAMoveSeededFromAMarkPastTheBlockKeysInsideItsOwnSpan() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        let layerID = manager.layers[1].id
+        let celID = manager.layers[1].cels[0].id
+
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
+                                                restBox: box,
+                                                map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
+                                                restElements: [], atFrame: 5)
+        XCTAssertEqual(route, .seedAndKey, "Premise")
+        XCTAssertEqual(keyFrames(manager, cel: 0), [5], "the neighbour on the next block is not this block's")
+        XCTAssertEqual(shownDX(manager, atFrame: 9)!, 0, accuracy: 1e-9,
+                       "the drawing stays where the artist put it to the block's end")
+        XCTAssertTrue(manager.layers[1].cels[1].transformTracks.isEmpty, "and the next block was not touched")
+    }
+
+    /// The other side of the same fence: the block is 10..<20, the mark below the playhead is at 5,
+    /// and the seeded key landed at cel-local -5 — the "no stored key is below 0" premise that
+    /// `splitCel`'s left-half crop was once deleted on.
+    ///
+    /// Watched failing with the filter removed: keys `[-5, 5]`, frame 10 reads -10.
+    func testAMoveSeededFromAMarkBeforeTheBlockKeysInsideItsOwnSpan() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        let layerID = manager.layers[1].id
+        let celID = manager.layers[1].cels[1].id
+
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
+                                                restBox: box,
+                                                map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
+                                                restElements: [], atFrame: 15)
+        XCTAssertEqual(route, .seedAndKey, "Premise")
+        XCTAssertEqual(keyFrames(manager, cel: 1), [5], "cel-local 5 is document 15; nothing below 0")
+        XCTAssertEqual(shownDX(manager, atFrame: 10)!, 0, accuracy: 1e-9, "the block's first frame holds the key")
+    }
+
+    /// The baseline arm through the same fence: a Move between marks holds the old pose, the next
+    /// mark commits it onto the nearest keyframes either side — and the one above is on the next
+    /// block.
+    ///
+    /// Watched failing with the filter removed from `poseDeltaForKeyframe`: keys `[2, 7, 15]`.
+    func testAHeldPoseCommittedByAMarkKeysInsideItsOwnSpan() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 2))
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        let layerID = manager.layers[1].id
+        let celID = manager.layers[1].cels[0].id
+
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
+                                                restBox: box,
+                                                map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
+                                                restElements: [], atFrame: 5)
+        XCTAssertEqual(route, .storedValueHoldingBaseline, "Premise")
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 7))
+        XCTAssertEqual(keyFrames(manager, cel: 0), [2, 7], "the old pose on the mark below, the new on the mark; nothing past the block")
+    }
+
+    /// **The left half is cropped too.** A key below 0 — which the writer above used to mint, and
+    /// which a document saved before the fence may still carry — stays below 0 in the left half of a
+    /// split, and the crop there was deleted once as unreachable. It goes, and it is named.
+    ///
+    /// Watched failing with the left half's `cropPoseKeysToSpan()` removed from `splitCel`: the left
+    /// keys read `[-5, 0, 4]` and the crop is empty.
+    func testASplitCropsAKeyBelowZeroFromTheLeftHalfAndNamesIt() {
+        let manager = fixture(start: 10, keys: [(-5, -50), (0, 0), (9, 90)])
+        let crop = manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 15)
+        XCTAssertEqual(keyFrames(manager, cel: 0), [0, 4])
+        XCTAssertEqual(keyFrames(manager, cel: 1), [0, 4])
+        XCTAssertEqual(crop.frames, [5], "10 + (-5): the document frame the key sat on, before the block")
+        XCTAssertEqual(croppedNotice(manager)?.frames, [5])
+        manager.undo()
+        XCTAssertEqual(keyFrames(manager), [-5, 0, 9], "one undo brings the split and the key back together")
     }
 }

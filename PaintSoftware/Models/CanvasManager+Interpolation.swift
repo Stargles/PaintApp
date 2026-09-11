@@ -51,6 +51,10 @@ extension CanvasManager {
                                           layers: layersAfter, canvases: canvases,
                                           elements: elementsAfter)
         })
+        // This bracket raises `structureUndoDepth`, so a span change inside it (a video bake splits
+        // the block under it) parks its crop here — and a bracket that parks must raise, or the next
+        // unrelated step announces the crop as its own. TODO (62); see `flushPendingKeyframeCrop`.
+        flushPendingKeyframeCrop()
     }
 
     private func applyInterpolationState(groups: [MotionGroup], guides: [GuideStroke],

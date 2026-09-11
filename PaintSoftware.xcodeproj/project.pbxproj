@@ -98,7 +98,6 @@
 		060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */; };
 		90D2C0CAF5C82D3ACE6E6E33 /* CelSpanCropUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C789077E554228A336093A5 /* CelSpanCropUITests.swift */; };
 		FFA8702DC21C2E5DD0ED6335 /* CelSpanCropLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE13A76BBBD02B125E6C2CC2 /* CelSpanCropLogicTests.swift */; };
-		1EC09FFD3BCAF632665012D7 /* CelSpanCropReviewLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC2733E9AF5AD4131943855 /* CelSpanCropReviewLogicTests.swift */; };
 		7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */; };
 		35553EE622BD0F5BED4E269C /* OpacityChannelLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */; };
 		B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */; };
@@ -510,7 +509,6 @@
 		A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SplitDrawingLogicTests.swift; sourceTree = "<group>"; };
 		1C789077E554228A336093A5 /* CelSpanCropUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelSpanCropUITests.swift; sourceTree = "<group>"; };
 		BE13A76BBBD02B125E6C2CC2 /* CelSpanCropLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelSpanCropLogicTests.swift; sourceTree = "<group>"; };
-		5CC2733E9AF5AD4131943855 /* CelSpanCropReviewLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelSpanCropReviewLogicTests.swift; sourceTree = "<group>"; };
 		BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/KeyframeControl.swift; sourceTree = "<group>"; };
 		172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpacityChannelLogicTests.swift; sourceTree = "<group>"; };
 		D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderKeyframeEntryLogicTests.swift; sourceTree = "<group>"; };
@@ -975,7 +973,6 @@
 				A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */,
 				1C789077E554228A336093A5 /* CelSpanCropUITests.swift */,
 				BE13A76BBBD02B125E6C2CC2 /* CelSpanCropLogicTests.swift */,
-				5CC2733E9AF5AD4131943855 /* CelSpanCropReviewLogicTests.swift */,
 				B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */,
 				172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */,
 				D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */,
@@ -1524,7 +1521,6 @@
 				060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */,
 				90D2C0CAF5C82D3ACE6E6E33 /* CelSpanCropUITests.swift in Sources */,
 				FFA8702DC21C2E5DD0ED6335 /* CelSpanCropLogicTests.swift in Sources */,
-				1EC09FFD3BCAF632665012D7 /* CelSpanCropReviewLogicTests.swift in Sources */,
 				7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */,
 				35553EE622BD0F5BED4E269C /* OpacityChannelLogicTests.swift in Sources */,
 				B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */,

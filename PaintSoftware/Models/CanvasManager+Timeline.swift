@@ -187,10 +187,11 @@ extension CanvasManager {
             // a memberwise `Cel(...)` defaults both fields to `[:]`, so duplicating an animated cel
             // produced a copy of the drawing with the animation silently deleted.
             //
-            // **Verbatim, including keys past the copy's length.** A copy can be shorter than its
-            // source when a neighbour is in the way, and §3.1's resize rule is the one to follow —
-            // *"a key pushed outside the new span is held, not deleted"* — so re-growing the copy
-            // gives the animation back rather than finding it trimmed.
+            // **Verbatim, including keys past the copy's length — and the caller crops.** A copy can
+            // be shorter than its source when a neighbour is in the way, and TODO (62)'s rule is that
+            // a key outside the copy's span goes: `duplicateCel` calls `cropPoseKeysToSpan` on the
+            // cel it builds from this, so this stays a plain copy of the source and the crop is made
+            // where the span is known. The merge's adoption keeps the source's span and needs none.
             transformTracks: cel.transformTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
     }
 
@@ -834,16 +835,16 @@ extension CanvasManager {
     /// because the half that keeps the original cel id is the one that was mutated in place.
     ///
     /// **Neither half is left holding a key outside its own span** — TODO (62). `split` itself no
-    /// longer mints one (its left-half key lands on `cut - 1`, inside), so on a document written
-    /// under the current rules the crop below finds nothing. It runs anyway, on the right half,
-    /// because a document saved while §3.1 still held keys past a span carries them until something
-    /// touches the cel, and a split is that something: a stray at local `f >= frameCount` lands in
-    /// the right half at `f - cut`, still past its end, and goes here with the banner naming it.
-    /// **The left half is not cropped, because it cannot need it**: `split` keeps only keys below
-    /// `cut` on the left and no stored key is below 0 (the left-edge resize crops those), so a crop
-    /// there is a line no document can reach — mutation-tested as such, and
-    /// `CelSpanCropLogicTests.testASplitLeavesEveryKeyInsideItsHalfAndEveryFrameUnchanged` pins the
-    /// invariant against `split` changing its mind.
+    /// longer mints one (its left-half key lands on `cut - 1`, inside), so on a document whose keys
+    /// are all inside the crop below finds nothing. It runs anyway, on **both** halves, because a
+    /// stored key can be outside the span before the split touches the cel — a document saved while
+    /// §3.1 still held keys past a span, or a key the mark workflow seeded on a neighbouring keyframe
+    /// that lay on another block (a writer that was minting keys past the end *and below 0* until
+    /// 2026-09-11; `seedAndKeyPose` and `poseDeltaForKeyframe` now keep to the span). A stray at
+    /// local `f >= frameCount` lands in the right half at `f - cut`, still past its end; one below 0
+    /// stays below 0 in the left. Each goes here with the banner naming it. The left-half crop was
+    /// deleted once as unreachable on the premise that no stored key is below 0, and review found the
+    /// writer that made the premise false; `CelSpanCropLogicTests` pins both halves.
     ///
     /// - Returns: what the split discarded, in absolute frames.
     @discardableResult
@@ -863,6 +864,7 @@ extension CanvasManager {
         withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             layers[layerIndex].cels[celIndex].transformTracks = leftTracks
+            crop.merge(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
             var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             crop.merge(secondHalf.cropPoseKeysToSpan())
             noteKeyframeCrop(crop)
