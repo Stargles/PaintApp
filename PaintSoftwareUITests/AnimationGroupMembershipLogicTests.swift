@@ -535,6 +535,28 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         XCTAssertEqual(group(f, f.s4), f.groupA, "with the rest of Group A left alone")
     }
 
+    /// **Both refusals name the step that reveals the control they send the artist to** — TODO (59).
+    ///
+    /// `SelectPanel.animationGroupBand` is up only while the graph editor is, so a sentence ending
+    /// *"under Select ▸ Animation Group"* and nothing else is an instruction an artist cannot follow:
+    /// they open the Select panel, the band is not there, and the app has lied to them. This is the
+    /// pin on the pair, and it is asserted over both sentences rather than one because it was one
+    /// sentence being fixed and the other being forgotten that this shape of defect is made of.
+    ///
+    /// The two operands are the shipped strings and the two things a follower of them has to do —
+    /// open the graph editor, then find Animation Group in the Select panel. Not a check that the
+    /// message is non-empty, which every version of it would pass.
+    func testBothAnimationGroupRefusalsNameTheGraphEditorAsWellAsThePanel() {
+        for kind in [CanvasNotice.Kind.onlyPartOfAnAnimationGroup, .animationGroupNotAlone] {
+            let message = CanvasNotice(kind).message
+            XCTAssertTrue(message.contains("Animation Group"),
+                          "\(kind): names the control — got \"\(message)\"")
+            XCTAssertTrue(message.contains("graph editor"),
+                          "\(kind): and names the step that puts that control on screen, or the "
+                          + "artist opens the Select panel and finds nothing — got \"\(message)\"")
+        }
+    }
+
     // MARK: - The readout
 
     /// **The Select panel's readout names what the loop actually caught.**

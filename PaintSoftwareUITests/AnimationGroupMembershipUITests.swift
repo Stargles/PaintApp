@@ -291,9 +291,15 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         selectRectangle(app, paper,
                         from: (midBefore.minX - 0.05, midBefore.minY - 0.05),
                         to: (midBefore.maxX + 0.05, midBefore.maxY + 0.05))
+        // **The band is up only while the graph editor is** — TODO (59), the owner: *"the animation
+        // group section only really needs to be up when in graph editor."* So this is the artist's
+        // own route to it, and asserting its absence first is what keeps that a fact rather than an
+        // assumption about a control that happened to be on screen.
         let readout = app.staticTexts["selectPanel.animationGroupReadout"]
+        XCTAssertFalse(readout.exists, "the band should not be up with the graph editor closed")
+        app.buttons["timeline.graphEditorButton"].tap()
         XCTAssertTrue(readout.waitForExistence(timeout: 5),
-                      "the Select panel has an Animation Group band")
+                      "the Select panel has an Animation Group band once the graph editor is open")
         XCTAssertEqual(readout.value as? String, "Group 1", """
             The readout must resolve what the loop caught, not echo a placeholder — it read \
             "\(readout.value as? String ?? "nil")". The loop is around D1 where the first Move's \

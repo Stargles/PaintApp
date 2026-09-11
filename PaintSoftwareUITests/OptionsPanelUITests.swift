@@ -151,6 +151,59 @@ final class OptionsPanelUITests: PaintUITestCase {
         assertPanelIsDockedAndFlat(app, topControl: rectangle, "the Select panel")
     }
 
+    /// **The Select panel's measured height** — TODO (59), the owner 2026-09-10: *"the lasso fill
+    /// menu is way too tall. Try to compact the height. You can expand it horizontally."*
+    ///
+    /// `selectPanel.top` and `bottomDock.floor` are the card's own two edges, so this is the
+    /// panel's height rather than the distance from some control inside it — which is what
+    /// `assertPanelIsDockedAndFlat` measures and is why that helper could not answer this ask.
+    ///
+    /// MEASURED on an iPad Pro 13-inch (M4) at `BottomDock.preferredWidth`: **261.5 points before
+    /// the compaction and 162.5 after**. The cap below is the measured number with a
+    /// little headroom, so a row added back without a thought goes red here rather than in a month.
+    ///
+    /// **It also asserts what the compaction *is*, not only that a number came down**: the
+    /// paint-outside switch is on the first row beside the mode tabs rather than owning one, and the
+    /// Animation Group band is not up with the graph editor closed. Either of those coming back
+    /// would push the height over the cap anyway, but a failure that says which one is the one worth
+    /// having.
+    func testTheSelectPanelIsCompact() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(app.buttons["selectPanel.mode.rectangle"].waitForExistence(timeout: 5))
+
+        let cardTop = app.otherElements["selectPanel.top"]
+        let floor = app.otherElements["bottomDock.floor"]
+        XCTAssertTrue(cardTop.waitForExistence(timeout: 5), "the Select panel's card has no top probe")
+        XCTAssertTrue(floor.waitForExistence(timeout: 5), "the dock has no floor probe")
+        attach(app, "07-select-panel-height")
+
+        let height = floor.frame.maxY - cardTop.frame.minY
+        XCTAssertGreaterThan(height, 0, "the panel measured no height at all")
+        XCTAssertLessThanOrEqual(height, 175,
+                                 String(format: "the Select panel is %.0f points tall against a card %.0f wide "
+                                        + "— it was 262 before TODO (59)",
+                                        height, BottomDock.preferredWidth))
+
+        // The switch shares the rule row: same row as the mode tabs, to the right of them.
+        let toggle = app.buttons["selectPanel.allowOutsideToggle"]
+        let modeTab = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the paint-outside switch is gone")
+        XCTAssertLessThan(toggle.frame.minY, modeTab.frame.maxY,
+                          "the paint-outside switch is stacked under the mode tabs rather than beside them")
+        XCTAssertGreaterThan(toggle.frame.minX, modeTab.frame.maxX,
+                             "…and it is to their right, on the same row")
+
+        // And the Animation Group band is not up, because the graph editor is not.
+        XCTAssertFalse(app.staticTexts["selectPanel.animationGroupReadout"].exists,
+                       "the Animation Group band is up with the graph editor closed")
+        app.buttons["timeline.graphEditorButton"].tap()
+        XCTAssertTrue(app.staticTexts["selectPanel.animationGroupReadout"].waitForExistence(timeout: 5),
+                      "…and opening the graph editor is what brings it back, which is where both of "
+                      + "KEYFRAMES §2.29's refusal sentences now send the artist")
+    }
+
     /// **The anchor is the dock's, so all four panels take it** — asserted on the other two rather
     /// than assumed, because the four are four separate views and only the column they sit in is
     /// shared. The text panel, which is the one with a fixed height ceiling of its own.

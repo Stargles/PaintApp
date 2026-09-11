@@ -285,8 +285,15 @@ struct CanvasNotice: Identifiable, Equatable {
         // redraw the loop, because membership was unreachable; an artist who wanted *this ink out of
         // that group* had nowhere to go and the app said nothing about it. The loop fix stays first in
         // both, since it is what an artist who meant to move the whole group wants.
-        case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it, or change what it belongs to under Select ▸ Animation Group."
-        case .animationGroupNotAlone: return "The loop holds an animated group and ink that isn't part of it — a group moves on its own, so loop around just one group, or put them in the same one under Select ▸ Animation Group."
+        //
+        // **And each names the step that reveals the control** — TODO (59). The Animation Group band
+        // is up only while the graph editor is (`SelectPanel.animationGroupBand`), so *"under Select
+        // ▸ Animation Group"* on its own sends the artist to a panel that does not have it. Two steps
+        // stated is the repair; the alternative was an exception to the hiding rule, and that band's
+        // own doc records why each version of it is worse. `AnimationGroupMembershipLogicTests`
+        // pins both sentences against the door they name.
+        case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it, or open the graph editor and change what it belongs to under Select ▸ Animation Group."
+        case .animationGroupNotAlone: return "The loop holds an animated group and ink that isn't part of it — a group moves on its own, so loop around just one group, or open the graph editor and put them in the same one under Select ▸ Animation Group."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):

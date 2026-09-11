@@ -53,8 +53,42 @@ struct SelectPanel: View {
     /// costs the panel the same height on a document with one animation group and on one with six.
     /// It sits between the loop rule and the action row because it is a *fourth* thing to do with the
     /// loop rather than a rule the action row obeys.
+    ///
+    /// **Two bands and a caption since TODO (59)**, the owner 2026-09-10: *"the lasso fill menu is
+    /// way too tall. Try to compact the height. You can expand it horizontally."* MEASURED on an
+    /// iPad Pro 13-inch at `BottomDock.preferredWidth`: **261.5 points before, 162.5 after** — the
+    /// panel is now a rule row, an action row and one line of prose, against a card 760 wide.
+    /// Three things paid for it and none of them removes a control:
+    ///
+    ///   * the **paint-outside switch joins the rule row** (`paintOutsideToggle`), where it costs no
+    ///     height at all because that row is as tall as the membership column either way — the
+    ///     owner's *"takes a whole layer for a switch"*;
+    ///   * the **Animation Group band is up only while the graph editor is** — see that band's doc
+    ///     for the §2.29 refusals this would otherwise strand, and what was done about them;
+    ///   * the **caption brings its own divider**, so a panel with nothing to say ends at the action
+    ///     row instead of carrying a rule and 14 points of air.
     var body: some View {
         VStack(spacing: 0) {
+            // **The card's own top edge, as a one-point probe** — TODO (59), whose third ask is that
+            // this panel be shorter and whose only honest answer is a measured number.
+            // `bottomDock.floor` in `DrawingView` marks the column's bottom and has since item (49);
+            // this is the other edge, and `OptionsPanelUITests.testTheSelectPanelIsCompact` is the
+            // subtraction.
+            //
+            // **A sibling at the head of the stack, not an `.overlay` on `bottomDockCard`**, which is
+            // where it was first written and which MEASURED as breaking the panel outright: an
+            // `.accessibilityElement()` inside an overlay on the card made the card a *leaf*, and
+            // every control in it — the mode tabs included — stopped resolving, so
+            // `testTheSelectPanelsModeTabsShareARowWithTheMembershipPicker` went red for a change
+            // that touched no layout. It is CLAUDE.md's "an identifier on a container beats its
+            // descendants" reached through a door nobody had checked. One point of height is the
+            // price of not going near that again.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("selectPanel.top")
+                .allowsHitTesting(false)
+
             if canvasManager.selectionMode == .automatic {
                 HStack(spacing: 12) {
                     Text("Tolerance: \(Int(canvasManager.magicWandTolerance * 100))%")
@@ -67,7 +101,7 @@ struct SelectPanel: View {
                 .padding(.top, 10)
             }
 
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 HStack(spacing: 6) {
                     ForEach(SelectionMode.allCases) { mode in
                         modeTab(mode)
@@ -82,13 +116,24 @@ struct SelectPanel: View {
                 Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
 
                 membershipPicker
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
+
+                paintOutsideToggle
             }
             .padding(.horizontal, 10)
-            .padding(.top, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
 
             divider
 
-            animationGroupBand
+            // **Only while the graph editor is open** — TODO (59), the owner: *"the animation group
+            // section only really needs to be up when in graph editor."* See `animationGroupBand`'s
+            // own doc for what that costs the two §2.29 refusals and how they were repaired.
+            if canvasManager.isGraphEditorOpen {
+                animationGroupBand
+                divider
+            }
 
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
@@ -106,39 +151,63 @@ struct SelectPanel: View {
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
                     .accessibilityIdentifier("selectPanel.deselectButton")
             }
-            .padding(.vertical, 8)
-
-            divider
-
-            // A plain Button driving the switch look (rather than SwiftUI's native `Toggle`) so tapping
-            // is a single reliable gesture end to end — a native Toggle bound through a custom
-            // Binding(get:set:) intermittently didn't flip when activated via accessibility (VoiceOver/
-            // XCUITest), while every other control in this bar is a Button and taps it consistently.
-            Button {
-                canvasManager.allowsPaintingOutsideSelection.toggle()
-            } label: {
-                HStack {
-                    Text("Paint Outside Selection")
-                        .font(.subheadline)
-                        .foregroundColor(.white)
-                    Spacer()
-                    switchIndicator
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .accessibilityIdentifier("selectPanel.allowOutsideToggle")
-            .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
+            .padding(.vertical, 6)
 
             if let caption {
+                divider
+
                 Text(caption)
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.vertical, 6)
             }
         }
+    }
+
+    /// **The paint-outside rule, sharing the first row rather than owning one** — TODO (59), the
+    /// owner: *"The paint outside selection for example takes a whole layer for a switch."*
+    ///
+    /// It belongs in the first band on the same argument §5.26 made for moving the membership picker
+    /// into this panel: the band is *how the loop behaves* — the mode it is drawn in, what it then
+    /// catches, and whether ink may land outside it — and the action row below is what to *do* with
+    /// it. So this is the third column of a rule row, not a seventh verb.
+    ///
+    /// **It costs the panel no height at all**, which is the whole saving: the row's height is set by
+    /// the membership column (a label, a segmented control and its caption), and this column is
+    /// shorter than that, so the 52 points it used to own below the action row are simply gone.
+    ///
+    /// A plain Button driving the switch look (rather than SwiftUI's native `Toggle`) so tapping is a
+    /// single reliable gesture end to end — a native Toggle bound through a custom
+    /// `Binding(get:set:)` intermittently didn't flip when activated via accessibility (VoiceOver/
+    /// XCUITest), while every other control in this bar is a Button and taps it consistently.
+    private var paintOutsideToggle: some View {
+        Button {
+            canvasManager.allowsPaintingOutsideSelection.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                // **Wrapped in a fixed column rather than shortened**, because "Paint Outside" alone
+                // reads as a verb the button performs; the words that say it is a *rule about the
+                // selection* are the ones worth keeping. Two lines of `.caption` are still shorter
+                // than the column beside them.
+                Text("Paint Outside Selection")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    // **A `maxWidth`, not a `width`, and not `fixedSize()` on the button** — 96 is
+                    // what makes it two lines at `BottomDock.preferredWidth`, and a rigid column
+                    // would *overflow* the card at `minimumWidth` rather than give ground. Three
+                    // columns do not fit a 360-point card and the membership picker is already
+                    // unreadable there (it was before this row gained a third column); giving
+                    // rather than overflowing is the difference between cramped and broken.
+                    .frame(maxWidth: 96, alignment: .leading)
+                switchIndicator
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("selectPanel.allowOutsideToggle")
+        .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
     }
 
     /// **TODO item (23) — "What the loop catches".** `Enclosed · Cut · Touching`, ordered by how much
@@ -218,6 +287,26 @@ struct SelectPanel: View {
     /// loop has caught, so an XCUITest asserting on it goes red if the control stops resolving —
     /// whereas an `exists` assertion on a chip would stay green against a feature that had been
     /// deleted from underneath it.
+    ///
+    /// ## It is up only while the graph editor is — TODO (59)
+    ///
+    /// The owner, on their first look at it: *"the animation group section only really needs to be up
+    /// when in graph editor."* True of the workflow, and it takes a row and a divider off a panel
+    /// they had just called too tall.
+    ///
+    /// **The cost is that KEYFRAMES §2.29's two refusals pointed here**, and a sentence that names a
+    /// control the artist cannot see is worse than no sentence: both said *"…under Select ▸ Animation
+    /// Group"*, and with the band hidden that is a dead end rather than an instruction. The repair is
+    /// in the sentences, not in an exception to the rule — `CanvasNotice.Kind.message` says *"open
+    /// the graph editor, then Select ▸ Animation Group"* now, which is two steps stated instead of
+    /// one step implied.
+    ///
+    /// **The alternatives, and why each is worse.** Showing the band whenever a refusal is *live*
+    /// ties a panel's layout to a banner that dismisses itself after 2.6 s — the panel would reflow
+    /// under the artist's finger and then reflow back. Showing it whenever the document has any
+    /// animation group makes it permanent the moment anyone animates anything, which is the state the
+    /// owner is complaining about. Showing it whenever the loop *holds* group ink hides it in exactly
+    /// the case an artist wants it most: adding untagged ink to a group.
     private var animationGroupBand: some View {
         let reason = canvasManager.animationGroupEditUnavailableReason
         // Read once and used for the readout, for the gate, and for every chip's outline, so the
@@ -312,13 +401,16 @@ struct SelectPanel: View {
 
     /// A plain iOS-switch look-alike (capsule track + circular knob) purely for display — the
     /// enclosing Button owns the actual tap handling, see the comment above its call site.
+    ///
+    /// **44x26 rather than UIKit's 51x31 since TODO (59)**: it shares a row now, and the row's height
+    /// is the membership column's, so the switch has to fit under that rather than set it.
     private var switchIndicator: some View {
         let isOn = canvasManager.allowsPaintingOutsideSelection
         return ZStack(alignment: isOn ? .trailing : .leading) {
             Capsule().fill(isOn ? Color.blue : Color.white.opacity(0.25))
             Circle().fill(Color.white).padding(2)
         }
-        .frame(width: 51, height: 31)
+        .frame(width: 44, height: 26)
     }
 
     private var divider: some View {
@@ -343,7 +435,7 @@ struct SelectPanel: View {
             // the membership picker instead of a band of their own, so there is no width for them
             // to divide, and ragged tabs would read as three different controls.
             .frame(width: 74)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .background(isActive ? Color.white.opacity(0.15) : Color.clear)
             .cornerRadius(8)
         }
