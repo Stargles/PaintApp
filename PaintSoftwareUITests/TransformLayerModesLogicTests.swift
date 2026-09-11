@@ -744,6 +744,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         let atZero = shakenRasterLayer(seed: 5, period: 3, x: 10, y: 4, rotation: 6)
         let atFour = shakenRasterLayer(seed: 5, period: 3, x: 10, y: 4, rotation: 6, blockStart: 4)
         XCTAssertNil(atFour.manager.layerPoses(atFrame: 3)[atFour.drawn], "before the bar the shaker is not there")
+        XCTAssertNotNil(atZero.manager.layerPoses(atFrame: 1)[atZero.drawn], "premise: the bar at 0 jolts at all")
         for k in 0..<8 {
             XCTAssertEqual(atFour.manager.layerPoses(atFrame: 4 + k)[atFour.drawn]?.encoded,
                            atZero.manager.layerPoses(atFrame: k)[atZero.drawn]?.encoded,
