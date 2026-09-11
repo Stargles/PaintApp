@@ -28,19 +28,26 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// `Effect.parameters` is an exhaustive switch with no `default:`: nothing here would notice a
     /// sixteenth effect, so the compiler has to.
     ///
-    /// Sixteen entries over fifteen cases. Gaussian and Directional Blur are one case split by
-    /// `Blur.isDirectional`, and both are listed so the "same case, same table" claim is exercised
-    /// rather than assumed. Recolour (TODO (60)) is the fourteenth case and the Computer Screen
-    /// (TODO (60), 2026-09-11) the fifteenth; each was added here deliberately, with every count
-    /// below moved by exactly what it adds.
+    /// **Nineteen entries over fifteen cases.** Sixteen the day the Computer Screen shipped. Gaussian
+    /// and Directional Blur are one case split by `Blur.isDirectional`, and both are listed so the
+    /// "same case, same table" claim is exercised rather than assumed; TODO (60)'s Dither and Halftone
+    /// (`Posterize.screen`) and Hue Colorize (`HSVShift.colorize`) are the same claim reached through
+    /// two more fields, so all three are listed here for the identical reason rather than covered only
+    /// by the smaller equivalence checks in `testTheSlidersMatchTheSettingsBarCallSitesTheyReplaced`.
+    /// None of the three adds a stored field or a slider — every sweep below that would otherwise
+    /// triple-count Posterize's or HSV Shift's own parameters across their split entries dedupes the
+    /// same way `testThereAreThirtyTwoSlidersInTheWholeCatalogue` already deduped the two blurs.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
+        .hsvShift(Effect.HSVShift(hueDegrees: 210, saturation: 0.5, colorize: true)),
         .gradientMap(Effect.GradientMap()),
         .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),
+        .posterize(Effect.Posterize(screen: .ordered, screenStrength: 1)),
+        .posterize(Effect.Posterize(screen: .halftone, screenStrength: 1)),
         .blur(Effect.Blur(radius: 8)),
         .blur(Effect.Blur(radius: 12, angleDegrees: 0, isDirectional: true)),
         .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
@@ -90,11 +97,16 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         // The Curves panel is a `CurveEditor`, a caption and a Reset button — no slider anywhere.
         XCTAssertEqual(sliderRows(.curves(Effect.Curves())), [])
 
-        XCTAssertEqual(sliderRows(.hsvShift(Effect.HSVShift())), [
+        let hsvRows = sliderRows(.hsvShift(Effect.HSVShift()))
+        XCTAssertEqual(hsvRows, [
             "hue|Hue|-180.0...180.0|%.0f°",
             "saturation|Saturation|0.0...2.0|%.2f",
             "value|Value|0.0...2.0|%.2f",
         ])
+        // TODO (60). Hue Colorize is `colorize` set on the same payload — `colorize` has no `uiRange`
+        // (it is `.boolean`), so it contributes no row and the three sliders above are unmoved.
+        XCTAssertEqual(sliderRows(.hsvShift(Effect.HSVShift(colorize: true))), hsvRows,
+                       "Hue Colorize shares HSV Shift's table exactly")
 
         // The stops editor comes first and carries no slider of its own; Mix is the only one.
         XCTAssertEqual(sliderRows(.gradientMap(Effect.GradientMap())), [
@@ -108,10 +120,18 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
         // Screen Strength is drawn only when a screen is selected; the *address* exists either way,
         // which is why it is here for a `.none` posterize.
-        XCTAssertEqual(sliderRows(.posterize(Effect.Posterize())), [
+        let posterizeRows = sliderRows(.posterize(Effect.Posterize()))
+        XCTAssertEqual(posterizeRows, [
             "levels|Levels|2.0...32.0|%.0f",
             "screenStrength|Screen Strength|0.0...1.0|%.2f",
         ])
+        // TODO (60). Dither and Halftone are `Posterize` with `screen` set — the table does not branch
+        // on `screen`'s value (only the view's row-visibility choice above does), so both share this
+        // exact list.
+        XCTAssertEqual(sliderRows(.posterize(Effect.Posterize(screen: .ordered, screenStrength: 1))),
+                       posterizeRows, "Dither shares Posterize's table exactly")
+        XCTAssertEqual(sliderRows(.posterize(Effect.Posterize(screen: .halftone, screenStrength: 1))),
+                       posterizeRows, "Halftone shares Posterize's table exactly")
 
         XCTAssertEqual(sliderRows(.noise(Effect.Noise())), [
             "amount|Amount|0.0...0.5|%.3f",
@@ -171,11 +191,14 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// `uiRange`), and 32 with the Computer Screen's six.
     func testThereAreThirtyTwoSlidersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
-            // Both blur entries are one case; count it once.
+            // Blur, Posterize and HSV Shift each back more than one menu entry; count each case once,
+            // through whichever entry is its "base" reading.
             if case .blur(let blur) = $0 { return !blur.isDirectional }
+            if case .posterize(let post) = $0 { return post.screen == .none }
+            if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
             return true
         }
-        XCTAssertEqual(cases.count, 15, "Fifteen cases behind sixteen menu entries")
+        XCTAssertEqual(cases.count, 15, "Fifteen cases behind nineteen menu entries")
         XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 32)
     }
 
@@ -219,17 +242,20 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **43 stored fields over 15 payload structs, and every one of them addressable.** 33 the day
-    /// the table was written, plus Recolour's own 2 (its new payload struct), TODO (60)'s
-    /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), and the Computer Screen's 6 (its
-    /// own new payload struct). The count is the point: a field added to a payload struct and not to
-    /// the table is a knob no keyframe can reach, and nothing else in the app would say so.
+    /// **44 stored fields over 15 payload structs, and every one of them addressable.** 33 the day
+    /// the table was written, plus Recolour's own 2 (its new payload struct), the same day's
+    /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), the Computer Screen's 6 (its own
+    /// new payload struct), and TODO (60)'s `HSVShift.colorize` (1 more, the boolean mode switch
+    /// `Effect.displayName` and `EffectReference`'s colorize branch both key on). Dither and Halftone
+    /// add no field of their own — `Posterize.screen` already existed. The count is the point: a field
+    /// added to a payload struct and not to the table is a knob no keyframe can reach, and nothing
+    /// else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
         let expected: [(Effect, Int)] = [
             (.levels(Effect.Levels()), 5),
             (.curves(Effect.Curves()), 1),
             (.brightnessContrast(Effect.BrightnessContrast()), 2),
-            (.hsvShift(Effect.HSVShift()), 3),
+            (.hsvShift(Effect.HSVShift()), 4),
             (.gradientMap(Effect.GradientMap()), 2),
             (.chromaticAberration(Effect.ChromaticAberration()), 2),
             (.posterize(Effect.Posterize()), 3),
@@ -250,7 +276,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 43)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 44)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -295,7 +321,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "crtScreen.scanlinePeriod", "crtScreen.scanlines", "crtScreen.vignette",
             "curves.points",
             "gradientMap.mix", "gradientMap.stops",
-            "hsvShift.hue", "hsvShift.saturation", "hsvShift.value",
+            "hsvShift.colorize", "hsvShift.hue", "hsvShift.saturation", "hsvShift.value",
             "levels.gamma", "levels.inputBlack", "levels.inputWhite",
             "levels.outputBlack", "levels.outputWhite",
             "noise.amount", "noise.monochrome", "noise.seed",
@@ -314,7 +340,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 43)
+        XCTAssertEqual(seen.count, 44)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -344,16 +370,20 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                        \Effect.Bloom.color)
         XCTAssertEqual(parameter("sobel.gain", of: .sobel(Effect.Sobel()))?.keyPath,
                        \Effect.Sobel.gain)
+        XCTAssertEqual(parameter("hsvShift.colorize", of: .hsvShift(Effect.HSVShift()))?.keyPath,
+                       \Effect.HSVShift.colorize)
     }
 
     // MARK: - Animation kinds
 
-    /// **Seven structural fields hold, and these are they.** Two of the seven change the render *shape*
-    /// rather than a number — `blur.directional` rewrites the pass list from two passes to one, and
-    /// `bloom.input` decides whether the compositor performs an entire sub-walk into two borrowed
-    /// textures — so they could not be tweened even in principle. `recolor.preserveShading` is the
-    /// seventh, a `Bool` like `noise.monochrome`.
-    func testTheSevenSteppedParametersAreTheStructuralOnes() {
+    /// **Eight structural fields hold, and these are they.** Three of the eight change the render
+    /// *shape* rather than a number — `blur.directional` rewrites the pass list from two passes to
+    /// one, `bloom.input` decides whether the compositor performs an entire sub-walk into two borrowed
+    /// textures, and TODO (60)'s `hsvShift.colorize` swaps what `hueDegrees`/`saturation` mean and the
+    /// effect's own `displayName` (its own doc: the same shape as `blur.directional`, reached through
+    /// `HSVShift` instead of `Blur`) — so none of the three could be tweened even in principle.
+    /// `recolor.preserveShading` is a `Bool` like `noise.monochrome`.
+    func testTheEightSteppedParametersAreTheStructuralOnes() {
         let stepped = Self.everyMenuEntry
             .flatMap { $0.parameters }
             .filter { $0.animation == .stepped }
@@ -362,7 +392,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "posterize.levels", "posterize.screen",
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
-            "recolor.preserveShading",
+            "recolor.preserveShading", "hsvShift.colorize",
         ])
     }
 
@@ -380,10 +410,17 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// tween as one value with a fixed count — which is why they are continuous rather than
     /// componentwise. 24 doubles and one colour the day the table was written; TODO (60) added
     /// `sobel.gain` (a double) and `bloom.color` (a colour); the Computer Screen's six, every one a
-    /// continuous `Double`, brought the doubles to 31.
+    /// continuous `Double`, brought the doubles to 31. Dither/Halftone/Hue Colorize add none of their
+    /// own — `hsvShift.colorize` is `.stepped`, not `.continuous` — so the same dedup this file's
+    /// header comment names keeps the count from tripling what Posterize and HSV Shift each contribute.
     func testThirtyThreeParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
-            .filter { if case .blur(let b) = $0 { return !b.isDirectional }; return true }
+            .filter {
+                if case .blur(let b) = $0 { return !b.isDirectional }
+                if case .posterize(let post) = $0 { return post.screen == .none }
+                if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
+                return true
+            }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
         XCTAssertEqual(continuous.count, 33)
@@ -535,7 +572,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "posterize.levels", "posterize.screen",
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
-            "recolor.preserveShading",
+            "recolor.preserveShading", "hsvShift.colorize",
         ])
     }
 
@@ -559,11 +596,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                 let written = parameter.write(effect, probe)
                 XCTAssertEqual(parameter.read(written) ?? .nan, probe, accuracy: 1e-9,
                                "\(parameter.id) did not read back what was written")
-                // Writing a parameter must never change *which* effect this is. The one entry
-                // that legitimately renames itself is `blur.directional`, which is exactly what
-                // splits one case across two menu entries.
+                // Writing a parameter must never change *which* effect this is, with the exceptions
+                // that are exactly what splits one case across two-or-three menu entries:
+                // `blur.directional` (Gaussian/Directional Blur), `posterize.screen` (TODO (60)'s
+                // Posterize/Dither/Halftone) and `hsvShift.colorize` (TODO (60)'s HSV Shift/Hue
+                // Colorize).
                 XCTAssertTrue(written.displayName == effect.displayName
-                              || parameter.id == "blur.directional",
+                              || parameter.id == "blur.directional"
+                              || parameter.id == "posterize.screen"
+                              || parameter.id == "hsvShift.colorize",
                               "\(parameter.id) changed which effect this is")
             }
         }
@@ -605,6 +646,13 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             guard case .posterize(let p)? = written else { return XCTFail("not a posterize") }
             XCTAssertEqual(p.screen, expected)
         }
+        // TODO (60). The write also renames the effect — Dither and Halftone are Posterize with this
+        // field set, the Blur precedent — which is the model-level half of `EffectCatalog.isCurrent`
+        // ticking the right menu row; `EffectCatalog` itself is SwiftUI and unreachable from this
+        // target (this file's own header), so an XCUITest is the other half.
+        XCTAssertEqual(screen?.write(.posterize(Effect.Posterize()), 0).displayName, "Posterize")
+        XCTAssertEqual(screen?.write(.posterize(Effect.Posterize()), 1).displayName, "Dither")
+        XCTAssertEqual(screen?.write(.posterize(Effect.Posterize()), 2).displayName, "Halftone")
 
         let input = parameter("bloom.input", of: .bloom(Effect.Bloom()))
         XCTAssertEqual(input?.modelDomain, 0...1)
@@ -613,6 +661,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             guard case .bloom(let p)? = written else { return XCTFail("not a bloom") }
             XCTAssertEqual(p.input, expected)
         }
+    }
+
+    /// **TODO (60)'s boolean twin of the option-bridge test above.** `hsvShift.colorize`'s write
+    /// also renames the effect — the model-level half of Hue Colorize's menu entry ticking correctly,
+    /// the same argument `testTheOptionBridgeReachesEveryCase` makes for `posterize.screen`.
+    func testTheColorizeBridgeRenamesTheEffect() {
+        let colorize = parameter("hsvShift.colorize", of: .hsvShift(Effect.HSVShift()))
+        XCTAssertEqual(colorize?.write(.hsvShift(Effect.HSVShift()), 0).displayName, "HSV Shift")
+        XCTAssertEqual(colorize?.write(.hsvShift(Effect.HSVShift()), 1).displayName, "Hue Colorize")
     }
 
     /// The `Int` bridge rounds the way the settings bar's Levels slider already did.

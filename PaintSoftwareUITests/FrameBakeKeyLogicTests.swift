@@ -429,20 +429,26 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     // MARK: - Effects, case by case and parameter by parameter
 
-    /// **Forty-two effect values, all of which must be forty-two digests.** Every case, and for
-    /// every case at least one row per artist-facing parameter — thirty-nine before TODO (60), which
-    /// added `"bloom default"` (a baseline for `"bloom color"` to collide against, argued below),
-    /// `"bloom color"` and `"sobel gain"` (`"sobel"` renamed `"sobel default"` alongside it). This
-    /// comment already said "Thirty-one" against an actual thirty-nine before that — stale on its own
-    /// terms, worth fixing here rather than left to compound. `bloom.color` and `sobel.gain` were
-    /// from `BakeKeyEncoder.encode(effect:)` entirely (see that file's comment on the `.bloom` and
-    /// `.sobel` cases): the digest didn't move, so the disk-backed frame store served one frame's
-    /// bytes for both, and this table's whole reason for existing — catching two effects that share
-    /// a digest — could not have caught it, because there was no row varying either field to collide
-    /// against its own default. A cold-start XCUITest driving the real Gain slider and Colour swatch
-    /// is what found it (identical screenshots at gain 0.25 and gain 8); these two rows pin it here,
-    /// at the unit the encoder actually operates on, so a regression is a one-second failure rather
-    /// than a 50-second one.
+    /// **Fifty-nine effect values, all of which must be fifty-nine digests.** Every case, and for
+    /// every case at least one row per artist-facing parameter. This comment has drifted before —
+    /// it said "Thirty-one" against an actual thirty-nine, then "Forty-two" against an actual
+    /// fifty-seven going into this session, which is the same "re-take the table, don't increment
+    /// it" lesson CLAUDE.md's cost-model section states about a different count; the fifty-seven is
+    /// recounted from the array below rather than trusted from the stale prose. TODO (60) adds two:
+    /// `"hsvShift default"` (a baseline for `"hsvShift colorize"` to collide against, the same shape
+    /// `"bloom default"`/`"bloom color"` argue below) and `"hsvShift colorize"` itself — Dither and
+    /// Halftone need no new row, since `"posterize screen ordered"`/`"posterize screen halftone"`
+    /// already exist and are the exact fields those two menu entries set.
+    ///
+    /// `bloom.color` and `sobel.gain` were missing from `BakeKeyEncoder.encode(effect:)` entirely
+    /// (see that file's comment on the `.bloom` and `.sobel` cases): the digest didn't move, so the
+    /// disk-backed frame store served one frame's bytes for both, and this table's whole reason for
+    /// existing — catching two effects that share a digest — could not have caught it, because there
+    /// was no row varying either field to collide against its own default. A cold-start XCUITest
+    /// driving the real Gain slider and Colour swatch is what found it (identical screenshots at
+    /// gain 0.25 and gain 8); these two rows pin it here, at the unit the encoder actually operates
+    /// on, so a regression is a one-second failure rather than a 50-second one. `"hsvShift colorize"`
+    /// exists for the identical reason, pre-empting the same class of bug rather than reacting to it.
     ///
     /// Pairwise rather than each-against-a-baseline, because the failure a hand-written encoder
     /// actually risks is two *cases* sharing a tag or two parameters being written to the same
@@ -461,9 +467,13 @@ final class FrameBakeKeyLogicTests: XCTestCase {
                                                              CurvePoint(x: 1, y: 1)]))),
             ("brightnessContrast brightness", .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2))),
             ("brightnessContrast contrast", .brightnessContrast(Effect.BrightnessContrast(contrast: 1.2))),
+            // TODO (60). The baseline "hsvShift colorize" needs to be able to collide against — the
+            // same reason "bloom default" exists below.
+            ("hsvShift default", .hsvShift(Effect.HSVShift())),
             ("hsvShift hue", .hsvShift(Effect.HSVShift(hueDegrees: 30))),
             ("hsvShift saturation", .hsvShift(Effect.HSVShift(saturation: 1.5))),
             ("hsvShift value", .hsvShift(Effect.HSVShift(value: 0.5))),
+            ("hsvShift colorize", .hsvShift(Effect.HSVShift(colorize: true))),
             ("gradientMap default", .gradientMap(Effect.GradientMap())),
             ("gradientMap stop position", .gradientMap(Effect.GradientMap(stops: [
                 GradientStop(position: 0, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)),

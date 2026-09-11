@@ -401,6 +401,11 @@ private extension BakeKeyEncoder {
         case .hsvShift(let p):
             tag(0x53)
             double(p.hueDegrees); double(p.saturation); double(p.value)
+            // TODO (60). `colorize` changes what the three numbers above MEAN (an absolute target
+            // instead of a relative shift) without changing any of them, so two frames differing only
+            // in this flag would otherwise digest identically and collide in the disk-backed frame
+            // store — `Bloom.color`'s own comment two cases below names the exact failure this guards.
+            bool(p.colorize)
         case .gradientMap(let p):
             tag(0x54)
             array(p.stops) { e, stop in

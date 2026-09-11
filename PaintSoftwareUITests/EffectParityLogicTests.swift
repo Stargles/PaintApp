@@ -127,6 +127,9 @@ final class EffectParityLogicTests: XCTestCase {
         ("halftone", .posterize(Effect.Posterize(levels: 3, screen: .halftone, screenStrength: 0.7))),
         ("grain", .noise(Effect.Noise(amount: 0.25, isMonochrome: true, seed: 7))),
         ("colourNoise", .noise(Effect.Noise(amount: 0.25, isMonochrome: false, seed: 7))),
+        // TODO (60). Hue Colorize's own branch of kHSVShift — the mode `hsvShift` above does not
+        // exercise, since `colorize` there defaults false.
+        ("hueColorize", .hsvShift(Effect.HSVShift(hueDegrees: 210, saturation: 0.6, value: 1.1, colorize: true))),
     ]
 
     /// Each effect at the parameters that mean "do nothing", which is a different question from the

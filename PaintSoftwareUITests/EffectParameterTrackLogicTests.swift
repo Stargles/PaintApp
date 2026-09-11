@@ -67,16 +67,21 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// **Hand-typed for `EffectParameterCharacterizationTests`' reason**: `Effect` cannot be
-    /// `CaseIterable`, so nothing in this suite would notice a sixteenth effect. Sixteen entries
-    /// over fifteen cases, both blurs listed.
+    /// `CaseIterable`, so nothing in this suite would notice a sixteenth effect. Nineteen entries
+    /// over fifteen cases — both blurs listed, and TODO (60)'s Dither/Halftone (`Posterize.screen`)
+    /// and Hue Colorize (`HSVShift.colorize`) for the identical reason, mirroring
+    /// `EffectParameterCharacterizationTests.everyMenuEntry`.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
+        .hsvShift(Effect.HSVShift(hueDegrees: 210, saturation: 0.5, colorize: true)),
         .gradientMap(Effect.GradientMap()),
         .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),
+        .posterize(Effect.Posterize(screen: .ordered, screenStrength: 1)),
+        .posterize(Effect.Posterize(screen: .halftone, screenStrength: 1)),
         .blur(Effect.Blur(radius: 8)),
         .blur(Effect.Blur(radius: 12, angleDegrees: 0, isDirectional: true)),
         .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
@@ -221,9 +226,10 @@ final class EffectParameterTrackLogicTests: XCTestCase {
 
     // MARK: - Scope: which parameter kinds this stage drives
 
-    /// **The twelve parameters stage 2 refuses, listed by name** — nine the day this test was
-    /// written, plus TODO (60)'s `bloom.color` (`outline.color`'s twin) and Recolour's
-    /// `recolor.entries` and `recolor.preserveShading`.
+    /// **The thirteen parameters stage 2 refuses, listed by name** — nine the day this test was
+    /// written, plus `bloom.color` (`outline.color`'s twin), Recolour's `recolor.entries` and
+    /// `recolor.preserveShading`, and TODO (60)'s `hsvShift.colorize` (`blur.directional`'s twin —
+    /// swaps what the other two HSV Shift knobs mean and the effect's own name).
     ///
     /// A test rather than a comment because the alternative to refusing them is worse than not
     /// shipping them: a `.stepped` field driven by a `Double` curve renders as a staircase the graph
@@ -252,12 +258,13 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "posterize.screen",     // .stepped — half a Bayer screen is not a screen
             "recolor.entries",      // .notAnimatable — TODO (60)'s ruling: the colour list is not keyed
             "recolor.preserveShading", // .stepped — a boolean
+            "hsvShift.colorize",    // .stepped — TODO (60), `blur.directional`'s twin
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
         XCTAssertEqual(animatable.count, 31,
-                       "31 of the 43 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+                       "31 of the 44 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 43, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 44, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as

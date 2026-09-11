@@ -428,6 +428,9 @@ struct EffectParams {
     float curvature;
     float vignette;
     float aberration;
+    // TODO (60) — which of HSV Shift's two readings hueTurns/saturation/value carry. See the Swift
+    // declaration this mirrors.
+    uint  isColorize;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -633,6 +636,17 @@ static inline float3 effectChannels(uint kind, constant EffectParams &params, co
             return (c * params.contrast + (0.5f - 0.5f * params.contrast)) * params.brightness;
 
         case kEffectHSVShift: {
+            // TODO (60) — Hue Colorize. Mirrors `EffectReference`'s Swift branch line for line: see
+            // that file's comment for what `k` is and why the solve clamps rather than overshoots.
+            if (params.isColorize != 0u) {
+                float hue = params.hueTurns;
+                float s = saturate(params.saturation);
+                float targetLum = saturate(lum(c) * params.value);
+                float3 full = hsbToRGB(float3(hue, s, 1.0f));
+                float k = lum(full);
+                float v = k > 0.0f ? saturate(targetLum / k) : 0.0f;
+                return hsbToRGB(float3(hue, s, v));
+            }
             float3 hsb = rgbToHSB(c);
             float s = saturate(hsb.y * params.saturation);
             float v = saturate(hsb.z * params.value);

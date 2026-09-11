@@ -484,4 +484,147 @@ final class OptionsPanelUITests: PaintUITestCase {
             the render.
             """)
     }
+
+    // MARK: - TODO (60): Dither and Hue Colorize, the two menu entries this item adds
+
+    /// The distinct red-channel byte values over a small grid inside `dxRange`×`dyRange` — a grey
+    /// stroke's R, G and B bytes move together, so the red channel alone already says how many
+    /// distinct output levels are present. A flat `Posterize` reads one value; an ordered-screen
+    /// dither reads more than one, over the same input, which is `Effect.Screen`'s own
+    /// `testTheOrderedScreenBreaksAFlatColourIntoTwoQuantizerSteps` proved at the model layer —
+    /// this is that claim driven through the real menu and the real render, `CLAUDE.md`'s
+    /// "prove the artist can use it" rule.
+    private func distinctRedValues(_ canvas: XCUIElement, dxRange: ClosedRange<Double>,
+                                   dyRange: ClosedRange<Double>, samplesPerAxis: Int = 12) throws -> Set<UInt8> {
+        let (width, height, buffer) = try canvasBytes(canvas)
+        var values: Set<UInt8> = []
+        for i in 0...samplesPerAxis {
+            let dx = dxRange.lowerBound + (dxRange.upperBound - dxRange.lowerBound) * Double(i) / Double(samplesPerAxis)
+            let x = min(max(Int(dx * Double(width)), 0), width - 1)
+            for j in 0...samplesPerAxis {
+                let dy = dyRange.lowerBound + (dyRange.upperBound - dyRange.lowerBound) * Double(j) / Double(samplesPerAxis)
+                let y = min(max(Int(dy * Double(height)), 0), height - 1)
+                values.insert(buffer[(y * width + x) * 4])
+            }
+        }
+        return values
+    }
+
+    /// **TODO (60), cold start: Dither is reachable from the menu, shows its Screen Strength slider,
+    /// and actually breaks a flat stroke into a pattern — the same claim
+    /// `RecolorEffectLogicTests`-style model tests make, driven through the real app.** `0x6A6A6A`
+    /// is chosen so `Posterize`'s own quantizer (`levels: 4`, the catalogue's default) lands the value
+    /// safely mid-step rather than on a step boundary — `c·3 ≈ 1.25`, a quarter of the way between two
+    /// integers in either direction — so a flat `Posterize` reads one level everywhere and the ordered
+    /// screen's ±0.47-wide swing around 0.5 still crosses into the next one for roughly half the
+    /// dither matrix. See `Effect.Posterize`'s doc for the formula this arithmetic is checking.
+    func testPickingDitherRevealsItsControlsAndBreaksAFlatGreyIntoAPattern() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+        let brushHex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(brushHex.waitForExistence(timeout: 5))
+        setHexField(app, brushHex, to: "6A6A6A")
+        colorButton.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.2, dy: 0.5), to: CGVector(dx: 0.8, dy: 0.5))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let posterizeItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.posterize")
+        XCTAssertTrue(posterizeItem.waitForExistence(timeout: 5), "The menu should list Posterize")
+        posterizeItem.tap()
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let flat = try settled { try distinctRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.45...0.55) }
+        attach(app, "posterize-flat")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let ditherItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.dither")
+        XCTAssertTrue(ditherItem.waitForExistence(timeout: 5), "The menu should list Dither")
+        ditherItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let strengthSlider = app.sliders["effectSettings.screenStrength"]
+        XCTAssertTrue(strengthSlider.waitForExistence(timeout: 5),
+                      "Dither's Screen Strength slider did not open — the artist cannot reach it")
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let dithered = try settled { try distinctRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.45...0.55) }
+        attach(app, "posterize-dithered")
+
+        XCTAssertEqual(flat.count, 1, "Fixture premise: a flat grey posterizes to one level. Got \(flat)")
+        XCTAssertGreaterThan(dithered.count, 1,
+                             "Dither must break the same flat grey into more than one level. Got \(dithered)")
+        XCTAssertNotEqual(flat, dithered, "Dither's drawn pixels must differ from plain Posterize's")
+    }
+
+    /// **TODO (60), cold start: Hue Colorize is reachable from the menu, shows Hue/Saturation/the
+    /// Colorize toggle, and changing Hue actually changes the colour a grey stroke takes on.** Grey
+    /// rather than black or white so `EffectReference`'s colorize branch has a non-degenerate `Lum` to
+    /// preserve — `Effect.HSVShift.colorize`'s doc names why the two extremes are special cases.
+    /// −180° and 0° are chosen for maximum contrast on the "redness" readout `maxRedness` already uses
+    /// for Bloom above: −180°≡180° is cyan-ish (green+blue, low R−G) and 0° is red (high R−G).
+    func testReachingHueColorizeFromAFreshDocumentChangesTheStrokesHue() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+        let brushHex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(brushHex.waitForExistence(timeout: 5))
+        setHexField(app, brushHex, to: "808080")
+        colorButton.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let colorizeItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.huecolorize")
+        XCTAssertTrue(colorizeItem.waitForExistence(timeout: 5), "The menu should list Hue Colorize")
+        colorizeItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let hueSlider = app.sliders["effectSettings.hue"]
+        XCTAssertTrue(hueSlider.waitForExistence(timeout: 5),
+                      "Hue Colorize's Hue slider did not open — the artist cannot reach it")
+        XCTAssertTrue(app.sliders["effectSettings.saturation"].exists, "…nor Saturation")
+        let colorizeToggle = app.switches["effectSettings.colorize"]
+        XCTAssertTrue(colorizeToggle.exists, "…nor the Colorize toggle that got the artist here")
+        XCTAssertEqual(colorizeToggle.value as? String, "1", "Picking Hue Colorize must leave it on")
+
+        hueSlider.adjust(toNormalizedSliderPosition: 0.0)   // −180°, cyan-ish
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let cyanish = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.4...0.6) }
+        attach(app, "hue-colorize-cyan")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.effectSettings"].tap()
+        XCTAssertTrue(hueSlider.waitForExistence(timeout: 5), "Reopening should show the same Hue slider")
+        hueSlider.adjust(toNormalizedSliderPosition: 0.5)   // 0°, red
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let reddish = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.4...0.6) }
+        attach(app, "hue-colorize-red")
+
+        XCTAssertGreaterThan(reddish, cyanish + 15, """
+            Dragging Hue Colorize's Hue slider from −180° to 0° must change the colour it paints. \
+            Cyan-ish reading \(cyanish), red reading \(reddish) — close readings mean the slider is \
+            not reaching the render.
+            """)
+    }
 }

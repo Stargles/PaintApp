@@ -187,6 +187,27 @@ enum EffectReference {
             return contrasted * params.brightness
 
         case kHSVShift:
+            // TODO (60) — Hue Colorize. `hueTurns`/`saturation` stop being a shift on the pixel's own
+            // HSB and become the constant hue/saturation every pixel is pushed toward; `value` stays
+            // a multiplier, but on the pixel's own `Lum` rather than on its own `V` — solved back
+            // through `V` so the picture keeps its own light and dark. See `Effect.HSVShift.colorize`
+            // for the reason (a naive `hsb.v * value` cannot reach a mid pixel's `Lum` at every hue
+            // once saturation is past about a half) and `Composite.metal`'s mirror of this branch.
+            if params.isColorize != 0 {
+                let hue = Double(params.hueTurns)
+                let sat = min(max(Double(params.saturation), 0), 1)
+                let targetLum = min(max(Double(luminance(c)) * Double(params.value), 0), 1)
+                let full = ColorMath.hsbToRGB(h: hue, s: sat, v: 1)
+                // `k` is this hue/saturation's own `Lum` at full brightness — the ceiling `V` can
+                // reach. Solving `v = targetLum / k` and clamping is what turns "keep the lightness"
+                // into a number: exact whenever the target is inside the ceiling, and held at the
+                // ceiling (never above, never below) on the rest, which is a gamut limit rather than
+                // an approximation this kernel could tighten.
+                let k = Double(luminance(SIMD3<Float>(Float(full.r), Float(full.g), Float(full.b))))
+                let v = k > 0 ? min(max(targetLum / k, 0), 1) : 0
+                let rgb = ColorMath.hsbToRGB(h: hue, s: sat, v: v)
+                return SIMD3<Float>(Float(rgb.r), Float(rgb.g), Float(rgb.b))
+            }
             let hsb = ColorMath.rgbToHSB(r: Double(c.x), g: Double(c.y), b: Double(c.z))
             let saturation = min(max(hsb.s * Double(params.saturation), 0), 1)
             let value = min(max(hsb.v * Double(params.value), 0), 1)

@@ -113,10 +113,22 @@ enum Effect: Equatable {
         case .levels:              return "Levels"
         case .curves:              return "Curves"
         case .brightnessContrast:  return "Brightness / Contrast"
-        case .hsvShift:            return "HSV Shift"
+        // TODO (60). The Blur precedent: one case, two names, split by a field rather than by a
+        // second `case`. `colorize` swaps what `hueDegrees`/`saturation` mean (an absolute target
+        // instead of a relative shift), which is a different enough effect to want its own row in
+        // the menu, and `EffectCatalog.isCurrent` already keys on `displayName` for exactly this.
+        case .hsvShift(let hsv):   return hsv.colorize ? "Hue Colorize" : "HSV Shift"
         case .gradientMap:         return "Gradient Map"
         case .chromaticAberration: return "Chromatic Aberration"
-        case .posterize:           return "Posterize"
+        // TODO (60). Dither and Halftone are `Posterize` with its `screen` set — §7 already grouped
+        // the three as one quantizer, three screens, and `Blur.isDirectional` is the precedent for
+        // stating that as a `displayName` split rather than a third and fourth `case`.
+        case .posterize(let post):
+            switch post.screen {
+            case .none:     return "Posterize"
+            case .ordered:  return "Dither"
+            case .halftone: return "Halftone"
+            }
         case .noise:               return "Noise"
         case .blur(let blur):      return blur.isDirectional ? "Directional Blur" : "Gaussian Blur"
         case .bloom:               return "Bloom"
@@ -313,9 +325,35 @@ extension Effect {
     /// author's hand in one sitting.
     struct HSVShift: Equatable {
         /// Degrees, wrapping. Artist-facing units; the conversion helpers take turns.
+        ///
+        /// **Two meanings, chosen by `colorize` below.** Off, this rotates the pixel's own hue by
+        /// this many degrees, exactly as it always has. On, it *is* the hue every pixel takes —
+        /// Photoshop's Hue/Saturation → Colorize, the owner's *"color correcting images to look like
+        /// the background"* — so the slider's travel is unchanged (hue is cyclic; −180…180 already
+        /// covers the wheel either way) and only the kernel's interpretation moves.
         var hueDegrees: Double = 0
+        /// Off, a multiplier on the pixel's own saturation (0 flattens it, 2 doubles it, unbounded
+        /// above). On, the absolute saturation every pixel takes, clamped 0…1 in the kernel — the UI
+        /// range still runs 0…2, which is harmless: a colorize saturation past 1 just holds at fully
+        /// saturated rather than doing anything stranger.
         var saturation: Double = 1
+        /// Unchanged by `colorize` — see its own doc: a multiplier either way, just on a different
+        /// base (the pixel's own `V` when off, a lightness-preserving `V` solved for the target hue
+        /// and saturation when on).
         var value: Double = 1
+        /// **TODO (60) — Hue Colorize, a mode on this effect rather than a new one**, because it is
+        /// the same three knobs read a different way: `hueDegrees` and `saturation` stop being a
+        /// shift and become the constant every pixel is pushed toward, and `EffectReference`'s
+        /// colorize branch solves for the `V` that keeps the pixel's own `Lum` (the `0.3R+0.59G+0.11B`
+        /// this file already uses for `GradientMap`) — so a photo takes on the target hue while
+        /// keeping its own light and dark, which a naive `hsbToRGB(hue, sat, v * value)` would not:
+        /// at high saturation `v` alone cannot reach a mid pixel's `Lum` for every hue (a fully
+        /// saturated blue's own ceiling is `Lum ≈ 0.11`), so the solve clamps there and only there —
+        /// a physical gamut limit, not a bug, and the reason the catalogue's own Hue Colorize prototype
+        /// picks a saturation that keeps the identity fixture in `HueColorizeEffectLogicTests` inside
+        /// the reachable range at every hue. Default `false` so every document saved before this field
+        /// existed decodes into the shift it always was — `HSVShift`'s own guarantee, extended.
+        var colorize: Bool = false
     }
 
     /// Luminance in, colour out — the gradient sampled at the pixel's own brightness.
@@ -851,6 +889,12 @@ struct EffectParams: Equatable {
     var curvature: Float = 0
     var vignette: Float = 0
     var aberration: Float = 0
+    /// **TODO (60) — which of HSV Shift's two readings `hueTurns`/`saturation`/`value` carry.** A
+    /// `UInt32` flag rather than a fifth reused scalar, for the same reason `screen`/`isMonochrome`
+    /// are their own fields: the kernel branches on it before it touches any of the three, so folding
+    /// it into one of them would make "0" ambiguous between "shift by nothing" and "colorize toward
+    /// hue 0". Appended at the end for the reason every field since the colour triple was.
+    var isColorize: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -925,10 +969,13 @@ extension Effect {
             p.contrast = Float(bc.contrast)
         case .hsvShift(let hsv):
             // Turns rather than degrees, because that is the unit `ColorMath` works in and the
-            // conversion belongs on the side that has a `Double` to do it in.
+            // conversion belongs on the side that has a `Double` to do it in. The same two fields
+            // carry the colorize reading too — `isColorize` is what tells the kernel which one it
+            // is holding, not a different pair of scalars.
             p.hueTurns = Float(hsv.hueDegrees / 360)
             p.saturation = Float(hsv.saturation)
             p.value = Float(hsv.value)
+            p.isColorize = hsv.colorize ? 1 : 0
         case .gradientMap(let map):
             p.mix = Float(map.mix)
         case .chromaticAberration(let ca):
@@ -1607,13 +1654,16 @@ extension Effect.BrightnessContrast: Codable {
 }
 
 extension Effect.HSVShift: Codable {
-    private enum CodingKeys: String, CodingKey { case hueDegrees, saturation, value }
+    private enum CodingKeys: String, CodingKey { case hueDegrees, saturation, value, colorize }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         hueDegrees = try c.decodeIfPresent(Double.self, forKey: .hueDegrees) ?? 0
         saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 1
         value = try c.decodeIfPresent(Double.self, forKey: .value) ?? 1
+        // TODO (60). Absent means "saved before this field existed" — decodes to false, the shift
+        // this effect always was, so a document from before Hue Colorize shipped renders unchanged.
+        colorize = try c.decodeIfPresent(Bool.self, forKey: .colorize) ?? false
     }
 }
 
@@ -2127,6 +2177,11 @@ extension Effect {
                          ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
                 l.double("hsvShift.value", "Value", "value", \.value,
                          ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
+                // TODO (60). Structural, `blur.directional`'s shape exactly: it swaps what Hue and
+                // Saturation above mean (a relative shift vs. an absolute target) and the effect's
+                // own `displayName`, so a `Double` curve tweening it would tween between two
+                // different readings of the other two knobs rather than any one quantity.
+                l.boolean("hsvShift.colorize", "Colorize", "colorize", \.colorize),
             ]
 
         case .gradientMap:

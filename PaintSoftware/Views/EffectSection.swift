@@ -22,6 +22,15 @@ import SwiftUI
 ///   blur dialogs open at a nonzero radius for the same reason. `Effect.Blur`'s own default stays 0 —
 ///   that is the *type's* identity and two tests depend on it — and the difference between the two is
 ///   the whole reason these are prototypes here rather than `.init()` at the call site.
+/// * **Dither, Halftone and Hue Colorize (TODO (60)) are neither** — `Blur.isDirectional`'s shape:
+///   one payload struct, two catalogue entries split by a field, so a "grade starts at identity"
+///   prototype and a "filter starts visible" prototype can share `Effect.Posterize`/`Effect.HSVShift`
+///   without either lying about what picking it does. Dither and Halftone are `Posterize` with its
+///   `screen` set and full strength, so the screen is visible the moment it is picked rather than
+///   faded to nothing; Hue Colorize has no identity in the ordinary sense at all — turning `colorize`
+///   on with `hue: 0, saturation: 1` would slam every pixel to fully saturated red — so it takes the
+///   filter convention: a moderate saturation chosen low enough that `HueColorizeEffectLogicTests`'
+///   Lum-preservation claim holds at every hue (`Effect.HSVShift.colorize`'s doc has the arithmetic).
 enum EffectCatalog {
 
     static let groups: [[Effect]] = [
@@ -30,11 +39,16 @@ enum EffectCatalog {
             .levels(Effect.Levels()),
             .curves(Effect.Curves()),
             .hsvShift(Effect.HSVShift()),
+            // A warm sepia tint at a saturation moderate enough to reach every pixel's own lightness —
+            // see the header note above.
+            .hsvShift(Effect.HSVShift(hueDegrees: 35, saturation: 0.5, colorize: true)),
             .gradientMap(Effect.GradientMap()),
             // Its identity: no pairs yet. The first one arrives by tapping Add in the settings bar
             // and picking its two ends off the canvas, which is the workflow TODO (60) asks for.
             .recolor(Effect.Recolor()),
             .posterize(Effect.Posterize()),
+            .posterize(Effect.Posterize(screen: .ordered, screenStrength: 1)),
+            .posterize(Effect.Posterize(screen: .halftone, screenStrength: 1)),
         ],
         [
             .blur(Effect.Blur(radius: 8)),
@@ -286,10 +300,19 @@ struct EffectSettingsBar: View {
                 onEditEnded()
             }
 
-        case .hsvShift:
+        case .hsvShift(var params):
             slider("hsvShift.hue")
             slider("hsvShift.saturation")
             slider("hsvShift.value")
+            // TODO (60). `Blur`'s `Directional` toggle exactly: swaps which of the two menu entries
+            // (HSV Shift / Hue Colorize) this payload renders and reads as, with no change to the
+            // three sliders above — see `Effect.displayName` and `Effect.HSVShift.colorize`.
+            toggleRow("Colorize", isOn: params.colorize, identifier: "colorize") {
+                params.colorize = $0; onChange(.hsvShift(params))
+            }
+            if params.colorize {
+                note("Hue and Saturation are now the colour every pixel takes; lightness is kept.")
+            }
 
         case .gradientMap(let params):
             GradientStopsEditor(stops: params.stops,
