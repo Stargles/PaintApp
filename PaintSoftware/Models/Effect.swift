@@ -95,6 +95,11 @@ enum Effect: Equatable {
     /// L∞ a pair of separable max passes would give (which paints a square ring around a round shape).
     /// See `Outline` and `Effect.maxOutlineRadius` for the cost that choice buys.
     case outline(Outline)
+    /// **Recolour — After Effects' *Change to Color*, TODO (60), designed 2026-09-10.** An ordered
+    /// list of from→to pairs, each with a tolerance measured in **Oklab** and a softness beside it;
+    /// the first entry that claims a pixel wins, and shading inside a matched region is kept by
+    /// default. One per-pixel pass, no neighbourhood. See `Recolor` for the four rulings.
+    case recolor(Recolor)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -112,6 +117,7 @@ enum Effect: Equatable {
         case .sobel:               return "Sobel"
         case .sharpen:             return "Sharpen"
         case .outline:             return "Outline"
+        case .recolor:             return "Recolour"
         }
     }
 
@@ -204,6 +210,12 @@ enum Effect: Equatable {
         switch self {
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap,
              .posterize, .noise, .chromaticAberration, .blur, .sharpen, .sobel:
+            return .backdrop
+        // **Recolour reads colour, so it takes the backdrop like the other grades.** TODO (60)
+        // records that this is what keeps it off the paper: EFFECT_BACKDROP §2 grades the artist's
+        // ink over the paper, and a from-colour the paper happens to match would recolour the paper
+        // too — which is what an adjustment layer means, and what the artist's tolerance controls.
+        case .recolor:
             return .backdrop
         case .outline:
             return .ink
@@ -455,6 +467,35 @@ extension Effect {
         var threshold: Double = 0.5
     }
 
+    /// **A list of from→to colour pairs, applied in order** — TODO (60)'s recolour, and the four
+    /// rulings that make it work on a character rather than produce fringes (settled 2026-09-10):
+    ///
+    /// 1. **Tolerance is measured in Oklab, not RGB.** RGB distance is perceptually uneven, so one
+    ///    slider cannot mean the same thing across a character's colours; an Oklab radius means
+    ///    "this much colour difference" everywhere. `ColorMath.rgbToOklab` is the conversion, the
+    ///    one the gradient map already ships.
+    /// 2. **Softness beside the tolerance.** A hard radius draws a visible ring on anti-aliased ink
+    ///    where the test flips. Full replacement inside `tolerance · (1 − softness)`, easing out to
+    ///    nothing at `tolerance` — see `RecolorTableEntry` for the ramp.
+    /// 3. **First match in the list wins.** The list is what the artist sees, so order is already
+    ///    visible; nearest-match would be invisible and impossible to reason about from the panel.
+    ///    *How* the first match wins is stated on `RecolorTableEntry`: a pixel in an entry's soft
+    ///    ring hands the remainder of its weight down the list rather than back to the original.
+    /// 4. **Shading is preserved by default.** A matched pixel moves to the target colour and keeps
+    ///    its own lightness offset from the matched centre, so a shaded fill stays shaded;
+    ///    `preserveShading = false` is the flat "replace exactly" the cases that want it get.
+    ///
+    /// **The from/to colours are not keyframeable in this version** — every non-pose channel goes
+    /// through `TargetChannel`, and a variable-length list of colours is not a thing that table
+    /// describes. `Effect.parameters` says so with `.notAnimatable`, the first parameter to answer it.
+    ///
+    /// An empty list is the identity, and is what `EffectCatalog` hands the artist: the grades start
+    /// at their identity, and the first entry arrives by tapping Add in the settings bar.
+    struct Recolor: Equatable {
+        var entries: [RecolorEntry] = []
+        var preserveShading: Bool = true
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     enum Screen: String, Codable, Equatable, CaseIterable {
@@ -487,6 +528,98 @@ struct CurvePoint: Equatable, Codable {
 struct GradientStop: Equatable, Codable {
     var position: Double
     var color: CodableColor
+}
+
+/// One from→to pair of a recolour, with its own tolerance and softness. Alpha on both colours is
+/// ignored: a grade never changes coverage, and the *from* is matched on colour alone.
+struct RecolorEntry: Equatable {
+    var from: CodableColor
+    var to: CodableColor
+    /// The Oklab distance from `from` within which a pixel is claimed at all. Oklab's `L` spans
+    /// 0...1 and `a`/`b` about ±0.4, so 0.1 is a generous "the same colour, shaded"; 0.02 is about
+    /// one just-noticeable difference.
+    var tolerance: Double = RecolorEntry.defaultTolerance
+    /// What fraction of the tolerance is the soft ring. 0 is a hard edge, 1 eases from the centre.
+    var softness: Double = RecolorEntry.defaultSoftness
+
+    static let defaultTolerance = 0.1
+    static let defaultSoftness = 0.5
+
+    /// What Add hands the artist: mid-grey to mid-grey, which recolours nothing until a swatch is
+    /// picked, at the two defaults above.
+    static var blank: RecolorEntry {
+        RecolorEntry(from: CodableColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1),
+                     to: CodableColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+    }
+}
+
+/// One recolour entry as **both kernels receive it** — `from` and `to` already in Oklab, `to` in
+/// RGB as well, the two radii resolved. Mirrored field for field by `RecolorTableEntry` in
+/// `Composite.metal`, under the same all-scalar layout rule `EffectParams` states: twelve 4-byte
+/// floats, so the two declarations agree if they list the same names in the same order.
+///
+/// **Resolved here, once, in `Double`, for the reason `Effect.lookupTable` is.** The alternative is
+/// `ColorMath.rgbToOklab` on the *entry* in both kernels, and a cube root evaluated once by Metal
+/// with fast math on and once by libm is exactly the disagreement a parity sweep would then report as
+/// a recolour bug. Neither backend converts an entry; both convert the *pixel*, which they must.
+///
+/// **The weight ramp**, stated once so both kernels transcribe the same sentence. With `d` the
+/// pixel's Oklab distance from `from`: weight is 1 at `d ≤ inner`, 0 at `d ≥ tolerance`, and in
+/// between it is `smoothstep` of `(tolerance − d) / (tolerance − inner)` — monotone, and with a
+/// zero slope at both ends so neither edge of the ring leaves a crease on anti-aliased ink.
+///
+/// **How "first match wins" is applied**, and it is a refinement of the literal rule rather than a
+/// departure from it. The literal reading — "take the first entry whose distance is within
+/// tolerance, at its own weight" — puts a hard seam at every overlap boundary: a pixel just inside
+/// entry 1's ring keeps most of its *original* colour, and the pixel beside it, just outside, is
+/// fully entry 2's. That seam is exactly what softness exists to remove. So an entry takes its
+/// weight out of whatever weight is **still unclaimed**, in list order, and what no entry claims
+/// stays the original: inside an entry's inner radius it takes everything and nothing below it is
+/// consulted, in its ring it takes its share and the rest falls through to the next entry, and the
+/// result is continuous wherever each entry's own ramp is. Order still decides every contested pixel.
+struct RecolorTableEntry: Equatable {
+    var fromL: Float = 0
+    var fromA: Float = 0
+    var fromB: Float = 0
+    var toL: Float = 0
+    var toA: Float = 0
+    var toB: Float = 0
+    var toRed: Float = 0
+    var toGreen: Float = 0
+    var toBlue: Float = 0
+    /// The outer radius, in Oklab distance. A pixel at or past it is not this entry's at all.
+    var tolerance: Float = 0
+    /// The inner radius, `tolerance · (1 − softness)`, inside which the weight is 1.
+    var inner: Float = 0
+    /// Padding to twelve floats, so a later field cannot shift the stride.
+    var reserved: Float = 0
+
+    init() {}
+
+    init(_ entry: RecolorEntry) {
+        let from = ColorMath.rgbToOklab(r: min(max(entry.from.red, 0), 1),
+                                        g: min(max(entry.from.green, 0), 1),
+                                        b: min(max(entry.from.blue, 0), 1))
+        let toRGB = (r: min(max(entry.to.red, 0), 1), g: min(max(entry.to.green, 0), 1),
+                     b: min(max(entry.to.blue, 0), 1))
+        let to = ColorMath.rgbToOklab(r: toRGB.r, g: toRGB.g, b: toRGB.b)
+        fromL = Float(from.L); fromA = Float(from.a); fromB = Float(from.b)
+        toL = Float(to.L); toA = Float(to.a); toB = Float(to.b)
+        toRed = Float(toRGB.r); toGreen = Float(toRGB.g); toBlue = Float(toRGB.b)
+        let outer = entry.tolerance.isFinite ? max(entry.tolerance, 0) : 0
+        let softness = entry.softness.isFinite ? min(max(entry.softness, 0), 1) : 0
+        tolerance = Float(outer)
+        inner = Float(outer * (1 - softness))
+    }
+
+    /// The ramp above, on one distance. Shared by `EffectReference` and by the tests that pin the
+    /// ring; the shader spells the same three lines in `recolorWeight`.
+    static func weight(distance d: Float, tolerance: Float, inner: Float) -> Float {
+        if d <= inner { return 1 }
+        if d >= tolerance { return 0 }
+        let u = (tolerance - d) / (tolerance - inner)
+        return u * u * (3 - 2 * u)
+    }
 }
 
 // MARK: - What the kernels are given
@@ -551,6 +684,13 @@ struct EffectParams: Equatable {
     /// makes the end of the block the one position where adding fields cannot shift an existing one.
     var originX: UInt32 = 0
     var originY: UInt32 = 0
+    /// **How many entries of the recolour table are live**, and whether the recolour keeps each
+    /// pixel's lightness offset — TODO (60). Appended at the end for the reason every field since
+    /// the colour triple was: the one position a new field cannot shift an existing one. The table
+    /// itself is a separate binding (`Effect.recolorTable`), because a list does not fit a flat
+    /// block and `setBytes` carries it as `weights` is carried.
+    var recolorEntryCount: UInt32 = 0
+    var preserveShading: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -607,6 +747,7 @@ extension Effect {
         // invariant this property exists to serve) hold without a wasted copy pass.
         case .sharpen:             return 7
         case .outline:             return 12
+        case .recolor:             return 13
         }
     }
 
@@ -676,6 +817,10 @@ extension Effect {
             p.colorR = Float(min(max(outline.color.red, 0), 1))
             p.colorG = Float(min(max(outline.color.green, 0), 1))
             p.colorB = Float(min(max(outline.color.blue, 0), 1))
+        case .recolor(let recolor):
+            // The count the kernel walks is the *table's*, which is capped — see `recolorTable`.
+            p.recolorEntryCount = UInt32(min(recolor.entries.count, Self.maxRecolorEntries))
+            p.preserveShading = recolor.preserveShading ? 1 : 0
         }
         return p
     }
@@ -769,6 +914,24 @@ extension Effect {
         }
     }
 
+    /// **The recolour's entries, resolved for the kernels** — one `RecolorTableEntry` per entry, in
+    /// list order, and **bound unconditionally**, one zeroed element long for every other effect, so
+    /// the binding contract does not vary by kind (the same rule `weights` and `lookupTable` follow).
+    /// `EffectParams.recolorEntryCount` says how many of them are live; a zeroed entry has tolerance 0
+    /// and so claims nothing even if it were walked.
+    ///
+    /// Capped at `maxRecolorEntries`: the table reaches the GPU through `setBytes`, whose limit is
+    /// 4 KB, and 64 entries of 48 bytes is 3 KB. The settings bar stops offering Add at the cap.
+    var recolorTable: [RecolorTableEntry] {
+        guard case .recolor(let recolor) = self, !recolor.entries.isEmpty else { return [RecolorTableEntry()] }
+        return recolor.entries.prefix(Self.maxRecolorEntries).map(RecolorTableEntry.init)
+    }
+
+    /// The most entries a recolour renders. **A real limit, not a defensive one**, for `maxBlurTaps`'
+    /// reason: both backends have to agree on what an over-long list means, and here it means the
+    /// first 64 are live. 4 KB is `setBytes`' ceiling and 64 × 48 bytes sits under it.
+    static let maxRecolorEntries = 64
+
     /// `2 · maxBlurTaps + 1` samples per pass is the ceiling a blur's cost is measured against; see
     /// `Blur` for why the cap is a real limit rather than a defensive one.
     static let maxBlurTaps = 128
@@ -814,7 +977,8 @@ extension Effect {
         case .chromaticAberration(let aberration):
             guard aberration.offsetY.isFinite else { return 0 }
             return Int(abs(aberration.offsetY).rounded(.up)) + 1
-        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise:
+        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
+             .recolor:
             return 0
         }
     }
@@ -832,7 +996,7 @@ extension Effect {
         case .noise: return true
         case .posterize(let posterize): return posterize.screen != .none
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
-             .blur, .bloom, .sobel, .sharpen, .outline:
+             .blur, .bloom, .sobel, .sharpen, .outline, .recolor:
             return false
         }
     }
@@ -1123,7 +1287,7 @@ extension Effect: Codable {
 
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
-             posterize, noise, blur, bloom, sobel, sharpen, outline
+             posterize, noise, blur, bloom, sobel, sharpen, outline, recolor
     }
 
     private var kind: Kind {
@@ -1141,6 +1305,7 @@ extension Effect: Codable {
         case .sobel:               return .sobel
         case .sharpen:             return .sharpen
         case .outline:             return .outline
+        case .recolor:             return .recolor
         }
     }
 
@@ -1168,6 +1333,7 @@ extension Effect: Codable {
         case .sobel:               self = .sobel(try params(Sobel.self, Sobel()))
         case .sharpen:             self = .sharpen(try params(Sharpen.self, Sharpen()))
         case .outline:             self = .outline(try params(Outline.self, Outline()))
+        case .recolor:             self = .recolor(try params(Recolor.self, Recolor()))
         }
     }
 
@@ -1188,6 +1354,7 @@ extension Effect: Codable {
         case .sobel(let p):               try container.encode(p, forKey: .params)
         case .sharpen(let p):             try container.encode(p, forKey: .params)
         case .outline(let p):             try container.encode(p, forKey: .params)
+        case .recolor(let p):             try container.encode(p, forKey: .params)
         }
     }
 }
@@ -1340,6 +1507,32 @@ extension Effect.Outline: Codable {
     }
 }
 
+extension Effect.Recolor: Codable {
+    private enum CodingKeys: String, CodingKey { case entries, preserveShading }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try c.decodeIfPresent([RecolorEntry].self, forKey: .entries) ?? []
+        preserveShading = try c.decodeIfPresent(Bool.self, forKey: .preserveShading) ?? true
+    }
+}
+
+/// **The two colours are required and the two radii are not**, and the split is `CurvePoint`'s
+/// argument applied per field: an entry without a colour at either end is corrupt rather than old,
+/// while a tolerance or softness added later is a knob a document written before it simply has the
+/// default of. Encodes synthesized, like every payload above.
+extension RecolorEntry: Codable {
+    private enum CodingKeys: String, CodingKey { case from, to, tolerance, softness }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        from = try c.decode(CodableColor.self, forKey: .from)
+        to = try c.decode(CodableColor.self, forKey: .to)
+        tolerance = try c.decodeIfPresent(Double.self, forKey: .tolerance) ?? Self.defaultTolerance
+        softness = try c.decodeIfPresent(Double.self, forKey: .softness) ?? Self.defaultSoftness
+    }
+}
+
 // MARK: - The parameter table
 //
 // **KEYFRAMES.md §8 stage 1.** Until this table existed nothing in the app could *name* an effect
@@ -1382,9 +1575,12 @@ enum EffectParameterAnimation: String, Equatable {
     /// and `GradientMap.stops` are the only two, and both are ordered lists whose *n*-th element has
     /// an obvious counterpart in another list of the same length and none at all otherwise.
     case componentwise
-    /// Cannot be keyed at any step. **Nothing answers this today** and it is here so that a later
-    /// parameter which genuinely cannot be animated — a file reference, a device-dependent handle —
-    /// has an answer that is not `.stepped` chosen by default.
+    /// Cannot be keyed at any step. **`recolor.entries` is the one answer today** — TODO (60)'s
+    /// ruling that the from/to colours are not keyframeable in this version: a variable-length list
+    /// of colours is a variable number of channels, which `TargetChannel`'s table does not describe
+    /// and is not to be bent to. It is here rather than `.componentwise` so that a channel set is a
+    /// decision someone makes later and not something the list inherits from the gradient stops by
+    /// default.
     case notAnimatable
 }
 
@@ -1403,6 +1599,8 @@ enum EffectParameterValue: String, Equatable {
     case colour
     case curvePoints
     case gradientStops
+    /// `Recolor.entries` — a list of from→to pairs, and the one `.notAnimatable` value.
+    case recolorEntries
 }
 
 /// Whether every value in `EffectParameter.modelDomain` renders distinctly.
@@ -1622,7 +1820,7 @@ extension Effect {
     /// channels would silently not exist, and the first symptom would be an artist unable to
     /// animate a knob they can see.
     ///
-    /// **Thirteen cases, fourteen menu entries.** Gaussian and Directional Blur are one case split
+    /// **Fourteen cases, fifteen menu entries.** Gaussian and Directional Blur are one case split
     /// by `Blur.isDirectional`, so they share one branch here and `blur.directional` is itself a
     /// parameter — which is the honest shape, since an artist can flip a Gaussian blur into a
     /// directional one without changing effect.
@@ -1798,6 +1996,21 @@ extension Effect {
                 l.compound("outline.color", "Colour", "color",
                            value: .colour, animation: .continuous,
                            componentDomain: 0...1, keyPath: \Outline.color),
+            ]
+
+        case .recolor:
+            let l = EffectCaseLens<Recolor>(extract: { if case .recolor(let p) = $0 { return p }; return nil },
+                                           embed: { .recolor($0) })
+            return [
+                // **The first `.notAnimatable` parameter** — the owner's ruling that the colour list
+                // is not keyframeable in this version (`Recolor`'s doc). The control is the list's
+                // Add button, the one control that exists whatever the list holds; each entry's
+                // swatches and sliders carry `effectSettings.recolorEntry.<n>.…` of their own.
+                l.compound("recolor.entries", "Colours", "recolorAddEntry",
+                           value: .recolorEntries, animation: .notAnimatable,
+                           componentDomain: 0...1, keyPath: \Recolor.entries),
+                l.boolean("recolor.preserveShading", "Preserve Shading", "preserveShading",
+                          \.preserveShading),
             ]
         }
     }

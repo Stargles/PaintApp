@@ -31,6 +31,9 @@ enum EffectCatalog {
             .curves(Effect.Curves()),
             .hsvShift(Effect.HSVShift()),
             .gradientMap(Effect.GradientMap()),
+            // Its identity: no pairs yet. The first one arrives by tapping Add in the settings bar
+            // and picking its two ends off the canvas, which is the workflow TODO (60) asks for.
+            .recolor(Effect.Recolor()),
             .posterize(Effect.Posterize()),
         ],
         [
@@ -202,6 +205,11 @@ struct EffectSettingsBar: View {
     /// act that opens and closes its bracket in the same breath, and there is no motion for a take
     /// to capture. Starting playback on a toggle flip would be a mode the artist did not ask for.
     var onSliderTouchDown: (EffectParameter) -> Void = { _ in }
+    /// **Which grade home this bar is editing** — the value the recolour's eyedropper buttons arm
+    /// the tool with, so a pick lands on this node's pair and not on the brush (TODO (60)). Nil is
+    /// a bar with no home to pick for, which is no shipped caller; it is optional so the previews
+    /// and any harness that builds a bar around a bare `Effect` need not invent one.
+    var pickTarget: KeyframeTarget? = nil
     var onBack: () -> Void
     var onClose: () -> Void
 
@@ -377,6 +385,21 @@ struct EffectSettingsBar: View {
                 params.color = picked; onChange(.outline(params))
             }
             note("Painted outside the shape only; pixels already inside are left untouched.")
+
+        case .recolor(var params):
+            // The list first, the way the gradient map's stops come first — it is the effect.
+            RecolorEntriesEditor(entries: params.entries,
+                                 canvasManager: canvasManager,
+                                 pickTarget: pickTarget,
+                                 onChange: { params.entries = $0; onChange(.recolor(params)) },
+                                 onEditBegan: onEditBegan,
+                                 onEditEnded: onEditEnded)
+            toggleRow("Preserve Shading", isOn: params.preserveShading, identifier: "preserveShading") {
+                params.preserveShading = $0; onChange(.recolor(params))
+            }
+            note(params.entries.isEmpty
+                 ? "Add a colour, then tap its eyedropper and tap the canvas to pick what to change."
+                 : "The first colour in the list that matches wins. Preserve Shading keeps each pixel's light and dark.")
         }
     }
 
@@ -1084,6 +1107,223 @@ struct GradientStopsEditor: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("effectSettings.gradientAddStop")
+    }
+}
+
+// MARK: - The recolour entries editor
+
+/// `Effect.Recolor.entries`: a row per from→to pair, each with its two swatches, an eyedropper beside
+/// each swatch, its tolerance and softness, and a remove button; then Add.
+///
+/// **Two lines per pair rather than one.** The bar is `BottomDock.preferredWidth` wide and a pair
+/// carries two swatches, two eyedroppers, two sliders with readouts and a remove button; on one line
+/// the sliders would be a third of the travel every other slider in this bar gets, and at
+/// `BottomDock.minimumWidth` they would clip. The colours on the first line and the two radii on the
+/// second read as "this → that, and how loosely", which is the sentence the list is.
+///
+/// **The eyedropper is a tool, not a picker.** Tapping it arms `Tool.eyedropper` for *this* swatch
+/// (`CanvasManager.selectEyedropper(for:)`), and the artist's next canvas tap fills the swatch and
+/// hands the tool back — with this panel still up, which is `DrawingView`'s `interactionBegan`
+/// exception. The armed button is drawn highlighted so the artist can see which swatch the next tap
+/// is for. Tapping the swatch itself opens the colour picker, the route every other colour in this
+/// bar already has.
+///
+/// **Add is refused at `Effect.maxRecolorEntries`** rather than accepting an entry the kernels would
+/// not walk — a row that renders nothing and says nothing is the failure this whole bar exists to
+/// avoid.
+struct RecolorEntriesEditor: View {
+    let entries: [RecolorEntry]
+    @ObservedObject var canvasManager: CanvasManager
+    let pickTarget: KeyframeTarget?
+    var onChange: ([RecolorEntry]) -> Void
+    var onEditBegan: () -> Void
+    var onEditEnded: () -> Void
+
+    /// Which swatch's colour popover is open — `(index, end)`, one at a time, the
+    /// `GradientStopsEditor.colorPickerIndex` shape with the end added.
+    @State private var colorPicker: (index: Int, end: CanvasManager.EyedropperDestination.RecolorEnd)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(entries.indices, id: \.self) { index in
+                entryRow(index)
+            }
+            addButton
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private func entryRow(_ index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                swatch(index, .from)
+                eyedropperButton(index, .from)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.5))
+                    .accessibilityHidden(true)
+                swatch(index, .to)
+                eyedropperButton(index, .to)
+                Spacer()
+                Button {
+                    onEditBegan()
+                    var updated = entries
+                    updated.remove(at: index)
+                    onChange(updated)
+                    onEditEnded()
+                } label: {
+                    Image(systemName: "minus.circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("effectSettings.recolorEntry.\(index).remove")
+            }
+            HStack(spacing: BottomDock.rowSpacing) {
+                radiusSlider(index, "Tolerance", \.tolerance, "tolerance",
+                             range: 0...RecolorEntriesEditor.toleranceSliderCeiling)
+                radiusSlider(index, "Softness", \.softness, "softness", range: 0...1)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// The slider stops at half of Oklab's lightness axis. Past that a single entry claims most of
+    /// the picture, which is a fill tool rather than a recolour; the model accepts any value.
+    static let toleranceSliderCeiling = 0.5
+
+    private func swatch(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> some View {
+        let colour = color(index, end)
+        return Button {
+            colorPicker = (index, end)
+        } label: {
+            colour.color
+                .frame(width: 30, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)")
+        // The hex, for the reason `colorRow` gives: it survives the panel closing and reopening, so
+        // a test can confirm a pick reached the model rather than only the button it landed on.
+        .accessibilityValue(colour.color.hexString)
+        .canvasPresentation(.effectRecolorColour,
+                            isPresented: Binding(get: { colorPicker.map { $0.index == index && $0.end == end } ?? false },
+                                                 set: { if !$0 { colorPicker = nil } }),
+                            canvasManager: canvasManager,
+                            onPresent: onEditBegan, onDismiss: onEditEnded) {
+            // `supportsOpacity: false` for `GradientStopsEditor`'s reason: an entry's alpha is not
+            // the artist's to set — the from end is matched on colour alone and the to end is laid
+            // down at the pixel's own coverage.
+            ColorPickerPanel(color: Binding(
+                get: { color(index, end).color },
+                set: { picked in write(index, end, picked.effectColor) }
+            ), supportsOpacity: false)
+            .frame(width: ColorPickerPanel.popoverSize.width,
+                   height: ColorPickerPanel.popoverSize.height)
+            .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)Picker")
+        }
+    }
+
+    /// Arms the eyedropper for this swatch. **Selected while armed for exactly this swatch**, so the
+    /// artist — and a test — can tell which of the pairs' four buttons the next canvas tap is for.
+    private func eyedropperButton(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> some View {
+        let armed = isArmed(index, end)
+        return Button {
+            guard let pickTarget else { return }
+            canvasManager.selectEyedropper(for: .recolorEntry(target: pickTarget, index: index, end: end))
+        } label: {
+            Image(systemName: "eyedropper")
+                .font(.system(size: 13))
+                .foregroundColor(armed ? .blue : .white.opacity(0.7))
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 4).fill(armed ? Color.blue.opacity(0.2) : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .disabled(pickTarget == nil)
+        .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)Eyedropper")
+        .accessibilityAddTraits(armed ? .isSelected : [])
+    }
+
+    private func isArmed(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> Bool {
+        guard canvasManager.selectedTool == .eyedropper, let pickTarget,
+              case .recolorEntry(let target, let armedIndex, let armedEnd) = canvasManager.eyedropperDestination
+        else { return false }
+        return target == pickTarget && armedIndex == index && armedEnd == end
+    }
+
+    /// One of the two radii, on half a line: label, slider, readout — `EffectSettingsBar.sliderRow`
+    /// at half width, with the label column narrowed to fit two per line.
+    private func radiusSlider(_ index: Int, _ label: String, _ keyPath: WritableKeyPath<RecolorEntry, Double>,
+                              _ identifier: String, range: ClosedRange<Double>) -> some View {
+        let value = entries.indices.contains(index) ? entries[index][keyPath: keyPath] : 0
+        return HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.85))
+                .lineLimit(1)
+                .frame(width: 64, alignment: .leading)
+            Slider(value: Binding(
+                get: { value },
+                set: { newValue in
+                    guard entries.indices.contains(index) else { return }
+                    var updated = entries
+                    updated[index][keyPath: keyPath] = newValue
+                    onChange(updated)
+                }
+            ), in: range) { editing in
+                if editing { onEditBegan() } else { onEditEnded() }
+            }
+            .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(identifier)")
+            .accessibilityValue(String(format: "%.4f", value))
+            Text(String(format: "%.2f", value))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .frame(width: 36, alignment: .trailing)
+        }
+    }
+
+    private var addButton: some View {
+        let atCap = entries.count >= Effect.maxRecolorEntries
+        return Button {
+            onEditBegan()
+            onChange(entries + [RecolorEntry.blank])
+            onEditEnded()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle")
+                Text(atCap ? "Add Colour (limit \(Effect.maxRecolorEntries))" : "Add Colour")
+                    .font(.system(size: 12))
+                Spacer()
+            }
+            .foregroundColor(.white.opacity(atCap ? 0.35 : 0.85))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(atCap)
+        .accessibilityIdentifier("effectSettings.recolorAddEntry")
+    }
+
+    private func color(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> CodableColor {
+        guard entries.indices.contains(index) else {
+            return CodableColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+        }
+        switch end {
+        case .from: return entries[index].from
+        case .to:   return entries[index].to
+        }
+    }
+
+    private func write(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd, _ colour: CodableColor) {
+        guard entries.indices.contains(index) else { return }
+        var updated = entries
+        switch end {
+        case .from: updated[index].from = colour
+        case .to:   updated[index].to = colour
+        }
+        onChange(updated)
     }
 }
 

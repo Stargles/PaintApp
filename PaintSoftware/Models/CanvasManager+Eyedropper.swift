@@ -10,21 +10,66 @@ import UIKit
 
 extension CanvasManager {
 
-    /// Selects the eyedropper, remembering what to come back to.
+    /// **Where a pick lands.** The sidebar's eyedropper fills the brush swatch; the recolour panel's
+    /// fills one end of one of its pairs (TODO (60)). Everything about the *tool* — arming it, the
+    /// tap, the off-main-thread composite, the revert once the touch is up — is shared; what differs
+    /// is the buffer sampled and the field written, and both are decided by this value.
+    enum EyedropperDestination: Equatable {
+        /// `brushColor`, sampled from the composite the artist is looking at.
+        case brushColor
+        /// One end of `entry` on `target`'s recolour. **The `from` end samples what is UNDER the
+        /// effect** — see `eyedropperRecipe()` — because the picture on screen may already carry an
+        /// earlier entry's replacement, and a mapping whose source no longer exists once the artist's
+        /// own list is applied does nothing and cannot say why. The `to` end samples the screen.
+        case recolorEntry(target: KeyframeTarget, index: Int, end: RecolorEnd)
+
+        /// Which end of a recolour pair a pick fills.
+        enum RecolorEnd: Equatable { case from, to }
+
+        /// **Whether the pick is being made *for* an open panel**, which is what decides that the
+        /// canvas tap must not close it. A pick for the brush is momentary and the Select-panel
+        /// exception in `DrawingView` is the whole story there; a pick for a recolour pair is one of
+        /// several the artist is about to make from the same panel, and closing it on every one would
+        /// cost a trip back into the layer options per colour.
+        var picksIntoAnOpenPanel: Bool {
+            switch self {
+            case .brushColor: return false
+            case .recolorEntry: return true
+            }
+        }
+    }
+
+    /// Selects the eyedropper for the brush swatch, remembering what to come back to.
     ///
     /// **Not `.eyedropper` itself**, if that is somehow already current: the memory has to survive a
     /// second tap on the sidebar button, or a double-tap would strand the artist in the tool with
     /// "previous" pointing at the tool they are already in.
     func selectEyedropper() {
+        selectEyedropper(for: .brushColor)
+    }
+
+    /// Selects the eyedropper for `destination`. The one entry point; the sidebar's is the
+    /// `.brushColor` spelling of it.
+    ///
+    /// Re-arming for a *different* destination while already in the tool retargets the pick and
+    /// keeps the original "previous tool", so tapping the from-eyedropper and then the to-eyedropper
+    /// before touching the canvas fills `to`, and the tool still hands back to what the artist was
+    /// doing before either tap.
+    func selectEyedropper(for destination: EyedropperDestination) {
         if selectedTool != .eyedropper { toolBeforeEyedropper = selectedTool }
+        eyedropperDestination = destination
         selectedTool = .eyedropper
     }
 
     /// Leaves the eyedropper for whatever was selected before it, defaulting to the pen if nothing
-    /// was recorded. See `Tool.eyedropper` for why picking reverts at all.
+    /// was recorded. See `Tool.eyedropper` for why picking reverts at all — **for every
+    /// destination**: a recolour pick returns to the *panel*, which is a matter of the panel staying
+    /// open (`DrawingView`'s `interactionBegan` exception), not of the tool staying armed. Left
+    /// armed, the artist's next canvas touch would re-pick into the same swatch instead of drawing.
     func leaveEyedropper() {
         selectedTool = toolBeforeEyedropper ?? .pen
         toolBeforeEyedropper = nil
+        eyedropperDestination = .brushColor
     }
 
     // MARK: - The three steps
@@ -69,7 +114,52 @@ extension CanvasManager {
     /// the same memory ceiling everything else is.
     @MainActor
     func eyedropperRecipe() -> FrameRecipe? {
-        makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
+        eyedropperRecipe(for: eyedropperDestination)
+    }
+
+    /// Step 1 for a stated destination — `eyedropperRecipe()` reads the armed one.
+    ///
+    /// **Three of the four destinations sample the screen; a recolour pair's `from` end samples what
+    /// is UNDER the effect.** TODO (60): a recolour layer grades the layers below it, so the composite
+    /// the artist is looking at may already carry an earlier entry's replacement. Sampling that
+    /// assigns a mapping whose source no longer exists once their own list is applied — the entry
+    /// does nothing, or chains off another entry unpredictably, and neither failure says why. So the
+    /// `from` end composites **everything beneath the recolour node, with the recolour not applied**:
+    ///
+    /// - For a value layer that is `split(atLeaf:).below` — the same cut the compositor's own `.ink`
+    ///   sub-walk uses (`CoreGraphicsCompositor.gradedInkOverPaper`) — **with the paper**, because
+    ///   the recolour's input is `.backdrop` and `accumulator == paper ⊕ split(atLeaf:).below` is
+    ///   exactly the buffer the kernel is handed. So a from-colour picked off the paper matches the
+    ///   paper, which is what the effect will then recolour.
+    /// - For a folder node it is the node's own assembled composite: its children over
+    ///   **transparency**, at opacity 1 with no mask and no grade, because a node's grade mixes in
+    ///   place over what its inputs assembled and that buffer never had the paper in it.
+    ///
+    /// Sampled at native size, one pixel, off the same striped composite every other pick uses. The
+    /// `to` end has no such constraint and samples the screen like the brush does.
+    @MainActor
+    func eyedropperRecipe(for destination: EyedropperDestination) -> FrameRecipe? {
+        guard let full = makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
+        else { return nil }
+        guard case .recolorEntry(let target, _, .from) = destination else { return full }
+
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }),
+                  let below = full.tree.split(atLeaf: index)?.below else { return nil }
+            return FrameRecipe(tree: below, leaves: full.leaves, maskStacks: full.maskStacks,
+                               frame: full.frame, canvasSize: full.canvasSize,
+                               background: full.background, quality: full.quality)
+        case .folder(let id):
+            guard let node = RenderNode.find(id, in: full.tree),
+                  case .node(let op, let inputs) = node.content else { return nil }
+            let ungraded = RenderNode(id: node.id, content: .node(op: op, inputs: inputs),
+                                      opacity: 1, isVisible: true, blendMode: .normal,
+                                      isIsolated: node.isIsolated, masks: [], effect: nil)
+            return FrameRecipe(tree: [ungraded], leaves: full.leaves, maskStacks: full.maskStacks,
+                               frame: full.frame, canvasSize: full.canvasSize,
+                               background: nil, quality: full.quality)
+        }
     }
 
     /// Step 2, pure and safe from any thread — the same contract `Compositor.composite` states, and
@@ -143,8 +233,37 @@ extension CanvasManager {
             raise(.nothingToPick)
             return false
         }
-        brushColor = picked
-        ActionRecorder.ifRecording { $0.model("brushColor", picked.hexString) }
+        switch eyedropperDestination {
+        case .brushColor:
+            brushColor = picked
+            ActionRecorder.ifRecording { $0.model("brushColor", picked.hexString) }
+            return true
+        case .recolorEntry(let target, let index, let end):
+            return setRecolorEntryColor(of: target, index: index, end: end, to: picked)
+        }
+    }
+
+    /// Writes a picked colour into one end of one recolour pair — **one undo step**, through the
+    /// same `setStoredEffect` the settings bar's other rows write through. False if the target no
+    /// longer holds a recolour or the entry is gone (the artist removed it while the pick was in
+    /// flight), which is reported the way a miss is: nothing was assigned.
+    @MainActor
+    @discardableResult
+    func setRecolorEntryColor(of target: KeyframeTarget, index: Int,
+                              end: EyedropperDestination.RecolorEnd, to picked: Color) -> Bool {
+        guard case .recolor(var recolor)? = storedEffect(of: target),
+              recolor.entries.indices.contains(index) else {
+            raise(.nothingToPick)
+            return false
+        }
+        let components = picked.rgbaComponents
+        let colour = CodableColor(red: components.r, green: components.g, blue: components.b, alpha: 1)
+        switch end {
+        case .from: recolor.entries[index].from = colour
+        case .to:   recolor.entries[index].to = colour
+        }
+        setStoredEffect(of: target, to: .recolor(recolor))
+        ActionRecorder.ifRecording { $0.model("recolorEntry.\(index).\(end)", picked.hexString) }
         return true
     }
 

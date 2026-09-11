@@ -123,6 +123,7 @@ final class EffectPipelines {
 
         let lut = effect.lookupTable
         let weights = effect.weights
+        let recolor = effect.recolorTable
 
         // Constant for the whole effect, so bound once: bindings persist across dispatches within an
         // encoder, and only the two that vary per pass are re-set inside the loop.
@@ -135,6 +136,12 @@ final class EffectPipelines {
         weights.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             encoder.setBytes(base, length: raw.count, index: 3)
+        }
+        // The recolour table — one zeroed entry for every other effect, so the binding contract does
+        // not vary by kind. `Effect.maxRecolorEntries` keeps it under `setBytes`' 4 KB.
+        recolor.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            encoder.setBytes(base, length: raw.count, index: 4)
         }
 
         let tw = min(16, state.maxTotalThreadsPerThreadgroup)

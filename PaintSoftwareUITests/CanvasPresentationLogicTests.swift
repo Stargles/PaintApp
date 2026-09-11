@@ -50,6 +50,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
         "valueLayerColour": true,          // also closes an undo bracket on the way out
         "effectOutlineColour": true,       // ditto
         "effectGradientStopColour": true,
+        "effectRecolorColour": true,
         // The gallery screen mounts no `DrawingView`, so there is no canvas, no `LayerHostView` and
         // no `StrokeGestureRecognizer` for a teardown to strand. `false` here is a fact about
         // `ContentView`'s `switch screen`, not about these two sheets — move the gallery into a sheet

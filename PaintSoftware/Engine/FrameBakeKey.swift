@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Thirteen cases and their payload fields, by hand. Adding a fourteenth without touching this
+// Fourteen cases and their payload fields, by hand. Adding a fifteenth without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -442,6 +442,15 @@ private extension BakeKeyEncoder {
             double(p.width)
             encode(codableColor: p.color)
             double(p.threshold)
+        case .recolor(let p):
+            tag(0x5D)
+            array(p.entries) { e, entry in
+                e.encode(codableColor: entry.from)
+                e.encode(codableColor: entry.to)
+                e.double(entry.tolerance)
+                e.double(entry.softness)
+            }
+            bool(p.preserveShading)
         }
     }
 

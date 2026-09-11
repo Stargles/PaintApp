@@ -104,6 +104,10 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// A gradient stop's colour, in the gradient-map effect's stop list.
     case effectGradientStopColour
 
+    /// One end of a recolour pair's colour, in the recolour effect's entry list — the *swatch* route
+    /// to a colour; the eyedropper beside it is a tool, not a presentation, and closes nothing.
+    case effectRecolorColour
+
     // MARK: - The gallery
     //
     // **Neither of these registers itself, and that is correct.** `GalleryView` holds no
@@ -147,8 +151,8 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
-             .effectOutlineColour, .effectGradientStopColour:
-            // All ten are raised from chrome that sits over a mounted, touchable `CanvasView` —
+             .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour:
+            // All eleven are raised from chrome that sits over a mounted, touchable `CanvasView` —
             // five of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
             // **The rule is the same for both and that is the point of the type**: a presentation
             // left to its own dismissal is dismissed *by* the touch that lands outside it, and this

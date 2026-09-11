@@ -375,6 +375,7 @@ constant uint kEffectBloomCombine        = 9;
 constant uint kEffectSobel               = 10;
 constant uint kEffectSharpenCombine      = 11;
 constant uint kEffectOutline             = 12;
+constant uint kEffectRecolor             = 13;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
@@ -410,6 +411,22 @@ struct EffectParams {
     // every neighbourhood kernel keeps using the local `gid`, which is what the apron pays for.
     uint  originX;
     uint  originY;
+    // How many entries of the recolour table are live, and whether it keeps each pixel's lightness
+    // offset — TODO (60). Appended at the end, like everything since the colour triple.
+    uint  recolorEntryCount;
+    uint  preserveShading;
+};
+
+/// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
+/// same layout rule as `EffectParams`. `from` and `to` arrive already in Oklab (and `to` in RGB as
+/// well), resolved once in Swift; only the *pixel* is converted here.
+struct RecolorTableEntry {
+    float fromL, fromA, fromB;
+    float toL, toA, toB;
+    float toRed, toGreen, toBlue;
+    float tolerance;
+    float inner;
+    float reserved;
 };
 
 /// One entry of the resolved transfer table.
@@ -500,6 +517,86 @@ static inline float3 hsbToRGB(float3 hsb) {
     }
 }
 
+// MARK: Oklab
+//
+// Björn Ottosson's Oklab (https://bottosson.github.io/posts/oklab/), transcribed digit for digit
+// from `ColorMath.rgbToOklab`/`oklabToRGB` — the CPU reference calls those, in `Double`, so this is
+// the second transcription of a published listing and the recolour's GPU-versus-CPU delta measures
+// float32 against `Double` on the same matrices. Metal has no `cbrt`; `pow(x, 1/3)` on a clamped
+// non-negative cone response is the same number to well inside a channel step.
+
+static inline float srgbToLinear(float c) {
+    float x = saturate(c);
+    return x <= 0.04045f ? x / 12.92f : pow((x + 0.055f) / 1.055f, 2.4f);
+}
+
+static inline float linearToSRGB(float c) {
+    float x = saturate(c);
+    return x <= 0.0031308f ? x * 12.92f : 1.055f * pow(x, 1.0f / 2.4f) - 0.055f;
+}
+
+static inline float3 rgbToOklab(float3 c) {
+    float lr = srgbToLinear(c.r), lg = srgbToLinear(c.g), lb = srgbToLinear(c.b);
+    float l = 0.4122214708f * lr + 0.5363325363f * lg + 0.0514459929f * lb;
+    float m = 0.2119034982f * lr + 0.6806995451f * lg + 0.1073969566f * lb;
+    float s = 0.0883024619f * lr + 0.2817188376f * lg + 0.6299787005f * lb;
+    float l_ = pow(max(l, 0.0f), 1.0f / 3.0f);
+    float m_ = pow(max(m, 0.0f), 1.0f / 3.0f);
+    float s_ = pow(max(s, 0.0f), 1.0f / 3.0f);
+    return float3(0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_,
+                  1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_,
+                  0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_);
+}
+
+static inline float3 oklabToRGB(float3 lab) {
+    float l_ = lab.x + 0.3963377774f * lab.y + 0.2158037573f * lab.z;
+    float m_ = lab.x - 0.1055613458f * lab.y - 0.0638541728f * lab.z;
+    float s_ = lab.x - 0.0894841775f * lab.y - 1.2914855480f * lab.z;
+    float l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    return float3(linearToSRGB( 4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s),
+                  linearToSRGB(-1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s),
+                  linearToSRGB(-0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s));
+}
+
+/// `RecolorTableEntry.weight` in Effect.swift, transcribed: 1 inside `inner`, 0 past `tolerance`,
+/// smoothstep between.
+static inline float recolorWeight(float d, float tolerance, float inner) {
+    if (d <= inner) { return 1.0f; }
+    if (d >= tolerance) { return 0.0f; }
+    float u = (tolerance - d) / (tolerance - inner);
+    return u * u * (3.0f - 2.0f * u);
+}
+
+/// Recolour, one pixel — `EffectReference.recolorPixel`'s twin, and `RecolorTableEntry`'s doc in
+/// Effect.swift is the sentence both transcribe. The pixel goes to Oklab once; each entry in list
+/// order takes its weight out of what is still unclaimed; what nothing claims stays the original.
+static inline float3 recolorChannels(float3 c, constant EffectParams &params,
+                                     constant RecolorTableEntry *entries) {
+    uint count = params.recolorEntryCount;
+    if (count == 0u) { return c; }
+    float3 pixel = rgbToOklab(c);
+    float remaining = 1.0f;
+    float3 claimed = float3(0.0f);
+    for (uint i = 0u; i < count && remaining > 0.0f; ++i) {
+        constant RecolorTableEntry &entry = entries[i];
+        float3 from = float3(entry.fromL, entry.fromA, entry.fromB);
+        float d = length(pixel - from);
+        float weight = recolorWeight(d, entry.tolerance, entry.inner);
+        if (!(weight > 0.0f)) { continue; }
+        float take = weight * remaining;
+        float3 replacement;
+        if (params.preserveShading != 0u) {
+            float lightness = saturate(entry.toL + (pixel.x - entry.fromL));
+            replacement = oklabToRGB(float3(lightness, entry.toA, entry.toB));
+        } else {
+            replacement = float3(entry.toRed, entry.toGreen, entry.toBlue);
+        }
+        claimed += replacement * take;
+        remaining -= take;
+    }
+    return claimed + c * remaining;
+}
+
 /// The per-pixel colour transform, unpremultiplied in and out — the same contract `blendChannels` has,
 /// and the shape `EffectReference.transform` mirrors line for line.
 ///
@@ -509,6 +606,7 @@ static inline float3 hsbToRGB(float3 hsb) {
 /// it; a neighbourhood kernel is passed the local `gid` and must keep being, or its taps would run
 /// off the texture.
 static inline float3 effectChannels(uint kind, constant EffectParams &params, constant uchar4 *lut,
+                                    constant RecolorTableEntry *recolor,
                                     float3 c, uint2 position) {
     switch (kind) {
         case kEffectLookupTable:
@@ -552,6 +650,9 @@ static inline float3 effectChannels(uint kind, constant EffectParams &params, co
             }
             return c + deviation;
         }
+
+        case kEffectRecolor:
+            return recolorChannels(c, params, recolor);
 
         default:
             return c;
@@ -755,7 +856,8 @@ static inline float4 outline(texture2d<float, access::read> source, constant Eff
 ///
 /// `original` is the effect's own input, unchanged by any earlier pass, and equals `source` on pass 0.
 /// Only `kEffectBloomCombine` reads it, but it is bound for every pass so the binding contract does not
-/// vary by kind — the same rule `lut` follows.
+/// vary by kind — the same rule `lut` follows, and `recolor` (one zeroed entry for every effect but
+/// the recolour) follows it too.
 ///
 /// Dispatched with `dispatchThreads` like every kernel above, so out-of-bounds threads are never
 /// launched and there is no bounds check to pay for.
@@ -766,6 +868,7 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
                         constant EffectParams          &params   [[buffer(1)]],
                         constant uchar4                *lut      [[buffer(2)]],
                         constant float                 *weights  [[buffer(3)]],
+                        constant RecolorTableEntry     *recolor  [[buffer(4)]],
                         uint2 gid [[thread_position_in_grid]])
 {
     // The kernels that read a neighbourhood, or a second texture, need the alpha of texels other than
@@ -810,7 +913,7 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     // **The frame coordinate, not this buffer's.** A strip is a window onto the frame (RENDER.md
     // §3.8) and `originX/originY` is where it sits; noise and a dithered posterize are functions of
     // absolute position, so a strip that passed `gid` would restart its grain at every seam.
-    float3 graded = saturate(effectChannels(kind, params, lut, colour,
+    float3 graded = saturate(effectChannels(kind, params, lut, recolor, colour,
                                             gid + uint2(params.originX, params.originY)));
     result.write(float4(graded * alpha, alpha), gid);
 }

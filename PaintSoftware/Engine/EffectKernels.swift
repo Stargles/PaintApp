@@ -55,20 +55,24 @@ enum EffectReference {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return bytes }
         let lut = effect.lookupTable
         let weights = effect.weights
+        let recolor = effect.recolorTable
 
         var current = bytes
         for pass in effect.passes(inFrameAt: origin) {
             current = apply(pass, to: current, original: bytes, lut: lut, weights: weights,
-                            width: width, height: height)
+                            recolor: recolor, width: width, height: height)
         }
         return current
     }
 
     /// One pass over one buffer. `original` is the effect's own input, unchanged by any earlier pass —
     /// bloom's combine is the one kernel that reads it, and it is passed to every pass rather than
-    /// declared per pass so that `EffectPass` stays a kind and a parameter block.
+    /// declared per pass so that `EffectPass` stays a kind and a parameter block. `recolor` is the
+    /// same shape of thing as `lut` and `weights`: a derived value bound for every pass and read by
+    /// one kind.
     private static func apply(_ pass: EffectPass, to bytes: [UInt8], original: [UInt8],
-                              lut: [UInt8], weights: [Float], width: Int, height: Int) -> [UInt8] {
+                              lut: [UInt8], weights: [Float], recolor: [RecolorTableEntry],
+                              width: Int, height: Int) -> [UInt8] {
         let kind = pass.kind, params = pass.params
 
         // The gather and multi-pass kernels answer for the whole premultiplied pixel — they need the
@@ -112,7 +116,7 @@ enum EffectReference {
                 // position, so passing the local `x, y` would restart the grain at every seam.
                 // `originX/originY` are 0 for every whole-frame composite, which is what keeps this
                 // the identity everywhere else.
-                let graded = clamp(transform(kind, params, lut, colour,
+                let graded = clamp(transform(kind, params, lut, recolor, colour,
                                              x: x + Int(params.originX), y: y + Int(params.originY)))
                 for channel in 0..<3 {
                     result[pixel + channel] = quantize(graded[channel] * alpha)
@@ -155,6 +159,7 @@ enum EffectReference {
     private static let kSobel: UInt32 = 10
     private static let kSharpenCombine: UInt32 = 11
     private static let kOutline: UInt32 = 12
+    private static let kRecolor: UInt32 = 13
 
     // MARK: - The per-pixel transforms
     //
@@ -163,6 +168,7 @@ enum EffectReference {
     // arithmetic can be compared with the shader's line for line.
 
     private static func transform(_ kind: UInt32, _ params: EffectParams, _ lut: [UInt8],
+                                  _ recolor: [RecolorTableEntry],
                                   _ c: SIMD3<Float>, x: Int, y: Int) -> SIMD3<Float> {
         switch kind {
         case kLookupTable:
@@ -200,9 +206,55 @@ enum EffectReference {
                                (noiseValue(x, y, params.seed, 2) - 0.5) * 2 * params.amount)
             return c + deviation
 
+        case kRecolor:
+            return recolorPixel(c, params: params, entries: recolor)
+
         default:
             return c
         }
+    }
+
+    /// **Recolour, one pixel** — `RecolorTableEntry`'s doc is the specification and this is its
+    /// transcription; `recolorChannels` in `Composite.metal` is the other one.
+    ///
+    /// The pixel is converted to Oklab **once**, in `Double` through `ColorMath` — the conversion
+    /// the gradient map's table is built with, so this side is the reference the shader's float
+    /// transcription is measured against, exactly as HSV's is. The entries arrive already converted.
+    ///
+    /// `remaining` is the weight no entry has claimed yet, and it is what makes list order the
+    /// whole of "first match wins": an entry can only take what the entries above it left. Under
+    /// `preserveShading` the replacement is the target colour at the *pixel's* lightness offset from
+    /// the matched centre, clamped to Oklab's `L ∈ [0, 1]`; otherwise it is the flat target.
+    private static func recolorPixel(_ c: SIMD3<Float>, params: EffectParams,
+                                     entries: [RecolorTableEntry]) -> SIMD3<Float> {
+        let count = min(Int(params.recolorEntryCount), entries.count)
+        guard count > 0 else { return c }
+        let lab = ColorMath.rgbToOklab(r: Double(c.x), g: Double(c.y), b: Double(c.z))
+        let pixel = SIMD3<Float>(Float(lab.L), Float(lab.a), Float(lab.b))
+        let preserveShading = params.preserveShading != 0
+
+        var remaining: Float = 1
+        var claimed = SIMD3<Float>(repeating: 0)
+        for entry in entries.prefix(count) where remaining > 0 {
+            let from = SIMD3<Float>(entry.fromL, entry.fromA, entry.fromB)
+            let distance = ((pixel - from) * (pixel - from)).sum().squareRoot()
+            let weight = RecolorTableEntry.weight(distance: distance,
+                                                  tolerance: entry.tolerance, inner: entry.inner)
+            guard weight > 0 else { continue }
+            let take = weight * remaining
+            let replacement: SIMD3<Float>
+            if preserveShading {
+                let lightness = min(max(entry.toL + (pixel.x - entry.fromL), 0), 1)
+                let rgb = ColorMath.oklabToRGB(L: Double(lightness), a: Double(entry.toA),
+                                               b: Double(entry.toB))
+                replacement = SIMD3<Float>(Float(rgb.r), Float(rgb.g), Float(rgb.b))
+            } else {
+                replacement = SIMD3<Float>(entry.toRed, entry.toGreen, entry.toBlue)
+            }
+            claimed += replacement * take
+            remaining -= take
+        }
+        return claimed + c * remaining
     }
 
     /// W3C Compositing and Blending Level 1's `Lum`, which `Compositor.swift` and `Composite.metal`

@@ -750,6 +750,11 @@ final class CanvasManager: ObservableObject {
     /// `CanvasManager+Eyedropper.swift`. Not `@Published`: nothing renders it, and republishing on a
     /// field the artist cannot see would invalidate every observer of this object for nothing.
     var toolBeforeEyedropper: Tool?
+    /// **Where the next pick lands** — the brush swatch, or one end of a recolour pair (TODO (60)).
+    /// `@Published`, unlike the field above, because the recolour panel *does* render it: the
+    /// eyedropper button beside the swatch that is armed is highlighted so the artist can see which
+    /// swatch their next canvas tap will fill. See `CanvasManager+Eyedropper.swift`.
+    @Published var eyedropperDestination: EyedropperDestination = .brushColor
     /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
     /// belongs to the app rather than a project's manifest.
     static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"

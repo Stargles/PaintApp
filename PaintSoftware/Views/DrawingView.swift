@@ -272,8 +272,18 @@ struct DrawingView: View {
         // Scoped to Select rather than to every panel: a brush or fill dropdown genuinely is a
         // top-bar dropdown over live canvas, and closing that on a pick is the existing behaviour
         // this rule is for.
+        //
+        // **And to a pick made *for* an open panel** — the recolour bar's eyedropper (TODO (60)).
+        // That pick's whole reason is to fill a swatch in the panel the artist is looking at, and
+        // the panel is the layer options behind `activePanel == .layers`; closing it here would drop
+        // `layerOptionsID` and with it the effect bar, so every pair would cost a trip back in. The
+        // owner: *"assigning four pairs must not cost four trips back into the panel."*
+        // `EyedropperDestination.picksIntoAnOpenPanel` is the model's word on which picks these are.
         .onReceive(canvasManager.interactionBegan) {
-            if activePanel == .select && canvasManager.selectedTool == .eyedropper { return }
+            if canvasManager.selectedTool == .eyedropper
+                && (activePanel == .select || canvasManager.eyedropperDestination.picksIntoAnOpenPanel) {
+                return
+            }
             if activePanel != .none { activePanel = .none }
         }
         // The layer options menu belongs to the layer panel — it can't outlive it.
@@ -454,6 +464,8 @@ struct DrawingView: View {
                         canvasManager.beginArmedTake(on: editing.target,
                                                      isRecordable: parameter.isScalarAnimatable)
                     },
+                    // The recolour's eyedroppers arm the tool for *this* node's pairs (TODO (60)).
+                    pickTarget: editing.target,
                     onBack: { showingEffectSettings = false },
                     onClose: { layerOptionsID = nil })
                 .bottomDockCard(width: width)
