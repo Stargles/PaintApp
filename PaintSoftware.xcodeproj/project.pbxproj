@@ -98,6 +98,8 @@
 		060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */; };
 		7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */; };
 		35553EE622BD0F5BED4E269C /* OpacityChannelLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */; };
+		B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */; };
+		64DDD4BEBBAFA3F466ED580A /* FolderKeyframeEntryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1F5B8D60E9D5BE82181DC7 /* FolderKeyframeEntryUITests.swift */; };
 		A4D4B09E751B4A469DA2A304 /* PaintSoftware/Models/TargetChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D5241AC7C570B0869CF072 /* PaintSoftware/Models/TargetChannel.swift */; };
 		4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */; };
 		A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */; };
@@ -501,6 +503,8 @@
 		A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SplitDrawingLogicTests.swift; sourceTree = "<group>"; };
 		BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/KeyframeControl.swift; sourceTree = "<group>"; };
 		172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpacityChannelLogicTests.swift; sourceTree = "<group>"; };
+		D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderKeyframeEntryLogicTests.swift; sourceTree = "<group>"; };
+		EB1F5B8D60E9D5BE82181DC7 /* FolderKeyframeEntryUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderKeyframeEntryUITests.swift; sourceTree = "<group>"; };
 		13D5241AC7C570B0869CF072 /* PaintSoftware/Models/TargetChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TargetChannel.swift; sourceTree = "<group>"; };
 		B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyframeControlLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationCurveLogicTests.swift; sourceTree = "<group>"; };
@@ -957,6 +961,8 @@
 				A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */,
 				B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */,
 				172C9D62338B953B79068469 /* OpacityChannelLogicTests.swift */,
+				D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */,
+				EB1F5B8D60E9D5BE82181DC7 /* FolderKeyframeEntryUITests.swift */,
 				C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */,
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
 				B87AF22B470D6379F6E590B9 /* PlaybackEngagementLogicTests.swift */,
@@ -1497,6 +1503,8 @@
 				060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */,
 				7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */,
 				35553EE622BD0F5BED4E269C /* OpacityChannelLogicTests.swift in Sources */,
+				B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */,
+				64DDD4BEBBAFA3F466ED580A /* FolderKeyframeEntryUITests.swift in Sources */,
 				A4D4B09E751B4A469DA2A304 /* PaintSoftware/Models/TargetChannel.swift in Sources */,
 				4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */,
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,

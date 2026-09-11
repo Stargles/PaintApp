@@ -1044,6 +1044,10 @@ struct FolderOptionsPanel: View {
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
+                keyframeSection
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+
                 // §6.2: a group is as legal a mask *target* as a layer, the same way it's a legal
                 // source — `maskRow`/`maskMenu` don't know or care which kind of node they were
                 // handed, and **a compositor node is included**. The exclusion here was a consequence
@@ -1108,6 +1112,114 @@ struct FolderOptionsPanel: View {
                 if !trimmed.isEmpty { canvasManager.renameFolder(folderID, to: trimmed) }
             }
         }
+    }
+
+    /// **Where a folder's first keyframe is placed** — KEYFRAMES.md §2.26, TODO (21).
+    ///
+    /// **Why it is here and not on a timeline row.** A layer's Add Keyframe lives on the timeline's
+    /// cel menu (`AnimationTimeline.keyframeItems`), and a folder cannot have it there: that menu is
+    /// raised by a **two-stage tap** whose first stage *selects the row*, and the timeline's notion of
+    /// "the row you are working on" is `currentLayerIndex` — a layer index, with no folder spelling.
+    /// `CanvasManager.keyframeTarget` already says as much ("what it does not have is a timeline row
+    /// for the control to be *next to*"). So a folder row's menu would need a folder selection state
+    /// the document does not have, and inventing one reaches the layer panel, the graph band and the
+    /// channel list. Two smaller refusals sit behind that one: `TimelineFolderRowView` is
+    /// `isUserInteractionEnabled = false` by construction ("cels are edited on the child layers' own
+    /// rows") and would need a coordinator back-reference and a zone model it has no cels to build
+    /// one from; and Clear Keyframes' scope is *the stretch of track you tapped*, which on a folder
+    /// row is its descendants' span — the wrong set, since a folder's own marks are in absolute
+    /// document frames and can sit outside every child's block.
+    ///
+    /// **Whereas a folder's animation already lives in this panel.** The Transform toggle and
+    /// `transformMoveRow` above are how a folder's *pose* channel is reached at all, and the opacity
+    /// slider on the folder's own row is how its scalar is edited. Putting the mark beside them makes
+    /// one surface the answer to "animate this group" rather than two.
+    ///
+    /// **It takes no channel argument, and that is the design.** `addKeyframe(_:atFrame:)` walks the
+    /// grade's parameters, `TargetChannel.all` and the container pose itself, so one press serves
+    /// every channel kind a folder has and the next row added to `TargetChannel.all` needs nothing
+    /// here. The view's whole contribution is a `KeyframeTarget` and a frame.
+    ///
+    /// **The frame is read now rather than captured.** The cel menu pins the frame it was raised on
+    /// because it is anchored over that column and playback does not stop for a menu; this panel is
+    /// anchored over no column, so the honest answer is *where the playhead is*, and the caption says
+    /// which frame that is so a press during playback is never a surprise.
+    @ViewBuilder
+    private var keyframeSection: some View {
+        let target = KeyframeTarget.folder(id: folderID)
+        let frame = canvasManager.currentFrame
+        let placed = canvasManager.keyframeFrames(of: target)
+
+        HStack(spacing: 8) {
+            Image(systemName: "plus.diamond").foregroundColor(.white).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add Keyframe").foregroundColor(.white)
+                // `maskRow`'s rule: the identifier rides the `Text`, so the summary surfaces as its
+                // own `staticTexts` element instead of being folded into the button's.
+                //
+                // **The value is §2.28's union, not the mark list** — `keyframeFrames(of:)`, the one
+                // accessor, so what this row reports and what the timeline draws diamonds for cannot
+                // come apart. The caption may truncate at 240 pt; the value never does.
+                Text(Self.keyframeCaption(frame: frame, placed: placed))
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("layerOptions.folderKeyframes")
+                    .accessibilityValue(Self.keyframeValue(placed))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        // The tap target beside the texts rather than around them — `maskRow` carries the argument:
+        // a `Button` wrapped around this would fold `layerOptions.folderKeyframes` into itself.
+        .overlay(
+            Button { canvasManager.addKeyframe(target, atFrame: frame) } label: {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layerOptions.addKeyframe")
+            .accessibilityLabel("Add Keyframe")
+            .accessibilityValue("\(frame)")
+        )
+
+        // Offered only where it would do something — `keyframeItems`' rule, and the predicate is the
+        // same union accessor, so a keyframe the artist placed by dragging the opacity slider is
+        // removable here even though no *mark* was ever stored for it. That biconditional is what
+        // §2.28 exists to hold: a diamond the artist can see and a Remove that is not offered is the
+        // device report it was written from.
+        //
+        // **No Clear Keyframes.** Its scope is the stretch of track the artist tapped, and this panel
+        // is not a stretch of track; a whole-track Clear here would give a folder a destructive reach
+        // its layers do not have, from a surface with no frame context. Every keyframe is reachable
+        // one at a time by scrubbing to it, which is what Remove is.
+        if placed.contains(frame) {
+            optionsAction("Remove Keyframe", systemImage: "minus.diamond",
+                          identifier: "layerOptions.removeKeyframe") {
+                canvasManager.removeKeyframe(target, atFrame: frame)
+            }
+            .accessibilityValue("\(frame)")
+        }
+    }
+
+    /// The caption under "Add Keyframe": which frame a press writes, and what this folder already
+    /// carries.
+    ///
+    /// Pure, so the two callers below cannot drift, but **not reachable from the fast tier** — this
+    /// file is not compiled into `PaintSoftwareUITests`, which is why neither of these holds a
+    /// *decision*. The decision is `keyframeFrames(of:)`, which lives in `KeyframeControl.swift` and
+    /// has its own logic tests; these two only spell its answer, and what pins them is the XCUITest
+    /// that reads the rendered row.
+    private static func keyframeCaption(frame: Int, placed: [Int]) -> String {
+        guard !placed.isEmpty else { return "At frame \(frame) · this group has none yet" }
+        return "At frame \(frame) · keys at " + placed.map(String.init).joined(separator: ", ")
+    }
+
+    /// The same union as a machine-readable value — "none", or the frames comma-separated. Apart from
+    /// the caption because the caption is a sentence that can truncate and this must not.
+    private static func keyframeValue(_ placed: [Int]) -> String {
+        placed.isEmpty ? "none" : placed.map(String.init).joined(separator: ",")
     }
 
     /// §4.3's op picker, widened to §4.4's grades — **one list, because a node does exactly one
