@@ -348,8 +348,9 @@ struct CanvasNotice: Identifiable, Equatable {
         // spelled out rather than summarised because a crop is usually one or two of them, and an
         // artist who reads "3 keyframes" wants to know *which* three before deciding.
         case .keyframesCropped(let crop):
-            let noun = crop.count == 1 ? "keyframe" : "keyframes"
-            return "\(crop.count) \(noun) outside the block's new length \(crop.count == 1 ? "was" : "were") removed (frame \(Self.list(crop.frames))). Undo brings \(crop.count == 1 ? "it" : "them") back."
+            let one = crop.count == 1
+            let where_ = crop.frames.count == 1 ? "frame" : "frames"
+            return "\(crop.count) \(one ? "keyframe" : "keyframes") outside the block's new length \(one ? "was" : "were") removed (\(where_) \(Self.list(crop.frames))). Undo brings \(one ? "it" : "them") back."
         }
     }
 

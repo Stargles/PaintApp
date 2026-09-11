@@ -253,10 +253,12 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         func slid(_ dx: CGFloat) -> PoseQuad {
             PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: dx, y: 0))
         }
+        // The second key on the two-frame cel's last frame, not one past it: a key outside the
+        // span is what TODO (62) crops on a copy, and this test is about the copy *not* flattening.
         manager.layers[1].cels[0].transformTracks = [
             TransformChannelID.cel.id: TransformTrack(keys: [
                 TransformTrack.Key(frame: 0, pose: slid(10), interpolation: .linear),
-                TransformTrack.Key(frame: 2, pose: slid(30), interpolation: .linear)])
+                TransformTrack.Key(frame: 1, pose: slid(30), interpolation: .linear)])
         ]
         let posed = manager.layers[1].cels[0]
         XCTAssertNotNil(manager.derivedCelContent(for: posed, atFrame: posed.startFrame),
@@ -270,7 +272,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         XCTAssertEqual(copy.vector?.elements.count, 1,
                        "a cel that is not an in-between is copied as geometry, not as a picture of it")
         XCTAssertNil(copy.bakedImage, "and nothing is baked into it")
-        XCTAssertEqual(copy.transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame), [0, 2],
+        XCTAssertEqual(copy.transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame), [0, 1],
                        "and its animation rides along, which a flatten would have deleted")
     }
 

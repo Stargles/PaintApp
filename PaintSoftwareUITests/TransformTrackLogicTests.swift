@@ -173,7 +173,14 @@ final class TransformTrackLogicTests: XCTestCase {
                            dx(whole.pose(atCelLocalFrame: frame))!, accuracy: 1e-9,
                            "right half, frame \(frame)")
         }
-        XCTAssertEqual(left.keys.map(\.frame), [0, 5], "the inserted key is one past the left span")
+        // **The left half's inserted key is on its own last frame, not one past it** — TODO (62).
+        // Until 2026-09-11 this line read `[0, 5]` with the caption "the inserted key is one past the
+        // left span", on the strength of §3.1's old rule that a key outside a span is held; the owner
+        // reversed that rule, and a key at 5 on a five-frame half is exactly the thing
+        // `Cel.cropPoseKeysToSpan` now removes. The per-frame loop above is what matters and it did
+        // not change: every frame the left half draws still shows what it showed.
+        XCTAssertEqual(left.keys.map(\.frame), [0, 4], "the inserted key is the left half's last frame")
+        XCTAssertEqual(dx(left.keys[1].pose)!, 40, accuracy: 1e-9, "and it holds the pose at that frame")
         XCTAssertEqual(right.keys.map(\.frame), [0, 7])
         XCTAssertEqual(dx(right.keys[0].pose)!, 50, accuracy: 1e-9, "and it holds the pose at the cut")
     }
@@ -190,9 +197,14 @@ final class TransformTrackLogicTests: XCTestCase {
         XCTAssertEqual(dx(right.pose(atCelLocalFrame: 7)), 120, "and stepping on the key, as before")
     }
 
-    /// A key sitting exactly on the cut is carried across **whole** rather than re-synthesised from
-    /// its own pose: the pose would match either way, but the handles and the tangent mode would not,
-    /// and a split is not an occasion to flatten an authored ease.
+    /// A key sitting exactly on the cut is carried across **whole** to the right half rather than
+    /// re-synthesised from its own pose: the pose would match either way, but the handles and the
+    /// tangent mode would not, and a split is not an occasion to flatten an authored ease.
+    ///
+    /// **The left half does not get it** — TODO (62). The cut is the right half's first frame and not
+    /// one of the left half's, so a copy there would be a key outside the left span, which is the
+    /// thing the owner ruled deleted; the left half ends on a synthesised key at `cut - 1` instead.
+    /// This assertion read `left.key(atFrame: 6) == authored` until 2026-09-11.
     func testAKeyOnTheCutKeepsItsHandlesOnBothSides() {
         let authored = TransformTrack.Key(frame: 6, pose: moved(60),
                                           inHandle: AnimationCurve.Handle(deltaFrames: -3, deltaValue: 0.4),
@@ -202,10 +214,28 @@ final class TransformTrackLogicTests: XCTestCase {
         whole.setKey(authored)
 
         let (left, right) = whole.split(atCelLocalFrame: 6)
-        XCTAssertEqual(left.key(atFrame: 6), authored)
+        XCTAssertEqual(left.keys.map(\.frame), [0, 5], "the left half ends inside its own span")
+        XCTAssertNil(left.key(atFrame: 6), "and holds no key on the cut, which is not one of its frames")
         var rebased = authored
         rebased.frame = 0
         XCTAssertEqual(right.key(atFrame: 0), rebased)
+    }
+
+    /// The other boundary case: a key already sitting on `cut - 1` is the left half's last frame and
+    /// is kept whole rather than overwritten by a synthesised one — the same "not an occasion to
+    /// flatten an authored ease" argument, applied to the frame the left half actually ends on.
+    func testAKeyOnTheFrameBeforeTheCutIsKeptWholeOnTheLeft() {
+        let authored = TransformTrack.Key(frame: 5, pose: moved(50),
+                                          inHandle: AnimationCurve.Handle(deltaFrames: -2, deltaValue: 0.3),
+                                          outHandle: AnimationCurve.Handle(deltaFrames: 2, deltaValue: -0.3),
+                                          tangentMode: .free, interpolation: .linear)
+        var whole = track([(0, 0), (12, 120)])
+        whole.setKey(authored)
+
+        let (left, right) = whole.split(atCelLocalFrame: 6)
+        XCTAssertEqual(left.keys.map(\.frame), [0, 5])
+        XCTAssertEqual(left.key(atFrame: 5), authored, "kept whole, handles and all")
+        XCTAssertEqual(right.keys.map(\.frame), [0, 6], "the right half still gets its own key at the cut")
     }
 
     /// **The predicate the whole derivation hangs off.** A track whose keys all hold the rest pose —

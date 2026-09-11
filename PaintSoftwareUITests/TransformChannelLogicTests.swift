@@ -429,11 +429,18 @@ final class TransformChannelLogicTests: XCTestCase {
     /// A `.linear` whole-cel channel over the fixture's twelve frames, written onto the cel's own
     /// storage — the field `posedCelContent` and `splitCel` both read. Linear so that "every frame
     /// shows what it showed" is exact rather than approximate across a cut.
-    private func animateLinearly(_ manager: CanvasManager, dx travel: CGFloat = 120) {
+    ///
+    /// **The last key is on frame 11, the cel's last, not on 12.** It was 12 until 2026-09-11 — one
+    /// past a twelve-frame span, which §3.1 then allowed and TODO (62) now crops on any span change,
+    /// so a split of that fixture came back with its right half's far key removed and every frame
+    /// after the cut flat. `CelSpanCropLogicTests` pins that crop; this fixture stays inside the span
+    /// so these tests stay about what they were about.
+    private func animateLinearly(_ manager: CanvasManager, dx travel: CGFloat = 120,
+                                 lastKeyAt lastKey: Int = 11) {
         manager.layers[1].cels[0].transformTracks = [
             TransformChannelID.cel.id: TransformTrack(keys: [
                 TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: slide(travel), interpolation: .linear)])
+                TransformTrack.Key(frame: lastKey, pose: slide(travel), interpolation: .linear)])
         ]
     }
 
@@ -477,7 +484,7 @@ final class TransformChannelLogicTests: XCTestCase {
         manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
         manager.undo()
         XCTAssertEqual(manager.layers[1].cels.count, 1)
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.map(\.frame), [0, 12])
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.map(\.frame), [0, 11])
     }
 
     /// **`duplicateCel` copies the animation with the drawing.** `Cel.transformTracks`' own doc
@@ -492,15 +499,19 @@ final class TransformChannelLogicTests: XCTestCase {
     /// empty and this reads `nil` against `[0, 12]`.
     func testDuplicatingAnAnimatedCelCopiesItsChannelAndItsHeldBaseline() throws {
         let (manager, layerID, celID) = fixture()
-        animateLinearly(manager)
+        // Six frames and a key on the last of them. This fixture used to shorten the cel to 6 with
+        // the key still at 12 — a key outside the span, which TODO (62) now crops on the copy — so
+        // the last key sits inside the span to keep this test about the copy carrying the channel;
+        // `CelSpanCropLogicTests` is where the clamped-copy crop is pinned.
         manager.layers[1].cels[0].frameCount = 6
+        animateLinearly(manager, lastKeyAt: 5)
         manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .cel, pose: slide(-7))
 
         manager.duplicateCel(layerIndex: 1, celIndex: 0)
         XCTAssertEqual(manager.layers[1].cels.count, 2)
         let copy = manager.layers[1].cels[1]
         XCTAssertEqual(copy.startFrame, 6)
-        XCTAssertEqual(copy.transformTracks["cel"]?.keys.map(\.frame), [0, 12],
+        XCTAssertEqual(copy.transformTracks["cel"]?.keys.map(\.frame), [0, 5],
                        "keys are cel-local, so they need no rebasing and none is done")
         XCTAssertEqual(copy.pendingPoseBaselines["cel"], slide(-7))
         XCTAssertNotEqual(copy.id, celID, "and it really is a different cel")
@@ -510,14 +521,15 @@ final class TransformChannelLogicTests: XCTestCase {
     /// the same door duplicate did.
     func testCopyingAndPastingACelCarriesItsChannel() throws {
         let (manager, layerID, celID) = fixture()
-        animateLinearly(manager)
+        // The last key inside the span, for the reason the duplicate test above gives.
         manager.layers[1].cels[0].frameCount = 6
+        animateLinearly(manager, lastKeyAt: 5)
         manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .cel, pose: slide(-3))
 
         manager.copyCel(layerIndex: 1, celIndex: 0)
         XCTAssertTrue(manager.pasteCel(layerIndex: 1, startFrame: 20))
         let pasted = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 20 })
-        XCTAssertEqual(pasted.transformTracks["cel"]?.keys.map(\.frame), [0, 12])
+        XCTAssertEqual(pasted.transformTracks["cel"]?.keys.map(\.frame), [0, 5])
         XCTAssertEqual(pasted.pendingPoseBaselines["cel"], slide(-3))
     }
 
