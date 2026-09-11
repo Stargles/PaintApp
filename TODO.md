@@ -50,17 +50,18 @@ rather than assuming it still holds.
 
 ## (61) The transform layer becomes its own layer type, with five new modes
 
-**Status** — **shipped: stages 0–1** (2026-09-11) of [TRANSFORM_LAYER.md](TRANSFORM_LAYER.md) §8; the
+**Status** — **shipped: stages 0–3** (2026-09-11) of [TRANSFORM_LAYER.md](TRANSFORM_LAYER.md) §8; the
 item stays until stage 6 merges. The design document's §2 holds the owner's seventeen rulings
 (2026-09-11) and §8 the build order. Stage 0 made the transformation layer its own `LayerKind` with its
-own `+` entry and a mode picker listing Move; stage 1 made its bar mean "only here" (and an adjustment
-layer's bar too), with a notice when Move is tapped outside it. **Stages 2–5 are all unblocked and
-independent; 6 depends on nothing.**
+own `+` entry and a mode picker; stage 1 made its bar mean "only here" (and an adjustment layer's bar
+too), with a notice when Move is tapped outside it; stages 2 and 3 put Parallax and Rotate in the
+picker — on a posed folder too — with the item list and the speed field on the panel. **Stages 4–5
+are unblocked and independent; 6 depends on nothing.**
 
 - [x] Stage 0 — the kind, the migration, the `+` entry, the panel.
 - [x] Stage 1 — the span: pixel-less leaves act inside their bar; Move outside refused with a notice;
       keys past the bar kept and drawn.
-- [ ] Stage 2 — parallax (6a). - [ ] Stage 3 — rotate (6b). - [ ] Stage 4 — screen shake (6d).
+- [x] Stage 2 — parallax (6a). - [x] Stage 3 — rotate (6b). - [ ] Stage 4 — screen shake (6d).
 - [ ] Stage 5 — repeat (6c). - [ ] Stage 6 — duplicate offset (6e), as a value-layer effect.
 
 > *"make the transform layer its own layer type instead of attached to the value layer. Additionally,

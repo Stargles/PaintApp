@@ -332,6 +332,38 @@ final class TransformLayerModesLogicTests: XCTestCase {
                        "the preview's write of the pose did not lose the mode")
     }
 
+    // MARK: - The picker's model half
+
+    /// **Switching the mode is one undo step that leaves the pose, its keys and the speed alone** —
+    /// §6's factorisation as a writer: the mode qualifies the pose, so picking Rotate on a keyed
+    /// layer keeps both keys and the typed speed, undo puts Move back with nothing else changed, and
+    /// a layer with no pose refuses. A writer that rebuilt the pose without its mode, or dropped a
+    /// key on the way, turns this red.
+    func testSwitchingTheModeIsOneUndoStepThatLeavesThePoseAndItsKeysAlone() throws {
+        let fx = fourDrawings(mover: pose(.identity, mode: .move))
+        var keyed = try XCTUnwrap(fx.manager.layers[fx.mover].transform)
+        keyed.track.setKey(TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: canvasBox)))
+        keyed.track.setKey(TransformTrack.Key(frame: 8, pose: PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 30, y: 0))))
+        fx.manager.layers[fx.mover].transform = keyed
+        fx.manager.layers[fx.mover].rotateSpeed = 15
+        let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
+
+        fx.manager.setTransformLayerMode(target, to: .rotate)
+        XCTAssertEqual(fx.manager.transformLayerMode(of: target), .rotate)
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.track, keyed.track, "both keys are exactly what they were")
+        XCTAssertEqual(fx.manager.layers[fx.mover].rotateSpeed, 15, "…and the speed")
+        fx.manager.setTransformLayerMode(target, to: .rotate)
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.transformLayerMode(of: target), .move, "one step back is Move — the second, same-mode pick recorded nothing")
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.track, keyed.track)
+        fx.manager.redo()
+        XCTAssertEqual(fx.manager.transformLayerMode(of: target), .rotate)
+
+        let drawing = KeyframeTarget.layer(id: fx.manager.layers[fx.a].id)
+        fx.manager.setTransformLayerMode(drawing, to: .parallax)
+        XCTAssertNil(fx.manager.transformLayerMode(of: drawing), "a drawing has no pose to put a mode on")
+    }
+
     // MARK: - The folder twin (§3.3)
 
     /// **A folder's pose takes the modes as well** (§3.3): a folder in Parallax shares its move over

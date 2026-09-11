@@ -215,7 +215,11 @@ recorder arm — every cost §3.6 lists as the reason `TargetChannel` exists.
 `LayerFolder.transform` takes the four pose modes as well (not repeat: a folder has no block). The
 accumulator's `inner` line reads the mode exactly as the layer's does. Declining that leaves five
 keyable rows on a folder that key nothing — §2.23's dead control by a new door — so it is not optional
-if the rows are.
+if the rows are. **Built in stage 2–3**: a folder's pose goes down its recursion as the topmost poser of
+the folder's own stack rather than as a map composed onto `outer`, which is the only place a folder in
+Parallax can hand each child its share; the folder's panel carries the same Mode picker and rows. **A
+folder in Rotate integrates from frame 0**, since it has no bar to start from — the one place the two
+homes differ, and a question for the owner if a folder's spin should have a start of its own.
 
 What is **not** keyable and lives on the mode itself: repeat's period, shake's frequency and seed.
 
@@ -326,7 +330,12 @@ follows its layer through reorder, survives being dragged out from under the par
 Adding an item gives it the positional default and leaves explicit shares alone; two parallax layers
 over one set compose, each through the child's one share. The alternative — a `[UUID: Double]` on the
 parallax layer — dies with it, dangles on delete, cannot be keyed without a channel kind that does not
-exist, and has to be recomputed on every add.
+exist, and has to be recomputed on every add. **What stage 2 found building it**: a `TargetChannel`
+key path is `WritableKeyPath<_, Double>` and cannot address an optional, so the row reaches the field
+through a non-optional view (`parallaxShareValue`, nil reading as 1) and the render reads
+`parallaxShare(atFrame:positionalDefault:)` instead; and because the channel funnel seeds keyframe A
+from the *stored* number, `CanvasManager.setParallaxShare` writes the positional default through
+before the first edit is routed, so A holds the 75% the artist was looking at rather than the view's 1.
 
 **The accumulator.** On meeting a parallax layer at position *p*, each item *q* below it takes
 `blend(rest, P, share(q))` composed onto whatever `carried[q]` already holds from transform layers
@@ -460,12 +469,16 @@ reachability XCUITest from a fresh document and an assertion on what is drawn, p
 |---|---|---|
 | 0 ✅ | **The kind** — `LayerKind.transform`, the decode migration, the `+` entry, the options panel with a mode picker showing only Move. Behaviour-neutral for every posed document. **Shipped 2026-09-11.** The hidden-layer fix (BUGS.md) is a separate change and is not part of this row. | `TransformLayerLogicTests` / `TransformLayerEntryLogicTests` with their fixtures creating the kind (three tests about the old mode picker became three about the kind); a migration round trip through a real package rewritten to the old spelling, drawn on both backends; `LayerPanelControlsUITests` drives `+` → panel → Move row → box; `LayerKindLogicTests` walks `allCases` through every switch |
 | 1 ✅ | **The span** (§4, rulings 1 and 17) — pixel-less leaves act inside their block, the grade included; Move outside the block refused with `CanvasNotice.moveOutsideTransformBlock`; BUGS.md's value-layer entry closed. **Shipped 2026-09-11.** | a pose at a frame past the block resolves to nil in `layerPoses`; a grade past its bar is the ungraded floor, byte for byte on both backends; shorten the bar → the composite past it equals the un-posed one and the keys beyond are still listed and still drawn; lengthen → byte-identical to before; the refusal and the notice, from the toolbar and the channel row; `TransformLayerSpanUITests` drives all of it from a fresh document |
-| 2 | **Parallax** — `parallaxShare` row, item counting, the per-entry blend, the panel's item list. | four drawings → leaf maps at 100/75/50/25 of the box's translation; a folder is one item; a tint between them is none; −50 moves opposite; a keyed share; reorder keeps an explicit share with its layer; the box drag moves each item live |
-| 3 | **Rotate** — `rotateSpeed` row, integration from the block start, box-centre pivot pre-composed, `movesItsContents`. | 15°/frame → 90° at `s + 6` about the box centre; keyed 0→15 integrates (no backward snap); a mark holds the box, not the angle; under a keystoned box the orbit of one point is the conic (pin four extremes); a raster fixture reddens when the function is dropped from the map |
+| 2 ✅ | **Parallax** — `parallaxShare` row, item counting, the per-entry blend, the panel's item list. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: four drawings → leaf maps at 100/75/50/25 of the box's translation; a folder is one item; a tint between them is none; −50 moves opposite and 150 overshoots; half a turn is 45° and half a 4× scale is 2.5× (the factored blend); a keyed share; reorder keeps a typed share with its layer and re-defaults the rest; the panel's list is the render's items; the first edit on a keyed item seeds keyframe A with the positional default; the box drag moves each item live; a folder in Parallax shares over its children. `TransformLayerModesUITests` drives `+` → Transform Layer → Mode → Parallax → the list → Move → drag from a fresh document and measures the four bands off the canvas |
+| 3 ✅ | **Rotate** — `rotateSpeed` row, integration from the block start, box-centre pivot pre-composed, `movesItsContents`. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: 15°/frame → 90° at `s + 6` about the box centre with `s = 4`, nothing at `s`, nothing before the block; keyed 15→0 integrates (no backward snap, holds where it stopped); a mark holds the box, not the angle, and keeps the mode; `hasContainerPoseInForce` reads the mode and the speed's track; under a keystoned box the orbit of one point is the conic (four extremes, and not a circle about the mapped centre); a raster fixture on both backends is drawn turned and reddens when the function is dropped from the map, same frame same bytes, the version differing across frames; a folder in Rotate spins its children from frame 0. `TransformLayerModesUITests` types 15 into the speed field, reads the frames-per-turn line, scrubs six frames in and measures the quarter turn off the canvas |
 | 4 | **Shake** — three rows, `period`, `seed`, the noise, re-roll. | one frame pinned against a hand-computed value; same frame twice → same map; two seeds differ; composes over authored keys; re-roll is one undo step |
 | 5 | **Repeat** — the frame carry in `renderNodes` / `leafSnapshots`, the period, the edit redirect or refusal, the ghost blocks. | `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` (the cache, for free); cel-local keys ride; an opacity curve beneath repeats; an edit at a repeated frame lands on the source cel or is refused with the notice |
 | 6 | **Duplicate offset** — the case, two passes on both backends, the eleven CPU blend formulas, the box writer, strip reach. | parity byte-for-byte per mode; rim and intersection over a known shape; `testNoEffectChangesAlpha` holds; the box commit writes the five scalars; a strip seam test at a large offset |
 
-Stages 2–5 are independent of each other and **all four are unblocked** now that 0 and 1 are in; 6
-depends on nothing here. The mode picker in `LayerPanel.transformModeRow` is where each of 2–5 adds
-its entry; there is no `TransformMode` enum yet — stage 2 introduces it with the second case.
+Stages 4 and 5 are independent of each other and both unblocked; 6 depends on nothing here. The mode
+picker in `LayerPanel.transformModeRow` is where each of 4–5 adds its entry, as a case of
+`TransformLayerMode` (`Models/TransformLayerMode.swift`) — **not `TransformMode`, which was taken**:
+that name is the Move bar's Uniform / Freeform / Distort picker, and stage 2 found the collision on
+the day it introduced the enum. The mode lives on `LayerPose.mode`, so a folder's pose carries it for
+free (§3.3); the scalars a mode reads are `TargetChannel` rows on the two homes, because a key path
+through an optional payload is not writable.
