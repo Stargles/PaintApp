@@ -84,6 +84,15 @@ struct Cel: Identifiable {
     /// the debt; cel-local numbering is what makes the line a copy rather than a conversion, which is
     /// the part that really is free.
     ///
+    /// **A key never lives outside `0..<frameCount`** — TODO (62), the owner's ruling of 2026-09-10.
+    /// Every verb that can shorten this cel's span (both resize handles, split, a clamped duplicate
+    /// or paste, a video speed change) calls `cropPoseKeysToSpan` from inside its own undo step, so
+    /// the keys past the new end go with the frames and come back with them on undo; the crop is
+    /// announced (`CanvasNotice.keyframesCropped`) and nothing else restores them. A left-edge resize
+    /// keeps every key on the document frame it was on, so the local numbers shift with the origin.
+    /// A document saved before the ruling may still carry a key past a span; it is left alone until a
+    /// span change touches that cel, because a silent crop on load is the loss the ruling forbids.
+    ///
     /// Empty is the overwhelmingly common case and every reader tests it first: a document that has
     /// never been keyframed must cost one `isEmpty` on the paths that ask, which is every rasterize of
     /// every cel.

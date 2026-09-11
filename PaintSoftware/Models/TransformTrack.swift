@@ -52,7 +52,9 @@ enum TransformChannelID: Hashable {
 /// Keys are numbered from the cel's own `startFrame`, so the channel rides the cel through move,
 /// split, duplicate and paste for free — the same argument `motionGroupID`'s doc makes for a field
 /// over a side table. A *layer* channel (an effect parameter, §2.4) is in absolute document frames
-/// because its target has no cel to ride. There is no third notion.
+/// because its target has no cel to ride. There is no third notion. **And a key is never outside the
+/// cel's span** (TODO 62): `cropped(toFrameCount:)` and `shifted(by:)` below are what a span change
+/// applies, through `Cel.cropPoseKeysToSpan`.
 ///
 /// ## Why the timing is an `AnimationCurve` over pose *indices* rather than a second interpolant
 ///
