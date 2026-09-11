@@ -1022,15 +1022,68 @@ extension CanvasManager {
     /// undo step; nothing else moves: the authored pose, its track and its keys stay exactly as they
     /// are, because §6's factorisation makes the mode a qualifier on the pose rather than a rewrite
     /// of it. Refused on a target with no pose to qualify.
+    ///
+    /// **Repeat is refused on a folder** (§3.3: *"not repeat: a folder has no block"*, and the loop's
+    /// extent is the block) — the folder picker does not list it, and this is the model's half of
+    /// the same rule. On a layer entering Repeat with no period yet, the period is **pre-filled from
+    /// where the drawings beneath end** (§2 ruling 11), inside the same undo step.
     func setTransformLayerMode(_ target: KeyframeTarget, to mode: TransformLayerMode) {
         guard var pose = containerPose(of: target), pose.mode != mode else { return }
+        if mode == .repeat, case .folder = target { return }
         pose.mode = mode
         // **The shake's seed is minted the first time the pose enters Shake** (§5.4: *"minted at
         // creation"*), inside the same undo step as the pick, so two shake layers differ from birth
         // and one is stable from its first frame. A seed already minted is kept — leaving Shake and
         // coming back is the same shake, `valueFill`'s own asymmetry.
         if mode == .shake, pose.shakeSeed == 0 { pose.shakeSeed = Self.freshShakeSeed() }
+        if mode == .repeat, pose.repeatPeriod == 0, case .layer(let id) = target,
+           let index = layers.firstIndex(where: { $0.id == id }) {
+            pose.repeatPeriod = suggestedRepeatPeriod(forLayer: index)
+        }
         withStructureUndo(label: .transformLayerMode) {
+            applyContainerPose(pose, target: target)
+        }
+    }
+
+    /// **The loop length a Repeat layer is pre-filled with** — §2 ruling 11's (b): *"where the
+    /// drawings beneath it end"*, measured from the layer's first block. The entries beneath it in
+    /// its container, a folder's contents included, are walked for the last frame any of their
+    /// cels covers; the period is that end less the block's start, so a walk on frames 1–8 under a
+    /// bar starting at 1 pre-fills 8. Never below 1, and the block's own length when nothing beneath
+    /// ends after the block starts (a loop of the whole bar, which is the identity — the honest
+    /// default when there is nothing to loop yet).
+    func suggestedRepeatPeriod(forLayer index: Int) -> Int {
+        guard layers.indices.contains(index) else { return 1 }
+        let blockStart = layers[index].cels.map(\.startFrame).min() ?? 0
+        let blockLength = layers[index].cels.first { $0.startFrame == blockStart }?.frameCount ?? 1
+        let stack = Array(containerEntries(inContainer: layers[index].parentFolderID).reversed())
+        guard let position = stack.firstIndex(where: {
+            if case .layer(let at) = $0 { return at == index } else { return false }
+        }) else { return max(blockLength, 1) }
+        var end = blockStart
+        for q in 0..<position {
+            switch stack[q] {
+            case .layer(let at):
+                guard layers[at].kind.holdsPixels else { continue }
+                for cel in layers[at].cels where cel.endFrame > end { end = cel.endFrame }
+            case .folder(let folder):
+                for at in descendantLayerIndices(ofFolder: folder.id) where layers[at].kind.holdsPixels {
+                    for cel in layers[at].cels where cel.endFrame > end { end = cel.endFrame }
+                }
+            }
+        }
+        let fromDrawings = end - blockStart
+        return fromDrawings >= 1 ? fromDrawings : max(blockLength, 1)
+    }
+
+    /// **Sets a Repeat layer's loop length** — §2 ruling 11's (a), typed; one undo step; never below
+    /// 1. Written whatever the mode, since the panel offers it only in Repeat and a period is
+    /// harmless storage elsewhere.
+    func setRepeatPeriod(_ target: KeyframeTarget, to period: Int) {
+        let clamped = max(period, 1)
+        guard var pose = containerPose(of: target), pose.repeatPeriod != clamped else { return }
+        pose.repeatPeriod = clamped
+        withStructureUndo(label: .repeatPeriod) {
             applyContainerPose(pose, target: target)
         }
     }
@@ -1161,5 +1214,91 @@ extension CanvasManager {
         case .layer(let id): return layers.first { $0.id == id }?.parallaxShare
         case .folder(let id): return folders.first { $0.id == id }?.parallaxShare
         }
+    }
+
+    // MARK: - §5.5's ghost blocks
+
+    /// **One run of frames on a layer's row that a Repeat above it is showing as an earlier frame** —
+    /// what the timeline draws ghosted so the artist can tell (§5.5: *"the timeline drawing the
+    /// repeated span as ghost blocks so the artist can see it is one"*). `sourceCelID` is the cel
+    /// those frames are showing, so consecutive ghost frames of one drawing are one segment and the
+    /// row reads as the first cycle's pattern played again.
+    struct RepeatGhost: Equatable {
+        let start: Int
+        let length: Int
+        let sourceCelID: UUID
+    }
+
+    /// **The ghost segments on layer `index`'s row.** Structural rather than off the render walk —
+    /// the timeline builds its layout key on every SwiftUI pass, and a walk per frame of every
+    /// repeated span would be hundreds of walks a pass — so this applies the Repeat layers that reach
+    /// the layer in the walk's own order (outermost container first, top to bottom within one) with
+    /// `TransformLayerMode.repeatSourceFrame`, which is the one function the walk applies too;
+    /// `TransformLayerModesLogicTests` pins the two against each other on a nested fixture. Empty
+    /// for every layer in a document with no Repeat layer in force, after one array scan.
+    func repeatGhostSegments(forLayer index: Int) -> [RepeatGhost] {
+        guard hasRepeatLayerInForce, layers.indices.contains(index) else { return [] }
+        let chain = repeatPosers(reaching: index)
+        guard !chain.isEmpty else { return [] }
+        let end = contentEndFrame
+        var segments: [RepeatGhost] = []
+        var open: (start: Int, sourceCelID: UUID)?
+        func close(at frame: Int) {
+            if let open { segments.append(RepeatGhost(start: open.start, length: frame - open.start, sourceCelID: open.sourceCelID)) }
+            open = nil
+        }
+        for frame in 0..<end {
+            var shown = frame
+            for repeater in chain {
+                guard let block = repeater.blocks.first(where: { shown >= $0.start && shown < $0.end }) else { continue }
+                shown = TransformLayerMode.repeatSourceFrame(shown, blockStart: block.start, period: repeater.period)
+            }
+            guard shown != frame, let celIndex = activeCelIndex(inLayer: index, atFrame: shown) else {
+                close(at: frame)
+                continue
+            }
+            let id = layers[index].cels[celIndex].id
+            if open?.sourceCelID != id { close(at: frame); open = (frame, id) }
+        }
+        close(at: end)
+        return segments
+    }
+
+    /// One Repeat layer as the ghost walk sees it: its blocks and its period.
+    private struct RepeatPoser {
+        let blocks: [(start: Int, end: Int)]
+        let period: Int
+    }
+
+    /// **The Repeat layers whose loop reaches layer `index`, in the order the render walk applies
+    /// them** — for each container from the outermost in, the visible Repeat layers above the entry
+    /// that leads to the layer, top to bottom. `renderNodes`' own two gates: the eye, and never
+    /// inside a compositor node, where the sibling carry is suppressed.
+    private func repeatPosers(reaching index: Int) -> [RepeatPoser] {
+        var chain: [RepeatPoser] = []
+        var child: ContainerEntry = .layer(index: index)
+        var container = layers[index].parentFolderID
+        while true {
+            let isNode = container.flatMap { id in folders.first { $0.id == id } }?.isCompositorNode == true
+            var above: [RepeatPoser] = []
+            // `containerEntries` ranks top to bottom, so everything before the child is above it.
+            scan: for entry in containerEntries(inContainer: container) {
+                switch (entry, child) {
+                case (.layer(let a), .layer(let b)) where a == b: break scan
+                case (.folder(let a), .folder(let b)) where a.id == b.id: break scan
+                case (.layer(let at), _):
+                    guard !isNode, layers[at].isVisible, let pose = layers[at].layerTransform, pose.repeats else { continue scan }
+                    above.append(RepeatPoser(blocks: layers[at].cels.map { ($0.startFrame, $0.endFrame) },
+                                             period: pose.repeatPeriod))
+                default:
+                    break
+                }
+            }
+            chain = above + chain
+            guard let containerID = container, let folder = folders.first(where: { $0.id == containerID }) else { break }
+            child = .folder(folder)
+            container = folder.parentFolderID
+        }
+        return chain
     }
 }

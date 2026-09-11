@@ -702,7 +702,7 @@ extension CanvasManager {
                          sizing: RenderSizing = .native) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let (tree, poses) = renderTreeAndPoses(atFrame: frame)
+        let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame)
         let renderSize: CGSize
         switch sizing {
         case .native:
@@ -721,7 +721,7 @@ extension CanvasManager {
         let maskStacks = maskSourceStacks(of: tree)
         return FrameRecipe(
             tree: tree,
-            leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses,
+            leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
                                   alsoIncluding: maskedLayerIndices(in: maskStacks)),
             maskStacks: maskStacks,
             frame: frame,
@@ -836,7 +836,7 @@ extension CanvasManager {
                             activeLayerIndex: Int,
                             quality: RenderQuality = .full) -> SandwichRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
-        let (tree, poses) = renderTreeAndPoses(atFrame: frame)
+        let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame)
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
 
         // **`renderResolution` is applied here and nowhere else**, which is what makes it a live-canvas
@@ -867,7 +867,7 @@ extension CanvasManager {
         let maskStacks = maskSourceStacks(of: tree)
         return SandwichRecipe(
             tree: tree, below: halves.below, above: halves.above,
-            leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses,
+            leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
                                   alsoIncluding: maskedLayerIndices(in: maskStacks)),
             maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
             paper: canvasBackground(renderedInto: renderSize), quality: quality)
@@ -1066,19 +1066,33 @@ extension CanvasManager {
     /// every cel that stores what it shows, which is every cel in a document using neither animation
     /// system, and it is only reached at all on a document that engages the compositor.
     ///
-    /// **`poses` is §4.4's per-leaf container map, and passing it is an optimisation rather than a
-    /// correctness choice** — omit it and this resolves the whole map itself, which is right and
-    /// costs a tree walk. `CanvasView.makeSandwichKey` calls this once per layer, so it resolves the
-    /// map once outside its loop and hands it in; a caller asking about one layer can leave it off.
+    /// **`poses` is §4.4's per-leaf container map and `frames` §5.5's per-leaf source frames, and
+    /// passing them is an optimisation rather than a correctness choice** — omit them and this
+    /// resolves both itself from one walk, which is right and costs a tree walk.
+    /// `CanvasView.makeSandwichKey` calls this once per layer, so it resolves the maps once outside
+    /// its loop and hands them in; a caller asking about one layer can leave them off.
+    ///
+    /// **The version is the source frame's, whole** — TRANSFORM_LAYER.md §5.5's *"a repeated frame's
+    /// tree and leaf versions are the source frame's, so it is the source frame's file"*: the cel,
+    /// the derivation and the effect are all looked up at `frames[index]`, which is what makes
+    /// `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` true with no field added to the key.
     @MainActor
     func contentVersion(ofLayer index: Int, atFrame frame: Int,
-                        poses: [Int: PoseMap]? = nil) -> LayerContentVersion? {
-        guard layers.indices.contains(index),
-              let celIndex = activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
+                        poses: [Int: PoseMap]? = nil, frames: [Int: Int]? = nil) -> LayerContentVersion? {
+        guard layers.indices.contains(index) else { return nil }
+        let (resolvedPoses, resolvedFrames): ([Int: PoseMap], [Int: Int])
+        if let poses, let frames {
+            (resolvedPoses, resolvedFrames) = (poses, frames)
+        } else {
+            let walk = renderTreeAndPoses(atFrame: frame)
+            (resolvedPoses, resolvedFrames) = (poses ?? walk.poses, frames ?? walk.frames)
+        }
+        let leafFrame = resolvedFrames[index] ?? frame
+        guard let celIndex = activeCelIndex(inLayer: index, atFrame: leafFrame) else { return nil }
         let layer = layers[index]
-        let pose = (poses ?? layerPoses(atFrame: frame))[index]
-        return Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
-                                   derived: derivedCelContent(for: layer.cels[celIndex], atFrame: frame,
+        let pose = resolvedPoses[index]
+        return Self.contentVersion(of: layer, celIndex: celIndex, atFrame: leafFrame,
+                                   derived: derivedCelContent(for: layer.cels[celIndex], atFrame: leafFrame,
                                                               inheriting: pose),
                                    pose: pose)
     }
@@ -1103,15 +1117,16 @@ extension CanvasManager {
     func sandwichKey(atFrame frame: Int, activeLayerIndex: Int,
                      override: ActiveContentOverride = .resolve,
                      tree: [RenderNode]? = nil) -> SandwichKey {
-        // §4.4's per-leaf container poses, resolved once for the whole map: `contentVersion` resolves
-        // them itself when they are not handed in, and asking inside the loop would make a tree walk
-        // quadratic in the layer count on the path RENDER §2 is most protective of.
-        let poses = layerPoses(atFrame: frame)
+        // §4.4's per-leaf container poses and §5.5's source frames, resolved once for the whole
+        // map: `contentVersion` resolves them itself when they are not handed in, and asking inside
+        // the loop would make a tree walk quadratic in the layer count on the path RENDER §2 is
+        // most protective of. The tree comes off the same walk when the caller has not handed one in.
+        let walk = renderTreeAndPoses(atFrame: frame)
         let contents = layers.indices.map { index -> LayerContentVersion? in
             if case .held(let content) = override, index == activeLayerIndex { return content }
-            return contentVersion(ofLayer: index, atFrame: frame, poses: poses)
+            return contentVersion(ofLayer: index, atFrame: frame, poses: walk.poses, frames: walk.frames)
         }
-        return SandwichKey(tree: tree ?? renderTreeAndPoses(atFrame: frame).tree,
+        return SandwichKey(tree: tree ?? walk.tree,
                            activeLayerIndex: activeLayerIndex,
                            contents: contents,
                            renderResolution: renderResolution,
@@ -1173,9 +1188,16 @@ extension CanvasManager {
     /// **A value layer's colour is resolved here** — `resolvedColor(atFrame:)` and then
     /// `LayerRenderSource.SolidColor`, which is where that type's own note argues why the resolve
     /// stays on the main actor and the canvas-sized fill does not.
+    ///
+    /// **`frames` is TRANSFORM_LAYER.md §5.5's per-leaf source frame**, and every "at this frame"
+    /// read below — the cel, the derivation, the version, the grade test, the flat colour — asks
+    /// `frames[index] ?? frame` and never `frame`. That is the whole of how a Repeat layer reaches
+    /// the pixels: the tree was already resolved at the carried frame by `renderNodes`, and this is
+    /// the other half of the same walk's answer.
     @MainActor
     private func leafSnapshots(atFrame frame: Int, quality: RenderQuality,
                                poses: [Int: PoseMap] = [:],
+                               frames: [Int: Int] = [:],
                                alsoIncluding maskSourceLayers: Set<Int> = []) -> [LeafSnapshot?] {
         var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
         // **`derived` is resolved here rather than in `resolve()`, and that placement is
@@ -1186,6 +1208,7 @@ extension CanvasManager {
         let provider = celContentProvider(atFrame: frame)
         for index in layers.indices {
             let layer = layers[index]
+            let leafFrame = frames[index] ?? frame
             // The visibility check is an elision, not the compositing rule — `RenderNode.isVisible`
             // carries the flag and the compositor is what honours it. Skipping the render here only
             // avoids rasterizing pixels that would then be multiplied by zero, which is precisely
@@ -1230,22 +1253,26 @@ extension CanvasManager {
             // wanted for its alpha, means the leaf contributes nothing of *either* sort, and nil for
             // both is exactly right.
             guard layer.isVisible || maskSourceLayers.contains(index),
-                  let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
+                  let celIndex = activeCelIndex(inLayer: index, atFrame: leafFrame)
             else { continue }
             // §4.4's container pose for this leaf, resolved by `renderNodes` and handed in. It
             // reaches the derivation (which re-poses vector objects) *and* the frozen cel (which
             // resamples the raster tiers) *and* the version — §2.12's two currencies and §4.5's two
             // keys, all off this one value.
             let pose = poses[index]
-            let derived = provider.content(for: layer.cels[celIndex], inheriting: pose)
-            let version = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
+            // The derivation is bound to the leaf's own frame: a cel's pose keys are cel-local, so
+            // under a Repeat they ride for free (§5.5), and §3.4.1's group compensation is read at
+            // the source frame (§7).
+            let derived = (leafFrame == frame ? provider : provider.at(leafFrame))
+                .content(for: layer.cels[celIndex], inheriting: pose)
+            let version = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: leafFrame,
                                               derived: derived, pose: pose)
             // **A transformation layer is elided exactly as a grading one is**, and for the identical
             // reason: §4.4's transform mode holds no pixels, so rasterizing its blank cel would mint
             // a canvas-sized transparent image per frame for a leaf whose whole contribution is
             // already spent — in `renderNodes`, on the leaves beneath it. Asked through
             // `layerTransform` so this and the tree derivation read one accessor.
-            guard layer.layerEffect(atFrame: frame) == nil, layer.layerTransform == nil else {
+            guard layer.layerEffect(atFrame: leafFrame) == nil, layer.layerTransform == nil else {
                 leaves[index] = LeafSnapshot(version: version, content: nil)
                 continue
             }
@@ -1272,7 +1299,7 @@ extension CanvasManager {
             // layer's block at frame *n* removes its colour at *n*, which is what every other layer
             // does and what the timeline shows.
             if let fill = layer.valueFill {
-                let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: frame))
+                let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: leafFrame))
                 leaves[index] = LeafSnapshot(version: version, content: .solid(colour))
                 continue
             }

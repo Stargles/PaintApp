@@ -810,23 +810,32 @@ extension CanvasManager {
         renderTreeAndPoses(atFrame: frame).tree
     }
 
-    /// **The tree and §4.4's per-layer pose map, from one walk** — the one producer, so the two
-    /// cannot disagree about which leaves a transformation layer reaches.
+    /// **The tree, §4.4's per-layer pose map and §5.5's per-layer source frame, from one walk** —
+    /// the one producer, so the three cannot disagree about which leaves a transformation layer
+    /// reaches or which frame a Repeat layer shows them at.
     ///
     /// `poses` is keyed by `layers` index and holds **only** the leaves a container pose actually
     /// moves: a document with no transformation layer and no posed folder produces an empty
     /// dictionary, which is what keeps this free for every document that has never used the feature.
+    /// `frames` is keyed the same way and holds only the leaves a Repeat layer shows at a frame
+    /// **other than `frame`** — the source frame, TRANSFORM_LAYER.md §5.5 — so it too is empty for
+    /// every document with no Repeat layer, and `frames[i] ?? frame` is the frame leaf `i` is read at.
     ///
     /// **The pose is emitted *alongside* the tree rather than as a field on `RenderNode`, and that is
     /// §2.3 rather than tidiness.** A pose in the tree would reach the compositor, and the only thing
     /// a compositor can do with one is resample the pixels it was handed — *"the owner wants crisp
     /// lines, not a bitmap magnify"*. Ink is stamped at the posed position instead, which happens at
-    /// rasterisation, so this map's consumer is `leafSnapshots` and not `Compositor.draw`.
-    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: PoseMap]) {
+    /// rasterisation, so this map's consumer is `leafSnapshots` and not `Compositor.draw`. The frame
+    /// is alongside for the same reason one level up: the tree is already resolved *at* a frame
+    /// (a leaf's opacity and effect are numbers by the time they are nodes), so what a repeated leaf
+    /// needs is for its cel, its derivation and its version to be looked up at the source frame,
+    /// which is `leafSnapshots`' job and not the compositor's.
+    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: PoseMap], frames: [Int: Int]) {
         var poses: [Int: PoseMap] = [:]
-        let tree = renderNodes(inContainer: nil, atFrame: frame,
-                               inheriting: nil, ownPoser: nil, poses: &poses)
-        return (tree, poses)
+        var frames: [Int: Int] = [:]
+        let tree = renderNodes(inContainer: nil, atFrame: frame, documentFrame: frame,
+                               inheriting: nil, ownPoser: nil, poses: &poses, frames: &frames)
+        return (tree, poses, frames)
     }
 
     /// **One container pose resolved at one frame, as the map it hands each entry beneath it** —
@@ -860,18 +869,24 @@ extension CanvasManager {
     ///     no block.
     ///   - channels: the poser's own `TargetChannel` rows — whether each has a curve, and its value
     ///     at a frame — read per frame for rotate's integral and at `frame` for shake's amplitudes.
-    ///   - shareOf: an item's share at this frame given its positional default — the parallax
-    ///     layer's one read of `parallaxShare` on either home.
+    ///   - shareOf: the share of the item at a stack position, given its positional default — the
+    ///     parallax layer's one read of `parallaxShare` on either home, at the frame that item is
+    ///     read at (which under a Repeat between the two may not be the poser's own).
     ///   - stack: this container's entries, bottom to top, and `position` the poser's own place in
     ///     it; the items a parallax poser counts are the entries beneath that position.
     /// - Returns: nil when the pose contributes nothing at this frame, which is what keeps a
     ///   document with an untouched transform layer identical to one with none (§4.5's trap).
+    ///   Always nil for Repeat, which is not a pose: its whole contribution is the frame carry the
+    ///   accumulator computes before it asks for posers.
     private func containerPoser(pose: LayerPose, atFrame frame: Int, blockStart: Int,
                                 channels: PoserChannels,
-                                shareOf: (ContainerEntry, Int, Double) -> Double,
+                                shareOf: (Int, Double) -> Double,
                                 stack: [ContainerEntry], position: Int) -> ContainerPoser? {
         let authored = pose.resolvedPose(atFrame: frame)
         switch pose.mode {
+        case .repeat:
+            return nil
+
         case .move:
             return pose.mapping(atFrame: frame).map(ContainerPoser.uniform)
 
@@ -902,7 +917,7 @@ extension CanvasManager {
             var maps: [Int: PoseMap] = [:]
             for (rank, q) in items.enumerated() {
                 let positional = TransformLayerMode.positionalParallaxShare(rank: rank, of: items.count)
-                let share = shareOf(stack[q], frame, positional)
+                let share = shareOf(q, positional)
                 if let map = TransformLayerMode.parallaxMap(authored: authored, share: share) {
                     maps[q] = map
                 }
@@ -965,6 +980,14 @@ extension CanvasManager {
         renderTreeAndPoses(atFrame: frame).poses
     }
 
+    /// **§5.5's source frames on their own** — for each `layers` index a Repeat layer reaches, the
+    /// frame that leaf is shown at when the document is at `frame`; absent means `frame` itself.
+    /// `displayedFrame(forLayer:atFrame:)` is the one-layer reading with the cheap exit in front
+    /// of it; this is the whole map for a caller that is about to walk every layer.
+    func leafFrames(atFrame frame: Int) -> [Int: Int] {
+        renderTreeAndPoses(atFrame: frame).frames
+    }
+
     /// Every `layers` index in evaluation order. Characterized as identical to `layers.indices` —
     /// the tree reorders nothing, it only reveals the nesting that the flat array already encodes.
     ///
@@ -980,10 +1003,17 @@ extension CanvasManager {
     /// as the topmost poser of this stack, so that a folder in Parallax shares its pose out over its
     /// children exactly as a parallax layer does over the entries beneath it. `poses` collects
     /// §4.4's per-leaf map on the way down.
-    private func renderNodes(inContainer container: UUID?, atFrame frame: Int,
+    ///
+    /// `frame` is the frame *this container* is walked at and `documentFrame` the one the whole
+    /// walk was asked for; they differ inside a folder beneath a Repeat, which is walked at the
+    /// source frame (§5.5). `frames` records a leaf against `documentFrame`, because that is what
+    /// `leafSnapshots` compares it to — recorded against `frame` a leaf inside such a folder would
+    /// read as its own source and be looked up at the playhead.
+    private func renderNodes(inContainer container: UUID?, atFrame frame: Int, documentFrame: Int,
                              inheriting inherited: PoseMap?,
                              ownPoser: ((_ stack: [ContainerEntry]) -> ContainerPoser?)?,
-                             poses: inout [Int: PoseMap]) -> [RenderNode] {
+                             poses: inout [Int: PoseMap],
+                             frames: inout [Int: Int]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
         // **Whether these entries are a node's operands rather than an ordinary stack.** Three rules
@@ -1047,6 +1077,31 @@ extension CanvasManager {
         // is the same association the running product had (`M_k ∘ (… ∘ (M_1 ∘ inherited))`), so a
         // document with no parallax layer composes the same `CGAffineTransform`s in the same order
         // and lands on the same bits. The folder's own pose, when there is one, is the first poser.
+        //
+        // **The carry is a (pose, frame) view since TRANSFORM_LAYER.md §5.5, and the frame half runs
+        // first.** A Repeat layer at position *p* shows every entry beneath it at the source frame
+        // `s + ((f − s) mod period)` of its block — so the frame an entry is *read at* (its cel, its
+        // opacity and effect curves, its own pose if it is a poser, its children if it is a folder)
+        // is decided top-to-bottom by the Repeat layers above it, exactly as its pose is decided by
+        // the transform layers above it. `carriedFrame` is that per-entry frame, computed in a pass
+        // of its own before any poser is asked, because a poser beneath a Repeat has to be resolved
+        // at *its* carried frame and not the walk's — a Rotate under a Repeat spins the first cycle
+        // again rather than spinning on (ruling 12: *"what the first cycle looks like is what
+        // repeats"*). A Repeat layer's own block is tested at the frame carried *to it*, so a Repeat
+        // under a Repeat composes. The same two gates as a pose: a block at that frame, and the eye.
+        var carriedFrame = [Int](repeating: frame, count: stack.count)
+        do {
+            var current = frame
+            for position in stride(from: stack.count - 1, through: 0, by: -1) {
+                carriedFrame[position] = current
+                guard !containerIsNode, case .layer(let index) = stack[position],
+                      layers[index].isVisible,
+                      let pose = layers[index].layerTransform, pose.repeats,
+                      let celIndex = activeCelIndex(inLayer: index, atFrame: current) else { continue }
+                current = TransformLayerMode.repeatSourceFrame(
+                    current, blockStart: layers[index].cels[celIndex].startFrame, period: pose.repeatPeriod)
+            }
+        }
         var posers: [ContainerPoser] = []
         if let ownPoser, let own = ownPoser(stack) { posers.append(own) }
         var carried = [PoseMap?](repeating: inherited, count: stack.count)
@@ -1059,17 +1114,20 @@ extension CanvasManager {
                 }
                 carried[position] = accumulated
             }
+            let entryFrame = carriedFrame[position]
             guard !containerIsNode, case .layer(let index) = stack[position],
                   layers[index].isVisible,
-                  let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
+                  let celIndex = activeCelIndex(inLayer: index, atFrame: entryFrame),
                   let pose = layers[index].layerTransform else { continue }
             let layer = layers[index]
             // **The block's first frame is the rotate mode's origin** (§5.3): the sum restarts at
             // every block, so a layer with several blocks is several starts.
             guard let poser = containerPoser(
-                pose: pose, atFrame: frame, blockStart: layer.cels[celIndex].startFrame,
+                pose: pose, atFrame: entryFrame, blockStart: layer.cels[celIndex].startFrame,
                 channels: PoserChannels(layer: layer),
-                shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
+                shareOf: { q, positional in
+                    self.parallaxShare(of: stack[q], atFrame: carriedFrame[q], positionalDefault: positional)
+                },
                 stack: stack, position: position) else { continue }
             posers.append(poser)
         }
@@ -1087,6 +1145,9 @@ extension CanvasManager {
             // prevent, and would do it silently, as a mask nobody picked. Suppressed rather than
             // resolved-and-ignored so the mask never enters `masks(ofNode:…)` at all.
             let below: MaskSource? = position > 0 && !containerIsNode ? source(of: stack[position - 1]) : nil
+            // §5.5: the frame this entry is read at — the walk's, unless a Repeat above it says
+            // otherwise. Every "at this frame" read below asks this and not `frame`.
+            let entryFrame = carriedFrame[position]
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
@@ -1102,14 +1163,19 @@ extension CanvasManager {
                 // Nil here also drops `needsCompositorOnCanvas`'s effect clause and the leaf's
                 // `.normal` pin for the frames outside the bar, which is what a leaf that contributes
                 // nothing should look like to the tree.
-                let effect = activeCelIndex(inLayer: index, atFrame: frame) != nil
-                    ? layer.layerEffect(atFrame: frame) : nil
+                let effect = activeCelIndex(inLayer: index, atFrame: entryFrame) != nil
+                    ? layer.layerEffect(atFrame: entryFrame) : nil
                 // **The one place a leaf's pose is recorded.** Absent rather than present-and-identity
                 // for `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached from the tree side:
                 // an entry in this dictionary is what gives a cel a derivation, and a derivation costs
                 // a canvas-sized render and an entry in each of three caches (§4.5). A document with
                 // no transformation layer therefore mints nothing at all.
                 if let pose = carried[position] { poses[index] = pose }
+                // **And the one place a leaf's source frame is recorded**, absent for the same reason:
+                // `leafSnapshots` reads `frames[i] ?? documentFrame`, so a document with no Repeat
+                // layer mints nothing here either. Against the *document* frame, not this
+                // container's — see the parameter.
+                if entryFrame != documentFrame { frames[index] = entryFrame }
                 result.append(RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   // **Resolved at this frame** — TODO (21)'s keyframable opacity,
                                   // and the seam is the one `layerEffect(atFrame:)` already cut two
@@ -1118,7 +1184,7 @@ extension CanvasManager {
                                   // `node.opacity` and therefore varies per frame for free. A layer
                                   // with no curve returns the stored value byte for byte, which is
                                   // what keeps every document nobody has animated identical.
-                                  opacity: layer.opacity(atFrame: frame), isVisible: layer.isVisible,
+                                  opacity: layer.opacity(atFrame: entryFrame), isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
                                   // not a blend (§7 says so while listing it among them); it is this
                                   // machinery with an implicit source, so it is resolved here into a
@@ -1183,20 +1249,26 @@ extension CanvasManager {
                 // Move the recursion composes exactly `map.concatenating(outer)` onto every child,
                 // the value `inner` used to carry. The origin for a folder in Rotate is frame 0: a
                 // folder has no block (§3.3, *"not repeat: a folder has no block"*).
+                //
+                // **At the carried frame, not the walk's** (§5.5): a folder under a Repeat is walked
+                // at the source frame, so everything inside it — its cels, its curves, its own pose
+                // — repeats with it.
                 let outer = carried[position]
                 let ownPose = folder.transform
                 let children = renderNodes(
-                    inContainer: folder.id, atFrame: frame, inheriting: outer,
+                    inContainer: folder.id, atFrame: entryFrame, documentFrame: documentFrame, inheriting: outer,
                     ownPoser: ownPose.map { pose in
                         { stack in
                             self.containerPoser(
-                                pose: pose, atFrame: frame, blockStart: 0,
+                                pose: pose, atFrame: entryFrame, blockStart: 0,
                                 channels: PoserChannels(folder: folder),
-                                shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
+                                shareOf: { q, positional in
+                                    self.parallaxShare(of: stack[q], atFrame: entryFrame, positionalDefault: positional)
+                                },
                                 stack: stack, position: stack.count)
                         }
                     },
-                    poses: &poses)
+                    poses: &poses, frames: &frames)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps
@@ -1217,7 +1289,7 @@ extension CanvasManager {
                                   // Resolved at this frame, the leaf's rule on the other home —
                                   // §2.21 for grades, reached by the channel kind that arrived
                                   // after it.
-                                  opacity: folder.opacity(atFrame: frame), isVisible: folder.isVisible,
+                                  opacity: folder.opacity(atFrame: entryFrame), isVisible: folder.isVisible,
                                   // **Two forcings, and they are different rules that happen to write
                                   // the same value.**
                                   //
@@ -1265,7 +1337,7 @@ extension CanvasManager {
                                   // lands, and a raw field read is a grade frozen at whatever the
                                   // artist last typed. Today the two answer identically, which is
                                   // exactly what makes the mistake invisible until it is expensive.
-                                  effect: folder.resolvedEffect(atFrame: frame)))
+                                  effect: folder.resolvedEffect(atFrame: entryFrame)))
             }
         }
         return result

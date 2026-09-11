@@ -120,6 +120,13 @@ struct TimelineLayoutKey: Equatable {
     /// `Int`s, against a key that already carries every cel's id, start, length and thumbnail
     /// address.
     let trackMarkers: [[Int]]
+    /// **The frames on each layer's row a Repeat layer above it is showing as an earlier frame**,
+    /// as runs of one source cel — TRANSFORM_LAYER.md §5.5's ghost blocks, parallel to `tracks`.
+    /// In the key for `trackMarkers`' reason: the gate early-returns on an unchanged key, so a
+    /// ghost whose inputs (the repeat's period and blocks, the cels beneath) were not here would
+    /// draw once and freeze. Empty for every row of a document with no Repeat layer, after one
+    /// array scan (`CanvasManager.repeatGhostSegments`).
+    let trackGhosts: [[CanvasManager.RepeatGhost]]
     /// Parallel to the `.folder` entries of `rows`, in their order.
     let folders: [FolderKey]
 
@@ -198,6 +205,7 @@ extension TimelineLayoutKey {
                      drag: DragKey?) -> TimelineLayoutKey {
         var tracks: [[CelKey]] = []
         var trackMarkers: [[Int]] = []
+        var trackGhosts: [[CanvasManager.RepeatGhost]] = []
         var folders: [FolderKey] = []
 
         for row in stackRows {
@@ -212,6 +220,7 @@ extension TimelineLayoutKey {
                 // channel in force keys on, and carries the grade asymmetry that used to sit on this
                 // line.
                 trackMarkers.append(canvasManager.keyframeFrames(of: .layer(id: layer.id)))
+                trackGhosts.append(canvasManager.repeatGhostSegments(forLayer: layerIndex))
             } else if let folderID = row.folderID {
                 let folder = canvasManager.folders.first { $0.id == folderID }
                 let childCels = canvasManager.descendantLayerIndices(ofFolder: folderID)
@@ -236,6 +245,7 @@ extension TimelineLayoutKey {
             rows: stackRows,
             tracks: tracks,
             trackMarkers: trackMarkers,
+            trackGhosts: trackGhosts,
             folders: folders,
             currentLayerIndex: canvasManager.currentLayerIndex,
             pixelsPerFrame: pixelsPerFrame,

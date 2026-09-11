@@ -122,6 +122,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// each and no keyframe twin.
     case shakePeriod
     case shakeSeed
+    /// A repeat layer's period changing (`setRepeatPeriod`), TRANSFORM_LAYER.md §5.5 — typed, not
+    /// keyable, one label.
+    case repeatPeriod
     /// A transform layer's — or a posed folder's — mode being switched (`setTransformLayerMode`),
     /// TRANSFORM_LAYER.md §5: Move, Parallax or Rotate.
     case transformLayerMode
@@ -278,6 +281,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .shakeRotationKeyframes: return "edit rotate shake keyframes"
         case .shakePeriod: return "change shake speed"
         case .shakeSeed: return "re-roll shake"
+        case .repeatPeriod: return "change repeat length"
         case .transformLayerMode: return "change transform mode"
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"

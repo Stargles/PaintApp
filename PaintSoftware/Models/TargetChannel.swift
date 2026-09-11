@@ -340,6 +340,12 @@ extension Layer {
             return TargetChannel.shakeChannels.contains {
                 channelIsEverNonZero($0, stored: stored($0), tracks: tracks)
             }
+        case .repeat:
+            // Not a move at all, but the same consequence for the live canvas: the entries beneath
+            // show a frame Core Animation's flat row of hosts cannot show (each host draws its own
+            // cel at the playhead), so the composite has to be what is on screen. A period never
+            // set loops nothing and engages nothing.
+            return pose.repeats
         }
     }
 

@@ -841,7 +841,7 @@ final class FrameBaker {
     /// below close exactly that gap: a curve edited so that frame 7 changes and frame 0 does not is
     /// invisible in the tree at frame 0 and plain in the dictionary.
     /// A container pose as much of it as reaches a pixel: the stored base, the whole track, the
-    /// mode, and the shake's seed and period — and not the baseline, for
+    /// mode, the shake's seed and period and the repeat's period — and not the baseline, for
     /// `StructuralStamp.containerPoses`' reason. **The seed and period are here because the rotate
     /// test found the pose missing**: the noise is a pure function of `(seed, period, frame)`
     /// (TRANSFORM_LAYER.md §5.4), so a re-rolled seed changes every frame's bytes with nothing in the
@@ -853,6 +853,9 @@ final class FrameBaker {
         let mode: TransformLayerMode
         let shakeSeed: UInt64
         let shakePeriod: Int
+        /// §5.5's loop length — which frames beneath show which source frame, and nothing in the
+        /// tree says so either.
+        let repeatPeriod: Int
 
         init(_ pose: LayerPose) {
             self.pose = pose.pose
@@ -860,6 +863,7 @@ final class FrameBaker {
             mode = pose.mode
             shakeSeed = pose.shakeSeed
             shakePeriod = pose.shakePeriod
+            repeatPeriod = pose.repeatPeriod
         }
     }
 

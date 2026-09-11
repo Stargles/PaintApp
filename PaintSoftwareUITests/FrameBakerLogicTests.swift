@@ -743,6 +743,19 @@ final class FrameBakerLogicTests: XCTestCase {
         }
     }
 
+    /// **Stage 5's: the repeat period decides which source frame every frame beneath shows, and the
+    /// tree at the probe frame cannot say so** — the premise assertion holds because frame 0 is its
+    /// own source under any period. Drop `repeatPeriod` from `ContainerPoseStamp` and this goes red.
+    func testARepeatLayersPeriodIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("the period decides which frame each frame beneath shows",
+                                                 setup: { manager, mover in
+                                                     manager.layers[mover].transform?.mode = .repeat
+                                                     manager.layers[mover].transform?.repeatPeriod = 2
+                                                 }) { manager, mover in
+            manager.layers[mover].transform?.repeatPeriod = 3
+        }
+    }
+
     func testAShakeLayersAmplitudeIsAStructuralEdit() {
         assertIsAStructuralEditOfATransformLayer("a typed amplitude scales every frame's jolt with no track to be seen",
                                                  setup: { manager, mover in

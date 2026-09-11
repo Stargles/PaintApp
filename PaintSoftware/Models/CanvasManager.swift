@@ -401,7 +401,7 @@ final class CanvasManager: ObservableObject {
     var activeLayerIsVector: Bool {
         guard layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
-              let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return false }
+              let celIdx = displayedCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return false }
         return layers[currentLayerIndex].cels[celIdx].vector != nil
     }
 
@@ -447,7 +447,7 @@ final class CanvasManager: ObservableObject {
         beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
-              let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let celIdx = displayedCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               let vector = layers[currentLayerIndex].cels[celIdx].vector,
               image.size.width > 0, image.size.height > 0 else { return nil }
         let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
@@ -3052,7 +3052,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].thumbnail = image
-        if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
+        if displayedCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = image
         }
         thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,
@@ -3071,7 +3071,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].thumbnail = nil
-        if activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
+        if displayedCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
             layers[layerIndex].thumbnail = nil
         }
         thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,

@@ -811,9 +811,14 @@ struct CanvasView: UIViewRepresentable {
                         self.updateShapeOverlay()
                         return
                     }
+                    // `displayedCelIndex`, not `activeCelIndex`: under a Repeat layer the stroke
+                    // landed in the *source* frame's cel (TRANSFORM_LAYER.md §5.5, ruling 13), and
+                    // this is the call that dirties and bakes it — asked at the playhead's own frame
+                    // it would find no cel and the lift would raise nothing, CLAUDE.md's silent
+                    // stroke-lift trap by a new door.
                     guard let host, let layerID = host.strokeView.layerID,
                           let layerIndex = self.canvasManager.layers.firstIndex(where: { $0.id == layerID }),
-                          let celIndex = self.canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: self.canvasManager.currentFrame) else { return }
+                          let celIndex = self.canvasManager.displayedCelIndex(inLayer: layerIndex, atFrame: self.canvasManager.currentFrame) else { return }
                     self.canvasManager.strokeEnded(layerIndex: layerIndex, celIndex: celIndex)
                     self.updateShapeOverlay()
                 }
@@ -906,6 +911,10 @@ struct CanvasView: UIViewRepresentable {
         /// two interaction gates. Extracted from the middle of that function so it is a named
         /// row rather than part of `reconcile`'s remainder; the body is unchanged.
         private func reconcileLayerRows(touch: CanvasTouchInputs) {
+            // §5.5's source frames, once for the whole loop: under a Repeat layer a host shows —
+            // and a stroke lands in — the cel of the frame the layer is *showing*, not the
+            // playhead's. Empty for every document with no Repeat layer, after one array scan.
+            let shownFrames = canvasManager.displayedFrames(atFrame: canvasManager.currentFrame)
             for (index, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
@@ -926,7 +935,8 @@ struct CanvasView: UIViewRepresentable {
                     * canvasManager.maskEditCanvasDim(forLayerAt: index)
                 if host.alpha != targetAlpha { host.alpha = targetAlpha }
 
-                let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame)
+                let celIdx = canvasManager.activeCelIndex(inLayer: index,
+                                                          atFrame: shownFrames[index] ?? canvasManager.currentFrame)
 
                 // §4.5's value layer on the live canvas: **a host with a background colour**, and
                 // nothing else. Its three content views stay empty — the colour is not in a cel — so
@@ -2123,9 +2133,11 @@ struct CanvasView: UIViewRepresentable {
             // empty frame has nothing to act on, and spawning a block would leave a blank one behind
             // plus an undo step for a gesture that changed nothing the artist can see.
             guard canvasManager.selectedTool != .eraser else { return }
+            // `displayedCelIndex`: under a Repeat the frame that has to be empty is the source
+            // frame's, which is where `ensureCelAtCurrentFrame` spawns (§5.5, ruling 13).
             guard let host, canvasManager.layers.indices.contains(index),
                   host.strokeView.layerID == canvasManager.layers[index].id,
-                  canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) == nil,
+                  canvasManager.displayedCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) == nil,
                   let celIdx = canvasManager.ensureCelAtCurrentFrame(layerIndex: index) else { return }
 
             let cel = canvasManager.layers[index].cels[celIdx]
@@ -2434,7 +2446,7 @@ struct CanvasView: UIViewRepresentable {
 
             // Also outside the AppliedTool guard: toggling "paint outside selection" doesn't touch
             // any of that struct's fields. Only applies to the layer/cel the selection belongs to.
-            let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
+            let celIdx = canvasManager.displayedCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
             let celID = celIdx.map { layer.cels[$0].id }
             if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
                selection.layerID == layer.id, selection.celID == celID {
@@ -2516,11 +2528,14 @@ struct CanvasView: UIViewRepresentable {
             // §4.4's per-leaf poses, resolved once for the whole loop rather than per layer: the
             // accumulation is a walk of the tree, and asking it inside the loop would make this pass
             // quadratic in the layer count for a document nobody has posed.
-            let poses = canvasManager.layerPoses(atFrame: canvasManager.currentFrame)
+            // …and §5.5's source frames off the same walk: a host under a Repeat previews the cel
+            // of the frame it is showing, derived at that frame.
+            let walk = canvasManager.renderTreeAndPoses(atFrame: canvasManager.currentFrame)
+            let poses = walk.poses
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
-                guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
-                                                                  atFrame: canvasManager.currentFrame) else {
+                let shownFrame = walk.frames[layerIndex] ?? canvasManager.currentFrame
+                guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: shownFrame) else {
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.setInterpolationImage(nil)
                     continue
@@ -2531,7 +2546,7 @@ struct CanvasView: UIViewRepresentable {
                 // `cel.interpolation != nil` first, which is a test for *one* of the two derivation
                 // sources, so a cel animated purely by a transform key took the no-recipe exit and
                 // the canvas drew its resting ink at every frame of a move the export was animating.
-                switch canvasManager.livePreview(forCel: cel, atFrame: canvasManager.currentFrame,
+                switch canvasManager.livePreview(forCel: cel, atFrame: shownFrame,
                                                  inheriting: poses[layerIndex]) {
                 case .derived(let derived):
                     // **A blanked host renders nothing, so the picture would be thrown away** — TODO

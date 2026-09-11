@@ -539,15 +539,30 @@ struct LayerPose: Equatable {
     /// so it sits here with the seed. Encoded only when it is not 1.
     var shakePeriod: Int = 1
 
+    /// **The loop's length in frames, for a pose in Repeat** — TRANSFORM_LAYER.md §5.5, §2 ruling 11:
+    /// *"you type the loop's length, pre-filled from where the drawings beneath end"*. A number on the
+    /// layer and never inferred at render time, because a background running the whole scene beneath
+    /// the walk would otherwise silently stop the walk looping. Zero is "never set" — a pose in any
+    /// other mode carries it and it encodes as absent — and loops nothing; `setTransformLayerMode`
+    /// fills it in on the way into Repeat. Not keyable, so it sits here with the shake's seed.
+    var repeatPeriod: Int = 0
+
     init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil,
-         mode: TransformLayerMode = .move, shakeSeed: UInt64 = 0, shakePeriod: Int = 1) {
+         mode: TransformLayerMode = .move, shakeSeed: UInt64 = 0, shakePeriod: Int = 1,
+         repeatPeriod: Int = 0) {
         self.pose = pose
         self.track = track
         self.baseline = baseline
         self.mode = mode
         self.shakeSeed = shakeSeed
         self.shakePeriod = shakePeriod
+        self.repeatPeriod = repeatPeriod
     }
+
+    /// **Whether this pose loops the frames beneath it at all** — in Repeat with a period set. The
+    /// one predicate the render walk, the edit redirect and the timeline's ghosts read, so the three
+    /// cannot disagree about which layers loop.
+    var repeats: Bool { mode == .repeat && repeatPeriod >= 1 }
 
     /// A container that shows its contents exactly where they are — what a freshly created
     /// transformation layer holds, and the value §2.5's *"a state of the unmoved item at keyframe A"*
@@ -605,7 +620,7 @@ struct LayerPose: Equatable {
 
 extension LayerPose: Codable {
 
-    private enum CodingKeys: String, CodingKey { case pose, track, baseline, mode, shakeSeed, shakePeriod }
+    private enum CodingKeys: String, CodingKey { case pose, track, baseline, mode, shakeSeed, shakePeriod, repeatPeriod }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -622,6 +637,7 @@ extension LayerPose: Codable {
         // says, and what every pose that has never been in Shake says.
         shakeSeed = try c.decodeIfPresent(UInt64.self, forKey: .shakeSeed) ?? 0
         shakePeriod = try c.decodeIfPresent(Int.self, forKey: .shakePeriod) ?? 1
+        repeatPeriod = try c.decodeIfPresent(Int.self, forKey: .repeatPeriod) ?? 0
     }
 
     /// Hand-written so that `mode` is **written only when it is not Move** — §3.5's field-presence
@@ -636,6 +652,7 @@ extension LayerPose: Codable {
         if mode != .move { try c.encode(mode, forKey: .mode) }
         if shakeSeed != 0 { try c.encode(shakeSeed, forKey: .shakeSeed) }
         if shakePeriod != 1 { try c.encode(shakePeriod, forKey: .shakePeriod) }
+        if repeatPeriod != 0 { try c.encode(repeatPeriod, forKey: .repeatPeriod) }
     }
 }
 

@@ -23,6 +23,13 @@ import CoreGraphics
 ///    scaled 2× shakes twice the pixels and a Move key is composed under it; the period eases
 ///    between beats; the beats count from the block's start; the mode switch mints a seed, Re-roll
 ///    is one undo step, and a raster fixture on both backends is drawn jolted.
+///  * **Repeat** (§5.5, stage 5) — a leaf beneath is shown at the source frame `s + ((f − s) mod p)`
+///    and the composite at a repeated frame is the source frame's bytes on both backends; the frame
+///    store hits for free (`FrameBakeKey(s + p + k) == FrameBakeKey(s + k)`); an opacity curve, a
+///    transform layer and a folder beneath all repeat; a repeat under a repeat composes; a hidden
+///    repeat loops nothing; the period is pre-filled from where the drawings beneath end, typed as one
+///    undo step, and refused on a folder; drawing on a repeated frame lands on the source cel; the
+///    timeline's ghost segments agree with the render walk on a nested fixture.
 ///  * **Persistence** — the mode and the rows round-trip through a manifest and a real package,
 ///    and an older document with none of them decodes to Move.
 ///
@@ -137,6 +144,26 @@ final class TransformLayerModesLogicTests: XCTestCase {
         let base = avalanche(seed &+ (channel &+ 1) &* golden)
         let raw = avalanche(base &+ UInt64(bitPattern: Int64(beat)) &* golden)
         return Double(raw >> 11) * (2.0 / 9_007_199_254_740_992.0) - 1
+    }
+
+    /// **Three one-frame drawings on frames 0, 1 and 2 — a block at x 8, 28 and 48 — under a Repeat
+    /// transform layer whose bar runs `blockStart` … `blockStart + 12` with `period`.** Returns the
+    /// manager, the drawn layer's index and the repeat layer's.
+    private func repeatedDrawings(period: Int = 3, blockStart: Int = 0) -> (manager: CanvasManager, drawn: Int, looper: Int) {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addLayer(name: "ink")
+        manager.addTransformLayer(name: "looper")
+        let drawn = layerIndex(named: "ink", in: manager)
+        let looper = layerIndex(named: "looper", in: manager)
+        CanvasFixture.setCelLayout(manager, layerIndex: drawn, [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 1)])
+        for (frame, x) in [(0, 8), (1, 28), (2, 48)] {
+            CanvasFixture.setBakedContent(manager, layerIndex: drawn, frame: frame,
+                                          CanvasFixture.solidImage(.black, rect: CGRect(x: x, y: 29, width: 6, height: 6)))
+        }
+        CanvasFixture.setCelLayout(manager, layerIndex: looper, [(start: blockStart, length: 12)])
+        manager.layers[looper].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .repeat, repeatPeriod: period)
+        return (manager, drawn, looper)
     }
 
     private func compositeBytes(_ manager: CanvasManager, atFrame frame: Int) throws -> [UInt8] {
@@ -837,6 +864,291 @@ final class TransformLayerModesLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - Repeat: the frame carry (§5.5, rulings 11–13)
+
+    /// **A leaf beneath a Repeat is shown at `s + ((f − s) mod p)`, and the composite at a repeated
+    /// frame is the source frame's bytes on both backends.** The first cycle is the identity (no
+    /// entry in `leafFrames`), frame 4 is frame 1 and frame 5 is frame 2 — as bytes, which is what
+    /// the artist sees; and the same frame twice is the same bytes. Past the bar the loop stops
+    /// (ruling 1) and frame 12, which the drawings do not reach, is blank.
+    func testARepeatLayerShowsTheFramesBeneathAgainEveryPeriodOnBothBackends() throws {
+        try onBothBackends { backend in
+            let fx = repeatedDrawings(period: 3)
+            for frame in 0..<3 {
+                XCTAssertNil(fx.manager.leafFrames(atFrame: frame)[fx.drawn], "\(backend): frame \(frame) is its own source")
+            }
+            for frame in 3..<12 {
+                XCTAssertEqual(fx.manager.leafFrames(atFrame: frame)[fx.drawn], frame % 3, "\(backend): frame \(frame) shows frame \(frame % 3)")
+            }
+            let sources = try (0..<3).map { try compositeBytes(fx.manager, atFrame: $0) }
+            for (frame, x) in [(0, 11), (1, 31), (2, 51)] {
+                XCTAssertEqual(try XCTUnwrap(inkBounds(sources[frame])).midX, Double(x), accuracy: 1.5,
+                               "\(backend): premise — frame \(frame)'s block is at x \(x)")
+            }
+            for frame in 3..<12 {
+                let bytes = try compositeBytes(fx.manager, atFrame: frame)
+                XCTAssertEqual(bytes, sources[frame % 3], "\(backend): frame \(frame) is frame \(frame % 3)'s picture, byte for byte")
+            }
+            XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 7), try compositeBytes(fx.manager, atFrame: 7),
+                           "\(backend): the same frame renders the same bytes")
+            XCTAssertNil(inkBounds(try compositeBytes(fx.manager, atFrame: 12)),
+                         "\(backend): past the bar the loop stops and there is no drawing at 12")
+            XCTAssertNil(fx.manager.leafFrames(atFrame: 12)[fx.drawn])
+        }
+    }
+
+    /// **The frame store hits for free**: `FrameBakeKey` carries no frame, so a repeated frame's
+    /// recipe digests to the source frame's key — `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)`
+    /// — and two different source frames are two keys. §5.5's *"a repeat costs the bake nothing"*.
+    func testARepeatedFramesBakeKeyIsTheSourceFramesKey() throws {
+        let fx = repeatedDrawings(period: 3)
+        func key(_ frame: Int) throws -> FrameBakeKey {
+            let recipe = try XCTUnwrap(fx.manager.makeFrameRecipe(atFrame: frame, includeBackground: true), "frame \(frame) has a recipe")
+            return FrameBakeKey(recipe: recipe, renderResolution: fx.manager.renderResolution)
+        }
+        for k in 0..<3 {
+            XCTAssertEqual(try key(3 + k), try key(k), "frame \(3 + k) is frame \(k)'s file")
+            XCTAssertEqual(try key(6 + k), try key(k), "frame \(6 + k) too")
+        }
+        XCTAssertNotEqual(try key(0), try key(1), "premise: two source frames are two keys")
+        XCTAssertNotEqual(try key(12), try key(0), "past the bar the frame is its own")
+    }
+
+    /// **Everything beneath repeats** (ruling 12): the drawn layer's opacity curve is read at the
+    /// source frame, a Rotate layer beneath the Repeat spins its first cycle again rather than on,
+    /// and a folder beneath it is walked at the source frame. A carry that remapped only the cel
+    /// lookup fails all three.
+    func testAnOpacityCurveATransformLayerAndAFolderBeneathARepeatAllRepeat() throws {
+        let fx = repeatedDrawings(period: 3)
+        fx.manager.layers[fx.drawn].channelTracks[TargetChannel.opacity.id] = curve([(0, 0.2), (2, 1)])
+        func leafOpacity(_ frame: Int) -> Double? {
+            RenderNode.find(fx.manager.layers[fx.drawn].id, in: fx.manager.renderTree(atFrame: frame))?.opacity
+        }
+        XCTAssertEqual(leafOpacity(0), 0.2); XCTAssertEqual(leafOpacity(2), 1)
+        XCTAssertEqual(leafOpacity(3), 0.2, "frame 3 fades in again from the start")
+        XCTAssertEqual(leafOpacity(4), leafOpacity(1), "frame 4 is frame 1's opacity")
+        XCTAssertEqual(leafOpacity(5), 1)
+
+        // A Rotate layer between the drawing and the Repeat, 30°/frame: frame 4 is 30°, not 120°.
+        fx.manager.addTransformLayer(name: "wheel")
+        fx.manager.restackLayer(fx.manager.layers[layerIndex(named: "wheel", in: fx.manager)].id,
+                                above: .layer(fx.manager.layers[fx.drawn].id), parentFolderID: nil)
+        let wheelNow = layerIndex(named: "wheel", in: fx.manager), drawnNow = layerIndex(named: "ink", in: fx.manager)
+        XCTAssertLessThan(wheelNow, layerIndex(named: "looper", in: fx.manager), "premise: the wheel is beneath the looper")
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: wheelNow, [(start: 0, length: 12)])
+        fx.manager.layers[wheelNow].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .rotate)
+        fx.manager.layers[wheelNow].rotateSpeed = 30
+        let right = CGPoint(x: centre.x + 10, y: centre.y)
+        func angle(_ frame: Int) throws -> Double {
+            guard let map = fx.manager.layerPoses(atFrame: frame)[drawnNow] else { return 0 }
+            let p = try XCTUnwrap(map.applied(to: right))
+            var a = atan2(p.y - centre.y, p.x - centre.x) * 180 / .pi
+            if a < 0 { a += 360 }
+            return a
+        }
+        XCTAssertEqual(try angle(1), 30, accuracy: 1e-9)
+        XCTAssertEqual(try angle(4), 30, accuracy: 1e-9, "the wheel beneath the loop spins its first cycle again")
+        XCTAssertEqual(try angle(3), 0, accuracy: 1e-9, "…from rest")
+
+        // A folder beneath the looper holding the drawing: walked at the source frame. `addFolder`
+        // puts the folder at the top, so it is restacked under the looper.
+        let folder = fx.manager.addFolder(name: "G")
+        fx.manager.layers[layerIndex(named: "ink", in: fx.manager)].parentFolderID = folder
+        fx.manager.restackFolder(folder, above: .bottom, parentFolderID: nil)
+        let inFolder = layerIndex(named: "ink", in: fx.manager)
+        XCTAssertLessThan(fx.manager.containerEntries(inContainer: nil).firstIndex { if case .layer(let at) = $0 { return fx.manager.layers[at].name == "looper" } else { return false } } ?? -1,
+                          fx.manager.containerEntries(inContainer: nil).firstIndex { if case .folder(let f) = $0 { return f.id == folder } else { return false } } ?? -1,
+                          "premise: the folder is beneath the looper (entries rank top to bottom)")
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 5)[inFolder], 2, "a folder beneath the looper is walked at the source frame")
+        XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 5), try compositeBytes(fx.manager, atFrame: 2))
+    }
+
+    /// **A repeat under a repeat composes, and a hidden repeat loops nothing** — the accumulator's
+    /// gates, on the frame carry. Outer period 5 over an inner period 2, chosen so the two are not
+    /// one: frame 8 → outer 3 → inner 1, where the inner alone would say 0.
+    func testARepeatUnderARepeatComposesAndAHiddenOneLoopsNothing() throws {
+        let fx = repeatedDrawings(period: 2)
+        fx.manager.addTransformLayer(name: "outer")
+        let outer = layerIndex(named: "outer", in: fx.manager)
+        XCTAssertGreaterThan(outer, fx.looper, "premise: the new layer is above the inner looper")
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: outer, [(start: 0, length: 12)])
+        fx.manager.layers[outer].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .repeat, repeatPeriod: 5)
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 8)[fx.drawn], 1, "8 → outer 3 → inner 1")
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 7)[fx.drawn], 0, "7 → outer 2 → inner 0")
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 3)[fx.drawn], 1, "3 → outer 3 → inner 1")
+        fx.manager.layers[fx.looper].isVisible = false
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 8)[fx.drawn], 3, "the hidden inner loop is gone: 8 → outer 3")
+        fx.manager.layers[outer].isVisible = false
+        XCTAssertNil(fx.manager.leafFrames(atFrame: 9)[fx.drawn], "both hidden: the frame is its own")
+        XCTAssertFalse(fx.manager.hasRepeatLayerInForce, "…and the cheap exit says so")
+        fx.manager.layers[fx.looper].isVisible = true
+        fx.manager.layers[outer].isVisible = true
+        fx.manager.layers[outer].transform?.repeatPeriod = 0
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 8)[fx.drawn], 0, "a period never set loops nothing: 8 → inner 0")
+    }
+
+    /// **The render-path predicate reads the repeat** (§7): a Repeat with a period engages the
+    /// composite, one with no period does not, and in Move the period is inert storage.
+    func testMovesItsContentsReadsTheRepeat() {
+        let fx = repeatedDrawings(period: 3)
+        XCTAssertTrue(fx.manager.hasContainerPoseInForce, "a loop is a picture the flat hosts cannot show")
+        fx.manager.layers[fx.looper].transform?.repeatPeriod = 0
+        XCTAssertFalse(fx.manager.hasContainerPoseInForce, "no period, no loop")
+        fx.manager.layers[fx.looper].transform?.repeatPeriod = 3
+        fx.manager.layers[fx.looper].transform?.mode = .move
+        XCTAssertFalse(fx.manager.hasContainerPoseInForce, "in Move the period is inert storage")
+    }
+
+    /// **The period is pre-filled from where the drawings beneath end, typed as one undo step, and
+    /// refused on a folder** (rulings 11, §3.3). Drawings on 0–2 pre-fill 3; a background held to 12
+    /// beneath pre-fills 12 (ruling 11's own example of why it is typed); nothing beneath pre-fills
+    /// the bar's length; a tint beneath counts for nothing; a typed number stays through a mode
+    /// round trip.
+    func testTheRepeatPeriodIsPreFilledFromWhereTheDrawingsBeneathEndAndTypedAsOneUndoStep() throws {
+        let fx = repeatedDrawings(period: 0)
+        fx.manager.layers[fx.looper].transform?.mode = .move
+        let target = KeyframeTarget.layer(id: fx.manager.layers[fx.looper].id)
+        XCTAssertEqual(fx.manager.suggestedRepeatPeriod(forLayer: fx.looper), 3)
+        fx.manager.setTransformLayerMode(target, to: .repeat)
+        XCTAssertEqual(fx.manager.layers[fx.looper].transform?.repeatPeriod, 3, "entering Repeat fills the period in")
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 4)[fx.drawn], 1, "…and the loop is live at once")
+
+        fx.manager.setRepeatPeriod(target, to: 2)
+        XCTAssertEqual(fx.manager.leafFrames(atFrame: 4)[fx.drawn], 0)
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.notice?.kind, .historyUndo(.repeatPeriod))
+        XCTAssertEqual(fx.manager.layers[fx.looper].transform?.repeatPeriod, 3, "one undo: the old length")
+        fx.manager.setRepeatPeriod(target, to: 0)
+        XCTAssertEqual(fx.manager.layers[fx.looper].transform?.repeatPeriod, 1, "never below one")
+        fx.manager.setRepeatPeriod(target, to: 5)
+        fx.manager.setTransformLayerMode(target, to: .move)
+        fx.manager.setTransformLayerMode(target, to: .repeat)
+        XCTAssertEqual(fx.manager.layers[fx.looper].transform?.repeatPeriod, 5, "a typed number survives leaving and returning")
+
+        // A background held to 12 beneath: the pre-fill is 12, which is why the number is typed.
+        fx.manager.addLayer(name: "bg")
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: layerIndex(named: "bg", in: fx.manager), [(start: 0, length: 12)])
+        fx.manager.restackLayer(fx.manager.layers[layerIndex(named: "bg", in: fx.manager)].id, above: .bottom, parentFolderID: nil)
+        fx.manager.layers[layerIndex(named: "looper", in: fx.manager)].transform?.repeatPeriod = 0
+        XCTAssertEqual(fx.manager.suggestedRepeatPeriod(forLayer: layerIndex(named: "looper", in: fx.manager)), 12,
+                       "a background running to 12 beneath makes the pre-fill 12")
+        // A tint beneath counts for nothing; a bar starting at 4 measures from 4.
+        fx.manager.deleteLayer(at: layerIndex(named: "bg", in: fx.manager))
+        fx.manager.addValueLayer(name: "tint")
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: layerIndex(named: "tint", in: fx.manager), [(start: 0, length: 24)])
+        fx.manager.restackLayer(fx.manager.layers[layerIndex(named: "tint", in: fx.manager)].id, above: .bottom, parentFolderID: nil)
+        XCTAssertEqual(fx.manager.suggestedRepeatPeriod(forLayer: layerIndex(named: "looper", in: fx.manager)), 3,
+                       "a tint held to 24 is not a drawing")
+        let looperNow = layerIndex(named: "looper", in: fx.manager)
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: looperNow, [(start: 1, length: 12)])
+        XCTAssertEqual(fx.manager.suggestedRepeatPeriod(forLayer: looperNow), 2, "measured from the bar's start")
+        // Nothing beneath: the bar's own length.
+        let empty = CanvasManager()
+        empty.canvasSize = size
+        empty.addTransformLayer(name: "alone")
+        XCTAssertEqual(empty.suggestedRepeatPeriod(forLayer: 0), empty.layers[0].cels[0].frameCount)
+
+        // A folder cannot loop.
+        let folder = fx.manager.addFolder(name: "G")
+        let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
+        fx.manager.folders[folderAt].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox))
+        fx.manager.setTransformLayerMode(.folder(id: folder), to: .repeat)
+        XCTAssertEqual(fx.manager.folders[folderAt].transform?.mode, .move, "Repeat is refused on a folder")
+        XCTAssertFalse(TransformLayerMode.folderCases.contains(.repeat), "…and the folder picker does not list it")
+    }
+
+    /// **Drawing on a repeated frame lands on the source cel** (ruling 13): at frame 4, which shows
+    /// frame 1, the cel every drawing path is handed is frame 1's — through
+    /// `displayedCelIndex` and through `ensureCelAtCurrentFrame`, which spawns nothing when the
+    /// source has a cel and spawns *at the source frame* when it has none. `activeCelIndex` at the
+    /// playhead is deliberately not consulted: with a held block sitting on frame 4 it would answer
+    /// a cel the render never shows there.
+    func testDrawingOnARepeatedFrameLandsOnTheSourceCel() throws {
+        let fx = repeatedDrawings(period: 3)
+        let sourceCelID = fx.manager.layers[fx.drawn].cels[1].id
+        fx.manager.currentFrame = 4
+        XCTAssertEqual(fx.manager.displayedFrame(forLayer: fx.drawn, atFrame: 4), 1)
+        XCTAssertEqual(fx.manager.displayedCelIndex(inLayer: fx.drawn, atFrame: 4).map { fx.manager.layers[fx.drawn].cels[$0].id }, sourceCelID)
+        let celCount = fx.manager.layers[fx.drawn].cels.count
+        let handed = try XCTUnwrap(fx.manager.ensureCelAtCurrentFrame(layerIndex: fx.drawn))
+        XCTAssertEqual(fx.manager.layers[fx.drawn].cels[handed].id, sourceCelID, "the stroke goes onto drawing 1")
+        XCTAssertEqual(fx.manager.layers[fx.drawn].cels.count, celCount, "…and nothing was minted at the playhead")
+
+        // A held block on the repeated frame does not change the answer: the render shows frame 1.
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: fx.drawn, [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 10)])
+        let heldSource = fx.manager.layers[fx.drawn].cels[1].id
+        XCTAssertNotNil(fx.manager.activeCelIndex(inLayer: fx.drawn, atFrame: 4), "premise: a block does sit on frame 4")
+        XCTAssertEqual(try XCTUnwrap(fx.manager.ensureCelAtCurrentFrame(layerIndex: fx.drawn)).description,
+                       fx.manager.layers[fx.drawn].cels.firstIndex { $0.id == heldSource }?.description,
+                       "the block under the playhead is not what is on screen; the source cel is")
+
+        // A gap at the source frame: the block is spawned there, one frame long, not at the playhead.
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: fx.drawn, [(start: 0, length: 1), (start: 2, length: 1)])
+        XCTAssertNil(fx.manager.activeCelIndex(inLayer: fx.drawn, atFrame: 1), "premise: frame 1 is empty")
+        let spawned = try XCTUnwrap(fx.manager.ensureCelAtCurrentFrame(layerIndex: fx.drawn))
+        XCTAssertEqual(fx.manager.layers[fx.drawn].cels[spawned].startFrame, 1, "spawned at the source frame")
+        XCTAssertEqual(fx.manager.layers[fx.drawn].cels[spawned].frameCount, 1)
+        XCTAssertNil(fx.manager.layers[fx.drawn].cels.first { $0.startFrame == 4 }, "…and not at the playhead")
+
+        // Off the loop the redirect is the identity, at no cost.
+        fx.manager.layers[fx.looper].isVisible = false
+        XCTAssertEqual(fx.manager.displayedFrame(forLayer: fx.drawn, atFrame: 4), 4)
+    }
+
+    /// **The timeline's ghost segments are the repeated frames, run by source drawing, and agree with
+    /// the render walk frame for frame on a nested fixture** — the ghosts are computed structurally
+    /// (the layout key cannot afford a walk per frame) and this is the pin that keeps the two
+    /// spellings of the remap one. Three drawings under a period-3 bar of 12: ghosts at 3, 4, 5, …,
+    /// 11, one frame each, cycling through the three cels.
+    func testTheGhostSegmentsAreTheRepeatedFramesAndAgreeWithTheRenderWalk() throws {
+        let fx = repeatedDrawings(period: 3)
+        let cels = fx.manager.layers[fx.drawn].cels
+        let ghosts = fx.manager.repeatGhostSegments(forLayer: fx.drawn)
+        XCTAssertEqual(ghosts.map(\.start), Array(3..<12))
+        XCTAssertEqual(ghosts.map(\.length), Array(repeating: 1, count: 9))
+        XCTAssertEqual(ghosts.map(\.sourceCelID), (3..<12).map { cels[$0 % 3].id })
+        XCTAssertTrue(fx.manager.repeatGhostSegments(forLayer: fx.looper).isEmpty, "the looper itself is not beneath itself")
+
+        // A held drawing is one segment per cycle: cels [0,2) and [2,3) under period 3 → ghosts of
+        // two frames then one frame, repeating.
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: fx.drawn, [(start: 0, length: 2), (start: 2, length: 1)])
+        let held = fx.manager.repeatGhostSegments(forLayer: fx.drawn)
+        XCTAssertEqual(held.map { ($0.start, $0.length) }.map { "\($0.0),\($0.1)" }, ["3,2", "5,1", "6,2", "8,1", "9,2", "11,1"])
+
+        // Nested: the drawing in a folder under an outer Repeat (period 5), with an inner Repeat
+        // (period 2) inside the folder above the drawing. Every frame of the scene, the ghost's
+        // source cel is the cel the render walk reads.
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: fx.drawn, [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 1)])
+        fx.manager.layers[fx.looper].transform?.repeatPeriod = 5
+        let folder = fx.manager.addFolder(name: "G")
+        fx.manager.layers[layerIndex(named: "ink", in: fx.manager)].parentFolderID = folder
+        fx.manager.addTransformLayer(name: "inner")
+        fx.manager.layers[layerIndex(named: "inner", in: fx.manager)].parentFolderID = folder
+        // A container ranks by the topmost `layers` index it holds, so the folder goes to the
+        // bottom *after* its contents are in it — restacked first, the inner layer's index would
+        // lift it back above the looper.
+        fx.manager.restackFolder(folder, above: .bottom, parentFolderID: nil)
+        let inner = layerIndex(named: "inner", in: fx.manager)
+        CanvasFixture.setCelLayout(fx.manager, layerIndex: inner, [(start: 0, length: 12)])
+        fx.manager.layers[inner].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .repeat, repeatPeriod: 2)
+        let drawn = layerIndex(named: "ink", in: fx.manager)
+        XCTAssertGreaterThan(inner, drawn, "premise: the inner looper is above the drawing in the folder")
+        XCTAssertGreaterThan(layerIndex(named: "looper", in: fx.manager), inner, "premise: the outer looper is above the folder")
+        let nested = fx.manager.repeatGhostSegments(forLayer: drawn)
+        XCTAssertFalse(nested.isEmpty)
+        var ghostAt: [Int: UUID] = [:]
+        for g in nested { for f in g.start..<(g.start + g.length) { ghostAt[f] = g.sourceCelID } }
+        for frame in 0..<fx.manager.contentEndFrame {
+            let shown = fx.manager.leafFrames(atFrame: frame)[drawn]
+            let walkCel = shown.flatMap { fx.manager.activeCelIndex(inLayer: drawn, atFrame: $0) }
+                .map { fx.manager.layers[drawn].cels[$0].id }
+            XCTAssertEqual(ghostAt[frame], walkCel, "frame \(frame): the ghost shows what the walk reads (shown at \(String(describing: shown)))")
+        }
+        XCTAssertEqual(ghostAt[2], fx.manager.layers[drawn].cels[0].id, "premise: the inner loop alone ghosts frame 2 as drawing 0")
+        XCTAssertEqual(ghostAt[8], fx.manager.layers[drawn].cels[1].id, "8 → outer 3 → inner 1, where the inner alone would say 0")
+        XCTAssertEqual(ghostAt[7], fx.manager.layers[drawn].cels[0].id, "7 → outer 2 → inner 0, where the inner alone would say 1")
+    }
+
     // MARK: - Persistence
 
     /// **The mode and the two rows survive a manifest round trip; a manifest without them decodes to
@@ -874,7 +1186,14 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertNil(olderBack.parallaxShare, "absent is the positional default")
         XCTAssertEqual(olderBack.transform?.shakeSeed, 0, "absent is never minted")
         XCTAssertEqual(olderBack.transform?.shakePeriod, 1, "absent is a jolt a frame")
+        XCTAssertEqual(olderBack.transform?.repeatPeriod, 0, "absent is never set")
         XCTAssertFalse(olderJSON.contains("shake"), "a pose in Move writes none of the shake keys")
+        XCTAssertFalse(olderJSON.contains("repeatPeriod"), "…nor the repeat's")
+
+        let looping = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .repeat, repeatPeriod: 8)
+        let loopingBack = try JSONDecoder().decode(LayerPose.self, from: try JSONEncoder().encode(looping))
+        XCTAssertEqual(loopingBack.mode, .repeat)
+        XCTAssertEqual(loopingBack.repeatPeriod, 8)
 
         // Stage 4's fields: the seed and period inside the pose, the amplitudes beside it, both homes.
         let shaking = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake, shakeSeed: 0xC0FFEE, shakePeriod: 3)
@@ -938,6 +1257,37 @@ final class TransformLayerModesLogicTests: XCTestCase {
                            "frame \(frame): the reloaded document shakes the same way")
         }
         XCTAssertNotNil(reloaded.layerPoses(atFrame: 0)[reloadedDrawn], "premise: the leaf is jolted at all")
+    }
+
+    /// **A repeat survives a real package**: the period comes back and the reloaded document shows
+    /// the same source frames, so frame 5 is still frame 2's picture.
+    func testARepeatSurvivesAPackageRoundTrip() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transform-repeat-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+        let fx = repeatedDrawings(period: 3)
+        let looperID = fx.manager.layers[fx.looper].id, drawnID = fx.manager.layers[fx.drawn].id
+        let url = root.appendingPathComponent("repeat.paintproj", isDirectory: true)
+        let finished = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(fx.manager, to: url) { finished.fulfill() }
+        wait(for: [finished], timeout: 30)
+
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
+        let looper = try XCTUnwrap(reloaded.layers.first { $0.id == looperID })
+        XCTAssertEqual(looper.transform?.mode, .repeat)
+        XCTAssertEqual(looper.transform?.repeatPeriod, 3)
+        let reloadedDrawn = index(of: drawnID, in: reloaded)
+        for frame in 0..<12 {
+            XCTAssertEqual(reloaded.leafFrames(atFrame: frame)[reloadedDrawn], fx.manager.leafFrames(atFrame: frame)[fx.drawn],
+                           "frame \(frame): the same source frame after a reload")
+        }
+        XCTAssertEqual(try compositeBytes(reloaded, atFrame: 5), try compositeBytes(reloaded, atFrame: 2),
+                       "frame 5 is still frame 2's picture")
     }
 
     /// **Through a real package**: a parallax layer with one typed share and a rotating folder with a

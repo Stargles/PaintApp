@@ -401,7 +401,7 @@ struct LayerOptionsPanel: View {
         // would be one the artist can set and never see.
         if canvasManager.layers[index].kind == .transform {
             let target = KeyframeTarget.layer(id: canvasManager.layers[index].id)
-            transformModeRow(canvasManager: canvasManager, target: target)
+            transformModeRow(canvasManager: canvasManager, target: target, modes: TransformLayerMode.allCases)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             transformMoveRow(scope: "beneath this layer") {
                 leavingMaskEdit { canvasManager.beginContainerPoseMove() }
@@ -789,19 +789,21 @@ private func transformMoveRow(scope: String, onMove: @escaping () -> Void) -> so
     .accessibilityIdentifier("layerOptions.transformMove")
 }
 
-/// **A container pose's mode picker** — TRANSFORM_LAYER.md §5's Move, Parallax and Rotate, on a
-/// transform layer's panel and on a posed folder's (§3.3). A `Menu` on a row with a title, the live
-/// value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape — so a later mode
-/// costs a `Button` and nothing about the row moves. Shake and Repeat are §8's stages 4 and 5 and
-/// are not listed until they land: a row that is offered and does nothing is CLAUDE.md's *"refusal
-/// with no notice"* wearing a menu.
+/// **A container pose's mode picker** — TRANSFORM_LAYER.md §5's five modes on a transform layer's
+/// panel, and the four pose modes on a posed folder's (§3.3). A `Menu` on a row with a title, the
+/// live value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape. Each mode
+/// was listed only once its stage landed: a row that is offered and does nothing is CLAUDE.md's
+/// *"refusal with no notice"* wearing a menu.
 ///
 /// The identifiers are the row's own (`layerOptions.transformModeButton`,
-/// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name.
-private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
+/// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name. `modes` is
+/// what the picker lists — every case on a layer, `TransformLayerMode.folderCases` on a folder,
+/// which has no block for Repeat to loop within (§3.3).
+private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget,
+                              modes: [TransformLayerMode]) -> some View {
     let current = canvasManager.transformLayerMode(of: target) ?? .move
     return Menu {
-        ForEach(TransformLayerMode.allCases) { mode in
+        ForEach(modes) { mode in
             Button {
                 canvasManager.setTransformLayerMode(target, to: mode)
             } label: {
@@ -856,6 +858,69 @@ private func transformModeSection(canvasManager: CanvasManager, target: Keyframe
     case .shake:
         ShakeRows(canvasManager: canvasManager, target: target)
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    case .repeat:
+        RepeatRows(canvasManager: canvasManager, target: target)
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    }
+}
+
+/// **Repeat's one control** — §5.5 and §2 ruling 11: the loop's length in frames, *typed*, pre-filled
+/// on the way into the mode from where the drawings beneath end (`setTransformLayerMode`). A
+/// stepper beside the field for a nudge. Two lines under it say what the artist will otherwise
+/// learn from the source: the loop runs until the bar ends, and drawing on a repeated frame draws
+/// on the frame it repeats (ruling 13), which the timeline shows ghosted.
+private struct RepeatRows: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+
+    @State private var fieldText = ""
+
+    private var period: Int { canvasManager.containerPose(of: target)?.repeatPeriod ?? 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Loop every").foregroundColor(.white)
+                Spacer()
+                Text(period == 1 ? "1 frame" : "\(period) frames")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .accessibilityIdentifier("layerOptions.repeatPeriodReadout")
+                Stepper("", value: Binding(
+                    get: { period },
+                    set: { canvasManager.setRepeatPeriod(target, to: $0) }),
+                        in: 1...max(period, 1) + 999)
+                    .labelsHidden()
+                    .accessibilityIdentifier("layerOptions.repeatPeriod.stepper")
+                TextField("\(period)", text: $fieldText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.white)
+                    .frame(width: 52)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 4)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(4)
+                    .accessibilityIdentifier("layerOptions.repeatPeriod.field")
+                    .accessibilityValue("\(period)")
+                    .onSubmit {
+                        defer { fieldText = "" }
+                        guard let typed = Int(fieldText.trimmingCharacters(in: .whitespaces)) else { return }
+                        canvasManager.setRepeatPeriod(target, to: typed)
+                    }
+            }
+            Text("The frames beneath this layer play again from the bar's start every \(period == 1 ? "frame" : "\(period) frames"), until the bar ends. The number was filled in from where the drawings beneath end; type another to change it.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Drawing on a repeated frame draws on the frame it repeats — those frames are ghosted on the timeline.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 
@@ -1430,7 +1495,8 @@ struct FolderOptionsPanel: View {
                     // **The mode, on the folder too** — TRANSFORM_LAYER.md §3.3: a folder's pose takes
                     // the pose modes as well, or the keyable rows those modes read would key nothing
                     // on a folder, which is §2.23's dead control by a new door.
-                    transformModeRow(canvasManager: canvasManager, target: .folder(id: folderID))
+                    transformModeRow(canvasManager: canvasManager, target: .folder(id: folderID),
+                                     modes: TransformLayerMode.folderCases)
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                     // `LayerOptionsPanel`'s row closes its own mask-edit session and the panel itself
                     // before raising the box (`leavingMaskEdit`, private to that struct) — inlined

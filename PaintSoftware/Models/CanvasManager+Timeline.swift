@@ -28,12 +28,53 @@ extension CanvasManager {
     /// `resizeCelRightEdge`/"Extend to End" are how it gets longer. `addCel` already clamps the
     /// length against the next block and gives a `.vector` layer's cel its own `VectorCanvas`, so a
     /// block spawned on a vector layer is a vector block.
+    ///
+    /// **Through the Repeat redirect** — TRANSFORM_LAYER.md §5.5, §2 ruling 13: *"drawing on a
+    /// repeated frame lands on the original drawing it repeats"*. At a frame a Repeat layer above
+    /// this one is showing as an earlier frame, the cel is the *source* frame's, and a block spawned
+    /// on an empty source frame is spawned there too — a block minted at the playhead would be one
+    /// the render never reads while the repeat is in force, which is the trap §5.5 names.
     @discardableResult
     func ensureCelAtCurrentFrame(layerIndex: Int) -> Int? {
         guard layers.indices.contains(layerIndex) else { return nil }
-        if let existing = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) { return existing }
-        addCel(layerIndex: layerIndex, startFrame: currentFrame, frameCount: 1)
-        return activeCelIndex(inLayer: layerIndex, atFrame: currentFrame)
+        let shown = displayedFrame(forLayer: layerIndex, atFrame: currentFrame)
+        if let existing = activeCelIndex(inLayer: layerIndex, atFrame: shown) { return existing }
+        addCel(layerIndex: layerIndex, startFrame: shown, frameCount: 1)
+        return activeCelIndex(inLayer: layerIndex, atFrame: shown)
+    }
+
+    // MARK: - §5.5's redirect: the frame a layer is showing
+
+    /// **Whether any Repeat layer in this document loops at all** — the cheap exit in front of every
+    /// redirect below, so a document that has never used Repeat pays one array scan and no tree walk.
+    var hasRepeatLayerInForce: Bool {
+        layers.contains { $0.isVisible && $0.layerTransform?.repeats == true }
+    }
+
+    /// **The frame layer `index` is *showing* when the document is at `frame`** — `frame` itself
+    /// unless a Repeat layer above it (TRANSFORM_LAYER.md §5.5) is showing it at the source frame of
+    /// its loop. Read off the render walk, so it cannot disagree with the picture.
+    ///
+    /// **This is what every edit "at the playhead" on a layer beneath a Repeat has to ask** (§5.5's
+    /// trap): `activeCelIndex(inLayer:atFrame: currentFrame)` answers for the frame the *playhead*
+    /// is on, which under a Repeat may hold no cel or a different one from the one on screen.
+    /// `displayedCelIndex(inLayer:atFrame:)` is the same question answered as a cel.
+    func displayedFrame(forLayer index: Int, atFrame frame: Int) -> Int {
+        guard hasRepeatLayerInForce else { return frame }
+        return leafFrames(atFrame: frame)[index] ?? frame
+    }
+
+    /// `displayedFrame(forLayer:atFrame:)` for every layer at once, for a caller about to loop over
+    /// the stack — one walk rather than one per layer. Empty when no Repeat layer loops.
+    func displayedFrames(atFrame frame: Int) -> [Int: Int] {
+        guard hasRepeatLayerInForce else { return [:] }
+        return leafFrames(atFrame: frame)
+    }
+
+    /// **The cel layer `index` is showing at `frame`** — `activeCelIndex` at `displayedFrame`. Nil
+    /// where the source frame holds no cel, exactly as `activeCelIndex` is nil on an empty frame.
+    func displayedCelIndex(inLayer index: Int, atFrame frame: Int) -> Int? {
+        activeCelIndex(inLayer: index, atFrame: displayedFrame(forLayer: index, atFrame: frame))
     }
 
     /// How long a new cel starting at `startFrame` may actually be: `maxLength`, cut short by the

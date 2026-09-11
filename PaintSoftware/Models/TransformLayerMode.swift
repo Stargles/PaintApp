@@ -11,9 +11,15 @@ import Foundation
 /// two meet in §5.3 — a Rotate layer's box under Distort is what gives the perspective ellipse — so
 /// they must not share a spelling.
 ///
-/// **Four cases as of stage 4; Repeat is §8's stage 5.** A case here before its stage lands would
-/// be a row the mode picker offers and nothing honours, which is CLAUDE.md's *"refusal with no
-/// notice"* wearing a menu. Each arrives with its own render arm and its own test.
+/// **Five cases, one per §8 stage.** Each arrived with its own render arm and its own test — a case
+/// here before its stage landed would have been a row the mode picker offers and nothing honours,
+/// CLAUDE.md's *"refusal with no notice"* wearing a menu.
+///
+/// **Repeat is the one that is not a pose** (§3.1's second shape): it produces a *frame* per entry
+/// beneath it rather than a map, and it is here rather than in a home of its own because it is the
+/// same kind of leaf with the same scope rule — spent in `renderNodes`' carry on the entries
+/// beneath, in its own container — and the owner listed it with the others. It is also the one mode
+/// a **folder cannot take** (`folderCases`): the loop's extent is the block, and a folder has none.
 ///
 /// **The mode lives on `LayerPose`** (`LayerPose.mode`), which is what makes a folder's pose take it
 /// for free — `Layer.transform` and `LayerFolder.transform` are one type — and what keeps "a mode
@@ -41,6 +47,13 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
     /// the seed). `shakePeriod` is how many frames one beat lasts (ruling 10).
     case shake
 
+    /// §5.5 — everything beneath is shown at the **source** frame `s + ((f − s) mod p)` for a block
+    /// starting at `s` and a typed period `p` (`LayerPose.repeatPeriod`, ruling 11: typed, pre-filled
+    /// from where the drawings beneath end). Everything repeats — cels, their cel-local keys, the
+    /// entries' opacity and effect curves, a transform layer beneath (ruling 12) — and drawing on a
+    /// repeated frame lands on the frame it repeats (ruling 13).
+    case `repeat`
+
     var id: String { rawValue }
 
     /// The artist-facing label — the picker's caption and the row's title.
@@ -50,6 +63,7 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
         case .parallax: return "Parallax"
         case .rotate: return "Rotate"
         case .shake: return "Shake"
+        case .repeat: return "Repeat"
         }
     }
 
@@ -61,8 +75,13 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
         case .parallax: return "Each item beneath takes a share of the box's move"
         case .rotate: return "Spin everything beneath about the box's centre"
         case .shake: return "Jolt everything beneath about the box's centre"
+        case .repeat: return "Play the frames beneath again from the bar's start, until it ends"
         }
     }
+
+    /// **The modes a posed folder may take** — every pose mode and not Repeat (§3.3: *"not repeat: a
+    /// folder has no block"*). The folder panel's picker lists these; the layer's lists `allCases`.
+    static let folderCases: [TransformLayerMode] = [.move, .parallax, .rotate, .shake]
 }
 
 // MARK: - The arithmetic, stated once
@@ -219,4 +238,16 @@ extension TransformLayerMode {
 
     /// The range the panel's period control offers — one beat a frame up to one every twelve.
     static let shakePeriodRange = 1...12
+
+    // MARK: Repeat (§5.5)
+
+    /// **The source frame a repeat shows at `frame`**: `s + ((f − s) mod p)` inside a block starting
+    /// at `blockStart` with period `period`, so the first cycle is the identity and every later one
+    /// reads the first. A period under 1 loops nothing — the frame is its own source — which is what
+    /// a Repeat layer whose period was never set does. Frames before the block are never asked:
+    /// the accumulator only reaches this where the block is in force.
+    static func repeatSourceFrame(_ frame: Int, blockStart: Int, period: Int) -> Int {
+        guard period >= 1, frame > blockStart else { return frame }
+        return blockStart + (frame - blockStart) % period
+    }
 }

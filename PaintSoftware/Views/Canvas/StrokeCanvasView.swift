@@ -1706,8 +1706,8 @@ final class StrokeCanvasView: UIView {
         if let timingCelsBefore {
             if let layerID, let manager = canvasManager,
                let target = manager.keyframeTarget(layerIndex: manager.currentLayerIndex) {
-                let celID = manager.activeCelIndex(inLayer: manager.currentLayerIndex,
-                                                   atFrame: manager.currentFrame)
+                let celID = manager.displayedCelIndex(inLayer: manager.currentLayerIndex,
+                                                      atFrame: manager.currentFrame)
                     .map { manager.layers[manager.currentLayerIndex].cels[$0].id }
                 timingStroke = TimingStroke(layerID: layerID, target: target,
                                             celsBefore: timingCelsBefore,

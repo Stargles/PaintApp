@@ -470,7 +470,11 @@ struct TimelineTrackView: UIViewRepresentable {
                     row.update(cels: layers[entry.layerIndex].cels,
                                displayedFrameCount: laidOutCount,
                                markers: built.trackMarkers.indices.contains(slot)
-                                   ? built.trackMarkers[slot] : [])
+                                   ? built.trackMarkers[slot] : [],
+                               // Out of the key, for the markers' reason: a ghost drawn from a
+                               // value the key does not carry would draw once and never move.
+                               ghosts: built.trackGhosts.indices.contains(slot)
+                                   ? built.trackGhosts[slot] : [])
                     // **Where a drop resolves and where its ghost is drawn are recorded separately, and
                     // that is the fix rather than an accident of naming.** `layoutDragChrome` used to
                     // place the ghost at `minY + gap/2`, i.e. derived from the strip — true only while a
@@ -1898,6 +1902,65 @@ private final class TimelineKeyMarkerBand: UIView {
     }
 }
 
+/// **TRANSFORM_LAYER.md §5.5's ghost blocks** — the frames of one row a Repeat layer above it is
+/// showing as an earlier frame, each run of one source drawing drawn as a dashed outline over a
+/// dark wash, so the artist can see which frames are a loop and where each repeated drawing starts
+/// and stops. The cheapest honest drawing of *"the timeline shows the repeated span as ghost
+/// blocks"*: a run of frames showing drawing 5 again is one dashed block the width of that run,
+/// and a real block sitting under the wash is visibly not what is on screen there. Ruling 13's
+/// consequence — drawing on those frames draws on the frame they repeat — is what the ghosting is
+/// for.
+///
+/// `TimelineKeyMarkerBand`'s shape: one view per row, gated on its own inputs, one accessibility
+/// element whose value (`start,length|…`) is what a test reads.
+private final class TimelineRepeatGhostBand: UIView {
+    private var ghosts: [CanvasManager.RepeatGhost] = []
+    private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        contentMode = .redraw
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityTraits = .none
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(ghosts: [CanvasManager.RepeatGhost], pixelsPerFrame: CGFloat, identifier: String) {
+        let changed = ghosts != self.ghosts || pixelsPerFrame != self.pixelsPerFrame
+        self.ghosts = ghosts
+        self.pixelsPerFrame = pixelsPerFrame
+        isHidden = ghosts.isEmpty
+        accessibilityIdentifier = identifier
+        accessibilityValue = ghosts.map { "\($0.start),\($0.length)" }.joined(separator: "|")
+        if changed { setNeedsDisplay() }
+    }
+
+    override func draw(_ rect: CGRect) {
+        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
+    }
+
+    private func drawNow(_ rect: CGRect) {
+        guard pixelsPerFrame > 0 else { return }
+        for ghost in ghosts {
+            let x = TimelineKeyMarkers.columnX(frame: ghost.start, pixelsPerFrame: pixelsPerFrame)
+            let block = CGRect(x: x, y: 0, width: CGFloat(ghost.length) * pixelsPerFrame, height: bounds.height)
+                .insetBy(dx: 2, dy: 2)
+            guard block.intersects(rect) else { continue }
+            let path = UIBezierPath(roundedRect: block, cornerRadius: 4)
+            UIColor.black.withAlphaComponent(0.45).setFill()
+            path.fill()
+            UIColor.white.withAlphaComponent(0.7).setStroke()
+            path.lineWidth = 1
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            path.stroke()
+        }
+    }
+}
+
 /// **The bake bar** — which stretches of the scene are not ready to play (RENDER.md §3.7).
 ///
 /// One view for the whole document rather than one per row, because a baked frame is a property of
@@ -2516,6 +2579,11 @@ private final class TimelineRowView: UIView {
     /// Added in `init` and re-fronted in `update`, because the cel views are created lazily there and
     /// would otherwise land on top of it.
     private let keyMarkers = TimelineKeyMarkerBand()
+    /// TRANSFORM_LAYER.md §5.5's ghost blocks — the frames of this row a Repeat above it is showing
+    /// as an earlier frame — drawn *over* the blocks and under the key markers, for the same
+    /// re-fronting reason: a block sitting on a repeated frame is not what is on screen there, and
+    /// a wash over it is what says so.
+    private let repeatGhosts = TimelineRepeatGhostBand()
     private var pendingZone: Zone?
     private var activeZone: Zone?
 
@@ -2565,6 +2633,7 @@ private final class TimelineRowView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        addSubview(repeatGhosts)
         addSubview(keyMarkers)
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
@@ -2587,7 +2656,8 @@ private final class TimelineRowView: UIView {
     /// gap this draws runs to the right-hand edge of what is laid out, which is two screenfuls past
     /// wherever the artist has scrolled, so there is always empty slot to tap on. See
     /// `TimelineTrackView.Coordinator.displayedFrameCount(contentEndFrame:contentOffsetX:viewportWidth:pixelsPerFrame:)`.
-    func update(cels: [Cel], displayedFrameCount: Int, markers: [Int]) {
+    func update(cels: [Cel], displayedFrameCount: Int, markers: [Int],
+                ghosts: [CanvasManager.RepeatGhost] = []) {
         var result: [Segment] = []
         var cursor = 0
         let ordered = cels.enumerated().sorted { $0.element.startFrame < $1.element.startFrame }
@@ -2658,6 +2728,12 @@ private final class TimelineRowView: UIView {
         // Marks and keys alike run in absolute document frames (§2.4, §2.26) and are a property of
         // the *layer*, so the band spans the whole track — including the frames this layer has no cel
         // on, where a keyframe is perfectly legal and is exactly the state the artist needs to see.
+        // §5.5's ghosts span the whole row like the markers do, over the blocks: a repeated frame
+        // may well hold a block of its own, and the wash is what says that block is not on screen.
+        repeatGhosts.frame = bounds
+        repeatGhosts.update(ghosts: ghosts, pixelsPerFrame: pixelsPerFrame,
+                            identifier: "timeline.repeatGhosts.\(layerIndex)")
+        bringSubviewToFront(repeatGhosts)
         keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
                                   width: bounds.width, height: TimelineKeyMarkers.bandHeight)
         keyMarkers.update(markers: markers, pixelsPerFrame: pixelsPerFrame,
