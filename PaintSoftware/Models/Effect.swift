@@ -564,9 +564,11 @@ struct RecolorEntry: Equatable {
 /// a recolour bug. Neither backend converts an entry; both convert the *pixel*, which they must.
 ///
 /// **The weight ramp**, stated once so both kernels transcribe the same sentence. With `d` the
-/// pixel's Oklab distance from `from`: weight is 1 at `d ≤ inner`, 0 at `d ≥ tolerance`, and in
+/// pixel's Oklab distance from `from`: weight is 0 at `d ≥ tolerance`, 1 at `d ≤ inner`, and in
 /// between it is `smoothstep` of `(tolerance − d) / (tolerance − inner)` — monotone, and with a
-/// zero slope at both ends so neither edge of the ring leaves a crease on anti-aliased ink.
+/// zero slope at both ends so neither edge of the ring leaves a crease on anti-aliased ink. **The
+/// outer test is asked first**, so at softness 0 — where the two radii coincide — a pixel exactly
+/// at the tolerance is outside, and "within tolerance" means strictly within at every softness.
 ///
 /// **How "first match wins" is applied**, and it is a refinement of the literal rule rather than a
 /// departure from it. The literal reading — "take the first entry whose distance is within
@@ -615,8 +617,8 @@ struct RecolorTableEntry: Equatable {
     /// The ramp above, on one distance. Shared by `EffectReference` and by the tests that pin the
     /// ring; the shader spells the same three lines in `recolorWeight`.
     static func weight(distance d: Float, tolerance: Float, inner: Float) -> Float {
-        if d <= inner { return 1 }
         if d >= tolerance { return 0 }
+        if d <= inner { return 1 }
         let u = (tolerance - d) / (tolerance - inner)
         return u * u * (3 - 2 * u)
     }

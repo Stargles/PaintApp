@@ -558,11 +558,11 @@ static inline float3 oklabToRGB(float3 lab) {
                   linearToSRGB(-0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s));
 }
 
-/// `RecolorTableEntry.weight` in Effect.swift, transcribed: 1 inside `inner`, 0 past `tolerance`,
-/// smoothstep between.
+/// `RecolorTableEntry.weight` in Effect.swift, transcribed: 0 at and past `tolerance` (asked first,
+/// so a hard edge excludes its own boundary), 1 inside `inner`, smoothstep between.
 static inline float recolorWeight(float d, float tolerance, float inner) {
-    if (d <= inner) { return 1.0f; }
     if (d >= tolerance) { return 0.0f; }
+    if (d <= inner) { return 1.0f; }
     float u = (tolerance - d) / (tolerance - inner);
     return u * u * (3.0f - 2.0f * u);
 }

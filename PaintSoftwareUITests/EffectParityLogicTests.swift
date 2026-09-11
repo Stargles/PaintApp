@@ -457,9 +457,28 @@ final class EffectParityLogicTests: XCTestCase {
     /// **It was twenty-one for a few hours on 2026-08-27**, when Sobel's alpha rule needed a
     /// `preserveAlpha` scalar to choose between two modes. The owner deleted the mode; one rule needs no
     /// flag, so the field went with it.
-    func testTheParameterBlockIsTwentyTwoPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 88)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 88)
+    ///
+    /// **Twenty-four since TODO (60)**: the recolour appended `recolorEntryCount` and
+    /// `preserveShading`, at the end, for the same reason every group before them was. The entries
+    /// themselves are a separate binding (`Effect.recolorTable`), pinned just below.
+    func testTheParameterBlockIsTwentyFourPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 96)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 96)
+    }
+
+    /// The recolour table's element is twelve packed floats — the Swift half of the layout contract
+    /// with `RecolorTableEntry` in `Composite.metal`, whose other half is the recolour parity row in
+    /// `RecolorEffectLogicTests`. And the table is bound for every effect, one zeroed entry long when
+    /// unused, so a kernel that does not read it cannot be changed by what happened to be bound.
+    func testTheRecolorTableEntryIsTwelvePackedFloatsAndAlwaysBound() {
+        XCTAssertEqual(MemoryLayout<RecolorTableEntry>.size, 48)
+        XCTAssertEqual(MemoryLayout<RecolorTableEntry>.stride, 48)
+        for (name, effect) in Self.sweep {
+            XCTAssertEqual(effect.recolorTable, [RecolorTableEntry()],
+                           "\(name) does not recolour and must bind the zeroed stub")
+            XCTAssertEqual(effect.params.recolorEntryCount, 0, "\(name) walks no recolour entries")
+        }
+        XCTAssertEqual(RecolorTableEntry().tolerance, 0, "The stub claims nothing even if walked")
     }
 
     /// The table is 256 RGBA entries, and an unused one is the identity — so an effect that does not

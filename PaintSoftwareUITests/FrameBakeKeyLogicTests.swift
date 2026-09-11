@@ -486,6 +486,19 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("outline width", .outline(Effect.Outline(width: 3))),
             ("outline colour", .outline(Effect.Outline(color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))),
             ("outline threshold", .outline(Effect.Outline(threshold: 0.7))),
+            // TODO (60): the list, each field of an entry, and the shading toggle each move the digest.
+            ("recolor empty", .recolor(Effect.Recolor())),
+            ("recolor flat", .recolor(Effect.Recolor(preserveShading: false))),
+            ("recolor one entry", .recolor(Effect.Recolor(entries: [RecolorEntry.blank]))),
+            ("recolor entry from", .recolor(Effect.Recolor(entries: [
+                RecolorEntry(from: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), to: RecolorEntry.blank.to)]))),
+            ("recolor entry to", .recolor(Effect.Recolor(entries: [
+                RecolorEntry(from: RecolorEntry.blank.from, to: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))]))),
+            ("recolor entry tolerance", .recolor(Effect.Recolor(entries: [
+                RecolorEntry(from: RecolorEntry.blank.from, to: RecolorEntry.blank.to, tolerance: 0.3)]))),
+            ("recolor entry softness", .recolor(Effect.Recolor(entries: [
+                RecolorEntry(from: RecolorEntry.blank.from, to: RecolorEntry.blank.to, softness: 0.1)]))),
+            ("recolor two entries", .recolor(Effect.Recolor(entries: [RecolorEntry.blank, RecolorEntry.blank]))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

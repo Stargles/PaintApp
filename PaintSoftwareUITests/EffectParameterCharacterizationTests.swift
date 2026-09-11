@@ -28,15 +28,17 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// `Effect.parameters` is an exhaustive switch with no `default:`: nothing here would notice a
     /// fourteenth effect, so the compiler has to.
     ///
-    /// Fourteen entries over thirteen cases. Gaussian and Directional Blur are one case split by
+    /// Fifteen entries over fourteen cases. Gaussian and Directional Blur are one case split by
     /// `Blur.isDirectional`, and both are listed so the "same case, same table" claim is exercised
-    /// rather than assumed.
+    /// rather than assumed. Recolour (TODO (60)) is the fourteenth case and was added here
+    /// deliberately, with every count below moved by exactly what it adds.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
         .gradientMap(Effect.GradientMap()),
+        .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),
         .blur(Effect.Blur(radius: 8)),
         .blur(Effect.Blur(radius: 12, angleDegrees: 0, isDirectional: true)),
@@ -139,17 +141,23 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "width|Width|0.0...24.0|%.1f px",
             "threshold|Alpha Threshold|0.0...1.0|%.2f",
         ])
+
+        // Recolour's tolerance and softness are *per entry* and live inside `RecolorEntriesEditor`,
+        // not in the table — the table cannot address the n-th entry's slider. So the effect has no
+        // `slider(...)` row of its own, like Curves.
+        XCTAssertEqual(sliderRows(.recolor(Effect.Recolor())), [])
     }
 
     /// 25 sliders across the whole catalogue — the count of `slider(...)` call sites in
-    /// `EffectSettingsBar.rows` on the day the table was written.
+    /// `EffectSettingsBar.rows` on the day the table was written, and still 25 with Recolour, whose
+    /// sliders are per entry (see above).
     func testThereAreTwentyFiveSlidersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Both blur entries are one case; count it once.
             if case .blur(let blur) = $0 { return !blur.isDirectional }
             return true
         }
-        XCTAssertEqual(cases.count, 13, "Thirteen cases behind fourteen menu entries")
+        XCTAssertEqual(cases.count, 14, "Fourteen cases behind fifteen menu entries")
         XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 25)
     }
 
@@ -193,7 +201,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **33 stored fields over 13 payload structs, and every one of them addressable.** The count
+    /// **35 stored fields over 14 payload structs, and every one of them addressable.** The count
     /// is the point: a field added to a payload struct and not to the table is a knob no keyframe
     /// can reach, and nothing else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
@@ -211,6 +219,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.sobel(Effect.Sobel()), 0),
             (.sharpen(Effect.Sharpen()), 2),
             (.outline(Effect.Outline()), 3),
+            (.recolor(Effect.Recolor()), 2),
         ]
         for (effect, count) in expected {
             XCTAssertEqual(effect.parameters.count, count,
@@ -220,7 +229,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 33)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 35)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -238,6 +247,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         case .sobel(let p):               return Mirror(reflecting: p).children.count
         case .sharpen(let p):             return Mirror(reflecting: p).children.count
         case .outline(let p):             return Mirror(reflecting: p).children.count
+        case .recolor(let p):             return Mirror(reflecting: p).children.count
         }
     }
 
@@ -266,6 +276,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "noise.amount", "noise.monochrome", "noise.seed",
             "outline.color", "outline.threshold", "outline.width",
             "posterize.levels", "posterize.screen", "posterize.screenStrength",
+            "recolor.entries", "recolor.preserveShading",
             "sharpen.amount", "sharpen.radius",
         ])
     }
@@ -277,7 +288,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 33)
+        XCTAssertEqual(seen.count, 35)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -306,11 +317,12 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Animation kinds
 
-    /// **Six structural fields hold, and these are they.** Two of the six change the render *shape*
+    /// **Seven structural fields hold, and these are they.** Two of the seven change the render *shape*
     /// rather than a number — `blur.directional` rewrites the pass list from two passes to one, and
     /// `bloom.input` decides whether the compositor performs an entire sub-walk into two borrowed
-    /// textures — so they could not be tweened even in principle.
-    func testTheSixSteppedParametersAreTheStructuralOnes() {
+    /// textures — so they could not be tweened even in principle. `recolor.preserveShading` is the
+    /// seventh, a `Bool` like `noise.monochrome`.
+    func testTheSevenSteppedParametersAreTheStructuralOnes() {
         let stepped = Self.everyMenuEntry
             .flatMap { $0.parameters }
             .filter { $0.animation == .stepped }
@@ -319,6 +331,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "posterize.levels", "posterize.screen",
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
+            "recolor.preserveShading",
         ])
     }
 
@@ -344,11 +357,19 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(continuous.filter { $0.value == .double }.count, 24)
     }
 
-    /// Nothing is un-animatable today. The case exists so a later parameter that genuinely is
-    /// cannot inherit `.stepped` by default.
-    func testNothingIsUnanimatableYet() {
-        XCTAssertTrue(Self.everyMenuEntry.flatMap { $0.parameters }
-            .allSatisfy { $0.animation != .notAnimatable })
+    /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
+    /// from/to colours are not keyframeable in this version, because a variable-length list of
+    /// colours is a variable number of channels and `TargetChannel`'s table does not describe one.
+    /// Until it, nothing answered `.notAnimatable`; the case existed so a parameter that genuinely
+    /// cannot be animated would not inherit `.stepped` by default, and this is that parameter.
+    func testTheRecolourEntriesAreTheOneUnanimatableParameter() {
+        let unanimatable = Self.everyMenuEntry.flatMap { $0.parameters }
+            .filter { $0.animation == .notAnimatable }
+            .map(\.id)
+        XCTAssertEqual(unanimatable, ["recolor.entries"])
+        XCTAssertEqual(parameter("recolor.entries", of: .recolor(Effect.Recolor()))?.value, .recolorEntries)
+        XCTAssertFalse(parameter("recolor.entries", of: .recolor(Effect.Recolor()))?.isScalarAnimatable ?? true,
+                       "No scalar curve may be pointed at the list")
     }
 
     // MARK: - The UI range and the model domain are two different facts
@@ -462,6 +483,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "posterize.levels", "posterize.screen",
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
+            "recolor.preserveShading",
         ])
     }
 
@@ -504,13 +526,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(radius?.write(bloom, 40), bloom)
     }
 
-    /// The three compound values have no single number, so the scalar bridge refuses them rather
-    /// than half-addressing one. They need a channel that speaks their own type.
+    /// The four compound values have no single number, so the scalar bridge refuses them rather
+    /// than half-addressing one. Three need a channel that speaks their own type; the recolour's
+    /// list is ruled to have none at all.
     func testCompoundParametersHaveNoScalarBridge() {
         let compound: [(String, Effect)] = [
             ("curves.points", .curves(Effect.Curves())),
             ("gradientMap.stops", .gradientMap(Effect.GradientMap())),
             ("outline.color", .outline(Effect.Outline())),
+            ("recolor.entries", .recolor(Effect.Recolor())),
         ]
         for (id, effect) in compound {
             let p = parameter(id, of: effect)

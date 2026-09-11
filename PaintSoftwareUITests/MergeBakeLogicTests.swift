@@ -271,6 +271,13 @@ final class MergeBakeLogicTests: XCTestCase {
             .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)),
             .hsvShift(Effect.HSVShift(hueDegrees: -40, saturation: 0.3, value: 1.4)),
             .posterize(Effect.Posterize(levels: 3)),
+            // TODO (60): the owner's own ask — *"works with the merge layer under it like the HSV to
+            // bake them"*. Red → blue with a tolerance wide enough to take the whole red rectangle.
+            .recolor(Effect.Recolor(entries: [
+                RecolorEntry(from: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
+                             to: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                             tolerance: 0.2, softness: 0.5),
+            ])),
         ]
 
         for grade in grades {

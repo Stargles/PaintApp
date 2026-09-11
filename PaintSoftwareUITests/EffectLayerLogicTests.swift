@@ -2024,10 +2024,13 @@ final class EffectLayerLogicTests: XCTestCase {
             // Fixed since 2026-08-27, when the owner deleted the artist-facing choice — the row reads
             // the same as it did the day before, but for a different reason.
             ("Sobel",                .sobel(Effect.Sobel()),                                     .backdrop),
+            // TODO (60): reads colour, so the backdrop — a from-colour the paper matches recolours
+            // the paper, which is what an adjustment layer means and what the tolerance controls.
+            ("Recolour",             .recolor(Effect.Recolor()),                                 .backdrop),
         ]
 
-        XCTAssertEqual(expected.count, 13,
-                       "Thirteen effects exist; a fourteenth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 14,
+                       "Fourteen effects exist; a fifteenth has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {

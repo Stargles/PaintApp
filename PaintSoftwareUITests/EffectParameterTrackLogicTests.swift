@@ -67,14 +67,15 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// **Hand-typed for `EffectParameterCharacterizationTests`' reason**: `Effect` cannot be
-    /// `CaseIterable`, so nothing in this suite would notice a fourteenth effect. Fourteen entries
-    /// over thirteen cases, both blurs listed.
+    /// `CaseIterable`, so nothing in this suite would notice a fifteenth effect. Fifteen entries
+    /// over fourteen cases, both blurs listed.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
         .gradientMap(Effect.GradientMap()),
+        .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),
         .blur(Effect.Blur(radius: 8)),
         .blur(Effect.Blur(radius: 12, angleDegrees: 0, isDirectional: true)),
@@ -156,7 +157,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
 
     // MARK: - Scope: which parameter kinds this stage drives
 
-    /// **The nine parameters stage 2 refuses, listed by name.**
+    /// **The eleven parameters stage 2 refuses, listed by name.**
     ///
     /// A test rather than a comment because the alternative to refusing them is worse than not
     /// shipping them: a `.stepped` field driven by a `Double` curve renders as a staircase the graph
@@ -182,12 +183,14 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "outline.color",        // .continuous but compound: the lens is the identity. The trap.
             "posterize.levels",     // .stepped — three levels and four have nothing between them
             "posterize.screen",     // .stepped — half a Bayer screen is not a screen
+            "recolor.entries",      // .notAnimatable — TODO (60)'s ruling: the colour list is not keyed
+            "recolor.preserveShading", // .stepped — a boolean
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
         XCTAssertEqual(animatable.count, 24,
-                       "24 of the 33 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+                       "24 of the 35 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 33, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 35, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as

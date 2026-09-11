@@ -378,6 +378,7 @@ final class StripedCompositeLogicTests: XCTestCase {
             .blur(Effect.Blur(radius: 4)), .bloom(Effect.Bloom(radius: 4)),
             .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
             .outline(Effect.Outline(width: 2, color: colour, threshold: 0.4)),
+            .recolor(Effect.Recolor(entries: [RecolorEntry.blank])),
         ]
         for effect in positional {
             XCTAssertTrue(effect.readsAbsolutePosition, "\(effect.displayName) indexes by `gid` in the kernel")
