@@ -638,10 +638,21 @@ struct EffectSettingsBar: View {
             .canvasPresentation(presentation, isPresented: $showingColorPicker,
                                 canvasManager: canvasManager,
                                 onPresent: onEditBegan, onDismiss: onEditEnded) {
+                // **No `.accessibilityIdentifier` on this view — found live, not in review.** One
+                // here stamps that identifier onto *every* descendant XCUITest can see, silently
+                // replacing `ColorPickerPanel`'s own (`colorPanel.hexField`, `colorPanel.svSquare`,
+                // …) with the one string, on every element: the swatch tap starts working, the panel
+                // visibly opens, and then nothing inside it is reachable by the name it actually
+                // carries. `layerPanel.canvasColorButton`'s picker (`LayerPanel.swift`) has no such
+                // wrapper and is what a cold-start XCUITest for TODO (60) reached for by name after
+                // this row's own identifier turned up nothing — `testTheCanvasColourRowOpensTheSame
+                // PickerTheBrushUses` is the proof the panel's identifiers are otherwise intact.
+                // `LayerPanel.swift`'s value-layer swatch and this file's gradient-stop swatch wrap
+                // `ColorPickerPanel` the same broken way and were never driven this deep either — out
+                // of scope here, flagged instead of touched.
                 ColorPickerPanel(color: Binding(get: { color.color }, set: { change($0.effectColor) }))
                     .frame(width: ColorPickerPanel.popoverSize.width,
                            height: ColorPickerPanel.popoverSize.height)
-                    .accessibilityIdentifier("effectSettings.\(identifier)Picker")
             }
         }
         .padding(.horizontal, 14)

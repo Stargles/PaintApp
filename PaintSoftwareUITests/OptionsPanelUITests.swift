@@ -338,6 +338,31 @@ final class OptionsPanelUITests: PaintUITestCase {
         return current
     }
 
+    /// **Scrolls the open Blend Mode / Operation menu until `identifier` exists, then taps it.**
+    ///
+    /// BUGS.md's *"The effects menu only exposes its first few items to XCUITest"* (2026-08-30) is
+    /// real as far as it goes — a plain query never matches Bloom, Sobel, or the four other items
+    /// past Posterize, because the menu's `CollectionView` simply has not realized cells for them
+    /// yet. But that note stopped at "not a bug in the app" without finding the fix on the *test*
+    /// side: XCUITest's own `swipeUp()`, called on the **collection view itself** rather than on a
+    /// coordinate or on one of its cells, does drive its scroll and does realize further cells —
+    /// confirmed here 2026-09-11 after a coordinate-based drag and a cell-targeted `swipeUp()` both
+    /// only closed the menu (the cell one scrolls out from under itself mid-gesture; a raw
+    /// coordinate drag reads as "touch outside the popover" once it strays past the popover's own
+    /// ~520pt visible height, which is far short of the full window). Six effects were unreachable by
+    /// any XCUITest before this method existed; it is the fix BUGS.md's entry says a future session
+    /// should look for rather than re-running the same five things.
+    private func scrollMenuTo(_ app: XCUIApplication, identifier: String, maxSwipes: Int = 10) -> XCUIElement {
+        let item = app.buttons[identifier]
+        let collection = app.collectionViews.firstMatch
+        for _ in 0..<maxSwipes {
+            if item.exists { break }
+            guard collection.exists else { break }
+            collection.swipeUp()
+        }
+        return item
+    }
+
     /// **TODO (60), cold start: Sobel's new Gain slider actually changes the picture.** A model
     /// assertion on `Effect.Sobel.gain` proves nothing about whether an artist can reach or see it
     /// (CLAUDE.md's "prove the artist can use it" rule). Sobel is always `.backdrop` with no control
@@ -353,7 +378,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let sobelItem = app.buttons["layerOptions.blendMode.sobel"]
+        let sobelItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.sobel")
         XCTAssertTrue(sobelItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Sobel")
         sobelItem.tap()
 
@@ -409,7 +434,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let bloomItem = app.buttons["layerOptions.blendMode.bloom"]
+        let bloomItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.bloom")
         XCTAssertTrue(bloomItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Bloom")
         bloomItem.tap()
 
@@ -430,6 +455,16 @@ final class OptionsPanelUITests: PaintUITestCase {
         let colorSwatch = app.buttons["effectSettings.color"]
         XCTAssertTrue(colorSwatch.waitForExistence(timeout: 5),
                       "Bloom's Colour swatch did not open — the artist cannot reach it")
+        // Bloom's fifth row — `EffectSettingsBar`'s own rows sit in a real `ScrollView` capped at
+        // `BottomDock.maxScrollHeight` (`ContentHeightCap`), and TODO (60) is what pushed Bloom's row
+        // count from four to five; the swatch can now land below the visible card exactly the way
+        // Curves' and a many-stop Gradient Map's later rows already do. `scrollMenuTo`'s reasoning
+        // applies again: `exists` is true the moment the row is laid out, whether or not it is
+        // presently scrolled into view, so wait for `isHittable` and nudge the scroll view first.
+        if !colorSwatch.isHittable {
+            app.scrollViews.containing(.slider, identifier: "effectSettings.intensity").firstMatch.swipeUp()
+        }
+        XCTAssertTrue(colorSwatch.isHittable, "Bloom's Colour swatch exists but never scrolls into reach")
         colorSwatch.tap()
         let tintHex = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(tintHex.waitForExistence(timeout: 5), "The swatch must open ColorPickerPanel")

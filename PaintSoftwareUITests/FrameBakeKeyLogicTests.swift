@@ -429,8 +429,20 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     // MARK: - Effects, case by case and parameter by parameter
 
-    /// **Thirty-one effect values, all of which must be thirty-one digests.** Every case, and for
-    /// every case at least one row per artist-facing parameter.
+    /// **Forty-two effect values, all of which must be forty-two digests.** Every case, and for
+    /// every case at least one row per artist-facing parameter — thirty-nine before TODO (60), which
+    /// added `"bloom default"` (a baseline for `"bloom color"` to collide against, argued below),
+    /// `"bloom color"` and `"sobel gain"` (`"sobel"` renamed `"sobel default"` alongside it). This
+    /// comment already said "Thirty-one" against an actual thirty-nine before that — stale on its own
+    /// terms, worth fixing here rather than left to compound. `bloom.color` and `sobel.gain` were
+    /// from `BakeKeyEncoder.encode(effect:)` entirely (see that file's comment on the `.bloom` and
+    /// `.sobel` cases): the digest didn't move, so the disk-backed frame store served one frame's
+    /// bytes for both, and this table's whole reason for existing — catching two effects that share
+    /// a digest — could not have caught it, because there was no row varying either field to collide
+    /// against its own default. A cold-start XCUITest driving the real Gain slider and Colour swatch
+    /// is what found it (identical screenshots at gain 0.25 and gain 8); these two rows pin it here,
+    /// at the unit the encoder actually operates on, so a regression is a one-second failure rather
+    /// than a 50-second one.
     ///
     /// Pairwise rather than each-against-a-baseline, because the failure a hand-written encoder
     /// actually risks is two *cases* sharing a tag or two parameters being written to the same
@@ -474,13 +486,25 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("blur radius", .blur(Effect.Blur(radius: 3))),
             ("blur angle", .blur(Effect.Blur(radius: 3, angleDegrees: 45, isDirectional: true))),
             ("blur directional", .blur(Effect.Blur(radius: 3, isDirectional: true))),
+            // TODO (60). The baseline every other bloom row needs to be able to collide *against*:
+            // without one, a row that varies only `color` from its defaults has nothing else in this
+            // table sharing every other field, so an un-encoded `color` would produce a digest with
+            // no twin here to collide with — silent, not red. This is exactly the gap that let the
+            // `.sobel` case ship with no `gain` in it at all (see `BakeKeyEncoder.encode(effect:)`'s
+            // comment on both cases): this table's own single un-varying `"sobel"` row could not have
+            // caught it either, for the identical reason.
+            ("bloom default", .bloom(Effect.Bloom())),
             ("bloom threshold", .bloom(Effect.Bloom(threshold: 0.5))),
             ("bloom radius", .bloom(Effect.Bloom(radius: 5))),
             ("bloom intensity", .bloom(Effect.Bloom(intensity: 0.6))),
             // EFFECT_BACKDROP §4's artist-facing choice — a different picture, and it lives only in
             // the effect payload, so nothing else in the key could stand in for it.
             ("bloom input backdrop", .bloom(Effect.Bloom(input: .backdrop))),
-            ("sobel", .sobel(Effect.Sobel())),
+            // TODO (60). Differs from "bloom default" in `color` alone, so an un-encoded `color`
+            // collides the two — the fix `.sobel default` / `.sobel gain` below applies the same way.
+            ("bloom color", .bloom(Effect.Bloom(color: CodableColor(red: 1, green: 0.4, blue: 0.15, alpha: 1)))),
+            ("sobel default", .sobel(Effect.Sobel())),
+            ("sobel gain", .sobel(Effect.Sobel(gain: 2))),
             ("sharpen radius", .sharpen(Effect.Sharpen(radius: 2))),
             ("sharpen amount", .sharpen(Effect.Sharpen(radius: 2, amount: 0.5))),
             ("outline width", .outline(Effect.Outline(width: 3))),

@@ -430,10 +430,18 @@ private extension BakeKeyEncoder {
             tag(0x59)
             double(p.threshold); double(p.radius); double(p.intensity)
             encode(effectInput: p.input)
-        case .sobel:
-            // No parameters at all — `Effect.Sobel` is an empty struct, and the divisor that used to
-            // look like one is a resolved constant. The tag is the whole encoding.
+            // TODO (60). Without this the disk-backed frame store (RENDER.md §3.3) would collide two
+            // frames differing only in the glow's tint onto one file — the exact failure this file's
+            // own header warns about, "a green suite and a wrong canvas" — and did: an early build of
+            // this feature left `color` out of the key, and a cold-start XCUITest driving the real
+            // swatch (not just the model) was what caught it; the byte-level kernel tests never
+            // touch this cache at all, so they stayed green throughout.
+            encode(codableColor: p.color)
+        case .sobel(let p):
+            // TODO (60): `gain` is the one field now, encoded like any other Double below — the tag
+            // alone was the whole encoding when the struct was empty, which is no longer true.
             tag(0x5A)
+            double(p.gain)
         case .sharpen(let p):
             tag(0x5B)
             double(p.radius); double(p.amount)
