@@ -149,6 +149,36 @@ bent to. Worth doing later as its own thing.
 
 **One thing that is already true and helps**: EFFECT_BACKDROP.md rules that an adjustment layer grades the
 artist's ink and not the paper, so recolour cannot accidentally repaint the background.
+
+**The eyedropper is part of it, not a nicety.** The owner, 2026-09-10:
+
+> *"also small thing, definitely need ergonomic eyedropper tool ability for the recolor. on assigning
+> which color is picked"*
+
+Guessing a hex for the shadow inside a character is exactly what makes this kind of tool unusable, so
+**both ends of a pair are assigned by tapping the canvas** — the from colour especially. `Tool.eyedropper`
+already exists and `CanvasManager.selectEyedropper` is its verb, so this reuses the tool rather than
+adding a second picker.
+
+**Two things about it that are not obvious from the ask, and one is a correctness question rather than an
+ergonomic one:**
+
+- **The from colour must be sampled from what is UNDER the effect, not from what is on screen.** A
+  recolour layer grades the layers below it, so the composite an artist is looking at may already carry
+  an earlier entry's replacement. Sample that and the artist assigns a mapping whose source no longer
+  exists once their own list is applied — the entry does nothing, or chains off another entry
+  unpredictably, and neither failure says why. Sample the ungraded pixels beneath. The *to* colour has no
+  such constraint and can come from anywhere on the canvas.
+- **Picking must return to the recolour panel.** `Tool.eyedropper`'s existing behaviour is to pick and
+  revert to the previous tool (`EraserAndPersistenceUITests.testTheSidebarEyedropperPicksTheColourUnder
+  TheTapAndRevertsTheTool`), which is right for the sidebar and wrong here — assigning four pairs must
+  not cost four trips back into the panel. Whatever shape that takes, it must not break the sidebar's.
+
+**A trap already recorded on this exact tool, so the new entry point does not re-open it**: the owner
+reported on 2026-08-17 that the eyedropper picked a colour *and* painted a stroke with the same tap,
+because adding `.eyedropper` to the enum did not add it to the list of tools that do not paint
+(`Tool.swift`'s own comment carries this). Any new way of entering the eyedropper has to satisfy the same
+exhaustive switches — the enum is deliberately `default:`-less so that missing one fails to compile.
 ---
 
 ## (61) The transform layer becomes its own layer type, with five new modes
