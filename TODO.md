@@ -131,7 +131,7 @@ pose key has a node.
       **§5 specifies *"one mechanism, two surfaces: a slider, and the Move box"*, and the Move-box
       surface is not built** — `ValueRecording` is scalar-only while a transform channel stores
       `PoseQuad` keys, so resampling and tolerance both need definitions nobody has ruled on. §5's
-      *"slow motion is a capture-speed multiplier on the record control"* is also unbuilt. **Both are
+      *"slow motion is a capture-speed multiplier on the record control"* is **declined** — see below. **Both are
       owner-facing design and want a conversation before anyone builds them.**
       **The owner has now ruled on that, and it reverses what this item called "the design".** This
       row used to end *"at 24 fps a new document's take is over before a person can react, because §5
@@ -165,7 +165,26 @@ pose key has a node.
       movement, in canvas points, and let the owner tune it once a recorded drag exists to look at —
       the same reasoning as [[render the cost, don't describe it]]. Do not hold the surface for a
       ruling that cannot usefully be given in advance.
-      §5's *"slow motion is a capture-speed multiplier on the record control"* is also still unbuilt.
+      **§5's slow-motion multiplier is DECLINED, by the owner, 2026-09-10, and they are right about the
+      mechanism.** They asked: *"for the slow motion multiplier doesnt it just make sense for it to be linked
+      to plauback speed instead of being a separate feature? If playback speed is 12fps for example it will
+      naturally be 2x slower."*
+
+      Verified against the code rather than reasoned about. `CanvasManager`'s playback tick interval is
+      `1.0 / fps`, so a scene at 12 fps takes twice the wall clock of the same scene at 24 — the artist gets
+      exactly twice as long to perform the gesture. A take `resampled(fps:startFrame:)` walks one stop per
+      document frame, and `PoseRecording`'s own comment says why that is exact: *"`startFrame + i` is the
+      playhead at the i-th stop, because playback advances at `fps`"*. So **lowering the rate already is the
+      capture multiplier, at no cost, with no control to build.** 12 fps is a standard animation rate anyway —
+      recording at the rate you intend is normal practice, not a compromise.
+
+      **The one thing the separate multiplier would have added, recorded so the decision is not re-derived.**
+      Keys land on *frame numbers*, and `fps` is the rate those frames play at — so recording at 12 and then
+      setting the rate back to 24 plays the performance twice as fast. The multiplier would have let an artist
+      perform slowly and still land keys at the **full 24 fps density**, so the finished animation plays at 24
+      with their slow-performed motion mapped onto it. That is the only capability lost, and the honest version
+      of it is not a knob on the recorder at all — it is a capture rate that is independent of the document's
+      frame rate, which is a larger idea and one nobody has asked for.
 - [x] **Stage 10, the timing recorder (§7) — built and merged 2026-09-10.** The owner gave the full
       brief on 2026-09-09 and it is larger than §7's laser pointer.
 
