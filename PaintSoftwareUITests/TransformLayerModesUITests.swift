@@ -1,9 +1,9 @@
 import XCTest
 
-/// **Can an artist reach Parallax, Rotate and Shake from a fresh document, and does the canvas show
-/// what the mode promises?** — TRANSFORM_LAYER.md §5.2–§5.4, §8's rows 2–4, driven the way the
-/// artist drives them with no prior state: `+` → Transform Layer → its row → Mode → the mode → the
-/// mode's own controls → the box or the playhead → the picture.
+/// **Can an artist reach Parallax, Rotate, Shake and Repeat from a fresh document, and does the
+/// canvas show what the mode promises?** — TRANSFORM_LAYER.md §5.2–§5.5, §8's rows 2–5, driven the
+/// way the artist drives them with no prior state: `+` → Transform Layer → its row → Mode → the mode
+/// → the mode's own controls → the box or the playhead → the picture.
 ///
 /// `TransformLayerModesLogicTests` owns the arithmetic. What it cannot say, and what this file is for:
 ///
@@ -15,7 +15,9 @@ import XCTest
 ///    into a 15°/frame spin — turned about the box's centre, not slid; a band under a Shake layer
 ///    is drawn somewhere else on the first frames of the bar, the same somewhere else every time the
 ///    playhead comes back (ruling 9's determinism, off the screen), somewhere new after Re-roll, and
-///    back where it was after one undo.
+///    back where it was after one undo; three drawings on frames 1–3 under a Repeat of 3 show frame
+///    2's picture on frame 5, the timeline ghosts the repeated frames, and ink drawn on frame 5
+///    appears on frame 2 (ruling 13).
 ///
 /// The assertions are on screenshots of `canvas.host` and on the panel's exposed values, never on
 /// anything stored. A small class on purpose (CLAUDE.md's cost model: per test *class*).
@@ -150,7 +152,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
     }
 
     /// The modes §8 has shipped, which the picker must list — and no other.
-    private static let shippedModes = ["move", "parallax", "rotate", "shake"]
+    private static let shippedModes = ["move", "parallax", "rotate", "shake", "repeat"]
 
     /// Opens the options of the layer at `index` (the row must be the active one) and picks `mode`
     /// from its Mode picker. Reads the picker's value back, which is the exposed operand.
@@ -167,8 +169,6 @@ final class TransformLayerModesUITests: PaintUITestCase {
         for shipped in Self.shippedModes {
             XCTAssertTrue(app.buttons["layerOptions.transformMode.\(shipped)"].exists, "The picker lists \(shipped)")
         }
-        XCTAssertFalse(app.buttons["layerOptions.transformMode.repeat"].exists,
-                       "…and not a mode that has not shipped — a row that does nothing is a refusal with no notice")
         item.tap()
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
         XCTAssertEqual(modeButton.value as? String, mode, "the pick reached the model and the row reports it")
@@ -491,5 +491,141 @@ final class TransformLayerModesUITests: PaintUITestCase {
         for (a, b) in zip(first, restored) {
             XCTAssertEqual(a, b, accuracy: 0.004, "one undo brings the old shake back: \(first) vs \(restored)")
         }
+    }
+
+    // MARK: - Repeat
+
+    /// The born layer's block whose value starts at `start` — the array index moves under a split,
+    /// so the block is found by what it says rather than by where it is.
+    private func bornCel(_ app: XCUIApplication, startingAt start: Int) -> XCUIElement? {
+        for celIndex in 0..<6 {
+            let cel = app.otherElements["timeline.cel.0.\(celIndex)"]
+            guard cel.exists, let value = cel.value as? String else { continue }
+            if value.split(separator: ",").first.map(String.init) == "\(start)" { return cel }
+        }
+        return nil
+    }
+
+    /// Taps frame `frame` (0-based) of the born layer's block starting at `start`, which selects the
+    /// layer and moves the playhead — `handleTapOnCel`'s first stage.
+    private func tapBornLayer(_ app: XCUIApplication, blockStartingAt start: Int, frame: Int) {
+        guard let cel = bornCel(app, startingAt: start),
+              let value = cel.value as? String, let length = Int(value.split(separator: ",")[1]) else {
+            return XCTFail("No block on the born layer starting at \(start)")
+        }
+        cel.coordinate(withNormalizedOffset: CGVector(dx: (Double(frame - start) + 0.5) / Double(length), dy: 0.5)).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, frame + 1, "the tap put the playhead on frame \(frame + 1)")
+    }
+
+    /// Splits the born layer's block starting at `start` at frame `frame`, through the cel menu:
+    /// one tap selects the frame, a second on the same spot opens the menu, Split Drawing cuts.
+    private func splitBornLayer(_ app: XCUIApplication, blockStartingAt start: Int, atFrame frame: Int) {
+        tapBornLayer(app, blockStartingAt: start, frame: frame)
+        guard let cel = bornCel(app, startingAt: start),
+              let value = cel.value as? String, let length = Int(value.split(separator: ",")[1]) else { return }
+        cel.coordinate(withNormalizedOffset: CGVector(dx: (Double(frame - start) + 0.5) / Double(length), dy: 0.5)).tap()
+        let split = app.buttons["timeline.menu.Split Drawing"]
+        XCTAssertTrue(split.waitForExistence(timeout: 5), "the second tap opens the block's menu")
+        split.tap()
+        XCTAssertTrue(bornCel(app, startingAt: frame)?.waitForExistence(timeout: 5) == true, "the cut left a block starting at \(frame)")
+    }
+
+    /// The band's paper-relative column inside paper rows `v0…v1`, repeated until two consecutive
+    /// captures agree; nil when the region holds no ink after the deadline.
+    private func settledColumn(_ canvas: XCUIElement, v0: Double, v1: Double, _ what: String) -> Double? {
+        var last: Double?
+        let deadline = Date().addingTimeInterval(8)
+        repeat {
+            guard let paper = currentPaper(canvas, what) else { return nil }
+            let read = inkCentroid(paper.pixels, in: paperRegion(paper.paper, v0: v0, v1: v1))
+                .map { paperRelative($0, in: paper.paper).u }
+            if let read, let last, abs(last - read) < 0.002 { return read }
+            last = read
+            Thread.sleep(forTimeInterval: 0.3)
+        } while Date() < deadline
+        return last
+    }
+
+    /// **Three drawings on frames 1, 2 and 3, a transform layer above, Mode → Repeat, type 3, and
+    /// frame 5 shows frame 2's picture; the timeline ghosts the repeated frames; and a line drawn on
+    /// frame 5 appears on frame 2** — §5.5 and rulings 11–13, off the screen. The born layer's
+    /// twelve-frame block is cut twice through the cel menu so the three frames are three drawings;
+    /// the period field is the exposed operand (pre-filled to 12, where the held third drawing ends,
+    /// then typed to 3); the ghost band's value is read off the born layer's row.
+    func testRepeatShowsFrameTwoOnFrameFiveGhostsTheLoopAndRedirectsInkToTheFrameItRepeats() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
+        XCTAssertEqual(total, 12, "Premise: a new document is twelve frames")
+
+        // Three blocks: [0,1), [1,2), [2,12).
+        splitBornLayer(app, blockStartingAt: 0, atFrame: 1)
+        splitBornLayer(app, blockStartingAt: 1, atFrame: 2)
+        XCTAssertEqual(bornCel(app, startingAt: 0)?.value as? String, "0,1")
+        XCTAssertEqual(bornCel(app, startingAt: 1)?.value as? String, "1,1")
+        XCTAssertEqual(bornCel(app, startingAt: 2)?.value as? String, "2,10")
+
+        // A band on each of the first three frames at its own column, all on row 0.3 — off the
+        // centre column and the top tenth, which is where `paperBounds` walks.
+        let columns = [0.2, 0.4, 0.7]
+        for (frame, u) in columns.enumerated() {
+            tapBornLayer(app, blockStartingAt: frame, frame: frame)
+            guard let paper = currentPaper(canvas, "frame \(frame + 1) before drawing") else { return }
+            let at = hostPoint(paper.paper, u: u, v: 0.3)
+            drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
+            let read = settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
+            XCTAssertEqual(read ?? -1, u, accuracy: 0.03, "Sanity: frame \(frame + 1)'s band is at \(u)")
+        }
+        attach(app, "1-three-drawings")
+
+        // The layer, from +, then Mode → Repeat. The period is pre-filled from where the drawings
+        // beneath end — the third block is held to 12 — and typed to 3.
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        pickMode(app, layerIndex: 1, mode: "repeat")
+        let field = app.textFields["layerOptions.repeatPeriod.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Repeat puts the period field on the panel")
+        XCTAssertEqual(field.value as? String, "12", "pre-filled from where the drawings beneath end")
+        field.tap()
+        field.typeText("3\n")
+        let readout = app.staticTexts["layerOptions.repeatPeriodReadout"]
+        XCTAssertTrue(readout.waitForExistence(timeout: 5))
+        XCTAssertEqual(readout.label, "3 frames", "the readout echoes the typed length")
+        attach(app, "2-repeat-period-typed")
+        closeRail(app)
+
+        // **What the timeline exposes**: the born layer's row ghosts frames 4–12, one frame each.
+        let ghosts = app.otherElements["timeline.repeatGhosts.0"]
+        XCTAssertTrue(ghosts.waitForExistence(timeout: 5), "the repeated frames are ghosted on the drawing's row")
+        XCTAssertTrue((ghosts.value as? String ?? "").hasPrefix("3,1|4,1|5,1|6,1"),
+                      "frames 4, 5, 6, 7… each show an earlier drawing: \(String(describing: ghosts.value))")
+
+        // **What is drawn**: frame 5 is frame 2's picture (the band at 0.4), not the held third
+        // drawing's (0.7); frame 4 is frame 1's.
+        scrub(app, toFrame: 5, total: total)
+        let atFive = settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 5")
+        XCTAssertEqual(atFive ?? -1, columns[1], accuracy: 0.03, "frame 5 shows frame 2's drawing, not the block sitting under the playhead")
+        scrub(app, toFrame: 4, total: total)
+        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 4") ?? -1, columns[0], accuracy: 0.03, "frame 4 shows frame 1's")
+        attach(app, "3-frame-5-shows-frame-2")
+
+        // **Ruling 13**: a second band drawn on frame 5, lower down, lands on frame 2 — and not on
+        // frame 3. The born layer is selected by tapping its held block at frame 5.
+        tapBornLayer(app, blockStartingAt: 2, frame: 4)
+        guard let paper = currentPaper(canvas, "frame 5 before the redirected stroke") else { return }
+        let lower = hostPoint(paper.paper, u: 0.55, v: 0.65)
+        drawBand(on: canvas, x: Double(lower.dx), y: Double(lower.dy), halfHeight: 0.04)
+        XCTAssertEqual(settledColumn(canvas, v0: 0.5, v1: 0.8, "frame 5 after drawing") ?? -1, 0.55, accuracy: 0.03,
+                       "the new band shows on frame 5 itself")
+        scrub(app, toFrame: 2, total: total)
+        XCTAssertEqual(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 2") ?? -1, 0.55, accuracy: 0.03,
+                       "…and on frame 2, the drawing it repeats")
+        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 2, upper") ?? -1, columns[1], accuracy: 0.03,
+                       "frame 2's own band is still there")
+        attach(app, "4-ink-from-frame-5-on-frame-2")
+        scrub(app, toFrame: 3, total: total)
+        XCTAssertNil(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 3"), "frame 3 did not receive it")
     }
 }

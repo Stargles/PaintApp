@@ -1066,10 +1066,9 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         row.tap()   // already selected after the add: opens its options
 
         // **The panel is about transforming, and nothing else** — TRANSFORM_LAYER.md §2 ruling 2.
-        // A mode picker that lists the modes that have shipped (Move, Parallax, Rotate and Shake
-        // since §8's stages 2–4; Repeat arrives with stage 5 and must not appear as a dead row),
-        // and the Move row itself. No Blend Mode row, no colour swatch, no mask row: the leaf holds
-        // no pixels for any of them to act on.
+        // A mode picker that lists all five modes (each arrived with its §8 stage and was not listed
+        // before it, as a dead row is a refusal with no notice), and the Move row itself. No Blend
+        // Mode row, no colour swatch, no mask row: the leaf holds no pixels for any of them to act on.
         let modeButton = app.buttons["layerOptions.transformModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5),
                       "A transform layer's options open on its mode picker")
@@ -1080,8 +1079,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["layerOptions.transformMode.parallax"].exists, "…and Parallax")
         XCTAssertTrue(app.buttons["layerOptions.transformMode.rotate"].exists, "…and Rotate")
         XCTAssertTrue(app.buttons["layerOptions.transformMode.shake"].exists, "…and Shake")
-        XCTAssertFalse(app.buttons["layerOptions.transformMode.repeat"].exists,
-                       "…and not a mode that has not shipped — a row that does nothing is a refusal with no notice")
+        XCTAssertTrue(app.buttons["layerOptions.transformMode.repeat"].exists, "…and Repeat")
         moveItem.tap()
 
         let moveRow = app.buttons["layerOptions.transformMove"]
