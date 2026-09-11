@@ -41,9 +41,21 @@ final class HueColorizeEffectLogicTests: XCTestCase {
     /// **The claim the whole feature exists for**: a mid-grey pixel's `Lum` survives colorizing to
     /// any hue, at the catalogue's own saturation (0.5) — chosen there, and reused here, because it
     /// keeps every hue's own ceiling (`Effect.HSVShift.colorize`'s `k(H,S)`) above 0.5, so the solve
-    /// never clamps and the claim is exact rather than "as close as gamut allows". Mutation: with the
-    /// colorize branch's `v = targetLum / k` replaced by the old shift branch's `hsb.v * value`, every
-    /// row below reads a `Lum` far from 128 whenever the target hue's own ceiling sits below it.
+    /// never clamps and the claim is exact rather than "as close as gamut allows".
+    ///
+    /// **Mutation-tested, and the result corrected this comment rather than the other way round.**
+    /// Replacing the solved `v = targetLum / k` with the naive `hsb.v * value` (the shift branch's own
+    /// formula, applied to the *target* hue/saturation instead of the pixel's) moves every row here by
+    /// 7 to 57 bytes — MEASURED from the same closed form this file computes with, since `hsb.v` of a
+    /// grey pixel is a constant `0.502` and `k(H, 0.5)` ranges `0.555…0.945` over the swept hues, so
+    /// `Lum_out = 0.502 · k` never lands near `0.502` itself. **But reverting the colorize branch
+    /// entirely — falling through to the shift formula unconditionally — does NOT move this test at
+    /// all**, and that is not a gap in the arithmetic above, it is a property of grey itself: a grey
+    /// pixel's own saturation is already 0, so a *shift*, which multiplies saturation rather than
+    /// replacing it, cannot add any chroma either and grey passes through both formulas unchanged.
+    /// `testHueLandsOnTheConstantEvenStartingFromAnUnrelatedHue` and
+    /// `testHueSweepsTheWholeWheelUnderColorize` are what catch the full-fallback mutation instead —
+    /// both use a saturated, non-zero-hue fixture for exactly this reason, stated in their own doc.
     func testLumOfAMidGreyPixelIsUnchangedUnderColorizeAtAnyHue() {
         let grey = flatBytes(128, 128, 128)
         let inputLum = lum(grey)
@@ -93,12 +105,18 @@ final class HueColorizeEffectLogicTests: XCTestCase {
         XCTAssertEqual(hsb.h * 360, 90, accuracy: 2, "The output hue must be the target, not the input's own")
     }
 
-    /// **Swept across the wheel**, on a fully saturated input so the output is never near-achromatic
-    /// (where `rgbToHSB`'s own hue becomes noisy — its doc: achromatic input always reads hue 0).
+    /// **Swept across the wheel, on a fixture whose own hue is not a multiple of the 45° step** —
+    /// mutation-caught, not merely careful: a `flatBytes(255, 0, 0)` fixture (hue 0°) first shipped
+    /// here, and reverting the colorize branch to the plain shift formula (`hsb.h + hueTurns` instead
+    /// of the absolute `hue`) still passed every row, because "rotate hue-0 by `target`" and "set hue
+    /// to `target`" are the same output whenever the start is hue 0 — the identical trap the same
+    /// mutation exposed in `testLumOfAMidGreyPixelIsUnchangedUnderColorizeAtAnyHue` from the other
+    /// side (an achromatic pixel's saturation is already 0, so a shift can't add any either). A
+    /// saturated input on **295°**, not on the swept grid at all, cannot coincide with any target.
     func testHueSweepsTheWholeWheelUnderColorize() {
-        let saturatedRed = flatBytes(255, 0, 0)
+        let purpleIsh = flatBytes(180, 40, 200)
         for target in stride(from: 0.0, to: 360.0, by: 45.0) {
-            let out = cpu(colorize(hue: target, saturation: 0.8), saturatedRed)
+            let out = cpu(colorize(hue: target, saturation: 0.8), purpleIsh)
             let hsb = ColorMath.rgbToHSB(r: Double(out[0]) / 255, g: Double(out[1]) / 255, b: Double(out[2]) / 255)
             let wrapped = (hsb.h * 360).truncatingRemainder(dividingBy: 360)
             let delta = min(abs(wrapped - target), 360 - abs(wrapped - target))

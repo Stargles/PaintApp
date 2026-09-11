@@ -163,6 +163,12 @@ final class EffectParityLogicTests: XCTestCase {
     ///
     ///     levels 0 · curves 0 · brightnessContrast 1 · hsvShift 0 · gradientMap 1
     ///     chromaticAberration 1 · posterize 1 · dither 1 · halftone 1 · grain 0 · colourNoise 0
+    ///     hueColorize 0
+    ///
+    /// **TODO (60)'s `hueColorize` lands at 0, for `hsvShift`'s own reason — the colorize branch is
+    /// the same `ColorMath.rgbToHSB`/`hsbToRGB` calls, in `Double`, that `hsvShift` already compares
+    /// against an independently-authored `Double` implementation.** MEASURED on the simulator, this
+    /// fixture, 2026-09-11.
     ///
     /// **`hsvShift` at 0 is the row worth the most, and for a reason the other zeros do not share.**
     /// `EffectReference` grades HSV through `ColorMath.rgbToHSB`/`hsbToRGB` — the colour picker's
@@ -444,8 +450,10 @@ final class EffectParityLogicTests: XCTestCase {
                        "Levels and Curves are one kernel by design — both resolve to the same table")
     }
 
-    /// **The Swift half of the layout contract with `Composite.metal`.** Twenty-two 4-byte scalars, no
-    /// padding: if a future parameter is added as a `SIMD2` or a `Bool` this fails here, before it
+    /// **The Swift half of the layout contract with `Composite.metal`.** Thirty-three 4-byte scalars
+    /// today (this comment's own count has drifted before — see the paragraphs below, which narrate
+    /// each addition rather than restate a total this docstring's opening line has to keep in sync),
+    /// no padding: if a future parameter is added as a `SIMD2` or a `Bool` this fails here, before it
     /// fails as a shifted field and a wrong picture. The Metal half is pinned by the parity sweep,
     /// which is what a mismatch would show up as.
     ///
@@ -465,12 +473,15 @@ final class EffectParityLogicTests: XCTestCase {
     /// `preserveShading`, at the end, for the same reason every group before them was. The entries
     /// themselves are a separate binding (`Effect.recolorTable`), pinned just below.
     ///
-    /// **Thirty-two since the Computer Screen (TODO (60), 2026-09-11)**: `frameWidth`/`frameHeight`,
-    /// the other half of the strip origin, and the screen's six resolved knobs — eight scalars, at the
-    /// end, named rather than aliased onto `amount`/`mix`/`threshold` so the kernel reads as itself.
-    func testTheParameterBlockIsThirtyTwoPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 128)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 128)
+    /// **Thirty-two since the Computer Screen (2026-09-11)**: `frameWidth`/`frameHeight`, the other
+    /// half of the strip origin, and the screen's six resolved knobs — eight scalars, at the end,
+    /// named rather than aliased onto `amount`/`mix`/`threshold` so the kernel reads as itself.
+    ///
+    /// **Thirty-three since Hue Colorize (TODO (60), same day)**: `isColorize`, one flag at the end,
+    /// same rule as every group before it.
+    func testTheParameterBlockIsThirtyThreePackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 132)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 132)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract

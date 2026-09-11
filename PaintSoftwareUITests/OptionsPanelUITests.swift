@@ -487,24 +487,30 @@ final class OptionsPanelUITests: PaintUITestCase {
 
     // MARK: - TODO (60): Dither and Hue Colorize, the two menu entries this item adds
 
-    /// The distinct red-channel byte values over a small grid inside `dxRange`×`dyRange` — a grey
-    /// stroke's R, G and B bytes move together, so the red channel alone already says how many
-    /// distinct output levels are present. A flat `Posterize` reads one value; an ordered-screen
-    /// dither reads more than one, over the same input, which is `Effect.Screen`'s own
-    /// `testTheOrderedScreenBreaksAFlatColourIntoTwoQuantizerSteps` proved at the model layer —
-    /// this is that claim driven through the real menu and the real render, `CLAUDE.md`'s
-    /// "prove the artist can use it" rule.
-    private func distinctRedValues(_ canvas: XCUIElement, dxRange: ClosedRange<Double>,
-                                   dyRange: ClosedRange<Double>, samplesPerAxis: Int = 12) throws -> Set<UInt8> {
+    /// The red-channel byte values over a small grid inside `dxRange`×`dyRange`, **excluding anything
+    /// implausibly close to white paper** — a grey stroke's R, G and B bytes move together, so the red
+    /// channel alone already says how many distinct output levels are present. `Effect.Screen`'s own
+    /// `testTheOrderedScreenBreaksAFlatColourIntoTwoQuantizerSteps` proved the underlying claim at the
+    /// model layer; this drives it through the real menu and the real render, `CLAUDE.md`'s "prove the
+    /// artist can use it" rule.
+    ///
+    /// **The `< 200` filter exists because the grid's edges can land on paper rather than ink.** A
+    /// first version required every sample to be one exact value and read `[255, 92]` — a stray
+    /// background pixel at the patch's own edge, not a dither defect; the fix is not a wider margin
+    /// (this app's actual painted-stroke width is not this file's to assume) but excluding what is
+    /// obviously paper from a measurement about ink.
+    private func inkRedValues(_ canvas: XCUIElement, dxRange: ClosedRange<Double>,
+                              dyRange: ClosedRange<Double>, samplesPerAxis: Int = 16) throws -> [UInt8] {
         let (width, height, buffer) = try canvasBytes(canvas)
-        var values: Set<UInt8> = []
+        var values: [UInt8] = []
         for i in 0...samplesPerAxis {
             let dx = dxRange.lowerBound + (dxRange.upperBound - dxRange.lowerBound) * Double(i) / Double(samplesPerAxis)
             let x = min(max(Int(dx * Double(width)), 0), width - 1)
             for j in 0...samplesPerAxis {
                 let dy = dyRange.lowerBound + (dyRange.upperBound - dyRange.lowerBound) * Double(j) / Double(samplesPerAxis)
                 let y = min(max(Int(dy * Double(height)), 0), height - 1)
-                values.insert(buffer[(y * width + x) * 4])
+                let red = buffer[(y * width + x) * 4]
+                if red < 200 { values.append(red) }
             }
         }
         return values
@@ -532,7 +538,13 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        drawLine(on: canvas, from: CGVector(dx: 0.2, dy: 0.5), to: CGVector(dx: 0.8, dy: 0.5))
+        // Several parallel strokes rather than one, so the painted band's width is this test's own
+        // to name rather than a guess about the default brush's — a single line left the sampled
+        // patch straddling the stroke's edge and picking up white paper (255) alongside the ink,
+        // which mutation testing caught as a fixture premise failure rather than a real dither defect.
+        for dy in stride(from: 0.44, through: 0.56, by: 0.02) {
+            drawLine(on: canvas, from: CGVector(dx: 0.2, dy: dy), to: CGVector(dx: 0.8, dy: dy))
+        }
 
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
@@ -542,7 +554,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         posterizeItem.tap()
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
-        let flat = try settled { try distinctRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.45...0.55) }
+        let flat = try settled { try inkRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.48...0.52) }
         attach(app, "posterize-flat")
 
         openLayerPanel(app)
@@ -558,13 +570,26 @@ final class OptionsPanelUITests: PaintUITestCase {
                       "Dither's Screen Strength slider did not open — the artist cannot reach it")
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
-        let dithered = try settled { try distinctRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.45...0.55) }
+        let dithered = try settled { try inkRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.48...0.52) }
         attach(app, "posterize-dithered")
 
-        XCTAssertEqual(flat.count, 1, "Fixture premise: a flat grey posterizes to one level. Got \(flat)")
-        XCTAssertGreaterThan(dithered.count, 1,
-                             "Dither must break the same flat grey into more than one level. Got \(dithered)")
-        XCTAssertNotEqual(flat, dithered, "Dither's drawn pixels must differ from plain Posterize's")
+        XCTAssertGreaterThan(flat.count, 10, "Fixture premise: the patch must be mostly ink. Got \(flat)")
+        XCTAssertGreaterThan(dithered.count, 10, "Fixture premise: the patch must be mostly ink. Got \(dithered)")
+
+        // **Range, not exact uniformity** — the anti-aliased seam between painted passes and the
+        // screenshot's own resampling both add a few bytes of noise even where every sample is ink
+        // (measured: an 89–92 spread under plain Posterize on this fixture), so requiring one exact
+        // value is a claim about the compositing pipeline this test does not need to make. A dither
+        // pattern crosses a whole quantizer step — about 85 of 255 here — which dwarfs that noise by
+        // an order of magnitude, so the two are still unmistakable apart.
+        let flatRange = Int(flat.max()!) - Int(flat.min()!)
+        let ditheredRange = Int(dithered.max()!) - Int(dithered.min()!)
+        XCTAssertLessThan(flatRange, 20,
+                          "A flat Posterize patch should read as one level plus noise. Got \(flat)")
+        XCTAssertGreaterThan(ditheredRange, flatRange + 30, """
+            Dither must break the same flat grey across a wider spread than Posterize's own noise. \
+            Posterize range \(flatRange) (\(flat)), Dither range \(ditheredRange) (\(dithered)).
+            """)
     }
 
     /// **TODO (60), cold start: Hue Colorize is reachable from the menu, shows Hue/Saturation/the
