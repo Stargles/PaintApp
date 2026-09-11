@@ -840,7 +840,8 @@ private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarg
 }
 
 /// **The rows the picked mode needs, and nothing for Move** — the speed for Rotate (§5.3), the item
-/// list for Parallax (§5.2). Each ends in its own divider so the rows beneath it sit as they did.
+/// list for Parallax (§5.2), the three amplitudes with the speed and the Re-roll for Shake (§5.4).
+/// Each ends in its own divider so the rows beneath it sit as they did.
 @ViewBuilder
 private func transformModeSection(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
     switch canvasManager.transformLayerMode(of: target) ?? .move {
@@ -851,6 +852,9 @@ private func transformModeSection(canvasManager: CanvasManager, target: Keyframe
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
     case .parallax:
         ParallaxItemsSection(canvasManager: canvasManager, poser: target)
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    case .shake:
+        ShakeRows(canvasManager: canvasManager, target: target)
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
     }
 }
@@ -997,6 +1001,112 @@ private struct RotateSpeedRow: View {
         let direction = speed < 0 ? "anticlockwise" : "clockwise"
         return String(format: "One turn every %.1f frames (%.2f s at %d fps), %@",
                       frames, seconds, canvasManager.fps, direction)
+    }
+}
+
+/// **Shake's controls** — §5.4 and §2 rulings 9–10: the three keyable amplitudes (*"Shake x, shake y,
+/// rotate shake sliders … so that they can be keyframed"*), one *speed* — how many frames each jolt
+/// lasts, not keyable — and **Re-roll**, the *"new shake"* button, one undo step. A line under them
+/// says what a keyframe does not do (§6: it holds the box, not the shake; key the amplitudes to 0
+/// to hold still) and that the shake is the same on every play until re-rolled.
+private struct ShakeRows: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+
+    private func resolved(_ channel: TargetChannel) -> Double {
+        canvasManager.resolvedValue(of: target, channel: channel, atFrame: canvasManager.currentFrame) ?? 0
+    }
+
+    private var period: Int { canvasManager.containerPose(of: target)?.shakePeriod ?? 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(TargetChannel.shakeChannels) { channel in
+                HStack {
+                    Text(channel.name).foregroundColor(.white)
+                    Spacer()
+                    Text(String(format: channel.format, resolved(channel)) + (channel == .shakeRotation ? "°" : " pt"))
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .accessibilityIdentifier("layerOptions.\(channel.id)Readout")
+                }
+                ChannelScalarControl(
+                    canvasManager: canvasManager, target: target, channel: channel,
+                    identifier: "layerOptions.\(channel.id)", resolved: resolved(channel),
+                    display: { String(format: channel.format, $0) },
+                    parse: { Double($0.trimmingCharacters(in: .whitespaces)) },
+                    write: { value in
+                        canvasManager.applyTargetChannelEdit(target, channel: channel, newValue: value,
+                                                             atFrame: canvasManager.currentFrame)
+                    })
+            }
+            ShakePeriodControl(canvasManager: canvasManager, target: target, period: period)
+            HStack {
+                Button {
+                    canvasManager.rerollShakeSeed(target)
+                } label: {
+                    Label("Re-roll", systemImage: "dice")
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white)
+                .accessibilityIdentifier("layerOptions.shakeReroll")
+                Text("The same shake every play; Re-roll for a new one. Undo brings the old one back.")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Shakes from the start of the bar, about the box's centre — a box scaled 2× shakes twice as far. A keyframe holds the box, not the shake; set the amounts to 0 to hold still.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+/// **The shake's one speed control** — §2 ruling 10 — as a slider over whole frames per jolt,
+/// bracketed as one undo step on release. 1 is a new position every frame; larger eases between
+/// positions over that many frames. Not routed through `applyTargetChannelEdit`: the period is not
+/// a channel (§5.4 says why), so there is no keyframe arm to take.
+private struct ShakePeriodControl: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+    let period: Int
+
+    @State private var dragValue: Double?
+
+    private var shown: Int { dragValue.map { Int($0.rounded()) } ?? period }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Speed").foregroundColor(.white)
+                Spacer()
+                Text(shown == 1 ? "A new jolt every frame" : "A new jolt every \(shown) frames")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .accessibilityIdentifier("layerOptions.shakePeriodReadout")
+            }
+            Slider(value: Binding(
+                get: { dragValue ?? Double(period) },
+                set: { dragValue = $0.rounded() }),
+                   in: Double(TransformLayerMode.shakePeriodRange.lowerBound)...Double(TransformLayerMode.shakePeriodRange.upperBound),
+                   step: 1,
+                   onEditingChanged: { editing in
+                       guard !editing else { return }
+                       canvasManager.setShakePeriod(target, to: shown)
+                       dragValue = nil
+                   })
+            .tint(.blue)
+            .accessibilityIdentifier("layerOptions.shakePeriod.slider")
+            .accessibilityValue("\(shown)")
+        }
     }
 }
 

@@ -109,6 +109,19 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// `TargetChannel.rotateSpeed`'s two labels, TRANSFORM_LAYER.md §5.3.
     case rotateSpeed
     case rotateSpeedKeyframes
+    /// A shake layer's three amplitudes changing, and their keyframes — `TargetChannel.shakeX`'s,
+    /// `shakeY`'s and `shakeRotation`'s two labels each, TRANSFORM_LAYER.md §5.4.
+    case shakeX
+    case shakeXKeyframes
+    case shakeY
+    case shakeYKeyframes
+    case shakeRotation
+    case shakeRotationKeyframes
+    /// A shake layer's period (`setShakePeriod`) — how many frames one jolt lasts — and its seed
+    /// being re-rolled (`rerollShakeSeed`), §2 rulings 10 and 9. Neither is keyable, so one label
+    /// each and no keyframe twin.
+    case shakePeriod
+    case shakeSeed
     /// A transform layer's — or a posed folder's — mode being switched (`setTransformLayerMode`),
     /// TRANSFORM_LAYER.md §5: Move, Parallax or Rotate.
     case transformLayerMode
@@ -257,6 +270,14 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .parallaxShareKeyframes: return "edit parallax keyframes"
         case .rotateSpeed: return "change rotate speed"
         case .rotateSpeedKeyframes: return "edit rotate speed keyframes"
+        case .shakeX: return "change shake x"
+        case .shakeXKeyframes: return "edit shake x keyframes"
+        case .shakeY: return "change shake y"
+        case .shakeYKeyframes: return "edit shake y keyframes"
+        case .shakeRotation: return "change rotate shake"
+        case .shakeRotationKeyframes: return "edit rotate shake keyframes"
+        case .shakePeriod: return "change shake speed"
+        case .shakeSeed: return "re-roll shake"
         case .transformLayerMode: return "change transform mode"
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"

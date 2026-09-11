@@ -142,6 +142,12 @@ struct LayerFolder: Identifiable {
     /// transform layer (§2 ruling 3: a folder counts as one item and nothing inside it is split up).
     /// Nil is the positional default, as it is on the layer, and for the same three reasons.
     var parallaxShare: Double? = nil
+    /// `Layer.shakeX` / `shakeY` / `shakeRotation` on the folder — §3.3: a folder's pose takes the
+    /// pose modes as well, so a folder in `.shake` jolts its contents by these. Its beats count from
+    /// frame 0, as its spin does, because a folder has no block.
+    var shakeX: Double = 0
+    var shakeY: Double = 0
+    var shakeRotation: Double = 0
 }
 
 // MARK: - Compositor nodes (§4.3)

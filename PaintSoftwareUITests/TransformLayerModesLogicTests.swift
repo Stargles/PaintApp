@@ -17,8 +17,14 @@ import CoreGraphics
 ///    a keyed speed integrates with no backward snap, a keyframe holds the box and not the angle, a
 ///    keystoned box carries one point's orbit onto the conic (four extremes), and a raster fixture
 ///    goes red on both backends when the function is dropped from the resolved map.
-///  * **Persistence** — the mode and the two rows round-trip through a manifest and a real package,
-///    and an older document with none of the three decodes to Move.
+///  * **Shake** (§5.4, stage 4) — the noise is pinned at one raw value and is a pure function of
+///    `(seed, channel, beat)`; a 10-point amplitude at rest moves a point by ten times the noise and
+///    the same frame twice is the same map; two seeds differ; the jolt is in box space, so a box
+///    scaled 2× shakes twice the pixels and a Move key is composed under it; the period eases
+///    between beats; the beats count from the block's start; the mode switch mints a seed, Re-roll
+///    is one undo step, and a raster fixture on both backends is drawn jolted.
+///  * **Persistence** — the mode and the rows round-trip through a manifest and a real package,
+///    and an older document with none of them decodes to Move.
 ///
 /// `@MainActor` because `makeRenderRequest` and `ProjectStore.save`/`load` are.
 @MainActor
@@ -92,6 +98,45 @@ final class TransformLayerModesLogicTests: XCTestCase {
         manager.layers[mover].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .rotate)
         manager.layers[mover].rotateSpeed = speed
         return (manager, drawn, mover)
+    }
+
+    /// `rotatedRasterLayer`'s twin for Shake: the same block, a Shake transform layer above it with
+    /// the given seed, period and amplitudes, its block starting at `blockStart`.
+    private func shakenRasterLayer(seed: UInt64, period: Int = 1, x: Double = 0, y: Double = 0,
+                                   rotation: Double = 0, blockStart: Int = 0) -> (manager: CanvasManager, drawn: Int, mover: Int) {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addLayer(name: "ink")
+        manager.addTransformLayer(name: "shaker")
+        let drawn = layerIndex(named: "ink", in: manager)
+        let mover = layerIndex(named: "shaker", in: manager)
+        manager.layers[drawn].cels[0].frameCount = 24
+        manager.layers[mover].cels[0].startFrame = blockStart
+        manager.layers[mover].cels[0].frameCount = 24
+        CanvasFixture.setBakedContent(manager, layerIndex: drawn,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 29, y: 29, width: 6, height: 6)))
+        manager.layers[mover].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake,
+                                                    shakeSeed: seed, shakePeriod: period)
+        manager.layers[mover].shakeX = x
+        manager.layers[mover].shakeY = y
+        manager.layers[mover].shakeRotation = rotation
+        return (manager, drawn, mover)
+    }
+
+    /// **A second spelling of the noise, for the pin below** — splitmix64's finalizer with its
+    /// constants written out, so a change to `TransformLayerMode.shakeNoise` that kept its shape
+    /// but not its bits goes red here rather than silently re-rolling every saved shake.
+    private func referenceNoise(seed: UInt64, channel: UInt64, beat: Int) -> Double {
+        func avalanche(_ x: UInt64) -> UInt64 {
+            var z = x
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+        let golden: UInt64 = 0x9E37_79B9_7F4A_7C15
+        let base = avalanche(seed &+ (channel &+ 1) &* golden)
+        let raw = avalanche(base &+ UInt64(bitPattern: Int64(beat)) &* golden)
+        return Double(raw >> 11) * (2.0 / 9_007_199_254_740_992.0) - 1
     }
 
     private func compositeBytes(_ manager: CanvasManager, atFrame frame: Int) throws -> [UInt8] {
@@ -582,6 +627,215 @@ final class TransformLayerModesLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - Shake: the noise (§5.4, ruling 9)
+
+    /// **One raw value of the noise, pinned against a number computed outside this process** (a
+    /// Python splitmix64 on 2026-09-11), and against a second Swift spelling with the constants
+    /// written out. The noise is what every saved shake is made of, so a change here that kept the
+    /// shape and lost the bits would silently re-roll every document on open.
+    func testTheShakeNoiseIsPinnedAtOneRawValueAndIsAPureFunctionOfItsArguments() {
+        XCTAssertEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 0, beat: 0), 0.7257122977221173, accuracy: 1e-15)
+        XCTAssertEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 1, beat: 0), 0.9680070149194351, accuracy: 1e-15)
+        XCTAssertEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 2, beat: 0), -0.06833133757059073, accuracy: 1e-15)
+        XCTAssertEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 0, beat: 1), -0.2636209686966611, accuracy: 1e-15)
+        XCTAssertEqual(TransformLayerMode.shakeNoise(seed: 0xDEAD_BEEF, channel: 0, beat: 3), 0.2110519185114068, accuracy: 1e-15)
+        for seed in [UInt64(1), 2, 0xDEAD_BEEF] {
+            for channel in UInt64(0)...2 {
+                for beat in [-2, 0, 1, 7, 100] {
+                    let n = TransformLayerMode.shakeNoise(seed: seed, channel: channel, beat: beat)
+                    XCTAssertEqual(n, referenceNoise(seed: seed, channel: channel, beat: beat),
+                                   "seed \(seed) channel \(channel) beat \(beat)")
+                    XCTAssertGreaterThanOrEqual(n, -1); XCTAssertLessThan(n, 1)
+                }
+            }
+        }
+        XCTAssertNotEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 0, beat: 0),
+                          TransformLayerMode.shakeNoise(seed: 2, channel: 0, beat: 0), "two seeds differ")
+        XCTAssertNotEqual(TransformLayerMode.shakeNoise(seed: 1, channel: 0, beat: 0),
+                          TransformLayerMode.shakeNoise(seed: 1, channel: 1, beat: 0), "x and y do not jolt in lockstep")
+    }
+
+    /// **A 10-point shake at rest moves a point by ten times the noise, the same frame twice is the
+    /// same map, and two seeds differ.** At period 1 every frame is its own beat, so frame *k*'s
+    /// translation is exactly `10 · n(seed, 0, k)` — hand-computed here through `referenceNoise`.
+    /// A shake that read the frame off the wall clock, or re-rolled per render, fails the second
+    /// assertion; one that ignored the seed fails the third.
+    func testAShakeLayerJoltsByTheSeededNoiseAndTheSameFrameIsTheSameMap() throws {
+        let fx = shakenRasterLayer(seed: 1, x: 10)
+        for frame in 0..<6 {
+            let map = try XCTUnwrap(fx.manager.layerPoses(atFrame: frame)[fx.drawn], "frame \(frame) is jolted")
+            let moved = try XCTUnwrap(map.applied(to: centre))
+            XCTAssertEqual(moved.x, centre.x + 10 * referenceNoise(seed: 1, channel: 0, beat: frame), accuracy: 1e-9,
+                           "frame \(frame): ten times the beat's noise, no more")
+            XCTAssertEqual(moved.y, centre.y, accuracy: 1e-9, "frame \(frame): no y amplitude, no y jolt")
+            XCTAssertEqual(fx.manager.layerPoses(atFrame: frame)[fx.drawn]?.encoded, map.encoded,
+                           "frame \(frame): the same frame twice is the same map")
+        }
+        XCTAssertNotEqual(fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.encoded,
+                          fx.manager.layerPoses(atFrame: 1)[fx.drawn]?.encoded, "two frames are two jolts")
+        let other = shakenRasterLayer(seed: 2, x: 10)
+        XCTAssertNotEqual(fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.encoded,
+                          other.manager.layerPoses(atFrame: 0)[other.drawn]?.encoded, "two seeds are two shakes")
+        // The rotate shake is a turn about the box's centre: the centre stays put and a point off it
+        // turns by the noise in degrees.
+        let rocking = shakenRasterLayer(seed: 1, rotation: 20)
+        let map = try XCTUnwrap(rocking.manager.layerPoses(atFrame: 0)[rocking.drawn])
+        let stillCentre = try XCTUnwrap(map.applied(to: centre))
+        XCTAssertEqual(stillCentre.x, centre.x, accuracy: 1e-9); XCTAssertEqual(stillCentre.y, centre.y, accuracy: 1e-9)
+        let right = try XCTUnwrap(map.applied(to: CGPoint(x: centre.x + 10, y: centre.y)))
+        let degrees = atan2(right.y - centre.y, right.x - centre.x) * 180 / .pi
+        XCTAssertEqual(degrees, 20 * referenceNoise(seed: 1, channel: 2, beat: 0), accuracy: 1e-6,
+                       "the rock is the third channel's noise, in degrees, about the centre")
+    }
+
+    /// **The jolt is in box space: a box scaled 2× by Move shakes twice the pixels, and a Move key
+    /// is composed under the shake** (§2 ruling 9, §6). With the authored box at 2× about the
+    /// centre, a 10-point amplitude moves the centre 20·n; with a Move key sliding the box 6 right,
+    /// the jolt rides on the slid box. An implementation that applied the jolt *after* the authored
+    /// map would move 10·n either way.
+    func testTheShakeIsInBoxSpaceSoAScaledBoxShakesFurtherAndAMoveKeyRidesUnderIt() throws {
+        let fx = shakenRasterLayer(seed: 1, x: 10)
+        let n0 = referenceNoise(seed: 1, channel: 0, beat: 0)
+        let doubled = CGAffineTransform(translationX: centre.x, y: centre.y).scaledBy(x: 2, y: 2)
+            .translatedBy(x: -centre.x, y: -centre.y)
+        fx.manager.layers[fx.mover].transform?.pose = PoseQuad(box: canvasBox, mappedBy: doubled)
+        let scaled = try XCTUnwrap(fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.applied(to: centre))
+        XCTAssertEqual(scaled.x, centre.x + 20 * n0, accuracy: 1e-6, "a 2× box shakes 20 for 10")
+        XCTAssertEqual(scaled.y, centre.y, accuracy: 1e-6)
+
+        let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
+        fx.manager.layers[fx.mover].transform?.pose = PoseQuad(restingIn: canvasBox)
+        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 0))
+        let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 6, y: 0))
+        XCTAssertEqual(fx.manager.commitContainerPose(target, restingAt: PoseQuad(restingIn: canvasBox),
+                                                      movedTo: slid, atFrame: 4),
+                       .storedValueHoldingBaseline)
+        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 4))
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .shake, "the Move and the marks kept the mode")
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakeSeed, 1, "…and the seed")
+        let n4 = referenceNoise(seed: 1, channel: 0, beat: 4)
+        let at4 = try XCTUnwrap(fx.manager.layerPoses(atFrame: 4)[fx.drawn]?.applied(to: centre))
+        XCTAssertEqual(at4.x, centre.x + 6 + 10 * n4, accuracy: 1e-6, "the jolt rides on the slid box")
+    }
+
+    /// **The period eases between beats** (ruling 10): at period 4 the sample at frame 2 is halfway
+    /// between beat 0's and beat 1's noise (smoothstep(½) = ½), and at frame 4 it is beat 1's own.
+    /// At period 1 no easing ever happens. A shake that stepped rather than eased reads beat 0's
+    /// value at frame 2.
+    func testThePeriodEasesBetweenBeatsAndOneIsANewPositionEveryFrame() {
+        let a = referenceNoise(seed: 7, channel: 0, beat: 0), b = referenceNoise(seed: 7, channel: 0, beat: 1)
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: 0, period: 4), a, accuracy: 1e-12)
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: 2, period: 4), (a + b) / 2, accuracy: 1e-12)
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: 4, period: 4), b, accuracy: 1e-12)
+        let quarter = 0.25 * 0.25 * (3 - 2 * 0.25)
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: 1, period: 4), a + (b - a) * quarter, accuracy: 1e-12)
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: 1, period: 1), b, accuracy: 1e-12,
+                       "period 1: frame 1 is beat 1")
+        XCTAssertEqual(TransformLayerMode.shakeSample(seed: 7, channel: 0, localFrame: -3, period: 2),
+                       referenceNoise(seed: 7, channel: 0, beat: -2) + (referenceNoise(seed: 7, channel: 0, beat: -1) - referenceNoise(seed: 7, channel: 0, beat: -2)) * 0.5,
+                       accuracy: 1e-12, "a negative local frame floors to its beat rather than truncating")
+    }
+
+    /// **The beats count from the block's start** (§4: the block is the function's origin). A bar
+    /// starting at 4 shakes at frame 4 + k exactly as a bar starting at 0 shakes at k, and before
+    /// the bar there is nothing. An implementation reading the document frame would give the
+    /// slid bar a different shake.
+    func testTheShakeStartsAtTheBlockSoASlidBarShakesTheSameWay() throws {
+        let atZero = shakenRasterLayer(seed: 5, period: 3, x: 10, y: 4, rotation: 6)
+        let atFour = shakenRasterLayer(seed: 5, period: 3, x: 10, y: 4, rotation: 6, blockStart: 4)
+        XCTAssertNil(atFour.manager.layerPoses(atFrame: 3)[atFour.drawn], "before the bar the shaker is not there")
+        for k in 0..<8 {
+            XCTAssertEqual(atFour.manager.layerPoses(atFrame: 4 + k)[atFour.drawn]?.encoded,
+                           atZero.manager.layerPoses(atFrame: k)[atZero.drawn]?.encoded,
+                           "frame \(4 + k) of the slid bar is frame \(k) of the bar at 0")
+        }
+    }
+
+    /// **The mode switch mints a seed, Re-roll is one undo step, and the period is clamped and
+    /// undoable.** A layer switched into Shake through the picker has a non-zero seed (two such
+    /// layers differ); leaving and returning keeps it; Re-roll changes it and one undo restores it
+    /// — which is what the artist sees as *the old shake coming back*.
+    func testTheModeSwitchMintsASeedAndRerollIsOneUndoStep() throws {
+        let fx = shakenRasterLayer(seed: 0, x: 10)
+        fx.manager.layers[fx.mover].transform?.mode = .move
+        let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
+        fx.manager.setTransformLayerMode(target, to: .shake)
+        let minted = try XCTUnwrap(fx.manager.layers[fx.mover].transform?.shakeSeed)
+        XCTAssertNotEqual(minted, 0, "entering Shake mints a seed")
+        fx.manager.setTransformLayerMode(target, to: .move)
+        fx.manager.setTransformLayerMode(target, to: .shake)
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakeSeed, minted, "leaving and returning keeps the shake")
+        let other = shakenRasterLayer(seed: 0, x: 10)
+        other.manager.layers[other.mover].transform?.mode = .move
+        other.manager.setTransformLayerMode(.layer(id: other.manager.layers[other.mover].id), to: .shake)
+        XCTAssertNotEqual(other.manager.layers[other.mover].transform?.shakeSeed, minted, "two shake layers differ from birth")
+
+        let before = fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.encoded
+        fx.manager.rerollShakeSeed(target)
+        let rerolled = try XCTUnwrap(fx.manager.layers[fx.mover].transform?.shakeSeed)
+        XCTAssertNotEqual(rerolled, minted, "Re-roll is a new seed")
+        XCTAssertNotEqual(fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.encoded, before, "…and a different picture")
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.notice?.kind, .historyUndo(.shakeSeed), "one undo, named for the re-roll")
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakeSeed, minted, "one undo: the old seed")
+        XCTAssertEqual(fx.manager.layerPoses(atFrame: 0)[fx.drawn]?.encoded, before, "…and the old picture")
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .shake, "undo of a re-roll does not leave the mode")
+
+        fx.manager.setShakePeriod(target, to: 40)
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakePeriod, TransformLayerMode.shakePeriodRange.upperBound,
+                       "the period is clamped into the control's range")
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.notice?.kind, .historyUndo(.shakePeriod))
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakePeriod, 1, "…and undoable")
+        fx.manager.layers[fx.mover].transform?.mode = .move
+        fx.manager.rerollShakeSeed(target)
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakeSeed, minted, "Re-roll off Shake is refused")
+    }
+
+    /// **The render-path predicate reads the three amplitudes and their tracks** (§7's
+    /// `movesItsContents` row). An untouched box with all three at zero moves nothing; any one
+    /// amplitude moves everything; one keyed 0 → 10 moves everything at every frame; in Move the
+    /// amplitudes are inert storage.
+    func testMovesItsContentsReadsTheShakeAmplitudesAndTheirTracks() {
+        let fx = shakenRasterLayer(seed: 1)
+        XCTAssertFalse(fx.manager.hasContainerPoseInForce, "all three at zero: nothing moves")
+        for channel in TargetChannel.shakeChannels {
+            fx.manager.layers[fx.mover][keyPath: channel.layerPath] = 3
+            XCTAssertTrue(fx.manager.hasContainerPoseInForce, "\(channel.id) alone moves everything beneath")
+            fx.manager.layers[fx.mover][keyPath: channel.layerPath] = 0
+        }
+        fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeY.id] = curve([(0, 0), (8, 10)])
+        XCTAssertTrue(fx.manager.hasContainerPoseInForce, "a keyed amplitude answers yes at frame 0 as well")
+        fx.manager.layers[fx.mover].transform?.mode = .move
+        XCTAssertFalse(fx.manager.hasContainerPoseInForce, "in Move the amplitudes are inert storage")
+    }
+
+    /// **A raster fixture is drawn jolted on both backends, and goes red when the function is
+    /// dropped from the resolved map.** A 6×6 block at the centre; a 10-point x shake at seed 1
+    /// moves it by `10 · n(k)` at frame *k* — +7.3 at frame 0, −2.6 at frame 1 — measured off the
+    /// composite's opaque bounds. The same frame composited twice is byte-identical (RENDER §2.16
+    /// with the noise inside the version), and two frames have two versions.
+    func testARasterLayerUnderAShakeLayerIsDrawnJoltedOnBothBackends() throws {
+        try onBothBackends { backend in
+            let fx = shakenRasterLayer(seed: 1, x: 10)
+            let rest = shakenRasterLayer(seed: 1, x: 0)
+            let restBounds = try XCTUnwrap(inkBounds(try compositeBytes(rest.manager, atFrame: 0)), "\(backend): the block is drawn at rest")
+            XCTAssertEqual(restBounds.midX, 32, accuracy: 1.5, "\(backend): premise — the block sits on the centre column")
+            for frame in 0..<3 {
+                let bytes = try compositeBytes(fx.manager, atFrame: frame)
+                let jolted = try XCTUnwrap(inkBounds(bytes), "\(backend): frame \(frame) is drawn")
+                XCTAssertEqual(jolted.midX, restBounds.midX + 10 * referenceNoise(seed: 1, channel: 0, beat: frame), accuracy: 1.5,
+                               "\(backend): frame \(frame) is drawn ten times the noise to the side")
+                XCTAssertEqual(jolted.midY, restBounds.midY, accuracy: 1.5, "\(backend): …and not up or down")
+                XCTAssertEqual(try compositeBytes(fx.manager, atFrame: frame), bytes,
+                               "\(backend): the same frame renders the same bytes")
+            }
+            let v0 = fx.manager.contentVersion(ofLayer: fx.drawn, atFrame: 0)
+            let v1 = fx.manager.contentVersion(ofLayer: fx.drawn, atFrame: 1)
+            XCTAssertNotEqual(v0, v1, "\(backend): the jolt is in the version, so two frames cannot share a cache entry")
+        }
+    }
+
     // MARK: - Persistence
 
     /// **The mode and the two rows survive a manifest round trip; a manifest without them decodes to
@@ -617,6 +871,72 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(olderBack.transform?.mode, .move, "absent is Move")
         XCTAssertNil(olderBack.rotateSpeed, "absent is 0 once it reaches the model")
         XCTAssertNil(olderBack.parallaxShare, "absent is the positional default")
+        XCTAssertEqual(olderBack.transform?.shakeSeed, 0, "absent is never minted")
+        XCTAssertEqual(olderBack.transform?.shakePeriod, 1, "absent is a jolt a frame")
+        XCTAssertFalse(olderJSON.contains("shake"), "a pose in Move writes none of the shake keys")
+
+        // Stage 4's fields: the seed and period inside the pose, the amplitudes beside it, both homes.
+        let shaking = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake, shakeSeed: 0xC0FFEE, shakePeriod: 3)
+        let shakenLayer = LayerManifest(id: UUID(), name: "Quake", opacity: 1, isVisible: true, kind: .transform,
+                                        transform: shaking, shakeX: 12, shakeY: 4, shakeRotation: 1.5, cels: [cel])
+        let shakenBack = try JSONDecoder().decode(LayerManifest.self, from: try JSONEncoder().encode(shakenLayer))
+        XCTAssertEqual(shakenBack.transform?.mode, .shake)
+        XCTAssertEqual(shakenBack.transform?.shakeSeed, 0xC0FFEE)
+        XCTAssertEqual(shakenBack.transform?.shakePeriod, 3)
+        XCTAssertEqual(shakenBack.shakeX, 12); XCTAssertEqual(shakenBack.shakeY, 4); XCTAssertEqual(shakenBack.shakeRotation, 1.5)
+        let shakenFolder = FolderManifest(id: UUID(), name: "G", isExpanded: true, isVisible: true,
+                                          transform: shaking, shakeX: 2, shakeY: 3, shakeRotation: 4)
+        let shakenFolderBack = try JSONDecoder().decode(FolderManifest.self, from: try JSONEncoder().encode(shakenFolder))
+        XCTAssertEqual(shakenFolderBack.transform?.shakeSeed, 0xC0FFEE)
+        XCTAssertEqual(shakenFolderBack.transform?.shakePeriod, 3)
+        XCTAssertEqual([shakenFolderBack.shakeX, shakenFolderBack.shakeY, shakenFolderBack.shakeRotation], [2, 3, 4])
+    }
+
+    /// **A shake survives a real package**: the seed, the period and the amplitudes on a layer and
+    /// on a folder come back, and the reloaded document jolts the same leaves to the same maps at
+    /// every frame — which is ruling 9's *"the same every time you play"* across a save.
+    func testAShakeSurvivesAPackageRoundTrip() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transform-shake-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+        let fx = shakenRasterLayer(seed: 0xBEEF, period: 2, x: 9, y: 3, rotation: 2)
+        fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeX.id] = curve([(0, 9), (8, 0)])
+        let folder = fx.manager.addFolder(name: "G")
+        fx.manager.layers[fx.drawn].parentFolderID = folder
+        let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
+        fx.manager.folders[folderAt].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake,
+                                                           shakeSeed: 0xF00D, shakePeriod: 4)
+        fx.manager.folders[folderAt].shakeRotation = 5
+        let moverID = fx.manager.layers[fx.mover].id, drawnID = fx.manager.layers[fx.drawn].id
+
+        let url = root.appendingPathComponent("shake.paintproj", isDirectory: true)
+        let finished = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(fx.manager, to: url) { finished.fulfill() }
+        wait(for: [finished], timeout: 30)
+
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
+        let mover = try XCTUnwrap(reloaded.layers.first { $0.id == moverID })
+        XCTAssertEqual(mover.transform?.mode, .shake)
+        XCTAssertEqual(mover.transform?.shakeSeed, 0xBEEF)
+        XCTAssertEqual(mover.transform?.shakePeriod, 2)
+        XCTAssertEqual([mover.shakeX, mover.shakeY, mover.shakeRotation], [9, 3, 2])
+        XCTAssertEqual(mover.channelTracks[TargetChannel.shakeX.id], fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeX.id])
+        let reloadedFolder = try XCTUnwrap(reloaded.folders.first { $0.id == folder })
+        XCTAssertEqual(reloadedFolder.transform?.shakeSeed, 0xF00D)
+        XCTAssertEqual(reloadedFolder.transform?.shakePeriod, 4)
+        XCTAssertEqual(reloadedFolder.shakeRotation, 5)
+        let reloadedDrawn = index(of: drawnID, in: reloaded)
+        for frame in 0..<10 {
+            XCTAssertEqual(reloaded.layerPoses(atFrame: frame)[reloadedDrawn]?.encoded ?? [],
+                           fx.manager.layerPoses(atFrame: frame)[fx.drawn]?.encoded ?? [],
+                           "frame \(frame): the reloaded document shakes the same way")
+        }
+        XCTAssertNotNil(reloaded.layerPoses(atFrame: 0)[reloadedDrawn], "premise: the leaf is jolted at all")
     }
 
     /// **Through a real package**: a parallax layer with one typed share and a rotating folder with a

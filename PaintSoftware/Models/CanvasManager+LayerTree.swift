@@ -964,6 +964,7 @@ extension CanvasManager {
                          // duplicated item with no typed share falls back to the position's.
                          rotateSpeed: source.rotateSpeed,
                          parallaxShare: source.parallaxShare,
+                         shakeX: source.shakeX, shakeY: source.shakeY, shakeRotation: source.shakeRotation,
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)

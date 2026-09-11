@@ -152,10 +152,56 @@ struct TargetChannel: Identifiable {
         layerPath: \Layer.rotateSpeed,
         folderPath: \LayerFolder.rotateSpeed)
 
+    /// **How far a Shake transform layer jolts sideways, in the box's own points** — TRANSFORM_LAYER.md
+    /// §5.4 and §2 ruling 9, the owner's *"Shake x, shake y, rotate shake sliders would be preferred
+    /// so that they can be keyframed"*. The render scales value noise in −1…1 by this, so it is an
+    /// amplitude: 10 is a jolt of up to ten points either way. `uiRange` is 0…100 points, which is
+    /// a hard shake at the owner's 2048-wide canvas; `modelDomain` is wide enough for any canvas
+    /// and admits a negative amplitude, which is the same shake mirrored.
+    static let shakeX = TargetChannel(
+        id: "shakeX",
+        name: "Shake X",
+        uiRange: 0...100,
+        modelDomain: -4096...4096,
+        format: "%.0f",
+        editLabel: .shakeX,
+        keyframeLabel: .shakeXKeyframes,
+        layerPath: \Layer.shakeX,
+        folderPath: \LayerFolder.shakeX)
+
+    /// `shakeX`'s vertical twin.
+    static let shakeY = TargetChannel(
+        id: "shakeY",
+        name: "Shake Y",
+        uiRange: 0...100,
+        modelDomain: -4096...4096,
+        format: "%.0f",
+        editLabel: .shakeY,
+        keyframeLabel: .shakeYKeyframes,
+        layerPath: \Layer.shakeY,
+        folderPath: \LayerFolder.shakeY)
+
+    /// **How far a Shake transform layer rocks, in degrees about the box's centre** — the owner's
+    /// *"rotate shake"*. `uiRange` is 0…30°, past which the picture reads as a spin rather than a
+    /// rock; `modelDomain` is half a turn either way.
+    static let shakeRotation = TargetChannel(
+        id: "shakeRotation",
+        name: "Rotate Shake",
+        uiRange: 0...30,
+        modelDomain: -180...180,
+        format: "%.1f",
+        editLabel: .shakeRotation,
+        keyframeLabel: .shakeRotationKeyframes,
+        layerPath: \Layer.shakeRotation,
+        folderPath: \LayerFolder.shakeRotation)
+
     /// **Every channel of this kind, in a fixed order.** The order is the channel list's and the
     /// band's colour order, so it is decided here and nowhere else — `Effect.parameters`' contract
     /// one type over.
-    static let all: [TargetChannel] = [.opacity, .parallaxShare, .rotateSpeed]
+    static let all: [TargetChannel] = [.opacity, .parallaxShare, .rotateSpeed, .shakeX, .shakeY, .shakeRotation]
+
+    /// The three rows a pose in Shake reads, in the order the panel lists them.
+    static let shakeChannels: [TargetChannel] = [.shakeX, .shakeY, .shakeRotation]
 
     /// The channel one id names, or nil. The lookup every writer guards on, so an id that is not a
     /// channel of this kind is refused in one place rather than at each write.
@@ -273,15 +319,35 @@ extension Layer {
     /// the 100% item moves — `movesItsContents` on the pose already answers both.
     var containerPoseMovesContents: Bool {
         guard let pose = layerTransform else { return false }
-        return pose.movesItsContents
-            || (pose.mode == .rotate && Self.speedIsEverNonZero(rotateSpeed, channelTracks))
+        return Self.containerPoseMovesContents(pose, stored: { self[keyPath: $0.layerPath] }, tracks: channelTracks)
     }
 
-    /// The speed clause of `containerPoseMovesContents`, stated once for both homes: with a curve
-    /// the track decides — any key off zero, or two keys whose handles could leave it — and with
-    /// none the stored base does.
-    static func speedIsEverNonZero(_ stored: Double, _ tracks: [String: AnimationCurve]) -> Bool {
-        if let curve = tracks[TargetChannel.rotateSpeed.id], !curve.isEmpty {
+    /// **The mode clause of `containerPoseMovesContents`, stated once for both homes.** The authored
+    /// pose moving is enough in any mode; past that, Rotate moves if its speed is ever non-zero and
+    /// Shake if any of its three amplitudes is — each read off the channel's *track* when it has
+    /// one (any key off zero, or two keys whose handles could leave it) and off the stored base
+    /// otherwise, so a channel keyed 0 → 15 answers yes at frame 0 as well. Move and Parallax add
+    /// nothing: a share of a resting pose is rest.
+    static func containerPoseMovesContents(_ pose: LayerPose, stored: (TargetChannel) -> Double,
+                                           tracks: [String: AnimationCurve]) -> Bool {
+        if pose.movesItsContents { return true }
+        switch pose.mode {
+        case .move, .parallax:
+            return false
+        case .rotate:
+            return channelIsEverNonZero(.rotateSpeed, stored: stored(.rotateSpeed), tracks: tracks)
+        case .shake:
+            return TargetChannel.shakeChannels.contains {
+                channelIsEverNonZero($0, stored: stored($0), tracks: tracks)
+            }
+        }
+    }
+
+    /// One channel's half of the clause above: with a curve the track decides, with none the stored
+    /// base does.
+    static func channelIsEverNonZero(_ channel: TargetChannel, stored: Double,
+                                     tracks: [String: AnimationCurve]) -> Bool {
+        if let curve = tracks[channel.id], !curve.isEmpty {
             return curve.isAnimated || curve.keys.contains { $0.value != 0 }
         }
         return stored != 0
@@ -322,7 +388,6 @@ extension LayerFolder {
     /// `Layer.containerPoseMovesContents` on the folder — the same predicate over `transform`.
     var containerPoseMovesContents: Bool {
         guard let pose = transform else { return false }
-        return pose.movesItsContents
-            || (pose.mode == .rotate && Layer.speedIsEverNonZero(rotateSpeed, channelTracks))
+        return Layer.containerPoseMovesContents(pose, stored: { self[keyPath: $0.folderPath] }, tracks: channelTracks)
     }
 }

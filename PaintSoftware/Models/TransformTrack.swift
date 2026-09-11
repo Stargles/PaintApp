@@ -524,12 +524,29 @@ struct LayerPose: Equatable {
     /// before 2026-09-11 says and what every pose nobody has switched says — one meaning.
     var mode: TransformLayerMode = .move
 
+    /// **The shake's seed** — TRANSFORM_LAYER.md §5.4, §2 ruling 9: *"the same every time you play …
+    /// with a 'new shake' button"*. Minted when the pose is switched into Shake and re-rolled by the
+    /// panel's button (one undo step); every noise sample is a pure function of it, so a saved
+    /// document shakes exactly as it did. **Not keyable and not a `TargetChannel` row** (§3.3's
+    /// closing line) — it is a name for a pattern, not a quantity to animate — so it lives here
+    /// beside the mode rather than on the two homes. Zero is "never minted", which a pose in any
+    /// other mode carries and which encodes as absent.
+    var shakeSeed: UInt64 = 0
+
+    /// **Frames per beat of the shake** — ruling 10's one *speed* control, *"a new position every
+    /// frame, or a smoother wobble"*: 1 is a jolt every frame, larger eases between beats. Not
+    /// keyable at first (§5.4: a varying period needs phase integration, exactly rotate's argument),
+    /// so it sits here with the seed. Encoded only when it is not 1.
+    var shakePeriod: Int = 1
+
     init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil,
-         mode: TransformLayerMode = .move) {
+         mode: TransformLayerMode = .move, shakeSeed: UInt64 = 0, shakePeriod: Int = 1) {
         self.pose = pose
         self.track = track
         self.baseline = baseline
         self.mode = mode
+        self.shakeSeed = shakeSeed
+        self.shakePeriod = shakePeriod
     }
 
     /// A container that shows its contents exactly where they are — what a freshly created
@@ -588,7 +605,7 @@ struct LayerPose: Equatable {
 
 extension LayerPose: Codable {
 
-    private enum CodingKeys: String, CodingKey { case pose, track, baseline, mode }
+    private enum CodingKeys: String, CodingKey { case pose, track, baseline, mode, shakeSeed, shakePeriod }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -601,6 +618,10 @@ extension LayerPose: Codable {
         // that an older build cannot open one; silently reading Shake as Move would be a wrong
         // picture with nothing on screen to say so.
         mode = try c.decodeIfPresent(TransformLayerMode.self, forKey: .mode) ?? .move
+        // Absent is "never minted" and "one beat a frame" — what every pose written before stage 4
+        // says, and what every pose that has never been in Shake says.
+        shakeSeed = try c.decodeIfPresent(UInt64.self, forKey: .shakeSeed) ?? 0
+        shakePeriod = try c.decodeIfPresent(Int.self, forKey: .shakePeriod) ?? 1
     }
 
     /// Hand-written so that `mode` is **written only when it is not Move** — §3.5's field-presence
@@ -613,6 +634,8 @@ extension LayerPose: Codable {
         try c.encode(track, forKey: .track)
         try c.encodeIfPresent(baseline, forKey: .baseline)
         if mode != .move { try c.encode(mode, forKey: .mode) }
+        if shakeSeed != 0 { try c.encode(shakeSeed, forKey: .shakeSeed) }
+        if shakePeriod != 1 { try c.encode(shakePeriod, forKey: .shakePeriod) }
     }
 }
 

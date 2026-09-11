@@ -840,17 +840,26 @@ final class FrameBaker {
     /// `LayerFolder.resolvedEffect(atFrame:)` and `Layer.opacity(atFrame:)`, and the track fields
     /// below close exactly that gap: a curve edited so that frame 7 changes and frame 0 does not is
     /// invisible in the tree at frame 0 and plain in the dictionary.
-    /// A container pose as much of it as reaches a pixel: the stored base, the whole track and the
-    /// mode — and not the baseline, for `StructuralStamp.containerPoses`' reason.
+    /// A container pose as much of it as reaches a pixel: the stored base, the whole track, the
+    /// mode, and the shake's seed and period — and not the baseline, for
+    /// `StructuralStamp.containerPoses`' reason. **The seed and period are here because the rotate
+    /// test found the pose missing**: the noise is a pure function of `(seed, period, frame)`
+    /// (TRANSFORM_LAYER.md §5.4), so a re-rolled seed changes every frame's bytes with nothing in the
+    /// tree to say so, and a stamp without it would serve the old shake off the display path
+    /// forever. `FrameBakerLogicTests` drops each and expects red.
     private struct ContainerPoseStamp: Equatable {
         let pose: PoseQuad
         let track: TransformTrack
         let mode: TransformLayerMode
+        let shakeSeed: UInt64
+        let shakePeriod: Int
 
         init(_ pose: LayerPose) {
             self.pose = pose.pose
             track = pose.track
             mode = pose.mode
+            shakeSeed = pose.shakeSeed
+            shakePeriod = pose.shakePeriod
         }
     }
 
@@ -880,11 +889,12 @@ final class FrameBaker {
         /// Layers then folders, the other three fields' shape. The pose's `baseline` is left out:
         /// it is §2.27's authoring state between two marks and reaches no pixel.
         let containerPoses: [ContainerPoseStamp?]
-        /// **The two scalars the modes read as stored bases** — `Layer.rotateSpeed` and
-        /// `Layer.parallaxShare` on both homes. Their *curves* ride `channelTracks`; the typed
-        /// numbers live in these fields and nowhere the tree can see.
+        /// **The scalars the modes read as stored bases** — `Layer.rotateSpeed`,
+        /// `Layer.parallaxShare` and the three shake amplitudes, on both homes. Their *curves* ride
+        /// `channelTracks`; the typed numbers live in these fields and nowhere the tree can see.
         let rotateSpeeds: [Double]
         let parallaxShares: [Double?]
+        let shakeAmplitudes: [[Double]]
         let canvasSize: CGSize?
         let canvasPadding: CGFloat
         /// **Guides, by value.** They are named from a recipe by id and edited in place keeping it,
@@ -912,6 +922,8 @@ final class FrameBaker {
                 + manager.folders.map { $0.transform.map(ContainerPoseStamp.init) }
             rotateSpeeds = manager.layers.map(\.rotateSpeed) + manager.folders.map(\.rotateSpeed)
             parallaxShares = manager.layers.map(\.parallaxShare) + manager.folders.map(\.parallaxShare)
+            shakeAmplitudes = manager.layers.map { [$0.shakeX, $0.shakeY, $0.shakeRotation] }
+                + manager.folders.map { [$0.shakeX, $0.shakeY, $0.shakeRotation] }
             canvasSize = manager.canvasSize
             canvasPadding = manager.canvasPadding
             guides = manager.guideStrokes

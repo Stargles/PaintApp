@@ -1025,7 +1025,44 @@ extension CanvasManager {
     func setTransformLayerMode(_ target: KeyframeTarget, to mode: TransformLayerMode) {
         guard var pose = containerPose(of: target), pose.mode != mode else { return }
         pose.mode = mode
+        // **The shake's seed is minted the first time the pose enters Shake** (§5.4: *"minted at
+        // creation"*), inside the same undo step as the pick, so two shake layers differ from birth
+        // and one is stable from its first frame. A seed already minted is kept — leaving Shake and
+        // coming back is the same shake, `valueFill`'s own asymmetry.
+        if mode == .shake, pose.shakeSeed == 0 { pose.shakeSeed = Self.freshShakeSeed() }
         withStructureUndo(label: .transformLayerMode) {
+            applyContainerPose(pose, target: target)
+        }
+    }
+
+    /// A seed for a shake — `DabRandom.freshSeed`, never zero, because zero is "never minted".
+    static func freshShakeSeed() -> UInt64 {
+        var seed = DabRandom.freshSeed()
+        while seed == 0 { seed = DabRandom.freshSeed() }
+        return seed
+    }
+
+    /// **Re-rolls a shake layer's seed** — §2 ruling 9's *"new shake"* button, one undo step, and
+    /// nothing else moves. Refused off a pose in Shake, where the seed reaches no pixel.
+    func rerollShakeSeed(_ target: KeyframeTarget) {
+        guard var pose = containerPose(of: target), pose.mode == .shake else { return }
+        var seed = Self.freshShakeSeed()
+        while seed == pose.shakeSeed { seed = Self.freshShakeSeed() }
+        pose.shakeSeed = seed
+        withStructureUndo(label: .shakeSeed) {
+            applyContainerPose(pose, target: target)
+        }
+    }
+
+    /// **Sets how many frames one jolt of a shake lasts** — §2 ruling 10's one speed control, clamped
+    /// into `TransformLayerMode.shakePeriodRange`, one undo step. Written whatever the mode, since
+    /// the panel offers it only in Shake and a period is harmless storage elsewhere.
+    func setShakePeriod(_ target: KeyframeTarget, to period: Int) {
+        let range = TransformLayerMode.shakePeriodRange
+        let clamped = min(max(period, range.lowerBound), range.upperBound)
+        guard var pose = containerPose(of: target), pose.shakePeriod != clamped else { return }
+        pose.shakePeriod = clamped
+        withStructureUndo(label: .shakePeriod) {
             applyContainerPose(pose, target: target)
         }
     }

@@ -11,15 +11,17 @@ import Foundation
 /// two meet in §5.3 — a Rotate layer's box under Distort is what gives the perspective ellipse — so
 /// they must not share a spelling.
 ///
-/// **Three cases, not five.** Shake and Repeat are §8's stages 4 and 5; a case here before its stage
-/// lands would be a row the mode picker offers and nothing honours, which is CLAUDE.md's *"refusal
-/// with no notice"* wearing a menu. Each arrives with its own render arm and its own test.
+/// **Four cases as of stage 4; Repeat is §8's stage 5.** A case here before its stage lands would
+/// be a row the mode picker offers and nothing honours, which is CLAUDE.md's *"refusal with no
+/// notice"* wearing a menu. Each arrives with its own render arm and its own test.
 ///
 /// **The mode lives on `LayerPose`** (`LayerPose.mode`), which is what makes a folder's pose take it
 /// for free — `Layer.transform` and `LayerFolder.transform` are one type — and what keeps "a mode
 /// never outlives the pose it qualifies" structural, `LayerPose.track`'s own argument for nesting.
-/// The scalars each mode reads (`rotateSpeed`, `parallaxShare`) are `TargetChannel` rows on the two
-/// homes, §3.3, and are *not* here: a key path into a nested optional is not writable.
+/// The scalars each mode reads (`rotateSpeed`, `parallaxShare`, the three shake amplitudes) are
+/// `TargetChannel` rows on the two homes, §3.3, and are *not* here: a key path into a nested optional
+/// is not writable. What is **not** keyable — shake's seed and period — lives on `LayerPose` beside
+/// the mode, for the same "never outlives the pose it qualifies" reason.
 enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
 
     /// §5.1 — the authored pose, applied to everything beneath. Every document before 2026-09-11.
@@ -33,6 +35,12 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
     /// the integral of `rotateSpeed` (degrees per frame) from the block's first frame.
     case rotate
 
+    /// §5.4 — the authored pose, pre-composed with a jolt in box space about the box's centre: a
+    /// slide of `shakeX`/`shakeY` and a turn of `shakeRotation`, each scaled by value noise that is a
+    /// pure function of `(seed, channel, beat)` (§2 ruling 9: the same every play; Re-roll changes
+    /// the seed). `shakePeriod` is how many frames one beat lasts (ruling 10).
+    case shake
+
     var id: String { rawValue }
 
     /// The artist-facing label — the picker's caption and the row's title.
@@ -41,6 +49,7 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
         case .move: return "Move"
         case .parallax: return "Parallax"
         case .rotate: return "Rotate"
+        case .shake: return "Shake"
         }
     }
 
@@ -51,6 +60,7 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
         case .move: return "Pose everything beneath by the box"
         case .parallax: return "Each item beneath takes a share of the box's move"
         case .rotate: return "Spin everything beneath about the box's centre"
+        case .shake: return "Jolt everything beneath about the box's centre"
         }
     }
 }
@@ -142,4 +152,71 @@ extension TransformLayerMode {
         guard degreesPerFrame != 0 else { return nil }
         return 360 / abs(degreesPerFrame)
     }
+
+    // MARK: Shake (§5.4)
+
+    /// **Value noise at one integer beat, −1…1** — a hash of `(seed, channel, beat)` through
+    /// `DabRandom.avalanche`, splitmix64's finalizer addressed rather than stepped (that type's own
+    /// argument). Channel 0 is the slide's x, 1 its y, 2 the turn, each an independently seeded
+    /// stream so that x and y do not jolt in lockstep. The top 53 bits become a `Double` in 0…1
+    /// exactly, then span −1…1.
+    ///
+    /// **A pure function of its three arguments and nothing else** — RENDER §2.16, *"the same frame
+    /// renders the same bytes"*, and §2 ruling 9's *"the same every time you play"*. Changing this
+    /// hash changes every saved shake on open, so `TransformLayerModesLogicTests` pins one raw value.
+    static func shakeNoise(seed: UInt64, channel: UInt64, beat: Int) -> Double {
+        let golden: UInt64 = 0x9E37_79B9_7F4A_7C15
+        let base = DabRandom.avalanche(seed &+ (channel &+ 1) &* golden)
+        let raw = DabRandom.avalanche(base &+ UInt64(bitPattern: Int64(beat)) &* golden)
+        return Double(raw >> 11) * (2.0 / 9_007_199_254_740_992.0) - 1
+    }
+
+    /// **The noise at a frame of the block, smoothstepped between beats** — `localFrame` is frames
+    /// since the block's first frame (§4: the block is the function's origin, so a bar slid along the
+    /// timeline shakes the same way), `period` is frames per beat: 1 is a new position every frame
+    /// and the sample is the beat's own value; larger is a wobble that eases from one beat's value
+    /// to the next's over `period` frames.
+    static func shakeSample(seed: UInt64, channel: UInt64, localFrame: Int, period: Int) -> Double {
+        let p = max(period, 1)
+        // Floor division, so a frame before the block's start (a folder's, which has none and
+        // integrates from 0) still lands on a beat rather than on Swift's truncation toward zero.
+        let beat = localFrame >= 0 ? localFrame / p : -((-localFrame + p - 1) / p)
+        let phase = localFrame - beat * p
+        let a = shakeNoise(seed: seed, channel: channel, beat: beat)
+        guard phase != 0 else { return a }
+        let b = shakeNoise(seed: seed, channel: channel, beat: beat + 1)
+        let t = Double(phase) / Double(p)
+        return a + (b - a) * (t * t * (3 - 2 * t))
+    }
+
+    /// **The shake mode's map at one frame**: a jolt of `(x·n₁, y·n₂)` points and `rotation·n₃`
+    /// degrees about the centre of the authored pose's own box, *then* the authored map — §5.4, one
+    /// rule with `rotationMap`, and with the same consequence (§2 ruling 9): the jolt is in box
+    /// space, so a box scaled 2× by Move shakes twice the pixels for the same amplitude. With the
+    /// default canvas-sized box the whole picture shakes about its centre, which is a screen shake.
+    ///
+    /// Nil where nothing jolts and nothing is posed, for `parallaxMap`'s reason; an amplitude of
+    /// zero contributes exactly nothing rather than `0 × noise`, so a layer with all three at zero is
+    /// the authored pose bit for bit.
+    static func shakeMap(authored: PoseQuad, localFrame: Int, period: Int, seed: UInt64,
+                         x: Double, y: Double, rotation: Double) -> PoseMap? {
+        let dx = x == 0 ? 0 : x * shakeSample(seed: seed, channel: 0, localFrame: localFrame, period: period)
+        let dy = y == 0 ? 0 : y * shakeSample(seed: seed, channel: 1, localFrame: localFrame, period: period)
+        let dr = rotation == 0 ? 0 : rotation * shakeSample(seed: seed, channel: 2, localFrame: localFrame, period: period)
+        let authoredMap: PoseMap? = authored.isIdentity ? nil : authored.map
+        guard dx != 0 || dy != 0 || dr != 0 else {
+            guard let authoredMap, !authoredMap.isIdentity else { return nil }
+            return authoredMap
+        }
+        let centre = CGPoint(x: authored.box.midX, y: authored.box.midY)
+        let jolt = CGAffineTransform(translationX: centre.x + CGFloat(dx), y: centre.y + CGFloat(dy))
+            .rotated(by: CGFloat(dr * .pi / 180))
+            .translatedBy(x: -centre.x, y: -centre.y)
+        let shaken = PoseMap.affine(jolt)
+        guard let authoredMap else { return shaken }
+        return shaken.concatenating(authoredMap)
+    }
+
+    /// The range the panel's period control offers — one beat a frame up to one every twelve.
+    static let shakePeriodRange = 1...12
 }

@@ -233,6 +233,16 @@ struct Layer: Identifiable {
     /// means "do not move me". `parallaxShareValue` is the non-optional view `TargetChannel`'s key
     /// path needs, and `parallaxShare(atFrame:positionalDefault:)` is what the render reads.
     var parallaxShare: Double? = nil
+    /// **How far a Shake transform layer jolts what is beneath it** — TRANSFORM_LAYER.md §5.4, the
+    /// owner's *"Shake x, shake y, rotate shake sliders … so that they can be keyframed"*, so all
+    /// three are `TargetChannel` rows and these are their stored bases. `shakeX`/`shakeY` are
+    /// amplitudes in the box's own points (§2 ruling 9: a box scaled 2× shakes 20 px for 10),
+    /// `shakeRotation` in degrees. Read by `RenderTree.renderNodes` only on a pose in `.shake`;
+    /// inert storage everywhere else, exactly as `rotateSpeed` is. The seed and period they are
+    /// scaled by are on `LayerPose`, which is not keyable and so needs no row.
+    var shakeX: Double = 0
+    var shakeY: Double = 0
+    var shakeRotation: Double = 0
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
     ///

@@ -716,6 +716,43 @@ final class FrameBakerLogicTests: XCTestCase {
         }
     }
 
+    /// **Stage 4's three: a re-rolled seed, a changed period and a typed amplitude each re-pose
+    /// every frame with nothing in the tree to say so** — TRANSFORM_LAYER.md §5.4, the noise being
+    /// a pure function of `(seed, period, amplitude, frame)`. Drop `shakeSeed` or `shakePeriod`
+    /// from `ContainerPoseStamp`, or the amplitudes from the stamp, and the matching test goes red:
+    /// the display path would serve the old shake off the store forever.
+    func testReRollingAShakeLayersSeedIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("a new seed is a new jolt on every frame",
+                                                 setup: { manager, mover in
+                                                     manager.layers[mover].transform?.mode = .shake
+                                                     manager.layers[mover].transform?.shakeSeed = 1
+                                                     manager.layers[mover].shakeX = 10
+                                                 }) { manager, mover in
+            manager.layers[mover].transform?.shakeSeed = 2
+        }
+    }
+
+    func testAShakeLayersPeriodIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("the period decides which beat each frame reads",
+                                                 setup: { manager, mover in
+                                                     manager.layers[mover].transform?.mode = .shake
+                                                     manager.layers[mover].transform?.shakeSeed = 1
+                                                     manager.layers[mover].shakeX = 10
+                                                 }) { manager, mover in
+            manager.layers[mover].transform?.shakePeriod = 4
+        }
+    }
+
+    func testAShakeLayersAmplitudeIsAStructuralEdit() {
+        assertIsAStructuralEditOfATransformLayer("a typed amplitude scales every frame's jolt with no track to be seen",
+                                                 setup: { manager, mover in
+                                                     manager.layers[mover].transform?.mode = .shake
+                                                     manager.layers[mover].transform?.shakeSeed = 1
+                                                 }) { manager, mover in
+            manager.layers[mover].shakeRotation = 6
+        }
+    }
+
     /// A cel that **slid** dirties where it was as well as where it is. Both halves, because the
     /// frames it left show something else now.
     func testACelThatMovedDirtiesBothItsOldSpanAndItsNew() {

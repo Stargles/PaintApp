@@ -372,6 +372,10 @@ enum ProjectStore {
             /// `writePackage`'s line, and the share is optional on both sides.
             let rotateSpeed: Double
             let parallaxShare: Double?
+            /// §5.4's three shake amplitudes, the speed's twins: plain values, zero-to-absent on write.
+            let shakeX: Double
+            let shakeY: Double
+            let shakeRotation: Double
             let cels: [CelContent]
         }
 
@@ -448,7 +452,10 @@ enum ProjectStore {
                                // TRANSFORM_LAYER.md §5's scalar rows: zero-to-absent for the speed,
                                // and the share is optional on both sides.
                                rotateSpeed: folder.rotateSpeed == 0 ? nil : folder.rotateSpeed,
-                               parallaxShare: folder.parallaxShare)
+                               parallaxShare: folder.parallaxShare,
+                               shakeX: folder.shakeX == 0 ? nil : folder.shakeX,
+                               shakeY: folder.shakeY == 0 ? nil : folder.shakeY,
+                               shakeRotation: folder.shakeRotation == 0 ? nil : folder.shakeRotation)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -476,6 +483,7 @@ enum ProjectStore {
                              transform: layer.transform,
                              rotateSpeed: layer.rotateSpeed,
                              parallaxShare: layer.parallaxShare,
+                             shakeX: layer.shakeX, shakeY: layer.shakeY, shakeRotation: layer.shakeRotation,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
@@ -1065,6 +1073,9 @@ enum ProjectStore {
                 // field-presence rule above; the share is optional on both sides.
                 rotateSpeed: layer.rotateSpeed == 0 ? nil : layer.rotateSpeed,
                 parallaxShare: layer.parallaxShare,
+                shakeX: layer.shakeX == 0 ? nil : layer.shakeX,
+                shakeY: layer.shakeY == 0 ? nil : layer.shakeY,
+                shakeRotation: layer.shakeRotation == 0 ? nil : layer.shakeRotation,
                 cels: celManifests
             ))
         }
@@ -1916,7 +1927,8 @@ enum ProjectStore {
                         // meaning `alphaMask` and `effect` above carry.
                         transform: f.transform,
                         rotateSpeed: f.rotateSpeed ?? 0,
-                        parallaxShare: f.parallaxShare)
+                        parallaxShare: f.parallaxShare,
+                        shakeX: f.shakeX ?? 0, shakeY: f.shakeY ?? 0, shakeRotation: f.shakeRotation ?? 0)
         }
 
         // Restore view presets.
@@ -1954,6 +1966,9 @@ enum ProjectStore {
                 transform: layerManifest.transform,
                 rotateSpeed: layerManifest.rotateSpeed ?? 0,
                 parallaxShare: layerManifest.parallaxShare,
+                shakeX: layerManifest.shakeX ?? 0,
+                shakeY: layerManifest.shakeY ?? 0,
+                shakeRotation: layerManifest.shakeRotation ?? 0,
                 fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,

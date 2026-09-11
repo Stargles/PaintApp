@@ -856,8 +856,10 @@ extension CanvasManager {
     /// - Parameters:
     ///   - pose: the authored pose, `Layer.layerTransform` or `LayerFolder.transform`.
     ///   - blockStart: the first frame of the block in force — a rotate layer's origin (§5.3, *"a
-    ///     block restarts the sum"*), and 0 for a folder, which has no block.
-    ///   - hasSpeedCurve / speedAt: the rotate speed's track, read per frame for the integral.
+    ///     block restarts the sum"*), the shake's beat origin (§5.4), and 0 for a folder, which has
+    ///     no block.
+    ///   - channels: the poser's own `TargetChannel` rows — whether each has a curve, and its value
+    ///     at a frame — read per frame for rotate's integral and at `frame` for shake's amplitudes.
     ///   - shareOf: an item's share at this frame given its positional default — the parallax
     ///     layer's one read of `parallaxShare` on either home.
     ///   - stack: this container's entries, bottom to top, and `position` the poser's own place in
@@ -865,7 +867,7 @@ extension CanvasManager {
     /// - Returns: nil when the pose contributes nothing at this frame, which is what keeps a
     ///   document with an untouched transform layer identical to one with none (§4.5's trap).
     private func containerPoser(pose: LayerPose, atFrame frame: Int, blockStart: Int,
-                                hasSpeedCurve: Bool, speedAt: (Int) -> Double,
+                                channels: PoserChannels,
                                 shareOf: (ContainerEntry, Int, Double) -> Double,
                                 stack: [ContainerEntry], position: Int) -> ContainerPoser? {
         let authored = pose.resolvedPose(atFrame: frame)
@@ -875,8 +877,20 @@ extension CanvasManager {
 
         case .rotate:
             let degrees = TransformLayerMode.integratedRotationDegrees(
-                from: blockStart, to: frame, hasCurve: hasSpeedCurve, speedAt: speedAt)
+                from: blockStart, to: frame, hasCurve: channels.hasCurve(.rotateSpeed),
+                speedAt: { channels.value(.rotateSpeed, $0) })
             return TransformLayerMode.rotationMap(authored: authored, degrees: degrees)
+                .map(ContainerPoser.uniform)
+
+        case .shake:
+            // The amplitudes are channels in absolute document frames and are read at *this* frame;
+            // the noise is read at the frame *of the block*, so a bar slid along the timeline shakes
+            // the same way (§4: the block is the function's origin).
+            return TransformLayerMode.shakeMap(
+                authored: authored, localFrame: frame - blockStart,
+                period: pose.shakePeriod, seed: pose.shakeSeed,
+                x: channels.value(.shakeX, frame), y: channels.value(.shakeY, frame),
+                rotation: channels.value(.shakeRotation, frame))
                 .map(ContainerPoser.uniform)
 
         case .parallax:
@@ -894,6 +908,24 @@ extension CanvasManager {
                 }
             }
             return maps.isEmpty ? nil : .perEntry(maps)
+        }
+    }
+
+    /// **A poser's own scalar rows, read through whichever home it is** — the two closures every
+    /// mode arm needs of a `TargetChannel`: whether it carries a curve (rotate's closed form against
+    /// its sum) and its resolved value at a frame.
+    fileprivate struct PoserChannels {
+        let hasCurve: (TargetChannel) -> Bool
+        let value: (TargetChannel, Int) -> Double
+
+        init(layer: Layer) {
+            hasCurve = { layer.channelTracks[$0.id]?.isEmpty == false }
+            value = { layer.resolvedValue($0, atFrame: $1) }
+        }
+
+        init(folder: LayerFolder) {
+            hasCurve = { folder.channelTracks[$0.id]?.isEmpty == false }
+            value = { folder.resolvedValue($0, atFrame: $1) }
         }
     }
 
@@ -1036,8 +1068,7 @@ extension CanvasManager {
             // every block, so a layer with several blocks is several starts.
             guard let poser = containerPoser(
                 pose: pose, atFrame: frame, blockStart: layer.cels[celIndex].startFrame,
-                hasSpeedCurve: layer.channelTracks[TargetChannel.rotateSpeed.id]?.isEmpty == false,
-                speedAt: { layer.rotateSpeed(atFrame: $0) },
+                channels: PoserChannels(layer: layer),
                 shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
                 stack: stack, position: position) else { continue }
             posers.append(poser)
@@ -1160,8 +1191,7 @@ extension CanvasManager {
                         { stack in
                             self.containerPoser(
                                 pose: pose, atFrame: frame, blockStart: 0,
-                                hasSpeedCurve: folder.channelTracks[TargetChannel.rotateSpeed.id]?.isEmpty == false,
-                                speedAt: { folder.rotateSpeed(atFrame: $0) },
+                                channels: PoserChannels(folder: folder),
                                 shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
                                 stack: stack, position: stack.count)
                         }
