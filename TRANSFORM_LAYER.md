@@ -1,17 +1,19 @@
 # The transform layer and its five modes — TODO (61)
 
-Design document, 2026-09-11, written at `73149b6`. **No code exists for any of it yet.** §2 is empty
-until the owner rules on §9; §3–§8 say what the code does today and what each mode wants, with the
-cost of each alternative. Read KEYFRAMES.md §2, §3.1, §3.6 and §4.4 first — the transform layer that
-ships is specified there and this document does not restate it.
+Design document, 2026-09-11, written at `73149b6` and ruled the same day. **§2 is the seventeen
+rulings; §8 is the build order and says what has shipped.** §3–§7 say what each mode wants and the
+cost of each alternative. Read KEYFRAMES.md §2, §3.1, §3.6 and §4.4 first — the transform layer's
+model and render path are specified there and this document does not restate them.
 
-## 0. What is already true — verified at `73149b6`, and stale from the first commit after it
+## 0. What is already true — verified at `73149b6`, amended for stages 0 and 1
 
-- **A transformation layer is a `.value` layer carrying `Layer.transform: LayerPose`** — a stored
+- **A transformation layer is a `.transform` layer carrying `Layer.transform: LayerPose`** — a stored
   `PoseQuad` (box + four corners), a `TransformTrack` in **absolute document frames** (§3.1), and a
-  held `baseline` for §2.27's gap. `Layer.layerTransform` is `kind == .value && effect == nil ?
-  transform : nil`; presence is the discriminant and the precedence is effect, then transform, then
-  flat colour. `LayerFolder.transform` is the same `LayerPose` on the folder (§2.21's twin).
+  held `baseline` for §2.27's gap. `Layer.layerTransform` is `kind == .transform ? transform : nil`;
+  **the kind is the discriminant** (ruling 2, stage 0). It was the third mode of `.value` until
+  2026-09-11, chosen by presence with the precedence effect, then transform, then flat colour; a
+  document saved that way decodes as the new kind (`LayerKind.migratingTransformModeValueLayers`).
+  `LayerFolder.transform` is the same `LayerPose` on the folder (§2.21's twin).
 - **It is applied in one place and never reaches the compositor.** `RenderTree.renderNodes(inContainer:
   atFrame:inheriting:poses:)` walks each container bottom-to-top, composes every transform layer's
   `mapping(atFrame:)` into `accumulated`, and records a per-entry `carried[position]` — an array,
@@ -20,23 +22,30 @@ ships is specified there and this document does not restate it.
   raster tiers' CTM (`PixelOps.FrozenCel.pose`, §2.12), and `LayerContentVersion.pose` (§4.5). A
   folder's own pose is composed on the way into its recursion ("inner first").
 - **Scope is structural**: `carried` is a local, so a pose cannot leave its container; inside a
-  compositor node the sibling carry is suppressed. **The accumulator does not read `isVisible`** —
-  a hidden transformation layer poses exactly as a shown one, where a hidden grade grades nothing.
-  Filed in BUGS.md; every mode below inherits the fix.
+  compositor node the sibling carry is suppressed. **The accumulator reads the block** (ruling 1,
+  stage 1): it composes a layer's pose only where `activeCelIndex` finds a cel, and the leaf
+  derivation resolves a value layer's grade under the same test. **Whether it reads `isVisible`** —
+  a hidden transformation layer posing exactly as a shown one, where a hidden grade grades nothing —
+  is BUGS.md's 2026-09-11 filing, shipped separately; every mode below inherits that fix.
 - **The Move box is `FloatingPieceKind.containerPose`**, a box the size of the canvas with no pixels;
   `showContainerPoseLive` writes the pose on every tick so the preview *is* the render path;
   `commitContainerPose` routes through `KeyframeControl.write`'s five-arm rule and **every arm writes
   the stored base** (`LayerPose.resolvedPose` is a precedence, not a composition). `seedingContainer`
   seeds the *old* pose onto the immediate neighbouring keyframes. The graph band draws the pose as six
   decomposed rows (§11.7), per component.
-- **No block gates it.** `beginContainerPoseMove`'s cel gate was deleted in §4.4 because
-  `renderNodes` composes the pose *"with no cel test at all"*, so a transform layer poses at every
-  frame of the document. A grade or flat-colour value layer, by contrast, contributes nothing past
-  its block (`leafSnapshots` gates every leaf on `activeCelIndex`), which BUGS.md files as a defect
-  because `addValueLayer` stamps one block of `newLayerBlockLength` at creation and nothing grows it.
-  **TODO (62) sharpened the split**: a cel's pose keys are cropped to its span; a layer's tracks —
-  `effectTracks`, `channelTracks`, `keyframeMarks`, `transform.track` — are untouched *by
-  construction*, and shortening a transform layer's block crops none of its keys.
+- **The block gates it** (ruling 1, stage 1). `beginContainerPoseMove` refuses a transform layer's
+  box at a frame its bar does not cover, with `CanvasNotice.moveOutsideTransformBlock`; before the
+  ruling its cel gate had been deleted because `renderNodes` composed the pose *"with no cel test at
+  all"*. The flat colour was always gated (`leafSnapshots` resolves it only where `activeCelIndex`
+  finds a block); **the grade was not** — the compositor reaches a grading leaf by `node.effect`
+  before it looks for a source — which is what BUGS.md's 2026-09-03 filing half-missed, and stage 1
+  gates it in the leaf derivation so one rule covers every pixel-less leaf. `newLayerBlockLength` is
+  `contentEndFrame`, so a new pixel-less layer's block already reached the scene's end at creation;
+  the layer *"made early and used late"* is the one the scene grew past, and lengthening its bar is
+  the timeline's own Extend to End. **TODO (62) sharpened the split**: a cel's pose keys are cropped
+  to its span; a layer's tracks — `effectTracks`, `channelTracks`, `keyframeMarks`,
+  `transform.track` — are untouched *by construction*, and shortening a transform layer's block
+  crops none of its keys (ruling 17).
 - **`TargetChannel` is the descriptor for "one `Double` a layer or folder owns"**: an undotted id,
   ui range, model domain, two labels and **a `WritableKeyPath` into each of the two homes**. One
   row in `TargetChannel.all` buys storage in `channelTracks`, a place in `KeyframeState` and §2.28's
@@ -50,7 +59,7 @@ ships is specified there and this document does not restate it.
   original input as a constant binding (bloom). **No effect has a Move box, and no effect has a blend
   mode of its own** — the layer's stored mode is pinned to `.normal` while it grades.
 - **`PoseInterpolation.blend(a, b, t:)` extrapolates** outside 0…1 and takes the nearer key when
-  the result goes singular (§9.1). `FrameBakeKey` carries **no frame**: two frames whose resolved
+  the result goes singular (KEYFRAMES §9.1). `FrameBakeKey` carries **no frame**: two frames whose resolved
   tree and leaf versions are equal are one file.
 
 ## 1. The ask
@@ -70,9 +79,69 @@ resized by a Move box, and is blended back where the original is present and the
 the default) or where both are (intersection) — *"this may not belong in the transform layers… I
 prefer value layer effect but do whatever is cleanest."*
 
-## 2. Rulings
+## 2. Rulings — settled 2026-09-11, do not re-litigate
 
-None yet. §9 is what the owner is asked; each answer lands here, numbered, with the date.
+Seventeen questions were put to the owner in the wording quoted below (each was answerable without
+reading anything in this repo, and carried a recommended answer); every one is now ruled. Questions
+1, 2, 7 and 13 were answered in the owner's own words; the rest took the recommendation as written.
+
+1. **The bar means "only here", for every mode.** *"Does a transform layer's bar in the timeline mean
+   'only here'? … Should the end of the bar mean* stop here *— the drawing goes back to normal from
+   25 on? The same would then hold for Rotate (spin from where the bar starts, stop where it ends) and
+   Shake."* Yes. Outside its block a transform layer does nothing; §4's gate is the rule and stage 1
+   built it — the accumulator composes a pose only where the layer has a cel, a Move raised outside
+   the bar is refused with a notice, and a new layer's bar reaches the scene's end.
+2. **"Transform Layer" is its own layer type** — a fourth `LayerKind`, its own `+` entry, no longer a
+   mode a value layer is switched into. *"Should 'Transform Layer' be its own entry in the + menu,
+   with its own panel for the five modes — and you can then no longer turn a value layer into a
+   transform layer or back?"* Yes. Existing documents' transform-mode value layers migrate on open;
+   an older build cannot open the new document. Stage 0.
+3. **Parallax: only things that draw pixels count as items.** *"If there is also a colour tint (a
+   value layer) sitting between them, should the tint count as one of the items … or be skipped? A
+   folder counts as one item and nothing inside it is split up."* Skipped.
+4. **Parallax: a number you typed stays.** *"Should the other four keep their numbers (only the new
+   one gets a default), or does everything re-default? And if you drag that back layer out from under
+   the Parallax layer and later back in, should it still say 10%?"* Typed numbers stay; new layers
+   get the default for their position; a layer remembers its number when it leaves and comes back.
+5. **Parallax: the percentage is keyframable.** *"Should a layer's percentage be something you can
+   keyframe?"* Yes; it costs nothing.
+6. **Rotate: speed is degrees per frame.** *"At 24 fps, a wheel set to 15° per frame turns once a
+   second. If you then set the document to 12 fps, should the wheel still turn once a second on
+   screen … or once every 24 frames?"* Per frame — what every other animation in the document does
+   when the fps changes; the panel can also show "frames per turn".
+7. **Rotate: a keyframe does not pause a spinning wheel.** *"If you place a keyframe on a Rotate
+   layer, should the spin pause there (like a hold), or keep going while only the box's position
+   holds?"* Keep going; key the speed to 0 to stop it.
+8. **Rotate in perspective is Distort on the box.** *"You use Distort on the Rotate layer's box to lean
+   it into a keystone; the wheel then travels in an ellipse on screen. Is that the 'rotating in
+   ellipses' you meant?"* Yes, and nothing else is built for it.
+9. **Shake: the box is the thing that shakes, and a shake is the same every time.** *"If you had first
+   scaled the shake layer's box up 2× with Move, should a 10 px shake move things 10 px on screen or
+   20? And should the shake be the same every time you play … with a 'new shake' button?"* 20; yes,
+   with the button.
+10. **Shake: one slider for how fast, not keyframable to start with.** *"Besides how far it shakes, do
+    you want a slider for how* fast *— a new position every frame, or a smoother wobble?"* Yes, one.
+11. **Repeat: you type the loop's length, pre-filled from where the drawings beneath end.** *"(a) You
+    type 8. (b) It looks at where the drawings beneath it end — but then a background under it that
+    runs to 48 would stop the walk looping."* (a), with the number filled in from (b) at creation.
+12. **Repeat: everything beneath repeats.** *"If a layer beneath the Repeat also fades in over frames
+    1–8 (opacity keyframes), does the fade repeat every cycle too, or only the drawings?"* Everything —
+    what the first cycle looks like is what repeats.
+13. **Repeat: drawing on a repeated frame lands on the original drawing it repeats.** *"At frame 13,
+    which is showing drawing 5 again, you draw a line. Should it go onto drawing 5 (and so appear in
+    every cycle), or should drawing be refused?"* Onto drawing 5.
+14. **Duplicate offset paints only inside the drawing: rim and intersection.** *"Both are inside the
+    original drawing's own outline, so this can never paint* outside *it … Is that right, or do you
+    also want a third choice, 'where the copy is and the original is not'?"* Rim and intersection
+    only, as asked.
+15. **Duplicate offset's box slides, resizes and rotates — not Distort.** *"Enough?"* Yes.
+16. **Duplicate offset blends with a layer blend mode at an opacity.** *"Is that the whole of 'blend it
+    with whatever is underneath'?"* Yes.
+17. **Keyframes past the bar are kept and inert, never deleted.** *"If you shorten a transform layer's
+    bar past one of its keyframes, should that keyframe be deleted (as a drawing's keyframes now are
+    when you shorten its block), or kept and simply do nothing until you lengthen the bar again?"*
+    Kept — a layer's keyframes are drawn on its row whatever its bars do, so nothing is hidden; a
+    layer may have several blocks, and they come back into force when the bar is lengthened. Stage 1.
 
 ## 3. Homes — how many, and why
 
@@ -120,9 +189,16 @@ panel.** Cheapest by a day; but the ask was a type, not an entry, and the three-
 stated precedence is at its limit — a fourth payload (repeat's period) with a fifth clause in
 `valueFill` is the shape `Layer.effect`'s own doc argues against.
 
-**Recommend A.** The count above is the whole cost, and it removes the "you had to use the feature to
-be told how to use it" entry §4.4 paid for: an artist adds a *Transform Layer* and its panel is about
-transforming.
+**A was ruled (ruling 2) and is stage 0, shipped.** The count above was the whole cost — the twelve
+sites became `LayerKind.holdsPixels` where they were spelling that property and a kind test where they
+were not; three exhaustive switches did exist after all (`Tool.textUnavailableReason`,
+`CanvasManager.selectionMembershipUnavailableReason`, `CanvasActiveLayer.init(kind:)`) and answered the
+new case at compile time, and `LayerKindLogicTests` walks `allCases` through all of them. It removed
+the "you had to use the feature to be told how to use it" entry §4.4 paid for: an artist adds a
+*Transform Layer* and its panel is a mode picker (Move alone until §8's later stages) and the Move row.
+`setLayerTransform` and `HistoryActionLabel.valueLayerTransform` are gone; `addTransformLayer` and
+`.addTransformLayer` replace them; the migrated layer's inert `fill` is dropped on decode, as is a
+`.value` layer's pose left under a grade.
 
 ### 3.3 The modes' parameters are `TargetChannel` rows, not a third channel kind
 
@@ -149,7 +225,7 @@ take), flattens the copy to a colour with the coverage kept, resamples that copy
 **rim** = `orig.a · (1 − dup.a)` or **intersection** = `orig.a · dup.a`, and paints the colour there
 through a blend mode over the accumulator. Both regions are subsets of the original's coverage, so it
 **never reshapes coverage** — it is an adjustment in the strict sense, and it cannot draw a shadow
-*outside* the drawing (§9, Q14). Two passes: a resample (the copy, gathered through the box's inverse
+*outside* the drawing (§2 ruling 14). Two passes: a resample (the copy, gathered through the box's inverse
 map, bilinear — chromatic aberration's tap generalised from a translation to an affine) and a combine
 that reads the original as bloom's combine does. What it needs that no effect has:
 
@@ -200,10 +276,20 @@ expressed with keys (speed to 0, amplitude to 0), rotate needs a start-frame num
 repeat is the exception that takes its extent from a block anyway — or from a start, a period and a
 count. Two rules for one layer type.
 
-**Recommend gating.** It is the owner's own vocabulary in (62) and in *"until the repeat cel ends"*,
-it is what every timeline the owner has used does with an adjustment layer's bar, and it makes the
-three time-function modes need no control they do not already have. §9 Q1 asks it in the owner's
-terms.
+**Gating was ruled (rulings 1 and 17) and is stage 1, shipped.** It is the owner's own vocabulary in
+(62) and in *"until the repeat cel ends"*, it is what every timeline the owner has used does with an
+adjustment layer's bar, and it makes the three time-function modes need no control they do not
+already have. What stage 1 found while building it: the flat colour was already gated and **the grade
+was not** — `Compositor.draw` reaches a grading leaf by `node.effect` before it looks for a source, so
+`leafSnapshots`' cel test never reached it, and a 12-frame adjustment layer went on grading a 48-frame
+scene while its bar visibly ended at 12. The value layer's two modes disagreed about what its own bar
+meant. Stage 1 gates the grade in `RenderTree.renderNodes`' leaf derivation beside the pose gate, so
+one rule covers every pixel-less leaf and both backends agree by construction (the tree is the same
+tree). **That changes what an existing document with a short adjustment-layer bar looks like past
+the bar**, which the standing no-migration permission covers and the fix for is Extend to End on the
+bar. And the default was already right: `newLayerBlockLength` is `contentEndFrame`, so BUGS.md's
+value-layer filing closed as *the bar is right, and the layer the scene grew past is lengthened from
+the timeline*.
 
 | mode | keys stored | time base | block |
 |---|---|---|---|
@@ -223,14 +309,14 @@ Everything in §0 stands. Under a new kind it is `TransformMode.move` and the de
 **Who is an item.** The entries beneath the parallax layer *in its own container* — `renderNodes`'
 `stack` — top to bottom: a layer with a drawing surface is one item, a folder is one item and its
 contents are not, and **a pixel-less layer (any transform layer, any value layer) is not an item and
-takes no share**, so a tint dropped between two drawings does not shift the defaults (§9 Q3). Item
+takes no share**, so a tint dropped between two drawings does not shift the defaults (§2 ruling 3). Item
 *k* of *n* defaults to a share of `(n − k + 1) / n` — 100/75/50/25 for four, the top item nearest the
 parallax layer moving most.
 
 **What a share of a pose is.** `PoseInterpolation.blend(rest, P, t: share)` — for a translation
 exactly `share × P`; for a scale or a turn the factored blend, which is the one interpolation §2.15
 allows; and beyond 0…1 the extrapolation the owner asked for (*"negative values or higher"*), clamped
-to the nearer end only where it goes singular (§9.1). No new arithmetic.
+to the nearer end only where it goes singular (KEYFRAMES §9.1). No new arithmetic.
 
 **Where the share lives: on the child, nil meaning "positional default".** `Layer.parallaxShare` and
 `LayerFolder.parallaxShare` as a `TargetChannel` row (§3.3), so it is keyable for free and the share
@@ -259,7 +345,7 @@ circle in box space through a keystoned quad is an ellipse on screen, so Distort
 rotation (a Move) is the start angle for free.
 
 **θ(f) = Σ speed(k) for k from the block's first frame to f − 1**, speed in **degrees per frame**
-(§9 Q6), a `TargetChannel` row so it is keyable — and *integrated*, so a speed keyed 0 → 15 is a
+(§2 ruling 6), a `TargetChannel` row so it is keyable — and *integrated*, so a speed keyed 0 → 15 is a
 wheel spinning up and a speed keyed to 0 is a wheel that stops where it is, rather than
 `speed(f) × (f − f0)`, under which a keyed speed snaps the wheel backwards. A block restarts the sum;
 several blocks are several starts.
@@ -275,7 +361,7 @@ non-zero speed moves everything beneath it, and that predicate is frame-invarian
 
 **Pose at frame *f*** = `authored(f) ∘ T(ax·n₁(f), ay·n₂(f)) ∘ R(ar·n₃(f))`, in box space about the
 box centre — one rule with rotate, and the same consequence: a box scaled 2× by Move shakes twice the
-pixels (§9 Q9). With the default box, the whole canvas shakes about its centre, which is a screen
+pixels (§2 ruling 9). With the default box, the whole canvas shakes about its centre, which is a screen
 shake.
 
 **`ax`, `ay`, `ar` are three `TargetChannel` rows** (the owner's *"so that they can be keyframed"*),
@@ -299,14 +385,14 @@ frame — the "six-layer container, ~22 ms" row — which the bake absorbs and t
 period *p*, an entry beneath it asked at frame *f* in the block is shown at `s + ((f − s) mod p)`.
 The first cycle is the identity. Everything beneath repeats — the cels, their cel-local keys (which
 ride for free, §3.1), the entries' opacity and effect curves, and a transform layer beneath it — because
-*"what the first cycle looked like"* is the only picture the loop can honestly show (§9 Q12).
+*"what the first cycle looked like"* is the only picture the loop can honestly show (§2 ruling 12).
 
 **It hits the frame store with no new key field.** `FrameBakeKey` carries no frame; a repeated
 frame's tree and leaf versions are the source frame's, so it *is* the source frame's file. A repeat
 costs the bake nothing and needs no test of its own beyond pinning that equality.
 
 **The period is a number on the layer**, pre-filled at creation from where the cels beneath end
-(§9 Q11), never inferred at render time — a background running the whole scene beneath the walk
+(§2 ruling 11), never inferred at render time — a background running the whole scene beneath the walk
 would otherwise silently stop the walk looping.
 
 **Editing on a repeated frame is the trap, and it has the shape of CLAUDE.md's case 3.** At frame 13
@@ -371,97 +457,14 @@ reachability XCUITest from a fresh document and an assertion on what is drawn, p
 
 | # | stage | tested by |
 |---|---|---|
-| 0 | **The kind** — `LayerKind.transform`, the decode migration, the `+` entry, the options panel with a mode picker showing only Move, the hidden-layer fix. Behaviour-neutral for every posed document. | existing `TransformLayerLogicTests` / `TransformLayerEntryLogicTests` unchanged; a migration round trip; `+` → panel → Move row raises the box; a hidden transform layer poses nothing (mutation: delete the `isVisible` clause) |
-| 1 | **The span** (§4, after Q1) — pixel-less leaves act inside their block; new blocks stamped to the scene's end; Move outside the block refused with a notice; BUGS.md's value-layer entry closes. | a pose at a frame past the block resolves to nil in `layerPoses`; a grade past its block is byte-identical to today; the notice appears; keys past the block stay and stay drawn |
+| 0 ✅ | **The kind** — `LayerKind.transform`, the decode migration, the `+` entry, the options panel with a mode picker showing only Move. Behaviour-neutral for every posed document. **Shipped 2026-09-11.** The hidden-layer fix (BUGS.md) is a separate change and is not part of this row. | `TransformLayerLogicTests` / `TransformLayerEntryLogicTests` with their fixtures creating the kind (three tests about the old mode picker became three about the kind); a migration round trip through a real package rewritten to the old spelling, drawn on both backends; `LayerPanelControlsUITests` drives `+` → panel → Move row → box; `LayerKindLogicTests` walks `allCases` through every switch |
+| 1 ✅ | **The span** (§4, rulings 1 and 17) — pixel-less leaves act inside their block, the grade included; Move outside the block refused with `CanvasNotice.moveOutsideTransformBlock`; BUGS.md's value-layer entry closed. **Shipped 2026-09-11.** | a pose at a frame past the block resolves to nil in `layerPoses`; a grade past its bar is the ungraded floor, byte for byte on both backends; shorten the bar → the composite past it equals the un-posed one and the keys beyond are still listed and still drawn; lengthen → byte-identical to before; the refusal and the notice, from the toolbar and the channel row; `TransformLayerSpanUITests` drives all of it from a fresh document |
 | 2 | **Parallax** — `parallaxShare` row, item counting, the per-entry blend, the panel's item list. | four drawings → leaf maps at 100/75/50/25 of the box's translation; a folder is one item; a tint between them is none; −50 moves opposite; a keyed share; reorder keeps an explicit share with its layer; the box drag moves each item live |
 | 3 | **Rotate** — `rotateSpeed` row, integration from the block start, box-centre pivot pre-composed, `movesItsContents`. | 15°/frame → 90° at `s + 6` about the box centre; keyed 0→15 integrates (no backward snap); a mark holds the box, not the angle; under a keystoned box the orbit of one point is the conic (pin four extremes); a raster fixture reddens when the function is dropped from the map |
 | 4 | **Shake** — three rows, `period`, `seed`, the noise, re-roll. | one frame pinned against a hand-computed value; same frame twice → same map; two seeds differ; composes over authored keys; re-roll is one undo step |
 | 5 | **Repeat** — the frame carry in `renderNodes` / `leafSnapshots`, the period, the edit redirect or refusal, the ghost blocks. | `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` (the cache, for free); cel-local keys ride; an opacity curve beneath repeats; an edit at a repeated frame lands on the source cel or is refused with the notice |
 | 6 | **Duplicate offset** — the case, two passes on both backends, the eleven CPU blend formulas, the box writer, strip reach. | parity byte-for-byte per mode; rim and intersection over a known shape; `testNoEffectChangesAlpha` holds; the box commit writes the five scalars; a strip seam test at a large offset |
 
-Stages 2–5 are independent of each other once 0 and 1 are in; 6 depends on nothing here.
-
-## 9. Questions for the owner
-
-Each is answerable without reading anything in this repo. The recommended answer follows each.
-
-**Q1 — Does a transform layer's bar in the timeline mean "only here"?** Say a transform layer's bar
-runs from frame 1 to 24 and the drawing under it runs to 48. Today it keeps moving the drawing on
-frames 25–48 even though its bar has ended. Should the end of the bar mean *stop here* — the drawing
-goes back to normal from 25 on? The same would then hold for Rotate (spin from where the bar starts,
-stop where it ends) and Shake. *Recommend: yes — the bar is when the layer acts, for every mode.*
-
-**Q2 — Its own entry in the + menu.** Today you add a Value Layer and change its row to Transform.
-Should "Transform Layer" be its own entry in the + menu, with its own panel for the five modes — and
-you can then no longer turn a value layer into a transform layer or back? *Recommend: yes.*
-
-**Q3 — Parallax: who counts.** Four drawing layers under a Parallax layer get 100 / 75 / 50 / 25. If
-there is also a colour tint (a value layer) sitting between them, should the tint count as one of the
-items (making five steps: 100 / 80 / 60 / 40 / 20), or be skipped? A folder counts as one item and
-nothing inside it is split up. *Recommend: skipped — only things that draw pixels count.*
-
-**Q4 — Parallax: remembering a number you typed.** You set the back layer to 10%. Then you add a fifth
-layer — should the other four keep their numbers (only the new one gets a default), or does everything
-re-default? And if you drag that back layer out from under the Parallax layer and later back in,
-should it still say 10%? *Recommend: numbers you typed stay; new layers get the default for their
-position; a layer remembers its number when it leaves and comes back.*
-
-**Q5 — Parallax: animating the percentage.** Should a layer's percentage be something you can keyframe
-— the background at 25% for the first half of the shot and 50% for the second? *Recommend: yes; it
-costs nothing.*
-
-**Q6 — Rotate: what "speed" is a number of.** At 24 fps, a wheel set to 15° per frame turns once a
-second. If you then set the document to 12 fps, should the wheel still turn once a second on screen
-(so it now covers 30° each frame), or once every 24 frames (now taking two seconds)? *Recommend: per
-frame — it is what every other animation in the document does when the fps changes, and the panel can
-also show "frames per turn".*
-
-**Q7 — Rotate: what a keyframe does to a spinning wheel.** If you place a keyframe on a Rotate layer,
-should the spin pause there (like a hold), or keep going while only the box's position holds? To stop
-the wheel you would animate its speed down to 0, which you can keyframe. *Recommend: keep going.*
-
-**Q8 — Rotate in perspective.** You use Distort on the Rotate layer's box to lean it into a keystone;
-the wheel then travels in an ellipse on screen. Is that the "rotating in ellipses" you meant?
-*Recommend: yes, and nothing else is built for it.*
-
-**Q9 — Shake: the numbers and the box.** Shake x and y are in pixels and rotate shake in degrees. If
-you had first scaled the shake layer's box up 2× with Move, should a 10 px shake move things 10 px on
-screen or 20? And should the shake be the same every time you play (so a frame always looks the same
-and a bake is stable), with a "new shake" button if you want a different one? *Recommend: 20 — the
-box is the thing that shakes; and yes, same every time, with the button.*
-
-**Q10 — Shake: how jittery.** Besides how far it shakes, do you want a slider for how *fast* — a new
-position every frame, or a smoother wobble that changes every few frames? *Recommend: yes, one
-slider, not keyframable to start with.*
-
-**Q11 — Repeat: how it knows the loop's length.** You draw an 8-drawing walk on frames 1–8 and want it
-to walk to frame 48. You add a Repeat layer above it and stretch its bar to 48. How should it know the
-loop is 8 long? (a) You type 8. (b) It looks at where the drawings beneath it end — but then a
-background under it that runs to 48 would stop the walk looping. *Recommend: (a), with the number
-filled in for you from (b) when you create the layer.*
-
-**Q12 — Repeat: what repeats.** If a layer beneath the Repeat also fades in over frames 1–8 (opacity
-keyframes), does the fade repeat every cycle too, or only the drawings? *Recommend: everything beneath
-repeats — what the first cycle looks like is what repeats.*
-
-**Q13 — Repeat: drawing on a repeated frame.** At frame 13, which is showing drawing 5 again, you draw
-a line. Should it go onto drawing 5 (and so appear in every cycle), or should drawing be refused with a
-message telling you to go to frame 5? *Recommend: it goes onto drawing 5.*
-
-**Q14 — Duplicate offset: only inside the drawing.** Rim is where the original is and the copy is not;
-intersection is where both are. Both are inside the original drawing's own outline, so this can
-never paint *outside* it — a cast shadow falling beside a character is not something it does. Is that
-right, or do you also want a third choice, "where the copy is and the original is not"? *Recommend:
-rim and intersection only, as asked.*
-
-**Q15 — Duplicate offset: what the box can do.** Slide, resize (separately in x and y) and rotate the
-copy — but not Distort. Enough? *Recommend: yes.*
-
-**Q16 — Duplicate offset: the blend.** The copy's colour is blended into the drawing with one of the
-same blend modes a layer has, at an opacity slider. Is that the whole of "blend it with whatever is
-underneath"? *Recommend: yes.*
-
-**Q17 — Keyframes past the bar (only if Q1 is yes).** If you shorten a transform layer's bar past one
-of its keyframes, should that keyframe be deleted (as a drawing's keyframes now are when you shorten
-its block), or kept and simply do nothing until you lengthen the bar again? *Recommend: kept — a
-layer's keyframes are drawn on its row whatever its bars do, so nothing is hidden.*
+Stages 2–5 are independent of each other and **all four are unblocked** now that 0 and 1 are in; 6
+depends on nothing here. The mode picker in `LayerPanel.transformModeRow` is where each of 2–5 adds
+its entry; there is no `TransformMode` enum yet — stage 2 introduces it with the second case.

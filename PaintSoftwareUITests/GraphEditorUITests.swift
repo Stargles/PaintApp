@@ -656,7 +656,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         mark(6)
 
         openLayerPanel(app)
-        app.staticTexts["layerPanel.row.1"].tap() // still selected: opens options, in Transform mode
+        app.staticTexts["layerPanel.row.1"].tap() // still selected: opens the transform layer's options
         let moveRow = app.buttons["layerOptions.transformMove"]
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
         moveRow.tap()

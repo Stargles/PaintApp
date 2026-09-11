@@ -22,6 +22,9 @@ toolset, and a frame-by-frame animation timeline.
   (Photoshop's Solid Colour layer); set an effect on it and it becomes an adjustment layer, grading
   everything below it inside its own container. Which mode it is in is decided by whether it carries
   an effect — there is no separate kind and no mode switch to keep in sync
+- **Transform layers**, a kind of their own: a layer with no pixels that moves everything beneath it in
+  its container through the Move box, keyframable; it acts only on the frames its timeline bar covers
+  (TRANSFORM_LAYER.md)
 - **Compositing**: 25 blend modes on layers and groups, following W3C Compositing Level 1 rather than
   `CGBlendMode` where the two disagree; render-time alpha masks (never baked, raster and vector
   alike, including "clip to below"); and compositor **nodes** — a node's direct children are its
@@ -182,8 +185,8 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 
 ### Layers
 1. Open the Layers panel from the top toolbar.
-2. **Tap** "+" for the menu: a raster, vector or value layer, a group, a compositor node, or a photo
-   as an object layer. The new item lands **directly above the active layer, inside that layer's own
+2. **Tap** "+" for the menu: a raster, vector, value or transform layer, a group, a compositor node,
+   or a photo as an object layer. The new item lands **directly above the active layer, inside that layer's own
    container** — not at the top of the document.
 3. Adjust opacity with the slider, toggle visibility with the eye icon, tap a row to make it active.
 4. Tap the active row again for its options menu (rename, blend mode, merge, delete). While one is

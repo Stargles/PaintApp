@@ -86,8 +86,10 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
    the box disappears, keyframe B receives the second position."* So the cel holds **one** drawing, in
    its rest position; keys hold poses; the render composes them. **A nudge writes no key** — §4.2.
 6. **The value layer's "Blend Mode" menu is relabelled to follow what is set** — Blend Mode / Effect /
-   Transform. The owner: *"that 'blend mode' is very vague since effects, blend modes, and now the
-   transform will be added to it."*
+   ~~Transform~~. The owner: *"that 'blend mode' is very vague since effects, blend modes, and now the
+   transform will be added to it."* **Transform left this menu on 2026-09-11** — TRANSFORM_LAYER.md §2
+   ruling 2 made the transformation layer a kind of its own (`LayerKind.transform`) with its own `+`
+   entry, so the row has two kinds of answer now, not three; the relabelling itself stands.
 7. **An editable fps control ships with this feature**, so the artist can take the document below 24.
 8. **The two meanings of "keyframe" are separated in the UI as "animation keyframes" (this feature) and
    "interpolation keyframes" (the existing reference cels).** The collision is real and is in the code:
@@ -885,16 +887,16 @@ in.** What that pass added is below; the model pass's own findings follow it.
 
 #### The artist's entry — the menu, the Move box and the writer
 
-**Creating one is §2.6's relabelled menu doing exactly what §2.6 says it does.** The value layer's row
-title now follows what is set — Blend Mode / Effect / Transform — and a Transform section of one entry
-makes the layer a transformation layer through `CanvasManager.setLayerTransform`. It is the third
-payload on the same recipe, and the accessors were already written for it: `Layer.layerTransform` is
-`kind == .value && effect == nil ? transform : nil` and `valueFill` was already gated on
-`transform == nil`, so nothing about the discriminant had to be invented. **The two ways out differ, and
-that asymmetry is load-bearing**: picking a grade leaves the pose stored and inert (that `effect == nil`
-clause takes it out of force, so flipping back restores the move *and its keyframes*), while picking a
-blend destroys it, because `valueFill` has no clause left and a layer that kept its pose would answer
-"transform" to the renderer with the artist's tick beside Multiply.
+**Creating one is the `+` menu's own "Transform Layer" entry — since 2026-09-11, TRANSFORM_LAYER.md
+§2 ruling 2.** It is `LayerKind.transform`, made by `CanvasManager.addTransformLayer`, and
+`Layer.layerTransform` is `kind == .transform ? transform : nil`. The paragraph this replaces described
+the mode it was before that ruling: §2.6's relabelled menu with a Transform section of one entry,
+`setLayerTransform` writing `Layer.transform` as the third payload of a `.value` layer with the
+precedence effect, then transform, then flat colour, and a grade-versus-blend asymmetry on the way out.
+None of that exists now — a value layer cannot become a transform layer or back, and a document saved
+that way migrates on decode. **And the bar means "only here"** (ruling 1): the pose is composed only
+where the layer has a cel, and a Move raised outside its bar is refused with
+`CanvasNotice.moveOutsideTransformBlock`, which reverses the deletion of that gate recorded below.
 
 **Moving one is the Move box, with three things that are new.** `FloatingPieceKind.containerPose` is a
 piece that carries no pixels: a container holds no geometry, so the box is *the canvas frame*, which is
@@ -983,6 +985,17 @@ for transform mode. `leafSnapshots` gates *every* leaf on `activeCelIndex`, so a
 two modes — flat colour, and §4.4's grade — genuinely stops contributing past the end of the block it was
 created with. That is filed in BUGS.md rather than fixed here: it is a rendering change touching every
 adjustment layer in every document, and it wants its own pass.
+
+**Both of the two paragraphs above are superseded by TRANSFORM_LAYER.md §2 ruling 1 (2026-09-11), and
+kept for the reasoning.** The owner ruled the bar means *"only here"* for every mode, so the gate is back
+— `beginContainerPoseMove` refuses outside the bar — and this time with something to refuse and a
+notice (`CanvasNotice.moveOutsideTransformBlock`), because `RenderTree.renderNodes` now composes the pose
+only where the layer has a cel. The "deeper version" was half wrong as stated: the flat colour was
+gated by `leafSnapshots`, but the grade never was, since the compositor reaches a grading leaf by
+`node.effect` before it looks for a source; stage 1 gates the grade in the leaf derivation too, and
+BUGS.md's entry closed as *the bar is right* rather than as a defect. The default was already the
+scene's end (`newLayerBlockLength`), so the layer made early and used late is lengthened from the
+timeline, which the notice says.
 
 **A third thing, found only by trying to drive it.** The Transform entry sat at the bottom of its menu,
 below the thirteen-item grade catalogue — which is **past the point where an accessibility client can see a

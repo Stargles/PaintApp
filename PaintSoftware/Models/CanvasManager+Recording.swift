@@ -155,7 +155,7 @@ extension CanvasManager {
             case .noTarget:
                 return "Nothing to record onto — add a layer first."
             case .moveBoxNotPosing:
-                return "This Move box can't be recorded — a recorded move needs a layer or folder in Transform mode. Still armed, so switch that on and press Move again."
+                return "This Move box can't be recorded — a recorded move needs a transform layer, or a folder with Transform on. Still armed, so add or switch to one and press Move again."
             case .noScene:
                 return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:

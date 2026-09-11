@@ -407,8 +407,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         XCTAssertFalse(manager.beginMoveBoxTake(), "No take starts…")
 
         XCTAssertEqual(manager.notice?.kind, .recordingRefused(.moveBoxNotPosing),
-                       "…and the artist is told, with the layer mode that would work named")
-        XCTAssertTrue(try XCTUnwrap(manager.notice?.message).contains("Transform mode"),
+                       "…and the artist is told, with the layer kind that would work named")
+        XCTAssertTrue(try XCTUnwrap(manager.notice?.message).contains("transform layer"),
                       "…which is the whole of what makes this sentence better than `.notRecordable`'s")
         XCTAssertTrue(manager.isRecordingArmed,
                       "The arm survives, because their next act is to land somewhere else")
