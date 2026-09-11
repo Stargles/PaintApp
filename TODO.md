@@ -399,6 +399,41 @@ and "Left to build" bullet checked out. **That list is history, not the current 
 
 ---
 
+## (63) Glare and Colour Wheels — two more effects
+
+**Status** — not started, asked 2026-09-11. **Low priority — the owner: *"these are not high priority
+so they can be put anywhere in the queue."*** Both are new `Effect` cases; (60)'s six merges of
+2026-09-11 (`70f793e` Recolour and `47c2d6a` Computer Screen for a whole case, `5ac52f0` for a field) are
+the worked examples, and their two lessons apply unchanged: **`BakeKeyEncoder` must see every new field
+or the frame store serves stale pixels**, and a cold-start XCUITest that asserts what is *drawn* is what
+found both of that pass's defects.
+
+> *"glare, and color wheels. Glare operates like blender's compositor glare. Different types of glare,
+> sort of like bloom, etc. Color wheels are a color grading tool allowing the user to edit the luminance
+> saturation and hue and strength (or some other combo, look to common ones in other color grading
+> programs). It has 4 of these, one for global, highlights, midtones, and shadows. Try to put some effort
+> into making the UI for it nice. 4 color pickers, plus their respective sliders. Also the same pinch to
+> merge into ability for these like the HSV so I can bake them to the actual colors."*
+
+- [ ] **Glare.** Blender's compositor Glare node has four types — *Fog Glow* (a wide soft bloom),
+      *Streaks* (N directional streaks at an angle, fading), *Ghosts* (lens-flare ghost images mirrored
+      about the centre) and *Simple Star* (a four-armed star) — each with a threshold, a mix and a
+      size/iterations control. `Effect.bloom` already ships as four passes; Fog Glow is close to it, and
+      Streaks and Star are directional blurs of the thresholded pass, so the multi-pass contract
+      (`Effect.passes`) is the plumbing. A new `case glare(Glare)` with a `type` picker rather than a
+      mode of Bloom, because the parameters differ per type. Both backends, byte-for-byte parity.
+- [ ] **Colour wheels.** The four-way corrector every grading program has — DaVinci Resolve's Lift /
+      Gamma / Gain / Offset, Premiere Lumetri's Shadows / Midtones / Highlights / Global: each wheel is a
+      hue-and-saturation offset (the wheel) with a luminance slider beside it and a strength; the three
+      tonal ranges are weighted by luminance with smooth overlaps and Global applies everywhere. A new
+      `case colorWheels(…)` with four wheels × (hue angle, saturation amount, luminance, strength) as
+      keyable `EffectParameter`s, and a settings bar that draws **four actual wheels** — the owner asked
+      for effort on the UI. Oklab for the offsets is consistent with the gradient map's ruling.
+- [ ] **Merge-down bakes both** like every other grade — the `hsvShift` precedent, a `MergeBakeLogicTests`
+      row each.
+
+---
+
 ## Later — the long-term features
 
 **None of these are designed, and each needs its own conversation with the owner before it starts.**
