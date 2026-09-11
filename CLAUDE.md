@@ -386,6 +386,22 @@ cheap confirmation is a whole re-run on a **newly created** device rather than a
 each failure: isolation confirms one test, and what you want to know is whether the *run* was sound.
 Creating and deleting a device costs about a minute and settles it.
 
+**The sharper test is whether the failing SET repeats, and it beats the no-assertion-message rule
+because today's failures all had messages.** MEASURED 2026-09-10, at the end of a session that had run
+eleven full suites and created a dozen devices: two consecutive full runs **of one binary** produced
+**disjoint** failure sets — eight then three, **no test in both** — and every one passed in isolation.
+The first eight included five that read as one coherent regression (the vector eraser "cuts it into two
+parts" got one, "a fully covered stroke is deleted" got one not zero, "the cut should land" failed
+outright) in a branch that had just changed a panel's layout, which is about as convincing as a false
+finding gets. **Not one of the five reproduced on a freshly created device.**
+
+So: **a regression fails the same tests twice.** When two runs of the same bytes disagree about *which*
+tests fail, the run is the variable, whatever the assertion messages say — and the failing set is
+cheaper to compare than any single test is to debug. Rule out the cheap causes first (disk, clone
+debris, `Restarting after unexpected exit` in the log, a stray booted device), and if those are clean,
+re-run whole on a new device before reading the list as a finding. The fresh device is also a partial
+cure, not merely a control: eight failures became three on the same commit.
+
 ### Triaging a failed XCUITest — do this before suspecting your change
 
 A one-off XCUITest failure here is environmental far more often than it is real, and re-running the

@@ -234,46 +234,6 @@ pose key has a node.
 - [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
       because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
       `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
-- [ ] **Animation-group membership editing — ruled 2026-09-10 and now buildable in full.** The owner,
-      asked in artist terms whether a drawing moved between animated groups should stay where it looks
-      on screen or snap to the new group's motion:
-
-      > *"stay where it looks like on screen for animation groups. I'm not sure how you plan to
-      > implement putting one thing out of one animation and in to another animation group but I'll let
-      > you take the wheel. Along with that, the ability to add new selections to an animation group
-      > (not only from another animation group) and remove selections from groups will be useful. I
-      > will let you take it first, then notify you if there is any UX changes I want in the future."*
-
-      **So it is three operations, not one**, and the third is the one the item used to be about:
-      **add** a selection to a group, **remove** a selection from a group, and **move** a selection from
-      one group to another. All three obey the same rule.
-
-      **What "stays where it looks on screen" has to mean, stated before anyone builds it.** Read
-      literally as *every* frame it is self-defeating: an element that looks identical at every frame
-      after joining a group has not joined it in any observable sense, and it is not expressible anyway
-      — only groups carry tracks, so per-frame compensation would need a per-element track that does
-      not exist. The reading that is both implementable and useful is the one re-parenting has in every
-      animation tool: **appearance is preserved at the frame the artist is on, and from there the
-      element follows its new group.** Concretely — on **add** and on **move**, the element's stored
-      geometry is rewritten so that the new group's pose *at the current frame* reproduces exactly
-      where it was; on **remove**, the departing group's pose at the current frame is baked into the
-      element so it stands still where it stood. **Say this back to the owner in those words when it
-      ships**, because it is an interpretation of their sentence and not a quote of it, and they asked
-      to be shown first and to give UX corrections after.
-
-      **What it collides with, and must not quietly break.** §2.29 (shipped 2026-09-03) refuses a Move
-      that catches *part* of a group and says so — that refusal is about a *Move*, not about membership,
-      and must survive. §2.29 also rules that splitting one animated group into two is *"a different
-      feature"*; adding and removing are not that, but a remove that empties a group, and an add that
-      makes a group's track meaningless, are both edges to decide and state. Every key on both tracks
-      changes meaning, so **one membership edit is one undo step** and the §2.28 union must still be
-      computed by the one accessor rather than patched.
-
-      **Built 2026-09-10 on `tmp/groups`, and the design shipped is in KEYFRAMES.md §3.4.1** — the
-      compensation `g · G_old(F) · G_new(F)⁻¹`, a fourth flat band in the Select panel, a notice that
-      says which of the three operations happened (because the whole visible effect at this frame is
-      that nothing moved), an emptied group kept rather than deleted, and an edit whose compensation
-      cannot be carried refused whole. Delete this row when it merges.
 **Spec** KEYFRAMES.md — **§2 is thirty owner rulings and §8 is the build order.** Four rulings
 are superseded and kept; the file says which.
 
