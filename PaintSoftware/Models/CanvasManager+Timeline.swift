@@ -635,6 +635,7 @@ extension CanvasManager {
         let length = max(cel.frameCount, 1)
         var elements = vector.elements
         var changed = false
+        var rewritten: Set<UUID> = []
         for index in elements.indices {
             guard case .video(var video) = elements[index] else { continue }
             switch anchor {
@@ -657,11 +658,15 @@ extension CanvasManager {
                 video.sourceStart = start
             }
             elements[index] = .video(video)
+            rewritten.insert(video.id)
             changed = true
         }
         guard changed else { return }
-        vector.elements = elements
-        vector.bumpVersion()
+        // A same-id rewrite, declared as one (TODO (41)). A crop changes which source frame the
+        // element shows and not where its rectangle is, and this canvas draws only the rectangle —
+        // the decoded frame is `videoCelContent`'s — so the seam bounds it by the placeholder's own
+        // quad, read off the element before and after.
+        vector.restoreElements(elements, changedInk: nil, rewriting: rewritten)
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -738,16 +743,19 @@ extension CanvasManager {
             var elements = vector.elements
             var wanted = layers[layerIndex].cels[celIndex].frameCount
             var changed = false
+            var rewritten: Set<UUID> = []
             for index in elements.indices {
                 guard case .video(var video) = elements[index], video.speed != speed else { continue }
                 video.speed = speed
                 elements[index] = .video(video)
+                rewritten.insert(video.id)
                 wanted = VideoFrameMap.frameCount(of: video, documentFPS: fps)
                 changed = true
             }
             guard changed else { return }
-            vector.elements = elements
-            vector.bumpVersion()
+            // `writeVideoCrop`'s seam and its reason: a speed is a same-id rewrite that moves no
+            // rectangle.
+            vector.restoreElements(elements, changedInk: nil, rewriting: rewritten)
 
             let start = layers[layerIndex].cels[celIndex].startFrame
             let ceiling = layers[layerIndex].cels.enumerated()

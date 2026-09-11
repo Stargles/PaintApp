@@ -1724,6 +1724,10 @@ final class VectorCanvas {
         /// once they are walked; `renderLocalContent` checks that half itself and falls back to the
         /// full walk if it escapes, so a site that under-declares costs a re-walk rather than an
         /// artifact. That is `applyToIncrementalBase`'s count check, one case along.
+        ///
+        /// **`.null` is the strongest claim of all — no pixel differs — and every memo survives it**
+        /// (`invalidateRenderOnly`). Only `restoreDamage` answers it, and only for a swap that adds,
+        /// removes and rewrites nothing the walk draws.
         case region(CGRect)
     }
 
@@ -1743,6 +1747,20 @@ final class VectorCanvas {
     /// which that distinction is true. Caller must hold `lock`.
     private func invalidateRenderOnly(_ damage: Damage) {
         version += 1
+        if case .region(let rect) = damage, rect.isNull {
+            // **A null rectangle is a proof that no pixel of any picture this canvas holds has
+            // changed, and every memo stays** — TODO (41)'s last box. `restoreDamage` answers it for
+            // a swap that adds, removes and rewrites nothing the walk draws: a second identical
+            // restore, or a rewrite of elements that are all suppressed, which is every lasso-move
+            // nudge while the float's latch is armed (the lifted pieces are drawn by the latch, not
+            // by this canvas, and the picture here is of everything else). Until this arm existed
+            // that nudge paid a whole-cel walk to produce the picture it already had, and a null
+            // region fell through `repairClip`'s refusal to the same full walk — the trap
+            // PERFORMANCE.md §11.11 records in the bench. `version` still moves, because consumers
+            // key their own memos on it and re-reading a memo that is standing costs them nothing.
+            lastDamage = damage
+            return
+        }
         // **Before `cachedImage` is cleared**, because the picture being cleared is the one a region
         // re-walk starts from. This is the only ordering constraint in this method.
         applyToRegionBase(damage)
@@ -1955,20 +1973,97 @@ final class VectorCanvas {
     ///     for ink this canvas has never walked — an element returning from a previous restore is
     ///     bounded by `vacatedInk` instead.
     ///
-    /// **A caller must not rewrite an element in place under its own id.** The footprints dropped
-    /// here are chosen by id difference, so an element that stays under its own id keeps its measured
-    /// footprint — right when its content is unchanged, and a skipped element drawing the wrong
-    /// picture when it is not. Every gesture that reaches this method adds and removes:
-    /// `detachedPiece` mints a fresh id per cut piece and an append is a new stroke.
+    /// **A caller must not rewrite an element in place under its own id through this form.** The
+    /// footprints dropped here are chosen by id difference, so an element that stays under its own id
+    /// keeps its measured footprint — right when its content is unchanged, and a skipped element
+    /// drawing the wrong picture when it is not. Every gesture that reaches this form adds and
+    /// removes: `detachedPiece` mints a fresh id per cut piece and an append is a new stroke.
     /// `UndoRepairLogicTests.testACutMintsFreshIdsRatherThanRewritingInPlace` is what says so, and
-    /// the survivor-order check below is what catches the other way a same-id list can differ.
+    /// the survivor-order check below is what catches the other way a same-id list can differ. A
+    /// caller that *does* rewrite under an id says which ids through
+    /// `restoreElements(_:changedInk:rewriting:)`, which is this method with that one extra fact.
     func restoreElements(_ newValue: [VectorElement], changedInk: CGRect?) {
+        restoreElements(newValue, changedInk: changedInk, rewriting: [])
+    }
+
+    /// **The seam a same-id rewrite comes through** — TODO (41)'s last box, and the prerequisite
+    /// TODO (42) names: a slider over a selection is one of these per tick.
+    ///
+    /// A recolour, an Apply Brush, a text retype, a video's crop, an animation-group retag with its
+    /// compensation and every lasso-move nudge all put an element back **at its own index under its
+    /// own id with different content**. The id-difference analysis above sees no departure and no
+    /// arrival for such an element, so until this existed every one of them declared `.everything`
+    /// and paid the whole-cel walk — ~142 ms at the owner's density, 745 ms at 1,000 strokes.
+    ///
+    /// **What a rewrite's damage is, and where each half comes from.** The picture standing on the
+    /// canvas holds the element's *old* ink, and the next picture must hold its *new* ink; the damage
+    /// is the union of the two. The old half is read here, *before* the splice, off the same tables a
+    /// departure is read from — `paintedBounds` for a stroke (a measurement), `derivedFootprint` for
+    /// anything else (a containment proof) — so it is exactly as trustworthy as a departure's. The new
+    /// half is `derivedFootprint` of the new value for a non-stroke, which is a proof again, and for a
+    /// stroke it is a **hint**: the old measurement when nothing that places a dab changed (a colour,
+    /// an opacity, a tag), and otherwise `strokeInkHint(of:)`, the centre line's box padded by the
+    /// new brush's reach. A hint is enough for a stroke and would not be for anything else, for the
+    /// reason `vacatedInk`'s doc gives: the rewritten element loses its `paintedBounds` entry here, so
+    /// `renderLocalContent` draws it, measures it, and widens the clip if it escaped. A stroke's
+    /// under-declared new half costs a second clipped walk and cannot draw a wrong picture; a
+    /// non-stroke's is never under-declared because it is never estimated.
+    ///
+    /// **Neither half is captured and reused.** An undo of a rewrite is another rewrite through this
+    /// same method, and it reads the departing half off the canvas *at the press* rather than off a
+    /// rectangle the forward edit remembered — because if the forward edit's hint was too small and
+    /// the render widened past it, a remembered rectangle would under-declare the ink now standing,
+    /// outside the clip, where nothing can notice. Reading the live measurement is what makes the
+    /// undo of a hint-bounded rewrite exact.
+    ///
+    /// **A rewritten stroke with no measured footprint contributes nothing to the old half, and that
+    /// is an argument rather than a shortcut.** An entry is only ever removed by `.everything`, which
+    /// drops every base a repair could start from, or by a region site that declared a rectangle
+    /// containing the element's ink — which every base then carries in its pending region. So a stroke
+    /// with no entry has its old ink either in no base at all or inside a region the next repair
+    /// already redraws; in neither case is there anything to declare. This is the case TODO (42)'s
+    /// slider lives in: its second tick arrives before the first tick's render has measured anything,
+    /// and `.everything` there would be a full walk on every tick but the first.
+    /// `UndoRepairLogicTests.testASecondRewriteBeforeTheFirstHasRenderedIsStillBounded` pins it and
+    /// the mutation that reddens it is in `applyToRegionBase`: taking `rect` instead of
+    /// `standing.region.union(rect)`.
+    ///
+    /// - Parameters:
+    ///   - newValue: the list to put back.
+    ///   - changedInk: a rectangle containing the ink of every element `newValue` carries that the
+    ///     standing list does not — new ids and rewritten ids alike — or nil when the caller cannot
+    ///     prove one, which every rewrite site passes.
+    ///   - rewritten: the ids the caller **may** have rewritten under their own id. Over-declaring
+    ///     costs the footprint of an element that did not change and can never draw a wrong picture;
+    ///     an id in this set that is in only one of the two lists is an ordinary add or remove. A
+    ///     selection's whole membership is a correct answer.
+    func restoreElements(_ newValue: [VectorElement], changedInk: CGRect?,
+                         rewriting rewritten: Set<UUID>) {
         lock.lock()
         defer { lock.unlock() }
         let arriving = Set(newValue.lazy.map(\.id))
-        // Taken before the splice, because afterwards the list no longer holds what left it.
-        let departed = _elements.filter { !arriving.contains($0.id) }
-        let damage = restoreDamage(to: newValue, departed: departed, changedInk: changedInk)
+        // Taken before the splice, because afterwards the list no longer holds what left it — and
+        // the same is true of a rewritten element's old value, which is why the pair is built here.
+        var departed: [VectorElement] = []
+        var standingRewritten: [UUID: VectorElement] = [:]
+        standingRewritten.reserveCapacity(rewritten.count)
+        for element in _elements {
+            if !arriving.contains(element.id) {
+                departed.append(element)
+            } else if rewritten.contains(element.id) {
+                standingRewritten[element.id] = element
+            }
+        }
+        var rewrites: [(old: VectorElement, new: VectorElement)] = []
+        rewrites.reserveCapacity(standingRewritten.count)
+        if !standingRewritten.isEmpty {
+            for element in newValue {
+                guard let old = standingRewritten[element.id] else { continue }
+                rewrites.append((old, element))
+            }
+        }
+        let damage = restoreDamage(to: newValue, departed: departed, rewrites: rewrites,
+                                   changedInk: changedInk)
         _elements = newValue
         // No `dropIncrementalBase()` here, though the `elements` setter has one: `restoreDamage`
         // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
@@ -1979,6 +2074,9 @@ final class VectorCanvas {
         // handed to `vacatedInk` are the ones about to be removed.
         rememberVacatedInk(departed: departed, arriving: arriving)
         forgetPaintedBounds(departed.lazy.map(\.id))
+        // A rewritten element's entry was a promise it has not changed, and it has. Forgotten rather
+        // than moved to `vacatedInk`: the id is still in the list, and the next walk measures it.
+        forgetPaintedBounds(rewrites.lazy.map(\.new.id))
         invalidate(damage)
     }
 
@@ -2026,12 +2124,21 @@ final class VectorCanvas {
     /// from a snapshot, so its dabs land where the walk that measured this rectangle put them.
     /// MEASURED — `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the
     /// operand that would move if this were an estimate rather than a measurement.
+    ///
+    /// **A stroke this canvas has never walked is bounded by `strokeInkHint(of:)` since TODO (41)'s
+    /// last box**, and the safety argument is `vacatedInk`'s own, one step further: the arriving
+    /// stroke has no `paintedBounds` entry, so the repair draws it, measures it, and widens the clip
+    /// if it escaped. The hint is spent on sizing the rectangle and on nothing else, so a bad one
+    /// costs a second clipped walk rather than a picture. The case that needed it is a recolour under
+    /// Cut: the pieces a straddling stroke is split into arrive under fresh ids that nothing has ever
+    /// measured, and before this arm every such recolour fell to the whole-cel walk however small the
+    /// loop was.
     private func inkOfArrivals(in newValue: [VectorElement], standing: Set<UUID>) -> CGRect? {
         var union = CGRect.null
         let floor = lowestRepairResolution
         for element in newValue where !standing.contains(element.id) {
             if let stroke = element.stroke {
-                guard let rect = vacatedInk[stroke.id] else { return nil }
+                guard let rect = vacatedInk[stroke.id] ?? Self.strokeInkHint(of: stroke) else { return nil }
                 union = union.union(rect)
                 continue
             }
@@ -2039,6 +2146,54 @@ final class VectorCanvas {
             union = union.union(rect)
         }
         return union.isNull ? nil : union
+    }
+
+    /// **Where a stroke's ink will probably land, read off its geometry and its brush — a hint for
+    /// sizing a repair rectangle, never a bound.** TODO (41)'s last box.
+    ///
+    /// BRUSH.md §12 stage 8 refuted a box derived from the brush as a *bound*: `ResponseCurve` does
+    /// not clamp, so no number read off the brush limits what a dab paints. What is asked of this is
+    /// weaker and is safe for a different reason: every caller spends it only on an element that has
+    /// no `paintedBounds` entry, which `renderLocalContent` therefore draws, measures and escape-checks
+    /// (`LocalContent.escaped`). A hint that is too small costs one more clipped walk; a hint that is
+    /// too large costs a slightly bigger repair. Neither is a wrong picture.
+    ///
+    /// The terms are the ones the engine already agrees on. The centre line's box is
+    /// `StrokeGeometry.bounds(of:padding:)`, which the residue collector and the spatial index read;
+    /// the reach is `StrokeGeometry.stampRadius(forPressure:brush:size:)` at full pressure, which is
+    /// `BrushStamper.stampDab`'s own radius (`maxPaintReach` reads it for the same purpose); and the
+    /// scatter is `BrushStamper.applyScatter`'s amplitude, `2 × radius × amount` on each of two axes,
+    /// which is the furthest a dab centre is ever moved off the line. A brush whose size row is
+    /// driven by something other than pressure — velocity, a random field — can exceed this at full
+    /// pressure, and the escape check is what answers that; `BrushModulations.isPressureOnly` is the
+    /// same limit stated for the eraser, which cannot retry and so refuses instead.
+    ///
+    /// The width used is `size`, which for a distorted stroke is the footprint envelope rather than
+    /// the artist's width — `StrokeDistort.restSize`'s doc says why that is the right number for a
+    /// bounds reader.
+    private static func strokeInkHint(of stroke: VectorStroke) -> CGRect? {
+        let values = stroke.brush.dabValues(atPressure: 1)
+        let radius = Swift.max(stroke.size * CGFloat(values.size), 0.5) / 2
+        let scatter = 2 * radius * CGFloat(abs(values.scatterAcross) + abs(values.scatterAlong))
+        return StrokeGeometry.bounds(of: stroke.samples, padding: radius + scatter)
+    }
+
+    /// **The new half of a rewritten stroke's damage** — see `restoreElements(_:changedInk:rewriting:)`.
+    ///
+    /// The old measurement is exact for the new value when nothing that places or sizes a dab has
+    /// changed — the same samples, the same lattice, the same distort, the same size and the same
+    /// brush — which is a recolour, an opacity change, a tag, a visibility threshold. The comparisons
+    /// are cheap by construction: a rewrite copies the struct and replaces one field, so the sample
+    /// arrays share storage and `==` answers off the buffer identity without walking them.
+    /// Anything else is `strokeInkHint(of:)` on the new value, which is the only place the *new*
+    /// brush's reach enters — the mutation `UndoRepairLogicTests` names is padding by the old one.
+    private static func rewrittenInk(of new: VectorStroke, replacing old: VectorStroke,
+                                     measured: CGRect?) -> CGRect? {
+        if let measured, new.samples == old.samples, new.lattice == old.lattice,
+           new.distort == old.distort, new.size == old.size, new.brushRef == old.brushRef {
+            return measured
+        }
+        return strokeInkHint(of: new)
     }
 
     /// **The smallest raster resolution a region declared right now can be repaired at.** Native, or
@@ -2175,7 +2330,16 @@ final class VectorCanvas {
     /// `UndoRepairLogicTests.testUndoingAGestureThatSplitOneStrokeAndDeletedAnotherFarAwayNeedsBothHalves`
     /// goes from `regionRepairsWidened` 0 to 1 without it — the escape check keeps the picture right
     /// and the press pays two walks, which is the bug TODO (41) exists to remove.
+    ///
+    /// **A rewrite is a departure and an arrival under one id, and it is bounded by exactly those two
+    /// arguments** — `restoreElements(_:changedInk:rewriting:)` carries the whole of it. The one
+    /// asymmetry with a departure by id is stated there: a rewritten *stroke* with no measurement
+    /// contributes nothing to the old half, where a departing stroke with none says `.everything`
+    /// (`regionDamage(replacing:)`). Both are correct; the departing rule is merely the conservative
+    /// one and was written first, and TODO (42)'s per-tick rewrite is what made the sharper argument
+    /// worth making.
     private func restoreDamage(to newValue: [VectorElement], departed: [VectorElement],
+                               rewrites: [(old: VectorElement, new: VectorElement)],
                                changedInk: CGRect?) -> Damage {
         var departing: [VectorStroke] = []
         departing.reserveCapacity(departed.count)
@@ -2194,10 +2358,38 @@ final class VectorCanvas {
             guard let rect = Self.derivedFootprint(of: element, lowestResolution: floor) else { return .everything }
             derivedDeparted = derivedDeparted.union(rect)
         }
+        // The rewritten elements' two halves, read off the same two tables and by the same two
+        // arguments. `old` is the value standing on the canvas — the one the picture was drawn from
+        // — and `new` is the one the next picture must show.
+        var rewrittenInk = CGRect.null
+        for (old, new) in rewrites {
+            // **A suppressed element is in no picture this canvas holds, before or after.** Every
+            // memo and base was walked under the standing suppression set — changing that set is
+            // `.everything` — so rewriting an element the walk skips changes no pixel anywhere, and
+            // it contributes nothing to either half. This is the lasso-move nudge with the latch
+            // armed: the lifted pieces are what move, the latch draws them, and this canvas's own
+            // picture is of everything else. When the float commits, un-suppressing them is the
+            // `.everything` that draws the new geometry.
+            if _suppressedElementIDs.contains(new.id) { continue }
+            if let oldStroke = old.stroke, let newStroke = new.stroke {
+                let measured = paintedBounds[oldStroke.id]
+                if let measured { rewrittenInk = rewrittenInk.union(measured) }
+                guard let arriving = Self.rewrittenInk(of: newStroke, replacing: oldStroke,
+                                                       measured: measured) else { return .everything }
+                rewrittenInk = rewrittenInk.union(arriving)
+                continue
+            }
+            // A kind change under one id — a stroke replaced by a fill, say — is not something any
+            // site does, and it takes the conservative answer rather than a per-kind cross product.
+            guard old.stroke == nil, new.stroke == nil else { return .everything }
+            guard let was = Self.derivedFootprint(of: old, lowestResolution: floor),
+                  let will = Self.derivedFootprint(of: new, lowestResolution: floor) else { return .everything }
+            rewrittenInk = rewrittenInk.union(was).union(will)
+        }
         // **Two lists holding the same ids in a different order draw different pixels**, and neither
         // an arrival nor a departure says so — z-position is what a display list means. Comparing the
         // survivors in order is what closes that, and it is the one difference the id sets are blind
-        // to.
+        // to. A rewritten element is a survivor here: it keeps its index, and this is what checks it.
         let standing = Set(_elements.lazy.map(\.id))
         let departedIDs = Set(departed.lazy.map(\.id))
         guard _elements.lazy.map(\.id).filter({ !departedIDs.contains($0) })
@@ -2205,7 +2397,8 @@ final class VectorCanvas {
 
         let arrivingInk: CGRect
         if !newValue.contains(where: { !standing.contains($0.id) }) {
-            // Nothing arrives, so what departs is the whole of the difference.
+            // Nothing arrives by id, so what departs and what is rewritten is the whole of the
+            // difference.
             arrivingInk = .null
         } else if let changedInk {
             arrivingInk = changedInk
@@ -2219,7 +2412,7 @@ final class VectorCanvas {
         } else {
             return .everything
         }
-        var vacated = derivedDeparted
+        var vacated = derivedDeparted.union(rewrittenInk)
         if !departing.isEmpty {
             guard case .region(let measured) = regionDamage(replacing: departing) else { return .everything }
             vacated = vacated.union(measured)

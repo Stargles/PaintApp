@@ -664,6 +664,201 @@ final class UndoRepairBench: XCTestCase {
         }
     }
 
+    // MARK: - A rewrite in place — the press TODO (41)'s last box was about, and TODO (42)'s tick
+
+    /// **A selection of `count` of the scene's strokes, clustered rather than scattered**: the
+    /// strokes nearest the canvas's centre, which is the shape of a lasso — a loop around one part
+    /// of the drawing — rather than fifty strokes chosen at random across the whole canvas, whose
+    /// union would be the canvas. The rectangle column says which it measured.
+    private static func selection(of count: Int, in elements: [VectorElement]) -> Set<UUID> {
+        let centre = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        let ranked = elements.compactMap { element -> (UUID, CGFloat)? in
+            guard let stroke = element.stroke, let box = StrokeGeometry.bounds(of: stroke.samples)
+            else { return nil }
+            return (element.id, hypot(box.midX - centre.x, box.midY - centre.y))
+        }.sorted { $0.1 < $1.1 }
+        return Set(ranked.prefix(count).map(\.0))
+    }
+
+    /// `elements` with every stroke in `ids` rewritten under its own id by `rewrite`.
+    private static func rewriting(_ elements: [VectorElement], _ ids: Set<UUID>,
+                                  _ rewrite: (inout VectorStroke) -> Void) -> [VectorElement] {
+        elements.map { element in
+            guard case .stroke(var stroke) = element, ids.contains(stroke.id) else { return element }
+            rewrite(&stroke)
+            return .stroke(stroke)
+        }
+    }
+
+    /// **The after arm for a rewrite** — `restoreElements(_:changedInk:rewriting:)` with the ids the
+    /// selection verbs pass, alternating for `measureRestoreElementsArm`'s reason.
+    private func measureRewriteArm(_ canvas: VectorCanvas, before: [VectorElement],
+                                   after: [VectorElement], rewritten: Set<UUID>)
+    -> (undoSeconds: Double, redoSeconds: Double, undoDabs: Int, redoDabs: Int,
+        repairs: Int, widened: Int, abandoned: Int, rectangle: String) {
+        canvas.elements = after
+        canvas.bumpVersion()
+        _ = canvas.render()
+        let repairsBefore = canvas.regionRepairs
+        let widenedBefore = canvas.regionRepairsWidened
+        let abandonedBefore = canvas.regionRepairsAbandoned
+        let timed = alternatingUndoRedo(runs: 3, undo: {
+            canvas.restoreElements(before, changedInk: nil, rewriting: rewritten)
+            _ = canvas.render()
+            return canvas.lastRenderDabCount
+        }, redo: {
+            canvas.restoreElements(after, changedInk: nil, rewriting: rewritten)
+            _ = canvas.render()
+            return canvas.lastRenderDabCount
+        })
+        return (timed.undoSeconds, timed.redoSeconds, timed.undoDabs, timed.redoDabs,
+                canvas.regionRepairs - repairsBefore,
+                canvas.regionRepairsWidened - widenedBefore,
+                canvas.regionRepairsAbandoned - abandonedBefore,
+                rectangleShare(canvas))
+    }
+
+    /// **Recolour fifty strokes, undo, redo** and **Apply Brush to fifty strokes, undo, redo**, at
+    /// the four stroke counts. Fifty is a lasso around one part of a drawing at the owner's density.
+    ///
+    /// The **before** arm is `bumpVersion()`, and as with the fill row that *is* what the old code
+    /// did: both verbs answered `.rewritesInPlace` and `registerVectorElementsUndo` put that through
+    /// `elements =` plus `bumpVersion()` in both closures, so every press was the whole-cel walk.
+    /// The after arm is the shipped seam with the shipped ids — the selection's own membership.
+    ///
+    /// Two rewrites rather than one because they bound their new half differently. A recolour moves
+    /// no dab, so the old measurement *is* the new footprint and the rectangle is exact; an Apply
+    /// Brush to a wider tip changes every dab's radius, so the new half is `strokeInkHint(of:)` at
+    /// the new brush's reach, and `repairsWidened` is the column that says whether the hint held.
+    func testUndoAndRedoAfterARecolourAndAnApplyBrush() {
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+        var wider = Self.benchBrush
+        wider.name = "Bench x2"
+        wider.dab.size = 2
+        let widerRef = BrushPool.intern(wider)
+        let red = CodableColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1)
+
+        for (verb, rewrite) in [("recolour", { (stroke: inout VectorStroke) in stroke.color = red }),
+                                ("applyBrush", { (stroke: inout VectorStroke) in stroke.brushRef = widerRef })] {
+            for n in Self.strokeCounts {
+                autoreleasepool {
+                    let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                    _ = canvas.render()
+                    let wholeLayerDabs = canvas.lastRenderDabCount
+
+                    let before = canvas.elements
+                    let selected = Self.selection(of: 50, in: before)
+                    let after = Self.rewriting(before, selected, rewrite)
+
+                    let old = measureBumpVersionArm(canvas, before: before, after: after)
+                    let new = measureRewriteArm(canvas, before: before, after: after,
+                                                rewritten: selected)
+
+                    report("\(verb) of 50 + undo + redo — n=\(n)", [
+                        ("strokes", "\(n)"),
+                        ("wholeLayerDabs", "\(wholeLayerDabs)"),
+                        ("undoBefore", ms(old.undoSeconds)),
+                        ("undoDabsBefore", "\(old.undoDabs)"),
+                        ("redoBefore", ms(old.redoSeconds)),
+                        ("redoDabsBefore", "\(old.redoDabs)"),
+                        ("undoAfter", ms(new.undoSeconds)),
+                        ("undoDabsAfter", "\(new.undoDabs)"),
+                        ("redoAfter", ms(new.redoSeconds)),
+                        ("redoDabsAfter", "\(new.redoDabs)"),
+                        ("rectangle", new.rectangle),
+                        ("repairsWidened", "\(new.widened)"),
+                        ("repairsAbandoned", "\(new.abandoned)"),
+                        ("undoSpeedup", String(format: "%.1fx",
+                                               old.undoSeconds / max(new.undoSeconds, 1e-9))),
+                        ("redoSpeedup", String(format: "%.1fx",
+                                               old.redoSeconds / max(new.redoSeconds, 1e-9))),
+                    ])
+
+                    XCTAssertEqual(Double(old.undoDabs), Double(wholeLayerDabs), accuracy: 300,
+                                   "\(verb): the before arm at n=\(n) must re-stamp the whole cel")
+                    XCTAssertEqual(new.repairs, 6,
+                                   "\(verb): three pairs, six presses, every one a repair")
+                    XCTAssertEqual(new.abandoned, 0,
+                                   "\(verb): an abandoned repair at n=\(n) hides a bad bound")
+                    XCTAssertLessThan(new.undoDabs * 2, old.undoDabs,
+                                      "\(verb): the after arm at n=\(n) re-stamped \(new.undoDabs) "
+                                      + "against the before arm's \(old.undoDabs)")
+                }
+            }
+        }
+    }
+
+    /// **What one tick of TODO (42)'s slider costs before the render** — `restoreElements` alone
+    /// for a rewrite of fifty strokes at 2,000, no walk, alternating. The number the item asks for:
+    /// the hook must not itself walk the cel, and this is the press it adds to.
+    ///
+    /// Three shapes of tick, because the hint has two arms: a recolour (same geometry, the old
+    /// measurement is reused, the comparison is a buffer-identity check), an Apply Brush (same
+    /// geometry, a different brush, `strokeInkHint` walks each stroke's forty samples once), and a
+    /// size change (the same). The control is one stroke arriving, which is the press §11.11a
+    /// measured at ~2 µs an element.
+    func testWhatARewriteTickCostsBeforeTheRender() {
+        let n = 2000
+        var wider = Self.benchBrush
+        wider.name = "Bench x2"
+        wider.dab.size = 2
+        let widerRef = BrushPool.intern(wider)
+        let red = CodableColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1)
+        for (verb, rewrite) in [("recolour", { (stroke: inout VectorStroke) in stroke.color = red }),
+                                ("applyBrush", { (stroke: inout VectorStroke) in stroke.brushRef = widerRef }),
+                                ("size", { (stroke: inout VectorStroke) in stroke.size *= 1.5 })] {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let before = canvas.elements
+                let selected = Self.selection(of: 50, in: before)
+                let after = Self.rewriting(before, selected, rewrite)
+
+                var undo: [Double] = [], redo: [Double] = []
+                for _ in 0..<5 {
+                    autoreleasepool {
+                        var start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(before, changedInk: nil, rewriting: selected)
+                        undo.append(CFAbsoluteTimeGetCurrent() - start)
+                        start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(after, changedInk: nil, rewriting: selected)
+                        redo.append(CFAbsoluteTimeGetCurrent() - start)
+                    }
+                }
+                undo.sort(); redo.sort()
+                report("tick alone, \(verb) of 50 — n=\(n)", [
+                    ("undoPress", ms(undo[2])),
+                    ("redoPress", ms(redo[2])),
+                ])
+            }
+        }
+
+        autoreleasepool {
+            let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+            _ = canvas.render()
+            let before = canvas.elements
+            canvas.addStroke(Self.benchStroke(n))
+            let after = canvas.elements
+            _ = canvas.render()
+            var undo: [Double] = [], redo: [Double] = []
+            for _ in 0..<5 {
+                autoreleasepool {
+                    var start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(before, changedInk: nil)
+                    undo.append(CFAbsoluteTimeGetCurrent() - start)
+                    start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(after, changedInk: nil)
+                    redo.append(CFAbsoluteTimeGetCurrent() - start)
+                }
+            }
+            undo.sort(); redo.sort()
+            report("tick alone, one stroke (control) — n=\(n)", [
+                ("undoPress", ms(undo[2])),
+                ("redoPress", ms(redo[2])),
+            ])
+        }
+    }
+
     // MARK: - A drawn stroke — the commonest undo/redo pair there is
 
     /// **Draw, undo, redo.** Not an eraser at all, which is the correction the owner had to make

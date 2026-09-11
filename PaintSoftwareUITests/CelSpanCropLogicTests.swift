@@ -673,7 +673,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
                                                 map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
-                                                restElements: [], atFrame: 5)
+                                                restElements: [], movedIDs: [], atFrame: 5)
         XCTAssertEqual(route, .seedAndKey, "Premise")
         XCTAssertEqual(keyFrames(manager, cel: 0), [5], "the neighbour on the next block is not this block's")
         XCTAssertEqual(shownDX(manager, atFrame: 9)!, 0, accuracy: 1e-9,
@@ -699,7 +699,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
                                                 map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
-                                                restElements: [], atFrame: 15)
+                                                restElements: [], movedIDs: [], atFrame: 15)
         XCTAssertEqual(route, .seedAndKey, "Premise")
         XCTAssertEqual(keyFrames(manager, cel: 1), [5], "cel-local 5 is document 15; nothing below 0")
         XCTAssertEqual(shownDX(manager, atFrame: 10)!, 0, accuracy: 1e-9, "the block's first frame holds the key")
@@ -723,7 +723,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
                                                 map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
-                                                restElements: [], atFrame: 5)
+                                                restElements: [], movedIDs: [], atFrame: 5)
         XCTAssertEqual(route, .storedValueHoldingBaseline, "Premise")
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 7))
         XCTAssertEqual(keyFrames(manager, cel: 0), [2, 7], "the old pose on the mark below, the new on the mark; nothing past the block")

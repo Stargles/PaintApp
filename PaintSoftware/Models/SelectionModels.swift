@@ -1568,11 +1568,13 @@ extension CanvasManager {
             // appending them, would silently restack a canvas that holds fills above *and* below the
             // same stroke — `addFill` appends (LASSO_FILL.md §2a), so such a canvas is ordinary.
             let newElements = split.elements.filter { !split.insideIDs.contains($0.id) }
-            vectorCanvas.elements = newElements
-            // **Not optional.** The `elements` setter deliberately does not invalidate, and both
-            // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this
-            // the clear happens in the model and is invisible on screen.
-            vectorCanvas.bumpVersion()
+            // The same seam the presses come through, so the forward edit is bounded too: what
+            // leaves is measured, and what arrives under Cut — the outside halves, under fresh ids —
+            // is bounded by `strokeInkHint(of:)` with the render's escape check behind it. It also
+            // hands the departed footprints to `vacatedInk`, which is what bounds the *undo*'s
+            // arrivals; `bumpVersion()` here used to clear them, which is why the undo's rectangle
+            // was described below as unmeasurable.
+            vectorCanvas.restoreElements(newElements, changedInk: nil)
             // Clear the transient tier, or a stale pre-clear fill preview composites over the top.
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
@@ -1580,11 +1582,8 @@ extension CanvasManager {
                                        layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection,
                                        // Elements leave and, under Cut, their outside halves arrive
                                        // with fresh ids — nothing is rewritten. No rectangle: what
-                                       // arrives on the *undo* is the whole pre-clear elements, which
-                                       // this cel has not measured (the forward edit above declared
-                                       // `.everything`), and the lasso's own box does not bound a
-                                       // straddling one. The redo is bounded anyway, off what the
-                                       // undo just vacated.
+                                       // arrives on the *undo* is what the forward edit above just
+                                       // vacated, and the canvas remembers where that was.
                                        swap: .addsAndRemoves(ink: nil))
             // The timeline and layer-panel thumbnails are a third thing, and
             // `registerVectorElementsUndo` refreshes them on the undo and redo sides but **not** on
@@ -1819,11 +1818,15 @@ extension CanvasManager {
         // behind: `working` is a local list and nothing has been assigned to the canvas yet.
         guard changed > 0 else { return }
 
-        vectorCanvas.elements = newElements
-        // **Not optional.** The `elements` setter deliberately does not invalidate, and both
-        // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this the
-        // recolour happens in the model and is invisible on screen.
-        vectorCanvas.bumpVersion()
+        // **The forward edit and its two presses all go through one seam, and it is told which ids
+        // it may find rewritten** — TODO (41)'s last box. `elements =` plus `bumpVersion()` was the
+        // whole-cel walk; `restoreElements(_:changedInk:rewriting:)` bounds the swap by the union of
+        // where each caught element was and where it will be, and under Cut it bounds the split's
+        // pieces too (they arrive under fresh ids, which is the id-difference half). `caught` rather
+        // than the exact changed set, on purpose: over-declaring costs an unchanged element its own
+        // footprint of repair, under-declaring is a wrong picture, and the selection is the unit
+        // TODO (42)'s slider will rewrite per tick.
+        vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: caught)
         // Clear the transient tier, or a stale pre-recolour fill preview composites over the top.
         setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
@@ -1833,10 +1836,10 @@ extension CanvasManager {
                                    label: .recolorSelection,
                                    // A recolour writes `stroke.color` and puts the stroke back at
                                    // its own index under its own id — see the loop above — so both
-                                   // lists hold the same ids with different content and no restore
-                                   // can bound itself. Under Cut it splits *as well*, which does not
-                                   // change the answer: one rewritten element is enough.
-                                   swap: .rewritesInPlace)
+                                   // lists hold the same ids with different content, and these are
+                                   // the ids. Under Cut it splits *as well*, which the same seam
+                                   // bounds by id difference.
+                                   swap: .rewritesInPlace(caught))
         // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
         // on the undo and redo sides but **not** on the initial apply — `clearSelectionPixels` gets
         // away with that only because `setFillImage` publishes through `@Published layers`, which is
@@ -1945,12 +1948,11 @@ extension CanvasManager {
         // split away with it, because nothing has been assigned to the canvas yet.
         guard changed > 0 else { return }
 
-        vectorCanvas.elements = newElements
-        // **Not optional**, for the reason `recolorSelection` states in full: the `elements` setter
-        // deliberately does not invalidate, and both `PixelOps.RasterizeKey` and `LayerContentVersion`
-        // key on `vectorVersion`, so without this the re-point happens in the model and nothing on
-        // screen changes.
-        vectorCanvas.bumpVersion()
+        // One seam for the edit and both its presses, told the ids — `recolorSelection` carries the
+        // argument. A re-pointed brush changes what the stroke paints, so the new half of each
+        // rewritten stroke's rectangle is `strokeInkHint(of:)` at the *new* brush's reach rather
+        // than the old measurement, and the render's escape check stands behind it.
+        vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: caught)
         // A stale pre-apply fill preview would composite over the top, exactly as it would a recolour.
         setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
@@ -1959,10 +1961,8 @@ extension CanvasManager {
                                    celID: layers[currentLayerIndex].cels[celIndex].id,
                                    label: .applyBrushToSelection,
                                    // `stroke.brushRef = ref` under the stroke's own id — the
-                                   // recolour's answer, and a re-pointed brush also changes what the
-                                   // stroke paints, so even a same-id rule that read content would
-                                   // have to re-measure it.
-                                   swap: .rewritesInPlace)
+                                   // recolour's answer, with the same ids.
+                                   swap: .rewritesInPlace(caught))
         celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
                                        celID: layers[currentLayerIndex].cels[celIndex].id)
     }

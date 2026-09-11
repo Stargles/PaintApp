@@ -313,7 +313,7 @@ final class TransformChannelLogicTests: XCTestCase {
                                                 restBox: box,
                                                 map: PoseMap(CGAffineTransform(translationX: 9, y: 0)),
                                                 restElements: manager.layers[1].cels[0].vector?.elements ?? [],
-                                                atFrame: 4)
+                                                movedIDs: [], atFrame: 4)
         XCTAssertEqual(route, .storedValue)
         XCTAssertTrue(manager.layers[1].cels[0].transformTracks.isEmpty)
         XCTAssertTrue(manager.animationGroups.isEmpty)
@@ -330,7 +330,7 @@ final class TransformChannelLogicTests: XCTestCase {
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
                                                 map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
-                                                restElements: [], atFrame: 8)
+                                                restElements: [], movedIDs: [], atFrame: 8)
         XCTAssertEqual(route, .storedValueHoldingBaseline)
         XCTAssertEqual(manager.layers[1].cels[0].pendingPoseBaselines.count, 1,
                        "The previous value is held; nothing is keyed yet")

@@ -77,7 +77,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box, map: map,
                                                 restElements: manager.layers[1].cels[0].vector?.elements ?? [],
-                                                atFrame: 4)
+                                                movedIDs: [], atFrame: 4)
         XCTAssertEqual(route, .key, "Fixture: an already-animated channel takes the auto-key arm")
 
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])

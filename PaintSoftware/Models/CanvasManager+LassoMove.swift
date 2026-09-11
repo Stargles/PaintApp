@@ -1205,8 +1205,15 @@ extension CanvasManager {
         let oldMirror = float.mirror
         let oldDistort = float.distort
 
-        vector.elements = newElements
-        vector.bumpVersion()
+        // **A same-id rewrite, declared as one** — TODO (41)'s last box, and the nudge is the case
+        // that turns out to cost nothing. Every element the float carries is suppressed while its
+        // latch is armed, so this canvas's own picture is of everything *else*, and moving the
+        // suppressed geometry changes no pixel of it: the seam declares a null region and every memo
+        // stands. `bumpVersion()` here was a whole-cel walk per nudge to produce the picture the
+        // canvas already had. When the latch is dropped below, un-suppressing is the `.everything`
+        // that draws the moved ink, once, and a nudge made with the latch already down is bounded by
+        // where each piece was and where it went.
+        vector.restoreElements(newElements, changedInk: nil, rewriting: float.insideIDs)
         float.frame.transform = transform
         float.frame.aspect = aspect
         float.frame.stretchAxis = stretchAxis
@@ -1358,7 +1365,7 @@ extension CanvasManager {
         let keyed = current.concatenating(outer).concatenating(map).concatenating(outerInverse)
         commitTransformPose(layerID: float.layerID, celID: float.celID, channel: channel,
                             restBox: restBox, map: keyed, restElements: float.elementsBeforeLift,
-                            atFrame: currentFrame)
+                            movedIDs: float.insideIDs, atFrame: currentFrame)
     }
 
     /// Un-does the lift itself, verbatim — the pre-split display list, the loop back on screen, and
@@ -1655,14 +1662,21 @@ extension CanvasManager {
                                               endsFloat: Bool, layerID: UUID, celID: UUID) {
         let beforeLift = vectorFloat?.elementsBeforeLift ?? oldElements
         let selectionBeforeLift = vectorFloat?.selectionBeforeLift
+        // The ids the nudge moved under their own id — `applyToVectorFloat`'s rewritten set, read
+        // off the same float. The presses go through the same seam the nudge did, for the same
+        // reason: while the pieces are suppressed a press changes no pixel here, and once they are
+        // not it is bounded by where each was and where it goes.
+        let moved = vectorFloat?.insideIDs ?? []
         let cost = (oldElements.count + newElements.count) * 512
         recordUndo(label: .move, cost: cost, undo: { [weak self] in
             guard let self else { return }
             // Undoing the first nudge undoes the split as well: the artist gets one stroke back, not
-            // two halves sitting on top of each other.
-            vector.elements = endsFloat ? beforeLift : oldElements
+            // two halves sitting on top of each other. Clearing the suppression is `.everything`,
+            // which is right — the parents come back into a picture that had the pieces hidden —
+            // and it has to come first, so that the restore is not read against a stale set.
             if endsFloat { vector.suppressedElementIDs = [] }
-            vector.bumpVersion()
+            vector.restoreElements(endsFloat ? beforeLift : oldElements, changedInk: nil,
+                                   rewriting: moved)
             self.selection = endsFloat ? selectionBeforeLift : oldSelection
             if endsFloat {
                 self.vectorFloat = nil
@@ -1677,8 +1691,7 @@ extension CanvasManager {
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             guard let self else { return }
-            vector.elements = newElements
-            vector.bumpVersion()
+            vector.restoreElements(newElements, changedInk: nil, rewriting: moved)
             self.selection = newSelection
             self.vectorFloat?.frame.transform = newFrameTransform
             self.vectorFloat?.frame.aspect = newAspect

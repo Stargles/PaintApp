@@ -89,6 +89,7 @@ extension CanvasManager {
                 guard let vector = cel.vector, vector.holdsVideo else { continue }
                 var elements = vector.elements
                 var changed = false
+                var rewritten: Set<UUID> = []
                 for index in elements.indices {
                     guard case .video(var video) = elements[index],
                           let crop = crops[video.id], VideoCrop(of: video) != crop else { continue }
@@ -96,11 +97,14 @@ extension CanvasManager {
                     video.sourceEnd = crop.end
                     video.speed = crop.speed
                     elements[index] = .video(video)
+                    rewritten.insert(video.id)
                     changed = true
                 }
                 guard changed else { continue }
-                vector.elements = elements
-                vector.bumpVersion()
+                // The same seam the forward crop and speed writes use, and the same argument
+                // (`writeVideoCrop`): a same-id rewrite that moves no rectangle, bounded by the
+                // element's own quad rather than `bumpVersion()`'s whole cel — TODO (41).
+                vector.restoreElements(elements, changedInk: nil, rewriting: rewritten)
             }
         }
     }

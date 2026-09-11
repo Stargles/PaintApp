@@ -394,12 +394,16 @@ extension CanvasManager {
                                    // exactly the question `ElementSwap` asks — but a session that
                                    // emptied the box *removed* that id (`removeTextLocked`), and an
                                    // id that is in one list and not the other is what
-                                   // `restoreElements` bounds by difference. Both add/remove arms
-                                   // are bounded whether or not the box clips, since TODO (41):
+                                   // `restoreElements` bounds by difference. All three arms are
+                                   // bounded whether or not the box clips, since TODO (41):
                                    // `derivedFootprint(of:lowestResolution:)` measures a pristine
-                                   // box's glyph ink and reads a sized one's clip.
-                                   swap: editingID == nil || element == nil
-                                       ? .addsAndRemoves(ink: nil) : .rewritesInPlace)
+                                   // box's glyph ink and reads a sized one's clip, in both the old
+                                   // value and the new. (The forward retype itself is bracketed by
+                                   // two suppression changes and stays `.everything`; it is the
+                                   // undo and the redo that this bounds.)
+                                   swap: editingID.map { element == nil ? .addsAndRemoves(ink: nil)
+                                                                        : .rewritesInPlace([$0]) }
+                                       ?? .addsAndRemoves(ink: nil))
         // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
         // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
@@ -421,20 +425,29 @@ extension CanvasManager {
     ///
     /// **What a caller knows about the shape of its own edit** — the answer
     /// `registerVectorElementsUndo` needs before it can put the swap through
-    /// `VectorCanvas.restoreElements(_:changedInk:)` instead of `bumpVersion()`.
+    /// `VectorCanvas.restoreElements(_:changedInk:rewriting:)` instead of `bumpVersion()`.
     ///
     /// There are two questions and they are separate, which is why this is one type rather than two
-    /// parameters: a rectangle is meaningless from a caller whose edit `restoreElements` cannot read at
-    /// all, and the pair `(rewritesInPlace: true, ink: someRect)` should not be expressible.
+    /// parameters: a rectangle is meaningless beside a set of rewritten ids, since the canvas derives
+    /// a rewrite's rectangle itself, and the pair `(rewritesInPlace: someIDs, ink: someRect)` should
+    /// not be expressible.
     enum ElementSwap {
         /// **At least one element in the new list carries the old list's id with different content**
-        /// — a recolour, an Apply Brush, a text object re-edited under the id it already had.
+        /// — a recolour, an Apply Brush, a text object re-edited under the id it already had — and
+        /// these are the ids that may.
         ///
         /// `restoreElements` chooses the footprints it drops by *id difference*, so a rewritten
-        /// element keeps a measured footprint that is no longer true of it, and a later region edit
-        /// may skip it on that footprint and draw the wrong picture. `bumpVersion()`'s `.everything`
-        /// clears the table wholesale, which is the only answer that is safe here.
-        case rewritesInPlace
+        /// element it was not told about would keep a measured footprint that is no longer true of
+        /// it, and a later region edit could skip it on that footprint and draw the wrong picture.
+        /// Told, it forgets that element's footprint and bounds the swap by the union of where the
+        /// element was and where it will be — `restoreElements(_:changedInk:rewriting:)` carries the
+        /// argument. Until TODO (41)'s last box this case was `bumpVersion()`'s `.everything`, which
+        /// was the only safe answer while nothing said *which* ids.
+        ///
+        /// **Over-declare rather than under-declare**: an id here that did not change costs its own
+        /// footprint's worth of repair, an id left out that did change is a wrong picture. A
+        /// selection's whole membership is a correct answer and is what the two selection verbs pass.
+        case rewritesInPlace(Set<UUID>)
         /// **The new list is the old one with elements added and removed, none rewritten.**
         ///
         /// - Parameter ink: a rectangle containing the ink of every element the *new* list carries
@@ -460,8 +473,14 @@ extension CanvasManager {
     /// **`swap` is what decides whether a press costs the rectangle or the cel**, and it has no
     /// default on purpose: `bumpVersion()` declares `Damage.everything`, so before it was asked for,
     /// undoing a fill on a 2,000-stroke cel re-stamped all 472,000 dabs — MEASURED at 1.1 s a press
-    /// (PERFORMANCE.md §11.11). Every call site now answers, and the ones that answer
-    /// `.rewritesInPlace` say in one line why.
+    /// (PERFORMANCE.md §11.11). Every call site answers, and since TODO (41)'s last box both answers
+    /// are bounded: a rewrite names its ids and `restoreElements(_:changedInk:rewriting:)` reads each
+    /// one's old footprint off the canvas at the press and derives its new one.
+    ///
+    /// **Neither closure captures a rectangle**, and for a rewrite that is load-bearing rather than
+    /// tidy: the departing half of a rewrite is the footprint the *last render* measured, which the
+    /// forward edit could not know, and a remembered rectangle would under-declare it wherever the
+    /// render had to widen. Both directions read the canvas as it stands.
     func registerVectorElementsUndo(vectorCanvas: VectorCanvas,
                                     oldElements: [VectorElement], newElements: [VectorElement],
                                     layerID: UUID, celID: UUID, label: HistoryActionLabel,
@@ -470,26 +489,20 @@ extension CanvasManager {
         // `MemoryLayout<VectorElement>.stride`, which is 576 today, and it charged the two lists
         // where a run of steps holds one array apiece.
         let cost = VectorUndoCost.bytes(from: oldElements, to: newElements)
-        guard case .addsAndRemoves(let ink) = swap else {
-            recordUndo(label: label, cost: cost, undo: { [weak self] in
-                vectorCanvas.elements = oldElements
-                vectorCanvas.bumpVersion()
-                self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-            }, redo: { [weak self] in
-                vectorCanvas.elements = newElements
-                vectorCanvas.bumpVersion()
-                self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-            })
-            return
+        let ink: CGRect?
+        let rewritten: Set<UUID>
+        switch swap {
+        case .addsAndRemoves(let rect): ink = rect; rewritten = []
+        case .rewritesInPlace(let ids): ink = nil; rewritten = ids
         }
         // One rectangle for both closures, for `StrokeCanvasView.registerVectorUndo`'s reason: it
         // bounds every pixel where the two lists differ, and that reads the same way in either
-        // direction.
+        // direction. The rewritten set reads the same way too — the ids are the same ids.
         recordUndo(label: label, cost: cost, undo: { [weak self] in
-            vectorCanvas.restoreElements(oldElements, changedInk: ink)
+            vectorCanvas.restoreElements(oldElements, changedInk: ink, rewriting: rewritten)
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
-            vectorCanvas.restoreElements(newElements, changedInk: ink)
+            vectorCanvas.restoreElements(newElements, changedInk: ink, rewriting: rewritten)
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
     }

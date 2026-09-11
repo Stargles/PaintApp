@@ -309,18 +309,21 @@ extension CanvasManager {
             motionGroups.append(contentsOf: created)
             for (_, canvas) in resolved {
                 var elements = canvas.elements
-                var changed = false
+                var retagged: Set<UUID> = []
                 for index in elements.indices {
                     guard case .stroke(var stroke) = elements[index],
                           let cluster = clusterOfStroke[stroke.id],
                           stroke.motionGroupID != created[cluster].id else { continue }
                     stroke.motionGroupID = created[cluster].id
                     elements[index] = .stroke(stroke)
-                    changed = true
+                    retagged.insert(stroke.id)
                 }
-                if changed {
-                    canvas.elements = elements
-                    canvas.bumpVersion()
+                if !retagged.isEmpty {
+                    // A same-id rewrite, declared as one (TODO (41)): a tag places no dab, so each
+                    // retagged stroke's rectangle is its own measured footprint, and the walk that
+                    // re-keys the preview memo repairs that rather than the cel. The undo of this
+                    // bracket is `applyInterpolationState`'s wholesale swap and stays `.everything`.
+                    canvas.restoreElements(elements, changedInk: nil, rewriting: retagged)
                 }
             }
             reregisterInterpolations(reading: touched)
@@ -372,12 +375,17 @@ extension CanvasManager {
     private func retag(in canvases: [VectorCanvas], to groupID: UUID?,
                        where predicate: (VectorStroke) -> Bool) {
         for canvas in canvases {
-            canvas.elements = canvas.elements.map { element in
-                guard case .stroke(var stroke) = element, predicate(stroke) else { return element }
+            var retagged: Set<UUID> = []
+            let elements = canvas.elements.map { element -> VectorElement in
+                guard case .stroke(var stroke) = element, predicate(stroke),
+                      stroke.motionGroupID != groupID else { return element }
                 stroke.motionGroupID = groupID
+                retagged.insert(stroke.id)
                 return .stroke(stroke)
             }
-            canvas.bumpVersion()
+            // A same-id rewrite, declared as one (TODO (41)) — `tagStrokesByColour`'s reason. A
+            // canvas the predicate touched nothing in declares a null region, which keeps its memo.
+            canvas.restoreElements(elements, changedInk: nil, rewriting: retagged)
         }
     }
 
@@ -732,20 +740,20 @@ extension CanvasManager {
                 guard let at = celIndices(forCel: celRef.celID, inLayer: celRef.layerID),
                       let canvas = layers[at.layer].cels[at.cel].vector else { continue }
                 var elements = canvas.elements
-                var changed = false
+                var retagged: Set<UUID> = []
                 for index in elements.indices {
                     let slot = cursor + index
                     guard slot < tags.count, case .stroke(var stroke) = elements[index],
                           stroke.motionGroupID != tags[slot] else { continue }
                     stroke.motionGroupID = tags[slot]
                     elements[index] = .stroke(stroke)
-                    changed = true
+                    retagged.insert(stroke.id)
                 }
                 cursor += elements.count
-                if changed {
-                    canvas.elements = elements
-                    // Bumps the version, which re-keys the preview memo so the retag shows up.
-                    canvas.bumpVersion()
+                if !retagged.isEmpty {
+                    // Moves the version, which re-keys the preview memo so the retag shows up — as
+                    // a same-id rewrite bounded by the retagged strokes' own footprints (TODO (41)).
+                    canvas.restoreElements(elements, changedInk: nil, rewriting: retagged)
                 }
             }
         }

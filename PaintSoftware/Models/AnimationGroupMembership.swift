@@ -366,11 +366,14 @@ extension CanvasManager {
             layers[currentLayerIndex].cels[celIndex]
                 .transformTracks[TransformChannelID.group($0).id] != nil
         } ?? false
-        vector.elements = rewritten
-        // **Not optional.** The `elements` setter deliberately does not invalidate, and both
-        // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this the
-        // edit happens in the model and the compensated geometry never reaches the screen.
-        vector.bumpVersion()
+        // **A same-id rewrite, declared as one** — TODO (41)'s last box. A retag with the identity
+        // compensation changes nothing the walk draws and costs each caught element its own
+        // footprint of repair; one with a real compensation moves the stored geometry, and the
+        // seam bounds it by where each element was and where it will be. `caught` is the set, for
+        // `recolorSelection`'s reason: over-declaring is a slightly larger rectangle, under-declaring
+        // is a wrong picture. Under Cut the split's pieces arrive under fresh ids, which the same
+        // call bounds by id difference.
+        vector.restoreElements(rewritten, changedInk: nil, rewriting: caught)
         // The transient tier, or a stale pre-edit fill preview composites over the top —
         // `recolorSelection` clears it for the same reason.
         setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
@@ -383,13 +386,11 @@ extension CanvasManager {
         recordUndo(label: .animationGroupMembership,
                    cost: VectorUndoCost.bytes(from: elementsBefore, to: rewritten),
                    undo: { [weak self] in
-                       vector.elements = elementsBefore
-                       vector.bumpVersion()
+                       vector.restoreElements(elementsBefore, changedInk: nil, rewriting: caught)
                        self?.animationGroups = groupsBefore
                        self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
                    }, redo: { [weak self] in
-                       vector.elements = rewritten
-                       vector.bumpVersion()
+                       vector.restoreElements(rewritten, changedInk: nil, rewriting: caught)
                        self?.animationGroups = groupsAfter
                        self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
                    })

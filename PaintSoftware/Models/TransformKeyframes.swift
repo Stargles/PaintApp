@@ -419,7 +419,11 @@ extension CanvasManager {
     ///
     /// `restBox` is the box the pose is measured against and `map` is the canvas-space map the
     /// gesture applied to the ink inside it. `restElements` is the display list as it stood *before*
-    /// the lift, which the `.key` arm restores.
+    /// the lift, which the `.key` arm restores, and `movedIDs` are the ids the gesture moved under
+    /// their own id — what the `.key` arm's swap may find rewritten (TODO (41)), which is the
+    /// float's `insideIDs`. Over-declaring costs a larger rectangle; under-declaring is a wrong
+    /// picture; an empty set is right only when `restElements` and the standing list hold the same
+    /// content under every shared id.
     ///
     /// **`map` is a `PoseMap` since KEYFRAMES.md §8 stage 5b**, so a Distort's keystone reaches the
     /// key rather than being flattened to its affine part on the way in. Every arm below is written
@@ -431,7 +435,7 @@ extension CanvasManager {
     @discardableResult
     func commitTransformPose(layerID: UUID, celID: UUID, channel: TransformChannelID,
                              restBox: CGRect, map: PoseMap,
-                             restElements: [VectorElement],
+                             restElements: [VectorElement], movedIDs: Set<UUID>,
                              atFrame frame: Int) -> KeyframeControl.Write {
         guard let at = celIndices(forCel: celID, inLayer: layerID),
               let target = keyframeTarget(layerIndex: at.layer)
@@ -480,7 +484,7 @@ extension CanvasManager {
             }
             keyPoseRestoringRest(layerID: layerID, celID: celID, channel: channel,
                                  atCelLocalFrame: local, pose: posed,
-                                 restElements: restElements)
+                                 restElements: restElements, movedIDs: movedIDs)
         }
         return route
     }
@@ -493,7 +497,7 @@ extension CanvasManager {
     /// an index.
     private func keyPoseRestoringRest(layerID: UUID, celID: UUID, channel: TransformChannelID,
                                       atCelLocalFrame frame: Int, pose: PoseQuad,
-                                      restElements: [VectorElement]) {
+                                      restElements: [VectorElement], movedIDs: Set<UUID>) {
         guard let at = celIndices(forCel: celID, inLayer: layerID),
               let vector = layers[at.layer].cels[at.cel].vector else { return }
         let before = celPoseState(layerID: layerID, celID: celID)
@@ -505,8 +509,11 @@ extension CanvasManager {
 
         let movedElements = vector.elements
         beginCanvasEdit()
-        vector.elements = restElements
-        vector.bumpVersion()
+        // **A same-id rewrite, declared as one** — TODO (41)'s last box. The moved elements go back
+        // to rest under their own ids (a piece a Cut minted is an id difference and is bounded by
+        // that half), so the seam bounds the swap by where each was and where it will be, in the
+        // bake and in both presses, rather than `bumpVersion()`'s whole-cel walk.
+        vector.restoreElements(restElements, changedInk: nil, rewriting: movedIDs)
         applyCelPoseState(state, layerID: layerID, celID: celID)
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
 
@@ -514,13 +521,11 @@ extension CanvasManager {
         recordUndo(label: .effectKeyframes,
                    cost: (movedElements.count + restElements.count) * 512,
                    undo: { [weak self] in
-                       vector.elements = movedElements
-                       vector.bumpVersion()
+                       vector.restoreElements(movedElements, changedInk: nil, rewriting: movedIDs)
                        self?.applyCelPoseState(before, layerID: layerID, celID: celID)
                        self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
                    }, redo: { [weak self] in
-                       vector.elements = restElements
-                       vector.bumpVersion()
+                       vector.restoreElements(restElements, changedInk: nil, rewriting: movedIDs)
                        self?.applyCelPoseState(state, layerID: layerID, celID: celID)
                        self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
                    })
