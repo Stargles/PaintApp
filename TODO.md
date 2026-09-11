@@ -48,32 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (60) Two more effects
-
-**Status** — not started, reported 2026-09-10. (Bloom's colour and Sobel's gain, the ask this item
-opened with, and two of the "four more effects" below — Recolour and Computer Screen — have all
-shipped and are gone from here. `Bloom.color` and `Sobel.gain` are `EffectParameter`s keyed through the
-existing track machinery, both defaulting to the identity so an old document renders unchanged.)
-
-**Four more effects, added by the owner 2026-09-10** — two left below now that Recolour and Computer
-Screen have shipped. These are new effects rather than parameters, so each is a `case` on `Effect` with
-its shader, its `lookupTable`/`params` arms and its settings UI — the enum's own comment says adding a
-case fails to compile until every arm is written, which is the safety this list relies on.
-
-- [ ] **Hue colorize.** > *"hue colorize option: look into adobe after effects for this. Useful for color
-      correcting images to look like the background"* — After Effects' Tint / Colorize: map the image's
-      luminance onto a colour ramp, or pull its hue toward a target, so a pasted photo takes on the
-      scene's palette. **The machinery exists**: `gradientMap` already maps luminance through a ramp and
-      mixes through Oklab, ruled by the owner 2026-08-30 after seeing `docs/oklab-ramps/02-the-cost.png`.
-      So this may be a *mode* of gradient map rather than a new effect — weigh that first.
-- [ ] **Dither.** > *"dither: supports different options. i think it may work sort of like posterize?"*
-      The owner's instinct is right: dither is quantisation like `posterize`, plus a spatial pattern that
-      trades banding for texture. Options worth having are the pattern (ordered/Bayer versus
-      error-diffusion) and the level count. Ordered is the one that survives animation — error diffusion
-      changes globally when one pixel changes, so it **crawls between frames**, which matters here in a
-      way it does not in a still-image editor. Say that in the UI or pick ordered by default.
----
-
 ## (61) The transform layer becomes its own layer type, with five new modes
 
 **Status** — not started, specified by the owner 2026-09-10. **This is a feature with a spec's worth of
