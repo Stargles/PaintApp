@@ -317,4 +317,32 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].cels[1].id, wasID)
         XCTAssertNotEqual(manager.layers[1].cels[2].id, wasID)
     }
+
+    // MARK: - Duplicate a layer flattens its in-betweens too (BUGS.md, 2026-09-11)
+
+    /// **The fourth door.** `duplicateLayer` walked its own `Cel(...)` — `raster`, `fillImage`,
+    /// `bakedImage`, `vector`, no `copyTiers` at all — so a duplicated layer's in-between came back
+    /// blank exactly as `duplicateCel`'s and `pasteCel`'s did before 2026-09-02, through a fourth
+    /// door found while auditing every `Cel(...)` for TODO (62).
+    ///
+    /// Watched failing with `duplicateLayer`'s cel loop restored to a bare `Cel(id:startFrame:
+    /// frameCount:raster:fillImage:bakedImage:vector:)`: the duplicated layer's middle cel is blank.
+    func testDuplicatingALayerCopiesAnInBetweensPictureRatherThanBlank() throws {
+        let (manager, _, _) = try interpolated()
+        let want = shown(manager, manager.layers[1].cels[1])
+        XCTAssertFalse(isBlank(want), "Setup: the in-between shows a picture to begin with")
+
+        manager.duplicateLayer(at: 1)
+        XCTAssertEqual(manager.layers.count, 3, "Setup: the duplicate landed")
+        let copy = manager.layers[2].cels[1]
+        XCTAssertEqual(copy.startFrame, manager.layers[1].cels[1].startFrame, "Setup: same slot")
+
+        PixelOps.clearRasterizeCache()
+        let got = stored(copy)
+        XCTAssertFalse(isBlank(got), "a duplicated layer's in-between is not blank")
+        XCTAssertEqual(bytes(of: got), bytes(of: want),
+                       "and it is the same picture, now stored rather than derived")
+        XCTAssertNil(manager.derivedCelContent(for: copy, atFrame: copy.startFrame),
+                     "which is what 'stops following the two drawings it derives from' means")
+    }
 }

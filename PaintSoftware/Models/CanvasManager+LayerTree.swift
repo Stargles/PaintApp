@@ -890,13 +890,25 @@ extension CanvasManager {
     }
 
     /// Copies a layer — content, cels, folder, and settings — in place above the original.
+    ///
+    /// **The cels go through `copyTiers(of:)`, not a hand-rolled `Cel(...)`** — the 2026-09-11 fix for
+    /// the fourth site `duplicateCel`, `splitCel` and `pasteCel` fell through before 2026-09-02:
+    /// naming `raster`, `fillImage`, `bakedImage` and `vector` but not `transformTracks` or
+    /// `pendingPoseBaselines` defaults both away, so a duplicated cel's Move animation and held pose
+    /// vanished silently. `copyTiers` also flattens a `.generate` cel into a still (`flattenedStill`),
+    /// which this site never did either — a duplicated in-between came back **blank**, since a
+    /// `.generate` cel stores nothing in the tiers a bare `Cel(...)` reads. No `interpolation:`
+    /// argument, on either arm, for `duplicateCel`'s own reason: a copy never derives.
     func duplicateLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         let source = layers[index]
         let cels = source.cels.map { cel -> Cel in
+            let tiers = copyTiers(of: cel)
             let copy = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
-                           raster: cel.raster.makeCopy(), fillImage: cel.fillImage,
-                           bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
+                           raster: tiers.raster, fillImage: tiers.fillImage,
+                           bakedImage: tiers.bakedImage, vector: tiers.vector,
+                           transformTracks: tiers.transformTracks,
+                           pendingPoseBaselines: tiers.pendingPoseBaselines)
             // **Assigned after construction rather than carried in the initialiser**, because since
             // §18.6 a tile is a reference cell and this is a *new cel with a new id*. Every `Cel(...)`
             // mints its own `ThumbnailTile` (see `Cel.tile`), so this line copies the picture into the
@@ -940,6 +952,13 @@ extension CanvasManager {
                          channelBaselines: source.channelBaselines,
                          keyframeMarks: source.keyframeMarks,
                          pendingBaselines: source.pendingBaselines,
+                         // `transform` is the third payload of the effect/transform/fill recipe
+                         // `Layer.transform`'s own doc describes, and it fell through the same door
+                         // `effect` and `fill` beside it were carried through: missing here, a
+                         // duplicated transformation layer decoded as a value layer with no pose —
+                         // `layerEffect`, `layerTransform` and `valueFill` all read presence, and
+                         // `nil` reads as "flat colour".
+                         transform: source.transform,
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)

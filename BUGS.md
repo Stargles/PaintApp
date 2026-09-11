@@ -35,29 +35,6 @@ mode (§0, §7); no test in `TransformLayerLogicTests` or `TransformLayerEntryLo
 visibility. The folder form does not share it — a hidden folder's whole subtree is skipped by the
 compositor, so its `resolvedPoseMapping` reaches nothing.
 
-## `duplicateLayer` drops every cel's pose channels, its held poses, its in-between recipe — and the layer's own transform (2026-09-11)
-
-`CanvasManager.duplicateLayer(at:)` builds each copied cel with a memberwise `Cel(...)` that names
-`raster`, `fillImage`, `bakedImage` and `vector` and **not** `transformTracks`, `pendingPoseBaselines`
-or `interpolation`, so all three default away: a duplicated layer comes back as its drawings with
-every Move animation deleted, and an in-between comes back **blank** (a `.generate` cel stores nothing;
-`copyTiers` exists to flatten it, per the 2026-09-03 ruling, and this site does not use it). It is the
-same door `duplicateCel`, `splitCel` and `pasteCel` fell through before 2026-09-02; this fourth site
-was found on 2026-09-11 while auditing every `Cel(...)` for TODO (62). **And the `Layer(...)` beneath
-it names `effectTracks`, `channelTracks`, `keyframeMarks` and `pendingBaselines` but not `transform`**
-— confirmed by the (62) review with a test that duplicated a transformation layer and read `nil` — so
-a duplicated transformation layer is a value layer with no pose, which `valueFill` then reads as a
-flat-colour layer. (The first filing of this entry said `transform` *was* carried; it is not.) The
-layer-level *tracks* being carried is what makes the cel-level loss hard to notice: the timeline
-still draws the layer's keyframe marks and opacity diamonds on the copy, while the cel's own pose
-diamonds are gone.
-
-Three lines: build the cels through `copyTiers(of:)` (which answers `transformTracks` and
-`pendingPoseBaselines` and flattens a derived cel), and pass `transform: source.transform` to the
-`Layer(...)`; plus a logic test that duplicates an animated transformation layer and reads the copy's
-`transformTracks` and `transform`. Not fixed on the (62) branch or its review because it is a copy
-verb rather than a span change — a later worker's, and the shape is one commit.
-
 ## Splitting a stepped pose channel changes the left half's last frames (2026-09-11)
 
 `TransformTrack.split(atCelLocalFrame:)` inserts a key at `cut - 1` holding `pose(atCelLocalFrame:

@@ -879,4 +879,51 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertNotNil(transformed.transform)
         XCTAssertNil(transformed.fill)
     }
+
+    // MARK: - Duplicate (BUGS.md, 2026-09-11)
+
+    /// **`duplicateLayer` never carried `transform`.** `Layer(...)`'s memberwise call there named
+    /// `effect`, `fill` and every keyframe field beside them, but not this one, so a duplicated
+    /// transformation layer decoded with `transform == nil` — `layerEffect`, `layerTransform` and
+    /// `valueFill` all read presence to decide the layer's mode, and a dropped `transform` reads as a
+    /// flat colour. The BUGS.md filing found this with a test that duplicated a transformation layer
+    /// and read `nil` back; this is that test, pinned in place.
+    ///
+    /// Watched failing with `transform:` removed from `duplicateLayer`'s `Layer(...)`:
+    /// `copy.layerTransform` is nil, so the copy is a mid-grey flat-colour layer instead of a
+    /// transformation layer, and the ink beneath it stops moving.
+    func testDuplicatingATransformationLayerCarriesItsPoseAndItStillPosesInk() throws {
+        let moverPose = animatedPose(CGAffineTransform(translationX: 24, y: 0))
+        let (manager, drawn) = posedVectorLayer(moverPose)
+        guard let moverAt = manager.layers.firstIndex(where: { $0.name == "mover" }) else {
+            return XCTFail("Setup: the transformation layer must exist to be duplicated")
+        }
+        XCTAssertNotNil(manager.layers[moverAt].layerTransform,
+                        "Premise: the source really is a transformation layer")
+        let wantBounds = try XCTUnwrap(inkBounds(PixelOps.rasterize(
+            cel: manager.layers[drawn].cels[0], canvasSize: size,
+            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))),
+            "Premise: the mover's frame-8 key really does move the ink")
+
+        manager.duplicateLayer(at: moverAt)
+        XCTAssertEqual(manager.layers.count, 3, "Premise: the duplicate landed")
+        let copy = manager.layers[moverAt + 1]
+
+        XCTAssertEqual(copy.transform, moverPose, "the pose and its whole track — keys, handles and all")
+        XCTAssertNotNil(copy.layerTransform, "still a transformation layer, not a flat colour")
+        XCTAssertNil(copy.valueFill, "and not a flat colour by the other accessor either")
+
+        // The duplicate landed *above* the source, in the same container as `drawn` — two stacked
+        // transform layers compose (`testTwoStackedTransformLayersComposeInnerFirst`), so leaving the
+        // original in force would double the translation and the comparison below would be about
+        // composition rather than about the copy. Resting the original isolates what is being asked:
+        // does the *copy*, on its own, still pose ink the way the source did.
+        manager.layers[moverAt].transform = LayerPose(restingIn: canvasBox)
+        let gotBounds = try XCTUnwrap(inkBounds(PixelOps.rasterize(
+            cel: manager.layers[drawn].cels[0], canvasSize: size,
+            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))),
+            "the copy alone must still derive a posed picture at frame 8")
+        XCTAssertEqual(gotBounds.minX, wantBounds.minX, accuracy: 0.5,
+                       "the ink moves the same amount under the copy alone as it did under the source")
+    }
 }

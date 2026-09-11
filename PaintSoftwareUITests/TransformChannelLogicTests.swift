@@ -811,4 +811,41 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertNil(manager.animationGroup(named: .cel(.group(UUID()))),
                      "A tag whose group has been deleted names nothing")
     }
+
+    // MARK: - Duplicate (BUGS.md, 2026-09-11)
+
+    /// **`duplicateLayer` dropped every cel's pose channels.** Each copied `Cel(...)` named `raster`,
+    /// `fillImage`, `bakedImage` and `vector` and not `transformTracks` or `pendingPoseBaselines`, so
+    /// a duplicated layer's Move animation was silently deleted — the fourth site `duplicateCel`,
+    /// `splitCel` and `pasteCel` fell through before 2026-09-02, reached through `duplicateLayer`'s
+    /// own door. The fix routes the cel copy through `copyTiers(of:)`, exactly as `duplicateCel`
+    /// already does.
+    ///
+    /// Watched failing with `copyTiers` removed from `duplicateLayer`'s cel loop (a bare `Cel(...)`
+    /// with no `transformTracks:`/`pendingPoseBaselines:`): `copy.transformTracks` reads `[:]` and
+    /// frame 4 renders the resting drawing — `inkBounds` at the source's *rest* position rather than
+    /// its posed one, so the bounds comparison is the assertion that would go red on its own even
+    /// without the channel-equality check beside it.
+    func testDuplicatingALayerCarriesItsCelsMoveKeysAndRendersTheSamePoseAtAMiddleFrame() throws {
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)
+        let source = manager.layers[1].cels[0]
+        let want = PixelOps.rasterize(cel: source, canvasSize: size,
+                                      derived: manager.derivedCelContent(for: source, atFrame: 4))
+        let wantBounds = try XCTUnwrap(inkBounds(want), "Setup: frame 4 shows a posed drawing")
+
+        manager.duplicateLayer(at: 1)
+        XCTAssertEqual(manager.layers.count, 3, "Setup: the duplicate landed")
+        let copy = manager.layers[2].cels[0]
+        XCTAssertEqual(copy.transformTracks, source.transformTracks,
+                       "the whole channel — keys, handles and all — travels with the copy")
+
+        let got = PixelOps.rasterize(cel: copy, canvasSize: size,
+                                     derived: manager.derivedCelContent(for: copy, atFrame: 4))
+        let gotBounds = try XCTUnwrap(inkBounds(got),
+                                      "the copy must still derive a posed picture at frame 4")
+        XCTAssertEqual(gotBounds.minX, wantBounds.minX, accuracy: 0.5,
+                       "the duplicate renders the same pose the source does at the same frame — what "
+                       + "is drawn, not only what `transformTracks` stores")
+    }
 }
