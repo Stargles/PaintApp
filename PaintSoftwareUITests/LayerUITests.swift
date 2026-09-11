@@ -1124,7 +1124,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     /// transformation layer with its own eye left the drawing beneath it exactly where the pose put
     /// it — a hidden control with no visible effect, CLAUDE.md's "silent refusal" shape reached
     /// through a fourth door. This drives the same route
-    /// `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt` proves reachable, then asks the
+    /// `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt` proves reachable, then asks the
     /// artist's own next question: does the eye do anything to a layer that only moves other layers?
     ///
     /// Watched failing with the `isVisible` guard removed from `renderNodes`'s accumulator: hiding the
@@ -1160,10 +1160,18 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertNotNil(inkResting, "Sanity: the stroke landed")
 
         openLayerPanel(app)
-        addValueLayerFromAddMenu(app)
-        app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.blendModeButton"].tap()
-        app.buttons["layerOptions.blendMode.transform"].tap()
+        addTransformLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The + menu's Transform Layer entry added a row")
+        row.tap()   // already selected after the add: opens its options
+
+        let modeButton = app.buttons["layerOptions.transformModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "A transform layer's options open on its mode picker")
+        modeButton.tap()
+        let moveItem = app.buttons["layerOptions.transformMode.move"]
+        XCTAssertTrue(moveItem.waitForExistence(timeout: 5))
+        moveItem.tap()
+
         let moveRow = app.buttons["layerOptions.transformMove"]
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
         moveRow.tap()
@@ -1183,10 +1191,10 @@ final class LayerPanelControlsUITests: PaintUITestCase {
 
         // **What the artist does next.** The Move box docks the rail down while it is live (unlike a
         // no-selection canvas Move, entering *this* Move through the layer options panel leaves the
-        // rail closed once the box is done, rather than reopened) — so reaching the eye beside
-        // "Value 2" costs one more tap on the layers button, the same one that opened it to begin
-        // with. **The rail is opened only long enough to tap the eye, then closed again**, because
-        // the canvas re-letterboxes to make room for it — comparing `inkColumn()` across an open rail
+        // rail closed once the box is done, rather than reopened) — so reaching the eye beside the
+        // new "Transform 2" row costs one more tap on the layers button, the same one that opened it
+        // to begin with. **The rail is opened only long enough to tap the eye, then closed again**,
+        // because the canvas re-letterboxes to make room for it — comparing `inkColumn()` across an open rail
         // and a closed one compares two different layouts, not two poses; a first draft of this test
         // measured exactly that and read a leaked pose where there was none.
         openLayerPanel(app)
