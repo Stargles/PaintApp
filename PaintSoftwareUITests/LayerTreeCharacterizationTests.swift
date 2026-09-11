@@ -760,21 +760,22 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "The predicate resolves positions; it does not read the argument order as the stack order")
     }
 
-    /// A transformation layer (§4.4's third payload) is a pose on the layers beneath it, which a pixel
-    /// bake cannot express — so it is the one `.value` mode that is still reported in *either*
-    /// position.
+    /// A transformation layer (`LayerKind.transform`) is a pose on the layers beneath it, which a
+    /// pixel bake cannot express — so it is the one pixel-less kind that is still reported in
+    /// *either* position.
     func testMergeLossKindReportsATransformationLayerInEitherPosition() {
         let manager = CanvasFixture.manager()
         manager.layers.removeAll()
         manager.addLayer(name: "Bottom")
-        manager.addValueLayer(name: "Top")
+        manager.addTransformLayer(name: "Top")
         manager.layers[1].transform = LayerPose(restingIn: CGRect(origin: CGPoint(x: 8, y: 0), size: CanvasFixture.canvasSize))
-        XCTAssertNotNil(manager.layers[1].layerTransform, "Setup: Top is in transform mode")
+        XCTAssertNotNil(manager.layers[1].layerTransform, "Setup: Top is a transform layer")
 
         XCTAssertEqual(manager.mergeLossKind(manager.layers[0].id, manager.layers[1].id), .unbakeableLayer)
 
+        manager.layers[1].kind = .raster
         manager.layers[1].transform = nil
-        manager.layers[0].kind = .value
+        manager.layers[0].kind = .transform
         manager.layers[0].transform = LayerPose(restingIn: CGRect(origin: CGPoint(x: 8, y: 0), size: CanvasFixture.canvasSize))
         XCTAssertEqual(manager.mergeLossKind(manager.layers[0].id, manager.layers[1].id), .unbakeableLayer,
                        "…and in the lower position too, where a grade is also unbakeable")

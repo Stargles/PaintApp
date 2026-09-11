@@ -166,7 +166,7 @@ enum UITestSeeds {
     /// its options menu and the graph editor's keyframe marks, and a UI test that spent them would be
     /// testing those three surfaces rather than the one thing it is for — whether the canvas serves a
     /// keyframed move off the bake instead of rasterizing it per tick. Every field below is the value
-    /// the real writers store: `addValueLayer` then `Layer.transform`, which is what
+    /// the real writers store: `addTransformLayer` then `Layer.transform`, which is what
     /// `transformMoveRow` and `setContainerPoseKey` end at.
     ///
     /// The ink is one horizontal stroke, thick enough that a single pixel probe finds it, and the move
@@ -189,10 +189,9 @@ enum UITestSeeds {
                                     VectorSample(x: size.width * 0.5, y: size.height * 0.5, pressure: 1)],
                                    channels: .pressureOnly)))
 
-        canvasManager.addValueLayer()
+        canvasManager.addTransformLayer()
         let box = CGRect(origin: .zero, size: size)
         let mover = canvasManager.layers.count - 1
-        canvasManager.layers[mover].fill = nil
         canvasManager.layers[mover].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
             track: TransformTrack(keys: [
@@ -239,10 +238,9 @@ enum UITestSeeds {
                                     VectorSample(x: size.width * 0.5, y: size.height * 0.5, pressure: 1)],
                                    channels: .pressureOnly)))
 
-        canvasManager.addValueLayer()
+        canvasManager.addTransformLayer()
         let box = CGRect(origin: .zero, size: size)
         let mover = canvasManager.layers.count - 1
-        canvasManager.layers[mover].fill = nil
         canvasManager.layers[mover].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
             track: TransformTrack(keys: [

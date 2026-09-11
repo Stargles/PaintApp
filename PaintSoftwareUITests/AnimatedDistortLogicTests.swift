@@ -620,9 +620,8 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = CanvasFixture.canvasSize
         manager.addVectorLayer(name: "ink")
-        manager.addValueLayer(name: "mover")
+        manager.addTransformLayer(name: "mover")
         let at = manager.layers.count - 1
-        manager.setLayerTransform(layerIndex: at, to: manager.restingContainerPose)
         manager.currentLayerIndex = at
         return manager
     }

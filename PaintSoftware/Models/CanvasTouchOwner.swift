@@ -197,9 +197,10 @@ enum CanvasActiveLayer: String, CaseIterable, Hashable {
         switch kind {
         case nil:
             self = .none
-        case .value:
-            // `Layer.hasNoDrawingSurface` is `kind == .value`; switching on the kind rather than
-            // asking the property is what makes a fourth `LayerKind` answer here at compile time.
+        case .value, .transform:
+            // `Layer.hasNoDrawingSurface` is `!kind.holdsPixels`; switching on the kind rather than
+            // asking the property is what made the fourth `LayerKind` answer here at compile time,
+            // and will make a fifth.
             self = .noDrawingSurface
         case .vector:
             self = .vector

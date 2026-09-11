@@ -160,9 +160,8 @@ final class PoseBandLogicTests: XCTestCase {
     /// conversion because a transformation layer has no cel to ride.
     func testAContainerPoseIsListedInAbsoluteFramesWithNoOffset() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].fill = nil
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: canvasBox),
             track: TransformTrack(keys: [
@@ -179,12 +178,12 @@ final class PoseBandLogicTests: XCTestCase {
                        [Double(canvasBox.midX), Double(canvasBox.midX) + 40])
     }
 
-    /// **A layer that is not in transform mode contributes no pose channel**, which is
+    /// **A layer that is not a transform layer contributes no pose channel**, which is
     /// `storedEffect(of:)`'s asymmetry one payload over: a pose left behind by a kind change poses
     /// nothing, so a curve for it would picture an animation the canvas is not running.
-    func testAPoseLeftOnALayerThatIsNotInTransformModeIsNotListed() throws {
+    func testAPoseLeftOnALayerThatIsNotATransformLayerIsNotListed() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: canvasBox),
@@ -194,7 +193,7 @@ final class PoseBandLogicTests: XCTestCase {
                                                mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
         manager.currentLayerIndex = 1
         manager.isGraphEditorOpen = true
-        XCTAssertNotNil(manager.layers[1].layerTransform, "Fixture: it is in transform mode now")
+        XCTAssertNotNil(manager.layers[1].layerTransform, "Fixture: it is a transform layer")
         XCTAssertFalse(try content(manager).channels.isEmpty)
 
         manager.layers[1].kind = .raster
@@ -228,9 +227,8 @@ final class PoseBandLogicTests: XCTestCase {
     /// this test and `testEveryPoseNodeHasAnIndicatorAndEveryIndicatorHasANode`'s container twin.
     func testATransformationLayersOwnKeysAreKeyframes() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].fill = nil
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: canvasBox),
             track: TransformTrack(keys: [
@@ -390,9 +388,8 @@ final class PoseBandLogicTests: XCTestCase {
     /// above and fail exactly here.
     func testTheDefaultReachesATransformationLayersOwnPose() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].fill = nil
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: canvasBox),
             track: TransformTrack(keys: [
@@ -427,9 +424,8 @@ final class PoseBandLogicTests: XCTestCase {
     /// still not an animation and is still hidden by default.
     func testAFullSizeSlideLeavesScaleXFlatDespiteTheDecompositionsFloatingPointNoise() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let wide = CGRect(x: 0, y: 0, width: 2048, height: 1024)
-        manager.layers[1].fill = nil
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: wide),
             track: TransformTrack(keys: [
@@ -581,9 +577,8 @@ final class PoseBandLogicTests: XCTestCase {
     /// container has no geometry to lift.
     func testAContainerPosesRowsNavigateToItsOwnMoveBox() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].fill = nil
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: canvasBox),
             track: TransformTrack(keys: [

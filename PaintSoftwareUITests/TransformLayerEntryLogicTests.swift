@@ -2,21 +2,21 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// Pure-logic tests for **the way an artist reaches the transformation layer** — KEYFRAMES.md §2.6's
-/// relabelled menu and §4.4's *"the artist-facing entry in the value layer's relabelled menu, and a
-/// writer that commits a Move box into `LayerPose.pose` / keys the track"*.
+/// Pure-logic tests for **the way an artist reaches the transformation layer** — since 2026-09-11 a
+/// kind of its own with its own `+` entry (TRANSFORM_LAYER.md §2 ruling 2, `addTransformLayer`),
+/// and §4.4's *"a writer that commits a Move box into `LayerPose.pose` / keys the track"*.
 ///
 /// `TransformLayerLogicTests` beside this one pins what a container pose *does* once it is there —
 /// scope, the three cache keys, which tier moves in which currency. This one pins how it gets there,
 /// and every assertion is written against the accessor the render path actually reads
 /// (`Layer.layerTransform`, `CanvasManager.layerPoses(atFrame:)`) rather than against
-/// `Layer.transform`, because that field is inert on a layer that is grading or is not `.value` and a
-/// table written against it is the forty-rows-that-set-nothing trap one payload over.
+/// `Layer.transform`, because that field is inert on a layer that is not `.transform` and a table
+/// written against it is the forty-rows-that-set-nothing trap one payload over.
 ///
-/// Four things are pinned, ordered by how expensive each is to discover later.
+/// Five things are pinned, ordered by how expensive each is to discover later.
 ///
-/// 1. **The mode picker's third arm**, including the two ways out of it and the asymmetry between
-///    them: a grade leaves the pose stored and inert, a blend destroys it.
+/// 1. **The kind**: a transform layer arrives posing, at rest, and nothing a value layer's setters
+///    write can reach it.
 /// 2. **The Move box's commit**, through all four of `KeyframeControl.write`'s live arms, including
 ///    that the stored base is written on every one of them — which is where a container pose differs
 ///    from a cel's and is the easiest thing here to get backwards.
@@ -25,6 +25,9 @@ import CoreGraphics
 ///    let an animated container drift straight through it.
 /// 4. **Undo**, because the preview writes the document on every tick of the drag and the step the
 ///    commit records has to restore the pose the drag *started* from.
+/// 5. **The span** — TRANSFORM_LAYER.md §2 ruling 1: the bar means "only here", so the box is
+///    refused with a notice at a frame the bar does not cover, the render poses nothing there, and a
+///    new layer's bar reaches the scene's end so that a layer made early still works late.
 ///
 /// `@MainActor` because `ProjectStore.save`/`load` are.
 @MainActor
@@ -41,8 +44,9 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// container and one that is neither, so every wrong scope rule picks up at least one of them.
     ///
     /// **The pose is not assigned here.** That is the difference from that file's fixture and the
-    /// point of this one: `mover` is created as an ordinary value layer and the artist's own entry —
-    /// `setLayerTransform` — is what turns it into a transformation layer.
+    /// point of this one: `mover` is created through the artist's own entry — `addTransformLayer`,
+    /// the `+` menu's "Transform Layer" — and arrives resting, so every pose a test reads was put
+    /// there by the Move box.
     private struct Stack {
         let manager: CanvasManager
         let folder: UUID
@@ -55,7 +59,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
         manager.addVectorLayer(name: "inner")
-        manager.addValueLayer(name: "mover")
+        manager.addTransformLayer(name: "mover")
         manager.addVectorLayer(name: "above")
         manager.addVectorLayer(name: "outside")
         XCTAssertEqual(manager.layers.map(\.name), ["floor", "inner", "mover", "above", "outside"],
@@ -72,12 +76,22 @@ final class TransformLayerEntryLogicTests: XCTestCase {
                      above: index(ids[3]), outside: index(ids[4]))
     }
 
-    /// A bare value layer on its own, for the tests that only care about the payload.
+    /// A bare transform layer on its own, active, for the tests that only care about the payload —
+    /// the two calls the `+` menu's entry makes, in the order it makes them.
     ///
     /// **Created with no name**, unlike `makeStack`'s, and that is load-bearing rather than tidy:
-    /// `addValueLayer(name:)` sets `hasCustomName` from whether a name was passed, so a fixture that
-    /// names its layer has told the app the artist named it and the mode rename is correctly
-    /// suppressed. A naming assertion over a named fixture measures the suppression, not the rename.
+    /// `addTransformLayer(name:)` sets `hasCustomName` from whether a name was passed, so a naming
+    /// assertion over a named fixture would measure the suppression rather than the default.
+    private func makeTransformLayer() -> CanvasManager {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addTransformLayer()
+        manager.currentLayerIndex = manager.layers.count - 1
+        return manager
+    }
+
+    /// A bare value layer on its own, active — the layer that is *not* a transform layer, for the
+    /// tests about what refuses on one.
     private func makeValueLayer() -> CanvasManager {
         let manager = CanvasManager()
         manager.canvasSize = size
@@ -171,85 +185,70 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertNil(manager.floatingPiece, "…and nothing came up")
     }
 
-    private func enterTransformMode(_ manager: CanvasManager, layerIndex: Int) {
-        manager.setLayerTransform(layerIndex: layerIndex, to: manager.restingContainerPose)
-        manager.currentLayerIndex = layerIndex
-    }
+    // MARK: - The kind (TRANSFORM_LAYER.md §2 ruling 2)
 
-    // MARK: - The mode picker's third arm (§2.6)
-
-    /// **The pick reaches the accessor the renderer asks, not merely the field.**
+    /// **Adding the layer reaches the accessor the renderer asks, not merely the field.**
     ///
-    /// `Layer.layerTransform` is `kind == .value && effect == nil ? transform : nil`, so a writer that
-    /// stored the pose on a `.raster` layer, or left a grade beside it, would set a field nothing
-    /// reads — which is exactly the shape that made forty rows of an effect table measure nothing.
-    /// The three answers are asserted together because they are one question: a value layer is
-    /// exactly one of three things.
-    func testPickingTransformMakesTheLayerPoseThroughTheAccessorTheRenderReads() {
-        let manager = makeValueLayer()
+    /// `Layer.layerTransform` is `kind == .transform ? transform : nil`, so a constructor that stored
+    /// the pose on the wrong kind would set a field nothing reads — which is exactly the shape that
+    /// made forty rows of an effect table measure nothing. The answers are asserted together because
+    /// they are one question: what is this layer. Watched failing with `kind: .value` in
+    /// `addTransformLayer`'s `Layer(...)` (`layerTransform` nil, `valueFill` nil, name right — a layer
+    /// that is nothing at all).
+    func testAddingATransformLayerMakesItPoseThroughTheAccessorTheRenderReads() {
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        XCTAssertNil(manager.layers[at].layerTransform, "A fresh value layer is a flat colour")
-        XCTAssertNotNil(manager.layers[at].valueFill)
-
-        manager.setLayerTransform(layerIndex: at, to: manager.restingContainerPose)
-
-        XCTAssertNotNil(manager.layers[at].layerTransform, "…and now it poses")
+        XCTAssertEqual(manager.layers[at].kind, .transform)
+        XCTAssertNotNil(manager.layers[at].layerTransform, "It arrives posing — at rest, but posing")
+        XCTAssertEqual(manager.layers[at].layerTransform?.pose, manager.restingContainerPose?.pose)
         XCTAssertNil(manager.layers[at].layerEffect)
         XCTAssertNil(manager.layers[at].valueFill,
-                     "The three payloads are exclusive at the accessors, which is where the panel "
-                     + "and the renderer are kept from disagreeing about what the layer is")
+                     "Not a flat colour and not a grade — the kind is the whole answer, and the panel "
+                     + "and the renderer read the same one")
         XCTAssertTrue(manager.layers[at].name.hasPrefix("Transform "),
-                      "The row an artist reads their stack on has to say what the layer became — "
-                      + "leaving \"Value n\" on a layer that now moves the stack is the lie "
-                      + "`LayerStackCell.title(for:)` exists to prevent")
-
-        manager.setLayerTransform(layerIndex: at, to: nil)
-        XCTAssertTrue(manager.layers[at].name.hasPrefix("Value "), "…and the rename runs both ways")
-        XCTAssertNotNil(manager.layers[at].valueFill, "Leaving transform mode is flat colour again")
+                      "The row an artist reads their stack on has to say what the layer is")
+        XCTAssertFalse(manager.layers[at].hasCustomName, "…and it is the model's name, not theirs")
+        XCTAssertTrue(manager.layers[at].hasNoDrawingSurface)
+        XCTAssertEqual(manager.layers[at].cels.count, 1, "One blank cel, like every pixel-less layer")
     }
 
-    /// **A layer that is not `.value` cannot be made to pose**, which is `setLayerEffect`'s own
-    /// refusal one payload over. Writing the pose anyway would store a value the render never reads
-    /// and put a Transform tick beside a raster layer.
-    func testARasterLayerRefusesThePoseRatherThanStoringOneNothingReads() {
-        let manager = CanvasManager()
-        manager.canvasSize = size
-        manager.addLayer(name: "paint")
-        let at = manager.layers.count - 1
-
-        manager.setLayerTransform(layerIndex: at, to: manager.restingContainerPose)
-
-        XCTAssertNil(manager.layers[at].transform, "Refused at the door, not left to the accessor")
-        XCTAssertNil(manager.layers[at].layerTransform)
+    /// **A pose on a layer that is not `.transform` is not read**, which is `layerEffect`'s kind
+    /// clause one payload over: a raster or value layer carrying the field poses nothing, so nothing
+    /// a kind change or a hand-edited manifest leaves behind can silently move the stack.
+    func testAPoseOnALayerThatIsNotATransformLayerIsNotRead() {
+        for kind in [LayerKind.raster, .vector, .value] {
+            let manager = CanvasManager()
+            manager.canvasSize = size
+            manager.addLayer(name: "paint")
+            let at = manager.layers.count - 1
+            manager.layers[at].kind = kind
+            manager.layers[at].transform = manager.restingContainerPose
+            XCTAssertNil(manager.layers[at].layerTransform, "a pose on a \(kind) layer is inert storage")
+            XCTAssertTrue(manager.layerPoses(atFrame: 0).isEmpty, "…and reaches no leaf")
+        }
     }
 
-    /// **The two ways out of transform mode, and they are deliberately different.**
-    ///
-    /// Picking a grade leaves the pose *stored and inert* — `layerTransform`'s `effect == nil` clause
-    /// takes it out of force — so flipping back restores the move the artist made, keyframes and all.
-    /// Picking a blend destroys it, because `valueFill` is gated on `transform == nil` and there is no
-    /// clause left: a layer that kept its pose would answer "transform" to the renderer while the
-    /// artist's tick sat beside Multiply.
-    ///
-    /// If this went red the panel and the canvas would disagree about what the layer is, which is the
-    /// state the merged row exists to make unreachable rather than to explain afterwards.
-    func testAGradeParksThePoseAndABlendDestroysIt() {
-        let manager = makeValueLayer()
+    /// **A value layer's setters refuse a transform layer**, `setLayerEffect`'s own rule for the wrong
+    /// kind reached from the new kind's side. There is no mode to flip: a grade, a fill or a blend
+    /// written here would be a value the render never reads (the leaf is elided, its mode pinned),
+    /// with a tick beside it in a panel that does not offer the control. Watched failing with the
+    /// `kind != .transform` guard removed from `setLayerBlendMode` (the mode was written).
+    func testAValueLayersSettersRefuseATransformLayerAndWriteNothing() {
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        manager.setLayerTransform(layerIndex: at, to: manager.restingContainerPose)
-        let posed = manager.layers[at].transform
+        let before = manager.layers[at]
+        let steps = manager.history.undoStack.count
 
         manager.setLayerEffect(layerIndex: at, to: .blur(Effect.Blur()))
-        XCTAssertNil(manager.layers[at].layerTransform, "Out of force under a grade")
-        XCTAssertEqual(manager.layers[at].transform, posed, "…but kept, so flipping back restores it")
-
-        manager.setLayerEffect(layerIndex: at, to: nil)
-        XCTAssertNotNil(manager.layers[at].layerTransform, "Flipping back restores the move")
-
+        manager.setLayerFill(layerIndex: at, to: ValueFill(color: PaletteColor(hex: "ff0000")))
         manager.setLayerBlendMode(layerIndex: at, to: .multiply)
-        XCTAssertNil(manager.layers[at].transform,
-                     "A blend is the one route out that has no clause to gate the pose with")
-        XCTAssertNotNil(manager.layers[at].valueFill, "…and the colour was there all along")
+
+        XCTAssertNil(manager.layers[at].effect, "No grade")
+        XCTAssertNil(manager.layers[at].fill, "No fill")
+        XCTAssertEqual(manager.layers[at].blendMode, .normal, "No mode — the render pins it anyway")
+        XCTAssertEqual(manager.layers[at].transform, before.transform, "…and the pose is untouched")
+        XCTAssertEqual(manager.layers[at].name, before.name)
+        XCTAssertEqual(manager.history.undoStack.count, steps, "Nothing was written, so no step was recorded")
     }
 
     // MARK: - The Move box (§4.4, §2.5)
@@ -269,7 +268,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// goes red here and nowhere else.
     func testAMoveBoxOnATransformationLayerPosesItsContainerAndNothingOutsideIt() throws {
         let stack = makeStack()
-        enterTransformMode(stack.manager, layerIndex: stack.mover)
+        stack.manager.currentLayerIndex = stack.mover
         XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty,
                       "A transformation layer nobody has moved costs the document nothing")
 
@@ -293,9 +292,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// If this went red the second drag would throw the first away, which is the "content teleports
     /// back" shape the rest of this file's Move paths are shaped to avoid.
     func testASecondMoveComposesOntoTheFirst() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
 
         moveBox(manager, by: CGVector(dx: 10, dy: 0))
         moveBox(manager, by: CGVector(dx: 0, dy: 7))
@@ -311,9 +309,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// Move twice on a transformation layer would cost the artist a press of Undo that puts nothing
     /// back.
     func testAMoveThatEndedWhereItBeganRecordsNothing() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let before = manager.layers[at].transform
         let undoWas = manager.canUndo
 
@@ -334,9 +331,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     ///
     /// If this went red, Undo would appear not to work on this layer alone.
     func testUndoAfterAMovePutsThePoseBackWhereTheDragFoundIt() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         moveBox(manager, by: CGVector(dx: 10, dy: 0))
         let afterFirst = manager.layers[at].transform
 
@@ -360,9 +356,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// answer is the pose the layer started at, so a `resetFloating` that forgot the preview would
     /// leave the rotation on screen and this would go red.
     func testTheMoveBarsOwnControlsCarryTheContainerPoseWithTheBox() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let rest = manager.layers[at].transform
         XCTAssertTrue(manager.beginContainerPoseMove())
 
@@ -395,9 +390,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// If this went red, deleting every key from an animated transformation layer would snap it back
     /// to rest instead of leaving it where the artist last saw it.
     func testTheAutoKeyArmWritesTheKeyAndTheStoredBaseTogether() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         // Two keys already on the channel, so `channelHasCurve` is true and the write routes to `.key`.
         manager.layers[at].transform?.track = TransformTrack(keys: [
             .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
@@ -424,9 +418,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// the base and dropped the previous value on the floor, and the owner's canonical A-then-B
     /// workflow produced two identical keys and no animation.
     func testAMoveBetweenTwoMarksHoldsThePoseTheContainerWasShowing() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let layerID = manager.layers[at].id
         manager.currentFrame = 0
         XCTAssertTrue(manager.addKeyframe(.layer(id: layerID), atFrame: 0))
@@ -450,9 +443,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// container's held pose was never committed by any keyframe press — the baseline stayed held
     /// forever and no curve ever appeared.
     func testTheNextKeyframeCommitsTheHeldPoseOntoTheMarkAndTheNewOneHere() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let layerID = manager.layers[at].id
         manager.currentFrame = 0
         manager.addKeyframe(.layer(id: layerID), atFrame: 0)
@@ -481,9 +473,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// did — the drawing kept moving with the marker gone, which is a control that appears not to
     /// work and is one of the two device reports §2.28 was written from.
     func testRemoveKeyframeDropsTheContainerPoseKeyItDrewAnIndicatorFor() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let target = KeyframeTarget.layer(id: manager.layers[at].id)
         manager.layers[at].transform?.track = TransformTrack(keys: [
             .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
@@ -511,9 +502,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// skipped the container — and the move ran straight through the keyframe the artist had just
     /// placed to stop it.
     func testPlacingAKeyframeHoldsAnAnimatedContainerPoseAtTheValueItResolvesTo() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let target = KeyframeTarget.layer(id: manager.layers[at].id)
         manager.layers[at].transform?.track = TransformTrack(keys: [
             .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
@@ -539,9 +529,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// other two and each spells it. Left out, a marked frame would carry both a mark and a key and
     /// the graph editor could not repair the pair, which is the divergence three device reports were.
     func testAContainerPoseKeyLandingOnAMarkedFrameDropsTheMark() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let layerID = manager.layers[at].id
         // Two marks, so a Move standing on one routes to `.seedAndKey` and writes a key here.
         manager.addKeyframe(.layer(id: layerID), atFrame: 0)
@@ -568,9 +557,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// `PoseBandLogicTests`' cel-side tests cannot reach, since `celFixture` there is a cel track and
     /// this is `Layer.transform`'s.
     func testRemovePoseChannelKeyDropsAKeyFromTheContainerPose() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let layerID = manager.layers[at].id
         manager.addKeyframe(.layer(id: layerID), atFrame: 0)
         manager.addKeyframe(.layer(id: layerID), atFrame: 8)
@@ -608,9 +596,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// nothing else pins that. `testAddPoseChannelKeyOnAnAnimatedContainerHoldsWhatTheTrackShowed`
     /// below is the one that separates held from reset, on a fixture where they differ.
     func testAddPoseChannelKeyOnAFreshContainerHoldsRestOnEveryOtherComponent() throws {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         // One key, so the track is non-empty and `poseChannels` draws it. Written directly rather
         // than through `addKeyframe`: with no Move ever committed, the container has neither a track
         // nor a baseline, and `poseDeltaForKeyframe`'s container arm requires one or the other — a
@@ -648,9 +635,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// The reference is read **before** the add, so the expected value is one nothing in the add
     /// path produced.
     func testAddPoseChannelKeyOnAnAnimatedContainerHoldsWhatTheTrackShowed() throws {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
         let layerID = manager.layers[at].id
         manager.addKeyframe(.layer(id: layerID), atFrame: 0)
         manager.addKeyframe(.layer(id: layerID), atFrame: 8)
@@ -702,7 +688,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         }
 
         let stack = makeStack()
-        enterTransformMode(stack.manager, layerIndex: stack.mover)
+        stack.manager.currentLayerIndex = stack.mover
         let layerID = stack.moverID
         stack.manager.currentFrame = 0
         stack.manager.addKeyframe(.layer(id: layerID), atFrame: 0)
@@ -749,9 +735,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// true is only half of keeping it: `revealPoseChannel` routed every channel through
     /// `beginVectorChannelMove`, which lifts vector geometry and has none to lift here.
     func testClickingAContainerPoseRowRaisesTheMoveBoxOnTheTransformationLayer() {
-        let manager = makeValueLayer()
+        let manager = makeTransformLayer()
         let at = manager.layers.count - 1
-        enterTransformMode(manager, layerIndex: at)
 
         XCTAssertTrue(PoseChannelID.container.raisesMoveBox)
         XCTAssertTrue(manager.revealPoseChannel(.container))
@@ -771,23 +756,21 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     // MARK: - Cold start: can an artist who has read nothing reach this feature?
     //
     // **Every other test in this file starts from a fixture that has already been told the answer.**
-    // `makeStack` and `makeValueLayer` both create their layers into an empty document, so the block
-    // `addValueLayer` stamps is a new scene's full twelve frames and covers every frame those tests
-    // ever visit, and
-    // `enterTransformMode` hands the layer its pose by calling the model directly. That is the right
-    // shape for pinning what the pose *does* — and it is exactly why nothing here caught the feature
-    // being unreachable. The owner installed a build and asked *"i selected the transform mode, now
-    // how do i use it?"*, and the answer was that they could not: the graph editor's channel row is
-    // the only affordance the app drew, `listedAnimationChannelIDs` lists a channel only once it has
-    // two differing keys, and only a Move can put those there. The tests below start from a document
-    // in the state the app actually creates and walk the route an artist walks.
+    // `makeStack` and `makeTransformLayer` both create their layers into an empty document, so the
+    // block `addTransformLayer` stamps is a new scene's full twelve frames and covers every frame
+    // those tests ever visit. That is the right shape for pinning what the pose *does* — and it is
+    // exactly why nothing here caught the feature being unreachable when it was a mode. The owner
+    // installed a build and asked *"i selected the transform mode, now how do i use it?"*, and the
+    // answer was that they could not: the graph editor's channel row is the only affordance the app
+    // drew, `listedAnimationChannelIDs` lists a channel only once it has two differing keys, and only
+    // a Move can put those there. The tests below start from a document in the state the app
+    // actually creates and walk the route an artist walks.
 
-    /// **A brand-new document, nothing arranged by hand: add the layer, pick Transform, get a box.**
+    /// **A brand-new document, nothing arranged by hand: add the layer, get a box.**
     ///
     /// The scene is left as a new document's own twelve frames rather than arranged for the fixture's
-    /// convenience, and the layer is created through `addValueLayer` and flipped through
-    /// `setLayerTransform` — which are the two calls the panel's own controls make
-    /// (`LayerPanel.valueBlendModeRow`), in the order the panel makes them.
+    /// convenience, and the layer is created through `addTransformLayer` — the one call the `+`
+    /// menu's entry makes. There is no second step: the layer arrives posing.
     ///
     /// The box is raised through **`beginMove`**, not `beginContainerPoseMove`, because that is what
     /// both artist-facing controls reach: the toolbar's move button goes through `TopToolbar.
@@ -797,15 +780,13 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let mover = manager.layers.count - 1
         manager.currentLayerIndex = mover
 
-        XCTAssertNil(manager.layers[mover].layerTransform,
-                     "The premise: a value layer arrives as flat colour, not as a transformation layer")
-        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
         XCTAssertNotNil(manager.layers[mover].layerTransform,
-                        "Picking Transform is what makes it one — through the accessor the render reads")
+                        "The premise: a transform layer arrives as one — through the accessor the "
+                        + "render reads, with nothing to pick first")
 
         manager.beginMove()
         XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
@@ -814,27 +795,48 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertEqual(manager.floatingPiece?.targetLayerID, manager.layers[mover].id)
     }
 
-    /// **The owner's report, reproduced: the layer is made early and used late.**
-    ///
-    /// `addValueLayer` stamps one block of `newLayerBlockLength` frames **at creation** and never
-    /// extends it, while the scene goes on growing as blocks are added elsewhere
-    /// (`addCel`). So a transformation layer added to a fresh 12-frame document, on a scene that later
-    /// reaches frame 30, has no block of its own from frame 12 onward — and `beginContainerPoseMove`
-    /// used to ask `activeCelIndex` for one, return false, and be discarded by `beginMove` without a
-    /// float, a highlight or a `CanvasNotice`. Total silence, at a frame the artist has every reason
-    /// to expect the layer to work at.
-    ///
-    /// **The two operands are the refusal and the render, and that is what makes this a bug rather
-    /// than a policy.** `activeCelIndex` is asserted nil first, so the test is standing on the
-    /// condition that used to close the gate; the box then has to come up anyway, because there is
-    /// nothing at that frame for the app to be refusing.
-    func testTheMoveBoxComesUpPastTheEndOfTheBlockTheLayerWasCreatedWith() {
+    // MARK: - The span (TRANSFORM_LAYER.md §2 ruling 1: the bar means "only here")
+
+    /// **A new transform layer's bar reaches the scene's end**, so a layer added to a long scene works
+    /// on every frame of it until the artist shortens the bar. `newLayerBlockLength` is
+    /// `contentEndFrame` for every layer, and this pins that the pixel-less kind gets it too — the
+    /// owner's report of a layer *"made early and used late"* was about a 12-frame block on a 31-frame
+    /// scene, and under ruling 1 that layer would have stopped at 12 and said so; the default is what
+    /// keeps that from being the common case. Watched failing with `frameCount: 12` in
+    /// `addTransformLayer` (no block at 30, refused).
+    func testANewTransformLayersBlockIsStampedToTheScenesEnd() {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
-        manager.addValueLayer()
+        manager.currentFrame = 30
+        XCTAssertNotNil(manager.ensureCelAtCurrentFrame(layerIndex: 0),
+                        "The premise: the scene has grown to 31 frames before the layer is added")
+        XCTAssertEqual(manager.contentEndFrame, 31)
+
+        manager.addTransformLayer()
         let mover = manager.layers.count - 1
-        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+        XCTAssertEqual(manager.layers[mover].cels.map { $0.startFrame ..< $0.endFrame }, [0 ..< 31],
+                       "One bar, from the start to the scene's end")
+        XCTAssertNotNil(manager.activeCelIndex(inLayer: mover, atFrame: 30))
+
+        manager.currentLayerIndex = mover
+        XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)), "…so Move works at frame 30")
+        XCTAssertEqual(manager.layerPoses(atFrame: 30)[0]?.affine?.tx ?? 0, 40, accuracy: 0.5)
+    }
+
+    /// **The owner's report, under the ruling: the layer is made early and used late, and now it says
+    /// so.** A transform layer added to a fresh 12-frame document, on a scene that later reaches
+    /// frame 30, has no bar of its own from frame 12 on — and the bar means "only here", so Move at
+    /// frame 20 is refused. What is new against the pre-ruling refusal the owner reported is that it
+    /// is *not silent*: `beginContainerPoseMove` raises `CanvasNotice.moveOutsideTransformBlock`,
+    /// naming the frame in the ruler's numbering and both ways out. Watched failing with the
+    /// `activeCelIndex` guard removed (the box came up).
+    func testTheMoveBoxIsRefusedPastTheEndOfTheBarAndSaysSo() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addTransformLayer()
+        let mover = manager.layers.count - 1
 
         // The artist draws out to frame 30 on the drawing layer — which is what raises the scene's
         // length, and the one thing that never touches the transformation layer's own block.
@@ -849,34 +851,35 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20),
                      "The premise this whole test stands on: the transformation layer has no block at "
                      + "frame 20, because it was created when the scene was 12 frames long")
+        let steps = manager.history.undoStack.count
 
         manager.beginMove()
-        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose, """
-            Move went silent at a frame the transformation layer is perfectly live at. The cel is \
-            incidental to a container pose — it is stored on `Layer.transform` in absolute document \
-            frames and `RenderTree.renderNodes` composes it with no cel test at all — so a gate on \
-            `activeCelIndex` refuses at frames where the feature demonstrably works.
-            """)
-        XCTAssertNil(manager.floatingPiece?.targetCelID,
-                     "…and it says so, rather than naming a cel it does not have")
+        XCTAssertNil(manager.floatingPiece, "No box outside the bar — the bar means only here")
+        XCTAssertEqual(manager.notice?.code, "moveOutsideTransformBlock",
+                       "…and it is said, not swallowed: the pre-ruling gate was reported for its silence")
+        XCTAssertTrue(manager.notice?.message.contains("Frame 21") == true,
+                      "The sentence names the frame the artist is on, in the ruler's numbering: "
+                      + "\(manager.notice?.message ?? "nil")")
+        XCTAssertTrue(manager.notice?.message.contains("bar") == true,
+                      "…and the bar, which is what they have to lengthen or scrub inside")
+        XCTAssertEqual(manager.history.undoStack.count, steps, "Nothing was written")
     }
 
-    /// **The refusal and the render, on one document, at one frame** — the pairing the test above
-    /// could only half-state, because an unmoved container maps to nil and so poses nothing to
-    /// measure.
-    ///
-    /// Here the artist has *already* moved the layer once, so `layerPoses(atFrame:)` reports the leaf
-    /// beneath it being posed at frame 20. A build that refuses the box at that same frame is
-    /// refusing to edit a transform it is simultaneously drawing with — which is the sharpest form of
-    /// the defect, and the one that would have looked most like the app being broken.
-    func testTheFrameThatRefusedTheBoxIsAFrameTheRenderIsPosingAt() {
+    /// **The refusal and the render, on one document, at one frame** — the pairing that makes this a
+    /// rule rather than a gate: the box is refused exactly where the render poses nothing. Here the
+    /// artist has *already* moved the layer once, so the pose is in force inside the bar; at frame 20,
+    /// past it, `layerPoses(atFrame:)` reports the leaf beneath as unposed and the box is refused,
+    /// and at frame 5, inside it, both are the other way. A build that posed at 20 and refused at 20
+    /// would be refusing to edit a transform it is simultaneously drawing with — the pre-ruling
+    /// defect; a build that refused at 5 would be the ruling over-applied. Watched failing with the
+    /// accumulator's `activeCelIndex` clause removed from `renderNodes` (posed at 20).
+    func testTheFrameThatRefusesTheBoxIsAFrameTheRenderIsNotPosingAt() throws {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let mover = manager.layers.count - 1
         manager.currentLayerIndex = mover
-        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
         XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)),
                       "The first Move, made at frame 0 where the block does cover the playhead")
 
@@ -884,33 +887,34 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         manager.currentFrame = 30
         manager.ensureCelAtCurrentFrame(layerIndex: 0)
         manager.currentLayerIndex = mover
+
         manager.currentFrame = 20
-
         XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
-        XCTAssertNotNil(manager.layerPoses(atFrame: 20)[0], """
-            The render is posing the layer beneath the transformation layer at frame 20 — no cel of \
-            the transformation layer's own is consulted anywhere on that path.
-            """)
-
+        XCTAssertNil(manager.layerPoses(atFrame: 20)[0],
+                     "Outside the bar the render poses nothing beneath the transform layer")
         manager.beginMove()
-        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
-                       "So the box has to come up at the frame the pose is in force at")
+        XCTAssertNil(manager.floatingPiece, "…so the box is refused there")
+        XCTAssertEqual(manager.notice?.code, "moveOutsideTransformBlock")
+
+        manager.currentFrame = 5
+        let inside = try XCTUnwrap(manager.layerPoses(atFrame: 5)[0], "Inside the bar the pose is in force")
+        XCTAssertEqual(inside.affine?.tx ?? 0, 40, accuracy: 0.5, "…and it is the pose the Move wrote")
+        manager.beginMove()
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose, "…so the box comes up there")
     }
 
-    /// **The graph editor's row, at the same frame** — §11.7's affordance is the one the owner went
-    /// looking for, and it went through the identical gate.
-    ///
-    /// It is reachable only *after* a Move has keyed the channel (`listedAnimationChannelIDs` needs
-    /// two differing keys), which is the circularity this pass exists to break — but once a row is
-    /// there, clicking it must not be refused at a frame the row itself is drawn across.
-    func testTheChannelListRowAlsoRaisesTheBoxPastTheBlocksEnd() {
+    /// **The graph editor's row, at the same frame** — §11.7's affordance goes through the identical
+    /// gate, and refuses with the identical notice rather than raising a box the render would not
+    /// show. It is reachable only *after* a Move has keyed the channel (`listedAnimationChannelIDs`
+    /// needs two differing keys), and the row is drawn across the whole track — but the bar is the
+    /// bar, and a row cannot make a frame the bar does not cover into one it does.
+    func testTheChannelListRowAlsoRefusesPastTheBarsEndAndSaysSo() {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let mover = manager.layers.count - 1
         manager.currentLayerIndex = mover
-        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
 
         manager.currentLayerIndex = 0
         manager.currentFrame = 30
@@ -919,40 +923,41 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         manager.currentFrame = 20
         XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
 
-        XCTAssertTrue(manager.revealPoseChannel(.container),
-                      "A container row must raise its box wherever the channel is drawn")
-        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose)
+        XCTAssertFalse(manager.revealPoseChannel(.container),
+                       "A container row refuses where the Move button refuses")
+        XCTAssertNil(manager.floatingPiece)
+        XCTAssertEqual(manager.notice?.code, "moveOutsideTransformBlock")
     }
 
-    /// **And the box still commits from out there**, which is the half a reachability test most
-    /// easily forgets: raising a float that then writes nothing would be a worse bug than the silence
-    /// it replaced, because the artist would watch their drag evaporate.
-    ///
-    /// The pose is asserted through `layerPoses(atFrame:)` — what the render actually maps the leaf
-    /// beneath through — rather than through `Layer.transform`, for this file's founding reason.
-    func testAMoveMadePastTheBlocksEndCommitsAndPosesTheLeavesBeneath() {
+    /// **Lengthen the bar and the same frame takes the box**, which is the way out the notice names.
+    /// The keys a Move wrote inside the bar are untouched by the bar's length in either direction
+    /// (ruling 17 — `TransformLayerLogicTests` pins the shortening half against the render), so
+    /// dragging the edge out to frame 30 puts the pose back in force at 20 with nothing re-authored.
+    func testLengtheningTheBarPutsTheFrameBackInsideAndTheBoxComesUp() throws {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let mover = manager.layers.count - 1
-        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+        manager.currentLayerIndex = mover
+        XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)))
+        let authored = manager.layers[mover].transform
 
         manager.currentLayerIndex = 0
         manager.currentFrame = 30
         manager.ensureCelAtCurrentFrame(layerIndex: 0)
         manager.currentLayerIndex = mover
         manager.currentFrame = 20
-        XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
-        XCTAssertNil(manager.layerPoses(atFrame: 20)[0], "…and nothing is posed yet")
+        manager.beginMove()
+        XCTAssertNil(manager.floatingPiece, "The premise: refused while the bar ends at 12")
 
-        XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)),
-                      "The whole gesture — lift, drag, let go — from a frame with no block")
-
-        let posed = manager.layerPoses(atFrame: 20)[0]
-        XCTAssertNotNil(posed, "The commit has to reach the leaf beneath")
-        XCTAssertEqual(posed?.affine?.tx ?? 0, 40, accuracy: 0.5,
-                       "…carrying the drag, in canvas points")
-        XCTAssertNil(manager.floatingPiece, "…and the box is down again")
+        // The timeline's own Extend to End — the right-edge drag's destination.
+        manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 31)
+        XCTAssertNotNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The bar now covers 20")
+        XCTAssertEqual(manager.layers[mover].transform, authored, "…and the keys were never touched")
+        let posed = try XCTUnwrap(manager.layerPoses(atFrame: 20)[0], "…so the pose is back in force")
+        XCTAssertEqual(posed.affine?.tx ?? 0, 40, accuracy: 0.5)
+        manager.beginMove()
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose, "…and the box comes up")
     }
 }

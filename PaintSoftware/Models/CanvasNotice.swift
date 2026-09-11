@@ -29,7 +29,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case noLayers
         /// The active layer is hidden — by its own eye or by an enclosing group's (§4.1).
         case hiddenLayer
-        /// The active layer holds no pixels: a value layer, in either of its two modes.
+        /// The active layer holds no pixels: a value layer, in either of its two modes, or a
+        /// transform layer.
         case noDrawingSurface
         /// An undo just reverted `HistoryActionLabel`. Raised only when one actually fired —
         /// `CanvasManager.undo()` checks `UndoHistory.undo()`'s return before calling `raise`, so an
@@ -238,6 +239,19 @@ struct CanvasNotice: Identifiable, Equatable {
         /// (`CanvasManager.pendingKeyframeCrop`). Carries the crop rather than a rendered sentence for
         /// `Kind`'s stated reason: the wording lives in `message`, and a test asserts on the case.
         case keyframesCropped(KeyframeCrop)
+
+        /// **Move was tapped on a transform layer at a frame its bar does not cover** —
+        /// TRANSFORM_LAYER.md §2 ruling 1 (2026-09-11): *the bar means "only here"*. A transform
+        /// layer poses nothing outside its blocks, so a box raised there would be editing a pose the
+        /// canvas is not showing, and the pre-ruling behaviour — the box came up anywhere, because
+        /// the render posed everywhere — is gone with the rule that produced it.
+        ///
+        /// Carries the frame the artist is standing on, in the model's numbering (`message` shows it
+        /// 1-based like the ruler), so the sentence can name where they are rather than what a bar
+        /// is. Two ways out and both are named: scrub inside the bar, or drag its edge out to here —
+        /// the second is what a layer made early and used late wants, and it is the timeline's own
+        /// Extend to End rather than anything this banner could press.
+        case moveOutsideTransformBlock(frame: Int)
     }
 
     /// Which of the three operations happened, in the artist's own nouns — the group's display name,
@@ -351,6 +365,8 @@ struct CanvasNotice: Identifiable, Equatable {
             let one = crop.count == 1
             let where_ = crop.frames.count == 1 ? "frame" : "frames"
             return "\(crop.count) \(one ? "keyframe" : "keyframes") outside the block's new length \(one ? "was" : "were") removed (\(where_) \(Self.list(crop.frames))). Undo brings \(one ? "it" : "them") back."
+        case .moveOutsideTransformBlock(let frame):
+            return "Frame \(frame + 1) is outside this transform layer's bar, and it only moves things where its bar is — scrub to a frame inside the bar, or drag the bar's edge out to here."
         }
     }
 
@@ -442,6 +458,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // thing a button could offer — undo — is on the toolbar where it always is. The sentence
         // says so.
         case .keyframesCropped: return nil
+        // Nor this one. Both ways out are on the timeline the artist is already looking at — a scrub
+        // or a handle drag — and neither is a tap this banner could make for them without deciding
+        // which of the two they meant.
+        case .moveOutsideTransformBlock: return nil
         }
     }
 
@@ -488,6 +508,7 @@ struct CanvasNotice: Identifiable, Equatable {
             }
         case .animationGroupEditRefused: return "animationGroupEditRefused"
         case .keyframesCropped: return "keyframesCropped"
+        case .moveOutsideTransformBlock: return "moveOutsideTransformBlock"
         }
     }
 

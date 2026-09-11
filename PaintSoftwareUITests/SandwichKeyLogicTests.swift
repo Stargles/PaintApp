@@ -113,10 +113,9 @@ final class SandwichKeyLogicTests: XCTestCase {
             CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 8)])
             CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
                                           CanvasFixture.solidImage(red, rect: CGRect(x: 2, y: 20, width: 20, height: 20)))
-            manager.addValueLayer()
+            manager.addTransformLayer()
             let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
             let mover = manager.layers.count - 1
-            manager.layers[mover].fill = nil
             manager.layers[mover].transform = LayerPose(
                 pose: PoseQuad(restingIn: box),
                 track: TransformTrack(keys: [

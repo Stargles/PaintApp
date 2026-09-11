@@ -1859,14 +1859,47 @@ final class CanvasManager: ObservableObject {
     /// number. Worth stating because it looks like a bug and is not; the alternative, storing the
     /// birth ordinal to reproduce it, is a second field carrying nothing an artist can act on.
     ///
-    /// **`transform` is the third mode and it is read in the accessors' own precedence order** —
-    /// effect, then transform, then flat colour (`Layer.transform`'s note states it once). Passing
-    /// both is not a state any writer produces; naming the effect for it is what keeps this function
-    /// agreeing with `Layer.layerEffect`/`layerTransform` rather than inventing a fourth answer.
-    static func defaultValueLayerName(effect: Effect?, transform: LayerPose? = nil,
-                                      ordinal: Int) -> String {
-        if let effect { return effect.displayName }
-        return transform == nil ? "Value \(ordinal)" : "Transform \(ordinal)"
+    /// Two answers, not three: the transformation layer was this kind's third mode until
+    /// 2026-09-11 and named itself "Transform n" from here; it is `LayerKind.transform` now and
+    /// `addTransformLayer` names it once, at creation, since it has no mode to follow.
+    static func defaultValueLayerName(effect: Effect?, ordinal: Int) -> String {
+        effect?.displayName ?? "Value \(ordinal)"
+    }
+
+    /// Adds a `.transform` layer — **the transformation layer, TRANSFORM_LAYER.md §2 ruling 2** — at
+    /// rest, posing everything beneath it in its container exactly where it already is until the
+    /// artist moves it. KEYFRAMES.md §4.4 is the model and the render path; this is the artist's way
+    /// in, from the `+` menu's own "Transform Layer" entry.
+    ///
+    /// **It arrives with a pose, always.** A transform layer's whole payload is `Layer.transform`,
+    /// and `restingContainerPose` is the one "no move yet" value there is — so unlike a value layer,
+    /// which is configured after it lands, there is nothing to pick here before the Move box can
+    /// come up: `+` → the panel's Move row → a box, which is the loop the owner found closed on itself
+    /// when this was a mode (§4.4's entry pass). Before the document has a canvas size there is no
+    /// rect to rest in and the layer is stamped with none, which poses nothing — reachable from a
+    /// fixture, not from the app, whose canvas picker sets the size before any layer exists.
+    ///
+    /// **Its block is `newLayerBlockLength` — the scene's end — for TRANSFORM_LAYER.md §2 ruling 1's
+    /// reason.** A transform layer acts only on the frames its bar covers, so a block that stopped
+    /// short of the scene would be a layer that silently stops working partway through it; stamped to
+    /// the end, it works everywhere until the artist shortens it, and lengthening it after the scene
+    /// grows is the timeline's own Extend to End. It gets the empty cel for `addVectorLayer`'s
+    /// reason too — every cel-lifecycle path assumes one — and nothing ever draws into it:
+    /// `leafSnapshots` elides the leaf outright.
+    ///
+    /// No fill: `Layer.fill` is a value layer's payload and `valueFill` never reads it on this kind.
+    func addTransformLayer(name: String? = nil) {
+        withStructureUndo(label: .addTransformLayer) {
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+                          raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            insertNewLayer { parent in
+                Layer(id: UUID(), name: name ?? "Transform \(layers.count + 1)",
+                      hasCustomName: name != nil,
+                      opacity: 1.0, isVisible: true, kind: .transform,
+                      transform: restingContainerPose, parentFolderID: parent, cels: [cel])
+            }
+        }
+        recordLayerStackChange("added transform layer")
     }
 
     /// Sets or clears the grade on a `.value` layer — **the mode picker's whole model half.** Passing
@@ -1926,66 +1959,14 @@ final class CanvasManager: ObservableObject {
             layers[layerIndex].pendingBaselines =
                 Effect.channelEntriesAddressed(by: effect, from: layers[layerIndex].pendingBaselines)
             if !layers[layerIndex].hasCustomName {
-                // The **stored** pose, because clearing the grade is what lets it back into force —
-                // `Layer.layerTransform` is gated on `effect == nil`, so a layer leaving effect mode
-                // with a pose underneath is a transformation layer again and must not come back
-                // named "Value n". This is `valueFill`'s asymmetry reaching the name.
-                layers[layerIndex].name =
-                    Self.defaultValueLayerName(effect: effect, transform: layers[layerIndex].transform,
-                                               ordinal: layers.count)
-            }
-        }
-    }
-
-    /// **Sets or clears the pose on a `.value` layer — the mode picker's third arm**, KEYFRAMES.md
-    /// §2.6's *"Blend Mode / Effect / Transform"* and §4.4's transformation layer.
-    ///
-    /// `setLayerEffect`'s twin, and every rule it states applies here with one word changed. What
-    /// differs is only which payload is the discriminant.
-    ///
-    /// **Setting a pose clears the grade, and that is the merged menu's own rule rather than a new
-    /// one.** `Layer.layerTransform` is `kind == .value && effect == nil ? transform : nil`, so a
-    /// layer that kept its grade would take the pick, move the checkmark, and pose nothing —
-    /// precisely the state `setLayerBlendMode`'s doc says the row exists to make unreachable rather
-    /// than to explain afterwards. The grade's channels go with it, `Effect.tracksAddressed(by:from:)`,
-    /// for that function's reason.
-    ///
-    /// **Clearing a pose keeps the fill**, which is `valueFill`'s asymmetry read from the third side:
-    /// the colour is inert storage while the layer poses, and keeping it is what makes flipping back
-    /// restore the artist's colour instead of resetting it to grey.
-    ///
-    /// **What it does *not* do is clear the pose when a grade is picked.** That is the same asymmetry
-    /// again and it is deliberate: `layerTransform`'s `effect == nil` clause already takes the pose
-    /// out of force, so storing it costs nothing and flipping back restores the move the artist
-    /// made — including its keyframes. `setLayerBlendMode` is the one route that destroys it, because
-    /// picking a blend means "flat colour in this mode" and there is no clause left to gate it with.
-    ///
-    /// One undo step, with the rename inside it, for `setLayerEffect`'s reason: an artist who picks
-    /// Transform and presses undo once expects the pose *and* the name back.
-    func setLayerTransform(layerIndex: Int, to pose: LayerPose?) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value else { return }
-        let clearsEffect = pose != nil && layers[layerIndex].effect != nil
-        guard layers[layerIndex].transform != pose || clearsEffect else { return }
-        withStructureUndo(label: pose == nil ? .valueLayerColor : .valueLayerTransform) {
-            layers[layerIndex].transform = pose
-            if clearsEffect {
-                layers[layerIndex].effect = nil
-                layers[layerIndex].effectTracks =
-                    Effect.tracksAddressed(by: nil, from: layers[layerIndex].effectTracks)
-                layers[layerIndex].pendingBaselines =
-                    Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
-            }
-            if !layers[layerIndex].hasCustomName {
-                layers[layerIndex].name =
-                    Self.defaultValueLayerName(effect: layers[layerIndex].effect,
-                                               transform: pose, ordinal: layers.count)
+                layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
             }
         }
     }
 
     /// **A container showing its contents exactly where they are, measured against this canvas** —
-    /// what the Transform entry in the value layer's menu creates, and what a transformation layer
-    /// holds until the artist moves it.
+    /// what `addTransformLayer` stamps, what `setFolderTransform` turns a folder's pose on with, and
+    /// what a transformation layer holds until the artist moves it.
     ///
     /// Nil before the document has a canvas size, which is the one state in which there is no box to
     /// measure a pose against. Every pose on this path is measured against the canvas rect: a
@@ -3278,19 +3259,16 @@ final class CanvasManager: ObservableObject {
     /// a layer still named "Gaussian Blur" after the blur was cleared is the same lie told backwards.
     /// Ordinary layers are untouched: they have no grade for a blend to conflict with.
     ///
-    /// **It clears the pose as well as the grade, and that is the one place the three payloads are
-    /// not treated alike.** A grade picked over a pose leaves the pose stored and inert, because
-    /// `Layer.layerTransform`'s `effect == nil` clause takes it out of force and flipping back
-    /// restores it. A blend mode has no such clause: `valueFill` is gated on `transform == nil`, so a
-    /// layer that kept its pose would answer "transform" to the renderer while the artist's tick sat
-    /// beside Multiply. Picking a blend *is* picking flat colour, so this is the one route out of
-    /// transform mode and it has to be a real one.
+    /// **Refused on a transform layer**, `setLayerEffect`'s rule for the wrong kind: the render pins
+    /// a pixel-less leaf to `.normal` (`RenderTree.renderNodes`), so a mode written here would be a
+    /// value nothing reads with a tick beside it. The panel offers no blend row on that kind, so this
+    /// is a guard for a direct caller rather than a refusal an artist can meet. It used to clear the
+    /// pose as well as the grade, as the one route out of the value layer's transform mode; that
+    /// mode is a kind now (TRANSFORM_LAYER.md §2 ruling 2) and there is no route to clear.
     func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
-        guard layers.indices.contains(layerIndex) else { return }
-        let isValue = layers[layerIndex].kind == .value
-        let clearsEffect = isValue && layers[layerIndex].effect != nil
-        let clearsTransform = isValue && layers[layerIndex].transform != nil
-        guard layers[layerIndex].blendMode != mode || clearsEffect || clearsTransform else { return }
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind != .transform else { return }
+        let clearsEffect = layers[layerIndex].kind == .value && layers[layerIndex].effect != nil
+        guard layers[layerIndex].blendMode != mode || clearsEffect else { return }
         withStructureUndo(label: .blendMode) {
             layers[layerIndex].blendMode = mode
             if clearsEffect {
@@ -3301,13 +3279,9 @@ final class CanvasManager: ObservableObject {
                                                                          from: layers[layerIndex].effectTracks)
                 layers[layerIndex].pendingBaselines =
                     Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
-            }
-            // The pose's channel is nested inside it (`LayerPose`'s doc says why), so clearing the
-            // payload takes the track with it and there is no second field to prune.
-            if clearsTransform { layers[layerIndex].transform = nil }
-            if (clearsEffect || clearsTransform) && !layers[layerIndex].hasCustomName {
-                layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, transform: nil,
-                                                                     ordinal: layers.count)
+                if !layers[layerIndex].hasCustomName {
+                    layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
+                }
             }
         }
     }
@@ -3321,26 +3295,22 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// **Turns a folder's own pose on or off** — `setLayerTransform`'s twin for `LayerFolder.transform`
-    /// (§2.21), and the writer TODO (21) found missing: the field existed, `RenderTree.renderNodes`
-    /// already composes it into every leaf beneath the folder unconditionally, and nothing anywhere
-    /// could ever set it to a value the artist chose.
+    /// **Turns a folder's own pose on or off** — the writer for `LayerFolder.transform` (§2.21) that
+    /// TODO (21) found missing: the field existed, `RenderTree.renderNodes` already composes it into
+    /// every leaf beneath the folder unconditionally, and nothing anywhere could ever set it to a
+    /// value the artist chose.
     ///
-    /// **Independent of `effect`, `blendMode` and `isCompositorNode`, and that is not an omission —
-    /// it is the one place this setter genuinely differs from `setLayerTransform`.** A value layer's
-    /// transform is one of three mutually exclusive answers to "what is this content-free layer",
-    /// so picking it clears the grade a checkmark would otherwise leave stranded and unread. A folder
-    /// already has real content — its children — so its pose, its grade and its own blend mode are
+    /// **Independent of `effect`, `blendMode` and `isCompositorNode`, and that is not an omission.**
+    /// A folder has real content — its children — so its pose, its grade and its own blend mode are
     /// three independent wrappers around that content rather than three answers to one question:
-    /// `containerPose(of:)` reads `folders[…].transform` with no gate on `effect`, unlike
-    /// `layerTransform`'s `effect == nil` clause, and the render tree carries a folder's `effect`
-    /// through "unconditionally like the leaf's" while composing its pose in on the way down — both
-    /// regardless of the other. Nothing here needs to clear anything.
+    /// `containerPose(of:)` reads `folders[…].transform` with no gate on `effect`, and the render tree
+    /// carries a folder's `effect` through "unconditionally like the leaf's" while composing its pose
+    /// in on the way down — both regardless of the other. Nothing here needs to clear anything. (A
+    /// layer's pose has no on/off writer at all any more: a transform layer *is* the kind that poses,
+    /// `addTransformLayer`, and a folder is the one container whose pose is a switch.)
     ///
-    /// **No rename**, unlike `setLayerTransform`. That renaming exists because a value layer's name is
-    /// a claim about which of the three things it currently is (`defaultValueLayerName`) and a folder's
-    /// is not — `setFolderBlendMode` and `setFolderIsolated` beside this don't rename either, and this
-    /// follows them rather than `setNodeEffect`'s node-specific scheme.
+    /// **No rename**: `setFolderBlendMode` and `setFolderIsolated` beside this don't rename either,
+    /// and this follows them rather than `setNodeEffect`'s node-specific scheme.
     func setFolderTransform(_ folderID: UUID, to pose: LayerPose?) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }),
               folders[idx].transform != pose else { return }

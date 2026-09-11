@@ -406,8 +406,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(framesBefore, [0, 4, 8, 9], "Premise: marks, opacity keys and pose keys all count")
 
         // A transformation layer of its own, with a block it could be said to "ride".
-        manager.addValueLayer()
-        manager.layers[2].fill = nil
+        manager.addTransformLayer()
         manager.layers[2].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size))]
         let rest = PoseQuad(restingIn: CGRect(origin: .zero, size: size))
         manager.layers[2].transform = LayerPose(pose: rest, track: TransformTrack(keys: [

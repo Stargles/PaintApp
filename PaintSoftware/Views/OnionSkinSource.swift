@@ -225,7 +225,7 @@ extension CanvasManager {
         guard onionSkin.placement == .behind else { return nil }
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return nil }
         let layer = layers[currentLayerIndex]
-        guard layer.kind != .value, isLayerEffectivelyVisible(currentLayerIndex) else { return nil }
+        guard layer.kind.holdsPixels, isLayerEffectivelyVisible(currentLayerIndex) else { return nil }
         guard let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layer.cels.indices.contains(celIndex) else { return nil }
         let cel = layer.cels[celIndex]

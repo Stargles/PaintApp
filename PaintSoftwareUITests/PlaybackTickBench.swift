@@ -132,9 +132,8 @@ final class PlaybackTickBench: XCTestCase {
         for index in 0..<Self.strokeCount { cel.vector?.addStroke(Self.ink(index)) }
         manager.layers[0].cels = [cel]
 
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let box = CGRect(origin: .zero, size: Self.canvas)
-        manager.layers[1].fill = nil
         manager.layers[1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: Self.frameCount,
                                       raster: .empty(size: Self.canvas))]
         manager.layers[1].transform = LayerPose(

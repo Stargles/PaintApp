@@ -818,19 +818,14 @@ extension CanvasManager {
     /// always nil at a lift. `containerRestPose` carries the pose instead and each nudge composes its
     /// delta onto it, which gives the same answer with none of that reinterpretation.
     ///
-    /// **It does not require a cel at the playhead, and that is the correction rather than a
-    /// looseness.** A container pose lives on `Layer.transform` in absolute document frames, and
-    /// `RenderTree.renderNodes` composes it with no cel test at all — so the layer poses everything
-    /// beneath it at *every* frame, and there is no frame at which raising the box would be a lie.
-    /// The gate that used to be here asked `activeCelIndex` purely to fill in `FloatingPiece`'s cel
-    /// ids, which for this kind are read by nothing: `commitFloatingPieceIfNeeded` returns to
-    /// `commitContainerFloat` before it looks up a cel, and `CanvasView`'s two readers are gated on
-    /// `.move`. What it cost was the owner's report — `addValueLayer` stamps one block of
-    /// `newLayerBlockLength` frames *at creation* and never extends it, so a transformation layer
-    /// made early and used late fell off the end of its own block and Move went silent. Neither of the
-    /// two obvious repairs was right: extending the cel would mint a stray block in the timeline (and
-    /// move `contentEndFrame` with it) for a payload that is not cel-scoped, and a `CanvasNotice` would
-    /// announce a refusal with nothing behind it. There is nothing wrong, so nothing is refused.
+    /// **A transform layer's box is refused at a frame its bar does not cover, and it says so** —
+    /// TRANSFORM_LAYER.md §2 ruling 1. The bar means *"only here"*: `RenderTree.renderNodes` composes
+    /// the pose only where `activeCelIndex` finds a block, so a box raised outside one would be
+    /// editing a pose the canvas is not showing, and the drag would appear to do nothing. This gate
+    /// existed once, was deleted in §4.4's entry pass because the render then posed at every frame
+    /// and there was nothing to refuse, and is back with the ruling that gives it something to refuse
+    /// — this time with `CanvasNotice.moveOutsideTransformBlock` rather than the silence that pass
+    /// was reported for. A folder has no block, so its arm has no gate.
     ///
     /// - Parameter target: what to pose — a specific layer or folder, or nil for the current layer,
     ///   which is `TopToolbar`'s Move glyph and `LayerOptionsPanel`'s own `transformMoveRow`'s
@@ -839,14 +834,19 @@ extension CanvasManager {
     ///   one implicitly, the same way `beginMove` never guesses a layer is a transformation layer
     ///   without being told by `layerTransform`.
     /// - Returns: whether a box came up. False when the named target (or the current layer, if none
-    ///   was named) is not posing, or before the document has a canvas size to measure the frame
-    ///   against.
+    ///   was named) is not posing, when a transform layer's bar does not cover the playhead, or
+    ///   before the document has a canvas size to measure the frame against.
     @discardableResult
     func beginContainerPoseMove(for target: KeyframeTarget? = nil) -> Bool {
         commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return false }
         let target = target ?? .layer(id: layers[currentLayerIndex].id)
         guard let pose = containerPose(of: target) else { return false }
+        if case .layer(let id) = target, let index = layers.firstIndex(where: { $0.id == id }),
+           activeCelIndex(inLayer: index, atFrame: currentFrame) == nil {
+            raise(.moveOutsideTransformBlock(frame: currentFrame))
+            return false
+        }
 
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         let lift = FloatingTransform(position: CGPoint(x: canvasRect.midX, y: canvasRect.midY),
@@ -857,8 +857,8 @@ extension CanvasManager {
         // layer is never asked to hold a folder's id.
         let layerID = layers[currentLayerIndex].id
         // Recorded when there is one, so `handleActiveContextChanged` keeps answering "still targeted"
-        // exactly as it did for a box raised inside a block — a scrub within one cel leaves the box up,
-        // anything else commits it. Nil out past the block's end, where there is no cel to name.
+        // — a scrub within one cel leaves the box up, anything else commits it. Nil only for a folder
+        // target raised from a layer with no block here; a layer target is gated above.
         let celID = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
             .map { layers[currentLayerIndex].cels[$0].id }
         floatingPiece = FloatingPiece(
@@ -1172,6 +1172,7 @@ extension CanvasManager {
         case .vector: return nil
         case .raster: return "A pixel layer can only cut at the selection."
         case .value:  return "A value layer holds nothing a lasso can catch."
+        case .transform: return "A transform layer holds nothing a lasso can catch."
         }
     }
 

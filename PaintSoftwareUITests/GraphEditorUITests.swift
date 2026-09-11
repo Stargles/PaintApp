@@ -617,7 +617,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
     /// Cold-start reachability first: nothing here is a fixture the test builds by hand — the layer
     /// is turned into a transformation layer through its own options row, the pose is created the
     /// only way an artist can create one (a Move, at two keyframes), and the graph editor is opened
-    /// on it, exactly as `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt` proves the *entry*
+    /// on it, exactly as `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt` proves the *entry*
     /// to Move itself is reachable. This test picks up from there and drives the two gestures that
     /// used to be refused past that entry.
     ///
@@ -633,13 +633,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         openLayerPanel(app)
-        addValueLayerFromAddMenu(app)
-        app.staticTexts["layerPanel.row.1"].tap() // already selected after the add: opens options
-        app.buttons["layerOptions.blendModeButton"].tap()
-        let transformItem = app.buttons["layerOptions.blendMode.transform"]
-        XCTAssertTrue(transformItem.waitForExistence(timeout: 5))
-        transformItem.tap()
-        app.buttons["layerOptions.close"].tap()
+        addTransformLayerFromAddMenu(app)
         app.buttons["toolbar.layersButton"].tap() // rail covers the timeline block taps below
 
         // Two marks, then one Move at the second — `KeyframeControl.write`'s `.seedAndKey` arm,

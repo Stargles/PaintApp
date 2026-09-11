@@ -1147,7 +1147,7 @@ struct LayerRowModel: Equatable {
     /// without the two being kept in step by hand here.
     var effect: Effect? = nil
 
-    /// **Whether this row is a transformation layer** — §4.4's third payload, on the same footing as
+    /// **Whether this row is a transformation layer** — `LayerKind.transform`, on the same footing as
     /// `effect` above and for its stated reason: the row is the only place an artist checks a stack at
     /// a glance, and a layer named "Sky" that is silently moving everything under it is exactly the
     /// state that stays invisible until the options panel is opened on the right row.

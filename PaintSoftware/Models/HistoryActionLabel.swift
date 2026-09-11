@@ -76,16 +76,15 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case addVectorLayer
     case addValueLayer
     case addEffectLayer
+    /// A transformation layer added (`addTransformLayer`) — TRANSFORM_LAYER.md §2 ruling 2's kind of
+    /// its own. It replaced `.valueLayerTransform`, the label for a value layer flipping into or out
+    /// of transform mode, which is no longer a thing a layer can do.
+    case addTransformLayer
     /// A value layer's flat colour changing (`setLayerFill`).
     case valueLayerColor
     /// A value layer's grade changing, including the live drag of one of its parameters
     /// (`setLayerEffect`, and the panel's `commitStructureGesture(label: .valueLayerEffect)`).
     case valueLayerEffect
-    /// A value layer becoming — or ceasing to be — a transformation layer (`setLayerTransform`),
-    /// KEYFRAMES.md §2.6's third payload. Named apart from `.valueLayerEffect` for that case's own
-    /// reason: the two are different things to want back, and an artist who picked Transform by
-    /// mistake reads "undo adjust layer effect" as a grade having changed.
-    case valueLayerTransform
     /// One keyframe track on one effect parameter being written, replaced or removed
     /// (`setEffectParameterTrack`) — KEYFRAMES.md stage 2. Named apart from `.valueLayerEffect`
     /// because the two are different things to want back: that one is the grade the artist picked,
@@ -159,10 +158,10 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case mergeLayers
     case duplicateLayer
     /// A folder becoming — or ceasing to be — a transformation group (`setFolderTransform`),
-    /// KEYFRAMES.md §2.21's folder twin of `.valueLayerTransform`. Named apart from that case for the
-    /// same reason it is named apart from `.blendMode`: a folder's transform is a fourth, independent
-    /// thing to want back, and an artist who toggled it by mistake should not read "undo blend mode"
-    /// or "undo layer transform" for a group that was never a value layer.
+    /// KEYFRAMES.md §2.21. Named apart from `.blendMode` because a folder's transform is an
+    /// independent thing to want back, and an artist who toggled it by mistake should not read "undo
+    /// blend mode" for a group. (A layer has no such toggle: a transform layer is a kind, and adding
+    /// one is `.addTransformLayer`.)
     case transform
     case opacity
 
@@ -236,9 +235,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addVectorLayer: return "add vector layer"
         case .addValueLayer: return "add value layer"
         case .addEffectLayer: return "add effect layer"
+        case .addTransformLayer: return "add transform layer"
         case .valueLayerColor: return "change layer colour"
         case .valueLayerEffect: return "adjust layer effect"
-        case .valueLayerTransform: return "change layer transform"
         case .effectKeyframes: return "edit effect keyframes"
         case .opacityKeyframes: return "edit opacity keyframes"
         case .addKeyframe: return "add keyframe"

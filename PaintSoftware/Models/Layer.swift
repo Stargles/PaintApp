@@ -44,17 +44,18 @@ struct Layer: Identifiable {
     /// union of all layers with this set (see `CanvasManager.fillReferenceSources`).
     /// See [[feedback-vector-layer-extensibility]].
     ///
-    /// **The default is visibility for every kind but `.value`, and that exception is the point.** A
-    /// value layer is one opaque colour across the entire canvas, so a visible one following the
+    /// **The default is visibility for every kind that holds pixels, and the exception is the point.**
+    /// A value layer is one opaque colour across the entire canvas, so a visible one following the
     /// ordinary default would become a boundary wall *everywhere in the document* — the fill tool
     /// would refuse to spread anywhere, with nothing on screen saying why, and the layer that caused
     /// it is the one layer in the stack with no drawn content to blame. So the answer nobody has been
-    /// asked for is "no" rather than "whatever the eye says".
+    /// asked for is "no" rather than "whatever the eye says". A transform layer has no alpha at all
+    /// to be a wall with, so it takes the same answer through `LayerKind.holdsPixels`.
     ///
     /// An explicit `fillReferenceOverride` still wins, exactly as it does for every other kind: this
     /// changes what "never asked" resolves to (§6.6's whole distinction), not whether the artist may
     /// answer.
-    var isFillReference: Bool { fillReferenceOverride ?? (kind == .value ? false : isVisible) }
+    var isFillReference: Bool { fillReferenceOverride ?? (kind.holdsPixels ? isVisible : false) }
     var kind: LayerKind = .raster
     /// The grade a `.value` layer in **effect mode** applies (§4.4), or nil on a layer that draws
     /// pixels — and, on a `.value` layer, **the field whose presence decides the mode**.
@@ -190,26 +191,24 @@ struct Layer: Identifiable {
     /// keyframe B would otherwise produce two identical keys and no animation — a wrong result with
     /// nothing on screen to explain it.
     var pendingBaselines: [String: Double] = [:]
-    /// **The pose a `.value` layer in *transform mode* applies to everything beneath it inside its
-    /// own container** — KEYFRAMES.md §2.3 and §4.4's transformation layer — or nil on a layer that
-    /// is grading, filling or drawing pixels.
+    /// **The pose a `.transform` layer applies to everything beneath it inside its own container** —
+    /// KEYFRAMES.md §2.3 and §4.4's transformation layer, TRANSFORM_LAYER.md's kind of its own — or
+    /// nil on every other kind.
     ///
-    /// **Presence is the discriminant, which makes this the third payload of the two-payload recipe
-    /// `effect` documents above.** §2.6 is the ruling that puts all three in one menu — *"Blend Mode /
-    /// Effect / Transform"* — so the layer is one of three things and never two, and the three
-    /// accessors below (`layerEffect`, `layerTransform`, `valueFill`) are where that is decided. The
-    /// alternative was still a `mode` enum beside the payloads, and it is still rejected for the
-    /// reason `effect` gives: a document could then say "transform mode, no pose".
+    /// **The kind is the discriminant, not this field's presence** — which is the one way this payload
+    /// differs from `effect` and `fill` beside it, and TRANSFORM_LAYER.md §2 ruling 2 is why. Until
+    /// 2026-09-11 a transformation layer was a `.value` layer carrying this and no `effect`, the third
+    /// arm of a presence-is-the-mode recipe with a stated precedence; the owner asked for *"its own
+    /// layer type instead of attached to the value layer"*, so the three-way precedence is gone, a
+    /// value layer cannot be flipped into a transform layer or back, and `layerTransform` below reads
+    /// the kind and nothing else. `addTransformLayer` always stamps a resting pose, so a `.transform`
+    /// layer with nil here is reachable only from a hand-written manifest and poses nothing, which is
+    /// `valueFill`'s own no-op rule for a value layer with no fill.
     ///
-    /// **The precedence is stated once, in the accessors, and it is: effect, then transform, then
-    /// flat colour.** Order matters only for a document that carries two payloads at once, which no
-    /// writer produces and only a hand-edited manifest can contain; picking one rather than leaving
-    /// it to whichever accessor is asked first is what stops the panel and the renderer disagreeing
-    /// about what the layer is.
-    ///
-    /// Stored on `Layer` beside `effect` and `fill` for their two reasons: flipping a layer's kind
-    /// cannot lose it, and it decodes with the one `decodeIfPresent` the persistence idiom
-    /// prescribes.
+    /// Stored on `Layer` beside `effect` and `fill` for their reason: it decodes with the one
+    /// `decodeIfPresent` the persistence idiom prescribes, and the field is what a saved transform-
+    /// mode value layer already carries — `LayerKind.migratingTransformModeValueLayers` is the whole
+    /// of that migration.
     var transform: LayerPose? = nil
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
@@ -273,9 +272,10 @@ extension Layer {
     var layerEffect: Effect? { kind == .value ? effect : nil }
 
     /// **The pose this layer applies to everything beneath it in its container, or nil** — §4.4's
-    /// transformation layer, and `layerEffect`'s twin in every respect including why both halves are
-    /// required. A `.raster` layer that once carried a pose and has since been changed back must not
-    /// silently start moving the stack.
+    /// transformation layer, and `layerEffect`'s twin in every respect including why the kind test is
+    /// required. A `.raster` or `.value` layer carrying a pose — a hand-edited manifest, or the inert
+    /// storage a pre-2026-09-11 document's grade-over-pose layer held — must not silently start
+    /// moving the stack.
     ///
     /// **Rendering asks this, never `transform` on its own**, and there are two consumers rather than
     /// one: `CanvasManager.renderNodes(inContainer:atFrame:)` accumulates it down the container, and
@@ -283,16 +283,18 @@ extension Layer {
     /// transformation layer holds none. Those two must agree or the layer both moves the stack and
     /// paints a blank canvas-sized image over it.
     ///
+    /// **It does not read the block.** TRANSFORM_LAYER.md §2 ruling 1 gates a transform layer to the
+    /// frames its bar covers, and that gate lives in `renderNodes`' accumulator beside the frame it
+    /// is about, not here: this accessor is the panel's and the Move router's *"is this layer a
+    /// transform layer"*, which has no playhead in the answer — `layerEffect`'s own division between
+    /// the panel question and the rendering question, applied to the pose.
+    ///
     /// **No `(atFrame:)` twin, and that asymmetry is deliberate.** `layerEffect(atFrame:)` exists
     /// because a track drives an effect's *parameters* while presence is decided here; a pose channel
     /// has no parameters — the track drives the whole value — so the frame-resolved question is
     /// `LayerPose.mapping(atFrame:)` on the payload, and asking it through a second accessor here
     /// would put the same optional chain in two places.
-    ///
-    /// **`effect == nil` is the precedence clause `transform`'s own note names**, and it is the same
-    /// shape `valueFill` already carries one field down: three payloads, one layer, and a document
-    /// that carries two of them resolves to the first rather than to whichever accessor was asked.
-    var layerTransform: LayerPose? { kind == .value && effect == nil ? transform : nil }
+    var layerTransform: LayerPose? { kind == .transform ? transform : nil }
 
     /// **The grade at one frame — the function KEYFRAMES.md stage 2 filled in.**
     ///
@@ -359,13 +361,11 @@ extension Layer {
     /// costs one inert field and buys the round trip: flip to an effect, flip back, and the colour the
     /// artist mixed is still there. Clearing it instead would be a silent destructive edit performed by
     /// a mode picker, which is the one thing a mode picker must not do.
-    /// **`transform == nil` is the third clause, added with §4.4's transformation layer**, and it is
-    /// the same argument the other two make: a transformation layer holds no pixels either, so a
-    /// `fill` left on a layer the artist has since put into transform mode must read as inert storage
-    /// rather than as a canvas-sized sheet of colour painted under the move. The mode flip stays
-    /// asymmetric for `fill`'s own reason — going *to* transform keeps the colour, so flipping back
-    /// restores it.
-    var valueFill: ValueFill? { kind == .value && effect == nil && transform == nil ? fill : nil }
+    ///
+    /// **There is no `transform == nil` clause any more.** There was one from KEYFRAMES §4.4 until
+    /// 2026-09-11, when the transformation layer was a third mode of this kind; it is a kind of its
+    /// own now (`LayerKind.transform`) and the kind test above already excludes it.
+    var valueFill: ValueFill? { kind == .value && effect == nil ? fill : nil }
 
     /// Whether a brush stroke has anywhere to land on this layer.
     ///
@@ -375,15 +375,17 @@ extension Layer {
     /// pixels. `layerEffect` and `valueFill` answer the *rendering* question and are right to ask more
     /// than the kind; this one is about the drawing surface, and there is none in any configuration.
     ///
-    /// One kind rather than the two this used to name: §4.4's effect layer stopped being a kind of its
-    /// own and became a mode of this one, so the clause it contributed went with it rather than being
-    /// preserved as a test that can no longer be true.
+    /// **Two kinds, and the list lives on the kind rather than here** — `LayerKind.holdsPixels`, an
+    /// exhaustive `switch`, so the next pixel-less kind has to say so where the enum is. This read
+    /// `kind == .value` until the transform layer became a kind of its own (TRANSFORM_LAYER.md §2
+    /// ruling 2), which is exactly the day a name-of-one-kind test stops meaning the property it was
+    /// spelling.
     ///
     /// One property rather than a clause repeated at each of `CanvasView`'s three sites (host
     /// interaction, the catch-all gesture's gate, the catch-all's handler) — those three have to agree
     /// or the touch is either swallowed with no feedback or fed to a host that cannot use it, and
     /// three spellings of the same list is how they come to disagree.
-    var hasNoDrawingSurface: Bool { kind == .value }
+    var hasNoDrawingSurface: Bool { !kind.holdsPixels }
 }
 
 // MARK: - §4.5's value layer

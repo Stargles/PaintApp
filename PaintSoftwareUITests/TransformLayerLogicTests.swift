@@ -6,8 +6,9 @@ import CoreGraphics
 /// TODO (21) that moves whatever is *under* a layer rather than what is *on* a cel.
 ///
 /// `TransformChannelLogicTests` beside this one pins the cel-scoped channel — a drawing moving inside
-/// its own cel. This one pins the container-scoped pose: a `.value` layer in transform mode moving
-/// everything beneath it in its container, and a folder moving everything inside it.
+/// its own cel. This one pins the container-scoped pose: a `.transform` layer (TRANSFORM_LAYER.md §2
+/// ruling 2 — its own kind since 2026-09-11, a mode of `.value` before) moving everything beneath it
+/// in its container, and a folder moving everything inside it.
 ///
 /// Four things are pinned here, ordered by how expensive each is to discover later.
 ///
@@ -39,6 +40,35 @@ final class TransformLayerLogicTests: XCTestCase {
     override func setUp() {
         super.setUp()
         PixelOps.clearRasterizeCache()
+    }
+
+    override func tearDown() {
+        // The span tests below switch backends; the default rather than a literal, for
+        // `Compositor.defaultBackend`'s reason.
+        Compositor.backend = Compositor.defaultBackend
+        MaskResolver.clearCache()
+        super.tearDown()
+    }
+
+    /// The composite's bytes at `frame` on the backend currently selected — what the artist sees,
+    /// rather than what the model stores.
+    private func compositeBytes(_ manager: CanvasManager, atFrame frame: Int) throws -> [UInt8] {
+        PixelOps.clearRasterizeCache()
+        MaskResolver.clearCache()
+        let image = try XCTUnwrap(manager.makeRenderRequest(atFrame: frame, includeBackground: false)
+                                    .flatMap(Compositor.composite), "the document must composite")
+        return try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+    }
+
+    /// Runs `body` once per backend, skipping Metal where this bundle has no device or shader.
+    private func onBothBackends(_ body: (CompositorBackend) throws -> Void) throws {
+        for backend in [CompositorBackend.coreGraphics, .metal] {
+            if backend == .metal, CompositorMetalEngine.shared == nil { continue }
+            Compositor.backend = backend
+            try body(backend)
+        }
+        try XCTSkipIf(CompositorMetalEngine.shared == nil,
+                      "CoreGraphics ran; no Metal device or shader library in this bundle for the second backend")
     }
 
     // MARK: - Fixtures
@@ -84,7 +114,7 @@ final class TransformLayerLogicTests: XCTestCase {
     /// |---|---|---|
     /// | 0 | `floor`, a vector layer | root |
     /// | 1 | `inner`, a vector layer | inside folder `F` |
-    /// | 2 | `mover`, a `.value` layer in transform mode | inside folder `F` |
+    /// | 2 | `mover`, a `.transform` layer — or a plain value layer when no pose is given | inside folder `F` |
     /// | 3 | `above`, a vector layer | inside folder `F` |
     /// | 4 | `outside`, a vector layer | root |
     ///
@@ -106,7 +136,10 @@ final class TransformLayerLogicTests: XCTestCase {
         // measures a different document than the one its table describes.
         manager.addVectorLayer(name: "floor")
         manager.addVectorLayer(name: "inner")
-        manager.addValueLayer(name: "mover")
+        // A transform layer when the test hands in a pose; a plain value layer when it hands in nil,
+        // so that "a document with no transformation layer" is a document with none rather than one
+        // whose transform layer happens to hold no pose.
+        if moverPose != nil { manager.addTransformLayer(name: "mover") } else { manager.addValueLayer(name: "mover") }
         manager.addVectorLayer(name: "above")
         manager.addVectorLayer(name: "outside")
         let ids = manager.layers.map(\.id)
@@ -118,7 +151,7 @@ final class TransformLayerLogicTests: XCTestCase {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
             manager.layers[at].parentFolderID = folder
         }
-        if let at = manager.layers.firstIndex(where: { $0.name == "mover" }) {
+        if let moverPose, let at = manager.layers.firstIndex(where: { $0.name == "mover" }) {
             manager.layers[at].transform = moverPose
         }
         return Stack(manager: manager, folder: folder,
@@ -133,7 +166,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "ink")
-        manager.addValueLayer(name: "mover")
+        manager.addTransformLayer(name: "mover")
         let drawn = manager.layers.firstIndex { $0.name == "ink" } ?? 0
         let cel = Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size),
                       vector: .empty(size: size))
@@ -151,7 +184,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addLayer(name: "ink")
-        manager.addValueLayer(name: "mover")
+        manager.addTransformLayer(name: "mover")
         let drawn = manager.layers.firstIndex { $0.name == "ink" } ?? 0
         manager.layers[drawn].cels[0].frameCount = 12
         CanvasFixture.setBakedContent(manager, layerIndex: drawn,
@@ -227,8 +260,8 @@ final class TransformLayerLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "ink")
-        manager.addValueLayer(name: "lower")
-        manager.addValueLayer(name: "upper")
+        manager.addTransformLayer(name: "lower")
+        manager.addTransformLayer(name: "upper")
         let ink = manager.layers.firstIndex { $0.name == "ink" } ?? 0
         let slide = CGAffineTransform(translationX: 10, y: 0)
         let turn = CGAffineTransform(rotationAngle: .pi / 2)
@@ -244,23 +277,30 @@ final class TransformLayerLogicTests: XCTestCase {
     }
 
     /// **The `kind` half of `Layer.layerTransform`, and it is the trap CLAUDE.md names by name.** A
-    /// pose left on a layer whose kind is not `.value` must reach nothing — otherwise a layer changed
-    /// back to raster silently goes on moving the stack, and every test in this file that set the
-    /// field without the kind would have been measuring the field rather than the feature.
-    func testAPoseOnALayerThatIsNotAValueLayerReachesNothing() {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
-        stack.manager.layers[stack.mover].kind = .raster
-        XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty)
+    /// pose left on a layer whose kind is not `.transform` must reach nothing — otherwise a layer
+    /// changed to raster silently goes on moving the stack, and every test in this file that set the
+    /// field without the kind would have been measuring the field rather than the feature. Both
+    /// other-kind cases, because `.value` is the one a pre-2026-09-11 document's inert grade-over-pose
+    /// storage would have carried, and it must stay inert.
+    func testAPoseOnALayerThatIsNotATransformLayerReachesNothing() {
+        for kind in [LayerKind.raster, .value] {
+            let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+            stack.manager.layers[stack.mover].kind = kind
+            XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty, "a pose on a \(kind) layer")
+            XCTAssertNil(stack.manager.layers[stack.mover].layerTransform, "…through the accessor too")
+        }
     }
 
-    /// **And a grade wins over a pose**, which is `Layer.transform`'s stated precedence. Only a
-    /// hand-written manifest can carry both; what matters is that the renderer and the panel resolve
-    /// it the same way rather than each asking its own accessor first.
-    func testAGradeOnTheSameLayerWinsOverAPose() {
+    /// **And a grade left on a transform layer reaches nothing either** — the kind is the
+    /// discriminant on both sides. Under the old three-payload precedence a grade beside a pose won
+    /// and parked the pose; now only a hand-written manifest can carry both, and what matters is that
+    /// the renderer and the panel read the same answer: this layer poses, and it grades nothing.
+    func testAGradeOnATransformLayerIsInertAndThePoseStillReaches() {
         let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         stack.manager.layers[stack.mover].effect = .posterize(Effect.Posterize())
-        XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty)
-        XCTAssertNotNil(stack.manager.layers[stack.mover].layerEffect)
+        XCTAssertEqual(Set(stack.manager.layerPoses(atFrame: 0).keys), [stack.inner])
+        XCTAssertNil(stack.manager.layers[stack.mover].layerEffect)
+        XCTAssertNil(stack.manager.layers[stack.mover].layerEffect(atFrame: 0))
     }
 
     /// **§4.3's isolation, which §4.4 asks for by name when it says to reuse the existing
@@ -276,7 +316,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "operand")
-        manager.addValueLayer(name: "mover")
+        manager.addTransformLayer(name: "mover")
         let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
         for name in ["operand", "mover"] {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
@@ -331,17 +371,21 @@ final class TransformLayerLogicTests: XCTestCase {
                        "Frame 8 is the second key's own frame — not frame 8 minus the cel's start")
     }
 
-    // MARK: - The mode (§2.6)
+    // MARK: - The kind (TRANSFORM_LAYER.md §2 ruling 2)
 
-    /// A `.value` layer in transform mode is neither of the other two things, so nothing paints a
-    /// canvas-sized sheet of colour under the move.
-    func testALayerInTransformModeIsNeitherAFlatColourNorAGrade() {
+    /// A transform layer is neither a flat colour nor a grade, so nothing paints a canvas-sized sheet
+    /// of colour under the move — and it is its own kind, with no fill stamped on it at all, where
+    /// the old transform *mode* of a value layer carried the fill as inert storage.
+    func testATransformLayerIsItsOwnKindAndNeitherAFlatColourNorAGrade() {
         let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         let mover = stack.manager.layers[stack.mover]
-        XCTAssertNotNil(mover.fill, "`addValueLayer` stamps one, and transform mode leaves it stored")
-        XCTAssertNil(mover.valueFill, "…and inert, exactly as effect mode leaves it")
+        XCTAssertEqual(mover.kind, .transform)
+        XCTAssertNil(mover.fill, "`addTransformLayer` stamps no fill — there is no mode to flip back to")
+        XCTAssertNil(mover.valueFill)
         XCTAssertNil(mover.layerEffect)
         XCTAssertNotNil(mover.layerTransform)
+        XCTAssertTrue(mover.hasNoDrawingSurface, "a stroke has nowhere to land on it")
+        XCTAssertFalse(mover.isFillReference, "…and it is no wall for the fill tool either")
     }
 
     /// **`leafSnapshots` has to elide it, and the two ends of that have to agree.** The tree gives the
@@ -665,5 +709,174 @@ final class TransformLayerLogicTests: XCTestCase {
                        Set(stack.manager.layerPoses(atFrame: 8).keys),
                        "The reloaded document poses the same leaves, which is the only thing the "
                        + "artist can actually see")
+    }
+
+    // MARK: - The span (TRANSFORM_LAYER.md §2 ruling 1: the bar means "only here")
+
+    /// **Shorten the bar and the frames past it show the drawing unposed, on both backends, byte for
+    /// byte — and the keys past the bar are still there.** The pose is keyed 0 → 24 px over frames
+    /// 0…8 and in force at 8 while the bar covers it; cut the bar back to 6 and frame 8's composite
+    /// is exactly the composite of the same document with the transform layer hidden, while the
+    /// layer's track still holds both keys. Ruling 17: inert, never cropped. Watched failing two
+    /// ways — with the accumulator's `activeCelIndex` clause removed (frame 8 still posed), and with
+    /// a deliberate `transform?.track` crop added to `resizeCelRightEdge` (the second key gone).
+    func testShorteningTheBarLeavesTheFramesPastItUnposedAndTheKeysInPlace() throws {
+        try onBothBackends { backend in
+            let (manager, drawn) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+            let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+            let keysBefore = manager.layers[mover].transform?.track.keys.map(\.frame)
+            XCTAssertEqual(keysBefore, [0, 8], "Premise: two keys, the second at 8")
+            XCTAssertNotNil(manager.layerPoses(atFrame: 8)[drawn], "Premise: posed at 8 while the bar covers it")
+            let posed = try compositeBytes(manager, atFrame: 8)
+
+            // What "unposed" is, measured rather than assumed: the same document with the transform
+            // layer resting — resting is absent (`testARestingTransformLayerMintsNoPoses`), so this
+            // is the picture with no pose in it and nothing else changed.
+            let authored = manager.layers[mover].transform
+            manager.layers[mover].transform = LayerPose(restingIn: canvasBox)
+            let unposed = try compositeBytes(manager, atFrame: 8)
+            manager.layers[mover].transform = authored
+            XCTAssertNotEqual(posed, unposed, "Premise: the pose moves pixels at 8 (\(backend))")
+
+            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
+            XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 8), "The bar now ends before 8")
+            XCTAssertNil(manager.layerPoses(atFrame: 8)[drawn], "…so the render poses nothing there")
+            XCTAssertEqual(try compositeBytes(manager, atFrame: 8), unposed,
+                           "…and what is drawn at 8 is the unposed drawing, byte for byte (\(backend))")
+            XCTAssertNotNil(manager.layerPoses(atFrame: 4)[drawn], "Inside the bar the pose is still in force")
+            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), keysBefore,
+                           "The key at 8 is inert, not cropped — a layer's keys are its own, whatever "
+                           + "its bars do (ruling 17)")
+            XCTAssertEqual(manager.keyframeFrames(of: .layer(id: manager.layers[mover].id)), [0, 8],
+                           "…and the timeline still lists it, which is what draws its diamond")
+        }
+    }
+
+    /// **Lengthen the bar back and the pose is in force again with nothing lost** — the other half
+    /// of ruling 17, and what makes "inert" different from "deleted": the composite at 8 after
+    /// shorten-then-lengthen is byte-identical to the composite before either.
+    func testLengtheningTheBarBringsThePoseBackWithNothingLost() throws {
+        try onBothBackends { backend in
+            let (manager, _) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+            let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+            let before = manager.layers[mover].transform
+            let posed = try compositeBytes(manager, atFrame: 8)
+
+            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
+            XCTAssertNotEqual(try compositeBytes(manager, atFrame: 8), posed, "Premise: shortened, 8 is unposed")
+            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 12)
+
+            XCTAssertEqual(manager.layers[mover].transform, before, "Pose, track and keys, to the field")
+            XCTAssertEqual(try compositeBytes(manager, atFrame: 8), posed,
+                           "…and the picture at 8 is exactly what it was (\(backend))")
+        }
+    }
+
+    /// **A frame past the bar resolves to no pose at all in `layerPoses`, so nothing downstream is
+    /// paid for** — no derivation, no cache entry, no canvas-sized render — which is the same safety
+    /// property `testADocumentWithNoTransformLayerMintsNoPoses` pins for a document that never had
+    /// one. Two blocks with a gap: posed inside each, nothing in the gap, nothing past the end.
+    func testAFrameOutsideEveryBlockOfATransformLayerMintsNoPose() {
+        let (manager, drawn) = posedVectorLayer(pose(CGAffineTransform(translationX: 20, y: 0)))
+        guard let mover = manager.layers.firstIndex(where: { $0.name == "mover" }) else {
+            return XCTFail("The fixture's transform layer went missing")
+        }
+        manager.layers[drawn].cels[0].frameCount = 40
+        CanvasFixture.setCelLayout(manager, layerIndex: mover, [(start: 0, length: 4), (start: 10, length: 4)])
+        for frame in [0, 3, 10, 13] {
+            XCTAssertNotNil(manager.layerPoses(atFrame: frame)[drawn], "posed inside a block, at \(frame)")
+        }
+        for frame in [4, 7, 9, 14, 30] {
+            XCTAssertTrue(manager.layerPoses(atFrame: frame).isEmpty, "nothing minted outside every block, at \(frame)")
+        }
+    }
+
+    // MARK: - The migration (TRANSFORM_LAYER.md §2 ruling 2)
+
+    /// **A document saved while the transformation layer was a mode of `.value` opens as a
+    /// `.transform` layer with its track intact, and draws the same picture at a posed frame on both
+    /// backends.** The fixture is a real package written by this build and then edited on disk into
+    /// the pre-2026-09-11 spelling — `"kind":"value"` beside the `transform` key, with the fill the
+    /// old mode carried as inert storage — because there is no longer any way to *write* that
+    /// spelling and a fixture built through the encoder could not express the document being
+    /// migrated. Watched failing with `migratingTransformModeValueLayers` returning `kind` unchanged:
+    /// the layer reopened as a mid-grey flat colour over the drawing.
+    func testADocumentSavedWithATransformModeValueLayerOpensAsATransformLayerAndDrawsTheSame() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transform-kind-migration-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let (manager, drawn) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+        let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+        let moverID = manager.layers[mover].id
+        let url = root.appendingPathComponent("old-spelling.paintproj", isDirectory: true)
+        let finished = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        wait(for: [finished], timeout: 30)
+
+        // Rewrite the manifest into the old spelling. The premise is checked first: this build writes
+        // the new kind, so the rewrite is a real change and not a no-op.
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        var json = try String(contentsOf: manifestURL, encoding: .utf8)
+        XCTAssertTrue(json.contains("\"kind\":\"transform\""), "Premise: this build writes the new kind")
+        let fillJSON = String(data: try JSONEncoder().encode(ValueFill()), encoding: .utf8)!
+        json = json.replacingOccurrences(of: "\"kind\":\"transform\"",
+                                         with: "\"kind\":\"value\",\"fill\":\(fillJSON)")
+        try json.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url), "The old spelling must still open")
+        let migrated = try XCTUnwrap(reloaded.layers.first { $0.id == moverID })
+        XCTAssertEqual(migrated.kind, .transform, "Read as the kind it is now")
+        XCTAssertEqual(migrated.transform, manager.layers[mover].transform, "The pose and its whole track")
+        XCTAssertNotNil(migrated.layerTransform, "…and in force, through the accessor the render reads")
+        XCTAssertNil(migrated.fill, "The inert fill the old mode carried is dropped — a transform layer has none")
+        XCTAssertNil(migrated.valueFill)
+        let reloadedDrawn = try XCTUnwrap(reloaded.layers.firstIndex { $0.id == manager.layers[drawn].id })
+        XCTAssertNotNil(reloaded.layerPoses(atFrame: 8)[reloadedDrawn], "…posing the leaf beneath at the keyed frame")
+
+        try onBothBackends { backend in
+            XCTAssertEqual(try compositeBytes(reloaded, atFrame: 8), try compositeBytes(manager, atFrame: 8),
+                           "What is drawn at the posed frame is unchanged by the migration (\(backend))")
+        }
+
+        // And saving it again writes the new kind: an older build cannot open this, by design.
+        let resaved = root.appendingPathComponent("resaved.paintproj", isDirectory: true)
+        let done = expectation(description: "ProjectStore.save completion, second")
+        ProjectStore.save(reloaded, to: resaved) { done.fulfill() }
+        wait(for: [done], timeout: 30)
+        let resavedJSON = try String(contentsOf: resaved.appendingPathComponent("manifest.json"), encoding: .utf8)
+        XCTAssertTrue(resavedJSON.contains("\"kind\":\"transform\""), "Encoded as the new kind")
+    }
+
+    /// **A value layer that kept its grade and a stale pose stays a value layer, and the pose goes.**
+    /// The old precedence parked a pose under a grade for a flip-back that no longer exists; a
+    /// document carrying that state reopens as the grade it was showing, with no dead field.
+    func testAValueLayerSavedWithAGradeOverAPoseStaysAValueLayerAndDropsThePose() throws {
+        let poseJSON = String(data: try JSONEncoder().encode(LayerPose(restingIn: canvasBox)), encoding: .utf8)!
+        let effectJSON = String(data: try JSONEncoder().encode(Effect.posterize(Effect.Posterize())), encoding: .utf8)!
+        let legacy = """
+        {"id":"\(UUID().uuidString)","name":"Posterize","opacity":1,"isVisible":true,
+         "kind":"value","effect":\(effectJSON),"transform":\(poseJSON),
+         "cels":[{"id":"\(UUID().uuidString)","startFrame":0,"frameCount":12,"rasterFileName":"r.png"}]}
+        """
+        let decoded = try JSONDecoder().decode(LayerManifest.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.kind, .value)
+        XCTAssertNotNil(decoded.effect, "The grade it was showing")
+        XCTAssertNil(decoded.transform, "…and the pose it was not")
+
+        let plain = """
+        {"id":"\(UUID().uuidString)","name":"Mover","opacity":1,"isVisible":true,
+         "kind":"value","transform":\(poseJSON),"fill":\(String(data: try JSONEncoder().encode(ValueFill()), encoding: .utf8)!),
+         "cels":[{"id":"\(UUID().uuidString)","startFrame":0,"frameCount":12,"rasterFileName":"r.png"}]}
+        """
+        let transformed = try JSONDecoder().decode(LayerManifest.self, from: Data(plain.utf8))
+        XCTAssertEqual(transformed.kind, .transform, "The manifest-level migration, on the bare decoder")
+        XCTAssertNotNil(transformed.transform)
+        XCTAssertNil(transformed.fill)
     }
 }

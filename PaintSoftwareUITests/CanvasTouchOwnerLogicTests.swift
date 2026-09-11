@@ -829,12 +829,16 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         XCTAssertEqual(CanvasActiveLayer(kind: .raster), .raster)
         XCTAssertEqual(CanvasActiveLayer(kind: .vector), .vector)
         XCTAssertEqual(CanvasActiveLayer(kind: .value), .noDrawingSurface)
+        XCTAssertEqual(CanvasActiveLayer(kind: .transform), .noDrawingSurface,
+                       "A transform layer holds no pixels either — TRANSFORM_LAYER.md §2 ruling 2's kind")
 
         // And the two properties the fourteen gates actually read off it, so a future case cannot be
         // added to `CanvasActiveLayer` and left answering the defaults.
         XCTAssertFalse(CanvasActiveLayer(kind: nil).exists)
         XCTAssertTrue(CanvasActiveLayer(kind: .value).exists)
         XCTAssertTrue(CanvasActiveLayer(kind: .value).hasNoDrawingSurface)
+        XCTAssertTrue(CanvasActiveLayer(kind: .transform).exists)
+        XCTAssertTrue(CanvasActiveLayer(kind: .transform).hasNoDrawingSurface)
         XCTAssertFalse(CanvasActiveLayer(kind: .raster).hasNoDrawingSurface)
         XCTAssertFalse(CanvasActiveLayer(kind: .vector).hasNoDrawingSurface)
     }

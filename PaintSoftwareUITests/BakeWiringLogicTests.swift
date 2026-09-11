@@ -368,9 +368,8 @@ final class BakeWiringLogicTests: XCTestCase {
                                    channels: .pressureOnly)))
         manager.layers[0].cels = [cel]
 
-        manager.addValueLayer()
+        manager.addTransformLayer()
         let box = CGRect(origin: .zero, size: size)
-        manager.layers[1].fill = nil
         manager.layers[1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
                                       raster: .empty(size: size))]
         let far = moving ? PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 24, y: 0))

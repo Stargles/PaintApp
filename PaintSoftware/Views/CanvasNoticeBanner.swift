@@ -98,6 +98,9 @@ struct CanvasNoticeBanner: View {
         // Not a warning: the resize did what was asked, and the glyph is the keyframe's own because
         // what the sentence is about is diamonds that have left the timeline.
         case .keyframesCropped: return "minus.diamond"
+        // The timeline's glyph, `cannotMoveDerivedFrame`'s reason: the message is about which frame
+        // the artist is standing on against where a bar is, and both ways out are on the timeline.
+        case .moveOutsideTransformBlock: return "film"
         // Not a warning either: the merge happened and gave the artist a layer. What the glyph says
         // is *which kind* of layer came back, which is the whole content of the message.
         case .mergedAsPixels:   return "square.on.square"

@@ -229,6 +229,57 @@ final class EffectLayerLogicTests: XCTestCase {
         return (manager, folder)
     }
 
+    // MARK: - The bar means "only here" (TRANSFORM_LAYER.md §2 ruling 1)
+
+    /// **A grade acts on the frames its bar covers and nowhere else.** The floor runs to frame 40 and
+    /// the adjustment layer's bar is cut back to 12; frame 5 is graded to the CSS value and frame 20
+    /// is the bare grey, on both backends, byte for byte. Before 2026-09-11 the grade applied at
+    /// every frame — `Compositor.draw` reaches a grading leaf by `node.effect` before it looks for a
+    /// source, so `leafSnapshots`' cel gate never reached it — and BUGS.md filed the bar as being
+    /// ignored; the ruling closes that the other way, with the bar right and the tree deriving no
+    /// effect where there is no block. Watched failing with the `activeCelIndex` clause removed from
+    /// `renderNodes`' leaf derivation (frame 20 read 154 on both backends).
+    func testAGradeActsOnlyWhereItsBarIsOnBothBackends() throws {
+        for backend in [CompositorBackend.coreGraphics, .metal] {
+            if backend == .metal { try XCTSkipIf(CompositorMetalEngine.shared == nil, "No Metal device or shader library in this bundle") }
+            Compositor.backend = backend
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 40)])
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+            manager.addValueLayer(effect: Self.brighten)
+            let grader = manager.layers.count - 1
+            XCTAssertEqual(manager.layers[grader].cels.map(\.frameCount), [40],
+                           "Premise: the adjustment layer was born spanning the 40-frame scene")
+            manager.resizeCelRightEdge(layerIndex: grader, celIndex: 0, newEndFrame: 12)
+
+            guard let inside = composite(manager, atFrame: 5), let outside = composite(manager, atFrame: 20) else {
+                return XCTFail("Fixture must composite on \(backend)")
+            }
+            XCTAssertEqual(pixel(inside, 32, 32), opaqueGrey(brightenedByTheSpec(128)),
+                           "Inside the bar the grade is in force (\(backend))")
+            XCTAssertEqual(pixel(outside, 32, 32), opaqueGrey(128),
+                           "Past the bar's end the floor is ungraded (\(backend)) — got \(pixel(outside, 32, 32))")
+            XCTAssertNil(manager.renderTree(atFrame: 20).first { $0.id == manager.layers[grader].id }?.effect,
+                         "…and the tree says so: the leaf derives no effect where it has no block, so "
+                         + "`needsCompositorOnCanvas` and the bake key see the same thing the pixels show")
+        }
+    }
+
+    /// **And a new adjustment layer's bar reaches the scene's end**, so the rule above is not the
+    /// common case: the layer added to a 40-frame scene grades frame 39. `newLayerBlockLength` was
+    /// always `contentEndFrame`; this pins that a value layer gets it, since under the ruling a
+    /// shorter default would be a grade that silently stops partway through the scene.
+    func testANewAdjustmentLayersBarReachesTheScenesEnd() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 40)])
+        manager.addValueLayer(effect: Self.brighten)
+        let grader = manager.layers.count - 1
+        XCTAssertEqual(manager.layers[grader].cels.map { $0.startFrame ..< $0.endFrame }, [0 ..< 40])
+        guard let last = composite(manager, atFrame: 39) else { return XCTFail("Fixture must composite") }
+        XCTAssertEqual(pixel(last, 32, 32), opaqueGrey(brightenedByTheSpec(128)))
+    }
+
     // MARK: - Opacity, masks, visibility
 
     /// **Opacity on an adjustment layer is an amount, not a coverage**, which is what the mix in

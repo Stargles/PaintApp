@@ -42,16 +42,15 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     /// A document whose layer 1 is a **transformation layer**, with `frames` frames of scene to record
     /// over and `playbackNow` wired to a clock the test owns.
     ///
-    /// The mode is set through `setLayerTransform`, which is what the layer options panel's own picker
-    /// calls — `TransformLayerEntryLogicTests`' rule, and for its reason: `Layer.layerTransform` is
-    /// `kind == .value && effect == nil ? transform : nil`, so a fixture that wrote the raw field would
-    /// be setting something the render path does not read.
+    /// The layer is created through `addTransformLayer`, which is what the `+` menu's entry calls —
+    /// `TransformLayerEntryLogicTests`' rule, and for its reason: `Layer.layerTransform` is
+    /// `kind == .transform ? transform : nil`, so a fixture that wrote the raw field onto some other
+    /// kind would be setting something the render path does not read.
     private func movingDocument(frames: Int = 240) -> (manager: CanvasManager, clock: FakeClock) {
         let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addValueLayer()
+        manager.addTransformLayer()
         CanvasFixture.setCelLayout(manager, layerIndex: moverIndex, [(start: 0, length: frames)])
         manager.currentLayerIndex = moverIndex
-        manager.setLayerTransform(layerIndex: moverIndex, to: manager.restingContainerPose)
         XCTAssertNotNil(manager.layers[moverIndex].layerTransform,
                         "Setup: the accessor the renderer reads says this layer poses")
         manager.history.removeAll()

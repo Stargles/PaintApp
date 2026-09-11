@@ -131,13 +131,27 @@ struct LayerPanel: View {
                     Label("Value Layer", systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("layerPanel.addValueButton")
-                // `activeContainerID` on these two and not on the three above, which is not an
-                // oversight: `addLayer`/`addVectorLayer`/`addValueLayer` resolve the container
-                // themselves (`newLayerPlacement`), because inserting *above the active layer* is
-                // only meaningful inside that layer's own folder. `addFolder`/`addCompositorNode`
-                // still read nil as the root — see `activeContainerID`'s doc for why they were left
-                // that way — so the inheritance has to be spelled out here or a folder created while
-                // the artist works inside a group lands at the top level instead of beside them.
+                // **The transformation layer is its own entry, because it is its own kind** —
+                // TRANSFORM_LAYER.md §2 ruling 2. It was the value layer's third mode from KEYFRAMES
+                // §4.4 until 2026-09-11, reached by adding a Value Layer and picking Transform from
+                // its Blend Mode row, which the owner had to be told; now an artist who wants to move
+                // what is beneath adds a *Transform Layer* and its panel is about transforming. The
+                // glyph is the toolbar's own Move glyph, which `transformMoveRow` already borrows for
+                // the same reason: the layer and the button do one thing.
+                Button {
+                    closingOptions { canvasManager.addTransformLayer() }
+                } label: {
+                    Label("Transform Layer", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                }
+                .accessibilityIdentifier("layerPanel.addTransformButton")
+                // `activeContainerID` on these two and not on the four above, which is not an
+                // oversight: `addLayer`/`addVectorLayer`/`addValueLayer`/`addTransformLayer` resolve
+                // the container themselves (`newLayerPlacement`), because inserting *above the
+                // active layer* is only meaningful inside that layer's own folder.
+                // `addFolder`/`addCompositorNode` still read nil as the root — see
+                // `activeContainerID`'s doc for why they were left that way — so the inheritance has
+                // to be spelled out here or a folder created while the artist works inside a group
+                // lands at the top level instead of beside them.
                 Button {
                     closingOptions { canvasManager.addFolder(parentFolderID: canvasManager.activeContainerID) }
                 } label: {
@@ -345,24 +359,7 @@ struct LayerOptionsPanel: View {
             // stamps one — would answer nil to both and fall into the effect branch with no effect to
             // edit. Effect mode *is* `layerEffect != nil`; everything else is flat colour, including
             // the layer that has not been given a colour yet, which is what the swatch is for.
-            if canvasManager.layers[index].layerTransform != nil {
-                // Transform mode's row **raises the box itself**, rather than describing where to find
-                // it. It rendered `EmptyView()` until the owner installed a build and asked *"i
-                // selected the transform mode, now how do i use it? there is nothing in the graph
-                // editor"* — and they were right, because the feature's entry was closed on itself.
-                // Move was already the verb (`CanvasManager.beginMove` routes a posing layer to
-                // `beginContainerPoseMove`), but nothing on screen said so: the only affordance that
-                // did was `revealPoseChannel`, which lives on a channel-list row, and that row exists
-                // only once the channel has two differing keys — which only a Move can put there. The
-                // artist had to already know the answer to be shown it.
-                //
-                // A row rather than a hint line, because a sentence pointing at a button somewhere else
-                // is a worse control than the button. The swatch stays absent for `valueColorRow`'s own
-                // reason — in this mode the fill is inert storage the render never reads.
-                transformMoveRow(scope: "beneath this layer") {
-                    leavingMaskEdit { canvasManager.beginContainerPoseMove() }
-                }
-            } else if let effect = canvasManager.layers[index].layerEffect {
+            if let effect = canvasManager.layers[index].layerEffect {
                 // Effect mode: the grade's knobs, behind a row rather than inline. Levels alone is
                 // five sliders and Gradient Map is a list, which is the same argument the Mask row
                 // made first — hence the same shape, the same chevron and the same Back button.
@@ -381,15 +378,46 @@ struct LayerOptionsPanel: View {
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
 
-        maskRow(mask: canvasManager.layers[index].alphaMask) { showingMaskMenu = true }
+        // **A transform layer's panel is about transforming** — TRANSFORM_LAYER.md §2 ruling 2, and
+        // the reason the kind exists. Two rows: which mode, and the verb.
+        //
+        // The mode picker lists Move alone today. Parallax, Rotate, Shake and Repeat are §5's four
+        // further modes and arrive one stage each (§8); until a stage lands its row is not here,
+        // because a row that is offered and does nothing is CLAUDE.md's *"a refusal with no notice"*
+        // wearing a menu. A picker of one rather than a caption, so the control the later modes
+        // join already has its place, its identifier and its value.
+        //
+        // The Move row **raises the box itself**, rather than describing where to find it. It
+        // rendered `EmptyView()` until the owner installed a build and asked *"i selected the
+        // transform mode, now how do i use it? there is nothing in the graph editor"* — and they
+        // were right, because the feature's entry was closed on itself. Move was already the verb
+        // (`CanvasManager.beginMove` routes a posing layer to `beginContainerPoseMove`), but nothing
+        // on screen said so: the only affordance that did was `revealPoseChannel`, which lives on a
+        // channel-list row, and that row exists only once the channel has two differing keys — which
+        // only a Move can put there. The artist had to already know the answer to be shown it.
+        //
+        // No blend row and no mask row: the leaf holds no pixels, so `RenderTree.renderNodes` pins
+        // its mode to `.normal` and its mask would multiply an image it never draws — either control
+        // would be one the artist can set and never see.
+        if canvasManager.layers[index].kind == .transform {
+            transformModeRow()
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            transformMoveRow(scope: "beneath this layer") {
+                leavingMaskEdit { canvasManager.beginContainerPoseMove() }
+            }
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        } else {
+            maskRow(mask: canvasManager.layers[index].alphaMask) { showingMaskMenu = true }
 
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        }
 
         // **A value layer's blend row is up top, merged with its grades** (`valueBlendModeRow`), so it
-        // must not appear a second time down here. This one is for every other kind, where a blend is a
-        // modifier on content the layer already has rather than the answer to what the layer *is* — and
-        // where there is no grade for it to conflict with, so it needs none of the merged row's rules.
-        if canvasManager.layers[index].kind != .value {
+        // must not appear a second time down here, and a transform layer has none (above). This one
+        // is for the kinds that hold pixels, where a blend is a modifier on content the layer already
+        // has rather than the answer to what the layer *is* — and where there is no grade for it to
+        // conflict with, so it needs none of the merged row's rules.
+        if canvasManager.layers[index].kind.holdsPixels {
             blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
                 canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
             }
@@ -449,17 +477,17 @@ struct LayerOptionsPanel: View {
     /// node whose operands are named slots, but a value layer sits in an ordinary stack with something
     /// under it, so the implicit source resolves and the mode means what it says.
     ///
-    /// **The row's title follows what is set — Blend Mode / Effect / Transform** — which is §2.6's
-    /// ruling in the owner's own words: *"that 'blend mode' is very vague since effects, blend modes,
-    /// and now the transform will be added to it."* One question, three kinds of answer, and the
-    /// label says which kind is live rather than naming only the one that usually is.
+    /// **The row's title follows what is set — Blend Mode / Effect** — which is §2.6's ruling in the
+    /// owner's own words: *"that 'blend mode' is very vague since effects, blend modes, and now the
+    /// transform will be added to it."* One question, two kinds of answer, and the label says which
+    /// kind is live rather than naming only the one that usually is.
     ///
-    /// **Transform is a section of one, and it is a section rather than a fourth arm of the effect
-    /// list**, because it is not a grade: `Layer.transform` is a third payload on the same
-    /// presence-is-the-discriminant recipe (§4.4), and `setLayerTransform` is what writes it.
+    /// **Transform is no longer in this menu.** It was a section of one above the grade catalogue
+    /// from §4.4's entry pass until 2026-09-11, when TRANSFORM_LAYER.md §2 ruling 2 made the
+    /// transformation layer a kind of its own with its own `+` entry; a value layer cannot become
+    /// one now, so there is nothing for the section to pick.
     private func valueBlendModeRow(index: Int) -> some View {
         let effect = canvasManager.layers[index].layerEffect
-        let transform = canvasManager.layers[index].layerTransform
         let blend = canvasManager.layers[index].blendMode
         return Menu {
             ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
@@ -472,7 +500,7 @@ struct LayerOptionsPanel: View {
                             // last picked underneath an effect, and a checkmark beside a mode the
                             // renderer is currently ignoring would be the panel disagreeing with the
                             // canvas — `nodeOperationRow` makes this same argument about `compositorOp`.
-                            if effect == nil, transform == nil, mode == blend {
+                            if effect == nil, mode == blend {
                                 Label(mode.displayName, systemImage: "checkmark")
                             } else {
                                 Text(mode.displayName)
@@ -482,43 +510,15 @@ struct LayerOptionsPanel: View {
                     }
                 }
             }
-            // **Transform sits above the grade catalogue, not below it, and that ordering is
-            // load-bearing rather than cosmetic.** The three kinds of answer this row gives are two
-            // single picks and one list of thirteen; putting the list last is what keeps the other two
-            // within reach. Below it, Transform was the ~35th item in the menu — past the point where
-            // an accessibility client can see one at all (BUGS.md, *"The effects menu only exposes its
-            // first few items to XCUITest"*, which is a scrollable-menu limit rather than an app
-            // defect). An artist scrolling by hand could still reach it, so this was never a hard
-            // wall for them; what it *was* is a wall for every UI test, so the one entry point to a
-            // whole feature could not be driven by anything but a human. That is the same blindness
-            // that let the feature ship unusable, one layer further out.
-            Section {
-                Button {
-                    // Toggling, like every other entry in this list: picking the mode the layer is
-                    // already in is the way *out* of it, and the only other way out is picking a
-                    // blend or a grade. Nil restores flat colour, keeping the fill
-                    // (`setLayerTransform` argues the asymmetry).
-                    canvasManager.setLayerTransform(layerIndex: index,
-                                                    to: transform == nil
-                                                        ? canvasManager.restingContainerPose : nil)
-                } label: {
-                    if transform != nil {
-                        Label("Transform", systemImage: "checkmark")
-                    } else {
-                        Text("Transform")
-                    }
-                }
-                .accessibilityIdentifier("layerOptions.blendMode.transform")
-            }
             effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
                 canvasManager.setLayerEffect(layerIndex: index, to: picked)
             }
         } label: {
             HStack(spacing: 8) {
-                Text(effect != nil ? "Effect" : (transform != nil ? "Transform" : "Blend Mode"))
+                Text(effect != nil ? "Effect" : "Blend Mode")
                     .foregroundColor(.white)
                 Spacer()
-                Text(effect?.displayName ?? (transform != nil ? "Transform" : blend.displayName))
+                Text(effect?.displayName ?? blend.displayName)
                     .font(.caption)
                     .foregroundColor(.gray)
                     .lineLimit(1)
@@ -531,10 +531,44 @@ struct LayerOptionsPanel: View {
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("layerOptions.blendModeButton")
-        // The grade's slug while grading, "transform" while posing, the blend's raw value otherwise —
-        // the same multi-vocabulary value `nodeOperationRow` reports, so a test can read which of the
-        // three answers is live. No `BlendMode.rawValue` and no `effectMenuSlug` is "transform".
-        .accessibilityValue(effect.map(effectMenuSlug) ?? (transform == nil ? blend.rawValue : "transform"))
+        // The grade's slug while grading, the blend's raw value otherwise — the same multi-vocabulary
+        // value `nodeOperationRow` reports, so a test can read which of the two answers is live.
+        .accessibilityValue(effect.map(effectMenuSlug) ?? blend.rawValue)
+    }
+
+    /// **A transform layer's mode picker, listing the one mode that has shipped** — TRANSFORM_LAYER.md
+    /// §5.1's Move. §8 adds Parallax, Rotate, Shake and Repeat here one stage at a time; the shape —
+    /// a `Menu` on a row with a title, the live value in the caption and a checkmark on the pick — is
+    /// `valueBlendModeRow`'s, so the fifth entry costs a `Button` and nothing about the row moves.
+    ///
+    /// Nothing is written when Move is picked: a transform layer is in Move already and there is no
+    /// other mode to leave. The identifiers are the row's own (`layerOptions.transformModeButton`,
+    /// `layerOptions.transformMode.move`) rather than the blend row's, since this is not a blend
+    /// row and the value it reports is a mode name.
+    private func transformModeRow() -> some View {
+        Menu {
+            Button {} label: {
+                Label("Move", systemImage: "checkmark")
+            }
+            .accessibilityIdentifier("layerOptions.transformMode.move")
+        } label: {
+            HStack(spacing: 8) {
+                Text("Mode").foregroundColor(.white)
+                Spacer()
+                Text("Move")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("layerOptions.transformModeButton")
+        .accessibilityValue("move")
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the
@@ -1004,9 +1038,9 @@ struct FolderOptionsPanel: View {
                 // composes a folder's pose into its children on the way down whether or not the
                 // folder is a compositor node (`resolvedPoseMapping`, read unconditionally), and it is
                 // independent of `effect`/`compositorOp` too — `containerPose(of:)` reads the raw
-                // field with no gate, unlike a value layer's `layerTransform`, which is one of three
-                // mutually exclusive answers to "what is this layer". So there is no reading under
-                // which showing this switch here would be a control the render tree overrides.
+                // field with no gate. So there is no reading under which showing this switch here
+                // would be a control the render tree overrides. (A layer has no such switch: a
+                // transform layer is a kind, added from the `+` menu, TRANSFORM_LAYER.md §2.)
                 //
                 // The toggle turns the pose on and off; the row beneath — `transformMoveRow`, the
                 // exact one `LayerOptionsPanel` uses — is what raises the box once it is on, which is

@@ -884,11 +884,24 @@ extension CanvasManager {
         // suppressed here for the same reason the clip-to-below source is suppressed below, and a
         // transform layer dropped into a Mix as an operand simply reaches nothing. `inherited` still
         // flows through untouched: whatever poses the node poses everything the node is built from.
+        //
+        // **A transform layer acts only on the frames its bar covers** — TRANSFORM_LAYER.md §2
+        // ruling 1, the owner's 2026-09-11 answer to *"does the bar mean only here?"*: yes, for
+        // every mode. So the accumulator asks `activeCelIndex` before it composes, and a layer with
+        // no block at this frame contributes no pose — exactly the gate a grade or a flat colour
+        // already passes through in `leafSnapshots`, reached here because the pose is spent in the
+        // walk rather than in the leaf. Its keys are **not** cropped to the block (ruling 17): they
+        // stay stored in absolute frames, inert outside every block and back in force the moment the
+        // bar is lengthened over them, which is what lets one layer own several blocks with a key
+        // between them interpolating across the gap. This is the one place the rule is applied, and
+        // every consumer — the live canvas, the sandwich key, the bake, the interpolation previews —
+        // reads `layerPoses(atFrame:)` off this walk, so none of them can disagree about it.
         var carried = [PoseMap?](repeating: inherited, count: stack.count)
         var accumulated = inherited
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
             carried[position] = accumulated
             guard !containerIsNode, case .layer(let index) = stack[position],
+                  activeCelIndex(inLayer: index, atFrame: frame) != nil,
                   let map = layers[index].layerTransform?.mapping(atFrame: frame) else { continue }
             accumulated = accumulated.map { map.concatenating($0) } ?? map
         }
@@ -909,7 +922,20 @@ extension CanvasManager {
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
-                let effect = layer.layerEffect(atFrame: frame)
+                // **A grade acts only on the frames its bar covers, too** — the same ruling, applied
+                // to the value layer's other pixel-less mode so that one rule covers every leaf that
+                // holds no pixels. The flat colour was already gated (`leafSnapshots` resolves it
+                // only where `activeCelIndex` finds a block); the grade was not, because the
+                // compositor reaches a grading leaf by `node.effect` before it ever looks for a
+                // source, so a 12-frame adjustment layer went on grading a 48-frame scene with a bar
+                // that visibly ended at 12. BUGS.md filed that as the bar being ignored; the ruling
+                // closes it the other way — the bar is right, and a new pixel-less layer's block is
+                // stamped to the scene's end so it works everywhere until the artist shortens it.
+                // Nil here also drops `needsCompositorOnCanvas`'s effect clause and the leaf's
+                // `.normal` pin for the frames outside the bar, which is what a leaf that contributes
+                // nothing should look like to the tree.
+                let effect = activeCelIndex(inLayer: index, atFrame: frame) != nil
+                    ? layer.layerEffect(atFrame: frame) : nil
                 // **The one place a leaf's pose is recorded.** Absent rather than present-and-identity
                 // for `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached from the tree side:
                 // an entry in this dictionary is what gives a cel a derivation, and a derivation costs

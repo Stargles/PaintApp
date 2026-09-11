@@ -269,17 +269,11 @@ final class RecordingUITests: PaintUITestCase {
         preset.tap()
         app.buttons["timeline.frameRateButton"].tap()   // close the panel
 
-        // A transformation layer, made the only way an artist can make one: a value layer, then its own
-        // mode picker. This is also the only way to *get* a recordable pose channel — a fresh document
-        // has none, which is the closed loop this surface has to open rather than sit behind.
+        // A transformation layer, made the only way an artist can make one: the + menu's own entry.
+        // This is also the only way to *get* a recordable pose channel — a fresh document has none,
+        // which is the closed loop this surface has to open rather than sit behind.
         openLayerPanel(app)
-        addValueLayerFromAddMenu(app)
-        app.staticTexts["layerPanel.row.1"].tap()       // already selected after the add: opens options
-        app.buttons["layerOptions.blendModeButton"].tap()
-        let transformItem = app.buttons["layerOptions.blendMode.transform"]
-        XCTAssertTrue(transformItem.waitForExistence(timeout: 5))
-        transformItem.tap()
-        app.buttons["layerOptions.close"].tap()
+        addTransformLayerFromAddMenu(app)
         app.buttons["toolbar.layersButton"].tap()       // the rail covers the timeline
 
         // **The marker band hides itself when a layer has no keys**, so its absence here is a real

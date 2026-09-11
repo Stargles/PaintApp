@@ -327,7 +327,7 @@ struct LayerManifest: Codable {
     var hasCustomName: Bool = false
     var opacity: Double
     var isVisible: Bool
-    /// Mirrors `Layer.kind` (raster/vector/value). Persisted (defaulting missing values to `.raster`)
+    /// Mirrors `Layer.kind` (raster/vector/value/transform). Persisted (defaulting missing values to `.raster`)
     /// so *added* layer kinds need no migration of already-saved projects — which is exactly what
     /// `.value` needed on arrival, since no document written before it contains the string and every
     /// one of them still decodes to the raster layer it was.
@@ -413,9 +413,9 @@ struct LayerManifest: Codable {
     /// decodes to exactly the behaviour it had.
     var fillReferenceOverride: Bool? = nil
     /// `Layer.transform` — KEYFRAMES.md §4.4's transformation layer, **written only when there is
-    /// one**. `effect`'s recipe one field up, and it carries the same discriminant meaning on the
-    /// way back in: a `.value` layer whose manifest has this key and no `effect` is in transform
-    /// mode. Absence is the whole migration.
+    /// one**. `effect`'s recipe one field up. Since 2026-09-11 it is the payload of `kind ==
+    /// .transform` rather than a mode of `.value`, and a manifest that still says `"value"` beside it
+    /// is read as `.transform` by `init(from:)` below — `LayerKind.migratingTransformModeValueLayers`.
     var transform: LayerPose? = nil
     var cels: [CelManifest]
 
@@ -477,6 +477,18 @@ struct LayerManifest: Codable {
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
         transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
+        // **The transform-layer migration, TRANSFORM_LAYER.md §2 ruling 2** — the one place a document
+        // written while a transformation layer was a *mode* of `.value` is read as the kind it is now.
+        // `LayerKind.migratingTransformModeValueLayers` carries the argument; what is done here beside
+        // it is to leave the migrated layer with exactly the payload its kind reads: a transform layer
+        // holds no fill, and a value layer that kept its grade holds no pose.
+        let migrated = LayerKind.migratingTransformModeValueLayers(kind, effect: effect, transform: transform)
+        if migrated == .transform {
+            kind = .transform
+            fill = nil
+        } else if kind == .value, transform != nil {
+            transform = nil
+        }
     }
 
     private enum CodingKeys: String, CodingKey {

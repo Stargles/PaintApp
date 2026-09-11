@@ -642,7 +642,7 @@ struct DrawingView: View {
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
              .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .recordingRefused,
              .recordingArmed, .animationGroupMembershipChanged, .animationGroupEditRefused,
-             .keyframesCropped:
+             .keyframesCropped, .moveOutsideTransformBlock:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner
             // never offers a button that would land here. Every case is spelled out rather than
             // defaulted so that adding a new kind is a compile error here, not a silent no-op.

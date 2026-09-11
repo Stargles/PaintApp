@@ -431,7 +431,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
     }
 
     /// **The row does something real: it re-poses whatever is inside the folder**, mirroring
-    /// `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt`'s own proof for a value layer's
+    /// `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt`'s own proof for a transform layer's
     /// transform mode — CLAUDE.md's "a correct value drawn in the wrong place" is exactly the shape a
     /// test that stopped at the switch and the row would miss, so this one drags the box and reads
     /// the ink back off the canvas rather than off the model.
@@ -448,7 +448,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         // The horizontal centre of gravity of the ink on the canvas' middle row, **measured from the
         // paper's own left edge rather than from the screenshot's**.
         //
-        // `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt` reads the centroid of every dark
+        // `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt` reads the centroid of every dark
         // pixel in the frame and normalises it by the frame's width, which works there because it
         // takes both of its readings at one layout. It does not survive being copied here, and it
         // was copied here: the screenshot carries the black tool rail down the left and the layers
@@ -606,7 +606,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         // The pose must survive the commit rather than resetting — a Move that quietly turns its own
         // switch back off would look, from the panel, exactly like a Move that had never happened.
         // The rail closes on its own somewhere in the drag-into-folder-then-Move sequence above (it
-        // does not for a plain layer, per `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt`'s
+        // does not for a plain layer, per `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt`'s
         // own "left up on purpose" note) — reopen defensively rather than assume either state.
         if !app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 2) {
             app.buttons["toolbar.layersButton"].tap()
@@ -963,7 +963,9 @@ final class LayerPanelControlsUITests: PaintUITestCase {
                        "…and only a value layer's: setLayerFill refuses every other kind anyway")
     }
 
-    /// **§4.4's transformation layer, reachable at last — and this test exists because it was not.**
+    /// **The transformation layer, reachable from a fresh document — and this test exists because
+    /// once it was not.** Since 2026-09-11 it is a kind of its own with its own `+` entry
+    /// (TRANSFORM_LAYER.md §2 ruling 2), and the route is `+` → Transform Layer → its panel → Move.
     ///
     /// The owner installed a build and asked *"i selected the transform mode, now how do i use it?
     /// there is nothing in the graph editor. Im not even sure if the feature is implemented fully."*
@@ -980,7 +982,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     /// the float too, so those two agreeing is the app reporting a live Move rather than a view
     /// rendering hopefully. It goes red if the row disappears while the model stays perfectly correct,
     /// which is exactly the state that shipped.
-    func testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt() throws {
+    func testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -1017,33 +1019,39 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertNotNil(inkBefore, "Sanity: the stroke landed")
 
         openLayerPanel(app)
-        addValueLayerFromAddMenu(app)
+        addTransformLayerFromAddMenu(app)
         let row = app.staticTexts["layerPanel.row.1"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The + menu's Transform Layer entry added a row")
+        XCTAssertTrue(row.label.hasPrefix("Transform"),
+                      "…named for what it is, since the row is where an artist reads their stack: \(row.label)")
         row.tap()   // already selected after the add: opens its options
 
-        let moveRow = app.buttons["layerOptions.transformMove"]
-        XCTAssertFalse(moveRow.exists,
-                       "A flat-colour value layer has nothing to move — the row belongs to the mode")
-
-        // The mode picker's third arm, from the merged Blend Mode row (§2.6).
-        let modeButton = app.buttons["layerOptions.blendModeButton"]
-        XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
+        // **The panel is about transforming, and nothing else** — TRANSFORM_LAYER.md §2 ruling 2.
+        // A mode picker that lists Move and only Move today (the other four modes arrive one stage
+        // each and must not appear as dead rows), and the Move row itself. No Blend Mode row, no
+        // colour swatch, no mask row: the leaf holds no pixels for any of them to act on.
+        let modeButton = app.buttons["layerOptions.transformModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5),
+                      "A transform layer's options open on its mode picker")
+        XCTAssertEqual(modeButton.value as? String, "move", "…which reports Move, the one mode that has shipped")
         modeButton.tap()
-        let transformItem = app.buttons["layerOptions.blendMode.transform"]
-        XCTAssertTrue(transformItem.waitForExistence(timeout: 5), """
-            The Transform entry is not visible to an accessibility client. It used to sit below the             thirteen-item grade catalogue, past the point where a scrollable menu exposes its items             at all (BUGS.md) — which made the one entry point to this whole feature undrivable by             any test. It is above the catalogue now; this assertion is what keeps it there.
-            """)
-        transformItem.tap()
+        let moveItem = app.buttons["layerOptions.transformMode.move"]
+        XCTAssertTrue(moveItem.waitForExistence(timeout: 5), "The picker lists Move")
+        XCTAssertFalse(app.buttons["layerOptions.transformMode.parallax"].exists,
+                       "…and not a mode that has not shipped — a row that does nothing is a refusal with no notice")
+        moveItem.tap()
 
-        XCTAssertEqual(modeButton.value as? String, "transform",
-                       "The row reports which of the three kinds of answer is live — the slug, "
-                       + "beside a grade's `effectMenuSlug` and a blend's raw value")
+        let moveRow = app.buttons["layerOptions.transformMove"]
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5), """
-            Transform mode offers no way to use it. This is the defect the owner reported: the pose is             authored with the Move box and nothing on screen said so, while the graph editor's channel             row — the only other affordance — cannot appear until a Move has already keyed the channel.
+            A transform layer offers no way to use it. This is the defect the owner reported of the \
+            old mode: the pose is authored with the Move box and nothing on screen said so, while the \
+            graph editor's channel row — the only other affordance — cannot appear until a Move has \
+            already keyed the channel.
             """)
-        XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
-                       "…and the flat colour's swatch is gone, as it is in effect mode")
+        XCTAssertFalse(app.buttons["layerOptions.blendModeButton"].exists,
+                       "No Blend Mode row: the render pins a pixel-less leaf to Normal, so a picker would set nothing")
+        XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists, "No colour swatch: there is no fill")
+        XCTAssertFalse(app.staticTexts["layerOptions.maskSummary"].exists, "No mask row: there are no pixels to mask")
 
         moveRow.tap()
 

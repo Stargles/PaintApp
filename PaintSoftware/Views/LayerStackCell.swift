@@ -377,7 +377,7 @@ final class LayerStackCell: UITableViewCell {
         // an artist who types "Gaussian Blur" by hand has said it too, and a suffix is not owed to
         // them for having agreed with the generator.
         if let effect = model.effect, effect.displayName != model.name { parts.append(effect.displayName) }
-        // The same suppression for the same reason: `setLayerTransform` renames the layer "Transform n",
+        // The same suppression for the same reason: `addTransformLayer` names the layer "Transform n",
         // so appending the word unconditionally would read "Transform 2  ·  Transform".
         if model.isTransform, !model.name.hasPrefix("Transform") { parts.append("Transform") }
         // `!= .normal` rather than `isBlending`: "Clip to Below" answers false to the second, because

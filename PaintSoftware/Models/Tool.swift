@@ -143,9 +143,13 @@ extension Tool {
             return nil
         case .value:
             // Neither mode of `.value` — the grade wrapper nor the flat colour — has a drawing
-            // surface for the bake to land in (`LayerKind`, `Layer.hasNoDrawingSurface`). This is
-            // not a "yet": text on a layer that holds no pixels has nothing to mean.
+            // surface for the bake to land in (`LayerKind.holdsPixels`, `Layer.hasNoDrawingSurface`).
+            // This is not a "yet": text on a layer that holds no pixels has nothing to mean.
             return "A value layer holds no pixels for text to land in. Add it on a raster or vector layer."
+        case .transform:
+            // The same answer for the same reason, in the layer's own name: a transform layer moves
+            // what is beneath it and holds nothing of its own.
+            return "A transform layer holds no pixels for text to land in. Add it on a raster or vector layer."
         case nil:
             // `activeLayerKind` is legitimately nil mid-edit — `deleteLayer` parks the index at -1
             // while it removes the active layer — as well as on a document with no layers at all.

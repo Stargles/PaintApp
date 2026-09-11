@@ -572,10 +572,22 @@ class PaintUITestCase: XCTestCase {
     /// Same menu again, for §4.5's value layer — one flat colour across the canvas.
     func addValueLayerFromAddMenu(_ app: XCUIApplication) {
         let addButton = app.buttons["layerPanel.addButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5), "The layer panel's + button must be on screen")
         addButton.press(forDuration: 1.0)
         let item = app.buttons["layerPanel.addValueButton"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "The + menu should list Value Layer")
+        item.tap()
+    }
+
+    /// Same menu again, for the transformation layer — TRANSFORM_LAYER.md §2 ruling 2's kind of its
+    /// own. Until 2026-09-11 a transformation layer was reached by adding a value layer and picking
+    /// Transform from its Blend Mode row; that entry is gone, and this is the whole of the route now.
+    func addTransformLayerFromAddMenu(_ app: XCUIApplication) {
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5), "The layer panel's + button must be on screen")
+        addButton.press(forDuration: 1.0)
+        let item = app.buttons["layerPanel.addTransformButton"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "The + menu should list Transform Layer")
         item.tap()
     }
 
