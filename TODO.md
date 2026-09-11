@@ -93,6 +93,62 @@ change it a second time. And a Sobel divisor has been mis-debugged here before (
 record a session "fixing" three effects that were already correct, because the failing run predated the
 rebuild): **diff the constant a test names against the value it reports before believing a numeric red.**
 
+
+**Four more effects, added by the owner 2026-09-10.** These are new effects rather than parameters, so
+each is a `case` on `Effect` with its shader, its `lookupTable`/`params` arms and its settings UI — the
+enum's own comment says adding a case fails to compile until every arm is written, which is the safety
+this list relies on.
+
+- [ ] **Computer screen.** > *"computer screen: mimics that computer screen look. You can add options for
+      different presets"* — scanlines, subpixel structure, curvature, vignette, and a little chromatic
+      aberration and bloom, behind named presets. Two of those ingredients **already exist as effects**
+      (`chromaticAberration`, `bloom`), so the question the build should answer first is whether this is
+      one new effect or a preset that stacks existing ones.
+- [ ] **Hue colorize.** > *"hue colorize option: look into adobe after effects for this. Useful for color
+      correcting images to look like the background"* — After Effects' Tint / Colorize: map the image's
+      luminance onto a colour ramp, or pull its hue toward a target, so a pasted photo takes on the
+      scene's palette. **The machinery exists**: `gradientMap` already maps luminance through a ramp and
+      mixes through Oklab, ruled by the owner 2026-08-30 after seeing `docs/oklab-ramps/02-the-cost.png`.
+      So this may be a *mode* of gradient map rather than a new effect — weigh that first.
+- [ ] **Dither.** > *"dither: supports different options. i think it may work sort of like posterize?"*
+      The owner's instinct is right: dither is quantisation like `posterize`, plus a spatial pattern that
+      trades banding for texture. Options worth having are the pattern (ordered/Bayer versus
+      error-diffusion) and the level count. Ordered is the one that survives animation — error diffusion
+      changes globally when one pixel changes, so it **crawls between frames**, which matters here in a
+      way it does not in a still-image editor. Say that in the UI or pick ordered by default.
+- [ ] **Recolour — designed 2026-09-10, see below.** > *"recolor: this one may need your input. The
+      premise is that its a tool where you can assign any color and make it into another color, providing
+      fine tuning for each color on your characters. It would likely look like some kind of list of this
+      color to that color and the tolerance. Works with the merge layer under it like the HSV to bake
+      them even in vector mode. Let me know if this is a good design."*
+
+**The recolour design is sound and is a known tool** — it is After Effects' *Change to Color*, a list of
+from/to pairs with a tolerance, and the merge-down-bakes-it behaviour is `hsvShift`'s existing precedent,
+so nothing new is needed there. Four decisions make the difference between it working on a character and
+producing fringes, and none of them is visible from the ask:
+
+1. **Measure tolerance in Oklab, not RGB.** RGB distance is perceptually uneven — the same number is a
+   large visual step in one part of the space and invisible in another, so one tolerance slider cannot
+   behave consistently across a character's colours. `ColorMath`'s Oklab conversions already ship for the
+   gradient map. A tolerance in Oklab means "this much colour difference" everywhere.
+2. **Tolerance needs a softness beside it.** A hard radius gives a binary in/out, and on anti-aliased ink
+   that draws a visible ring where the test flips. Full replacement inside an inner radius, blending out
+   to the tolerance edge.
+3. **First match in the list wins.** The owner's own UI is a list, so order is already visible; making it
+   priority costs no extra concept and makes overlapping tolerances predictable. The alternative —
+   nearest-match — is invisible and cannot be reasoned about from the panel.
+4. **Preserve shading by default.** Replacing a matched pixel with a flat colour destroys the shading
+   inside a filled region, which is the commonest disappointment with this kind of tool. Move the matched
+   colour to the target and **keep each pixel's lightness offset from the matched centre**, with a flat
+   "replace exactly" toggle for the cases that want it.
+
+**Not in the first version, recorded so it is a decision rather than an oversight**: the from/to colours
+are not keyframeable. Every non-pose channel now goes through `TargetChannel` (KEYFRAMES §3.6), so a list
+of colours would be a variable number of channels — which that table does not describe and should not be
+bent to. Worth doing later as its own thing.
+
+**One thing that is already true and helps**: EFFECT_BACKDROP.md rules that an adjustment layer grades the
+artist's ink and not the paper, so recolour cannot accidentally repaint the background.
 ---
 
 ## (61) The transform layer becomes its own layer type, with five new modes
