@@ -48,26 +48,17 @@ rather than assuming it still holds.
 
 ---
 
-## (60) Bloom takes a colour and Sobel takes a gain
+## (60) Two more effects
 
-**Status** — not started, reported 2026-09-10.
+**Status** — not started, reported 2026-09-10. (Bloom's colour and Sobel's gain, the ask this item
+opened with, and two of the "four more effects" below — Recolour and Computer Screen — have all
+shipped and are gone from here. `Bloom.color` and `Sobel.gain` are `EffectParameter`s keyed through the
+existing track machinery, both defaulting to the identity so an old document renders unchanged.)
 
-> *"some changes and new effects: ability to change the color of bloom, ability to change the gain of
-> sobel"*
-
-Both are existing effects gaining a parameter, so the work is the shader, the parameter plumbing and the
-settings UI rather than anything new in the pipeline. **Two things already decided that bear on it:**
-EFFECT_BACKDROP.md rules that Bloom and Sobel each get an artist-facing choice of input, and that
-**Sobel's new default changes how it looks in existing documents** — so this pass must not silently
-change it a second time. And a Sobel divisor has been mis-debugged here before (PERFORMANCE/CLAUDE.md
-record a session "fixing" three effects that were already correct, because the failing run predated the
-rebuild): **diff the constant a test names against the value it reports before believing a numeric red.**
-
-
-**Four more effects, added by the owner 2026-09-10.** These are new effects rather than parameters, so
-each is a `case` on `Effect` with its shader, its `lookupTable`/`params` arms and its settings UI — the
-enum's own comment says adding a case fails to compile until every arm is written, which is the safety
-this list relies on.
+**Four more effects, added by the owner 2026-09-10** — two left below now that Recolour and Computer
+Screen have shipped. These are new effects rather than parameters, so each is a `case` on `Effect` with
+its shader, its `lookupTable`/`params` arms and its settings UI — the enum's own comment says adding a
+case fails to compile until every arm is written, which is the safety this list relies on.
 
 - [ ] **Hue colorize.** > *"hue colorize option: look into adobe after effects for this. Useful for color
       correcting images to look like the background"* — After Effects' Tint / Colorize: map the image's
