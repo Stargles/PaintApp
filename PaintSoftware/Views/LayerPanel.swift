@@ -1251,9 +1251,16 @@ struct FolderOptionsPanel: View {
     /// what this row lists and what the timeline draws diamonds for. The first keyframe a group ever
     /// gets is a mark with no key anywhere, so a caption reading "keys at 0" would be naming the empty
     /// half of the union. Three device reports came from those two words being treated as one.
+    ///
+    /// **Shown 1-based, since 2026-09-11** — the same numbering the ruler and `AnimationTimeline`'s
+    /// "Frame N/M" label already use (`frameLabel`, `CanvasNotice.list`): the model's frame 0 is the
+    /// artist's frame 1 everywhere they read one, and this caption used to be the one place that
+    /// disagreed. `frame` and `placed` stay the raw model numbers — every caller (`addKeyframe`,
+    /// `removeKeyframe`, `placed.contains(frame)`) reads them unchanged; only this sentence adds 1.
     private static func keyframeCaption(frame: Int, placed: [Int]) -> String {
-        guard !placed.isEmpty else { return "Frame \(frame) · no keyframes yet" }
-        return "Frame \(frame) · keyframes at " + placed.map(String.init).joined(separator: ", ")
+        guard !placed.isEmpty else { return "Frame \(frame + 1) · no keyframes yet" }
+        return "Frame \(frame + 1) · keyframes at "
+             + placed.map { String($0 + 1) }.joined(separator: ", ")
     }
 
     /// The same union as a machine-readable value — "none", or the frames comma-separated. Apart from

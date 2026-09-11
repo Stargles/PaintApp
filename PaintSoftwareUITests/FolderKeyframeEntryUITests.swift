@@ -125,6 +125,9 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
                        "A fresh group carries no keyframes, and the panel says so")
         XCTAssertEqual(app.buttons["layerOptions.addKeyframe"].value as? String, "0",
                        "The row names the playhead's frame, which is 0 on a new document")
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 1 · no keyframes yet",
+                       "The caption is shown 1-based, like the ruler's own 'Frame 1/…' — since "
+                       + "2026-09-11, the model's frame 0 reads as 'Frame 1' here too")
         XCTAssertFalse(app.buttons["layerOptions.removeKeyframe"].exists,
                        "Nothing to remove yet, so the row is absent — the half of this pair that a "
                        + "build drawing it unconditionally still passes")
@@ -142,6 +145,8 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             keyframes and agree with itself; the mutation survived exactly this assertion. The two \
             operands below are the ones that catch it.
             """)
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 1 · keyframes at 1",
+                       "the caption's own list is 1-based too, once there is a keyframe to name")
         XCTAssertTrue(app.buttons["layerOptions.removeKeyframe"].waitForExistence(timeout: 5),
                       "With a keyframe under the playhead the panel offers to take it back")
         XCTAssertEqual(app.buttons["layerOptions.removeKeyframe"].value as? String, "0",
@@ -214,6 +219,9 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             diamonds from, so a value of "4" alone would mean the first mark was lost and a value of \
             "0" alone that the second press did nothing.
             """)
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 5 · keyframes at 1, 5",
+                       "both the playhead (now frame 4, shown 5) and the list (0 and 4, shown 1 and 5) "
+                       + "are the ruler's numbers, not the model's")
         attach(app, "folder-keyframe-row-after-second")
         closeFolderOptions(app)
 

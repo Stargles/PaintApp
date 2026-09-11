@@ -317,13 +317,23 @@ final class ToolPanelsUITests: PaintUITestCase {
         let video = app.buttons["export.videoButton"]
         XCTAssertTrue(video.waitForExistence(timeout: 5),
                       "the row opens the export sheet — a sheet raised from inside the Actions panel presents")
-        XCTAssertTrue(app.buttons["export.frameButton"].exists, "…offering both products (§3.9)")
+        let frameButton = app.buttons["export.frameButton"]
+        XCTAssertTrue(frameButton.exists, "…offering both products (§3.9)")
+        XCTAssertTrue(frameButton.label.contains("Frame 1 as a PNG"), """
+            The row's own detail names the frame it will export, 1-based like the ruler — a fresh \
+            document's playhead is on the model's frame 0, which reads "Frame 1" everywhere else \
+            (2026-09-11). It read \(frameButton.label).
+            """)
         let caption = app.staticTexts["export.caption"]
         XCTAssertTrue(caption.exists)
         XCTAssertTrue(caption.label.contains("fps"), """
             The caption is where §2.8 becomes visible — the pixel size the knob produces and the \
             rate, at the moment the artist is about to hand a file to somebody. It reads \
             \(caption.label).
+            """)
+        XCTAssertFalse(caption.label.contains("frames 0"), """
+            The video range in the caption is 1-based, like every other frame number the artist \
+            reads (2026-09-11) — a document's first frame is "1", never "0". It read \(caption.label).
             """)
 
         video.tap()

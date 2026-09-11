@@ -74,7 +74,7 @@ struct ExportSheet: View {
                 session.exportFrame()
             } label: {
                 row(icon: "photo", title: "Export This Frame",
-                    detail: "Frame \(canvasManager.currentFrame) as a PNG, with transparency where "
+                    detail: "Frame \(canvasManager.currentFrame + 1) as a PNG, with transparency where "
                           + "the paper is hidden.")
             }
             .accessibilityIdentifier("export.frameButton")
@@ -163,7 +163,11 @@ struct ExportSheet: View {
         }
         parts.append("\(canvasManager.fps) fps")
         if let range = videoRange {
-            parts.append(range.count == 1 ? "1 frame" : "frames \(range.lowerBound)–\(range.upperBound)")
+            // 1-based, like every other frame number the artist reads (2026-09-11) — `range` itself
+            // stays the model's 0-based `ClosedRange` for `videoDetail`'s count and `exportVideo`'s
+            // own use; only this sentence adds 1 to each bound.
+            parts.append(range.count == 1 ? "1 frame"
+                         : "frames \(range.lowerBound + 1)–\(range.upperBound + 1)")
         }
         return parts.joined(separator: " · ")
     }

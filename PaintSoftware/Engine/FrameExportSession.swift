@@ -401,19 +401,19 @@ final class FrameExportSession: ObservableObject {
             case .noCanvas:
                 return "This document has no canvas size yet, so there is nothing to render."
             case .unreadableFrame(let frame):
-                return "Frame \(frame) could not be read back from the render cache."
+                return "Frame \(frame + 1) could not be read back from the render cache."
             case .bakeFailed(let frame, let reason):
                 switch reason {
                 case .exceedsCeiling:
-                    return "Frame \(frame) is too large for the render cache. "
+                    return "Frame \(frame + 1) is too large for the render cache. "
                          + "Lower the Render Resolution and try again."
                 case .couldNotWrite:
-                    return "Frame \(frame) could not be saved — the device may be out of space."
+                    return "Frame \(frame + 1) could not be saved — the device may be out of space."
                 case .unreadableImage, .malformedKey, .none:
-                    return "Frame \(frame) could not be rendered."
+                    return "Frame \(frame + 1) could not be rendered."
                 }
             case .bakeStalled(let frame):
-                return "Rendering frame \(frame) did not finish. Close this and try again."
+                return "Rendering frame \(frame + 1) did not finish. Close this and try again."
             case .couldNotWrite(let detail):
                 return "The file could not be written: \(detail)"
             }
@@ -426,7 +426,7 @@ final class FrameExportSession: ObservableObject {
             return "The video encoder refused this size. \(detail) "
                  + "Lower the Render Resolution and try again."
         case .couldNotAppend(let frame):
-            return "Frame \(frame) would not encode."
+            return "Frame \(frame + 1) would not encode."
         case .wrongFrameSize(let expected, let got):
             return "The frame size changed mid-export (\(Int(expected.width))×\(Int(expected.height)) "
                  + "then \(Int(got.width))×\(Int(got.height))). Try again without editing while it runs."
