@@ -1040,10 +1040,15 @@ extension CanvasManager {
     /// case, where the consequence of engaging is a *drag* showing a stale composite rather than
     /// tracking the finger, and nobody has measured that drag. Widening this predicate is the fix;
     /// measuring the drag is what has to come first.
+    ///
+    /// **Through `containerPoseMovesContents`, not `LayerPose.movesItsContents` alone**, since
+    /// TRANSFORM_LAYER.md §5.3: a Rotate layer with an untouched box and a non-zero speed moves
+    /// everything beneath it, and the predicate has to read the speed's *track* to stay
+    /// frame-invariant.
     @MainActor
     var hasContainerPoseInForce: Bool {
-        layers.contains { $0.layerTransform?.movesItsContents == true }
-            || folders.contains { $0.transform?.movesItsContents == true }
+        layers.contains(where: \.containerPoseMovesContents)
+            || folders.contains(where: \.containerPoseMovesContents)
     }
 
     /// One layer's `LayerContentVersion` at `frame`, resolving its derivation — what

@@ -509,10 +509,27 @@ struct LayerPose: Equatable {
     /// screen to explain it.
     var baseline: PoseQuad? = nil
 
-    init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil) {
+    /// **What this container does with the pose above** — TRANSFORM_LAYER.md §5's modes. `.move`
+    /// applies it; `.parallax` hands each item beneath its own share of it; `.rotate` pre-composes a
+    /// turn about the box's centre whose angle grows with the frame. The mode qualifies the pose and
+    /// is stored beside it for `track`'s reason: there is exactly one container channel, so "a mode
+    /// never outlives the pose it qualifies" stays structural.
+    ///
+    /// **The three writers of the pose leave it alone**: `showContainerPoseLive`, `commitContainerPose`
+    /// and the keyframe arms all copy a `LayerPose` and change `pose`, `track` or `baseline`, so the
+    /// mode rides through a Move made in any mode — which is §6's factorisation, *"the pose is
+    /// `authored(f) ∘ mode(f)`, and the writers key `authored`"*.
+    ///
+    /// Defaults to `.move`, and decodes to it when absent, which is what every document written
+    /// before 2026-09-11 says and what every pose nobody has switched says — one meaning.
+    var mode: TransformLayerMode = .move
+
+    init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil,
+         mode: TransformLayerMode = .move) {
         self.pose = pose
         self.track = track
         self.baseline = baseline
+        self.mode = mode
     }
 
     /// A container that shows its contents exactly where they are — what a freshly created
@@ -571,13 +588,31 @@ struct LayerPose: Equatable {
 
 extension LayerPose: Codable {
 
-    private enum CodingKeys: String, CodingKey { case pose, track, baseline }
+    private enum CodingKeys: String, CodingKey { case pose, track, baseline, mode }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pose = try c.decode(PoseQuad.self, forKey: .pose)
         track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack()
         baseline = try c.decodeIfPresent(PoseQuad.self, forKey: .baseline)
+        // Absent is Move — every document written before the modes existed, and every pose nobody
+        // has switched. `decodeIfPresent` rather than a tolerant `try?`: a mode string this build
+        // does not know is a newer build's document, and TRANSFORM_LAYER.md §3.2 already accepts
+        // that an older build cannot open one; silently reading Shake as Move would be a wrong
+        // picture with nothing on screen to say so.
+        mode = try c.decodeIfPresent(TransformLayerMode.self, forKey: .mode) ?? .move
+    }
+
+    /// Hand-written so that `mode` is **written only when it is not Move** — §3.5's field-presence
+    /// idiom: a document whose transform layers are all in Move stays byte-for-byte the manifest it
+    /// was, and an older build reading one that carries the key ignores it and shows the pose
+    /// un-moded, which is the graceful half.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(pose, forKey: .pose)
+        try c.encode(track, forKey: .track)
+        try c.encodeIfPresent(baseline, forKey: .baseline)
+        if mode != .move { try c.encode(mode, forKey: .mode) }
     }
 }
 

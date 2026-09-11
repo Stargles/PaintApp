@@ -229,6 +229,13 @@ struct FolderManifest: Codable {
     /// what every folder nobody has posed carries, which is one meaning rather than two.
     var transform: LayerPose? = nil
 
+    /// `LayerFolder.rotateSpeed` — TRANSFORM_LAYER.md §5.3's degrees per frame, **written only when
+    /// non-zero**; absent decodes to 0, which is what every document before the modes says.
+    var rotateSpeed: Double? = nil
+    /// `LayerFolder.parallaxShare` — §5.2's typed share, optional on both sides: absent is *the
+    /// positional default*, which is one meaning in the model and on disk.
+    var parallaxShare: Double? = nil
+
     init(id: UUID, name: String, hasCustomName: Bool = false, isExpanded: Bool, isVisible: Bool,
          parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
@@ -237,7 +244,8 @@ struct FolderManifest: Codable {
          channelTracks: [String: AnimationCurve]? = nil,
          channelBaselines: [String: Double]? = nil,
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
-         transform: LayerPose? = nil) {
+         transform: LayerPose? = nil,
+         rotateSpeed: Double? = nil, parallaxShare: Double? = nil) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -256,6 +264,8 @@ struct FolderManifest: Codable {
         self.keyframeMarks = keyframeMarks
         self.pendingBaselines = pendingBaselines
         self.transform = transform
+        self.rotateSpeed = rotateSpeed
+        self.parallaxShare = parallaxShare
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -291,6 +301,8 @@ struct FolderManifest: Codable {
         keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
+        rotateSpeed = try container.decodeIfPresent(Double.self, forKey: .rotateSpeed)
+        parallaxShare = try container.decodeIfPresent(Double.self, forKey: .parallaxShare)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -303,6 +315,7 @@ struct FolderManifest: Codable {
         case isIsolated, alphaMask, compositorRole, effect, effectTracks
         case channelTracks, channelBaselines
         case keyframeMarks, pendingBaselines, transform
+        case rotateSpeed, parallaxShare
     }
 }
 
@@ -417,6 +430,13 @@ struct LayerManifest: Codable {
     /// .transform` rather than a mode of `.value`, and a manifest that still says `"value"` beside it
     /// is read as `.transform` by `init(from:)` below — `LayerKind.migratingTransformModeValueLayers`.
     var transform: LayerPose? = nil
+    /// `Layer.rotateSpeed` — TRANSFORM_LAYER.md §5.3's degrees per frame, **written only when
+    /// non-zero**. Absent decodes to 0, which is what every document written before the modes says
+    /// and what every layer that is not a Rotate transform layer says — one meaning.
+    var rotateSpeed: Double? = nil
+    /// `Layer.parallaxShare` — §5.2's typed share, optional on both sides: absent is *the positional
+    /// default*, which is the one meaning nil has in the model, so there is no empty-to-absent line.
+    var parallaxShare: Double? = nil
     var cels: [CelManifest]
 
     init(id: UUID, name: String, hasCustomName: Bool = false, opacity: Double, isVisible: Bool,
@@ -429,6 +449,7 @@ struct LayerManifest: Codable {
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
          fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, transform: LayerPose? = nil,
+         rotateSpeed: Double? = nil, parallaxShare: Double? = nil,
          cels: [CelManifest]) {
         self.id = id
         self.name = name
@@ -448,6 +469,8 @@ struct LayerManifest: Codable {
         self.fill = fill
         self.fillReferenceOverride = fillReferenceOverride
         self.transform = transform
+        self.rotateSpeed = rotateSpeed
+        self.parallaxShare = parallaxShare
         self.cels = cels
     }
 
@@ -477,6 +500,8 @@ struct LayerManifest: Codable {
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
         transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
+        rotateSpeed = try container.decodeIfPresent(Double.self, forKey: .rotateSpeed)
+        parallaxShare = try container.decodeIfPresent(Double.self, forKey: .parallaxShare)
         // **The transform-layer migration, TRANSFORM_LAYER.md §2 ruling 2** — the one place a document
         // written while a transformation layer was a *mode* of `.value` is read as the kind it is now.
         // `LayerKind.migratingTransformModeValueLayers` carries the argument; what is done here beside
@@ -495,7 +520,7 @@ struct LayerManifest: Codable {
         case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
         case effect, effectTracks, channelTracks, channelBaselines
         case keyframeMarks, pendingBaselines, fill, fillReferenceOverride
-        case transform, cels
+        case transform, rotateSpeed, parallaxShare, cels
     }
 }
 

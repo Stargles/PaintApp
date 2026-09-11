@@ -210,6 +210,29 @@ struct Layer: Identifiable {
     /// mode value layer already carries — `LayerKind.migratingTransformModeValueLayers` is the whole
     /// of that migration.
     var transform: LayerPose? = nil
+    /// **How fast a Rotate transform layer turns what is beneath it, in degrees per frame** —
+    /// TRANSFORM_LAYER.md §5.3 and §2 ruling 6 — and `TargetChannel.rotateSpeed`'s stored base, so it
+    /// is keyable through `channelTracks` like opacity. Read by `RenderTree.renderNodes` only on a
+    /// `.transform` layer whose pose is in `.rotate`; inert storage on every other layer, exactly as
+    /// `opacity` is inert on a layer that holds no pixels. The row lives here rather than on
+    /// `LayerPose` because a `TargetChannel` key path has to be writable, and a path through an
+    /// optional payload is not.
+    var rotateSpeed: Double = 0
+    /// **This layer's share of a Parallax transform layer's move, or nil for the positional default**
+    /// — TRANSFORM_LAYER.md §5.2 and §2 ruling 4, *"typed numbers stay; new layers get the default
+    /// for their position; a layer remembers its number when it leaves and comes back"*.
+    ///
+    /// **On the child, not on the parallax layer**, which is what makes all three halves of that
+    /// ruling true by storage rather than by bookkeeping: the number follows its layer through a
+    /// reorder, survives being dragged out from under the parallax layer and back (inert storage in
+    /// between, `valueFill`'s own asymmetry), and is destroyed by nothing but the artist. A
+    /// `[UUID: Double]` on the parallax layer would die with it, dangle on delete and have to be
+    /// recomputed on every add. Stored as a fraction — 1 is 100% — for `opacity`'s reason.
+    ///
+    /// **Nil is not zero.** Nil means "whatever position I am in says", 100/75/50/25 for four; zero
+    /// means "do not move me". `parallaxShareValue` is the non-optional view `TargetChannel`'s key
+    /// path needs, and `parallaxShare(atFrame:positionalDefault:)` is what the render reads.
+    var parallaxShare: Double? = nil
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
     ///

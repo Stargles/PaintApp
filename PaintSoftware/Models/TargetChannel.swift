@@ -105,10 +105,57 @@ struct TargetChannel: Identifiable {
         layerPath: \Layer.opacity,
         folderPath: \LayerFolder.opacity)
 
+    /// **An item's share of a Parallax transform layer's move** — TRANSFORM_LAYER.md §5.2, §2
+    /// rulings 3–5, the second row of this table and the first to arrive after opacity proved the
+    /// shape. Stored as a fraction (1 is 100%) for opacity's reason and read through
+    /// `percentText` for the slider's readout.
+    ///
+    /// **`uiRange` is the slider's 0…100% and `modelDomain` is ten times either side of it**, which
+    /// is the owner's *"slider from 0 to 100, but also can input negative values or higher"* stated
+    /// as two ranges: the control offers the useful span and a typed number may leave it, a negative
+    /// share moving the item the opposite way (`PoseInterpolation.blend` extrapolates). Ten turns is
+    /// a bound on absurdity rather than on intent.
+    ///
+    /// **The stored home is `Layer.parallaxShare`, which is optional, through a non-optional view**
+    /// (`parallaxShareValue`), because nil there means "the positional default" and a key path into
+    /// an optional is not writable. `Layer.parallaxShare(atFrame:positionalDefault:)` is what the
+    /// render reads; the funnel below this table sees only explicit numbers, because the panel
+    /// materialises the default before it lets the artist drag (`setParallaxShare`).
+    static let parallaxShare = TargetChannel(
+        id: "parallaxShare",
+        name: "Parallax",
+        uiRange: 0...1,
+        modelDomain: -10...10,
+        format: "%.2f",
+        editLabel: .parallaxShare,
+        keyframeLabel: .parallaxShareKeyframes,
+        layerPath: \Layer.parallaxShareValue,
+        folderPath: \LayerFolder.parallaxShareValue)
+
+    /// **How fast a Rotate transform layer turns, in degrees per frame** — TRANSFORM_LAYER.md §5.3
+    /// and §2 ruling 6 (*per frame*, so a change of fps changes the wheel's speed on screen exactly
+    /// as it changes every other animation's). The render integrates it from the block's first
+    /// frame (`TransformLayerMode.integratedRotationDegrees`), so keying it 0 → 15 spins a wheel up
+    /// and keying it to 0 stops the wheel where it is.
+    ///
+    /// `uiRange` is ±30°/frame — 15°/frame is one turn a second at 24 fps, so the slider spans two
+    /// turns a second either way; `modelDomain` is a full turn a frame either way, which is where
+    /// the picture stops being a spin at all.
+    static let rotateSpeed = TargetChannel(
+        id: "rotateSpeed",
+        name: "Rotate Speed",
+        uiRange: -30...30,
+        modelDomain: -360...360,
+        format: "%.1f",
+        editLabel: .rotateSpeed,
+        keyframeLabel: .rotateSpeedKeyframes,
+        layerPath: \Layer.rotateSpeed,
+        folderPath: \LayerFolder.rotateSpeed)
+
     /// **Every channel of this kind, in a fixed order.** The order is the channel list's and the
     /// band's colour order, so it is decided here and nowhere else — `Effect.parameters`' contract
     /// one type over.
-    static let all: [TargetChannel] = [.opacity]
+    static let all: [TargetChannel] = [.opacity, .parallaxShare, .rotateSpeed]
 
     /// The channel one id names, or nil. The lookup every writer guards on, so an id that is not a
     /// channel of this kind is refused in one place rather than at each write.
@@ -186,6 +233,59 @@ extension Layer {
     /// **The opacity the compositor should use at `frame`** — `resolvedValue` named, because opacity
     /// is read on four paths and a key path at each of them reads worse than a word.
     func opacity(atFrame frame: Int) -> Double { resolvedValue(.opacity, atFrame: frame) }
+
+    /// **`parallaxShare` as the non-optional `Double` a `TargetChannel` key path has to address.**
+    /// Writing makes the share explicit; reading a nil share answers 1 — a fallback the funnel is
+    /// not meant to reach, because `CanvasManager.setParallaxShare` writes the positional default
+    /// through before any edit can be routed, so a seeded keyframe A holds the number the artist
+    /// was looking at rather than this constant. The render never reads this; it reads
+    /// `parallaxShare(atFrame:positionalDefault:)`.
+    var parallaxShareValue: Double {
+        get { parallaxShare ?? 1 }
+        set { parallaxShare = newValue }
+    }
+
+    /// **This item's share at `frame`**: the curve when there is one, the typed number when there is
+    /// one, and otherwise the share its position in the stack gives it — TRANSFORM_LAYER.md §5.2's
+    /// three-way precedence, which is `resolvedValue`'s two-way one with the positional default
+    /// standing where a stored constant would.
+    func parallaxShare(atFrame frame: Int, positionalDefault: Double) -> Double {
+        if let curve = channelTracks[TargetChannel.parallaxShare.id], !curve.isEmpty {
+            return TargetChannel.parallaxShare.clamped(curve.evaluate(at: Double(frame)))
+        }
+        return parallaxShare ?? positionalDefault
+    }
+
+    /// The turn rate at `frame`, degrees per frame — `resolvedValue` named, for `opacity(atFrame:)`'s
+    /// reason: it is summed over every frame of a block and a key path in that loop reads worse than
+    /// a word.
+    func rotateSpeed(atFrame frame: Int) -> Double { resolvedValue(.rotateSpeed, atFrame: frame) }
+
+    /// **Whether this container's pose moves what is beneath it at *any* frame** —
+    /// `LayerPose.movesItsContents` widened to the mode, TRANSFORM_LAYER.md §5.3's *"a rotate layer
+    /// with an untouched box and a non-zero speed moves everything beneath it, and that predicate is
+    /// frame-invariant by contract"*. Reads the speed's *track*, not one frame: a speed keyed 0 → 15
+    /// moves the stack at frame 8 and this must say so at frame 0, or `sandwichEngagesOnCanvas`
+    /// would swap render paths mid-playback, which is the failure that predicate exists to refuse.
+    ///
+    /// Parallax needs no clause of its own: a share is a fraction of the authored pose, so with the
+    /// authored pose at rest every item is at rest whatever its share, and with it moved at least
+    /// the 100% item moves — `movesItsContents` on the pose already answers both.
+    var containerPoseMovesContents: Bool {
+        guard let pose = layerTransform else { return false }
+        return pose.movesItsContents
+            || (pose.mode == .rotate && Self.speedIsEverNonZero(rotateSpeed, channelTracks))
+    }
+
+    /// The speed clause of `containerPoseMovesContents`, stated once for both homes: with a curve
+    /// the track decides — any key off zero, or two keys whose handles could leave it — and with
+    /// none the stored base does.
+    static func speedIsEverNonZero(_ stored: Double, _ tracks: [String: AnimationCurve]) -> Bool {
+        if let curve = tracks[TargetChannel.rotateSpeed.id], !curve.isEmpty {
+            return curve.isAnimated || curve.keys.contains { $0.value != 0 }
+        }
+        return stored != 0
+    }
 }
 
 extension LayerFolder {
@@ -200,4 +300,29 @@ extension LayerFolder {
 
     /// The group's opacity at `frame`.
     func opacity(atFrame frame: Int) -> Double { resolvedValue(.opacity, atFrame: frame) }
+
+    /// `Layer.parallaxShareValue` on the folder — the same view, for the same key path.
+    var parallaxShareValue: Double {
+        get { parallaxShare ?? 1 }
+        set { parallaxShare = newValue }
+    }
+
+    /// `Layer.parallaxShare(atFrame:positionalDefault:)` on the folder — this folder's share as one
+    /// item beneath a parallax layer.
+    func parallaxShare(atFrame frame: Int, positionalDefault: Double) -> Double {
+        if let curve = channelTracks[TargetChannel.parallaxShare.id], !curve.isEmpty {
+            return TargetChannel.parallaxShare.clamped(curve.evaluate(at: Double(frame)))
+        }
+        return parallaxShare ?? positionalDefault
+    }
+
+    /// The group's turn rate at `frame`, degrees per frame.
+    func rotateSpeed(atFrame frame: Int) -> Double { resolvedValue(.rotateSpeed, atFrame: frame) }
+
+    /// `Layer.containerPoseMovesContents` on the folder — the same predicate over `transform`.
+    var containerPoseMovesContents: Bool {
+        guard let pose = transform else { return false }
+        return pose.movesItsContents
+            || (pose.mode == .rotate && Layer.speedIsEverNonZero(rotateSpeed, channelTracks))
+    }
 }

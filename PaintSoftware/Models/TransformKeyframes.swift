@@ -997,3 +997,132 @@ extension CanvasManager {
         pose.map { 64 + 160 * $0.track.keys.count } ?? 0
     }
 }
+
+// MARK: - The transform layer's modes — TRANSFORM_LAYER.md §5, stages 2 and 3
+
+/// **One item beneath a parallax poser, as the panel lists it** — its target (for the share
+/// writer), its name, the share it is showing at the playhead, and whether that share was typed
+/// or is the positional default (§5.2: *"defaults shown greyed until touched"*).
+struct ParallaxItem: Equatable {
+    let target: KeyframeTarget
+    let name: String
+    /// The share in force at the playhead — the curve, the typed number, or the positional default,
+    /// in that precedence.
+    let share: Double
+    /// The share this item's position gives it, whatever it stores — what the row shows greyed
+    /// when nothing has been typed, and what `setParallaxShare` materialises before the first edit.
+    let positionalDefault: Double
+    /// Whether the artist has typed a number (or keyed a curve) for this item.
+    let isExplicit: Bool
+}
+
+extension CanvasManager {
+
+    /// **Switches a transform layer's — or a posed folder's — mode**, TRANSFORM_LAYER.md §5. One
+    /// undo step; nothing else moves: the authored pose, its track and its keys stay exactly as they
+    /// are, because §6's factorisation makes the mode a qualifier on the pose rather than a rewrite
+    /// of it. Refused on a target with no pose to qualify.
+    func setTransformLayerMode(_ target: KeyframeTarget, to mode: TransformLayerMode) {
+        guard var pose = containerPose(of: target), pose.mode != mode else { return }
+        pose.mode = mode
+        withStructureUndo(label: .transformLayerMode) {
+            applyContainerPose(pose, target: target)
+        }
+    }
+
+    /// The mode a target's pose is in, or nil when it has no pose.
+    func transformLayerMode(of target: KeyframeTarget) -> TransformLayerMode? {
+        containerPose(of: target)?.mode
+    }
+
+    /// **A target channel's value at `frame`, on whichever home `target` names** — `storedValue`'s
+    /// resolved twin, and what a panel control shows: §2.23's dead-control argument says the slider
+    /// must show the resolved number, never the base, or a keyed channel reads as stuck.
+    func resolvedValue(of target: KeyframeTarget, channel: TargetChannel, atFrame frame: Int) -> Double? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
+        case .folder(let id): return folders.first { $0.id == id }?.resolvedValue(channel, atFrame: frame)
+        }
+    }
+
+    /// **The stack a container pose reaches, and where the poser sits in it** — the same two operands
+    /// `RenderTree.renderNodes` builds, so the panel's list and the render's items are one walk. A
+    /// layer's poser is the layer's own position in its container; a folder's is the top of the
+    /// folder's own contents.
+    private func poserStack(of target: KeyframeTarget) -> (stack: [ContainerEntry], position: Int)? {
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return nil }
+            let stack = Array(containerEntries(inContainer: layers[index].parentFolderID).reversed())
+            guard let position = stack.firstIndex(where: {
+                if case .layer(let at) = $0 { return at == index } else { return false }
+            }) else { return nil }
+            return (stack, position)
+        case .folder(let id):
+            guard folders.contains(where: { $0.id == id }) else { return nil }
+            let stack = Array(containerEntries(inContainer: id).reversed())
+            return (stack, stack.count)
+        }
+    }
+
+    /// **The items a parallax poser distributes its move over, top to bottom, with the share each is
+    /// showing at the playhead** — the panel's list (§5.2: *"the panel lists the items with a slider
+    /// each"*). Empty for a target with no pose, and for one with nothing beneath it; not gated on
+    /// the mode, so the panel can show what Parallax *would* do before the artist picks it.
+    func parallaxItems(beneath target: KeyframeTarget) -> [ParallaxItem] {
+        guard let (stack, position) = poserStack(of: target) else { return [] }
+        let positions = parallaxItemPositions(in: stack, beneath: position)
+        return positions.enumerated().map { rank, q in
+            let positional = TransformLayerMode.positionalParallaxShare(rank: rank, of: positions.count)
+            switch stack[q] {
+            case .layer(let index):
+                let layer = layers[index]
+                return ParallaxItem(
+                    target: .layer(id: layer.id), name: layer.name,
+                    share: layer.parallaxShare(atFrame: currentFrame, positionalDefault: positional),
+                    positionalDefault: positional,
+                    isExplicit: layer.parallaxShare != nil
+                        || layer.channelTracks[TargetChannel.parallaxShare.id]?.isEmpty == false)
+            case .folder(let folder):
+                return ParallaxItem(
+                    target: .folder(id: folder.id), name: folder.name,
+                    share: folder.parallaxShare(atFrame: currentFrame, positionalDefault: positional),
+                    positionalDefault: positional,
+                    isExplicit: folder.parallaxShare != nil
+                        || folder.channelTracks[TargetChannel.parallaxShare.id]?.isEmpty == false)
+            }
+        }
+    }
+
+    /// **One share-slider edit on one item, routed and performed** — `applyTargetChannelEdit` on
+    /// `TargetChannel.parallaxShare`, with the one line that channel needs and opacity did not.
+    ///
+    /// **The positional default is written through as a stored number before the edit is routed**,
+    /// when nothing has been typed yet. The funnel reads the *stored* value to seed keyframe A and
+    /// to hold a baseline (`applyTargetChannelEdit`'s own rule), and for a share that is nil the
+    /// stored value is `parallaxShareValue`'s fallback rather than the 75% the artist was looking at
+    /// — so a first drag on a keyed layer would seed A with the wrong number. Materialising first
+    /// makes the funnel's read true. It is not an undo step of its own: the number it writes is the
+    /// one already on screen, and the bracket the panel opens around the drag records the edit.
+    ///
+    /// - Returns: the arm taken, so the caller can label its undo bracket, exactly as the opacity
+    ///   slider does.
+    @discardableResult
+    func setParallaxShare(of item: KeyframeTarget, beneath poser: KeyframeTarget,
+                          to value: Double, atFrame frame: Int) -> KeyframeControl.Write {
+        if storedParallaxShare(of: item) == nil,
+           let listed = parallaxItems(beneath: poser).first(where: { $0.target == item }) {
+            setStoredValue(of: item, channel: .parallaxShare, to: listed.positionalDefault)
+        }
+        return applyTargetChannelEdit(item, channel: .parallaxShare, newValue: value, atFrame: frame)
+    }
+
+    /// The typed share on a target, or nil for the positional default — the raw optional, which
+    /// `storedValue(of:channel:)` cannot answer because it reads through the non-optional view.
+    func storedParallaxShare(of target: KeyframeTarget) -> Double? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?.parallaxShare
+        case .folder(let id): return folders.first { $0.id == id }?.parallaxShare
+        }
+    }
+}

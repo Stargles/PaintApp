@@ -825,8 +825,106 @@ extension CanvasManager {
     func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: PoseMap]) {
         var poses: [Int: PoseMap] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame,
-                               inheriting: nil, poses: &poses)
+                               inheriting: nil, ownPoser: nil, poses: &poses)
         return (tree, poses)
+    }
+
+    /// **One container pose resolved at one frame, as the map it hands each entry beneath it** —
+    /// TRANSFORM_LAYER.md §5's three modes, reduced to the one question the accumulator asks:
+    /// *what does entry `q` get from this poser?*
+    ///
+    /// `uniform` is Move and Rotate — every entry beneath takes the same map, which is the shape the
+    /// accumulator had before the modes existed. `perEntry` is Parallax — the map depends on which
+    /// entry is asking, and an entry that is not an *item* (a pixel-less layer, §2 ruling 3) is not
+    /// in the dictionary and takes nothing.
+    fileprivate enum ContainerPoser {
+        case uniform(PoseMap)
+        case perEntry([Int: PoseMap])
+
+        func map(forPosition position: Int) -> PoseMap? {
+            switch self {
+            case .uniform(let map): return map
+            case .perEntry(let maps): return maps[position]
+            }
+        }
+    }
+
+    /// **What one container pose contributes at `frame`, by its mode** — the single place a mode
+    /// is read on the render path, so a layer's pose and a folder's resolve through one function
+    /// (§3.3: *"the accumulator's `inner` line reads the mode exactly as the layer's does"*).
+    ///
+    /// - Parameters:
+    ///   - pose: the authored pose, `Layer.layerTransform` or `LayerFolder.transform`.
+    ///   - blockStart: the first frame of the block in force — a rotate layer's origin (§5.3, *"a
+    ///     block restarts the sum"*), and 0 for a folder, which has no block.
+    ///   - hasSpeedCurve / speedAt: the rotate speed's track, read per frame for the integral.
+    ///   - shareOf: an item's share at this frame given its positional default — the parallax
+    ///     layer's one read of `parallaxShare` on either home.
+    ///   - stack: this container's entries, bottom to top, and `position` the poser's own place in
+    ///     it; the items a parallax poser counts are the entries beneath that position.
+    /// - Returns: nil when the pose contributes nothing at this frame, which is what keeps a
+    ///   document with an untouched transform layer identical to one with none (§4.5's trap).
+    private func containerPoser(pose: LayerPose, atFrame frame: Int, blockStart: Int,
+                                hasSpeedCurve: Bool, speedAt: (Int) -> Double,
+                                shareOf: (ContainerEntry, Int, Double) -> Double,
+                                stack: [ContainerEntry], position: Int) -> ContainerPoser? {
+        let authored = pose.resolvedPose(atFrame: frame)
+        switch pose.mode {
+        case .move:
+            return pose.mapping(atFrame: frame).map(ContainerPoser.uniform)
+
+        case .rotate:
+            let degrees = TransformLayerMode.integratedRotationDegrees(
+                from: blockStart, to: frame, hasCurve: hasSpeedCurve, speedAt: speedAt)
+            return TransformLayerMode.rotationMap(authored: authored, degrees: degrees)
+                .map(ContainerPoser.uniform)
+
+        case .parallax:
+            // Nothing to share out: every item's share of a resting pose is rest, whatever the
+            // share, so the walk below would build a dictionary of nils.
+            guard !authored.isIdentity else { return nil }
+            let items = parallaxItemPositions(in: stack, beneath: position)
+            guard !items.isEmpty else { return nil }
+            var maps: [Int: PoseMap] = [:]
+            for (rank, q) in items.enumerated() {
+                let positional = TransformLayerMode.positionalParallaxShare(rank: rank, of: items.count)
+                let share = shareOf(stack[q], frame, positional)
+                if let map = TransformLayerMode.parallaxMap(authored: authored, share: share) {
+                    maps[q] = map
+                }
+            }
+            return maps.isEmpty ? nil : .perEntry(maps)
+        }
+    }
+
+    /// **The items a parallax poser at `position` shares its move out over, top to bottom** —
+    /// TRANSFORM_LAYER.md §5.2's *"who is an item"*, stated once for the render walk and the panel's
+    /// list so the two cannot disagree: a layer with a drawing surface is one item, a folder is one
+    /// item and its contents are not, and a pixel-less layer (any transform layer, any value layer)
+    /// is none and takes no share (§2 ruling 3). Rank 0 is the item nearest the parallax layer, which
+    /// is the one that moves most. `stack` is bottom to top, as `renderNodes` holds it; a folder's own
+    /// pose asks with `position == stack.count`.
+    func parallaxItemPositions(in stack: [ContainerEntry], beneath position: Int) -> [Int] {
+        var items: [Int] = []
+        for q in stride(from: min(position, stack.count) - 1, through: 0, by: -1) {
+            switch stack[q] {
+            case .layer(let index): if layers[index].kind.holdsPixels { items.append(q) }
+            case .folder: items.append(q)
+            }
+        }
+        return items
+    }
+
+    /// An entry's parallax share at `frame` — `Layer.parallaxShare(atFrame:positionalDefault:)` or
+    /// the folder's, whichever home the entry is.
+    private func parallaxShare(of entry: ContainerEntry, atFrame frame: Int,
+                               positionalDefault: Double) -> Double {
+        switch entry {
+        case .layer(let index):
+            return layers[index].parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
+        case .folder(let folder):
+            return folder.parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
+        }
     }
 
     /// §4.4's map on its own, for the two callers that want the poses without the nodes —
@@ -845,10 +943,14 @@ extension CanvasManager {
     }
 
     /// `inherited` is the pose this whole container is already being shown through — nil at the root
-    /// and at every container no transformation layer or posed folder reaches. `poses` collects
+    /// and at every container no transformation layer or posed folder reaches. `ownPoser` resolves
+    /// the container's *own* pose (a folder's `transform`) against its stack, and it is applied here
+    /// as the topmost poser of this stack, so that a folder in Parallax shares its pose out over its
+    /// children exactly as a parallax layer does over the entries beneath it. `poses` collects
     /// §4.4's per-leaf map on the way down.
     private func renderNodes(inContainer container: UUID?, atFrame frame: Int,
                              inheriting inherited: PoseMap?,
+                             ownPoser: ((_ stack: [ContainerEntry]) -> ContainerPoser?)?,
                              poses: inout [Int: PoseMap]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
@@ -905,15 +1007,40 @@ extension CanvasManager {
         // doc says the eye decides for a grade and a pose alike — this is that agreement, reached a
         // second way, and it composes with the block gate rather than replacing it: a layer needs
         // both a block at this frame and its eye open to contribute a pose.
+        //
+        // **The carry is per entry, not one running product** — TRANSFORM_LAYER.md §5.2's parallax,
+        // where the map an entry takes from a poser depends on *which* entry is asking. `posers` is
+        // every container pose met so far, top to bottom, and an entry's carried map is `inherited`
+        // with each poser's contribution prepended in that order — which for a stack of Move layers
+        // is the same association the running product had (`M_k ∘ (… ∘ (M_1 ∘ inherited))`), so a
+        // document with no parallax layer composes the same `CGAffineTransform`s in the same order
+        // and lands on the same bits. The folder's own pose, when there is one, is the first poser.
+        var posers: [ContainerPoser] = []
+        if let ownPoser, let own = ownPoser(stack) { posers.append(own) }
         var carried = [PoseMap?](repeating: inherited, count: stack.count)
-        var accumulated = inherited
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
-            carried[position] = accumulated
+            if !posers.isEmpty {
+                var accumulated = inherited
+                for poser in posers {
+                    guard let map = poser.map(forPosition: position) else { continue }
+                    accumulated = accumulated.map { map.concatenating($0) } ?? map
+                }
+                carried[position] = accumulated
+            }
             guard !containerIsNode, case .layer(let index) = stack[position],
                   layers[index].isVisible,
-                  activeCelIndex(inLayer: index, atFrame: frame) != nil,
-                  let map = layers[index].layerTransform?.mapping(atFrame: frame) else { continue }
-            accumulated = accumulated.map { map.concatenating($0) } ?? map
+                  let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
+                  let pose = layers[index].layerTransform else { continue }
+            let layer = layers[index]
+            // **The block's first frame is the rotate mode's origin** (§5.3): the sum restarts at
+            // every block, so a layer with several blocks is several starts.
+            guard let poser = containerPoser(
+                pose: pose, atFrame: frame, blockStart: layer.cels[celIndex].startFrame,
+                hasSpeedCurve: layer.channelTracks[TargetChannel.rotateSpeed.id]?.isEmpty == false,
+                speedAt: { layer.rotateSpeed(atFrame: $0) },
+                shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
+                stack: stack, position: position) else { continue }
+            posers.append(poser)
         }
 
         var result: [RenderNode] = []
@@ -1017,11 +1144,29 @@ extension CanvasManager {
                 // §2.21's folder form** — this container's contents are moved by the folder's pose
                 // and then carried by whatever is already carrying the folder, which is the same
                 // "inner first" order the accumulation above uses one level out.
+                //
+                // **The folder's pose goes down as the recursion's topmost poser rather than as a
+                // map already composed onto `outer`**, because since TRANSFORM_LAYER.md §3.3 a
+                // folder's pose has a mode too, and a folder in Parallax hands each child its own
+                // share — which is only expressible where the children are in view. For a folder in
+                // Move the recursion composes exactly `map.concatenating(outer)` onto every child,
+                // the value `inner` used to carry. The origin for a folder in Rotate is frame 0: a
+                // folder has no block (§3.3, *"not repeat: a folder has no block"*).
                 let outer = carried[position]
-                let inner = folder.resolvedPoseMapping(atFrame: frame)
-                    .map { map in outer.map { map.concatenating($0) } ?? map } ?? outer
-                let children = renderNodes(inContainer: folder.id, atFrame: frame,
-                                           inheriting: inner, poses: &poses)
+                let ownPose = folder.transform
+                let children = renderNodes(
+                    inContainer: folder.id, atFrame: frame, inheriting: outer,
+                    ownPoser: ownPose.map { pose in
+                        { stack in
+                            self.containerPoser(
+                                pose: pose, atFrame: frame, blockStart: 0,
+                                hasSpeedCurve: folder.channelTracks[TargetChannel.rotateSpeed.id]?.isEmpty == false,
+                                speedAt: { folder.rotateSpeed(atFrame: $0) },
+                                shareOf: { self.parallaxShare(of: $0, atFrame: $1, positionalDefault: $2) },
+                                stack: stack, position: stack.count)
+                        }
+                    },
+                    poses: &poses)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps

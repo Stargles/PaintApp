@@ -105,6 +105,7 @@
 		B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */; };
 		64DDD4BEBBAFA3F466ED580A /* FolderKeyframeEntryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1F5B8D60E9D5BE82181DC7 /* FolderKeyframeEntryUITests.swift */; };
 		A4D4B09E751B4A469DA2A304 /* PaintSoftware/Models/TargetChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D5241AC7C570B0869CF072 /* PaintSoftware/Models/TargetChannel.swift */; };
+		18BE9EA914E34360C07E7E82 /* PaintSoftware/Models/TransformLayerMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4F4C3E9BA6B14D7373E0EA /* PaintSoftware/Models/TransformLayerMode.swift */; };
 		4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */; };
 		A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */; };
 		C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */; };
@@ -522,6 +523,7 @@
 		D3C724E8C5870206E2A61042 /* FolderKeyframeEntryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderKeyframeEntryLogicTests.swift; sourceTree = "<group>"; };
 		EB1F5B8D60E9D5BE82181DC7 /* FolderKeyframeEntryUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderKeyframeEntryUITests.swift; sourceTree = "<group>"; };
 		13D5241AC7C570B0869CF072 /* PaintSoftware/Models/TargetChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TargetChannel.swift; sourceTree = "<group>"; };
+		3C4F4C3E9BA6B14D7373E0EA /* PaintSoftware/Models/TransformLayerMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformLayerMode.swift; sourceTree = "<group>"; };
 		B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyframeControlLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationCurveLogicTests.swift; sourceTree = "<group>"; };
 		C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectParameterTrackLogicTests.swift; sourceTree = "<group>"; };
@@ -1185,6 +1187,7 @@
 				748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */,
 				BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */,
 				13D5241AC7C570B0869CF072 /* PaintSoftware/Models/TargetChannel.swift */,
+				3C4F4C3E9BA6B14D7373E0EA /* PaintSoftware/Models/TransformLayerMode.swift */,
 				9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */,
 				9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */,
 				9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */,
@@ -1549,6 +1552,7 @@
 				B3EAB4926AD08D7F918A0FE6 /* FolderKeyframeEntryLogicTests.swift in Sources */,
 				64DDD4BEBBAFA3F466ED580A /* FolderKeyframeEntryUITests.swift in Sources */,
 				A4D4B09E751B4A469DA2A304 /* PaintSoftware/Models/TargetChannel.swift in Sources */,
+				18BE9EA914E34360C07E7E82 /* PaintSoftware/Models/TransformLayerMode.swift in Sources */,
 				4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */,
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,
 				C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */,

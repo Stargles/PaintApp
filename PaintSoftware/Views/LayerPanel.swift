@@ -400,12 +400,14 @@ struct LayerOptionsPanel: View {
         // its mode to `.normal` and its mask would multiply an image it never draws — either control
         // would be one the artist can set and never see.
         if canvasManager.layers[index].kind == .transform {
-            transformModeRow()
+            let target = KeyframeTarget.layer(id: canvasManager.layers[index].id)
+            transformModeRow(canvasManager: canvasManager, target: target)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             transformMoveRow(scope: "beneath this layer") {
                 leavingMaskEdit { canvasManager.beginContainerPoseMove() }
             }
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            transformModeSection(canvasManager: canvasManager, target: target)
         } else {
             maskRow(mask: canvasManager.layers[index].alphaMask) { showingMaskMenu = true }
 
@@ -534,41 +536,6 @@ struct LayerOptionsPanel: View {
         // The grade's slug while grading, the blend's raw value otherwise — the same multi-vocabulary
         // value `nodeOperationRow` reports, so a test can read which of the two answers is live.
         .accessibilityValue(effect.map(effectMenuSlug) ?? blend.rawValue)
-    }
-
-    /// **A transform layer's mode picker, listing the one mode that has shipped** — TRANSFORM_LAYER.md
-    /// §5.1's Move. §8 adds Parallax, Rotate, Shake and Repeat here one stage at a time; the shape —
-    /// a `Menu` on a row with a title, the live value in the caption and a checkmark on the pick — is
-    /// `valueBlendModeRow`'s, so the fifth entry costs a `Button` and nothing about the row moves.
-    ///
-    /// Nothing is written when Move is picked: a transform layer is in Move already and there is no
-    /// other mode to leave. The identifiers are the row's own (`layerOptions.transformModeButton`,
-    /// `layerOptions.transformMode.move`) rather than the blend row's, since this is not a blend
-    /// row and the value it reports is a mode name.
-    private func transformModeRow() -> some View {
-        Menu {
-            Button {} label: {
-                Label("Move", systemImage: "checkmark")
-            }
-            .accessibilityIdentifier("layerOptions.transformMode.move")
-        } label: {
-            HStack(spacing: 8) {
-                Text("Mode").foregroundColor(.white)
-                Spacer()
-                Text("Move")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.gray)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .accessibilityIdentifier("layerOptions.transformModeButton")
-        .accessibilityValue("move")
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the
@@ -822,6 +789,278 @@ private func transformMoveRow(scope: String, onMove: @escaping () -> Void) -> so
     .accessibilityIdentifier("layerOptions.transformMove")
 }
 
+/// **A container pose's mode picker** — TRANSFORM_LAYER.md §5's Move, Parallax and Rotate, on a
+/// transform layer's panel and on a posed folder's (§3.3). A `Menu` on a row with a title, the live
+/// value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape — so a later mode
+/// costs a `Button` and nothing about the row moves. Shake and Repeat are §8's stages 4 and 5 and
+/// are not listed until they land: a row that is offered and does nothing is CLAUDE.md's *"refusal
+/// with no notice"* wearing a menu.
+///
+/// The identifiers are the row's own (`layerOptions.transformModeButton`,
+/// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name.
+private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
+    let current = canvasManager.transformLayerMode(of: target) ?? .move
+    return Menu {
+        ForEach(TransformLayerMode.allCases) { mode in
+            Button {
+                canvasManager.setTransformLayerMode(target, to: mode)
+            } label: {
+                if mode == current {
+                    Label(mode.displayName, systemImage: "checkmark")
+                } else {
+                    Text(mode.displayName)
+                }
+            }
+            .accessibilityIdentifier("layerOptions.transformMode.\(mode.rawValue)")
+        }
+    } label: {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Mode").foregroundColor(.white)
+                Text(current.caption)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Text(current.displayName)
+                .font(.caption)
+                .foregroundColor(.gray)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+    .accessibilityIdentifier("layerOptions.transformModeButton")
+    .accessibilityValue(current.rawValue)
+}
+
+/// **The rows the picked mode needs, and nothing for Move** — the speed for Rotate (§5.3), the item
+/// list for Parallax (§5.2). Each ends in its own divider so the rows beneath it sit as they did.
+@ViewBuilder
+private func transformModeSection(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
+    switch canvasManager.transformLayerMode(of: target) ?? .move {
+    case .move:
+        EmptyView()
+    case .rotate:
+        RotateSpeedRow(canvasManager: canvasManager, target: target)
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    case .parallax:
+        ParallaxItemsSection(canvasManager: canvasManager, poser: target)
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    }
+}
+
+/// **A keyable scalar's slider and typed field, bracketed as one undo step and routed through
+/// `applyTargetChannelEdit`** — the opacity slider's funnel (`LayerStackListView.onOpacityChange`)
+/// on a SwiftUI control, and written once so the Rotate speed and every Parallax share are the same
+/// surface. The slider covers the channel's `uiRange`; the field accepts anything in its
+/// `modelDomain`, which is how a share is typed past 100% or negative (§2 ruling: *"can input
+/// negative values or higher"*).
+///
+/// **Shows the resolved value at the playhead, never the base** — §2.23: a keyed channel whose
+/// control showed the base would read as stuck.
+///
+/// `write` is the routed edit — `applyTargetChannelEdit` for a plain channel, `setParallaxShare` for
+/// a share, which materialises the positional default first — and returns the arm taken so the
+/// commit can name its step. `display` turns a stored value into the field's text and `parse` turns
+/// typed text back, so a share reads and types in percent while it is stored as a fraction.
+private struct ChannelScalarControl: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+    let channel: TargetChannel
+    let identifier: String
+    let display: (Double) -> String
+    let parse: (String) -> Double?
+    let write: (Double) -> KeyframeControl.Write
+
+    @State private var dragValue: Double?
+    @State private var wroteKeys = false
+    @State private var fieldText = ""
+
+    private var resolved: Double {
+        canvasManager.resolvedValue(of: target, channel: channel, atFrame: canvasManager.currentFrame) ?? 0
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Slider(value: Binding(
+                get: { dragValue ?? min(max(resolved, channel.uiRange.lowerBound), channel.uiRange.upperBound) },
+                set: { value in
+                    dragValue = value
+                    if write(value) != .storedValue { wroteKeys = true }
+                }),
+                   in: channel.uiRange,
+                   onEditingChanged: { editing in
+                       if editing {
+                           wroteKeys = false
+                           // §5.1 step 1: the recorder's arm is answered on touch-down, before this
+                           // surface opens its own undo bracket — the opacity slider's order.
+                           _ = canvasManager.beginArmedTake(on: target, isRecordable: true)
+                           canvasManager.beginStructureGesture()
+                       } else {
+                           canvasManager.commitStructureGesture(
+                               label: wroteKeys ? channel.keyframeLabel : channel.editLabel)
+                           dragValue = nil
+                           wroteKeys = false
+                       }
+                   })
+            .tint(.blue)
+            .accessibilityIdentifier("\(identifier).slider")
+            .accessibilityValue(display(dragValue ?? resolved))
+            TextField("", text: $fieldText)
+                .keyboardType(.numbersAndPunctuation)
+                .multilineTextAlignment(.trailing)
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.white)
+                .frame(width: 52)
+                .padding(.vertical, 3)
+                .padding(.horizontal, 4)
+                .background(Color.white.opacity(0.08))
+                .cornerRadius(4)
+                .accessibilityIdentifier("\(identifier).field")
+                .onSubmit {
+                    guard let typed = parse(fieldText) else {
+                        fieldText = display(resolved)
+                        return
+                    }
+                    // One bracket for the typed edit, the slider's own shape with no drag inside it.
+                    _ = canvasManager.beginArmedTake(on: target, isRecordable: true)
+                    canvasManager.beginStructureGesture()
+                    let route = write(channel.clamped(typed))
+                    canvasManager.commitStructureGesture(
+                        label: route != .storedValue ? channel.keyframeLabel : channel.editLabel)
+                    fieldText = display(resolved)
+                }
+                .onAppear { fieldText = display(resolved) }
+                .onChange(of: resolved) { _, value in
+                    if dragValue == nil { fieldText = display(value) }
+                }
+        }
+    }
+}
+
+/// **Rotate's one control** — degrees per frame, with the same number read as frames per turn
+/// beneath it (§2 ruling 6: *"the panel can also show frames per turn"*), and a line saying what a
+/// keyframe does *not* do to it (§6: placing a keyframe does not pause the wheel; key the speed to 0).
+private struct RotateSpeedRow: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+
+    private var speed: Double {
+        canvasManager.resolvedValue(of: target, channel: .rotateSpeed, atFrame: canvasManager.currentFrame) ?? 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Speed").foregroundColor(.white)
+                Spacer()
+                Text(String(format: "%.1f° per frame", speed))
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .accessibilityIdentifier("layerOptions.rotateSpeedReadout")
+            }
+            ChannelScalarControl(
+                canvasManager: canvasManager, target: target, channel: .rotateSpeed,
+                identifier: "layerOptions.rotateSpeed",
+                display: { String(format: "%.1f", $0) },
+                parse: { Double($0.trimmingCharacters(in: .whitespaces)) },
+                write: { value in
+                    canvasManager.applyTargetChannelEdit(target, channel: .rotateSpeed, newValue: value,
+                                                         atFrame: canvasManager.currentFrame)
+                })
+            Text(framesPerTurnText)
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .accessibilityIdentifier("layerOptions.rotateSpeedCaption")
+            Text("Spins from the start of the bar. A keyframe holds the box, not the spin — set the speed to 0 to stop it.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var framesPerTurnText: String {
+        guard let frames = TransformLayerMode.framesPerTurn(degreesPerFrame: speed) else {
+            return "Not turning"
+        }
+        let seconds = frames / Double(max(canvasManager.fps, 1))
+        let direction = speed < 0 ? "anticlockwise" : "clockwise"
+        return String(format: "One turn every %.1f frames (%.2f s at %d fps), %@",
+                      frames, seconds, canvasManager.fps, direction)
+    }
+}
+
+/// **Parallax's list: every item beneath the poser with its share** — §5.2, the panel's whole
+/// surface for the mode. Name, a slider per item, the share in percent, and the row greyed until a
+/// number has been typed or keyed (`ParallaxItem.isExplicit`), so the artist can see which shares are
+/// theirs and which are the position's.
+private struct ParallaxItemsSection: View {
+    @ObservedObject var canvasManager: CanvasManager
+    let poser: KeyframeTarget
+
+    var body: some View {
+        let items = canvasManager.parallaxItems(beneath: poser)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Shares").foregroundColor(.white)
+                Spacer()
+                Text(items.isEmpty ? "Nothing beneath to move" : "\(items.count) item\(items.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .accessibilityIdentifier("layerOptions.parallaxItems")
+            .accessibilityValue(items.map { "\($0.name)=\(Int(($0.share * 100).rounded()))\($0.isExplicit ? "*" : "")" }
+                                    .joined(separator: "|"))
+            if items.isEmpty {
+                Text("Put drawings or groups under this layer; each takes a share of the box's move — 100%, 75%, 50%, 25% for four.")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(items.enumerated()), id: \.offset) { rank, item in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(item.name)
+                            .font(.caption)
+                            .foregroundColor(item.isExplicit ? .white : .gray)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("layerOptions.parallaxItem.\(rank).name")
+                        Spacer()
+                        Text(TargetChannel.parallaxShare.percentText(item.share)
+                                + (item.isExplicit ? "" : " (default)"))
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                            .accessibilityIdentifier("layerOptions.parallaxItem.\(rank).share")
+                    }
+                    ChannelScalarControl(
+                        canvasManager: canvasManager, target: item.target, channel: .parallaxShare,
+                        identifier: "layerOptions.parallaxItem.\(rank)",
+                        display: { String(Int(($0 * 100).rounded())) },
+                        parse: { text in
+                            Double(text.trimmingCharacters(in: .whitespaces)
+                                       .replacingOccurrences(of: "%", with: "")).map { $0 / 100 }
+                        },
+                        write: { value in
+                            canvasManager.setParallaxShare(of: item.target, beneath: poser, to: value,
+                                                           atFrame: canvasManager.currentFrame)
+                        })
+                    .opacity(item.isExplicit ? 1 : 0.6)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
 /// The picker's list with "Clip to Below" dropped, for a compositor op.
 ///
 /// That mode is not a blend at all (§7): it is the mask machinery with an *implicit* source, the
@@ -1042,7 +1281,8 @@ struct FolderOptionsPanel: View {
                 // **Transform (§2.21, KEYFRAMES.md §4.4's folder twin) — offered on every folder, node
                 // or not.** Unlike Pass Through above, this is not inert on a node: `RenderTree`
                 // composes a folder's pose into its children on the way down whether or not the
-                // folder is a compositor node (`resolvedPoseMapping`, read unconditionally), and it is
+                // folder is a compositor node (`folder.transform`, handed to the recursion as its
+                // topmost poser, read unconditionally), and it is
                 // independent of `effect`/`compositorOp` too — `containerPose(of:)` reads the raw
                 // field with no gate. So there is no reading under which showing this switch here
                 // would be a control the render tree overrides. (A layer has no such switch: a
@@ -1071,6 +1311,11 @@ struct FolderOptionsPanel: View {
                 .accessibilityIdentifier("layerOptions.folderTransformToggle")
 
                 if canvasManager.folders[index].transform != nil {
+                    // **The mode, on the folder too** — TRANSFORM_LAYER.md §3.3: a folder's pose takes
+                    // the pose modes as well, or the keyable rows those modes read would key nothing
+                    // on a folder, which is §2.23's dead control by a new door.
+                    transformModeRow(canvasManager: canvasManager, target: .folder(id: folderID))
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                     // `LayerOptionsPanel`'s row closes its own mask-edit session and the panel itself
                     // before raising the box (`leavingMaskEdit`, private to that struct) — inlined
                     // rather than duplicated across a second private helper, matching how the Delete
@@ -1080,6 +1325,8 @@ struct FolderOptionsPanel: View {
                         canvasManager.beginContainerPoseMove(for: .folder(id: folderID))
                         onClose()
                     }
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                    transformModeSection(canvasManager: canvasManager, target: .folder(id: folderID))
                 }
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)

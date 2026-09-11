@@ -99,6 +99,19 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Apart from `.opacity` for `.effectKeyframes`' own reason — the value is what the artist
     /// picked and the curve is the animation on it.
     case opacityKeyframes
+    /// An item's parallax share changing (`setParallaxShare`), and its keyframes —
+    /// `TargetChannel.parallaxShare`'s two labels, TRANSFORM_LAYER.md §5.2. Two cases for
+    /// `.opacity` / `.opacityKeyframes`' reason: the number and the animation on it are different
+    /// things to want back.
+    case parallaxShare
+    case parallaxShareKeyframes
+    /// A rotate layer's speed changing (`setRotateSpeed`), and its keyframes —
+    /// `TargetChannel.rotateSpeed`'s two labels, TRANSFORM_LAYER.md §5.3.
+    case rotateSpeed
+    case rotateSpeedKeyframes
+    /// A transform layer's — or a posed folder's — mode being switched (`setTransformLayerMode`),
+    /// TRANSFORM_LAYER.md §5: Move, Parallax or Rotate.
+    case transformLayerMode
     /// A keyframe being placed (`CanvasManager.addKeyframe`) — KEYFRAMES.md §2.26. Named apart from
     /// `.effectKeyframes` because they are different things to want back: that one is an adjustment to
     /// an animation that already exists, this one is the press that *made* one, and an artist who
@@ -240,6 +253,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .valueLayerEffect: return "adjust layer effect"
         case .effectKeyframes: return "edit effect keyframes"
         case .opacityKeyframes: return "edit opacity keyframes"
+        case .parallaxShare: return "change parallax share"
+        case .parallaxShareKeyframes: return "edit parallax keyframes"
+        case .rotateSpeed: return "change rotate speed"
+        case .rotateSpeedKeyframes: return "edit rotate speed keyframes"
+        case .transformLayerMode: return "change transform mode"
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"
         case .clearKeyframes: return "clear keyframes"

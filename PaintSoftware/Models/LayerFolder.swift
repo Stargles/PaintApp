@@ -133,6 +133,15 @@ struct LayerFolder: Identifiable {
     /// Absent for every project saved before this field and for every folder nobody has posed, which
     /// is one meaning rather than two — `alphaMask`'s argument, and the whole migration this needs.
     var transform: LayerPose? = nil
+    /// `Layer.rotateSpeed` on the folder — TRANSFORM_LAYER.md §3.3: a folder's pose takes the pose
+    /// modes as well, so a folder in `.rotate` spins its contents at this many degrees per frame.
+    /// The one difference from the layer form is the origin: a folder has no block, so its angle
+    /// integrates from frame 0 rather than from a bar's first frame.
+    var rotateSpeed: Double = 0
+    /// `Layer.parallaxShare` on the folder — this folder's share as **one item** beneath a Parallax
+    /// transform layer (§2 ruling 3: a folder counts as one item and nothing inside it is split up).
+    /// Nil is the positional default, as it is on the layer, and for the same three reasons.
+    var parallaxShare: Double? = nil
 }
 
 // MARK: - Compositor nodes (§4.3)
@@ -288,21 +297,5 @@ extension LayerFolder {
     /// frame; `RenderTree.peakCompositeTextures` is the other place that assumption is load-bearing.
     func resolvedEffect(atFrame frame: Int) -> Effect? {
         effect?.resolved(atFrame: frame, through: effectTracks)
-    }
-
-    /// **The map this folder carries its contents through at `frame`, or nil when it shows them
-    /// where they are** — `resolvedEffect(atFrame:)`'s twin, and the accessor
-    /// `CanvasManager.renderNodes(inContainer:atFrame:)` reads when it descends into this folder.
-    ///
-    /// **Read this, never `transform` directly**, for the reason `resolvedEffect` gives at length one
-    /// method up: the accessor is where the keyframe track lands, and a raw field read is a pose
-    /// frozen at whatever the artist last dragged. Unlike the grade, the two do *not* answer
-    /// identically today — `LayerPose.mapping(atFrame:)` already consults the track — so the mistake
-    /// is visible immediately rather than lying in wait.
-    ///
-    /// Named for `resolvedEffect`'s reason as well: `transform(atFrame:)` would differ from the
-    /// stored `transform` by an argument label alone.
-    func resolvedPoseMapping(atFrame frame: Int) -> PoseMap? {
-        transform?.mapping(atFrame: frame)
     }
 }

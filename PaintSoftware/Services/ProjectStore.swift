@@ -367,6 +367,11 @@ enum ProjectStore {
             /// are), so like `effect` and `fill` it needs no defensive copy to be safe off main, and
             /// it is snapshotted unconditionally for the same reason they are.
             let transform: LayerPose?
+            /// `Layer.rotateSpeed` and `Layer.parallaxShare` — TRANSFORM_LAYER.md §5's two scalar
+            /// rows. Plain values, snapshotted unconditionally; zero-to-absent for the speed is
+            /// `writePackage`'s line, and the share is optional on both sides.
+            let rotateSpeed: Double
+            let parallaxShare: Double?
             let cels: [CelContent]
         }
 
@@ -439,7 +444,11 @@ enum ProjectStore {
                                // §4.4's container pose. Already optional in the model, so there is
                                // no empty-to-absent line to write: a folder nobody has posed carries
                                // nil and the synthesized encoder omits the key.
-                               transform: folder.transform)
+                               transform: folder.transform,
+                               // TRANSFORM_LAYER.md §5's scalar rows: zero-to-absent for the speed,
+                               // and the share is optional on both sides.
+                               rotateSpeed: folder.rotateSpeed == 0 ? nil : folder.rotateSpeed,
+                               parallaxShare: folder.parallaxShare)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -465,6 +474,8 @@ enum ProjectStore {
                              fill: layer.fill,
                              fillReferenceOverride: layer.fillReferenceOverride,
                              transform: layer.transform,
+                             rotateSpeed: layer.rotateSpeed,
+                             parallaxShare: layer.parallaxShare,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
@@ -1050,6 +1061,10 @@ enum ProjectStore {
                 // §4.4's transformation layer. Optional in the model as well, so this needs no
                 // empty-to-absent mapping — `effect` one field up is the same shape.
                 transform: layer.transform,
+                // TRANSFORM_LAYER.md §5's scalar rows: zero-to-absent for the speed, for the
+                // field-presence rule above; the share is optional on both sides.
+                rotateSpeed: layer.rotateSpeed == 0 ? nil : layer.rotateSpeed,
+                parallaxShare: layer.parallaxShare,
                 cels: celManifests
             ))
         }
@@ -1899,7 +1914,9 @@ enum ProjectStore {
                         pendingBaselines: f.pendingBaselines ?? [:],
                         // Optional on both sides — absent means "not posed", which is the same one
                         // meaning `alphaMask` and `effect` above carry.
-                        transform: f.transform)
+                        transform: f.transform,
+                        rotateSpeed: f.rotateSpeed ?? 0,
+                        parallaxShare: f.parallaxShare)
         }
 
         // Restore view presets.
@@ -1935,6 +1952,8 @@ enum ProjectStore {
                 keyframeMarks: layerManifest.keyframeMarks ?? [],
                 pendingBaselines: layerManifest.pendingBaselines ?? [:],
                 transform: layerManifest.transform,
+                rotateSpeed: layerManifest.rotateSpeed ?? 0,
+                parallaxShare: layerManifest.parallaxShare,
                 fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,
