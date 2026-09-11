@@ -458,15 +458,28 @@ final class TransformLayerModesLogicTests: XCTestCase {
     func testAKeyframeHoldsTheBoxNotTheAngle() throws {
         let fx = rotatedRasterLayer(speed: 15)
         let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
+        // §2.27's own workflow, so the key writer's container arm is actually reached: mark A, Move
+        // the box between the marks (the baseline is held), mark B (the held pose is committed onto A
+        // and the moved one keyed at B). A bare pair of marks with no Move between them writes no
+        // key at all, and a test built that way exercises none of the writers.
         XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 0))
+        let resting = PoseQuad(restingIn: canvasBox)
+        let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 6, y: 0))
+        XCTAssertEqual(fx.manager.commitContainerPose(target, restingAt: resting, movedTo: slid, atFrame: 4),
+                       .storedValueHoldingBaseline, "between two marks the Move holds a baseline")
         XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 4))
 
-        let key = fx.manager.layers[fx.mover].transform?.track.key(atFrame: 4)
-        XCTAssertTrue(key?.pose.isIdentity ?? true, "the mark holds the box where it rests")
-        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .rotate, "the mark did not lose the mode")
+        let track = try XCTUnwrap(fx.manager.layers[fx.mover].transform?.track)
+        XCTAssertEqual(track.keys.map(\.frame), [0, 4], "A took the held rest pose, B the moved box")
+        XCTAssertTrue(try XCTUnwrap(track.key(atFrame: 0)).pose.isIdentity, "A holds the box where it rested")
+        XCTAssertEqual(try XCTUnwrap(track.key(atFrame: 4)).pose.corners.p0.x, slid.corners.p0.x, accuracy: 1e-9,
+                       "B holds the box where it went — the box, and never the angle")
+        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .rotate,
+                       "neither the Move nor the mark lost the mode")
         let right = CGPoint(x: centre.x + 10, y: centre.y)
         let at6 = try XCTUnwrap(fx.manager.layerPoses(atFrame: 6)[fx.drawn]?.applied(to: right))
-        XCTAssertEqual(at6.x, centre.x, accuracy: 1e-6, "still 90° at 6 — the spin went on through the mark")
+        XCTAssertEqual(at6.x, centre.x + 6, accuracy: 1e-6,
+                       "still 90° at 6, about the box now slid 6 — the spin went on through the mark")
         XCTAssertEqual(at6.y, centre.y + 10, accuracy: 1e-6)
     }
 
