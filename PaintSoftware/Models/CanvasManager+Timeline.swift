@@ -422,10 +422,12 @@ extension CanvasManager {
     /// **The pose keys stay on the document frames they were on, and the ones the edge passes are
     /// removed** — TODO (62). Keys are cel-local (§3.1), so moving the block's origin by `d` frames
     /// moves every key's local number by `-d` (`TransformTrack.shifted(by:)`), and a key whose new
-    /// local frame is below 0 is outside the span and goes (`Cel.cropPoseKeysToSpan`). That is the
-    /// same reading `writeVideoCrop(anchoredAt: .tail)` gives the footage one line down: this edge
-    /// crops the *head*, and what the block shows at a document frame it still covers is what it
-    /// showed there before. The other reading — keys keep their local numbers and the whole animation
+    /// local frame is below 0 is outside the span and goes (`Cel.cropPoseKeysToSpan`) — but not before
+    /// a key lands on the new local frame 0 carrying the pose shown there, 2026-09-11's symmetric
+    /// reading of the same ruling `resizeCelRightEdge` carries at its own edge. That is the same
+    /// reading `writeVideoCrop(anchoredAt: .tail)` gives the footage one line down: this edge crops the
+    /// *head*, and what the block shows at a document frame it still covers is what it showed there
+    /// before. The other reading — keys keep their local numbers and the whole animation
     /// slides later with the edge — would retime the drawing against every other layer as a side
     /// effect of a length change, which is what §3.1 refuses.
     ///
@@ -549,12 +551,14 @@ extension CanvasManager {
     ///
     /// **Pose keys past the new end are removed** — TODO (62), the owner's ruling of 2026-09-10 that
     /// *shortening a cel crops the keys past its new end*, in place of §3.1's earlier "held, not
-    /// deleted". Keys are cel-local and this edge does not move the origin, so a key is outside
-    /// exactly when its local frame is at or past the new `frameCount`; `Cel.cropPoseKeysToSpan` is
-    /// the rule and the tracks are re-read from the baseline first, for `resizeCelLeftEdge`'s reason:
-    /// a drag past a key and back within one gesture restores it, and only the committed state is
-    /// reported. Lengthening removes nothing and restores nothing — a key cropped by an earlier,
-    /// committed shortening comes back only by undo, which is the ruling.
+    /// deleted", revised 2026-09-11: a key lands on the new last frame first, carrying the pose the
+    /// block showed there, so the frames that remain keep the motion they had rather than snapping to
+    /// whichever key was still inside. Keys are cel-local and this edge does not move the origin, so a
+    /// key is outside exactly when its local frame is at or past the new `frameCount`;
+    /// `Cel.cropPoseKeysToSpan` is the rule and the tracks are re-read from the baseline first, for
+    /// `resizeCelLeftEdge`'s reason: a drag past a key and back within one gesture restores it, and
+    /// only the committed state is reported. Lengthening removes nothing and restores nothing — a key
+    /// cropped by an earlier, committed shortening comes back only by undo, which is the ruling.
     ///
     /// - Returns: the keys removed, in absolute frames; see `resizeCelLeftEdge`.
     @discardableResult

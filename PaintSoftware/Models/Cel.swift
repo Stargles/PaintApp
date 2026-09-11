@@ -84,12 +84,15 @@ struct Cel: Identifiable {
     /// the debt; cel-local numbering is what makes the line a copy rather than a conversion, which is
     /// the part that really is free.
     ///
-    /// **A key never lives outside `0..<frameCount`** — TODO (62), the owner's ruling of 2026-09-10.
-    /// Every verb that can shorten this cel's span (both resize handles, split, a clamped duplicate
-    /// or paste, a video speed change) calls `cropPoseKeysToSpan` from inside its own undo step, so
-    /// the keys past the new end go with the frames and come back with them on undo; the crop is
-    /// announced (`CanvasNotice.keyframesCropped`) and nothing else restores them. A left-edge resize
-    /// keeps every key on the document frame it was on, so the local numbers shift with the origin.
+    /// **A key never lives outside `0..<frameCount`** — TODO (62), the owner's ruling of 2026-09-10,
+    /// revised 2026-09-11. Every verb that can shorten this cel's span (both resize handles, split, a
+    /// clamped duplicate or paste, a video speed change) calls `cropPoseKeysToSpan` from inside its own
+    /// undo step, so the keys past the new end go with the frames and come back with them on undo; the
+    /// crop is announced (`CanvasNotice.keyframesCropped`) and nothing else restores them. **Before a
+    /// key past an edge goes, a key lands on the new edge carrying the pose shown there**, so the
+    /// frames that remain keep the motion they had up to the new end rather than snapping to whichever
+    /// key was still inside (`TransformTrack.cropped(toFrameCount:)`). A left-edge resize keeps every
+    /// key on the document frame it was on, so the local numbers shift with the origin.
     /// A document saved before the ruling may still carry a key past a span; it is left alone until a
     /// span change touches that cel, because a silent crop on load is the loss the ruling forbids.
     ///

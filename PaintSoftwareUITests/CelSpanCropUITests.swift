@@ -10,7 +10,9 @@ import XCTest
 ///    mark — because every step is a different view and the model cannot see whether an artist can
 ///    get from one to the next;
 ///  * that **dragging the block's right edge past the second key** removes its diamond from the
-///    timeline and puts the banner on the canvas — what is *drawn and exposed*, not what is stored;
+///    timeline, puts a new one on the new last frame — the 2026-09-11 ruling that the frames which
+///    remain keep the motion they had — and puts the banner on the canvas: what is *drawn and
+///    exposed*, not what is stored;
 ///  * that **one press of Undo** brings the diamond and the block's length back together.
 ///
 /// A small class on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
@@ -97,8 +99,14 @@ final class CelSpanCropUITests: PaintUITestCase {
         XCTAssertLessThanOrEqual(after.length, second,
                                  "Premise: the block's new end (\(after.length)) is at or before the second key (\(second))")
 
-        // What is drawn: the second diamond is gone from the band, the first stays.
-        XCTAssertEqual(markers(app), "0", "the cropped key's diamond has left the timeline")
+        // What is drawn: the second diamond is gone from the band, the first stays — and, since
+        // 2026-09-11, the new last frame gains a diamond of its own, carrying the pose the block was
+        // showing there before the crop, unless the new block is a single frame (its last frame is
+        // then 0, which the first mark already keys).
+        let newLastFrame = after.length - 1
+        let expectedMarkers = newLastFrame > 0 ? "0|\(newLastFrame)" : "0"
+        XCTAssertEqual(markers(app), expectedMarkers,
+                       "the cropped key's diamond has left the timeline, and the new last frame gained its own")
 
         // What is said: the banner, by its case code rather than its wording.
         let notice = app.staticTexts["canvasNotice"]

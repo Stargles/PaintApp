@@ -460,6 +460,10 @@ rather than "it falls out of cel-local time":
   `channelTracks`, `keyframeMarks` and a transformation layer's own `transform.track` are in absolute
   document frames and apply at every frame whether or not the layer has a block there, so there is no
   span for a key of theirs to be outside of; `CelSpanCropLogicTests` pins the no-op.
+  **Revised 2026-09-11**: before a key past an edge is deleted, a key is inserted at the new edge
+  carrying the pose the track showed there — the new last frame on the right edge, the new first frame
+  on the left, symmetrically — so the frames that remain keep the motion they had up to the new end
+  instead of snapping to whichever key was still inside.
 
 ### 3.2 The curve
 

@@ -235,17 +235,55 @@ struct TransformTrack: Equatable {
     }
 
     /// **The keys inside `0..<frameCount`, and the cel-local frames of the ones that were not** —
-    /// TODO (62)'s rule, settled 2026-09-10: *keys beyond a cel's span are deleted, and shortening a
-    /// cel crops the keys past its new end.* Nothing here rescales or clamps a key onto the edge; a
-    /// key is kept where it is or it goes, and the caller says which went.
+    /// TODO (62)'s rule, settled 2026-09-10 and revised 2026-09-11: *keys beyond a cel's span are
+    /// deleted, and shortening a cel crops the keys past its new end* — but **before** a key past an
+    /// edge is removed, a key is inserted at the new edge carrying the pose the track showed there,
+    /// so the frames that remain keep the motion they had up to the new end instead of snapping to
+    /// whichever key happened to still be inside. Nothing here rescales or clamps a key *onto* the
+    /// edge — the survivors keep their own frames exactly — it is only the edge itself that gains a
+    /// key when one did not already stand there.
     ///
-    /// **Both edges, not only the end.** A key below 0 is as far outside the span as one at
-    /// `frameCount`, and a left-edge resize (`shifted(by:)`) is what produces one.
+    /// **Both edges, not only the end**, on the owner's ruling of 2026-09-11 — this file's reading of
+    /// symmetry, not a separate ruling of its own; a key below 0 is as far outside the span as one at
+    /// `frameCount`, and a left-edge resize (`shifted(by:)`) is what produces one. The new *first*
+    /// frame (0) gets the same treatment as the new *last* frame (`frameCount - 1`).
+    ///
+    /// **The inserted key's pose comes from `self`, before anything is removed** — `pose(atCelLocalFrame:)`
+    /// evaluated against the full, uncropped track, exactly as `split` samples `beforeCut` and `atCut`
+    /// from the whole track before slicing it. Its interpolation is inherited from the segment that
+    /// was carrying the edge, `split`'s same idea, so a `.constant` hold reads as a hold across the
+    /// join and a `.linear` ramp does not gain a curve it wasn't authored with.
+    ///
+    /// **Only inserted when a key past that edge is actually being removed.** A crop that discards
+    /// nothing changes nothing — the common case of a cel that already fits its span costs one
+    /// `isEmpty` and two no-op `contains` checks. And nothing is inserted where a key already stands
+    /// on the edge: the survivor there already says what the new edge shows, and re-minting it would
+    /// only flatten a handle or a tangent mode it does not need to lose.
     func cropped(toFrameCount frameCount: Int) -> (kept: TransformTrack, discarded: [Int]) {
+        let discardedBelow = keys.contains { $0.frame < 0 }
+        let discardedAbove = keys.contains { $0.frame >= frameCount }
+        guard discardedBelow || discardedAbove else { return (self, []) }
+
+        var working = keys
+        if discardedAbove, frameCount > 0, key(atFrame: frameCount - 1) == nil,
+           let edgePose = pose(atCelLocalFrame: frameCount - 1) {
+            // The last key still inside is ignored on the segment field of the key that begins
+            // nothing (`Key.interpolation`'s own doc), so which segment this inherits from cannot
+            // matter for the picture — carried for the same "reads alike" reason `split` gives.
+            let segment = keys.last { $0.frame <= frameCount - 1 }?.interpolation ?? .bezier
+            working.append(Key(frame: frameCount - 1, pose: edgePose, interpolation: segment))
+        }
+        if discardedBelow, key(atFrame: 0) == nil, let edgePose = pose(atCelLocalFrame: 0) {
+            // Frame 0 begins the segment that follows it, and does matter: this inherits the
+            // interpolation of whichever key was carrying frame 0 before the crop, so the new first
+            // key continues the ease the removed one started rather than defaulting to `.bezier`.
+            let segment = keys.last { $0.frame <= 0 }?.interpolation ?? .bezier
+            working.append(Key(frame: 0, pose: edgePose, interpolation: segment))
+        }
+
         let discarded = keys.filter { $0.frame < 0 || $0.frame >= frameCount }.map(\.frame)
-        guard !discarded.isEmpty else { return (self, []) }
-        return (TransformTrack(keys: keys.filter { $0.frame >= 0 && $0.frame < frameCount }, step: step),
-                discarded)
+        let kept = working.filter { $0.frame >= 0 && $0.frame < frameCount }
+        return (TransformTrack(keys: kept, step: step), discarded)
     }
 
     private static func normalised(_ input: [Key]) -> [Key] {
