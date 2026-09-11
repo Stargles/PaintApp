@@ -446,8 +446,15 @@ rather than "it falls out of cel-local time":
   `writeVideoCrop` gives the footage on that edge. A drag past a key and back within one gesture is
   not a crop: the handles recompute from the gesture baseline, and only the committed state is
   reported. The same crop runs on a duplicate or paste clamped shorter than its source, on a video
-  speed change that shortens the block, and on a split's right half (a stray a pre-ruling document
-  carried). **Layer-level tracks are untouched by all of it, by construction**: `effectTracks`,
+  speed change that shortens the block, and on both halves of a split — for a stray a pre-ruling
+  document carried, or one the mark workflow seeded before 2026-09-11, when `seedAndKeyPose` and
+  `poseDeltaForKeyframe` still put the held pose on the nearest layer keyframe either side of the
+  playhead whether or not that keyframe was on this block; **a neighbour outside the block is not
+  seeded now**, so no writer mints a key outside a span. The banner is raised by every bracket that
+  records a step (`withStructureUndo`, `withInterpolationUndo`, `commitStructureGesture`), and a
+  discrete step that crops more than once — a merge splitting both layers at every boundary — names
+  every crop; only a handle drag replaces, since each `.changed` recomputes from the baseline.
+  **Layer-level tracks are untouched by all of it, by construction**: `effectTracks`,
   `channelTracks`, `keyframeMarks` and a transformation layer's own `transform.track` are in absolute
   document frames and apply at every frame whether or not the layer has a block there, so there is no
   span for a key of theirs to be outside of; `CelSpanCropLogicTests` pins the no-op.

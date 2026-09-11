@@ -659,7 +659,7 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// cropped by the next resize with a banner naming a frame the artist never keyed on this block.
     ///
     /// Watched failing with the span filter removed from `seedAndKeyPose`: keys `[5, 15]`, and
-    /// frame 9 reads -8, on its way back to a pose the block never reaches.
+    /// frame 9 reads about -7, on its way back to a pose the block never reaches.
     func testAMoveSeededFromAMarkPastTheBlockKeysInsideItsOwnSpan() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()

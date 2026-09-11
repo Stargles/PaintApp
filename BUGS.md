@@ -3,22 +3,42 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## `duplicateLayer` drops every cel's pose channels and held poses (2026-09-11)
+## `duplicateLayer` drops every cel's pose channels, its held poses, its in-between recipe — and the layer's own transform (2026-09-11)
 
 `CanvasManager.duplicateLayer(at:)` builds each copied cel with a memberwise `Cel(...)` that names
-`raster`, `fillImage`, `bakedImage` and `vector` and **not** `transformTracks` or
-`pendingPoseBaselines`, so both default to `[:]`: a duplicated layer comes back as its drawings with
-every Move animation deleted, and nothing says so. It is the same door `duplicateCel`, `splitCel` and
-`pasteCel` fell through before 2026-09-02 (`Cel.transformTracks`' own doc comment records those three
-and asks whoever adds a field to *"owe those three sites a line each"*); this fourth site was missed
-then and found on 2026-09-11 while auditing every `Cel(...)` for TODO (62). The layer-level tracks
-(`effectTracks`, `channelTracks`, `keyframeMarks`, the transformation layer's `transform`) *are*
-carried, which makes the loss harder to notice: the timeline still draws the layer's keyframe marks
-and opacity diamonds on the copy, while the cel's own pose diamonds are gone.
+`raster`, `fillImage`, `bakedImage` and `vector` and **not** `transformTracks`, `pendingPoseBaselines`
+or `interpolation`, so all three default away: a duplicated layer comes back as its drawings with
+every Move animation deleted, and an in-between comes back **blank** (a `.generate` cel stores nothing;
+`copyTiers` exists to flatten it, per the 2026-09-03 ruling, and this site does not use it). It is the
+same door `duplicateCel`, `splitCel` and `pasteCel` fell through before 2026-09-02; this fourth site
+was found on 2026-09-11 while auditing every `Cel(...)` for TODO (62). **And the `Layer(...)` beneath
+it names `effectTracks`, `channelTracks`, `keyframeMarks` and `pendingBaselines` but not `transform`**
+— confirmed by the (62) review with a test that duplicated a transformation layer and read `nil` — so
+a duplicated transformation layer is a value layer with no pose, which `valueFill` then reads as a
+flat-colour layer. (The first filing of this entry said `transform` *was* carried; it is not.) The
+layer-level *tracks* being carried is what makes the cel-level loss hard to notice: the timeline
+still draws the layer's keyframe marks and opacity diamonds on the copy, while the cel's own pose
+diamonds are gone.
 
-Two lines through `Cel.CopyTiers` (`copyTiers(of:)` already answers both fields, and flattens a derived
-cel per the 2026-09-03 ruling) plus a logic test that duplicates an animated layer and reads the copy's
-`transformTracks`. Not fixed on the (62) branch because it is a copy verb rather than a span change.
+Three lines: build the cels through `copyTiers(of:)` (which answers `transformTracks` and
+`pendingPoseBaselines` and flattens a derived cel), and pass `transform: source.transform` to the
+`Layer(...)`; plus a logic test that duplicates an animated transformation layer and reads the copy's
+`transformTracks` and `transform`. Not fixed on the (62) branch or its review because it is a copy
+verb rather than a span change — a later worker's, and the shape is one commit.
+
+## Splitting a stepped pose channel changes the left half's last frames (2026-09-11)
+
+`TransformTrack.split(atCelLocalFrame:)` inserts a key at `cut - 1` holding `pose(atCelLocalFrame:
+cut - 1)`, and its doc says *"every other frame's pose is unchanged"*. That is true at `step: 1` and
+false above it: `step` quantises the *sampling* frame down to a multiple, so with `step: 3` and a cut
+at 5 the left half's frames 3 and 4 sample at 3 — inside the re-parameterised segment `[k₀, 4]`
+rather than at the inserted key — and read 22.5 where they read 30 before (MEASURED, linear keys
+0→90 over ten frames). The right half's re-phasing is documented and accepted (§2.10 anchors a step at
+frame 0 of the track's own base); the left half's was not, and the pre-2026-09-11 split (key at `cut`)
+read 18 there, so this is not a regression of TODO (62) — it is the split's arithmetic under `step`,
+unfiled until the (62) review measured it. Needs a ruling on what a stepped split should preserve
+before it is fixed; the sampling could be quantised before the key is chosen, or the inserted key
+placed on the last *stepped* frame.
 
 ## `FrameBakeKeyLogicTests`' mask-order test can fail to build its own fixture (2026-09-10)
 
