@@ -152,55 +152,98 @@ struct TransformTrack: Equatable {
     /// cel's `startFrame`.
     var keyedFrames: [Int] { keys.map(\.frame) }
 
-    /// **This channel cut in two at a cel-local frame** — KEYFRAMES.md §3.1's rule for `splitCel`,
-    /// verbatim: *"keys before the cut go left, keys after go right, and a key is inserted at the cut
-    /// in both so the value is continuous across it."*
+    /// **This channel cut in two at a cel-local frame** — KEYFRAMES.md §3.1's rule for `splitCel`:
+    /// *"keys before the cut go left, keys after go right, and a key is inserted at the cut in both so
+    /// the value is continuous across it."*
     ///
     /// `cut` is the first cel-local frame of the **right** half, so the left half spans `0..<cut` and
     /// a key of the right half at original frame `f` lands at `f - cut`.
     ///
-    /// **The inserted key is the pose this track already shows at `cut`**, which is what makes the
-    /// rule's *"so the value is continuous"* true rather than approximate. It is also why the left
-    /// half keeps a key one frame past its own last frame: without it, the left half's frames from its
-    /// last real key onward would hold that key's pose flat (`AnimationCurve`'s decision 2 reaching
-    /// here through `timing`) instead of continuing to travel, and the artist would watch a moving
-    /// drawing stop dead at the cut. §3.1's own resize rule — *"a key pushed outside the new span is
-    /// held, not deleted, so shrinking and re-growing a cel is lossless"* — is the precedent for
-    /// storing it there.
+    /// **The right half's inserted key is the pose this track already shows at `cut`; the left half's
+    /// is the pose it shows at `cut - 1`, its own last frame.** Both are what make *"so the value is
+    /// continuous"* true at every frame either half draws. The left one is needed at all because
+    /// without it the left half's frames from its last real key onward would hold that key's pose
+    /// flat (`AnimationCurve`'s decision 2 reaching here through `timing`) instead of continuing to
+    /// travel, and the artist would watch a moving drawing stop dead before the cut.
+    ///
+    /// **It lands on `cut - 1` rather than on `cut`, and that is TODO (62).** Until 2026-09-11 the left
+    /// half kept a key at `cut` — one frame *past* its own span — on the strength of §3.1's old resize
+    /// rule that a key outside a span is held. The owner reversed that rule: a key beyond a cel's span
+    /// is deleted, so a split may not mint one. A key on the last frame the half actually draws says
+    /// the same thing about every frame the artist can see, and is inside the span, so the crop that
+    /// follows a split (`Cel.cropPoseKeysToSpan`) finds nothing to remove on a track this produced.
     ///
     /// **What is lost is stated rather than hidden.** A segment that spans the cut is re-parameterised
-    /// on both sides: `[k₀, cut]` and `[cut, k₁]` each become a segment of their own, so the easing
-    /// *within* that one span is not the easing it had. Every other frame's pose is unchanged, which is
-    /// the strongest statement §3.1's rule admits — a single bezier cannot be two beziers.
+    /// on both sides: `[k₀, cut - 1]` and `[cut, k₁]` each become a segment of their own, so the
+    /// easing *within* that one span is not the easing it had. Every other frame's pose is unchanged,
+    /// which is the strongest statement §3.1's rule admits — a single bezier cannot be two beziers.
     ///
-    /// **A key that already sits exactly on the cut is carried across whole, not re-synthesised.** Its
-    /// pose is what `pose(atCelLocalFrame: cut)` would answer anyway, but its handles and tangent mode
-    /// are not recoverable from a pose, and a split is not an occasion to flatten an authored ease.
+    /// **A key that already sits exactly on the cut is carried across whole to the right half, not
+    /// re-synthesised.** Its pose is what `pose(atCelLocalFrame: cut)` would answer anyway, but its
+    /// handles and tangent mode are not recoverable from a pose, and a split is not an occasion to
+    /// flatten an authored ease. The left half still needs its own key at `cut - 1` in that case, since
+    /// the key on the cut is not one of its frames. A key already on `cut - 1` is likewise kept whole.
     ///
     /// Empty halves are never returned: an empty track cannot exist in `Cel.transformTracks`
-    /// (`clearPoseKeys` removes a channel left with no keys), and a track with keys yields a key at the
-    /// cut on both sides whatever the keys are. `step` rides unchanged onto both, which does re-phase
+    /// (`clearPoseKeys` removes a channel left with no keys), and a track with keys yields a key at
+    /// each half's boundary whatever the keys are. `step` rides unchanged onto both, which does re-phase
     /// the right half — its frame 0 is the original `cut` and §2.10 anchors a step at frame 0 of the
     /// track's own base. Rescaling it instead would retime the animation, which is the thing §3.1
     /// refuses for the resize handles and refuses here for the same reason.
     func split(atCelLocalFrame cut: Int) -> (left: TransformTrack, right: TransformTrack) {
-        guard let atCut = pose(atCelLocalFrame: cut) else { return (self, self) }
-        let onCut = key(atFrame: cut)
-        // **The inserted key inherits the interpolation of the segment it lands in**, which matters on
+        guard let atCut = pose(atCelLocalFrame: cut),
+              let beforeCut = pose(atCelLocalFrame: cut - 1) else { return (self, self) }
+        // **The inserted keys inherit the interpolation of the segment they land in**, which matters on
         // the right half and only there: a key's `interpolation` describes the segment it *begins*, so
         // the right half's first segment would otherwise be `.bezier` — `Key`'s default — whatever the
         // artist authored. A `.constant` hold cut in two would start easing, and a `.linear` span
-        // would gain a curve at the join.
+        // would gain a curve at the join. The left half's inserted key is its last and begins nothing,
+        // and takes the same value so that the two halves read alike.
         let segment = keys.last { $0.frame <= cut }?.interpolation ?? .bezier
-        var left = TransformTrack(keys: keys.filter { $0.frame <= cut }, step: step)
-        if onCut == nil { left.setKey(Key(frame: cut, pose: atCut, interpolation: segment)) }
+        var left = TransformTrack(keys: keys.filter { $0.frame < cut }, step: step)
+        if key(atFrame: cut - 1) == nil {
+            left.setKey(Key(frame: cut - 1, pose: beforeCut, interpolation: segment))
+        }
         var right = TransformTrack(keys: keys.filter { $0.frame >= cut }.map {
             var moved = $0
             moved.frame -= cut
             return moved
         }, step: step)
-        if onCut == nil { right.setKey(Key(frame: 0, pose: atCut, interpolation: segment)) }
+        if key(atFrame: cut) == nil { right.setKey(Key(frame: 0, pose: atCut, interpolation: segment)) }
         return (left, right)
+    }
+
+    // MARK: - Keeping keys inside the cel's span — TODO (62)
+
+    /// Every key moved by `delta` cel-local frames. What a **left-edge** resize does to a track before
+    /// cropping it: the cel's origin moves and its keys stay on the document frames they were on, so
+    /// their cel-local numbers move the other way. A key that lands below 0 is then outside the span
+    /// and `cropped(toFrameCount:)` removes it.
+    ///
+    /// `step` rides unchanged, which re-phases it exactly as `split` re-phases the right half's — and
+    /// for the same reason: §2.10 anchors a step at frame 0 of the track's own base, and rescaling
+    /// would retime the animation as a side effect of dragging a cel edge.
+    func shifted(by delta: Int) -> TransformTrack {
+        guard delta != 0 else { return self }
+        return TransformTrack(keys: keys.map { key in
+            var moved = key
+            moved.frame += delta
+            return moved
+        }, step: step)
+    }
+
+    /// **The keys inside `0..<frameCount`, and the cel-local frames of the ones that were not** —
+    /// TODO (62)'s rule, settled 2026-09-10: *keys beyond a cel's span are deleted, and shortening a
+    /// cel crops the keys past its new end.* Nothing here rescales or clamps a key onto the edge; a
+    /// key is kept where it is or it goes, and the caller says which went.
+    ///
+    /// **Both edges, not only the end.** A key below 0 is as far outside the span as one at
+    /// `frameCount`, and a left-edge resize (`shifted(by:)`) is what produces one.
+    func cropped(toFrameCount frameCount: Int) -> (kept: TransformTrack, discarded: [Int]) {
+        let discarded = keys.filter { $0.frame < 0 || $0.frame >= frameCount }.map(\.frame)
+        guard !discarded.isEmpty else { return (self, []) }
+        return (TransformTrack(keys: keys.filter { $0.frame >= 0 && $0.frame < frameCount }, step: step),
+                discarded)
     }
 
     private static func normalised(_ input: [Key]) -> [Key] {
@@ -285,6 +328,81 @@ struct TransformTrack: Equatable {
     func pose(atDocumentFrame frame: Int) -> PoseQuad? { pose(atCelLocalFrame: frame) }
 
     func mapping(atDocumentFrame frame: Int) -> PoseMap? { mapping(atCelLocalFrame: frame) }
+}
+
+// MARK: - What a span change discarded (TODO 62)
+
+/// **The pose keys a change to a cel's span threw away** — TODO (62)'s *"it says what it discarded"*,
+/// in the form the notice and the tests read.
+///
+/// The owner chose the crop with its objection in front of them (*"you'd lengthen the cel again and
+/// find the animation gone"*), and this type is the mitigation they asked for instead of the bare
+/// rule: a crop is not allowed to happen in silence. Every verb that shortens a span returns one of
+/// these, `CanvasManager.noteKeyframeCrop` carries it to the banner once the undo step that owns the
+/// crop is on the stack, and the banner names the count and the frames.
+///
+/// **Frames are absolute document frames**, not cel-local ones, because the artist reads the ruler.
+/// A key at cel-local 9 on a block starting at frame 20 is "the keyframe at 29" to them, and that is
+/// what the sentence says.
+struct KeyframeCrop: Equatable {
+
+    /// Channel id (`TransformChannelID.id`) → the absolute frames of the keys removed, ascending.
+    private(set) var discarded: [String: [Int]] = [:]
+
+    var isEmpty: Bool { discarded.isEmpty }
+
+    /// How many keys went, across every channel.
+    var count: Int { discarded.values.reduce(0) { $0 + $1.count } }
+
+    /// Every frame a key was removed from, across channels, ascending and unique — two channels
+    /// keyed on one frame lose two keys and name one frame.
+    var frames: [Int] { Set(discarded.values.joined()).sorted() }
+
+    mutating func record(channel: String, frames: [Int]) {
+        guard !frames.isEmpty else { return }
+        discarded[channel, default: []] = ((discarded[channel] ?? []) + frames).sorted()
+    }
+
+    /// Folds another crop into this one — `splitCel` crops two halves and reports once.
+    mutating func merge(_ other: KeyframeCrop) {
+        for (channel, frames) in other.discarded { record(channel: channel, frames: frames) }
+    }
+}
+
+extension Cel {
+
+    /// **Removes every pose key outside this cel's span, from every channel, and says what went** —
+    /// the one crop, which every verb that can leave a key outside a span calls (TODO 62).
+    ///
+    /// A key is outside when its cel-local frame is below 0 or at or past `frameCount`. A channel left
+    /// with no keys is removed rather than stored empty, which is `removeTransformPoseKey`'s rule on
+    /// the same payload: an empty `TransformTrack` in the dictionary is a channel the graph editor
+    /// would list and draw as a flat, unkeyed line.
+    ///
+    /// **`pendingPoseBaselines` is left alone.** A held pose is not a key and has no frame — it is
+    /// §2.27's *"the previous value is held"*, waiting for the next keyframe mark to commit it — so
+    /// there is nothing about it that can be outside a span.
+    ///
+    /// - Parameter delta: how far to move every key's cel-local frame **first**. A left-edge resize
+    ///   moves the cel's origin by `newStart - oldStart` and the keys stay on the document frames
+    ///   they were on, so the caller passes `oldStart - newStart`; every other caller passes nothing.
+    /// - Returns: what was removed, in absolute frames. Empty for the overwhelmingly common case of a
+    ///   cel with no channels, which costs one `isEmpty`.
+    @discardableResult
+    mutating func cropPoseKeysToSpan(shiftingKeysBy delta: Int = 0) -> KeyframeCrop {
+        var crop = KeyframeCrop()
+        guard !transformTracks.isEmpty else { return crop }
+        for (id, track) in transformTracks {
+            let (kept, discarded) = track.shifted(by: delta).cropped(toFrameCount: frameCount)
+            crop.record(channel: id, frames: discarded.map { startFrame + $0 })
+            if kept.isEmpty {
+                transformTracks.removeValue(forKey: id)
+            } else if kept != track {
+                transformTracks[id] = kept
+            }
+        }
+        return crop
+    }
 }
 
 // MARK: - The container pose (§2.3, §4.4)

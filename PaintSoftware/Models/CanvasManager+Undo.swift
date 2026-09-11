@@ -164,6 +164,30 @@ extension CanvasManager {
         defer { structureUndoDepth -= 1 }
         body()
         recordStructureChange(label: label, from: before, to: captureStructure())
+        flushPendingKeyframeCrop()
+    }
+
+    // MARK: - Saying what a span change discarded (TODO 62)
+
+    /// **Hands a span-shortening verb's crop to the artist, once the step that owns it exists.**
+    ///
+    /// Inside a structure step or a gesture bracket the crop is parked on `pendingKeyframeCrop` and
+    /// raised when the step is recorded, so the banner's *"Undo brings them back"* is true at the
+    /// moment it is read. A verb called with neither open (which only a test does: the timeline
+    /// brackets every handle drag, and every discrete verb wraps itself) registers no step at all, so
+    /// that sentence would be false and nothing is raised; the verb's return value is the whole
+    /// report there.
+    func noteKeyframeCrop(_ crop: KeyframeCrop) {
+        guard structureUndoDepth > 0 || gestureSnapshot != nil else { return }
+        pendingKeyframeCrop = crop.isEmpty ? nil : crop
+    }
+
+    /// Raises the parked crop, if any, against the step just recorded. Called from the two places a
+    /// structure step reaches the stack and nowhere else.
+    private func flushPendingKeyframeCrop() {
+        guard let crop = pendingKeyframeCrop else { return }
+        pendingKeyframeCrop = nil
+        raise(.keyframesCropped(crop))
     }
 
     /// Opens a gesture bracket. **Nests**, for the same reason `withStructureUndo` does: only the
@@ -193,6 +217,7 @@ extension CanvasManager {
         pendingGestureLabel = nil
         gestureSnapshot = nil
         recordStructureChange(label: claimed ?? label, from: before, to: captureStructure())
+        flushPendingKeyframeCrop()
     }
 
     /// Drops a gesture's snapshot without recording anything — for a drag that ended up changing
@@ -204,5 +229,7 @@ extension CanvasManager {
         guard structureGestureDepth == 0 else { return }
         pendingGestureLabel = nil
         gestureSnapshot = nil
+        // A cancelled drag recorded nothing, so there is no crop to report and no step to undo.
+        pendingKeyframeCrop = nil
     }
 }

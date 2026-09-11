@@ -4061,6 +4061,20 @@ final class CanvasManager: ObservableObject {
     /// be present to say so at the moment the bracket finally closes.
     var pendingGestureLabel: HistoryActionLabel?
 
+    /// **The pose keys the structure step now being built has cropped**, waiting for that step to
+    /// reach the undo stack before the artist is told — TODO (62)'s *"it says what it discarded"*.
+    ///
+    /// Written only through `noteKeyframeCrop`, and **replaced rather than accumulated**: a resize
+    /// handle calls its verb on every `.changed` of one drag, each call recomputes the whole result
+    /// from `gestureSnapshot`, and the crop is part of that result — so the last call's answer is the
+    /// drag's answer, and a drag that went past a key and came back reports nothing. Raised by
+    /// `flushPendingKeyframeCrop` from the two places a step is recorded (`withStructureUndo`'s
+    /// outermost scope and `commitStructureGesture`), and dropped by `cancelStructureGesture`.
+    ///
+    /// Raised *after* the step is recorded rather than from the verb, so that the banner's *"Undo
+    /// brings them back"* is true at the moment it is read.
+    var pendingKeyframeCrop: KeyframeCrop?
+
     /// Whether the open mask-edit session has already opened its undo bracket (§6.6). Nil-until-used
     /// rather than opened in `beginMaskEdit`, because the session now begins whenever a layer's
     /// options menu opens: bracketing there would record an empty step for every menu merely looked at.

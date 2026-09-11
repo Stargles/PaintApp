@@ -227,6 +227,17 @@ struct CanvasNotice: Identifiable, Equatable {
         /// rather than caution: every key on both tracks changes meaning at once, so a membership edit
         /// applied to some of the loop's ink and not the rest is a corrupted document.
         case animationGroupEditRefused(AnimationGroupEditRefusal)
+
+        /// **A change to a block's length removed the pose keys that fell outside it** — TODO (62),
+        /// settled 2026-09-10: *keys beyond a cel's span are deleted, and shortening a cel crops the
+        /// keys past its new end*. The owner chose that rule with its objection in front of them, on
+        /// condition that the crop is one undo step and says what it discarded; this is the saying.
+        ///
+        /// Raised once, when the step that owns the crop reaches the undo stack — not on every
+        /// `.changed` of a handle drag, and not at all for a drag that went past a key and came back
+        /// (`CanvasManager.pendingKeyframeCrop`). Carries the crop rather than a rendered sentence for
+        /// `Kind`'s stated reason: the wording lives in `message`, and a test asserts on the case.
+        case keyframesCropped(KeyframeCrop)
     }
 
     /// Which of the three operations happened, in the artist's own nouns — the group's display name,
@@ -330,6 +341,26 @@ struct CanvasNotice: Identifiable, Equatable {
             case .aPlacedImageCannotFollowAKeystone:
                 return "A placed image or video can't follow an animation that keystones — leave those out of the loop."
             }
+        // **The count, the frames, and the way back — in that order.** The count is what happened;
+        // the frames are where, in the ruler's own numbers, so the artist can look at the timeline and
+        // see the diamonds that are not there any more; and "Undo brings them back" is the mitigation
+        // the owner asked for in place of the bare rule, said where it can be acted on. The frames are
+        // spelled out rather than summarised because a crop is usually one or two of them, and an
+        // artist who reads "3 keyframes" wants to know *which* three before deciding.
+        case .keyframesCropped(let crop):
+            let noun = crop.count == 1 ? "keyframe" : "keyframes"
+            return "\(crop.count) \(noun) outside the block's new length \(crop.count == 1 ? "was" : "were") removed (frame \(Self.list(crop.frames))). Undo brings \(crop.count == 1 ? "it" : "them") back."
+        }
+    }
+
+    /// `[9]` → "9"; `[4, 9]` → "4 and 9"; `[4, 9, 12]` → "4, 9 and 12". Frames are shown 1-based, as
+    /// the ruler and the "Frame N/M" label show them — the model's frame 0 is the artist's frame 1.
+    private static func list(_ frames: [Int]) -> String {
+        let shown = frames.map { String($0 + 1) }
+        switch shown.count {
+        case 0: return ""
+        case 1: return shown[0]
+        default: return shown.dropLast().joined(separator: ", ") + " and " + shown[shown.count - 1]
         }
     }
 
@@ -406,6 +437,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // refusals name a frame to scrub to or ink to leave out of the loop, and neither is a tap this
         // banner could make on the artist's behalf.
         case .animationGroupMembershipChanged, .animationGroupEditRefused: return nil
+        // Nor this one, for `.mergedAsPixels`' reason: it reports what already happened, and the one
+        // thing a button could offer — undo — is on the toolbar where it always is. The sentence
+        // says so.
+        case .keyframesCropped: return nil
         }
     }
 
@@ -451,6 +486,7 @@ struct CanvasNotice: Identifiable, Equatable {
             case .joinedGroupThatIsNotAnimatedHere: return "animationGroupJoinedStaticGroup"
             }
         case .animationGroupEditRefused: return "animationGroupEditRefused"
+        case .keyframesCropped: return "keyframesCropped"
         }
     }
 

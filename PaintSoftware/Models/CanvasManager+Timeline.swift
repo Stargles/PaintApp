@@ -202,22 +202,34 @@ extension CanvasManager {
     /// is currently silent; a UI affordance for it is logged there as a low-priority follow-up.
     ///
     /// A copy of an in-between is a flattened still and carries no recipe — see `flattenedStill`.
-    func duplicateCel(layerIndex: Int, celIndex: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+    ///
+    /// **A copy clamped shorter than its source loses the source's keys past the copy's end, and says
+    /// so** — TODO (62). The keys ride across cel-local, so a copy that is `length` frames where the
+    /// source was longer arrives with every key at local `length` or beyond outside its own span. The
+    /// source keeps all of its keys; only the copy is cropped, and the banner names the frames.
+    ///
+    /// - Returns: what the copy discarded, in absolute frames — empty when the copy is full length.
+    @discardableResult
+    func duplicateCel(layerIndex: Int, celIndex: Int) -> KeyframeCrop {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         let source = layers[layerIndex].cels[celIndex]
         let newStart = source.endFrame
-        guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return }
+        guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return KeyframeCrop() }
         let tiers = copyTiers(of: source)
+        var crop = KeyframeCrop()
         withStructureUndo(label: .duplicateFrame) {
             // No `interpolation:` argument, on either arm — a copy never derives. On the flatten arm
             // that is the ruling; on the verbatim arm the source had no recipe to carry.
-            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, fillImage: tiers.fillImage, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
+            var newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, fillImage: tiers.fillImage, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
+            crop = newCel.cropPoseKeysToSpan()
+            noteKeyframeCrop(crop)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: newStart) {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
+        return crop
     }
 
     /// Snapshots a cel's content (not its position) onto a single clipboard slot, for `pasteCel` to
@@ -253,19 +265,24 @@ extension CanvasManager {
     /// `interpolation` field, so a paste cannot plant a recipe however hard it tries; the in-between
     /// was already resolved to a flattened still by `copyCel`, which is the only end of this pair
     /// that can still see the drawings it derived from.
+    ///
+    /// **A paste clamped shorter than what was copied crops the keys past its end, and says so** —
+    /// TODO (62), `duplicateCel`'s rule through the clipboard: the clipboard keeps its keys, the
+    /// pasted cel keeps the ones inside its own span, and the banner names the rest.
     @discardableResult
     func pasteCel(layerIndex: Int, startFrame: Int) -> Bool {
         guard let copiedCel, layers.indices.contains(layerIndex) else { return false }
         guard activeCelIndex(inLayer: layerIndex, atFrame: startFrame) == nil else { return false }
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: startFrame, maxLength: copiedCel.frameCount) else { return false }
         withStructureUndo(label: .pasteFrame) {
-            let newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
+            var newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
                              raster: copiedCel.raster.makeCopy(), fillImage: copiedCel.fillImage,
                              bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy(),
                              // Paste is the fourth verb in §3.1's *"move, split, duplicate and
                              // paste"*, and it dropped the channel by the same door duplicate did.
                              transformTracks: copiedCel.transformTracks,
                              pendingPoseBaselines: copiedCel.pendingPoseBaselines)
+            noteKeyframeCrop(newCel.cropPoseKeysToSpan())
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
@@ -400,15 +417,37 @@ extension CanvasManager {
     /// frame 0 already reads as everywhere else in this file (a cel can't be squeezed below one
     /// frame; this is the same shape, applied to the timeline's own edge instead of a neighbour's
     /// minimum length).
-    func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+    ///
+    /// **The pose keys stay on the document frames they were on, and the ones the edge passes are
+    /// removed** — TODO (62). Keys are cel-local (§3.1), so moving the block's origin by `d` frames
+    /// moves every key's local number by `-d` (`TransformTrack.shifted(by:)`), and a key whose new
+    /// local frame is below 0 is outside the span and goes (`Cel.cropPoseKeysToSpan`). That is the
+    /// same reading `writeVideoCrop(anchoredAt: .tail)` gives the footage one line down: this edge
+    /// crops the *head*, and what the block shows at a document frame it still covers is what it
+    /// showed there before. The other reading — keys keep their local numbers and the whole animation
+    /// slides later with the edge — would retime the drawing against every other layer as a side
+    /// effect of a length change, which is what §3.1 refuses.
+    ///
+    /// **The tracks are re-read from the baseline on every call, exactly as the neighbours are.** A
+    /// drag that goes past a key and comes back within one gesture therefore restores it, because
+    /// each `.changed` recomputes the crop from where the gesture started; only the state at
+    /// `commitStructureGesture` is the crop, and that is what the banner reports. The pushed
+    /// predecessors keep their own lengths and origins move with their keys, so nothing of theirs is
+    /// cropped — being shoved along the timeline is not being cropped, for keys as for footage.
+    ///
+    /// - Returns: the keys removed, in absolute frames — empty for a cel with no channels. Raised as
+    ///   a notice by the bracket that records the step (`noteKeyframeCrop`); a bare call from a test
+    ///   has no bracket, and the return value is its report.
+    @discardableResult
+    func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) -> KeyframeCrop {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         // Baseline for every position in this call — the resized cel's own anchor (its endFrame,
         // which this edge never moves) and every predecessor's untouched start/length — comes from
         // `gestureSnapshot` when a drag has one open, not from `layers` as it currently stands. See
         // `resizeCelRightEdge`'s comment for why: reading the live (already-pushed) state here is
         // exactly the bug that made dragging out and back not restore the neighbours.
         let baseline = gestureSnapshot?.layers ?? layers
-        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return }
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         let baselineCel = baseline[layerIndex].cels[celIndex]
         let requestedStart = min(newStartFrame, baselineCel.endFrame - 1)
 
@@ -442,6 +481,12 @@ extension CanvasManager {
 
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
         layers[layerIndex].cels[celIndex].frameCount = baselineCel.endFrame - clampedStart
+        // The span is written above, so the crop reads the new origin; the keys come from the
+        // baseline so the drag is idempotent, and shift by the distance the origin moved.
+        layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
+        let crop = layers[layerIndex].cels[celIndex]
+            .cropPoseKeysToSpan(shiftingKeysBy: baselineCel.startFrame - clampedStart)
+        noteKeyframeCrop(crop)
 
         let pushedIndices = Set(provisional.map(\.index))
         for entry in provisional {
@@ -462,6 +507,7 @@ extension CanvasManager {
         // does the tail of the crop. The pushed predecessors keep their own lengths and therefore
         // their own crops, which is right — being shoved along the timeline is not being cropped.
         writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .tail)
+        return crop
     }
 
     /// Drag the block's right edge: keeps the left edge fixed, changes frameCount only. Also used
@@ -499,15 +545,30 @@ extension CanvasManager {
     /// from a test, or from `extendCelToEnd`) `gestureSnapshot` is nil and the live model stands in
     /// for it, which is just "the baseline is wherever things currently are" — correct for a single
     /// call, same as it always was.
-    func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+    ///
+    /// **Pose keys past the new end are removed** — TODO (62), the owner's ruling of 2026-09-10 that
+    /// *shortening a cel crops the keys past its new end*, in place of §3.1's earlier "held, not
+    /// deleted". Keys are cel-local and this edge does not move the origin, so a key is outside
+    /// exactly when its local frame is at or past the new `frameCount`; `Cel.cropPoseKeysToSpan` is
+    /// the rule and the tracks are re-read from the baseline first, for `resizeCelLeftEdge`'s reason:
+    /// a drag past a key and back within one gesture restores it, and only the committed state is
+    /// reported. Lengthening removes nothing and restores nothing — a key cropped by an earlier,
+    /// committed shortening comes back only by undo, which is the ruling.
+    ///
+    /// - Returns: the keys removed, in absolute frames; see `resizeCelLeftEdge`.
+    @discardableResult
+    func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) -> KeyframeCrop {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         let baseline = gestureSnapshot?.layers ?? layers
-        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return }
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         let baselineCel = baseline[layerIndex].cels[celIndex]
         let clampedEnd = max(newEndFrame, baselineCel.startFrame + 1)
 
         layers[layerIndex].cels[celIndex].startFrame = baselineCel.startFrame
         layers[layerIndex].cels[celIndex].frameCount = clampedEnd - baselineCel.startFrame
+        layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
+        let crop = layers[layerIndex].cels[celIndex].cropPoseKeysToSpan()
+        noteKeyframeCrop(crop)
 
         // Successors this push could reach, nearest first, from the same baseline the resized cel's
         // own new end was just computed from.
@@ -539,6 +600,7 @@ extension CanvasManager {
         // fixed and the tail follows the new length — up to the clip's own duration, past which
         // there is no more footage to reveal and the last frame holds (§4.3's clamp).
         writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
+        return crop
     }
 
     /// **Makes a video's crop say what its block's length says** — VIDEO.md §2.2, and the whole of
@@ -693,6 +755,9 @@ extension CanvasManager {
             let room = ceiling.map { $0 - start } ?? Int.max
             let length = max(1, min(wanted, room))
             layers[layerIndex].cels[celIndex].frameCount = length
+            // A faster clip is a shorter block, and a shorter block crops the pose keys past its new
+            // end — TODO (62), the same rule the right-edge handle applies, reached by the speed row.
+            noteKeyframeCrop(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
             // Only when the neighbour clipped it: otherwise the crop already says exactly this.
             if length != wanted {
                 writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
@@ -767,10 +832,19 @@ extension CanvasManager {
     /// A recipe names *other* cels, never the one it lives on, so the second half's fresh id needs
     /// no rewriting on the way across — and a reference held elsewhere in the document still resolves,
     /// because the half that keeps the original cel id is the one that was mutated in place.
-    func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+    ///
+    /// **Neither half is left holding a key outside its own span** — TODO (62). `split` itself no
+    /// longer mints one (its left-half key lands on `cut - 1`, inside), so on a document written
+    /// under the current rules the crop below finds nothing. It runs anyway, on both halves, because
+    /// a document saved while §3.1 still held keys outside a span carries them until something
+    /// touches the cel, and a split is that something: those go here, and the banner names them.
+    ///
+    /// - Returns: what the two halves discarded between them, in absolute frames.
+    @discardableResult
+    func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) -> KeyframeCrop {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
         let cel = layers[layerIndex].cels[celIndex]
-        guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
+        guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return KeyframeCrop() }
         let cut = atFrame - cel.startFrame
         var leftTracks: [String: TransformTrack] = [:]
         var rightTracks: [String: TransformTrack] = [:]
@@ -779,10 +853,14 @@ extension CanvasManager {
             leftTracks[id] = halves.left
             rightTracks[id] = halves.right
         }
+        var crop = KeyframeCrop()
         withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             layers[layerIndex].cels[celIndex].transformTracks = leftTracks
-            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+            crop.merge(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
+            var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+            crop.merge(secondHalf.cropPoseKeysToSpan())
+            noteKeyframeCrop(crop)
             layers[layerIndex].cels.append(secondHalf)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             // **VIDEO.md §7's second row**: *"two cels; `sourceEnd` of the left half and
@@ -804,6 +882,7 @@ extension CanvasManager {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }
+        return crop
     }
 
     /// "Attach a new block to the end" of the given cel: a fresh blank cel immediately following it.
