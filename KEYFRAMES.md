@@ -1300,7 +1300,11 @@ the recorder is armed and an unadvertised mode is what §2.1 was withdrawn over.
 3. Keep routing its continuous values through a recorder intercept. The slider's is
    `CanvasManager.recordParameterSample`, reached from `applyEffectParameterEdit`, which returns whether
    the recorder consumed the routing decision. **A quad surface needs its own intercept**, because
-   `ValueRecording` is scalar-only — that is the unbuilt part of the Move box, not the trigger.
+   `ValueRecording` is scalar-only. That intercept is `recordMoveBoxSample`, reached from
+   `updateFloatingPose`, and it is **the one step where the Move box differs from a slider**: it
+   suppresses nothing. A slider has to be stopped from keying per tick, because its ordinary per-tick
+   behaviour *is* a routed keyframe write; a container float's per-tick behaviour is a preview written to
+   the stored base, and the only keyframe write on that path happens once, at the commit. See §5.2.
 
    **The layer panel's opacity slider is the second surface and it cost exactly these two lines**
    (2026-09-10, §3.6). `recordParameterSample` is keyed by an id string and knows nothing about which
@@ -1320,10 +1324,49 @@ artist is still holding the slider, and the step is recorded on their lift under
 `CanvasManager.pendingGestureLabel` is the claim that keeps it `.recordAnimation` — the exact lie that
 label exists to prevent, reached by a door the two-act arming opened.
 
-**The Move box is still unbuilt and this changes nothing about why.** `ValueRecording` is scalar-only
-while a transform channel stores `PoseQuad` keys, so resampling and tolerance both want owner rulings.
-What the ruling above buys is that the trigger is built once: the Move box and the canvas (stage 10) plug
-into `beginArmedTake` without touching it.
+**The Move box was the last unbuilt surface and it is built — 2026-09-10, §5.2.** This paragraph used to
+say it was waiting on owner rulings about resampling and tolerance for a quad; put that way the question
+could not be answered (*"i have no idea what the question is"*), and TODO (21) records the translation.
+The trigger needed no change, which is what the ruling above bought: both of the surfaces added since
+plug into `beginArmedTake` without touching it.
+
+### 5.2 The Move box — KEYFRAMES.md §5's second surface, built 2026-09-10
+
+**`PoseRecording` is `ValueRecording` in four corners instead of one number**, and `record` / `resampled`
+/ `simplified` mean the same three things. Three departures, each forced: between two samples the eight
+corner coordinates are **lerped**, not blended through `PoseInterpolation` (that is the authoring
+interpolant, and using it in the raw stream invents motion the hand did not make); the deviation a
+simplification measures is **the largest single corner displacement**, so a keystone pulled at one corner
+survives where a mean would thin exactly the frames carrying the gesture; and the tolerance is therefore
+**absolute in canvas points** where the scalar one is a fraction of a `uiRange`, because a pose channel
+has no range and a corner is already in a unit the artist's eye is in.
+`CanvasManager.recordingPoseSimplifyPoints` is that number — **2 pt**, a starting value the owner tunes in
+one line. MEASURED: a two-second hand arc reported at 120 Hz is 241 samples, 49 stops at 24 fps and **13
+keys**, with 1.9 pt of worst discarded corner deviation; at 0.5 pt it is 32 keys, at 8 pt it is 6.
+
+**One box of the three is recordable, and the other two are refused out loud.** A container pose — a
+transformation layer's `Layer.transform` or a posed folder's — is a *value* channel with a stored base and
+a track, which is exactly the shape `RecordingTake` already had for a slider. A raster lift poses nothing,
+and a lassoed vector float writes a **cel** pose channel whose `.key` arm takes the bake back and whose
+ink is out of the display list for the length of the float, so a take over it would have to drive that
+bake from the recorder; that is not built. Both boxes look identical to the one that records, so
+`.moveBoxNotPosing` names the layer mode that would work and **the arm survives**.
+
+**§5.1's four steps held unchanged; what needed widening was two rules that predate recording.** A take
+*is* playback, so for its whole length the playhead crosses cel boundaries and a finger sits on the
+canvas — and `handleActiveContextChanged` commits a floating piece on a cel change while
+`canvasInteractionBegan` stops playback on a canvas touch. The second is the one that bit, and it was
+invisible to every model-level test: `CanvasView.handleCatchAllTap` fires at `.began` for every touch on
+a layer with **no drawing surface**, which a transformation layer is by definition, so the very touch
+that started a Move-box take ended it in the same run loop and the artist was told *"Nothing was
+recorded"* for a drag they had just made. `CanvasManager.recordingOwnsMoveBox` is the narrow predicate
+both rules now ask, and it was found by driving the feature.
+
+**The box comes down when the take has taken it**, and that is load-bearing rather than tidy: the float's
+own commit restores `containerRest` and writes one key at the playhead, and `showContainerPoseLive`
+composes onto that same rest on every tick — so a box left up would overwrite the recorded track at the
+next touch or the next tap-away. A take that wrote nothing leaves the box alone, because what the artist
+then has is the ordinary Move they were making.
 
 ---
 
@@ -1430,21 +1473,29 @@ ink lands on the active layer at its own height.
   have drawn across four cels. Such a take also **cancels** its own structure bracket rather than
   committing it, because every byte it changed is already in the stroke's step.
 - **A canvas touch does not end the take it is part of.** `canvasInteractionBegan` gained
-  `mayContinueTake`, passed true by the stroke recognizer's `onAnyTouchBegan` and by nothing else — a
-  fill tap or an eyedropper press during a take still stops playback, because neither has a
-  cel-crossing story.
+  `mayContinueTake`, passed true by the stroke recognizer's `onAnyTouchBegan` — a fill tap or an
+  eyedropper press during a take still stops playback, because neither has a cel-crossing story.
+  **"And by nothing else" was true for one day**: §5.2's Move box is the second caller, and it had to be,
+  because `handleCatchAllTap` fires for every touch on a layer with no drawing surface and was ending the
+  take its own touch had just started. See §5.2.
 - **Smart-shape detection is off during a timing stroke.** It fires on the pen holding still, which is
   exactly how an artist records a hold.
 - **The eraser, a raster layer and an in-between are refused out loud** and the arm survives, per §5.1's
   `isRecordable` contract.
 
-### 7.4 §5.1 held for a third surface, with one gap
+### 7.4 §5.1 held for a third surface and then a fourth, with one gap each time
 
 The trigger needed no change: `beginArmedTake(on:isRecordable:)` is called on touch-down before the
 stroke opens anything of its own, and the two lines §5.1 promises are the two lines it took. What §5.1
 does **not** cover is what a take *catches* — it assumes the answer is a channel, because the two
 surfaces it was written for both report scalars. Ink is not a channel and never becomes one, so the
 take's own commit needed a third arm. That is a gap in §5.1's model of a take, not in its trigger.
+
+**The fourth surface found the same gap once more and confirmed the diagnosis.** §5.2's Move box reports a
+*quad*, which is not a scalar either, so the commit needed a **fourth** arm — and the trigger again needed
+nothing. So the pattern is settled: §5.1's four steps are right about how a take *starts* and say nothing
+useful about what it *catches*, and every new surface will add an arm to `commitRecordingTake` and not a
+line to the trigger.
 
 ---
 
@@ -1466,7 +1517,7 @@ Each stage is mergeable and leaves the app working.
 | **5b** ✅ | **Real Distort** — the *animated* one, a projective quad keyed across frames — built 2026-09-06. | §2.13, and TODO item (12)'s last piece. **The engine half was already built** (`posing`'s `Homography` overload, `restDelta`'s projective twin, `composedWalk`), and so, it turned out, was **the blend**: `PoseInterpolation.blend` has lerped the perspective row since it was written on 2026-09-02, and nothing had ever exercised it because nothing could author a projective key. That is one of this stage's four listed jobs refuted rather than done — what it needed was a test, and it has one. What was actually missing was the **currency**. `PoseQuad.affineOrLinearised` is deleted; `PoseQuad.affine` answers nil for a keystone and `PoseQuad.map` answers the new **`PoseMap`** — `.affine` or `.projective`, demoted at every constructor so `.projective` is never secretly affine. Both render reads (`TransformTrack.mapping(atCelLocalFrame:)`, `LayerPose.mapping(atFrame:)`) answer one, and it runs the whole way down: `poseMappings`, `posed`, `poseMaps`, `restDelta`, `lassoLoops`, `VectorFloat.poses`, `RenderTree`'s container accumulator, `LayerContentVersion.pose`, `PixelOps.FrozenCel.pose` and the three derivation identities, which encode **six numbers for an affine and nine for a keystone**. **The two cases are not one `Homography` for a measured reason**: composing two affines as 3x3 matrices differs from `CGAffineTransform.concatenating` in 78.5% of 200,000 random pairs, so an all-projective currency would have moved every existing picture by ~1e-11 to buy a case no stage-5 document contains. `commitTransformPose` takes a `PoseMap` and `commitPoseFromFloat` rebuilds the drag's projective factor — it rebuilt the affine half alone, so a Distort committed on a keyframed cel keyed the drag and silently dropped the keystone. **`distortUnavailableReason`'s container arm is gone**, and it was worse than it read: the picker stayed live, the corner drag wrote `distortQuad`, the outline foreshortened under the finger and the canvas did not follow. The raster tier gains an `ImageWarp` arm (§2.12), because CoreGraphics has no projective CTM. `AnimatedDistortLogicTests` is 18 tests, every number MEASURED on one quad — a 400x300 box pulled to a 120 pt top edge, where the deleted linearisation is **164.4 px** out at the bottom corners, local scale spans **6.09x**, and a blend that dropped the perspective row misses by **166.7 px**. Placed images and videos are still refused **by kind** — six numbers and a mirror bit where a homography needs eight — and that refusal is deliberately untouched. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with TODO (29). |
 | **6b** | **The playback cache** | **Delivered by TODO (29) instead**, and this row is a cross-reference rather than work: §4.6's store is RENDER.md §3.5-3.7, whose stages 4 and 5 are merged, so playback is served from LZ4 frames on disk today. What it is *not* is §2.20's span-scoped unit — it is a per-frame content-addressed store with playhead-distance eviction. Read RENDER §3.5-3.7 before planning anything on this row. |
-| **7** | **Live recording + editable fps** | §5. Its one prerequisite is met: the playback clock is on the model (`Engine/PlaybackClock.swift`, RENDER stage 1). Nothing else of it exists — `fps` is fixed at 24 and only load and save write it. |
+| **7** ✅ | **Live recording + editable fps** | §5. **This row said *"nothing else of it exists — `fps` is fixed at 24"* and had been stale since 2026-09-07.** Built: the editable rate (clamped 1-60, live during playback, no undo step), §5.1's two-act arming, and all three surfaces — the effect and opacity sliders, the canvas (§7, stage 10), and **the Move box, 2026-09-10, §5.2**. What is left of §5 is one sentence of it: *"slow motion is a capture-speed multiplier on the record control"*, which is unbuilt and wants the owner. |
 | **8** ✅ | **The transformation layer** | §4.4, complete: the model and the render path, then the artist's entry — §2.6's relabelled menu, a Move box that previews through the render path rather than a bitmap, and `commitContainerPose` routing through `KeyframeControl.write`'s same five arms. Three holes fell out of making it reachable and all three are in §4.4: §2.27's baseline had nowhere to live on a container, and neither `removeKeyframe` nor `addKeyframe` could see a container pose key — the second of those had been drawing a keyframe indicator the artist could not delete. **`LayerFolder.transform`'s entry landed 2026-09-06, TODO (21)** — `FolderOptionsPanel`'s Transform toggle plus the same `transformMoveRow`, `setFolderTransform` as the writer that turns it on, and `beginContainerPoseMove`/`commitContainerPose`/`containerPoseWrite`/`writeContainerPose` widened from a `layerID` to a `KeyframeTarget` so the one Move pipeline reaches a folder's own container as well as a layer's. The channel-list navigator's folder arm is still missing — §11.7's Ruling 2 has the honest reason, and it is bigger than this row. |
 | **10** ✅ | **The timing recorder** | §7, built 2026-09-10 to the owner's own brief, which is larger than §7's laser pointer: the artist's **real brush**, one gesture shared out among the cels the playhead crossed under it. **The fork the owner offered was decided by refuting its shared premise** — both arms assumed a mid-gesture commit, and the cut is a *partition* of the gesture's own knot stream (`Engine/TimingStrokeCut.swift`), recorded as indices while the pen moves and spent at pen-up exactly as `commitVectorStroke` already spends the selection clip's runs. The stroke lifecycle did not move; the single-cel path below the new early branch is byte-for-byte what it was. What it *did* cost is the **display**, and option B would have paid the same bill: playback engages the compositor unconditionally and blanking is a `layer.mask` over the whole host, so the live scratch was inside it and a stroke drawn during a take reached the screen nowhere. The trail is drawn by a sibling of the layer hosts now. |
 

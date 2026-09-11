@@ -771,7 +771,13 @@ extension CanvasManager {
     ///   which is the operand the shared refusal rule needs and not something this function decides.
     private func commitRecordedPoseTrack(_ take: RecordingTake)
         -> (wrote: Int, sawTwoStops: Bool) {
-        guard !take.poses.isEmpty, let base = take.basePose else { return (0, false) }
+        // **`containerPose(of:)` is re-asked, which is `commitContainerFloat`'s own guard** and needed
+        // for its reason one door over: the artist can leave Transform mode while the box is up, and
+        // `applyContainerPose` writes the raw field — so without this a take would put a `LayerPose`
+        // back onto a layer that has stopped posing, as storage the accessor ignores and a later mode
+        // switch would expose.
+        guard !take.poses.isEmpty, let base = take.basePose,
+              containerPose(of: take.target) != nil else { return (0, false) }
         let keys = take.poses.keys(fps: fps, startFrame: take.startFrame,
                                    tolerance: Self.recordingPoseSimplifyPoints)
         // **Built from `take.basePose`, never from `containerPose(of:)`.** This is the whole of the
