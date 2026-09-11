@@ -3256,7 +3256,7 @@ small here is a ghost on the canvas with no retry behind it.
 | placed image | `quad(of:)`'s bbox + 1 | the bound and the picture read the *same* `placement` through the *same* function, so they cannot drift |
 | video | the same, source rect inflated 1 local unit first | the placeholder's border is stroked at `max(2/s, 0.5)` local units about a line inset `1/s`, so above `s = 4` its outer edge stands `0.25 − 1/s` local units proud of the natural rectangle |
 | text, `autoSize` clear | `frame.boundingBox` + 1 | all three arms of `draw(text:…)` pass `clip: !autoSize` into a real `CGContext.clip` on the box |
-| **text, `autoSize` set** | **`.everything`, deliberately** | the box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, a *typographic* extent, and glyph ink runs past it by whatever a font's italic overhang, swashes or accents care to. `TextMeasure.inkBounds` claims a superset from line boxes and is right in practice, but "in practice" is a claim about font files rather than about this code. |
+| **text, `autoSize` set** | **`.everything`, deliberately** — *closed by §11.11e the next day, with a measurement of the glyph ink* | the box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, a *typographic* extent, and glyph ink runs past it by whatever a font's italic overhang, swashes or accents care to. `TextMeasure.inkBounds` claims a superset from line boxes and is right in practice, but "in practice" is a claim about font files rather than about this code. |
 
 **MEASURED, Release, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048×1024, §11's fixture** —
 `UndoRepairBench.testUndoAndRedoAfterAFill`. A 300 × 200 pt ellipse, which is 2.9% of the canvas and the
@@ -3309,12 +3309,120 @@ placed image, a video, Clear-on-selection, and a text object whose box has been 
 
 **Two things this does not touch, and they are the rest of TODO (41).** An `autoSize` text object still
 pays the cel in both directions — the row above says why, and the route to closing it is a *measurement*
-of glyph ink rather than a bound derived from the box. And a **rewrite in place** (Recolour, Apply Brush,
+of glyph ink rather than a bound derived from the box; **§11.11e is that measurement, and the row is
+closed.** And a **rewrite in place** (Recolour, Apply Brush,
 a text re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, every lasso-move
 nudge) still cannot be bounded by this mechanism at all: it preserves the element's id by design, so the
 id-difference analysis sees no departure and no arrival, and `derivedFootprint` cannot help — the
 element's *old* geometry is gone by the time anybody asks. That case needs the old footprint forgotten
 and the new one bounded, which is two rectangles from a place that currently supplies neither.
+
+### 11.11e The pristine text box, bounded by measuring its glyph ink (2026-09-11)
+
+TODO (41)'s second box. §11.11d left one kind on `.everything` on purpose: a text object whose box
+nobody has resized. A **sized** box clips its own glyphs, so its frame bounds its ink by proof. A
+**pristine** (`autoSize`) box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, a
+*typographic* extent that glyph ink runs past by whatever a font's italic overhang, swashes or accents
+care to — and a departure has no escape check behind it, so a rectangle that missed those pixels would
+be a permanent ghost. The item asked for a measurement of what CoreGraphics actually rasterises, and
+that is what shipped: `TextMeasure.glyphOutlineBounds(of:)` is `CTLineGetImageBounds` on every line of
+the *same* `CTFrame` the flatten draws, flipped as `TextLayout.draw` flips, carried through the same
+`affineTransform` that arm concatenates, unioned. Measure-only — one framesetter pass and one bounds
+query per line, no context, no bitmap — for the reason `TextMeasure` exists at all. The two arms the
+affine map does not cover are answered by a union: the warp's ink is inside `frame.boundingBox.integral`
+by construction (the bitmap it carries onto the quad *is* the box), and the collapsed-quad fallback is
+the same outline measurement at the bounding box's size.
+
+**The outline is exact and the raster is not, and the difference is the one number this section had to
+measure.** `CTLineGetImageBounds` agrees with the union of every glyph's own `CTFontCreatePathForGlyph`
+bounds to a hundredth of a point on Zapfino (`TextInkFootprintLogicTests.testTheOutlineBoundsAreTheUnionOfTheGlyphPaths`),
+so the "claim about font files" §11.11d worried about does not arise — the image bounds are the
+outline. But CoreGraphics widens hairline features to about a pixel so they do not vanish, and snaps
+glyph origins to a fraction of one, so ink lands past the outline. MEASURED as *reach* — the outline's
+edge against the index of the outermost pixel carrying any alpha, so a pad `p` device pixels holds
+exactly when `p > reach − 1` — on the iOS 26.5 simulator, over **307 faces** (every face the picker
+exposes) upright at 48 pt and **1,728 cases** of twelve overhanging faces × eight strings × three sizes
+× two rotations × three resolutions:
+
+| where | furthest reach past the outline | on |
+|---|---|---|
+| native | **1.49 px** | system italic "fJf", 40 pt, turned 2.3 rad |
+| half resolution | 1.54 px | Chalkduster "fJf", 12 pt, turned 2.3 rad |
+| quarter resolution | **1.72 px** | system face with combining marks, 12 pt, upright |
+| every face, upright, 48 pt | 1.04 px | Zapfino "Qfjy ÂÊÑ" |
+
+So one pixel would hold everywhere measured, with 0.28 px to spare at the coarsest resolution, and
+**`TextMeasure.glyphRasterOvershoot` is 2 — the whole-pixel cover.** The sweep asserts both halves: the
+padded rectangle contains every non-transparent pixel of every case (the containment proof), *and* the
+reach stays under the constant (the spare pixel, as a checked claim rather than a hope). One pixel less
+reddens the second on 230 cases, Zapfino first; two pixels less reddens the containment itself on the
+same 230, Zapfino upright first, by exactly 1.0 px. A departure that misses a pixel is a ghost and one
+that repaints two extra rows is nothing, which is why the cover is a pixel and not a fraction.
+
+**The pad is a device-pixel figure, and that is what decides its unit.** A repair of the declared
+rectangle can run at native or at the standing reduced slot's resolution (`reducedRender`), where one
+pixel of overshoot is `1/resolution` canvas points — and a request at any other resolution rebuilds the
+slot from a full walk, so those two are the only resolutions a rectangle declared *now* can ever be
+repaired at. `derivedFootprint(of:lowestResolution:)` therefore pads by `overshoot / min(1, slot)`,
+read at the press. The sweep renders the reduced picture *first*, so the slot is standing at the press,
+which is the thumbnail path's order; a mutation that ignores the slot fails it at quarter resolution
+(system italic "fJf", 12 pt) by exactly the pixel the arithmetic predicts.
+
+**MEASURED, Release, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048×1024, §11's fixture** —
+`UndoRepairBench.testUndoAndRedoAfterAnAutoSizeTextObject`. A title the way an artist places one: the
+system face, bold, 96 pt, "Scene 12 — take three", ~900 × 115 pt across the middle of the canvas, 3.4%
+of it, in a box nobody resized. Both arms in one process on one canvas, alternating undo and redo,
+median of three presses, `changedInk` nil in both directions (which is what the shipped text commit
+passes); **two whole runs on an idle machine (90.2% and 91.8% idle, no other `xcodebuild` alive),
+agreeing to within 5% on every row past the first** — the second run's figures are in brackets. The
+200-stroke row's *before* column read 353.9 ms the second time against 112.5 the first, on identical
+dab counts; it is the first row measured and the only one to move, which is what noise looks like.
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after |
+|---|---|---|---|---|---|---|
+| 200 | 47,200 | **15,576** | 112.5 (353.9) | **14.8 (15.3)** | 111.3 (365.0) | **15.0 (15.3)** |
+| 500 | 118,000 | **42,244** | 269.7 (267.0) | **34.8 (34.7)** | 270.8 (267.4) | **35.0 (35.0)** |
+| 1000 | 236,000 | **82,836** | 538.2 (529.9) | **65.9 (69.4)** | 538.6 (530.8) | **66.2 (69.6)** |
+| 2000 | 472,000 | **162,368** | 1082.0 (1059.2) | **128.2 (127.8)** | 1080.6 (1061.1) | **128.6 (128.1)** |
+
+**7.4–8.4×, flat across the range, and less than the fill's 9.8–12.1× for a reason the dab column
+states.** A title is a strip the width of the canvas's middle, so at 3.4% of the area it crosses the
+footprints of a third of the strokes — 82,836 dabs re-stamped against the fill's 46,492 at 2.9% — and
+what a repair re-stamps is every stroke whose footprint reaches the rectangle, whole. That is the
+mechanism working, not failing: a long thin rectangle touches more strokes than a round one of the
+same area. `repairsWidened` and `repairsAbandoned` are 0 in every row. INFERRED through §11.2's
+measured 1.32 device ratio: on the owner's iPad 9 the undo of a title at 1,000 strokes goes from
+**~710 ms to ~87 ms**, and at 2,000 from **~1.43 s to ~169 ms**.
+
+**The press itself does not move, which is the number §11.11d said a measuring arm might not survive.**
+`derivedFootprint`'s text arm resolves the font and runs one CoreText framesetter pass plus one image-
+bounds query per line, on the main thread inside the canvas's lock. MEASURED,
+`UndoRepairBench.testWhatTheTextArmAddsToThePressItself`, Release, n = 2000, `restoreElements` timed
+alone with no render, alternating, median of five:
+
+| what departs | undo press | redo press |
+|---|---|---|
+| one word, 64 pt | 3.78 ms | 4.14 ms |
+| the title above | 3.78 ms | 4.15 ms |
+| eight wrapped lines, 40 pt | 3.88 ms | 4.24 ms |
+| one stroke (control, measures nothing) | 3.75 ms | 4.13 ms |
+
+Within 0.13 ms of the control at eight lines and within 0.03 ms at one, against §11.11d's fill rows of
+3.78–4.16 ms on the same fixture: a CoreText pass at text-box size is the well-under-a-millisecond
+`TextLayout`'s header claims, and it disappears into the six-pass list walk.
+
+**Deleting a label by emptying it is a removal, and is registered as one now.** `commitTextToVector`
+answered `.rewritesInPlace` for any session that had reopened an object — deletion included — so
+undoing a deleted label paid the cel. An emptied box *removes* its id (`removeTextLocked`), and an id in
+one list and not the other is exactly what `restoreElements` bounds by difference; only a retype keeps
+the id with different content and still says `.everything`.
+`UndoRepairLogicTests.testTheTextCommitBoundsAnAddAndADeletionAndRefusesARetype` drives all three
+through the real session API, and `TextUndoFootprintUITests` drives the add, its undo and redo, the
+deletion and its undo from a fresh document, reading the glyph pixels and the stroke's off the screen.
+
+**Found while driving it, and not this section's to fix:** after the on-screen keyboard leaves, the
+editor's layout stays compressed until the next tap on a control, which restores it and is not
+delivered — BUGS.md, 2026-09-11.
 
 ### 11.12 The disappearing strokes: what the window actually is, on the owner's own document (2026-09-09)
 
