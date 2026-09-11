@@ -626,13 +626,19 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// The fixture is deliberately more than the minimum. It exercises **both** accessors — a
     /// `.value` layer in effect mode for `layerEffect(atFrame:)` on the leaf, a folder carrying a node
     /// effect for `resolvedEffect(atFrame:)` on the node — and gives the floor a block only at frames
-    /// 6–9, so frames 0 and 7 are genuinely different frames of a genuinely animated document and
-    /// frame 400 is past the end of it. That the tree consults no cel at all is the other half of what
-    /// makes it invariant, and is worth having a fixture prove rather than a comment claim.
+    /// 6–9, so frames 0 and 7 are genuinely different frames of a genuinely animated document. A
+    /// drawing layer's block does not reach the tree at all: a leaf with no cel is still a leaf, and
+    /// `leafSnapshots` is what elides its pixels.
+    ///
+    /// **A pixel-less leaf's block does reach it, since TRANSFORM_LAYER.md §2 ruling 1 (2026-09-11).**
+    /// This test used to compare frame 400 as well, on the claim that *"the tree consults no cel at
+    /// all"*; the bar of a value layer means "only here" now, so at 400 — past the grade's 12-frame
+    /// bar — the leaf derives no effect, and everything else is byte-identical. That is asserted as
+    /// its own clause rather than dropped, so the one thing the ruling moved is the one thing pinned.
     func testTheTreeIsTheSameAtEveryFrameForADocumentWithNoTrack() {
         let manager = gradedFixture()
 
-        let trees = [0, 7, 9, 400].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
+        let trees = [0, 7, 9].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
         XCTAssertFalse(trees[0].tree.isEmpty, "Fixture premise: there is a tree to compare")
         XCTAssertTrue(trees[0].tree.contains { $0.effect != nil } || trees[0].tree.contains { node in
             if case .node(_, let inputs) = node.content { return inputs.flatMap { $0 }.contains { $0.effect != nil } }
@@ -651,6 +657,37 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         }
         XCTAssertEqual(manager.renderLeafOrder(atFrame: 400), manager.renderLeafOrder(atFrame: 0),
                        "And so is the leaf order it is read through — no track moves a layer between containers")
+
+        // Past the value layer's bar the grading leaf derives no grade, and nothing else moves: the
+        // frame-400 tree is the frame-0 tree with that one leaf's `effect` cleared.
+        let grade = manager.layers.firstIndex { $0.name == "Grade" }!
+        XCTAssertNil(manager.activeCelIndex(inLayer: grade, atFrame: 400), "Premise: 400 is past the grade's bar")
+        let far = manager.renderTree(atFrame: 400)
+        let gradeID = manager.layers[grade].id
+        XCTAssertNotNil(RenderNode.find(gradeID, in: trees[0].tree)?.effect, "Premise: graded at 0")
+        XCTAssertNil(RenderNode.find(gradeID, in: far)?.effect,
+                     "Outside its bar the value layer's leaf carries no grade (ruling 1)")
+        XCTAssertTrue(Self.sameTree(far, trees[0].tree, ignoringEffectOf: gradeID),
+                      "…and every other node is what it was at frame 0 — the folder's grade included, "
+                      + "since a folder has no bar")
+    }
+
+    /// Node-for-node equality of two trees, with one leaf's `effect` left out of the comparison.
+    private static func sameTree(_ a: [RenderNode], _ b: [RenderNode], ignoringEffectOf id: UUID) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) {
+            guard x.id == y.id, x.opacity == y.opacity, x.isVisible == y.isVisible,
+                  x.blendMode == y.blendMode, x.isIsolated == y.isIsolated, x.masks == y.masks,
+                  x.id == id || x.effect == y.effect else { return false }
+            switch (x.content, y.content) {
+            case (.leaf(let i), .leaf(let j)): guard i == j else { return false }
+            case (.node(let op1, let in1), .node(let op2, let in2)):
+                guard op1 == op2, in1.count == in2.count,
+                      zip(in1, in2).allSatisfy({ sameTree($0, $1, ignoringEffectOf: id) }) else { return false }
+            default: return false
+            }
+        }
+        return true
     }
 
     /// **The other half: with a track, it genuinely differs — and that is the signal stage 2 landed.**

@@ -271,8 +271,8 @@ final class EffectLayerLogicTests: XCTestCase {
     /// shorter default would be a grade that silently stops partway through the scene.
     func testANewAdjustmentLayersBarReachesTheScenesEnd() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 40)])
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
         manager.addValueLayer(effect: Self.brighten)
         let grader = manager.layers.count - 1
         XCTAssertEqual(manager.layers[grader].cels.map { $0.startFrame ..< $0.endFrame }, [0 ..< 40])
