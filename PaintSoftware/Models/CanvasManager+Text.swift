@@ -388,17 +388,18 @@ extension CanvasManager {
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: before,
                                    newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
                                    label: editingID == nil ? .addText : .editText,
-                                   // **A re-edit is a same-id rewrite and a new object is not.**
-                                   // `upsertTextLocked` replaces `_elements[index]` under the id the
-                                   // artist is editing, so `editingID` is exactly the question
-                                   // `ElementSwap` asks. **The new-object arm buys the sized boxes
-                                   // and nothing else, which is TODO (41) as far as it goes**: all
-                                   // three arms of `draw(text:into:quality:)` clip to the box when
-                                   // `autoSize` is clear, so `derivedFootprint(of:)` bounds one of
-                                   // those exactly and answers nil for a pristine box, whose glyph
-                                   // ink nothing clips and nothing measures. A box the artist has
-                                   // never resized therefore still pays the cel in both directions.
-                                   swap: editingID == nil ? .addsAndRemoves(ink: nil) : .rewritesInPlace)
+                                   // **A re-edit that keeps the object is a same-id rewrite; a new
+                                   // object and a deletion are not.** `upsertTextLocked` replaces
+                                   // `_elements[index]` under the id the artist is editing, which is
+                                   // exactly the question `ElementSwap` asks — but a session that
+                                   // emptied the box *removed* that id (`removeTextLocked`), and an
+                                   // id that is in one list and not the other is what
+                                   // `restoreElements` bounds by difference. Both add/remove arms
+                                   // are bounded whether or not the box clips, since TODO (41):
+                                   // `derivedFootprint(of:lowestResolution:)` measures a pristine
+                                   // box's glyph ink and reads a sized one's clip.
+                                   swap: editingID == nil || element == nil
+                                       ? .addsAndRemoves(ink: nil) : .rewritesInPlace)
         // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
         // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
@@ -442,13 +443,14 @@ extension CanvasManager {
         ///   `VectorCanvas.vacatedInk` kept what it painted on the way out and bounds it exactly,
         ///   where a caller could only estimate.
         ///
-        ///   **Since TODO (41) nil is also right for a fill, a placed image and a video**, whose
-        ///   extents are stored geometry rather than a dab walk: `VectorCanvas.derivedFootprint(of:)`
-        ///   reads each off the element itself, so a caller passing a rectangle for one of those is
-        ///   supplying an answer the canvas already has. A rectangle is still worth passing where the
-        ///   caller has one anyway — `addFill(canvasSpacePath:)` returns it — because it costs
-        ///   nothing and covers the arrival of an element the canvas has never seen. Nil is still
-        ///   wrong for an **`autoSize` text object**, whose glyphs nothing clips and nothing measures.
+        ///   **Since TODO (41) nil is also right for a fill, a placed image, a video and a text
+        ///   object**, whose extents are stored geometry rather than a dab walk:
+        ///   `VectorCanvas.derivedFootprint(of:lowestResolution:)` reads each off the element itself
+        ///   — a text object's by measuring the glyph outlines its recipe lays out — so a caller
+        ///   passing a rectangle for one of those is supplying an answer the canvas already has. A
+        ///   rectangle is still worth passing where the caller has one anyway —
+        ///   `addFill(canvasSpacePath:)` returns it — because it costs nothing and covers the arrival
+        ///   of an element the canvas has never seen.
         case addsAndRemoves(ink: CGRect?)
     }
 

@@ -741,24 +741,44 @@ final class UndoRepairLogicTests: XCTestCase {
             "sized text object")
     }
 
-    /// **The half of this box that is deliberately not closed, and its pair is what makes it a
-    /// statement about the clip rather than about text.**
+    /// **A pristine (`autoSize`) text object is bounded by a measurement of its glyph ink, and
+    /// draws the right picture on both presses.** The second box of TODO (41).
     ///
-    /// An `autoSize` box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, which is a
+    /// An `autoSize` box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`, a
     /// *typographic* extent; glyph ink runs past it by however much a font's italic overhang, swashes
-    /// or accents care to, and `TextLayout.draw` is handed `clip: false` for exactly that box. There
-    /// is no escape check behind a departing text object, so a rectangle that missed those pixels
-    /// would be a ghost of the old glyphs, permanently. `.everything` is the honest answer.
+    /// or accents care to, and `TextLayout.draw` is handed `clip: false` for exactly that box, so the
+    /// box is no bound. `TextMeasure.glyphOutlineBounds(of:)` measures the outlines the flatten
+    /// rasterises, and `derivedFootprint` pads them by the rasteriser's overshoot;
+    /// `TextInkFootprintLogicTests` is the pixel sweep that says the pad holds. This is the round
+    /// trip on a drawn cel: Zapfino, whose swashes reach well outside their line box, in a size that
+    /// makes the reach several points. Mutation that reddens it: `guard !text.frame.autoSize else
+    /// { return nil }` back in `derivedFootprint`'s text arm — the `.region` assertion goes first.
+    func testUndoingAndRedoingAnAutoSizeTextObjectIsBoundedByItsMeasuredGlyphInk() {
+        assertARoundTripIsBoundedAndDrawsRight(
+            .text(VectorTextElement(
+                recipe: TextRecipe(string: "Qfj", font: FontDescriptor(familyName: "Zapfino", faceName: "Zapfino"),
+                                   typography: Typography(pointSize: 22)),
+                frame: TextFrame(origin: CGPoint(x: 40, y: 30), size: CGSize(width: 60, height: 40),
+                                 autoSize: true))),
+            "autoSize text object")
+    }
+
+    /// **Both kinds of text box declare a rectangle now, and the two rectangles are different
+    /// things** — which is the operand that says the `autoSize` arm measures glyphs rather than
+    /// reading the box the sized arm reads. A sized box's rectangle is its frame plus a point of
+    /// slack; a pristine box's is its glyph outline plus the raster overshoot, and for a string whose
+    /// ink does not fill its box the two disagree.
     ///
-    /// The same string in the same place with the bit *clear* is bounded, which is the operand that
-    /// says this is about `autoSize` and not about the fixture being unbounded some other way.
-    func testADepartingAutoSizeTextObjectStillSaysEverythingAndASizedOneDoesNot() {
-        for (autoSize, expectRegion) in [(true, false), (false, true)] {
+    /// Mutation that reddens it: route `autoSize` back to `.everything` (the first assertion), or
+    /// return `box.insetBy(-slack)` for both arms (the second).
+    func testADepartingTextObjectDeclaresARectangleWhetherOrNotItsBoxClipsAndNotTheSameOne() {
+        var declared: [Bool: CGRect] = [:]
+        for autoSize in [true, false] {
             let canvas = Self.drawnCanvas(12)
             let without = canvas.elements
             let bare = canvas.render()
-            canvas.elements = without + [.text(Self.textElement("Overhang", at: CGPoint(x: 30, y: 40),
-                                                                autoSize: autoSize))]
+            let text = Self.textElement("Overhang", at: CGPoint(x: 30, y: 40), autoSize: autoSize)
+            canvas.elements = without + [.text(text)]
             canvas.bumpVersion()
             let standing = canvas.render()
             if let d = diff(bare, standing, "autoSize=\(autoSize) fixture") {
@@ -768,11 +788,51 @@ final class UndoRepairLogicTests: XCTestCase {
             }
 
             canvas.restoreElements(without, changedInk: nil)
-            XCTAssertEqual(isRegion(canvas.lastDamage), expectRegion,
-                           "a text object with autoSize=\(autoSize) declared \(canvas.lastDamage): "
-                           + "a box that clips bounds its own glyphs and a box that does not cannot "
-                           + "bound them at all")
+            guard case .region(let rect) = canvas.lastDamage else {
+                XCTFail("a text object with autoSize=\(autoSize) declared \(canvas.lastDamage): a "
+                        + "sized box is bounded by its clip and a pristine one by its measured glyph "
+                        + "ink, so neither may pay the cel")
+                continue
+            }
+            declared[autoSize] = rect
+            let box = text.frame.boundingBox.insetBy(dx: -1, dy: -1)
+            if autoSize {
+                let outline = TextMeasure.glyphOutlineBounds(of: text)
+                let pad = TextMeasure.glyphRasterOvershoot
+                XCTAssertEqual(rect, outline.insetBy(dx: -pad, dy: -pad),
+                               "a pristine box's rectangle is its glyph outline plus the overshoot")
+            } else {
+                XCTAssertEqual(rect, box, "a sized box's rectangle is the box that clips it, plus slack")
+            }
         }
+        if let pristine = declared[true], let sized = declared[false] {
+            XCTAssertNotEqual(pristine, sized,
+                              "the pristine and the sized rectangle came out identical (\(pristine)), "
+                              + "so the autoSize arm is reading the box rather than the glyphs")
+        }
+    }
+
+    /// **The payoff for a text object, counted in dabs** — the sibling of
+    /// `testUndoingAFillStampsFarFewerDabsThanTheCelHolds`, for the press the second box was about.
+    /// Mutation that reddens it: return `CGRect(origin: .zero, size: size)` from the text arm — a
+    /// correct picture, worth nothing.
+    func testUndoingAnAutoSizeTextObjectStampsFarFewerDabsThanTheCelHolds() {
+        let canvas = Self.drawnCanvas(48)
+        let without = canvas.elements
+        canvas.elements = without + [.text(Self.textElement("Hi", at: CGPoint(x: 30, y: 40),
+                                                            size: CGSize(width: 30, height: 24),
+                                                            autoSize: true))]
+        canvas.bumpVersion()
+        _ = canvas.render()
+
+        canvas.restoreElements(without, changedInk: nil)
+        _ = canvas.render()
+        let repairDabs = canvas.lastRenderDabCount
+        let fullDabs = fullReWalk(of: canvas).dabs
+        XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
+        XCTAssertLessThan(repairDabs * 3, fullDabs,
+                          "undoing a pristine text object on a 48-mark grid re-stamped \(repairDabs) "
+                          + "dabs against the cel's \(fullDabs) — the bound is not binding")
     }
 
     /// **One gesture that drops a fill and a stroke together**, which is the shape that exercises the
@@ -1321,6 +1381,69 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
         manager.redo()
         XCTAssertEqual(canvas.lastDamage, .everything, "and the same reading the other way")
+    }
+
+    /// **The text commit's three answers, driven through the real session** — `beginTextSession`,
+    /// `updateTextString`, `commitInteractiveText`, then `undo()`. Placing a label is an add and its
+    /// undo is bounded; emptying a reopened label *removes* its id and its undo is bounded too;
+    /// retyping a reopened label keeps its id with different content and its undo says
+    /// `.everything`. The middle one is this pass's: `commitTextToVector` used to answer
+    /// `.rewritesInPlace` for any session that reopened an object, deletion included, so undoing a
+    /// deleted label paid the cel. Mutation that reddens it: `swap: editingID == nil ? … :
+    /// .rewritesInPlace` back in `commitTextToVector`.
+    ///
+    /// All three are pristine boxes, so every bounded answer here is the measured glyph-ink
+    /// rectangle rather than the box.
+    func testTheTextCommitBoundsAnAddAndADeletionAndRefusesARetype() {
+        let canvas = Self.drawnCanvas(24)
+        _ = canvas.render()
+        let manager = manager(around: canvas)
+        manager.textRecipe.typography.pointSize = 24
+
+        // Add.
+        manager.beginTextSession(at: CGPoint(x: 40, y: 30))
+        manager.updateTextString("Label")
+        manager.commitInteractiveText()
+        guard case .text(let placed)? = canvas.elements.last else {
+            return XCTFail("the commit must put a text object on top of the list")
+        }
+        XCTAssertTrue(placed.frame.autoSize, "fixture: a box nobody resized is pristine")
+        _ = canvas.render()
+        manager.undo()
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "undoing the add declared \(canvas.lastDamage) — a departing pristine text "
+                      + "object is bounded by its measured glyph ink")
+        _ = canvas.render()
+        manager.redo()
+        XCTAssertTrue(isRegion(canvas.lastDamage), "and redoing it is bounded the same way")
+        _ = canvas.render()
+
+        // Delete by emptying — the id leaves the list, which is a removal and not a rewrite.
+        let centre = CGPoint(x: placed.frame.boundingBox.midX, y: placed.frame.boundingBox.midY)
+        manager.beginTextSession(at: centre)
+        XCTAssertEqual(manager.textEditingElementID, placed.id, "fixture: the tap reopened the label")
+        manager.updateTextString("")
+        manager.commitInteractiveText()
+        XCTAssertFalse(canvas.elements.contains { $0.id == placed.id }, "fixture: the label is gone")
+        XCTAssertTrue(manager.canUndo, "fixture: the deletion registered a step")
+        _ = canvas.render()
+        manager.undo()
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "undoing the deletion declared \(canvas.lastDamage) — the label's id left the "
+                      + "list and comes back, which is an add/remove swap, not a rewrite")
+        XCTAssertTrue(canvas.elements.contains { $0.id == placed.id }, "the label is back")
+        _ = canvas.render()
+
+        // Retype — the same id with different content, which nothing can bound.
+        manager.beginTextSession(at: centre)
+        XCTAssertEqual(manager.textEditingElementID, placed.id, "fixture: the tap reopened the label")
+        manager.updateTextString("Relabel")
+        manager.commitInteractiveText()
+        _ = canvas.render()
+        manager.undo()
+        XCTAssertEqual(canvas.lastDamage, .everything,
+                       "a retyped label keeps its id with different content, so its undo must say "
+                       + "everything — a rectangle here would leave the old footprint standing")
     }
 
     /// **The measured footprints must not survive a rewrite**, which is the damage the answer above

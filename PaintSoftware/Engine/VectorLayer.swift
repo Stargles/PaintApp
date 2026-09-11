@@ -2028,16 +2028,30 @@ final class VectorCanvas {
     /// operand that would move if this were an estimate rather than a measurement.
     private func inkOfArrivals(in newValue: [VectorElement], standing: Set<UUID>) -> CGRect? {
         var union = CGRect.null
+        let floor = lowestRepairResolution
         for element in newValue where !standing.contains(element.id) {
             if let stroke = element.stroke {
                 guard let rect = vacatedInk[stroke.id] else { return nil }
                 union = union.union(rect)
                 continue
             }
-            guard let rect = Self.derivedFootprint(of: element) else { return nil }
+            guard let rect = Self.derivedFootprint(of: element, lowestResolution: floor) else { return nil }
             union = union.union(rect)
         }
         return union.isNull ? nil : union
+    }
+
+    /// **The smallest raster resolution a region declared right now can be repaired at.** Native, or
+    /// the reduced slot's if one is standing — and nothing lower, because a request at any other
+    /// resolution replaces the slot with a full walk (`reducedRender`'s doc), which has no base to
+    /// repair and so never reads the rectangle. Caller must hold `lock`.
+    ///
+    /// Exists for `derivedFootprint(of:lowestResolution:)`'s text arm, whose one inexact term is a
+    /// *device*-pixel quantity: the rasteriser's overshoot past a glyph outline is the same number of
+    /// pixels at any scale, so in canvas points it is that number divided by the resolution, and the
+    /// rectangle handed to both bases has to be padded for the smaller of the two.
+    private var lowestRepairResolution: CGFloat {
+        min(1, reducedRender?.resolution ?? 1)
     }
 
     /// **Where a non-stroke element's ink provably lies, read off its own stored geometry** — or nil
@@ -2064,24 +2078,35 @@ final class VectorCanvas {
     ///   placeholder's border is stroked at `max(2/scale, 0.5)` local units about a line inset
     ///   `1/scale`, so when the floor bites (`scale > 4`) its outer edge stands `0.25 - 1/scale < 0.25`
     ///   local units proud of the rect. A decoded frame and a placed image stand none.
-    /// * **A text object is bounded only when its box clips**, and that is the honest half of this
-    ///   function. `draw(text:into:quality:)` has three arms — an affine concatenate, a warp, and a
-    ///   translated bounding-box draw — and all three pass `clip: !frame.autoSize` down to
-    ///   `TextLayout.draw`, which turns it into a `CGContext.clip` on the box. A hard clip is a proof:
-    ///   with it the ink is inside the box quad, whose hull is `frame.boundingBox`. **Without it there
-    ///   is no bound at all** — an `autoSize` box was grown by `CTFramesetterSuggestFrameSizeWithConstraints`,
-    ///   which is a *typographic* extent, and glyph ink runs past it by however much a font's italic
-    ///   overhang, swashes or accents care to. `TextMeasure.inkBounds` claims a superset of the outline
-    ///   from line boxes and is right in practice, but "in practice" is a claim about font files rather
-    ///   than about this code, and a departure has no escape check to correct it. So an `autoSize`
-    ///   object answers nil and its restore pays the cel. That is the remaining half of this box.
+    /// * **A text object whose box clips is bounded by the box.** `draw(text:into:quality:)` has
+    ///   three arms — an affine concatenate, a warp, and a translated bounding-box draw — and all
+    ///   three pass `clip: !frame.autoSize` down to `TextLayout.draw`, which turns it into a
+    ///   `CGContext.clip` on the box. A hard clip is a proof: with it the ink is inside the box quad,
+    ///   whose hull is `frame.boundingBox`.
+    /// * **A pristine (`autoSize`) text object is bounded by a measurement of its glyph ink**, and
+    ///   the measurement is the whole of what closed TODO (41)'s second box. Its box was grown by
+    ///   `CTFramesetterSuggestFrameSizeWithConstraints`, a *typographic* extent that glyph ink runs
+    ///   past by however much a font's italic overhang, swashes or accents care to, so the box is not
+    ///   a bound and neither is `TextMeasure.inkBounds`, which builds one from line boxes.
+    ///   `TextMeasure.glyphOutlineBounds(of:)` is `CTLineGetImageBounds` — the outline CoreGraphics
+    ///   rasterises from — on the same `CTFrame` the flatten draws, carried through the same map. It
+    ///   is exact about the outline (its doc carries the measurement) and inexact about one thing:
+    ///   the rasteriser widens hairline features to about a pixel, so ink lands a fraction past the
+    ///   outline. That is `TextMeasure.glyphRasterOvershoot`, a *device*-pixel figure, and it is why
+    ///   this function takes `lowestResolution`: a repair of this rectangle can run at native or at
+    ///   the standing reduced slot's resolution, and a pixel of overshoot at resolution `r` is `1/r`
+    ///   canvas points. `TextInkFootprintLogicTests` is the pixel sweep that says the padded
+    ///   rectangle holds — every non-transparent pixel, every face the app exposes, both
+    ///   resolutions — and reddens one pixel smaller.
     ///
     /// **A `.null` answer is a real answer and not a refusal**: an element the walk's own guards make
     /// draw nothing paints nowhere, so it contributes nothing to a union. The empty-string and
-    /// zero-box tests below are `draw(text:into:quality:)`'s own, spelled the same way round.
+    /// zero-box tests below are `draw(text:into:quality:)`'s own, spelled the same way round — and a
+    /// text object whose every line has empty image bounds (a string of spaces) is the same case
+    /// one level down.
     ///
     /// Strokes answer nil, which is not a limitation but the rule: see `inkOfArrivals(in:standing:)`.
-    private static func derivedFootprint(of element: VectorElement) -> CGRect? {
+    private static func derivedFootprint(of element: VectorElement, lowestResolution: CGFloat) -> CGRect? {
         // The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
         let slack: CGFloat = 1
         switch element {
@@ -2097,8 +2122,14 @@ final class VectorCanvas {
         case .text(let text):
             let box = text.frame.boundingBox
             guard !text.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return .null }
-            guard !text.frame.autoSize else { return nil }
-            return box.insetBy(dx: -slack, dy: -slack)
+            guard text.frame.autoSize else { return box.insetBy(dx: -slack, dy: -slack) }
+            let outline = TextMeasure.glyphOutlineBounds(of: text)
+            guard !outline.isNull else { return .null }
+            // A resolution that is not positive is not a resolution; refusing is the honest answer
+            // rather than a pad of infinity or a division by zero.
+            guard lowestResolution > 0 else { return nil }
+            let pad = TextMeasure.glyphRasterOvershoot / lowestResolution
+            return outline.insetBy(dx: -pad, dy: -pad)
         }
     }
 
@@ -2121,12 +2152,12 @@ final class VectorCanvas {
     /// neither the caller nor `inkOfArrivals(in:standing:)` can bound, or a stroke departs that was
     /// never measured, which is `regionDamage(replacing:)`'s own answer.
     ///
-    /// **A departing fill, image or video used to be a fourth and is not any more** — TODO (41). The
-    /// reason it was is that `renderLocalContent` measures no footprint for those kinds, and the reason
-    /// that stopped mattering is that it does not have to: their extent is stored geometry rather than
-    /// a dab walk, so `derivedFootprint(of:)` reads it off the element itself. A departing **text**
-    /// object is still the fourth whenever its box does not clip; that arm's proof and its refusal are
-    /// both in `derivedFootprint(of:)`.
+    /// **A departing fill, image, video or text object used to be a fourth and is not any more** —
+    /// TODO (41). The reason it was is that `renderLocalContent` measures no footprint for those
+    /// kinds, and the reason that stopped mattering is that it does not have to: their extent is
+    /// stored geometry rather than a dab walk, so `derivedFootprint(of:lowestResolution:)` reads it
+    /// off the element itself — for a pristine text box, by measuring the glyph outlines the element's
+    /// recipe lays out. Each arm's containment proof is in that function's doc.
     ///
     /// **The union on the last line is the one thing here that reads as redundant and is not**, so
     /// the experiment is recorded rather than the argument. Reasoning about one stroke says it *is*
@@ -2154,12 +2185,13 @@ final class VectorCanvas {
         // `_elements`, so these are the values standing on the canvas right now: the geometry read
         // here is the geometry the standing picture was drawn from.
         var derivedDeparted = CGRect.null
+        let floor = lowestRepairResolution
         for element in departed {
             if let stroke = element.stroke {
                 departing.append(stroke)
                 continue
             }
-            guard let rect = Self.derivedFootprint(of: element) else { return .everything }
+            guard let rect = Self.derivedFootprint(of: element, lowestResolution: floor) else { return .everything }
             derivedDeparted = derivedDeparted.union(rect)
         }
         // **Two lists holding the same ids in a different order draw different pixels**, and neither

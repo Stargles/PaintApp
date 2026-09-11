@@ -509,6 +509,161 @@ final class UndoRepairBench: XCTestCase {
         return path
     }
 
+    // MARK: - A pristine text object — the press TODO (41)'s second box was about
+
+    /// A title the way an artist places one: the system face, bold, 96 pt, in a box nobody has
+    /// resized (`autoSize`), so the glyphs are clipped by nothing. Measured by
+    /// `TextLayout.autoSize` exactly as `regrowTextFrameIfAutoSizing` measures it.
+    private static func title(at origin: CGPoint) -> VectorTextElement {
+        let recipe = TextRecipe(string: "Scene 12 — take three",
+                                font: FontDescriptor(familyName: FontDescriptor.systemFamilyName, isBold: true),
+                                typography: Typography(pointSize: 96))
+        let font = TextLayout.resolvedFont(for: recipe).font
+        return VectorTextElement(recipe: recipe,
+                                 frame: TextFrame(origin: origin, size: TextLayout.autoSize(for: recipe, font: font),
+                                                  autoSize: true))
+    }
+
+    /// **Text, undo, redo**, at the four stroke counts the rest of this file uses.
+    ///
+    /// The **before** arm is `bumpVersion()`, and here as for the fill it *is* what the old code did:
+    /// `derivedFootprint`'s text arm answered nil for a pristine box, so a departing one returned
+    /// `.everything` whatever the caller passed, and `commitTextToVector` passes nil anyway. The
+    /// **after** arm is the measured glyph-ink rectangle, `TextMeasure.glyphOutlineBounds` plus the
+    /// raster overshoot, read for both directions with `changedInk` nil — which is what the shipped
+    /// text commit passes, so this row is the mechanism *and* the shipped press.
+    ///
+    /// The title is ~900 × 115 pt on the 2048 × 1024 canvas, about 5% of it, so the rectangle share
+    /// column should read about that.
+    func testUndoAndRedoAfterAnAutoSizeTextObject() {
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+
+        for n in Self.strokeCounts {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let wholeLayerDabs = canvas.lastRenderDabCount
+
+                let before = canvas.elements
+                let title = Self.title(at: CGPoint(x: 560, y: 420))
+                canvas.commitTextEdit(editingID: nil, element: title)
+                _ = canvas.render()
+                let after = canvas.elements
+
+                let old = measureBumpVersionArm(canvas, before: before, after: after)
+                let new = measureRestoreElementsArm(canvas, before: before, after: after,
+                                                    changedInk: nil)
+
+                report("autoSize text + undo + redo — n=\(n)", [
+                    ("strokes", "\(n)"),
+                    ("wholeLayerDabs", "\(wholeLayerDabs)"),
+                    ("undoBefore", ms(old.undoSeconds)),
+                    ("undoDabsBefore", "\(old.undoDabs)"),
+                    ("redoBefore", ms(old.redoSeconds)),
+                    ("redoDabsBefore", "\(old.redoDabs)"),
+                    ("undoAfter", ms(new.undoSeconds)),
+                    ("undoDabsAfter", "\(new.undoDabs)"),
+                    ("redoAfter", ms(new.redoSeconds)),
+                    ("redoDabsAfter", "\(new.redoDabs)"),
+                    ("rectangle", new.rectangle),
+                    ("repairsWidened", "\(new.widened)"),
+                    ("repairsAbandoned", "\(new.abandoned)"),
+                    ("undoSpeedup", String(format: "%.1fx",
+                                           old.undoSeconds / max(new.undoSeconds, 1e-9))),
+                    ("redoSpeedup", String(format: "%.1fx",
+                                           old.redoSeconds / max(new.redoSeconds, 1e-9))),
+                ])
+
+                XCTAssertEqual(Double(old.undoDabs), Double(wholeLayerDabs), accuracy: 300,
+                               "the before arm at n=\(n) must re-stamp the whole cel on the undo — "
+                               + "that is the press this row exists to price")
+                XCTAssertEqual(new.repairs, 6,
+                               "three pairs, six presses, and every one must have repaired a "
+                               + "rectangle rather than declared one and walked the cel anyway")
+                XCTAssertEqual(new.abandoned, 0,
+                               "an abandoned repair at n=\(n) pays both walks and hides a bad bound")
+                XCTAssertLessThan(new.undoDabs * 2, old.undoDabs,
+                                  "the after arm at n=\(n) re-stamped \(new.undoDabs) dabs on the "
+                                  + "undo against the before arm's \(old.undoDabs)")
+            }
+        }
+    }
+
+    /// **What the press itself now costs for a text object**, the sibling of
+    /// `testWhatTheFillArmAddsToThePressItself` and the number the fill row promised would not
+    /// survive an arm that *measured*: `derivedFootprint`'s text arm resolves the font and runs one
+    /// CoreText framesetter pass plus one image-bounds query per line, on the main thread, inside the
+    /// canvas's lock, during a press §11.11a measured at 0.44–7.84 ms. Timed alone with no render,
+    /// alternating, over a one-word label, the title above, and a paragraph of eight lines, against
+    /// the one-stroke control that measures nothing.
+    func testWhatTheTextArmAddsToThePressItself() {
+        let n = 2000
+        let paragraph = (1...8).map { "Line \($0) of a caption that wraps across the shot" }
+            .joined(separator: "\n")
+        let cases: [(label: String, element: VectorTextElement)] = [
+            ("one word", VectorTextElement(recipe: TextRecipe(string: "Bang", typography: Typography(pointSize: 64)),
+                                           frame: TextFrame(origin: CGPoint(x: 600, y: 400),
+                                                            size: CGSize(width: 160, height: 80), autoSize: true))),
+            ("title", Self.title(at: CGPoint(x: 560, y: 420))),
+            ("eight lines", VectorTextElement(recipe: TextRecipe(string: paragraph, typography: Typography(pointSize: 40)),
+                                              frame: TextFrame(origin: CGPoint(x: 300, y: 200),
+                                                               size: CGSize(width: 900, height: 420), autoSize: true))),
+        ]
+        for entry in cases {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let before = canvas.elements
+                canvas.commitTextEdit(editingID: nil, element: entry.element)
+                let after = canvas.elements
+
+                var undo: [Double] = [], redo: [Double] = []
+                for _ in 0..<5 {
+                    autoreleasepool {
+                        var start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(before, changedInk: nil)
+                        undo.append(CFAbsoluteTimeGetCurrent() - start)
+                        start = CFAbsoluteTimeGetCurrent()
+                        canvas.restoreElements(after, changedInk: nil)
+                        redo.append(CFAbsoluteTimeGetCurrent() - start)
+                    }
+                }
+                undo.sort(); redo.sort()
+                report("press alone, autoSize text (\(entry.label)) — n=\(n)", [
+                    ("undoPress", ms(undo[2])),
+                    ("redoPress", ms(redo[2])),
+                ])
+            }
+        }
+
+        // The control, in the same run: the same two presses over a stroke, which measures nothing.
+        autoreleasepool {
+            let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+            _ = canvas.render()
+            let before = canvas.elements
+            canvas.addStroke(Self.benchStroke(n))
+            let after = canvas.elements
+            _ = canvas.render()
+
+            var undo: [Double] = [], redo: [Double] = []
+            for _ in 0..<5 {
+                autoreleasepool {
+                    var start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(before, changedInk: nil)
+                    undo.append(CFAbsoluteTimeGetCurrent() - start)
+                    start = CFAbsoluteTimeGetCurrent()
+                    canvas.restoreElements(after, changedInk: nil)
+                    redo.append(CFAbsoluteTimeGetCurrent() - start)
+                }
+            }
+            undo.sort(); redo.sort()
+            report("press alone, one stroke (control for the text rows) — n=\(n)", [
+                ("undoPress", ms(undo[2])),
+                ("redoPress", ms(redo[2])),
+            ])
+        }
+    }
+
     // MARK: - A drawn stroke — the commonest undo/redo pair there is
 
     /// **Draw, undo, redo.** Not an eraser at all, which is the correction the owner had to make

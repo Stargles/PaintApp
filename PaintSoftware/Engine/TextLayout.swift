@@ -587,4 +587,124 @@ enum TextMeasure {
         }
         return result.offsetBy(dx: box.minX, dy: box.minY)
     }
+
+    // MARK: Glyph outlines — TODO (41)
+
+    /// **How far past a glyph's outline CoreGraphics may put ink, in raster pixels.** The one term
+    /// `glyphOutlineBounds(of:)` does not cover, and the reason it is a separate constant with its
+    /// own name rather than a `+1` inside the function.
+    ///
+    /// `CTLineGetImageBounds` is exact about the *outline*: MEASURED against the union of every
+    /// glyph's `CTFontCreatePathForGlyph` bounds on Zapfino, and the two agree to a hundredth of a
+    /// point (`TextInkFootprintLogicTests.testTheOutlineBoundsAreTheUnionOfTheGlyphPaths`). The
+    /// *raster* is not the outline. CoreGraphics widens hairline glyph features to about a pixel so
+    /// they do not vanish, and snaps glyph origins to a fraction of a pixel, so a swash thinner than
+    /// a pixel lands ink in a pixel its outline never reaches — MEASURED on the iPad simulator at
+    /// alpha 219 out of 255 one full pixel left of Zapfino's "Q" at 48 pt, a stroke and not a fringe.
+    /// The widening is a property of the rasteriser's pixel grid, so it is a fixed number of
+    /// *device* pixels whatever the point size, and a caller working in canvas points divides it by
+    /// the resolution it is about to draw at.
+    ///
+    /// **MEASURED 2026-09-11, iOS 26.5 simulator, `TextInkFootprintLogicTests`**, as *reach* — the
+    /// outline's edge against the index of the outermost pixel that carries any alpha, so a pad `p`
+    /// holds exactly when `p > reach − 1`. Over 307 faces upright at 48 pt and 1,728 cases of twelve
+    /// overhanging faces × eight strings × three sizes × two rotations × three resolutions, the
+    /// furthest reach is **1.72 px** (the system face with combining marks, 12 pt, quarter
+    /// resolution); 1.54 px at half resolution; **1.49 px at native** (system italic "fJf", 40 pt,
+    /// turned 2.3 rad); Zapfino upright 1.04 px. So one pixel would hold everywhere measured, with
+    /// 0.28 px to spare at the coarsest resolution, and **two is the whole-pixel cover**: the sweep
+    /// asserts both that the padded rectangle contains every pixel *and* that the reach stays under
+    /// this constant — so the spare pixel is a checked claim, and shrinking this by one turns the
+    /// sweep red on Zapfino and a hundred cases beside it. A departure that misses a pixel is a
+    /// permanent ghost and one that repaints two extra rows is nothing, which is why the cover is a
+    /// pixel rather than a fraction.
+    static let glyphRasterOvershoot: CGFloat = 2
+
+    /// **Where the element's glyph outlines lie in canvas space** — `CTLineGetImageBounds` on every
+    /// line of the *same* `CTFrame` `VectorCanvas.draw(text:into:quality:)` draws, flipped the way
+    /// `TextLayout.draw` flips, and carried through the same map that arm concatenates. `.null` when
+    /// the element paints nowhere: an empty string, a collapsed box, a string of nothing but spaces.
+    ///
+    /// **This is the measurement TODO (41) asked for, and it is measure-only**, like everything else
+    /// in this type: one framesetter pass and one bounds query per line, no context, no bitmap. It
+    /// is what `VectorCanvas.derivedFootprint(of:)` reads for a pristine (`autoSize`) box, whose
+    /// glyphs nothing clips — a box grown by `CTFramesetterSuggestFrameSizeWithConstraints` is a
+    /// *typographic* extent and glyph ink runs past it by whatever a font's italic overhang, swashes
+    /// or accents care to, so the typographic box was never a bound and `inkBounds(of:)` above,
+    /// built from line boxes, is a claim about font files rather than about this code. The image
+    /// bounds are what CoreGraphics rasterises from, and the one thing they leave out is the
+    /// rasteriser's own overshoot, which is `glyphRasterOvershoot`'s to add.
+    ///
+    /// **The bound and the picture read the same three arms, in the same order, off the same
+    /// values.** The affine arm lays out at `frame.size` and maps through `affineTransform`, which
+    /// is the flatten's first branch exactly. A frame with no affine map draws either through the
+    /// warp — a box-sized bitmap carried onto the quad, whose every texel lands inside
+    /// `frame.boundingBox.integral` by construction, `autoSize` or not, because the bitmap *is* the
+    /// box — or, when the warp declines (a collapsed quad, or a quad wholly outside the context's
+    /// clip), through the bounding-box draw at `box.size`. Which of those two runs depends on the
+    /// clip of a context this function never sees, so it answers with the union of both, which is a
+    /// superset whichever one the flatten takes.
+    static func glyphOutlineBounds(of element: VectorTextElement, library: FontLibrary = .shared) -> CGRect {
+        let recipe = element.recipe
+        let frame = element.frame
+        let box = frame.boundingBox
+        // `draw(text:into:quality:)`'s own guard, spelled the same way round.
+        guard !recipe.string.isEmpty, box.width > 0, box.height > 0 else { return .null }
+        let font = library.resolve(recipe.font, size: recipe.typography.clamped.pointSize).font
+
+        if let transform = frame.affineTransform {
+            let local = outlineBounds(recipe, font: font, boxSize: frame.size)
+            return local.isNull ? .null : hull(of: local, through: transform)
+        }
+        var union = CGRect.null
+        if frame.homography != nil {
+            union = union.union(box.integral)
+        }
+        let fallback = outlineBounds(recipe, font: font, boxSize: box.size)
+        if !fallback.isNull {
+            union = union.union(fallback.offsetBy(dx: box.minX, dy: box.minY))
+        }
+        return union
+    }
+
+    /// The union of every line's image bounds in the box's own coordinates, y down — the space
+    /// `TextLayout.draw` is handed before it flips for CoreText. `.null` when no line has ink.
+    ///
+    /// **`TextLayout.layout` rather than a framesetter call of this function's own**, so the frame
+    /// measured is byte-for-byte the frame drawn — including the taller rectangle `layout` hangs
+    /// below a box too short for its own first line, whose origin is why the line origins are
+    /// offset by `rect.origin` before the flip: `CTFrameGetLineOrigins` reports them relative to
+    /// the path's bounding box, not to the context.
+    private static func outlineBounds(_ recipe: TextRecipe, font: UIFont, boxSize: CGSize) -> CGRect {
+        guard boxSize.width > 0, boxSize.height > 0 else { return .null }
+        let framesetter = CTFramesetterCreateWithAttributedString(TextLayout.attributedString(recipe, font: font))
+        let laidOut = TextLayout.layout(framesetter, recipe: recipe, font: font, boxSize: boxSize)
+        let lines = (CTFrameGetLines(laidOut.frame) as? [CTLine]) ?? []
+        guard !lines.isEmpty else { return .null }
+        var origins = [CGPoint](repeating: .zero, count: lines.count)
+        CTFrameGetLineOrigins(laidOut.frame, CFRange(location: 0, length: 0), &origins)
+        var union = CGRect.null
+        for (index, line) in lines.enumerated() {
+            let ink = CTLineGetImageBounds(line, nil)
+            guard !ink.isNull, !ink.isEmpty else { continue }
+            let origin = CGPoint(x: laidOut.rect.minX + origins[index].x,
+                                 y: laidOut.rect.minY + origins[index].y)
+            // CoreText's y is up from the path's bottom; the box's is down from its top. `draw`
+            // makes that flip with `translateBy(0, height)` then `scaleBy(1, -1)`, so a y-up
+            // coordinate `u` is the y-down coordinate `height - u`.
+            let flipped = CGRect(x: origin.x + ink.minX,
+                                 y: boxSize.height - (origin.y + ink.maxY),
+                                 width: ink.width, height: ink.height)
+            union = union.union(flipped)
+        }
+        return union
+    }
+
+    /// The bounding box of `rect`'s four corners after `transform` — what a rotated or stretched
+    /// box's ink is inside, since an affine map sends a rectangle to a parallelogram and the
+    /// parallelogram's hull is the corners'.
+    private static func hull(of rect: CGRect, through transform: CGAffineTransform) -> CGRect {
+        var t = transform
+        return CGPath(rect: rect, transform: &t).boundingBoxOfPath
+    }
 }
