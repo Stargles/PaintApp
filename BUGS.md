@@ -22,19 +22,6 @@ reproduced on the owner's iPad; whether the layout should compress under the key
 owner's call (`.ignoresSafeArea(.keyboard)` on the editor root is the one-line alternative, and it
 would put the bottom-docked text panel under the keyboard).
 
-## A hidden transformation layer still poses everything beneath it (2026-09-11)
-
-Hide a transformation layer with its eye and the drawings under it stay moved. `RenderTree.renderNodes`'
-pose accumulator composes `layers[index].layerTransform?.mapping(atFrame:)` into `carried` with no
-`isVisible` test, and the pose is spent in `leafSnapshots` before the compositor ever sees the layer's
-own node — whose `isVisible` flag is honoured, but only for the pixels the transform layer does not
-have. A hidden *grade* grades nothing, because `Compositor.draw` and `MetalCompositor` guard
-`node.isVisible` before reaching `node.effect`; the two payloads of one kind answer the eye
-differently. Found reading the accumulator for TRANSFORM_LAYER.md, which inherits the fix for every
-mode (§0, §7); no test in `TransformLayerLogicTests` or `TransformLayerEntryLogicTests` names
-visibility. The folder form does not share it — a hidden folder's whole subtree is skipped by the
-compositor, so its `resolvedPoseMapping` reaches nothing.
-
 ## Splitting a stepped pose channel changes the left half's last frames (2026-09-11)
 
 `TransformTrack.split(atCelLocalFrame:)` inserts a key at `cut - 1` holding `pose(atCelLocalFrame:

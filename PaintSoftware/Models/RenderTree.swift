@@ -896,11 +896,21 @@ extension CanvasManager {
         // between them interpolating across the gap. This is the one place the rule is applied, and
         // every consumer — the live canvas, the sandwich key, the bake, the interpolation previews —
         // reads `layerPoses(atFrame:)` off this walk, so none of them can disagree about it.
+        //
+        // **And a hidden transformation layer poses nothing** — a second, independent gate, fixed the
+        // same day (BUGS.md, 2026-09-11). Both compositor backends guard `node.isVisible` before
+        // reaching `node.effect` (`Compositor.draw`, `MetalCompositor`), so a hidden *grade* already
+        // grades nothing; this accumulator had no matching guard, so hiding a transformation layer
+        // with its eye hid nothing and it went on moving the stack beneath it. `layerTransform`'s own
+        // doc says the eye decides for a grade and a pose alike — this is that agreement, reached a
+        // second way, and it composes with the block gate rather than replacing it: a layer needs
+        // both a block at this frame and its eye open to contribute a pose.
         var carried = [PoseMap?](repeating: inherited, count: stack.count)
         var accumulated = inherited
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
             carried[position] = accumulated
             guard !containerIsNode, case .layer(let index) = stack[position],
+                  layers[index].isVisible,
                   activeCelIndex(inLayer: index, atFrame: frame) != nil,
                   let map = layers[index].layerTransform?.mapping(atFrame: frame) else { continue }
             accumulated = accumulated.map { map.concatenating($0) } ?? map

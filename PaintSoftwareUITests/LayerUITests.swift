@@ -1119,6 +1119,101 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             """)
     }
 
+    /// **Small-defects batch, 2026-09-11: the eye on a transformation layer did nothing.**
+    /// `RenderTree.renderNodes`'s pose accumulator read no `isVisible`, so hiding a posing
+    /// transformation layer with its own eye left the drawing beneath it exactly where the pose put
+    /// it — a hidden control with no visible effect, CLAUDE.md's "silent refusal" shape reached
+    /// through a fourth door. This drives the same route
+    /// `testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt` proves reachable, then asks the
+    /// artist's own next question: does the eye do anything to a layer that only moves other layers?
+    ///
+    /// Watched failing with the `isVisible` guard removed from `renderNodes`'s accumulator: hiding the
+    /// mover leaves `inkColumn()` unchanged from the posed position.
+    func testHidingATransformationLayerReturnsTheInkItWasMoving() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        func inkColumn() -> Double? {
+            guard let cg = canvas.screenshot().image.cgImage else { return nil }
+            let w = cg.width, h = cg.height, bpr = w * 4
+            var buf = [UInt8](repeating: 0, count: h * bpr)
+            guard let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: bpr, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return nil }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            var sum = 0.0, weight = 0.0
+            for x in 0..<w {
+                let o = (h / 2) * bpr + x * 4
+                if Int(buf[o]) + Int(buf[o + 1]) + Int(buf[o + 2]) < 500 { sum += Double(x); weight += 1 }
+            }
+            return weight > 0 ? (sum / weight) / Double(w) : nil
+        }
+
+        for i in 0..<7 {
+            let x = 0.30 + Double(i) * 0.006
+            drawLine(on: canvas, from: CGVector(dx: x, dy: 0.40), to: CGVector(dx: x, dy: 0.60))
+        }
+        let inkResting = inkColumn()
+        XCTAssertNotNil(inkResting, "Sanity: the stroke landed")
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        app.buttons["layerOptions.blendMode.transform"].tap()
+        let moveRow = app.buttons["layerOptions.transformMove"]
+        XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
+        moveRow.tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.50))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.50))
+        start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        if app.buttons["moveBar.doneButton"].exists { app.buttons["moveBar.doneButton"].tap() }
+
+        let inkPosed = inkColumn()
+        XCTAssertNotNil(inkPosed, "The ink is still on the canvas after the move")
+        XCTAssertGreaterThan(inkPosed ?? 0, (inkResting ?? 0) + 0.05,
+                             "Premise: the transformation layer really did move the ink")
+        var shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "transform-layer-posed"; shot.lifetime = .keepAlways; add(shot)
+
+        // **What the artist does next.** The Move box docks the rail down while it is live (unlike a
+        // no-selection canvas Move, entering *this* Move through the layer options panel leaves the
+        // rail closed once the box is done, rather than reopened) — so reaching the eye beside
+        // "Value 2" costs one more tap on the layers button, the same one that opened it to begin
+        // with. **The rail is opened only long enough to tap the eye, then closed again**, because
+        // the canvas re-letterboxes to make room for it — comparing `inkColumn()` across an open rail
+        // and a closed one compares two different layouts, not two poses; a first draft of this test
+        // measured exactly that and read a leaked pose where there was none.
+        openLayerPanel(app)
+        let eye = app.buttons["layerPanel.row.1.visibility"]
+        XCTAssertTrue(eye.waitForExistence(timeout: 5), "The mover's own eye must be reachable")
+        eye.tap()
+        openLayerPanel(app)   // close, back to the layout `inkResting`/`inkPosed` were measured in
+
+        let inkHidden = inkColumn()
+        XCTAssertNotNil(inkHidden, "The drawing beneath is still there — only the mover is hidden")
+        XCTAssertLessThan(inkHidden ?? 1, (inkResting ?? 0) + 0.03, """
+            Hiding the transformation layer must return the drawing beneath it to its resting \
+            position — it is drawn at \(String(describing: inkHidden)), resting was \
+            \(String(describing: inkResting)), posed was \(String(describing: inkPosed)). A hidden \
+            eye that leaves the ink moved is a control with no visible effect.
+            """)
+        shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "transform-layer-hidden"; shot.lifetime = .keepAlways; add(shot)
+
+        openLayerPanel(app)
+        eye.tap()   // show it again
+        openLayerPanel(app)
+        let inkShownAgain = inkColumn()
+        XCTAssertNotNil(inkShownAgain)
+        XCTAssertGreaterThan(inkShownAgain ?? 0, (inkResting ?? 0) + 0.05,
+                             "Showing the mover again must restore the pose")
+    }
 
     /// **One colour picker, not two** (owner, 2026-08-17: "the canvas color changer … is different
     /// than the color changer for the brush. They should be the same").

@@ -24,9 +24,10 @@ model and render path are specified there and this document does not restate the
 - **Scope is structural**: `carried` is a local, so a pose cannot leave its container; inside a
   compositor node the sibling carry is suppressed. **The accumulator reads the block** (ruling 1,
   stage 1): it composes a layer's pose only where `activeCelIndex` finds a cel, and the leaf
-  derivation resolves a value layer's grade under the same test. **Whether it reads `isVisible`** —
-  a hidden transformation layer posing exactly as a shown one, where a hidden grade grades nothing —
-  is BUGS.md's 2026-09-11 filing, shipped separately; every mode below inherits that fix.
+  derivation resolves a value layer's grade under the same test. **It reads `isVisible` too — shipped
+  2026-09-11, BUGS.md's filing, both gates composing rather than one replacing the other**: a hidden
+  transformation layer used to pose exactly as a shown one, where a hidden grade grades nothing;
+  every mode below inherits both fixes.
 - **The Move box is `FloatingPieceKind.containerPose`**, a box the size of the canvas with no pixels;
   `showContainerPoseLive` writes the pose on every tick so the preview *is* the render path;
   `commitContainerPose` routes through `KeyframeControl.write`'s five-arm rule and **every arm writes

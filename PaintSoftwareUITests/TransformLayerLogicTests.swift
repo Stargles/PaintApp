@@ -880,6 +880,60 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertNil(transformed.fill)
     }
 
+    // MARK: - Visibility (BUGS.md / TRANSFORM_LAYER.md §0, 2026-09-11)
+
+    /// **A hidden transformation layer poses nothing.** `RenderTree.renderNodes`'s accumulator used
+    /// to read `layerTransform?.mapping(atFrame:)` with no `isVisible` test, so hiding the mover with
+    /// its eye left the drawing beneath it moved — while a hidden *grade* already grades nothing,
+    /// since both compositor backends guard `node.isVisible` before reaching `node.effect`. Pinned on
+    /// both backends, as whole-image bytes: frame 8 with the mover hidden must be the *exact* picture
+    /// frame 0 already is (the pose's own resting frame, where `mapping(atFrame:)` is nil) — not
+    /// merely close, since a leaked pose here is a whole-canvas translation, not a rounding error.
+    ///
+    /// Watched failing with the `layers[index].isVisible` guard removed from `renderNodes`'s
+    /// accumulator: frame 8 hidden differs from frame 0 by the same 24pt the shown frame 8 does.
+    func testAHiddenTransformationLayerPosesNothingOnBothBackends() throws {
+        let moverPose = animatedPose(CGAffineTransform(translationX: 24, y: 0))
+        let (manager, _) = posedVectorLayer(moverPose)
+        guard let moverAt = manager.layers.firstIndex(where: { $0.name == "mover" }) else {
+            return XCTFail("Setup: the transformation layer must exist to be hidden")
+        }
+
+        func bytes(_ frame: Int) throws -> Data {
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: frame, includeBackground: true))
+            let cgImage = try XCTUnwrap(Compositor.composite(recipe.resolve()))
+            return try XCTUnwrap(UIImage(cgImage: cgImage).pngData())
+        }
+
+        var backends: [CompositorBackend] = [.coreGraphics]
+        if CompositorMetalEngine.shared != nil { backends.append(.metal) }
+        let savedBackend = Compositor.backend
+        defer { Compositor.backend = savedBackend }
+
+        for backend in backends {
+            Compositor.backend = backend
+            PixelOps.clearRasterizeCache()
+
+            let resting = try bytes(0)
+            let posedVisible = try bytes(8)
+            XCTAssertNotEqual(posedVisible, resting,
+                              "\(backend): Premise — the mover really does move the ink at frame 8")
+
+            manager.layers[moverAt].isVisible = false
+            PixelOps.clearRasterizeCache()
+            let posedHidden = try bytes(8)
+            XCTAssertEqual(posedHidden, resting,
+                           "\(backend): a hidden transformation layer must pose nothing — frame 8 "
+                           + "hidden must be the exact un-posed picture")
+
+            manager.layers[moverAt].isVisible = true
+            PixelOps.clearRasterizeCache()
+            let posedAgain = try bytes(8)
+            XCTAssertEqual(posedAgain, posedVisible,
+                           "\(backend): showing it again restores the pose exactly")
+        }
+    }
+
     // MARK: - Duplicate (BUGS.md, 2026-09-11)
 
     /// **`duplicateLayer` never carried `transform`.** `Layer(...)`'s memberwise call there named
