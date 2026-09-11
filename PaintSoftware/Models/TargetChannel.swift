@@ -129,6 +129,28 @@ struct TargetChannel: Identifiable {
     func clamped(_ value: Double) -> Double {
         min(max(value, modelDomain.lowerBound), modelDomain.upperBound)
     }
+
+    /// **Where `value` sits in `uiRange`, as a whole percent** — TODO (59), the owner 2026-09-10:
+    /// *"adjusting opacity should display the % when you do."*
+    ///
+    /// **Not `format`, and the difference is the trap `format`'s own doc records.** That string is
+    /// `"%.2f"` and is applied to the *stored* number, which for opacity is 0…1 — so a percentage
+    /// spelled there would print a half-faded layer as `"0%"`, wrong by a factor of a hundred at
+    /// every value an artist can drag to. The percentage is a different reading of the same number
+    /// and gets its own function rather than a second format string that looks interchangeable with
+    /// the first.
+    ///
+    /// **Off `uiRange` rather than multiplying by 100**, so this is the fraction of the control's own
+    /// travel: that is what the artist is looking at when they drag a `UISlider` (which derives its
+    /// own percentage from its min and max the same way), and it stays right for a future channel
+    /// whose range is not 0…1. Clamped into `uiRange` first, because the value handed in is a
+    /// slider's live position and the readout must never print 103%.
+    func percentText(_ value: Double) -> String {
+        let span = uiRange.upperBound - uiRange.lowerBound
+        guard span > 0 else { return "0%" }
+        let inside = min(max(value, uiRange.lowerBound), uiRange.upperBound)
+        return "\(Int(((inside - uiRange.lowerBound) / span * 100).rounded()))%"
+    }
 }
 
 extension TargetChannel: Equatable {

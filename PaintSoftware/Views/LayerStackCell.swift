@@ -49,6 +49,21 @@ final class LayerStackCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let opacitySlider = UISlider()
+    /// **The percentage, while the artist is dragging the slider** — TODO (59), the owner
+    /// 2026-09-10: *"adjusting opacity should display the % when you do."*
+    ///
+    /// It sits where the row's name is and takes the name's place for the length of the drag, which
+    /// is what makes it free: the rail is 300 points wide and the name column is already down to
+    /// ~40 of them, so there is no width for a permanent readout and nothing worth reading in that
+    /// column while a finger is on the slider.
+    ///
+    /// **The number is `opacitySlider.value`, never `model.opacity`.** They are the same thing —
+    /// the row model resolves opacity *at the playhead* (`LayerRowModel.init(row:manager:)` calls
+    /// `opacity(atFrame:)`) and `configure` copies that into the slider — and reading the slider is
+    /// what keeps them the same thing during a drag, when the model is a tick behind. A readout
+    /// taken off the layer's stored base would disagree with both the slider and the canvas on any
+    /// animated layer, which is the whole of what layer opacity becoming keyframable changed here.
+    private let opacityReadoutLabel = UILabel()
     private let currentMarker = UIImageView()
     private let folderOptionsButton = UIButton(type: .system)
     /// §6.5's picker, as two trailing buttons that appear only while an options menu is open. They
@@ -93,7 +108,8 @@ final class LayerStackCell: UITableViewCell {
 
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
-                     nameLabel, subtitleLabel, opacitySlider, currentMarker, folderOptionsButton,
+                     nameLabel, subtitleLabel, opacitySlider, opacityReadoutLabel, currentMarker,
+                     folderOptionsButton,
                      maskSourceButton, fillReferenceButton, bakedMarker, vectorMarker, folderMarker,
                      blendModeMarker, compositorMarker, effectMarker] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -133,6 +149,13 @@ final class LayerStackCell: UITableViewCell {
         opacitySlider.addTarget(self, action: #selector(opacityDragBegan), for: .touchDown)
         opacitySlider.addTarget(self, action: #selector(opacityDragEnded),
                                 for: [.touchUpInside, .touchUpOutside, .touchCancel])
+
+        opacityReadoutLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        opacityReadoutLabel.textColor = .white
+        opacityReadoutLabel.textAlignment = .right
+        opacityReadoutLabel.isHidden = true
+        opacityReadoutLabel.isAccessibilityElement = true
+        opacityReadoutLabel.accessibilityTraits = .staticText
 
         // Deliberately image-less: which layer is active is shown by tinting the whole row blue
         // (`setCurrentRow`), which reads at a glance where a small checkmark tucked against the
@@ -190,6 +213,13 @@ final class LayerStackCell: UITableViewCell {
 
             opacitySlider.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             opacitySlider.widthAnchor.constraint(equalToConstant: 90),
+
+            // Immediately inboard of the slider, on the row's own centre line — the space the name
+            // and subtitle occupy, which this hides for the length of a drag. Nothing is pushed:
+            // the name's trailing constraint is already a `lessThanOrEqualTo` against the slider.
+            opacityReadoutLabel.trailingAnchor.constraint(equalTo: opacitySlider.leadingAnchor,
+                                                          constant: -8),
+            opacityReadoutLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
 
             currentMarker.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
             currentMarker.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -380,6 +410,8 @@ final class LayerStackCell: UITableViewCell {
             opacitySlider.value = Float(model.opacity)
         }
         opacitySlider.accessibilityIdentifier = "layerPanel.folder.\(model.name).opacity"
+        opacityReadoutLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name).opacityReadout"
+        refreshOpacityReadout()
         setCurrentRow(false)
         nameLabel.textColor = model.isVisible ? .white : .gray
         nameLabel.accessibilityIdentifier = "layerPanel.folder.\(model.name)"
@@ -473,6 +505,8 @@ final class LayerStackCell: UITableViewCell {
         // Overwrites whatever a recycled cell's last row left here — including a folder row's
         // `.opacity` identifier, which would otherwise linger on a reused cell.
         opacitySlider.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacity"
+        opacityReadoutLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacityReadout"
+        refreshOpacityReadout()
         currentMarker.isHidden = !model.isCurrent
         currentMarker.isAccessibilityElement = model.isCurrent
         setCurrentRow(model.isCurrent)
@@ -669,8 +703,70 @@ final class LayerStackCell: UITableViewCell {
         contentView.layer.cornerRadius = (isDropHighlighted || isCurrentRow) ? 8 : 0
     }
 
+    // MARK: - The opacity readout — TODO (59)
+
+    /// **How long the readout stays up after the finger lifts.**
+    ///
+    /// Not zero, and that is for the artist rather than for the harness: a number that vanishes on
+    /// lift is gone before you can read what you landed on, which is the one moment you most want
+    /// it. Not long either — it is over the row's name, and a name is what the rail is otherwise
+    /// for. `UITestSeeds.opacityReadoutLingerOverride` raises it for a test, because
+    /// **XCUITest has no asynchronous drag** and an accessibility read taken after
+    /// `press(…thenDragTo:…)` returns is a read of the state after the lift; see that property for
+    /// the attempt to get round that without a flag, and why it produced a green test measuring
+    /// nothing.
+    static var opacityReadoutLinger: TimeInterval { UITestSeeds.opacityReadoutLingerOverride ?? 1.2 }
+
+    /// Pending hide, so a second drag begun inside the linger does not blank the readout under the
+    /// finger that is moving it.
+    private var opacityReadoutHide: DispatchWorkItem?
+    private var isShowingOpacityReadout = false
+
+    private func showOpacityReadout() {
+        opacityReadoutHide?.cancel()
+        opacityReadoutHide = nil
+        isShowingOpacityReadout = true
+        refreshOpacityReadout()
+    }
+
+    private func scheduleOpacityReadoutHide() {
+        opacityReadoutHide?.cancel()
+        let hide = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.isShowingOpacityReadout = false
+            self.refreshOpacityReadout()
+        }
+        opacityReadoutHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.opacityReadoutLinger, execute: hide)
+    }
+
+    /// **The label's text and whether it is on screen, in one place.**
+    ///
+    /// Called from the drag's three events *and* from `configure`, which matters: an opacity edit
+    /// republishes the row, and `UITableViewDiffableDataSource.reconfigureItems` re-runs the cell
+    /// provider on **this same cell** without `prepareForReuse`. So `configure` has to leave the
+    /// readout exactly as the drag left it rather than resetting it, which is the same reason the
+    /// slider's own `value` is only assigned when it is not tracking.
+    private func refreshOpacityReadout() {
+        let text = TargetChannel.opacity.percentText(Double(opacitySlider.value))
+        opacityReadoutLabel.text = text
+        opacityReadoutLabel.accessibilityValue = text
+        opacityReadoutLabel.isHidden = !isShowingOpacityReadout
+        // The name gives way rather than being pushed: the rail is 300 points wide and the name
+        // column is ~40 of them, so a readout that made room for itself would truncate the name to
+        // nothing anyway — and during a drag the number is what the artist is reading.
+        nameLabel.alpha = isShowingOpacityReadout ? 0 : 1
+        subtitleLabel.alpha = isShowingOpacityReadout ? 0 : 1
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
+        // A cell recycled mid-linger would carry another row's percentage, over another row's
+        // hidden name.
+        opacityReadoutHide?.cancel()
+        opacityReadoutHide = nil
+        isShowingOpacityReadout = false
+        refreshOpacityReadout()
         // A reorder drag leaves preview translations on the cells it shifted; a cell recycled while
         // one is still applied would otherwise render its new row at the old row's offset.
         transform = .identity
@@ -684,9 +780,21 @@ final class LayerStackCell: UITableViewCell {
 
     @objc private func toggleVisibility() { onToggleVisibility?() }
     @objc private func toggleExpanded() { onToggleExpanded?() }
-    @objc private func opacityChanged() { onOpacityChange?(Double(opacitySlider.value)) }
-    @objc private func opacityDragBegan() { onOpacityChangeBegan?() }
-    @objc private func opacityDragEnded() { onOpacityChangeEnded?() }
+
+    @objc private func opacityChanged() {
+        refreshOpacityReadout()
+        onOpacityChange?(Double(opacitySlider.value))
+    }
+
+    @objc private func opacityDragBegan() {
+        showOpacityReadout()
+        onOpacityChangeBegan?()
+    }
+
+    @objc private func opacityDragEnded() {
+        scheduleOpacityReadoutHide()
+        onOpacityChangeEnded?()
+    }
     @objc private func openFolderOptions() { onOpenFolderOptions?() }
     @objc private func toggleMaskSource() { onToggleMaskSource?() }
     @objc private func toggleFillReference() { onToggleFillReference?() }

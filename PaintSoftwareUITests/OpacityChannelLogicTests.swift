@@ -732,4 +732,67 @@ final class OpacityChannelLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[0].channelBaselines[opacityID], 1,
                        "…including the held value, which is restored rather than lost")
     }
+
+    // MARK: - The percentage the rail shows while you drag — TODO (59)
+
+    /// **The readout's string, over the values a slider can be at.**
+    ///
+    /// `TargetChannel.format` is `"%.2f"` and is applied to the stored 0…1 number; a percentage
+    /// spelled there would print a half-faded layer as `"0%"`, which is why `percentText` is its own
+    /// function and why this test states the two ends and a rounding case rather than "it is
+    /// non-empty".
+    func testTheOpacityReadoutIsTheSlidersOwnPercentage() {
+        XCTAssertEqual(channel.percentText(0), "0%")
+        XCTAssertEqual(channel.percentText(1), "100%")
+        XCTAssertEqual(channel.percentText(0.5), "50%")
+        XCTAssertEqual(channel.percentText(0.875), "88%", "rounded to a whole percent, not truncated")
+        XCTAssertEqual(channel.percentText(0.874), "87%")
+        // The value handed in is a live slider position, so it must never print 103%.
+        XCTAssertEqual(channel.percentText(1.03), "100%", "clamped into the control's own travel")
+        XCTAssertEqual(channel.percentText(-0.2), "0%")
+    }
+
+    /// **The readout shows what the slider shows, which on an animated layer is not the stored
+    /// base** — the one thing that could have gone wrong here, because layer opacity became
+    /// keyframable the day before this was asked for.
+    ///
+    /// The two operands are the same layer read two ways at one frame: the percentage of the value
+    /// the rail puts on the slider (`LayerRowModel` calls `opacity(atFrame:)`) and the percentage of
+    /// `layers[0].opacity`, the stored base. They differ by 80 points here, so a readout wired to
+    /// the wrong one is not a rounding question — it would disagree with both the slider under the
+    /// finger and the canvas behind it.
+    func testTheReadoutFollowsThePlayheadRatherThanTheStoredBase() {
+        let manager = drawingManager()
+        manager.layers[0].opacity = 1
+        manager.layers[0].channelTracks[opacityID] = curve([(0, 1.0), (10, 0.2)])
+
+        manager.currentFrame = 10
+        let resolved = manager.layers[0].opacity(atFrame: manager.currentFrame)
+        XCTAssertEqual(channel.percentText(resolved), "20%",
+                       "the slider is at the value the playhead resolves, so the readout says 20%")
+        XCTAssertEqual(channel.percentText(manager.layers[0].opacity), "100%",
+                       "PREMISE: the stored base still says 100%, so the two really do disagree")
+        XCTAssertEqual(channel.percentText(drawnOpacity(manager, atFrame: 10)), "20%",
+                       "…and the readout agrees with what the compositor multiplies alpha by")
+
+        manager.currentFrame = 5
+        XCTAssertEqual(channel.percentText(manager.layers[0].opacity(atFrame: 5)), "60%",
+                       "and it follows the playhead into an in-between rather than snapping to a key")
+    }
+
+    /// **A folder's readout is the same channel on the other home**, which is `TargetChannel`'s whole
+    /// design claim and the reason the owner's *"both the layer rail's slider and a folder's"* costs
+    /// nothing extra: one descriptor, two key paths.
+    func testAFoldersReadoutIsTheSameChannelOnTheOtherHome() throws {
+        let manager = drawingManager()
+        let folderID = manager.addFolder(name: "Group")
+        let index = try XCTUnwrap(manager.folders.firstIndex { $0.id == folderID },
+                                  "PREMISE: the fixture has a folder to read")
+        manager.folders[index].opacity = 1
+        manager.folders[index].channelTracks[opacityID] = curve([(0, 1.0), (10, 0.4)])
+
+        XCTAssertEqual(channel.percentText(manager.folders[index].opacity(atFrame: 10)), "40%")
+        XCTAssertEqual(channel.percentText(manager.folders[index].opacity), "100%",
+                       "PREMISE: the folder's stored base disagrees with the playhead too")
+    }
 }

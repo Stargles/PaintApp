@@ -624,6 +624,51 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
 /// reorders or removes a row; each test drives a control and reads back what it opened.
 final class LayerPanelControlsUITests: PaintUITestCase {
 
+    /// **TODO (59): dragging a layer's opacity shows the percentage.** The owner, 2026-09-10:
+    /// *"adjusting opacity should display the % when you do."*
+    ///
+    /// **The two operands are the readout's string and the slider's own reported position**, so this
+    /// cannot pass against a label that prints a constant, a stale value, or the layer's stored base
+    /// — it has to agree with the control the finger moved. `normalizedSliderPosition` is XCUITest's
+    /// own read of the slider, taken after the drag lands wherever it lands, which is also why the
+    /// test does not assert a particular percentage: a synthetic drag's endpoint is not the test's
+    /// to decide, and the claim is that the two agree.
+    ///
+    /// **`-uiTestOpacityReadoutSeconds` is not a cheat, but it is a limit worth stating.** The
+    /// readout is up from touch-down to shortly after lift, and XCUITest has no asynchronous drag —
+    /// so without the flag this would read the state *after* the lift and see nothing, and the
+    /// obvious way round it (an expectation built beforehand) is recorded in `GraphEditorUITests` as
+    /// having produced a green test that measured nothing. What the flag moves is one number, the
+    /// linger; what is asserted here is a real label on screen carrying a real value. The *during*
+    /// is `LayerStackCell.refreshOpacityReadout`'s three call sites and is not covered here.
+    func testDraggingALayersOpacityShowsThePercentage() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestOpacityReadoutSeconds", "120"]
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let slider = app.sliders["layerPanel.row.0.opacity"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "the layer rail has no opacity slider")
+        let readout = app.staticTexts["layerPanel.row.0.opacityReadout"]
+        XCTAssertFalse(readout.exists,
+                       "the readout should not be up before anyone touches the slider")
+
+        slider.adjust(toNormalizedSliderPosition: 0.35)
+
+        XCTAssertTrue(readout.waitForExistence(timeout: 5),
+                      "dragging the opacity slider should show the percentage")
+        let shown = try XCTUnwrap(readout.value as? String, "the readout carries no value")
+        let expected = "\(Int((slider.normalizedSliderPosition * 100).rounded()))%"
+        XCTAssertEqual(shown, expected,
+                       "the readout must say what the slider says — slider at "
+                       + "\(slider.normalizedSliderPosition), readout \"\(shown)\"")
+
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "layer-opacity-readout"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
     /// ones from its own "+", and each saved view swipes left to reveal a delete button.
     func testViewSelectorDropdownAddsSelectsAndDeletesViews() throws {

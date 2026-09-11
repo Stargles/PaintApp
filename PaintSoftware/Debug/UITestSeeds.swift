@@ -90,6 +90,36 @@ enum UITestSeeds {
         return seconds
     }()
 
+    /// **How long the layer rail's opacity readout stays up after the finger lifts** — TODO (59),
+    /// and `noticeDurationOverride`'s problem in a second costume.
+    ///
+    /// The readout is on screen from touch-down to shortly after lift, which is right for an artist
+    /// and unreadable to a harness: **XCUITest has no asynchronous drag**, so an accessibility read
+    /// taken after `press(…thenDragTo:…)` returns is a read of the state after the lift.
+    /// `GraphEditorUITests` records the attempt to get round that with an
+    /// `XCTNSPredicateExpectation` built beforehand — it times out on the affirmative case and its
+    /// inverted twin then passes unconditionally, which is a green test measuring nothing.
+    ///
+    /// So the harness asks for a readout that waits for it. `-uiTestOpacityReadoutSeconds <n>`,
+    /// read by `LayerStackCell.opacityReadoutLinger`. Simulator-only, on `slowVectorRenderDelay`'s
+    /// rule and for its reason.
+    ///
+    /// **What this does and does not buy.** With the flag the test reads a real, visible label
+    /// carrying a real value, and compares it against the slider's own reported position — so the
+    /// assertion is about what is drawn. What it cannot prove is the *during*: production hides the
+    /// label `opacityReadoutLinger` after the lift and the flag only moves that number. The rest of
+    /// the rule — that the string is the slider's percentage, resolved at the playhead — is
+    /// `OpacityChannelLogicTests`' and runs in the fast tier.
+    static let opacityReadoutLingerOverride: TimeInterval? = {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return nil }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestOpacityReadoutSeconds"),
+              args.index(after: flag) < args.endIndex,
+              let seconds = Double(args[args.index(after: flag)]), seconds > 0 else { return nil }
+        return seconds
+    }()
+
     /// **VIDEO.md §8 stage 8's own gap.** Every video- or image-carrying element in this app is
     /// reached, for a real artist, through `PhotosPicker` — real system UI in a separate process
     /// that XCUITest cannot drive reliably, which is why `VideoImportLogicTests`'s own header says
