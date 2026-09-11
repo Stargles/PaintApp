@@ -3048,7 +3048,7 @@ measures no footprint for them (`renderLocalContent` says why), so `restoreDamag
 leaves and returns `.everything` however good the caller's rectangle is. That is the undo of a fill and
 the undo of a text commit. A **rewrite in place** — recolour, Apply Brush, a text object re-edited under
 its own id, a video's crop fields, a motion-group retag, a transform key's pose — must stay at
-`.everything` and now says so through `CanvasManager.ElementSwap.rewritesInPlace`: the footprints
+`.everything` *(closed by §11.11f, which bounds it at the mutation site)* and now says so through `CanvasManager.ElementSwap.rewritesInPlace`: the footprints
 `restoreElements` drops are chosen by id difference, so a rewritten element would keep a measurement
 that is no longer true of it and a later region edit could skip it on that measurement. That is the one
 case where a bound is a wrong picture rather than a slow one, and it is why the parameter has no
@@ -3315,7 +3315,8 @@ a text re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest
 nudge) still cannot be bounded by this mechanism at all: it preserves the element's id by design, so the
 id-difference analysis sees no departure and no arrival, and `derivedFootprint` cannot help — the
 element's *old* geometry is gone by the time anybody asks. That case needs the old footprint forgotten
-and the new one bounded, which is two rectangles from a place that currently supplies neither.
+and the new one bounded, which is two rectangles from a place that currently supplies neither. **§11.11f
+is that place, and the box is closed.**
 
 ### 11.11e The pristine text box, bounded by measuring its glyph ink (2026-09-11)
 
@@ -3423,6 +3424,141 @@ deletion and its undo from a fresh document, reading the glyph pixels and the st
 **Found while driving it, and not this section's to fix:** after the on-screen keyboard leaves, the
 editor's layout stays compressed until the next tap on a control, which restores it and is not
 delivered — BUGS.md, 2026-09-11.
+
+### 11.11f A rewrite in place, bounded at the mutation site (2026-09-11)
+
+TODO (41)'s last box, and the prerequisite TODO (42) names. Recolour, Apply Brush, a text retype, a
+video's crop and speed, an animation-group retag, `keyPoseRestoringRest` and every lasso-move nudge put
+an element back **at its own index under its own id with different content**. `restoreElements`
+chooses the footprints it drops by id difference, so it saw nothing, and every one of those edits
+declared `.everything` in the forward direction and in both presses — a whole-cel walk, ~142 ms at the
+owner's density and 745 ms at 1,000 strokes. §11.11d closed with *"two rectangles from a place that
+currently supplies neither"*; this is that place.
+
+**The idea is that a rewrite is a departure and an arrival under one id, and each half is bounded by
+exactly the argument that half already has.** `VectorCanvas.restoreElements(_:changedInk:rewriting:)`
+takes the ids a caller *may* have rewritten. For each one in both lists it reads the **old half** off
+the same tables a departure is read from — `paintedBounds` for a stroke, `derivedFootprint` for a
+fill, an image, a video or a text object — *before* the splice, and the **new half** off the new value:
+`derivedFootprint` again for a non-stroke, which is a containment proof, and for a stroke a **hint**,
+`strokeInkHint(of:)`. The union is the damage. The hint is the old measurement when nothing that places
+or sizes a dab changed (a colour, an opacity, a tag — the comparisons are buffer-identity checks on the
+shared sample arrays), and otherwise `StrokeGeometry.bounds(of:padding:)` — the centre line's box —
+padded by `StrokeGeometry.stampRadius(forPressure: 1)` at the *new* brush plus `BrushStamper.applyScatter`'s
+amplitude, `2 × radius × (|across| + |along|)`. These are the terms the residue collector and
+`maxPaintReach` already read; nothing was re-derived.
+
+**Why a hint is enough for a stroke and would not be for anything else** is `vacatedInk`'s argument,
+one step further. The rewritten element loses its `paintedBounds` entry, so `renderLocalContent` draws
+it, measures it and widens the clip if it escaped (`LocalContent.escaped`). A stroke's under-declared
+new half costs a second clipped walk and cannot draw a wrong picture; a non-stroke's is never estimated.
+BRUSH.md §12 stage 8 refuted a box derived from the brush as a *bound* — `ResponseCurve` does not clamp
+— and that ruling stands: the hint is spent on sizing the rectangle and on nothing the picture depends
+on. MEASURED: `repairsWidened` is 0 across every row of both bench tables below, and the mutation that
+pads by the *old* brush's reach reads 1 with the picture still right, which is the retry doing what it
+is for.
+
+**The brief asked for the old and new halves to be captured once at the forward edit and reused by the
+undo, and that would be wrong.** An undo of a rewrite is a rewrite through the same method, and it reads
+its departing half off the canvas *at the press* — the footprint the last render measured, which the
+forward edit could not know. If the forward hint was too small and the render widened past it, a
+remembered rectangle would under-declare the ink now standing, outside the clip, where nothing can
+notice. `registerVectorElementsUndo` captures no rectangle for a rewrite; `ElementSwap.rewritesInPlace`
+carries the ids and both closures hand them to the seam.
+
+**And the brief's rule that an unknown footprint must degrade to `.everything` is refuted for one case,
+by an invariant rather than a guess.** A rewritten *stroke* with no `paintedBounds` entry contributes
+nothing to the old half. An entry is only ever removed by `.everything`, which drops every base a repair
+could start from, or by a region site that declared a rectangle containing the element's ink — which
+every standing base then carries in its pending region (`applyToRegionBase` unions, never replaces). So
+a stroke with no entry has its old ink in no base or inside a region the next repair already redraws.
+This is the case TODO (42) lives in: a slider's second tick arrives before the first tick's render has
+measured anything, and `.everything` there would be a full walk on every tick but the first.
+`testASecondRewriteBeforeTheFirstHasRenderedIsStillBounded` moves one stroke A → B → C with no render
+between, and the mutation that reddens its picture is in `applyToRegionBase` — `rect` in place of
+`standing.region.union(rect)` leaves the ink at A as a ghost. A *departing* stroke with no entry still
+says `.everything` (`regionDamage(replacing:)`); the same argument would relax it and nothing has asked.
+
+**Two things fell out that were not asked for.** A null region is now a proof that no pixel changed
+and **every memo stands** (`invalidateRenderOnly`), which closes the bench trap §11.11 records — two
+identical restores cost one walk — and makes the lasso-move nudge with the latch armed cost **no walk
+at all**: the lifted pieces are suppressed, this canvas's picture is of everything else, and a rewrite
+of suppressed elements contributes nothing to either half. Each nudge used to pay a whole-cel walk for
+the picture the canvas already had; the commit's un-suppression is the one `.everything` that draws the
+moved ink. And `inkOfArrivals`' stroke arm falls back to the hint for a stroke this canvas has never
+walked, which is what made a Recolour under Cut boundable — the pieces a straddling stroke is split into
+arrive under fresh ids nobody measured, and the default membership *is* Cut — and what bounds
+Clear-on-selection's forward edit and the undo of a committed nudge.
+
+**MEASURED, Release, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048×1024, §11's fixture** —
+`UndoRepairBench.testUndoAndRedoAfterARecolourAndAnApplyBrush`. Fifty strokes rewritten, the fifty
+nearest the canvas's centre, which is a lasso around one part of the drawing rather than fifty picked at
+random across it. Both arms in one process on one canvas, alternating undo and redo, median of three
+presses. This Mac was at 77.4% idle before the run with **one other session's `xcodebuild` alive** and
+96.6% after; the per-class figures are within the ranges §11.11d and §11.11e report for the same
+`bumpVersion()` arm (541 / 1,093 ms at 1,000 / 2,000 against their 537–538 / 1,072–1,082), which is
+what says the contention cost the headline nothing measurable.
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after | rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | 47,200 | **30,916** | 110.9 | **59.3** | 111.6 | **59.2** | 38.4% |
+| 500 | 118,000 | **61,596** | 270.3 | **103.3** | 271.7 | **102.9** | 24.3% |
+| 1000 | 236,000 | **104,312** | 541.2 | **166.8** | 548.9 | **166.7** | 18.2% |
+| 2000 | 472,000 | **200,836** | 1092.6 | **302.7** | 1086.2 | **301.6** | 16.1% |
+
+Recolour of 50. **Apply Brush of 50** to a brush at twice the reach (`dab.size` 2):
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after | rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | 47,200 | **31,152** | 108.8 | **60.2** | 154.7 | **104.4** | 39.9% |
+| 500 | 118,000 | **61,596** | 270.9 | **106.3** | 320.8 | **151.9** | 25.6% |
+| 1000 | 236,000 | **108,560** | 541.1 | **172.3** | 597.8 | **219.9** | 19.4% |
+| 2000 | 472,000 | **206,028** | 1087.3 | **315.1** | 1156.4 | **365.2** | 17.2% |
+
+**1.9× at 200 and 3.6× at 2,000, and the curve runs the *opposite* way to the cut's.** §11.10's rectangle
+grew with density because a cut replaces every stroke under the tip; a fifty-stroke selection is a
+fixed set, and the fifty nearest the centre of a 200-stroke scene span 38% of the canvas where the same
+fifty at 2,000 are a tight cluster at 16%. So the saving grows with density, which is the direction the
+owner's complaint is in. At the density that prompted the report the honest sentence is: undoing a
+recolour at 2,000 strokes went from 1.09 s to 0.30 s. `repairsWidened` and `repairsAbandoned` are 0 in
+every row of both tables. The Apply Brush redo is slower than its undo in *both* arms (365 against 315
+after, 1,156 against 1,087 before) because it stamps the wider brush, which is more pixels a dab and
+not a property of the mechanism. INFERRED through §11.2's measured 1.32 device ratio: on the owner's
+iPad 9 undoing a recolour of fifty strokes at 1,000 goes from **~714 ms to ~220 ms**, and at 2,000 from
+**~1.44 s to ~400 ms**.
+
+**What one tick costs before the render — the number TODO (42) needs.** MEASURED,
+`UndoRepairBench.testWhatARewriteTickCostsBeforeTheRender`, Release, n = 2,000, `restoreElements` timed
+**alone** with no walk, alternating, median of five:
+
+| tick | undo press | redo press |
+|---|---|---|
+| recolour of 50 | 4.50 ms | 4.51 ms |
+| Apply Brush of 50 | 4.52 ms | 4.52 ms |
+| size × 1.5 of 50 | 4.52 ms | 4.51 ms |
+| one stroke (control, §11.11a's press) | 3.95 ms | 4.32 ms |
+
+**The hook adds ~0.2–0.5 ms to a press that was already ~4 ms**, and the three shapes are
+indistinguishable: the recolour's buffer-identity comparison and the fifty sample walks of the other two
+disappear into the six-pass list walk. The hook does not walk the cel: it adds a set lookup to the
+departure pass every restore already made, and one pass over the new list — only when something is
+rewritten — to pair each rewritten id with its old value.
+
+**So, to (42)'s question — is the live slider buildable, and what will a tick cost.** Yes. A tick is
+~4.5 ms on the main thread at 2,000 strokes and a render of the selection's own rectangle off it —
+~300 ms at 2,000 for a fifty-stroke selection covering a sixth of the canvas, ~60 ms at 200 — and a tick
+that arrives before the previous render has measured anything is bounded the same way rather than
+falling to the cel. What (42) still owes is above this seam: a preview-then-commit so a drag is one undo
+step (its own third box), and a render that is *dropped* when the next tick lands rather than queued
+(`install`'s version gate already discards a stale walk's result; what it does not do is stop the walk).
+`RewriteUndoFootprintUITests` drives the whole thing from a fresh document — draw, lasso, Recolour,
+undo, redo — reading the recoloured line's pixels and its neighbour's off the screen.
+
+**Not converted, and why.** `applyInterpolationState` restores whole display lists for every canvas an
+interpolation step touched and knows nothing about which same-id elements changed; a rewritten set it
+cannot name would be every id, which is a canvas-sized rectangle and the full walk it already pays. The
+three motion-group retag sites' *forward* edits do declare their ids and are bounded; their undo is that
+wholesale swap and stays `.everything`.
 
 ### 11.12 The disappearing strokes: what the window actually is, on the owner's own document (2026-09-09)
 

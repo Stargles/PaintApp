@@ -94,66 +94,6 @@ together. The owner's own instruction is **"do whatever is cleanest"**.
 
 ---
 
-## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
-
-**Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
-bad so it can be marked as done."* What is left is real but is nobody's priority until it bites again.
-The general undo/redo work shipped 2026-09-06 (PERFORMANCE.md §11.11a);
-what is left is two cases that are blocked on something a rectangle cannot fix.
-
-> *"Undoing and redoing while there are a lot of strokes can be laggy, a few hundred milliseconds
-> sluggish."* — 2026-09-06, after a first fix landed too narrowly
-
-**What the artist is waiting for was measured rather than reasoned about, and it settles the shape of
-the complaint.** The main-thread span of an undo press is **0.44–7.84 ms** across 200–4,000 strokes;
-the render it causes is **5–2,275 ms**, 96–99.7% of the wait, and off the main thread. So the app
-never stops responding — "laggy" is the old picture standing there. The **raster** arm is 0.02 ms a
-press at both 2048x1024 and 4096² and needs nothing at all.
-
-**The redo was 5.6–11.3x its own undo on the same one stroke**, which is the commonest pair of presses
-in the app, and this item had written that off as permanent. It was wrong: the ink coming back *had*
-been drawn, immediately before, by the walk that measured it. `VectorCanvas.vacatedInk` keeps that
-measurement while the id is out of the list. MEASURED in Release: a redo at 1,000 strokes **571 →
-51 ms**, at 4,000 **2,275 → 171 ms**.
-
-**Left to build — and note this item's earlier "there is no design left to do" was wrong twice.**
-- [x] **A departing fill, image or video forced `.everything`.** Closed 2026-09-10, PERFORMANCE.md
-      §11.11d. **The fix this box proposed — measure a fill's path bounds into `paintedBounds` — was
-      the wrong table, which is the third time this item's design has been wrong.** `paintedBounds` is
-      a *promise that the element has not changed*, so an entry there has to be forgotten at every
-      rewrite site and cleared on every `.everything`; none of that is needed, because the geometry
-      these kinds are drawn from is stored **on the element** and a restore is handed the element.
-      `VectorCanvas.derivedFootprint(of:)` is a pure function of the value, and the box closed by
-      deleting a guard rather than by adding a cache. MEASURED in Release: the undo of a fill at 1,000
-      strokes **537 → 45 ms**, at 2,000 **1,072 → 90 ms**, 9.8–12.1× across the range — larger than the
-      eraser's 1.8–6.7× because a fill's rectangle does not grow with density the way a cut's does.
-- [x] **An `autoSize` text object forced `.everything` in both directions.** Closed 2026-09-11,
-      PERFORMANCE.md §11.11e. **A measurement, as this box asked, and not a bound derived from the
-      box**: `TextMeasure.glyphOutlineBounds(of:)` is `CTLineGetImageBounds` on the very `CTFrame` the
-      flatten draws, carried through the frame's own map, and it is exact about the outline — pinned
-      against every glyph's own path. What it is not exact about is the *raster*: CoreGraphics puts
-      ink up to 1.72 device pixels past an outline (MEASURED over 307 faces and 1,728 cases), so the
-      rectangle is padded by `TextMeasure.glyphRasterOvershoot`, two device pixels converted at the
-      lowest resolution a repair can run at. `TextInkFootprintLogicTests` is the pixel sweep. The
-      sized box is untouched, and emptying a reopened label is now registered as the removal it is
-      rather than a rewrite, so undoing a deleted label is bounded too.
-- [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
-      re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
-      lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
-      Only Recolour, Apply Brush and the text re-edit actually declare `.rewritesInPlace` (through
-      `registerVectorElementsUndo`); video crop and speed, motion-group retags,
-      `keyPoseRestoringRest` and the lasso-move nudge still call `bumpVersion()` directly in their own
-      undo closures and were never touched by this pass. Either way it is the honest state and not a
-      fix. Bounding them needs a different idea: an id whose *content* changed needs its old footprint
-      forgotten and its new one bounded, and no rectangle from a caller supplies that.
-- [x] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
-      strokes.** Closed with the box above: a fill, a placed image, a video and now a text object all
-      carry their own extent, so the "measure what was replaced" recipe was never needed for them.
-
-**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a, §11.11d, §11.11e.
-
----
-
 ## (21) Keyframes — four stages and four gaps
 
 **Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b, 7, 8 and 10 are merged; 6b was
@@ -241,12 +181,15 @@ are superseded and kept; the file says which.
 
 ## (42) Editing the strokes inside a selection, not just their colour
 
-**Status** — not started. **The owner set the order 2026-09-07: (41) first, then this.** Its
-prerequisite got harder rather than nearer. A slider tick on a
-selection is a *rewrite in place*, which is precisely the case (41) established cannot be bounded by
-the damage-rectangle mechanism at all — the element keeps its id, so no rectangle from a caller says
-which footprint stopped being true. This item needs that solved first, and it is a different idea from
-the one that made undo cheap.
+**Status** — not started. **The owner set the order 2026-09-07: (41) first, then this.** (41) has
+now left this file whole (PERFORMANCE.md §11.11f, 2026-09-11): a slider tick on a selection is a
+*rewrite in place*, and `VectorCanvas.restoreElements(_:changedInk:rewriting:)` bounds one by the
+union of where each rewritten element was and where it will be — including a tick that lands before
+the previous tick's render has measured anything. MEASURED in Release at 2,000 strokes for a
+fifty-stroke selection: the press itself is ~4.5 ms and the render that follows is ~300 ms against
+1,090 ms for the whole cel (~60 ms at 200 strokes). So the live requirement is buildable on the seam
+as it stands; what a drag still needs is above it — preview-then-commit (the third box) and dropping
+a render the next tick has made stale rather than queueing it.
 
 > *"i plan to replace the change color of selection into a better tool where you can also change the
 > brush type, size, etc. of the strokes inside the selection. The color changer also shouldnt be the
@@ -257,10 +200,12 @@ Half of it shipped: the Select panel's **Brush** button re-points a selection at
 step (BRUSH.md §2.10), and `applyBrushToSelection`'s own doc says size, opacity and colour are
 deliberately untouched and points back here.
 
-**The live requirement is the load-bearing one and it has a hard prerequisite.** Adjusting a selection
-rewrites elements in place, so every tick of a slider is a mid-list edit — a whole-cel re-walk is
-~142 ms at the owner's density and 745 ms at 1,000 strokes, so a slider driving one is unusable.
-**(41) is a prerequisite, not an optimisation.**
+**The live requirement is the load-bearing one, and its prerequisite shipped.** Adjusting a selection
+rewrites elements in place, so every tick of a slider is a mid-list edit — a whole-cel re-walk was
+~142 ms at the owner's density and 745 ms at 1,000 strokes, and a slider driving one was unusable.
+Since (41)'s last box a tick is bounded to the selection's own rectangle; the numbers are in the status
+above. **The colour changer today applies the brush's current colour** — the Select panel's Recolour
+uses `brushColor` — which is what the picker below replaces.
 
 **Left to build**
 - [ ] Brush kind and size at selection scope, alongside colour
