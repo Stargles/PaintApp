@@ -58,11 +58,16 @@ final class SelectionOverlayLogicTests: XCTestCase {
 
     // MARK: - Gating guard, mirrored from `handlePan`/`handleTap`
 
-    /// The exact boolean `guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else {
-    /// return }` uses in `SelectionOverlayView.handlePan`/`handleTap`, pulled out so its four
-    /// combinations are pinned independently of the view/recognizer plumbing around it.
+    /// The gate's four combinations, pinned independently of the view/recognizer plumbing.
+    ///
+    /// **This forwarded to a local re-implementation until TODO (59), which measured nothing.** The
+    /// body was `!pencilOnlyDrawing || lastTouchType == .pencil` written out a second time here, so
+    /// the three tests below compared a copy of the rule against itself and would have stayed green
+    /// through any edit to the app's own spelling of it. (59) gave that expression a name —
+    /// `pencilOnlyDrawingAllows`, in `TouchTypeResolution.swift`, which this target compiles — so the
+    /// operand is now the shipped function.
     private func admits(pencilOnlyDrawing: Bool, lastTouchType: UITouch.TouchType) -> Bool {
-        !pencilOnlyDrawing || lastTouchType == .pencil
+        pencilOnlyDrawingAllows(lastTouchType, pencilOnly: pencilOnlyDrawing)
     }
 
     func testPencilOnlyModeRejectsAFingerDrivenSelectionGesture() {

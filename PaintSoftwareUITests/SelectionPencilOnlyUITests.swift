@@ -205,4 +205,72 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         XCTAssertTrue(doneButton.waitForNonExistence(timeout: 5),
                       "self-check: with pencil-only mode off, the same finger tap should bake the Move")
     }
+
+    /// **TODO (59)'s sixth hole: the graph editor's box select.** The owner, 2026-09-10: *"right now
+    /// in the graph menu, the finger can be used for the box select on nodes. Should only be the pen
+    /// (in pen mode)"* — i.e. it obeys `CanvasManager.pencilOnlyDrawing` rather than inventing a
+    /// second preference, which is what `pencilOnlyDrawingAllows` makes literal.
+    ///
+    /// **XCUITest cannot synthesise a pencil**, so the pen half of the ask is unprovable here and is
+    /// deliberately not implied: what this covers is the refusal of a *finger*, which is the half the
+    /// owner reported. `SelectionOverlayLogicTests` pins the predicate's other three rows.
+    ///
+    /// **The operand is the ring count the band publishes**, `TimelineGraphBand.encodeGesture`'s
+    /// `sel:` field, which is `TimelineGraphBandView.selection.count` — the same set the rings are
+    /// drawn from. The two halves are the *same drag* with the preference flipped, so a run where the
+    /// rectangle simply missed every node fails the self-check rather than passing the first
+    /// assertion for the wrong reason.
+    func testTheGraphEditorsBoxSelectIgnoresAFingerWhilePencilOnlyModeIsOn() throws {
+        let app = XCUIApplication()
+        // TODO (53)'s seeded document: a transformation layer carrying pose keys at frames 0 and 11,
+        // so the band has nodes for a rubber band to catch without this test spending a dozen taps
+        // authoring them through three other surfaces.
+        app.launchArguments += ["-uiTestSeedKeyframedMove"]
+        XCTAssertTrue(launchIntoEditor(app))
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()      // the transformation layer the seed added
+        if app.buttons["layerPanel.addButton"].exists { app.buttons["toolbar.layersButton"].tap() }
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5), "the graph editor did not open")
+        XCTAssertEqual(band.value as? String,
+                       "containerPose.x:0,11|containerPose.y~0,11|containerPose.rotation~0,11",
+                       "PREMISE: the seeded slide draws three channels — X animated, Y and Rotation "
+                       + "flat — and Scale X, Scale Y and Skew are off by TODO (59)'s default")
+        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
+                       "PREMISE: nothing is ringed before the drag")
+
+        // A rubber band drawn right-to-left across the whole band: it starts at frame 15, which is
+        // past the document's own twelve and therefore empty in every channel, and ends at frame 2,
+        // so the keys at frame 11 are inside it and the touch-down grabbed nothing.
+        // `TimelineGraphBand.keys(in:)` standardises the rect, so the direction costs nothing.
+        func boxSelect() {
+            let height = band.frame.height
+            let origin = band.coordinate(withNormalizedOffset: .zero)
+            let ppf = TimelineKeyMarkers.basePixelsPerFrame
+            origin.withOffset(CGVector(dx: TimelineGraphBand.x(ofFrame: 15, pixelsPerFrame: ppf),
+                                       dy: height - 4))
+                .press(forDuration: 0.1,
+                       thenDragTo: origin.withOffset(
+                           CGVector(dx: TimelineGraphBand.x(ofFrame: 2, pixelsPerFrame: ppf), dy: 4)))
+        }
+
+        setFingersCanPaint(app, to: false)             // pencil-only mode on
+        boxSelect()
+        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
+                       "a finger must not box-select nodes while pencil-only mode is on — this is the "
+                       + "reported bug. Got \(band.label)")
+
+        // Self-check: the same drag with the preference off rings nodes, which is what makes the
+        // assertion above about the *gate* rather than about a rectangle that caught nothing.
+        setFingersCanPaint(app, to: true)              // pencil-only mode off
+        boxSelect()
+        let ringed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label ENDSWITH %@", "|sel:3"), object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [ringed], timeout: 5), .completed,
+                       "with pencil-only mode off the same finger drag should ring the three drawn "
+                       + "channels' keys at frame 11. Got \(band.label)")
+    }
 }

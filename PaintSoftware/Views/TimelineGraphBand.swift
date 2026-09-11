@@ -2001,9 +2001,17 @@ enum TimelineGraphBand {
     /// can assert the *absence* of a focus or a readout as directly as its presence — which is what
     /// the (38)(b) change most needs pinned, a single tap that no longer deletes having no other
     /// visible effect than this.
-    static func encodeGesture(focus: KeyRef?, readout: String?) -> String {
+    ///
+    /// **`selectedCount` is TODO (59)'s third slot**, and it is a *count* rather than the set for the
+    /// same reason the two above are strings: what a test needs to say is "the rubber band caught
+    /// nothing" or "it caught some", and a set would make every existing assertion about a focus
+    /// depend on which keys happened to be ringed. It defaults to 0 so that the ~six call sites
+    /// asserting `encodeGesture(focus:readout:)` keep building the string the view publishes when
+    /// nothing is ringed, which is their subject.
+    static func encodeGesture(focus: KeyRef?, readout: String?, selectedCount: Int = 0) -> String {
         "focus:" + (focus.map { "\($0.parameterID)@\($0.frame)" } ?? "none")
             + "|read:" + (readout ?? "none")
+            + "|sel:\(selectedCount)"
     }
 }
 

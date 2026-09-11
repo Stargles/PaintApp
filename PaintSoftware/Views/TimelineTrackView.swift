@@ -729,6 +729,21 @@ struct TimelineTrackView: UIViewRepresentable {
             let bandHeight: CGFloat
             /// The keys being carried. Empty means the touch began on nothing, which is a marquee.
             let carried: Set<TimelineGraphBand.KeyRef>
+            /// **Whether this touch may draw a rubber band** — TODO (59), the owner 2026-09-10:
+            /// *"right now in the graph menu, the finger can be used for the box select on nodes.
+            /// Should only be the pen (in pen mode)"*.
+            ///
+            /// `pencilOnlyDrawingAllows`, answered **at touch-down** and carried, which is this
+            /// file's rule for every recogniser it owns: a touch resolves to what it is when it
+            /// lands and never changes its mind. The alternative — asking the recogniser on each
+            /// `.changed` — would read `lastTouchType` after a second contact had joined the
+            /// sequence and could flip a live marquee off mid-drag.
+            ///
+            /// **It gates the marquee alone**, not the whole band. Dragging a node the finger
+            /// landed on is unaffected, and so is tap-to-add: the owner named the box select, and
+            /// each of the others is a touch aimed at something the artist can see, which is the
+            /// distinction `CanvasView.Coordinator.setUpGestures`' gating list turns on.
+            let allowsMarquee: Bool
             /// **The node the finger actually took**, as opposed to the set it carries. Nil for a
             /// marquee and for a handle drag.
             ///
@@ -818,11 +833,11 @@ struct TimelineTrackView: UIViewRepresentable {
         /// this is `numberOfTouchesRequired = 1`, the same coexistence `TimelineRulerView` already
         /// relies on; and the playhead, which lies *over* the band by §11.3's z-order ruling, is
         /// `isUserInteractionEnabled = false`, so a key hidden under 120 pt of blue is still grabbable.
-        @objc func handleGraphBandTouch(_ gr: UILongPressGestureRecognizer) {
+        @objc func handleGraphBandTouch(_ gr: TouchTypeLongPressGestureRecognizer) {
             let point = gr.location(in: graphBandView)
             switch gr.state {
             case .began:
-                beginGraphBandTouch(at: point)
+                beginGraphBandTouch(at: point, touchType: gr.lastTouchType)
             case .changed:
                 updateGraphBandTouch(at: point)
             case .ended:
@@ -839,7 +854,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        private func beginGraphBandTouch(at point: CGPoint) {
+        private func beginGraphBandTouch(at point: CGPoint, touchType: UITouch.TouchType) {
             guard let content = laidOutKey?.graphBand else { return }
             let height = graphBandView.bounds.height
             // **One arbitration, at touch-down** — `TimelineGraphBand.grab` carries it, including the
@@ -888,7 +903,10 @@ struct TimelineTrackView: UIViewRepresentable {
             graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
                                           channels: content.channels,
                                           frameCount: content.frameCount, bandHeight: height,
-                                          carried: carried, grabbed: hit, handle: handle,
+                                          carried: carried,
+                                          allowsMarquee: pencilOnlyDrawingAllows(
+                                              touchType, pencilOnly: canvasManager.pencilOnlyDrawing),
+                                          grabbed: hit, handle: handle,
                                           startSelection: graphBandSelection,
                                           poseBaseline: poseBaseline)
         }
@@ -937,6 +955,11 @@ struct TimelineTrackView: UIViewRepresentable {
             }
 
             guard !drag.carried.isEmpty else {
+                // **TODO (59): the box select is the pen's.** Refused whole — no rubber band drawn
+                // and the standing selection left exactly as it was — rather than drawn-and-ignored,
+                // because a rectangle that follows the finger and selects nothing is the "refusal
+                // with no notice" defect wearing the opposite costume: it says something happened.
+                guard drag.allowsMarquee else { return }
                 let rect = CGRect(x: drag.start.x, y: drag.start.y,
                                   width: translation.width, height: translation.height)
                 graphBandView.setMarquee(rect)
@@ -2069,8 +2092,13 @@ private final class TimelineGraphBandView: UIView {
     /// answer to `DragGesture(minimumDistance: 0)`. The coordinator adds itself as the target and
     /// makes the scroll view's own pan `require(toFail:)` this — both exactly once, in
     /// `layoutGraphBand`.
-    let panRecognizer: UILongPressGestureRecognizer = {
-        let gr = UILongPressGestureRecognizer()
+    ///
+    /// **A `TouchTypeLongPressGestureRecognizer` since TODO (59)**, so the handler can ask what kind
+    /// of touch it is holding — the marquee is the pen's in pencil-only mode and a plain
+    /// `UILongPressGestureRecognizer`'s `@objc` action never sees a `UITouch`, which is the same
+    /// shape of hole `SelectionPencilOnlyUITests` records three earlier closures of.
+    let panRecognizer: TouchTypeLongPressGestureRecognizer = {
+        let gr = TouchTypeLongPressGestureRecognizer()
         gr.minimumPressDuration = 0
         gr.numberOfTouchesRequired = 1
         return gr
@@ -2085,7 +2113,8 @@ private final class TimelineGraphBandView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = .none
         accessibilityIdentifier = "timeline.graphBand"
-        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: nil, readout: nil)
+        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: nil, readout: nil,
+                                                            selectedCount: 0)
 
         marqueeView.isUserInteractionEnabled = false
         marqueeView.isHidden = true
@@ -2133,6 +2162,11 @@ private final class TimelineGraphBandView: UIView {
     func setSelection(_ keys: Set<TimelineGraphBand.KeyRef>) {
         guard keys != selection else { return }
         selection = keys
+        // **The ringed count reaches accessibility** — TODO (59). It is the same `selection` the
+        // rings are drawn from, so a test reading it is reading what is on screen rather than a
+        // parallel counter; and the marquee is the only thing that fills this set with more than one,
+        // which is what makes "a finger drew no rubber band" observable at all.
+        refreshGestureAccessibility()
         setNeedsDisplay()
     }
 
@@ -2157,7 +2191,8 @@ private final class TimelineGraphBandView: UIView {
     /// The band's second accessibility slot — see `TimelineGraphBand.encodeGesture`, which is where
     /// the choice to use the label rather than widen the value is argued.
     private func refreshGestureAccessibility() {
-        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: focus, readout: readout?.text)
+        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: focus, readout: readout?.text,
+                                                            selectedCount: selection.count)
     }
 
     /// **A node's column, in window coordinates — what the node menu's popover anchors to.**

@@ -31,6 +31,24 @@ func resolvedLastTouchType<S: Sequence>(from types: S) -> UITouch.TouchType? whe
     return first
 }
 
+/// **Whether an input that pencil-only mode gates may proceed** — the app's one predicate, spelled
+/// once.
+///
+/// It is written inline at nine call sites (`CanvasView.Coordinator`'s five, `SelectionOverlayView`'s
+/// two, `FloatingPieceOverlayView`'s one) as
+/// `!canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil`, and this is that
+/// expression given a name so that the tenth — TODO (59)'s graph-editor marquee — cannot invent its
+/// own spelling. The existing nine are deliberately left alone: each already has a doc comment
+/// arguing why *it* is gated, and rewriting them would be churn in files this function cannot be
+/// tested through anyway. **New gates use this.**
+///
+/// The rule is `CanvasView.Coordinator.setUpGestures`' rule verbatim: the question is not "is this a
+/// touch?" but *"would this input have drawn?"* — pencil-only means drawing is the pen's job, never
+/// that the app stops listening to hands.
+func pencilOnlyDrawingAllows(_ touchType: UITouch.TouchType, pencilOnly: Bool) -> Bool {
+    !pencilOnly || touchType == .pencil
+}
+
 /// A pan recognizer that remembers what kind of touch started it.
 ///
 /// Same shape and same reason as `CanvasView.TouchTypePressRecognizer` — see that type's doc
@@ -105,6 +123,30 @@ final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
         // the box" is exactly the failure this property exists to remove.
         if numberOfTouches == 0, let touch = touches.first {
             firstTouchLocationInWindow = touch.location(in: nil)
+        }
+        super.touchesBegan(touches, with: event)
+    }
+}
+
+/// **`TouchTypePanGestureRecognizer` for a `UILongPressGestureRecognizer`** — the shape the timeline
+/// uses for a drag that must keep its touch from the first point of travel
+/// (`TimelineGraphBandView.panRecognizer`, `TimelineRulerView.panRecognizer`), which is UIKit's
+/// answer to `DragGesture(minimumDistance: 0)`.
+///
+/// The third copy of one four-line override, and the reason it is a copy is stated on
+/// `TouchTypePanGestureRecognizer`: there is no common ancestor below `UIGestureRecognizer` to hang
+/// one implementation on, and only the tie-break (`resolvedLastTouchType`) is shared. It is *not*
+/// `CanvasView.TouchTypePressRecognizer` reused, because that type lives in a file this one cannot
+/// be reached from — `CanvasView.swift` is not in the "app sources shared with PaintSoftwareUITests"
+/// group and this file is, which is the whole reason the tie-break lives here.
+final class TouchTypeLongPressGestureRecognizer: UILongPressGestureRecognizer {
+    /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
+    /// conservative initial value, `TouchTypePanGestureRecognizer.lastTouchType`'s rule.
+    private(set) var lastTouchType: UITouch.TouchType = .direct
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
+            lastTouchType = type
         }
         super.touchesBegan(touches, with: event)
     }

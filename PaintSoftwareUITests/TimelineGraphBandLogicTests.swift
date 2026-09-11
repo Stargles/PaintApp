@@ -1861,11 +1861,17 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// UI test can assert the absence of a focus as directly as its presence, which is what the
     /// (38)(b) change most needs pinned: a single tap that no longer deletes has no other visible
     /// effect than this.
+    /// **Three halves since TODO (59)**, the third being the marquee's ring count — which is what
+    /// lets a UI test say "a finger drew no rubber band" about the thing on screen rather than about
+    /// a flag. It defaults to 0, so the call sites that are about a focus still spell two arguments.
     func testTheGestureStateSaysBothHalvesEvenWhenBothAreEmpty() {
         XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
-                       "focus:none|read:none")
+                       "focus:none|read:none|sel:0")
         XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: node(6), readout: "1.25"),
-                       "focus:brightnessContrast.brightness@6|read:1.25")
+                       "focus:brightnessContrast.brightness@6|read:1.25|sel:0")
+        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: nil, readout: nil, selectedCount: 3),
+                       "focus:none|read:none|sel:3",
+                       "and a marquee's ring count is the third field, not a change to the first two")
     }
 
 }

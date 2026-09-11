@@ -563,12 +563,15 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         // key takes the tapped *value*, so the dot is under the finger and the same point is now a
         // node. That is what makes the next two taps the two stages of (38)(b) at one location.
         onTheLine.tap()
+        // `selectedCount: 1` because a tap on a node makes it the standing selection as well as the
+        // focus (`beginGraphBandTouch`), which TODO (59)'s third field in `encodeGesture` is what
+        // first made visible from here.
         let focused = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == %@",
                                    TimelineGraphBand.encodeGesture(
                                        focus: .init(parameterID: "brightnessContrast.brightness",
                                                     frame: 3),
-                                       readout: nil)),
+                                       readout: nil, selectedCount: 1)),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
             A single tap on a node used to delete it. It focuses it now — which is what puts its two \
@@ -742,7 +745,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
             predicate: NSPredicate(format: "label == %@",
                                    TimelineGraphBand.encodeGesture(
                                        focus: .init(parameterID: "containerPose.rotation", frame: 3),
-                                       readout: nil)),
+                                       readout: nil, selectedCount: 1)),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed,
                       "A tap on a pose node focuses it first, exactly as a grade's does — got \(band.label)")
@@ -876,7 +879,8 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let node = TimelineGraphBand.KeyRef(parameterID: "brightnessContrast.brightness", frame: 0)
         let focused = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == %@",
-                                   TimelineGraphBand.encodeGesture(focus: node, readout: nil)),
+                                   TimelineGraphBand.encodeGesture(focus: node, readout: nil,
+                                                                   selectedCount: 1)),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
             A single tap on a node used to delete it and now focuses it, which is what draws its \
