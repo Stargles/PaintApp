@@ -364,8 +364,8 @@ and "Left to build" bullet checked out. **That list is history, not the current 
 - [x] **Two commit shas cited in this repo's docs are not on `main`** (`2fa1725`, `83f7c0d` — pre-rewrite
       orphans). Both are gone: this bullet was the only remaining citation of either. Sweep for others
       when the spec sweep above runs.
-- [ ] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
-      **Recommendation, 2026-09-07 (not acted on — the owner's call): keep both.**
+- [x] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
+      **The owner took the 2026-09-07 recommendation, 2026-09-11: keep both.**
       BRUSH_ENGINE_EXTENSIBILITY.md is not orphaned — BRUSH.md's own header calls it "still accurate
       about the seams" and says its ordering "survives into §12", §11 says its argument is "not to be
       lost", and it is cited live from ADD_TEXT.md, KEYFRAMES.md, CANVAS_RESIZE.md and one production
