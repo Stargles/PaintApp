@@ -67,8 +67,8 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// **Hand-typed for `EffectParameterCharacterizationTests`' reason**: `Effect` cannot be
-    /// `CaseIterable`, so nothing in this suite would notice a fifteenth effect. Fifteen entries
-    /// over fourteen cases, both blurs listed.
+    /// `CaseIterable`, so nothing in this suite would notice a sixteenth effect. Sixteen entries
+    /// over fifteen cases, both blurs listed.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
@@ -85,6 +85,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         .outline(Effect.Outline(width: 2)),
         .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
         .noise(Effect.Noise(amount: 0.08)),
+        .crtScreen(Effect.CRTScreen.preset(.crt)),
     ]
 
     private func brightness(_ manager: CanvasManager, atFrame frame: Int) -> Double? {
@@ -124,10 +125,50 @@ final class EffectParameterTrackLogicTests: XCTestCase {
                        "Resolution derives a value for a frame; it never writes one back into the model")
     }
 
+    /// **The Computer Screen's knobs are keyable through the same machinery** — TODO (60)'s row: a
+    /// curvature keyed 0 → 1 over ten frames is 0.5 at frame 5, held outside its keys, and the stored
+    /// screen is still the preset the artist picked. Every one of its six is `.continuous`, so the
+    /// writer takes each; the sweep at `testExactlyTheContinuousScalarParametersAreAnimatableAtThisStage`
+    /// counts them among the thirty.
+    func testAKeyedComputerScreenKnobTweensAndTheStoredScreenStaysPut() {
+        let stored = Effect.crtScreen(Effect.CRTScreen.preset(.lcd))
+        let manager = gradedManager(stored)
+        for id in ["crtScreen.scanlines", "crtScreen.scanlinePeriod", "crtScreen.apertureMask",
+                   "crtScreen.curvature", "crtScreen.vignette", "crtScreen.aberration"] {
+            XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id,
+                                                          to: linear([(0, 0.0), (10, 1.0)])),
+                          "\(id) is a continuous Double, so the writer takes it")
+            XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id, to: nil),
+                          "…and clears it")
+        }
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "crtScreen.curvature",
+                                                      to: linear([(0, 0.0), (10, 1.0)])))
+
+        func curvature(atFrame frame: Int) -> Double? {
+            guard case .crtScreen(let p)? = manager.layers[gradeIndex].layerEffect(atFrame: frame) else { return nil }
+            return p.curvature
+        }
+        XCTAssertEqual(curvature(atFrame: 0) ?? .nan, 0, accuracy: 1e-9, "At the first key")
+        XCTAssertEqual(curvature(atFrame: 5) ?? .nan, 0.5, accuracy: 1e-9, "Halfway along the segment")
+        XCTAssertEqual(curvature(atFrame: 10) ?? .nan, 1, accuracy: 1e-9, "At the last key")
+        XCTAssertEqual(curvature(atFrame: 40) ?? .nan, 1, accuracy: 1e-9, "Held after the last")
+
+        // The other five ride through untouched, and the stored base is the preset still.
+        guard case .crtScreen(let resolved)? = manager.layers[gradeIndex].layerEffect(atFrame: 5) else {
+            return XCTFail("Not a screen at frame 5")
+        }
+        var expected = Effect.CRTScreen.preset(.lcd)
+        expected.curvature = 0.5
+        XCTAssertEqual(resolved, expected, "Only the keyed knob moves; the LCD's other five stay")
+        XCTAssertNil(resolved.preset, "A keyed screen mid-tween is no preset — the bar reads Custom")
+        XCTAssertEqual(manager.layers[gradeIndex].effect, stored,
+                       "Resolution derives a value for a frame; it never writes one back into the model")
+    }
+
     /// **A document nobody has animated is bit-for-bit the document it was**, which is the claim every
     /// existing test in the suite is silently resting on now that the accessor does work.
     ///
-    /// Swept over all fourteen menu entries rather than one, because the guard that makes it true is a
+    /// Swept over all sixteen menu entries rather than one, because the guard that makes it true is a
     /// single `tracks.isEmpty` at the top of `Effect.resolved(atFrame:through:)` and a mistake there
     /// would be a mistake for every effect at once.
     func testALayerWithNoTrackResolvesToItsStoredEffectAtEveryFrame() {
@@ -187,10 +228,10 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "recolor.preserveShading", // .stepped — a boolean
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
-        XCTAssertEqual(animatable.count, 24,
-                       "24 of the 35 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+        XCTAssertEqual(animatable.count, 30,
+                       "30 of the 41 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 35, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 41, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as

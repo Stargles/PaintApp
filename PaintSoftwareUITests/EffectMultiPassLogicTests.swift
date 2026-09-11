@@ -1171,6 +1171,7 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
             .outline(Effect.Outline()),
             .recolor(Effect.Recolor(entries: [RecolorEntry.blank])),
+            .crtScreen(Effect.CRTScreen.preset(.arcade)),
         ]
         for effect in everything {
             XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params),
@@ -1193,6 +1194,9 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .sobel(Effect.Sobel()), .outline(Effect.Outline()),
             // Recolour is a per-pixel grade with a table of its own (`recolorTable`) and no weights.
             .recolor(Effect.Recolor(entries: [RecolorEntry.blank])),
+            // The Computer Screen is a gather — three bilinear taps — and still one dispatch: its
+            // fringe is its own taps rather than a call into the aberration kernel (TODO (60)).
+            .crtScreen(Effect.CRTScreen.preset(.arcade)),
         ]
         for effect in cheap {
             XCTAssertEqual(effect.passes.count, 1, "\(effect.displayName) must still be a single dispatch")
@@ -1200,13 +1204,14 @@ final class EffectMultiPassLogicTests: XCTestCase {
         }
     }
 
-    /// Fourteen kernel branches and every one reachable — the assertion that catches a new case copying
+    /// Fifteen kernel branches and every one reachable — the assertion that catches a new case copying
     /// an existing case's code, which a parity sweep shows only as one effect quietly rendering as
     /// another. Phase 9c's addition of Sobel, sharpen's combine and outline raised the ceiling from 9
-    /// to 12, and TODO (60)'s recolour to 13; each of the three gathers is also a gather kind, so a
-    /// missing entry in either backend's early-out list (Composite.metal, EffectKernels.swift) renders
-    /// as the identity rather than failing here — this test only proves the kind is *reachable*, and
-    /// the effect-specific tests above are what would notice a silent identity.
+    /// to 12, TODO (60)'s recolour to 13 and its Computer Screen to 14; each of the four gathers is
+    /// also a gather kind, so a missing entry in either backend's early-out list (Composite.metal,
+    /// EffectKernels.swift) renders as the identity rather than failing here — this test only proves
+    /// the kind is *reachable*, and the effect-specific tests above are what would notice a silent
+    /// identity.
     func testEveryKernelBranchIsReachedThroughSomePassList() {
         let everything: [Effect] = [
             .levels(Effect.Levels()), .brightnessContrast(Effect.BrightnessContrast()),
@@ -1215,8 +1220,9 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .noise(Effect.Noise()), .blur(Effect.Blur(radius: 1)), .bloom(Effect.Bloom()),
             .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 1, amount: 1)),
             .outline(Effect.Outline()), .recolor(Effect.Recolor()),
+            .crtScreen(Effect.CRTScreen()),
         ]
-        XCTAssertEqual(Set(everything.flatMap { $0.passes.map(\.kind) }), Set(0...13),
+        XCTAssertEqual(Set(everything.flatMap { $0.passes.map(\.kind) }), Set(0...14),
                        "Every branch of applyEffect must be reachable from some effect's pass list")
     }
 

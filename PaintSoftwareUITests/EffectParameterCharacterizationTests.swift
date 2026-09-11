@@ -26,12 +26,13 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// **Hand-typed, because `Effect` cannot be `CaseIterable`** — it has associated values. Every
     /// all-effects sweep in this suite is a literal like this one, which is exactly why
     /// `Effect.parameters` is an exhaustive switch with no `default:`: nothing here would notice a
-    /// fourteenth effect, so the compiler has to.
+    /// sixteenth effect, so the compiler has to.
     ///
-    /// Fifteen entries over fourteen cases. Gaussian and Directional Blur are one case split by
+    /// Sixteen entries over fifteen cases. Gaussian and Directional Blur are one case split by
     /// `Blur.isDirectional`, and both are listed so the "same case, same table" claim is exercised
-    /// rather than assumed. Recolour (TODO (60)) is the fourteenth case and was added here
-    /// deliberately, with every count below moved by exactly what it adds.
+    /// rather than assumed. Recolour (TODO (60)) is the fourteenth case and the Computer Screen
+    /// (TODO (60), 2026-09-11) the fifteenth; each was added here deliberately, with every count
+    /// below moved by exactly what it adds.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
@@ -48,6 +49,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         .outline(Effect.Outline(width: 2)),
         .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
         .noise(Effect.Noise(amount: 0.08)),
+        .crtScreen(Effect.CRTScreen.preset(.crt)),
     ]
 
     /// One line per slider row: the four facts a `slider(...)` call site carried — its
@@ -146,19 +148,30 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         // not in the table — the table cannot address the n-th entry's slider. So the effect has no
         // `slider(...)` row of its own, like Curves.
         XCTAssertEqual(sliderRows(.recolor(Effect.Recolor())), [])
+
+        // The Computer Screen's six, under a preset picker that is not a parameter (TODO (60)).
+        // Transcribed from `EffectSettingsBar.rows` the day the case was added, 2026-09-11.
+        XCTAssertEqual(sliderRows(.crtScreen(Effect.CRTScreen())), [
+            "scanlines|Scanlines|0.0...1.0|%.2f",
+            "scanlinePeriod|Line Spacing|1.0...16.0|%.1f px",
+            "apertureMask|RGB Stripes|0.0...1.0|%.2f",
+            "curvature|Curvature|0.0...1.0|%.2f",
+            "vignette|Vignette|0.0...1.0|%.2f",
+            "aberration|Colour Fringe|0.0...8.0|%.1f px",
+        ])
     }
 
-    /// 25 sliders across the whole catalogue — the count of `slider(...)` call sites in
-    /// `EffectSettingsBar.rows` on the day the table was written, and still 25 with Recolour, whose
-    /// sliders are per entry (see above).
-    func testThereAreTwentyFiveSlidersInTheWholeCatalogue() {
+    /// 31 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
+    /// `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour, whose
+    /// sliders are per entry (see above), and 31 with the Computer Screen's six.
+    func testThereAreThirtyOneSlidersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Both blur entries are one case; count it once.
             if case .blur(let blur) = $0 { return !blur.isDirectional }
             return true
         }
-        XCTAssertEqual(cases.count, 14, "Fourteen cases behind fifteen menu entries")
-        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 25)
+        XCTAssertEqual(cases.count, 15, "Fifteen cases behind sixteen menu entries")
+        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 31)
     }
 
     /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
@@ -182,10 +195,10 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                 animatable.insert(parameter.id)
             }
         }
-        XCTAssertEqual(animatable.count, 24,
+        XCTAssertEqual(animatable.count, 30,
                        "PREMISE: the animatable set — got \(animatable.sorted())")
         XCTAssertFalse(animatable.contains("posterize.levels"), """
-            PREMISE: 24 and not 25, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
+            PREMISE: 30 and not 31, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
             """)
     }
 
@@ -201,7 +214,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **35 stored fields over 14 payload structs, and every one of them addressable.** The count
+    /// **41 stored fields over 15 payload structs, and every one of them addressable.** The count
     /// is the point: a field added to a payload struct and not to the table is a knob no keyframe
     /// can reach, and nothing else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
@@ -220,6 +233,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.sharpen(Effect.Sharpen()), 2),
             (.outline(Effect.Outline()), 3),
             (.recolor(Effect.Recolor()), 2),
+            (.crtScreen(Effect.CRTScreen()), 6),
         ]
         for (effect, count) in expected {
             XCTAssertEqual(effect.parameters.count, count,
@@ -229,7 +243,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 35)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 41)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -248,6 +262,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         case .sharpen(let p):             return Mirror(reflecting: p).children.count
         case .outline(let p):             return Mirror(reflecting: p).children.count
         case .recolor(let p):             return Mirror(reflecting: p).children.count
+        case .crtScreen(let p):           return Mirror(reflecting: p).children.count
         }
     }
 
@@ -268,6 +283,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "blur.angle", "blur.directional", "blur.radius",
             "brightnessContrast.brightness", "brightnessContrast.contrast",
             "chromaticAberration.offsetX", "chromaticAberration.offsetY",
+            "crtScreen.aberration", "crtScreen.apertureMask", "crtScreen.curvature",
+            "crtScreen.scanlinePeriod", "crtScreen.scanlines", "crtScreen.vignette",
             "curves.points",
             "gradientMap.mix", "gradientMap.stops",
             "hsvShift.hue", "hsvShift.saturation", "hsvShift.value",
@@ -288,7 +305,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 35)
+        XCTAssertEqual(seen.count, 41)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -345,16 +362,17 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(Set(componentwise), ["curves.points", "gradientMap.stops"])
     }
 
-    /// 24 `Double`s plus `Outline.color`, whose four channels tween as one value with a fixed count
-    /// — which is why it is continuous rather than componentwise.
-    func testTwentyFiveParametersAreContinuous() {
+    /// 30 `Double`s plus `Outline.color`, whose four channels tween as one value with a fixed count
+    /// — which is why it is continuous rather than componentwise. 24 + 1 until the Computer Screen's
+    /// six arrived, every one a continuous `Double` — the brief's *"every numeric field keyable"*.
+    func testThirtyOneParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
             .filter { if case .blur(let b) = $0 { return !b.isDirectional }; return true }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
-        XCTAssertEqual(continuous.count, 25)
+        XCTAssertEqual(continuous.count, 31)
         XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id), ["outline.color"])
-        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 24)
+        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 30)
     }
 
     /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
@@ -416,6 +434,18 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         // The two that clamp to exactly their slider range.
         XCTAssertEqual(parameter("bloom.threshold", of: .bloom(Effect.Bloom()))?.modelDomain, 0...1)
         XCTAssertEqual(parameter("outline.threshold", of: .outline(Effect.Outline()))?.modelDomain, 0...1)
+
+        // And the Computer Screen's four strengths, which `params` clamps the same way; its period is
+        // floored at 1 and capped by nothing, and its fringe is signed — negative swaps red and blue.
+        let screen = Effect.crtScreen(Effect.CRTScreen())
+        for id in ["crtScreen.scanlines", "crtScreen.apertureMask", "crtScreen.curvature", "crtScreen.vignette"] {
+            XCTAssertEqual(parameter(id, of: screen)?.modelDomain, 0...1, id)
+            XCTAssertEqual(parameter(id, of: screen)?.uiRange, 0...1, id)
+        }
+        XCTAssertEqual(parameter("crtScreen.scanlinePeriod", of: screen)?.modelDomain, 1...(.infinity))
+        XCTAssertEqual(parameter("crtScreen.aberration", of: screen)?.modelDomain, EffectParameter.unbounded)
+        XCTAssertTrue(parameter("crtScreen.aberration", of: screen)?.modelDomain.contains(-2) == true,
+                      "A negative fringe is a real picture and must be keyable")
     }
 
     /// The grades guard rather than clamp, so a key outside the slider's travel is meaningful for
@@ -489,7 +519,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - The scalar bridge
 
-    /// Read a value, write a different one, read it back. Covers all 30 scalar parameters, which is
+    /// Read a value, write a different one, read it back. Covers all 36 scalar parameters, which is
     /// what a keyframe channel actually drives.
     func testEveryScalarParameterRoundTripsThroughReadAndWrite() {
         for effect in Self.everyMenuEntry {

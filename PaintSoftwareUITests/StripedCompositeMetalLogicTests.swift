@@ -217,7 +217,8 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: false) else {
             return XCTFail("Fixture must mint")
         }
-        XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks), 0,
+        XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
+                                               frameHeight: Int(recipe.canvasSize.height)), 0,
                        "Premise: noise reads no neighbour, so no apron can be what saves this")
 
         let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
@@ -394,7 +395,8 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: false) else {
             return XCTFail("Fixture must mint")
         }
-        XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks), 0,
+        XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
+                                               frameHeight: Int(recipe.canvasSize.height)), 0,
                        "Premise: no kernel here, so the strips are all exactly 16 rows and collide by size")
         let budget = budgetBytes(forStripBufferRows: 16, recipe: recipe)
         let plan = StripedCompositor.plan(for: recipe, budgetBytes: budget)

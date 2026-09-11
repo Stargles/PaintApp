@@ -499,6 +499,14 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("recolor entry softness", .recolor(Effect.Recolor(entries: [
                 RecolorEntry(from: RecolorEntry.blank.from, to: RecolorEntry.blank.to, softness: 0.1)]))),
             ("recolor two entries", .recolor(Effect.Recolor(entries: [RecolorEntry.blank, RecolorEntry.blank]))),
+            // TODO (60)'s Computer Screen: the identity, then each of its six knobs alone.
+            ("crt identity", .crtScreen(Effect.CRTScreen())),
+            ("crt scanlines", .crtScreen(Effect.CRTScreen(scanlines: 0.5))),
+            ("crt period", .crtScreen(Effect.CRTScreen(scanlinePeriod: 5))),
+            ("crt mask", .crtScreen(Effect.CRTScreen(apertureMask: 0.5))),
+            ("crt curvature", .crtScreen(Effect.CRTScreen(curvature: 0.5))),
+            ("crt vignette", .crtScreen(Effect.CRTScreen(vignette: 0.5))),
+            ("crt aberration", .crtScreen(Effect.CRTScreen(aberration: 2))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

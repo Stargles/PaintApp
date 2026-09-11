@@ -2702,7 +2702,7 @@ final class PerfBaselineTests: XCTestCase {
         }
 
         // And the point of the exercise: a strip's own buffer fits the budget the whole frame did not.
-        let apron = StripedCompositor.apron(of: tree, maskStacks: stacks)
+        let apron = StripedCompositor.apron(of: tree, maskStacks: stacks, frameHeight: Int(big.height))
         let tallest = strips.map(\.buffer.height).max() ?? 0
         XCTAssertGreaterThanOrEqual(
             ChunkedCompositor.chunkSources(for: tree,

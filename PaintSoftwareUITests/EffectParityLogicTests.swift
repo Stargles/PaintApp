@@ -461,9 +461,13 @@ final class EffectParityLogicTests: XCTestCase {
     /// **Twenty-four since TODO (60)**: the recolour appended `recolorEntryCount` and
     /// `preserveShading`, at the end, for the same reason every group before them was. The entries
     /// themselves are a separate binding (`Effect.recolorTable`), pinned just below.
-    func testTheParameterBlockIsTwentyFourPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 96)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 96)
+    ///
+    /// **Thirty-two since the Computer Screen (TODO (60), 2026-09-11)**: `frameWidth`/`frameHeight`,
+    /// the other half of the strip origin, and the screen's six resolved knobs — eight scalars, at the
+    /// end, named rather than aliased onto `amount`/`mix`/`threshold` so the kernel reads as itself.
+    func testTheParameterBlockIsThirtyTwoPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 128)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 128)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract

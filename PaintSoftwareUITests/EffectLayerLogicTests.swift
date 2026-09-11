@@ -1996,8 +1996,8 @@ final class EffectLayerLogicTests: XCTestCase {
     // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
 
     /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an
-    /// exhaustive switch with no `default:`, so a fourteenth effect fails to compile until someone
-    /// has decided what it reads; this is the other half — that the thirteen we have answer what the
+    /// exhaustive switch with no `default:`, so a sixteenth effect fails to compile until someone
+    /// has decided what it reads; this is the other half — that the fifteen we have answer what the
     /// ruling says they answer, so a later edit that flips one has to come here and change the table
     /// on purpose.
     ///
@@ -2027,10 +2027,14 @@ final class EffectLayerLogicTests: XCTestCase {
             // TODO (60): reads colour, so the backdrop — a from-colour the paper matches recolours
             // the paper, which is what an adjustment layer means and what the tolerance controls.
             ("Recolour",             .recolor(Effect.Recolor()),                                 .backdrop),
+            // TODO (60): a screen look over paper is the point — scanlines that stopped at the ink
+            // would be stripes on a drawing, not a monitor. Its curvature reshapes coverage, but it
+            // reads colour and position, not shape, so it has no use for the ink-only re-walk.
+            ("Computer Screen",      .crtScreen(Effect.CRTScreen.preset(.crt)),                  .backdrop),
         ]
 
-        XCTAssertEqual(expected.count, 14,
-                       "Fourteen effects exist; a fifteenth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 15,
+                       "Fifteen effects exist; a sixteenth has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {
