@@ -1,7 +1,7 @@
 import XCTest
 
-/// **Can an artist reach Parallax and Rotate from a fresh document, and does the canvas show what
-/// the mode promises?** — TRANSFORM_LAYER.md §5.2 and §5.3, §8's rows 2 and 3, driven the way the
+/// **Can an artist reach Parallax, Rotate and Shake from a fresh document, and does the canvas show
+/// what the mode promises?** — TRANSFORM_LAYER.md §5.2–§5.4, §8's rows 2–4, driven the way the
 /// artist drives them with no prior state: `+` → Transform Layer → its row → Mode → the mode → the
 /// mode's own controls → the box or the playhead → the picture.
 ///
@@ -12,7 +12,10 @@ import XCTest
 ///    and the Move row still raises the box;
 ///  * that **what is drawn is the mode**: four bands of ink on four layers move 100/75/50/25 of the
 ///    box's drag, measured off the canvas; a bar right of centre is drawn *below* centre six frames
-///    into a 15°/frame spin — turned about the box's centre, not slid.
+///    into a 15°/frame spin — turned about the box's centre, not slid; a band under a Shake layer
+///    is drawn somewhere else on the first frames of the bar, the same somewhere else every time the
+///    playhead comes back (ruling 9's determinism, off the screen), somewhere new after Re-roll, and
+///    back where it was after one undo.
 ///
 /// The assertions are on screenshots of `canvas.host` and on the panel's exposed values, never on
 /// anything stored. A small class on purpose (CLAUDE.md's cost model: per test *class*).
@@ -146,6 +149,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         add(shot)
     }
 
+    /// The modes §8 has shipped, which the picker must list — and no other.
+    private static let shippedModes = ["move", "parallax", "rotate", "shake"]
+
     /// Opens the options of the layer at `index` (the row must be the active one) and picks `mode`
     /// from its Mode picker. Reads the picker's value back, which is the exposed operand.
     private func pickMode(_ app: XCUIApplication, layerIndex: Int, mode: String) {
@@ -158,7 +164,10 @@ final class TransformLayerModesUITests: PaintUITestCase {
         modeButton.tap()
         let item = app.buttons["layerOptions.transformMode.\(mode)"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The picker lists \(mode)")
-        XCTAssertFalse(app.buttons["layerOptions.transformMode.shake"].exists,
+        for shipped in Self.shippedModes {
+            XCTAssertTrue(app.buttons["layerOptions.transformMode.\(shipped)"].exists, "The picker lists \(shipped)")
+        }
+        XCTAssertFalse(app.buttons["layerOptions.transformMode.repeat"].exists,
                        "…and not a mode that has not shipped — a row that does nothing is a refusal with no notice")
         item.tap()
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
@@ -364,5 +373,123 @@ final class TransformLayerModesUITests: PaintUITestCase {
                        "frame 7: the band is on the centre column — turned about the box's centre, not slid")
         XCTAssertEqual(atSeventh.v, expectedV, accuracy: 0.04,
                        "frame 7: …and below it, as far below as it was to the right (aspect \(aspect))")
+    }
+
+    // MARK: - Shake
+
+    /// The band's paper-relative centroid at each of `frames`, scrubbing to each in turn. Every
+    /// read is repeated until two consecutive captures agree, because a posed frame reaches the
+    /// canvas through the compositor a beat after the scrub.
+    private func bandColumns(_ app: XCUIApplication, canvas: XCUIElement, frames: [Int], total: Int,
+                             _ what: String) -> [Double]? {
+        var columns: [Double] = []
+        for frame in frames {
+            scrub(app, toFrame: frame, total: total)
+            var last: Double?
+            var settled: Double?
+            let deadline = Date().addingTimeInterval(8)
+            repeat {
+                guard let paper = currentPaper(canvas, "\(what), frame \(frame)"),
+                      let read = inkCentroid(paper.pixels, in: paperRegion(paper.paper, v0: 0.15, v1: 0.96))
+                          .map({ paperRelative($0, in: paper.paper).u }) else {
+                    XCTFail("\(what): the band vanished at frame \(frame)")
+                    return nil
+                }
+                if let last, abs(last - read) < 0.002 { settled = read; break }
+                last = read
+                Thread.sleep(forTimeInterval: 0.3)
+            } while Date() < deadline
+            guard let settled else { XCTFail("\(what): frame \(frame) never settled"); return nil }
+            columns.append(settled)
+        }
+        return columns
+    }
+
+    /// **A band left of and above the centre, a transform layer above, Mode → Shake, type 300 into
+    /// Shake X, and the band is drawn somewhere else on the bar's first frames — the same somewhere
+    /// else when the playhead comes back, somewhere new after Re-roll, and back where it was after
+    /// one undo** — §5.4 and §2 ruling 9, all of it off the screen. The amplitude field is the
+    /// exposed operand (its readout echoes it); the seed is never read, only its consequences. Four
+    /// frames are read rather than one so the "moved" and "re-rolled" checks do not hang on a single
+    /// noise sample that could, one time in twenty, be near zero.
+    ///
+    /// The band starts at paper (0.3, 0.3) and 300 points is under 0.15 of a 2048-point paper, so
+    /// however the noise falls the band never reaches the centre column or the top tenth — the two
+    /// lines `paperBounds` walks to find the paper.
+    func testShakeJoltsTheInkTheSameWayEveryTimeUntilReRolledAndUndoBringsTheOldShakeBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        guard let blank = currentPaper(canvas, "at launch") else { return }
+        guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
+
+        let at = hostPoint(blank.paper, u: 0.3, v: 0.3)
+        drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
+        guard let rest = currentPaper(canvas, "after drawing"),
+              let restU = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.15, v1: 0.96))
+                  .map({ paperRelative($0, in: rest.paper).u }) else {
+            return XCTFail("The band did not land")
+        }
+        XCTAssertEqual(restU, 0.3, accuracy: 0.04, "Sanity: the band is left of centre")
+
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        pickMode(app, layerIndex: 1, mode: "shake")
+
+        // **What the panel exposes**: three amplitude fields, a speed slider and Re-roll.
+        let field = app.textFields["layerOptions.shakeX.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Shake puts the Shake X field on the panel")
+        XCTAssertTrue(app.textFields["layerOptions.shakeY.field"].exists, "…and Shake Y")
+        XCTAssertTrue(app.textFields["layerOptions.shakeRotation.field"].exists, "…and Rotate Shake")
+        XCTAssertTrue(app.sliders["layerOptions.shakePeriod.slider"].exists, "…and how fast")
+        XCTAssertTrue(app.buttons["layerOptions.shakeReroll"].exists, "…and Re-roll")
+        XCTAssertEqual(app.sliders["layerOptions.shakePeriod.slider"].value as? String, "1", "a new jolt every frame to begin with")
+        field.tap()
+        field.typeText("300\n")
+        let readout = app.staticTexts["layerOptions.shakeXReadout"]
+        XCTAssertTrue(readout.waitForExistence(timeout: 5))
+        XCTAssertTrue(readout.label.hasPrefix("300"), "the readout echoes the typed amplitude: \(readout.label)")
+        attach(app, "1-shake-amplitude-typed")
+        closeRail(app)
+
+        // **What is drawn**: on the bar's first four frames the band is somewhere else — 300 points
+        // of a 2048-point canvas is up to a seventh of the paper — and the same somewhere else when
+        // the playhead comes back to the first frame.
+        let frames = [1, 2, 3, 4]
+        guard let first = bandColumns(app, canvas: canvas, frames: frames, total: total, "first pass") else { return }
+        attach(app, "2-shake-frame-4")
+        XCTAssertTrue(first.contains { abs($0 - restU) > 0.01 },
+                      "the band moved on at least one of the first four frames: \(first) against rest \(restU)")
+        // Two frames suffice for the determinism check (the noise either re-rolls per render or it
+        // does not); four are read where a single near-zero sample could hide a real difference.
+        guard let again = bandColumns(app, canvas: canvas, frames: Array(frames.prefix(2)), total: total, "second pass") else { return }
+        for (a, b) in zip(first, again) {
+            XCTAssertEqual(a, b, accuracy: 0.004, "the same frame draws the same picture on the way back: \(first) vs \(again)")
+        }
+
+        // Re-roll: a new shake. The panel is reached through the layer's row again.
+        openLayerPanel(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let reroll = app.buttons["layerOptions.shakeReroll"]
+        XCTAssertTrue(reroll.waitForExistence(timeout: 5), "the options reopen on the shake rows")
+        reroll.tap()
+        closeRail(app)
+        guard let rerolled = bandColumns(app, canvas: canvas, frames: frames, total: total, "after re-roll") else { return }
+        attach(app, "3-shake-rerolled-frame-4")
+        XCTAssertTrue(zip(first, rerolled).contains { abs($0 - $1) > 0.01 },
+                      "Re-roll drew a different picture on at least one frame: \(first) vs \(rerolled)")
+
+        // One undo: the old shake, exactly.
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        guard let restored = bandColumns(app, canvas: canvas, frames: Array(frames.prefix(2)), total: total, "after undo") else { return }
+        attach(app, "4-shake-undone-frame-4")
+        for (a, b) in zip(first, restored) {
+            XCTAssertEqual(a, b, accuracy: 0.004, "one undo brings the old shake back: \(first) vs \(restored)")
+        }
     }
 }
