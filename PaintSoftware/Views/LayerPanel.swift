@@ -631,10 +631,16 @@ struct LayerOptionsPanel: View {
                                     }
                                     fillWhenPickerOpened = nil
                                 }) {
+                // **No `.accessibilityIdentifier` on this view** — `EffectSettingsBar.colorRow`'s
+                // fix (`06e4e2e`), the same bug reached through a second door. One here stamps that
+                // identifier onto every descendant XCUITest can see, silently replacing
+                // `ColorPickerPanel`'s own (`colorPanel.hexField`, `colorPanel.svSquare`, …) with the
+                // one string: the popover opens, and nothing inside it is reachable by the name it
+                // actually carries. `layerOptions.valueColorButton` above already identifies the
+                // control that opens it.
                 ColorPickerPanel(color: valueColorBinding(index: index))
                     .frame(width: ColorPickerPanel.popoverSize.width,
                            height: ColorPickerPanel.popoverSize.height)
-                    .accessibilityIdentifier("layerOptions.valueColorPicker")
             }
         }
         .padding(.horizontal, 14)

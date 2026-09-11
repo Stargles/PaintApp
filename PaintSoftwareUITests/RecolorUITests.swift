@@ -200,4 +200,57 @@ final class RecolorUITests: PaintUITestCase {
         shot.lifetime = .keepAlways
         add(shot)
     }
+
+    /// **Small-defects batch, 2026-09-11: the recolour swatch's popover was unreachable by name.**
+    /// `swatch(_:_:)` wrapped its `ColorPickerPanel` in its own
+    /// `.accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)Picker")` — the same
+    /// `colorRow` bug (`06e4e2e`) found a third time in `EffectSection.swift`. The test above only
+    /// ever reaches a swatch's colour through its *eyedropper*, so it never drove this door; this one
+    /// taps the swatch itself and types into the panel that opens.
+    ///
+    /// Watched failing with the identifier put back on `swatch`'s `ColorPickerPanel`:
+    /// `colorPanel.hexField` never appears, though the popover visibly opens over the swatch.
+    func testTheFromSwatchOpensAReachableColourPicker() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        // Recolour is past the Blend Mode menu's first ~33 realized cells (BUGS.md, 2026-08-30) —
+        // `swipeUp()` on the menu's own `CollectionView`, not a coordinate and not the cell, is what
+        // actually scrolls it and realizes further cells (`OptionsPanelUITests.scrollMenuTo`'s doc).
+        let recolourItem = app.buttons["layerOptions.blendMode.recolour"]
+        let menu = app.collectionViews.firstMatch
+        for _ in 0..<10 {
+            if recolourItem.exists { break }
+            guard menu.exists else { break }
+            menu.swipeUp()
+        }
+        XCTAssertTrue(recolourItem.waitForExistence(timeout: 5), "Recolour should be reachable in the menu")
+        recolourItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let addColour = app.buttons["effectSettings.recolorAddEntry"]
+        XCTAssertTrue(addColour.waitForExistence(timeout: 5))
+        addColour.tap()
+        let fromSwatch = app.buttons["effectSettings.recolorEntry.0.from"]
+        XCTAssertTrue(fromSwatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(fromSwatch.value as? String, "808080", "Premise: a new pair starts grey")
+        fromSwatch.tap()
+
+        let hex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hex.waitForExistence(timeout: 5), """
+            The swatch must open `ColorPickerPanel` reachably by name — an `.accessibilityIdentifier` \
+            on the popover itself shadows this field with its own string, and the popover then opens \
+            with nothing inside it findable.
+            """)
+        setHexField(app, hex, to: "3366CC")
+        app.staticTexts["layerOptions.subMenuTitle"].tap()   // dismiss, away from the swatch
+
+        XCTAssertEqual(fromSwatch.value as? String, "3366CC", "the pick reached the model")
+    }
 }

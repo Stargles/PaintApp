@@ -1125,6 +1125,11 @@ struct GradientStopsEditor: View {
                 // `Effect.gradientTable` maps luminance to an opaque colour. This is the one
                 // capability the stock `ColorPicker` had that unifying on `ColorPickerPanel` would
                 // have dropped, so the panel grew the same flag rather than the flag being lost.
+                // **No `.accessibilityIdentifier` on this view** — `colorRow`'s fix (`06e4e2e`), the
+                // same bug this file's own header now flags twice over. One here stamps that
+                // identifier onto every descendant XCUITest can see, replacing `ColorPickerPanel`'s
+                // own (`colorPanel.hexField`, …) with the one string. The swatch button above already
+                // carries `effectSettings.gradientStop.\(index).color`.
                 ColorPickerPanel(color: Binding(
                     get: { stops[index].color.color },
                     set: { picked in
@@ -1136,7 +1141,6 @@ struct GradientStopsEditor: View {
                 ), supportsOpacity: false)
                 .frame(width: ColorPickerPanel.popoverSize.width,
                        height: ColorPickerPanel.popoverSize.height)
-                .accessibilityIdentifier("effectSettings.gradientStop.\(index).picker")
             }
 
             Slider(value: Binding(
@@ -1297,13 +1301,17 @@ struct RecolorEntriesEditor: View {
             // `supportsOpacity: false` for `GradientStopsEditor`'s reason: an entry's alpha is not
             // the artist's to set — the from end is matched on colour alone and the to end is laid
             // down at the pixel's own coverage.
+            // **No `.accessibilityIdentifier` on this view** — the same `colorRow` bug (`06e4e2e`)
+            // found a third time while sweeping this file for TODO's small-defects batch, 2026-09-11.
+            // One here would stamp that identifier onto every descendant XCUITest can see, replacing
+            // `ColorPickerPanel`'s own (`colorPanel.hexField`, …). The swatch button above already
+            // carries `effectSettings.recolorEntry.\(index).\(end)`.
             ColorPickerPanel(color: Binding(
                 get: { color(index, end).color },
                 set: { picked in write(index, end, picked.effectColor) }
             ), supportsOpacity: false)
             .frame(width: ColorPickerPanel.popoverSize.width,
                    height: ColorPickerPanel.popoverSize.height)
-            .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)Picker")
         }
     }
 

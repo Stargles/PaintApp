@@ -485,6 +485,49 @@ final class OptionsPanelUITests: PaintUITestCase {
             """)
     }
 
+    /// **Small-defects batch, 2026-09-11: the gradient-stop colour swatch's popover was unreachable
+    /// by name.** `EffectSection.stopRow` wrapped its `ColorPickerPanel` in its own
+    /// `.accessibilityIdentifier("effectSettings.gradientStop.\(index).picker")` — the same
+    /// `colorRow` bug (`06e4e2e`) reached through a second door: the popover opened, but every one of
+    /// `ColorPickerPanel`'s own identifiers, `colorPanel.hexField` included, was shadowed by that one
+    /// string on the view containing them. Reaches the panel through the stop-0 swatch and types a
+    /// hex, `LayerUITests.testTheCanvasColourRowOpensTheSamePickerTheBrushUses`'s proof of the same
+    /// shape.
+    ///
+    /// Watched failing with the identifier put back on `stopRow`'s `ColorPickerPanel`:
+    /// `colorPanel.hexField` never appears, though the popover visibly opens.
+    func testTheGradientStopColourSwatchOpensAReachableColourPicker() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let gradientItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.gradientmap")
+        XCTAssertTrue(gradientItem.waitForExistence(timeout: 5),
+                      "The Blend Mode menu should list Gradient Map")
+        gradientItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let stopSwatch = app.buttons["effectSettings.gradientStop.0.color"]
+        XCTAssertTrue(stopSwatch.waitForExistence(timeout: 5), "Gradient Map's first stop did not open")
+        XCTAssertEqual(stopSwatch.value as? String, "000000", "Premise: the default gradient starts black")
+        stopSwatch.tap()
+
+        let hex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hex.waitForExistence(timeout: 5), """
+            The swatch must open `ColorPickerPanel` reachably by name — an `.accessibilityIdentifier` \
+            on the popover itself shadows this field with its own string, and the popover then opens \
+            with nothing inside it findable.
+            """)
+        setHexField(app, hex, to: "3366CC")
+        // Dismiss the popover away from the swatch it is anchored to, `testChangingBloomsColoursChanges
+        // WhatIsDrawn`'s move.
+        app.staticTexts["layerOptions.subMenuTitle"].tap()
+
+        XCTAssertEqual(stopSwatch.value as? String, "3366CC", "the pick reached the model")
+    }
+
     // MARK: - TODO (60): Dither and Hue Colorize, the two menu entries this item adds
 
     /// The red-channel byte values over a small grid inside `dxRange`×`dyRange`, **excluding anything

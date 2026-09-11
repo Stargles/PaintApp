@@ -963,6 +963,45 @@ final class LayerPanelControlsUITests: PaintUITestCase {
                        "…and only a value layer's: setLayerFill refuses every other kind anyway")
     }
 
+    /// **Small-defects batch, 2026-09-11: the value-layer colour swatch's popover was unreachable by
+    /// name.** The row above this one wrapped its `ColorPickerPanel` in its own
+    /// `.accessibilityIdentifier("layerOptions.valueColorPicker")` — the same `colorRow` bug
+    /// (`06e4e2e`) that `testTheCanvasColourRowOpensTheSamePickerTheBrushUses` below already proves
+    /// fixed for the canvas-background swatch, reached through a second door here. Opens the same
+    /// value layer that test above creates and types into the panel `layerOptions.valueColorButton`
+    /// opens.
+    ///
+    /// Watched failing with the identifier put back on the panel: `colorPanel.hexField` never
+    /// appears, though the popover visibly opens over the swatch.
+    func testTheValueLayerColourSwatchOpensAReachableColourPicker() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let swatch = app.buttons["layerOptions.valueColorButton"]
+        XCTAssertTrue(swatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(swatch.value as? String, "808080", "Premise: it arrives mid-grey")
+        swatch.tap()
+
+        let hex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hex.waitForExistence(timeout: 5), """
+            The swatch must open `ColorPickerPanel` reachably by name — an `.accessibilityIdentifier` \
+            on the popover itself shadows this field with its own string, and the popover then opens \
+            with nothing inside it findable.
+            """)
+        setHexField(app, hex, to: "3366CC")
+        // Dismiss away from the swatch it is anchored to — `LayerStackCell`'s own row still shows
+        // once the panel closes, and tapping it a second time would reopen the options rather than
+        // dismiss the popover, so this taps the panel's own title instead.
+        app.staticTexts["layerOptions.title"].tap()
+
+        XCTAssertEqual(swatch.value as? String, "3366CC", "the pick reached the model")
+    }
+
     /// **The transformation layer, reachable from a fresh document — and this test exists because
     /// once it was not.** Since 2026-09-11 it is a kind of its own with its own `+` entry
     /// (TRANSFORM_LAYER.md §2 ruling 2), and the route is `+` → Transform Layer → its panel → Move.
