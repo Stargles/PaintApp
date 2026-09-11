@@ -78,7 +78,8 @@ case fails to compile until every arm is written, which is the safety this list 
 
 **Status** — not started, specified by the owner 2026-09-10. **This is a feature with a spec's worth of
 decisions in it, not a row — it wants a design document and a conversation before a line is written**,
-the way KEYFRAMES.md and RENDER.md were.
+the way KEYFRAMES.md and RENDER.md were. **The design document is [TRANSFORM_LAYER.md](TRANSFORM_LAYER.md)
+(2026-09-11): two homes, the block-span question, and seventeen questions for the owner in §9.**
 
 > *"make the transform layer its own layer type instead of attached to the value layer. Additionally,
 > add these modes to it: parralax, rotate, repeat, screen shake, duplicate offset."*

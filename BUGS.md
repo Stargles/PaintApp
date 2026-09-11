@@ -3,6 +3,19 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A hidden transformation layer still poses everything beneath it (2026-09-11)
+
+Hide a transformation layer with its eye and the drawings under it stay moved. `RenderTree.renderNodes`'
+pose accumulator composes `layers[index].layerTransform?.mapping(atFrame:)` into `carried` with no
+`isVisible` test, and the pose is spent in `leafSnapshots` before the compositor ever sees the layer's
+own node — whose `isVisible` flag is honoured, but only for the pixels the transform layer does not
+have. A hidden *grade* grades nothing, because `Compositor.draw` and `MetalCompositor` guard
+`node.isVisible` before reaching `node.effect`; the two payloads of one kind answer the eye
+differently. Found reading the accumulator for TRANSFORM_LAYER.md, which inherits the fix for every
+mode (§0, §7); no test in `TransformLayerLogicTests` or `TransformLayerEntryLogicTests` names
+visibility. The folder form does not share it — a hidden folder's whole subtree is skipped by the
+compositor, so its `resolvedPoseMapping` reaches nothing.
+
 ## `duplicateLayer` drops every cel's pose channels, its held poses, its in-between recipe — and the layer's own transform (2026-09-11)
 
 `CanvasManager.duplicateLayer(at:)` builds each copied cel with a memberwise `Cel(...)` that names
