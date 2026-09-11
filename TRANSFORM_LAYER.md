@@ -221,7 +221,11 @@ Parallax can hand each child its share; the folder's panel carries the same Mode
 folder in Rotate integrates from frame 0**, since it has no bar to start from — the one place the two
 homes differ, and a question for the owner if a folder's spin should have a start of its own.
 
-What is **not** keyable and lives on the mode itself: repeat's period, shake's frequency and seed.
+What is **not** keyable lives on `LayerPose` beside the mode rather than on the two homes: repeat's
+period (`repeatPeriod`), shake's frequency (`shakePeriod`) and seed (`shakeSeed`) — three fields, each
+encoded only when it is not the default, so a pose in Move writes the manifest it wrote before. **Built
+in stages 4 and 5**: that placement is what makes a folder's pose carry the shake's seed for free and
+what keeps "a seed never outlives the pose it qualifies" structural, `LayerPose.track`'s own argument.
 
 ### 3.4 Duplicate offset is an `Effect`, and here is what it strains
 
@@ -409,10 +413,22 @@ would otherwise silently stop the walk looping.
 showing frame 5, `activeCelIndex(inLayer:atFrame: 13)` finds no cel and `ensureCelAtCurrentFrame`
 would mint a one-frame block the artist cannot see. Every "at the playhead" read on an entry beneath a
 repeat — drawing, the Move box, the settings bar, `effectiveOpacity`, the channel-list navigator,
-§3.4.1's compensation frame — has to go through the remap or refuse. **Recommend the redirect**: the
-edit lands on the source frame's cel (§5.27's *"a lasso means what it means on screen"* applied to
-time), with the timeline drawing the repeated span as ghost blocks so the artist can see it is one.
-The refusal with a notice is the cheaper first stage.
+§3.4.1's compensation frame — has to go through the remap or refuse. **The redirect was built (stage
+5, ruling 13)**: the edit lands on the source frame's cel (§5.27's *"a lasso means what it means on
+screen"* applied to time), with the timeline drawing the repeated span as ghost blocks so the artist
+can see it is one. `CanvasManager.displayedFrame(forLayer:atFrame:)` / `displayedCelIndex` read the
+render walk's per-leaf source frame (behind a one-scan exit for documents with no Repeat), and **the
+drawing path goes through them**: `ensureCelAtCurrentFrame` (which also *spawns* at the source frame
+when it is empty), the live host's tiers, the stroke's lift, the spawned block, the selection clip, the
+live derived preview, the thumbnail install, `activeLayerIsVector` and an imported image. **What still
+reads the playhead's own frame, and is the remainder**: the Move box and the lasso (`SelectionModels`,
+`CanvasManager+LassoMove`), text and shape placement, animation-group membership, the panel row's
+thumbnail and the onion skin. On a repeated frame those see the cel the playhead sits on — a held block,
+or none — exactly as they would on an empty frame today, which is the silent half of case 3 and is
+listed here rather than left to be found. The ghost blocks are `TimelineRepeatGhostBand`: one dashed
+outline over a dark wash per run of one source drawing, computed structurally
+(`repeatGhostSegments`, the layout key cannot afford a walk per frame) and pinned against the walk on
+a nested fixture.
 
 **Not a cel operation.** Duplicate is a copy and Extend to End is a hold; both are destructive of the
 relationship. A repeat is a reference — edit the walk once and every cycle follows — and it applies to
@@ -452,7 +468,7 @@ hold a rotation, key the speed to 0; to hold a shake, key its amplitudes.
 | §2.28 union, computed never stored | mode scalars ride `channelTracks` through `KeyframeState`; no new store | none — by §3.3's choice |
 | §2.4 / §3.1 time bases | layer tracks stay absolute; repeat remaps the **read**, never the storage | repeat |
 | §3.4.1 compensation, `C` and `I` cancel | `I` is per entry under parallax and per frame under rotate/shake, but it is one value per cel, so it still cancels; under repeat it must be read at the **source** frame | repeat |
-| RENDER §2.16 / §3.3, same frame same bytes | the resolved pose is the one value in the version; shake's noise is pure; repeat is the identity key. **And the baker has to be told** — `FrameBaker.StructuralStamp` reads the tree, which carries no pose by design, so it now stamps the container poses (base, track, mode) and the two scalars; before stage 3 a moved box after the first sweep was a permanent miss on the display path, found by the rotate cold-start test drawing the ink unturned | shake |
+| RENDER §2.16 / §3.3, same frame same bytes | the resolved pose is the one value in the version; shake's noise is pure; repeat is the identity key. **And the baker has to be told** — `FrameBaker.StructuralStamp` reads the tree, which carries no pose by design, so it now stamps the container poses (base, track, mode, **the shake's seed and period, the repeat's period**) and the scalars (rotate speed, parallax share, **the three shake amplitudes**); before stage 3 a moved box after the first sweep was a permanent miss on the display path, found by the rotate cold-start test drawing the ink unturned. `FrameBakerLogicTests` drops each field and expects red | shake |
 | §4.5 three keys | nothing new to carry — but a test over a **raster** fixture must go red if a mode's function is dropped from the resolved map | rotate, shake |
 | §2.3 re-pose, never resample | the four pose modes ride the derivation; duplicate offset resamples *pixels* because it is a grade on the accumulator, which is what a grade is | — |
 | §11.7 six rows | the band draws the authored pose; the function is not a curve | rotate, shake |
@@ -471,14 +487,24 @@ reachability XCUITest from a fresh document and an assertion on what is drawn, p
 | 1 ✅ | **The span** (§4, rulings 1 and 17) — pixel-less leaves act inside their block, the grade included; Move outside the block refused with `CanvasNotice.moveOutsideTransformBlock`; BUGS.md's value-layer entry closed. **Shipped 2026-09-11.** | a pose at a frame past the block resolves to nil in `layerPoses`; a grade past its bar is the ungraded floor, byte for byte on both backends; shorten the bar → the composite past it equals the un-posed one and the keys beyond are still listed and still drawn; lengthen → byte-identical to before; the refusal and the notice, from the toolbar and the channel row; `TransformLayerSpanUITests` drives all of it from a fresh document |
 | 2 ✅ | **Parallax** — `parallaxShare` row, item counting, the per-entry blend, the panel's item list. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: four drawings → leaf maps at 100/75/50/25 of the box's translation; a folder is one item; a tint between them is none; −50 moves opposite and 150 overshoots; half a turn is 45° and half a 4× scale is 2.5× (the factored blend); a keyed share; reorder keeps a typed share with its layer and re-defaults the rest; the panel's list is the render's items; the first edit on a keyed item seeds keyframe A with the positional default; the box drag moves each item live; a folder in Parallax shares over its children. `TransformLayerModesUITests` drives `+` → Transform Layer → Mode → Parallax → the list → Move → drag from a fresh document and measures the four bands off the canvas |
 | 3 ✅ | **Rotate** — `rotateSpeed` row, integration from the block start, box-centre pivot pre-composed, `movesItsContents`. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: 15°/frame → 90° at `s + 6` about the box centre with `s = 4`, nothing at `s`, nothing before the block; keyed 15→0 integrates (no backward snap, holds where it stopped); a mark holds the box, not the angle, and keeps the mode; `hasContainerPoseInForce` reads the mode and the speed's track; under a keystoned box the orbit of one point is the conic (four extremes, and not a circle about the mapped centre); a raster fixture on both backends is drawn turned and reddens when the function is dropped from the map, same frame same bytes, the version differing across frames; a folder in Rotate spins its children from frame 0. `TransformLayerModesUITests` types 15 into the speed field, reads the frames-per-turn line, scrubs six frames in and measures the quarter turn off the canvas |
-| 4 | **Shake** — three rows, `period`, `seed`, the noise, re-roll. | one frame pinned against a hand-computed value; same frame twice → same map; two seeds differ; composes over authored keys; re-roll is one undo step |
-| 5 | **Repeat** — the frame carry in `renderNodes` / `leafSnapshots`, the period, the edit redirect or refusal, the ghost blocks. | `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` (the cache, for free); cel-local keys ride; an opacity curve beneath repeats; an edit at a repeated frame lands on the source cel or is refused with the notice |
+| 4 ✅ | **Shake** — `shakeX`/`shakeY`/`shakeRotation` rows, `LayerPose.shakePeriod` and `shakeSeed`, value noise smoothstepped between beats, Re-roll. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: the noise pinned at one raw value against a Python splitmix64 and a second Swift spelling; a 10-point amplitude at rest moves a point `10·n(seed, 0, k)` at frame *k* and the same frame twice is the same map; two seeds differ; a 2× box shakes 20 for 10 and a Move key rides under the jolt (the order of composition); the period eases between beats with smoothstep; the beats count from the block's start so a slid bar shakes the same way; the mode switch mints a seed, Re-roll is one undo step named for it, the period is clamped and undoable; `movesItsContents` reads the three amplitudes' tracks; a raster fixture on both backends is drawn `10·n(k)` to the side, same frame same bytes, two versions for two frames; the seed, period and amplitudes round-trip through both manifests and a real package. `FrameBakerLogicTests`: the seed, the period and an amplitude are structural edits. `TransformLayerModesUITests` draws a band, `+` → Transform Layer → Mode → Shake, types 300, and reads the band moved on the bar's first frames, the same on the way back, elsewhere after Re-roll, and back after one undo |
+| 5 ✅ | **Repeat** — the (pose, frame) carry in `renderNodes` / `leafSnapshots` / `contentVersion`, `LayerPose.repeatPeriod` typed and pre-filled, the edit redirect, the ghost blocks. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: `leafFrames` is `s + ((f − s) mod p)` and the composite at a repeated frame is the source frame's bytes on both backends, blank past the bar; `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` (the cache, for free); an opacity curve, a Rotate layer and a folder beneath all repeat; a repeat under a repeat composes (periods 5 over 2, chosen to differ from the inner alone) and a hidden one loops nothing; `movesItsContents` reads the period; the pre-fill is where the drawings beneath end (a held background makes it 12, a tint counts for nothing, measured from the bar's start, the bar's length with nothing beneath), typed as one undo step, refused on a folder; drawing at a repeated frame is handed the source cel, spawns at the source frame when it is empty, and ignores a held block under the playhead; the ghost segments run by source drawing and agree with the walk frame for frame on a nested fixture; the period survives a manifest and a package. `FrameBakerLogicTests`: the period is a structural edit. `TransformLayerModesUITests` cuts the born block twice through the cel menu, draws on frames 1–3, `+` → Transform Layer → Mode → Repeat, reads the period pre-filled to 12, types 3, reads the ghost band's value off the row, and measures frame 5 drawing frame 2's band, frame 4 frame 1's, and a band drawn on frame 5 appearing on frame 2 and not on frame 3 |
 | 6 | **Duplicate offset** — the case, two passes on both backends, the eleven CPU blend formulas, the box writer, strip reach. | parity byte-for-byte per mode; rim and intersection over a known shape; `testNoEffectChangesAlpha` holds; the box commit writes the five scalars; a strip seam test at a large offset |
 
-Stages 4 and 5 are independent of each other and both unblocked; 6 depends on nothing here. The mode
-picker in `LayerPanel.transformModeRow` is where each of 4–5 adds its entry, as a case of
-`TransformLayerMode` (`Models/TransformLayerMode.swift`) — **not `TransformMode`, which was taken**:
-that name is the Move bar's Uniform / Freeform / Distort picker, and stage 2 found the collision on
-the day it introduced the enum. The mode lives on `LayerPose.mode`, so a folder's pose carries it for
-free (§3.3); the scalars a mode reads are `TargetChannel` rows on the two homes, because a key path
-through an optional payload is not writable.
+Stage 6 depends on nothing here and is what remains. The mode picker in `LayerPanel.transformModeRow`
+lists every case of `TransformLayerMode` (`Models/TransformLayerMode.swift`) on a layer and
+`TransformLayerMode.folderCases` on a folder, which is all of them but Repeat — **not `TransformMode`,
+which was taken**: that name is the Move bar's Uniform / Freeform / Distort picker, and stage 2 found
+the collision on the day it introduced the enum. The mode lives on `LayerPose.mode`, so a folder's
+pose carries it for free (§3.3); the scalars a mode reads are `TargetChannel` rows on the two homes,
+because a key path through an optional payload is not writable; what is not keyable (§3.3's closing
+paragraph) sits on `LayerPose` beside the mode.
+
+**Two things stages 4 and 5 found that the design did not say.** A leaf inside a *folder* beneath a
+Repeat is walked at the source frame, and the walk's per-leaf `frames` map has to record that leaf
+against the **document** frame rather than the folder's own walk frame — recorded against the latter,
+the leaf inside the folder read as its own source and `leafSnapshots` looked its cel up at the
+playhead, so the folder half of ruling 12 was blank until `renderNodes` grew a `documentFrame`
+parameter. And a container's rank is the topmost `layers` index it holds, so a fixture that restacks
+a folder to the bottom and *then* adds a layer into it has lifted the folder back above the looper —
+the nested-repeat tests state their order as a premise for that reason.
