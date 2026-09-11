@@ -142,7 +142,11 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         // What the artist does next: drag the edge back out. The bar covers the second key's frame
         // again, but the cropped key itself does not come back — only undo brings it back, exactly as
         // for a drawing's own crop.
-        performDrag(app, identifier: "timeline.cel.1.0.rightHandle", totalDelta: 300)
+        //
+        // More distance than the shrink used (`performDrag`'s own doc note: a synthetic drag can
+        // undershoot by a timing-dependent amount) — the shrink only had to clear the second key by
+        // one frame, and a same-sized drag back landed on exactly that frame rather than past it.
+        performDrag(app, identifier: "timeline.cel.1.0.rightHandle", totalDelta: 450)
         guard let lengthened = readCel(app, layerIndex: 1, celIndex: 0) else {
             return XCTFail("Could not read the bar after lengthening")
         }

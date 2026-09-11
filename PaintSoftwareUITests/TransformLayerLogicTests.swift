@@ -867,6 +867,64 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertEqual(crop.frames, [8], "only the speed's discarded key is named, not opacity's")
     }
 
+    /// **A drag is many `.changed` calls on one open gesture, and each one has to crop from the
+    /// gesture's own baseline, not from what the previous call's insertion just left** — a real bug
+    /// this file's own review found the hard way: `TransformLayerSpanUITests`' drag went red with no
+    /// crop banner at all, and `NSLog` tracing showed why — `frames=[8]`, then `[7]`, `[6]`, `[5]`…,
+    /// a *different* key discarded on every tick because `cropTransformLayerKeysToBlocks` read the
+    /// **live** track, already carrying the previous tick's boundary insertion, and cropped *that*
+    /// again. The very last tick found nothing left to discard, so the committed crop was empty and
+    /// the banner never appeared — exactly the shape `resizeCelLeftEdge`'s own comment warns about
+    /// for the cel-level crop one door over, reached fresh through this one.
+    ///
+    /// The fix resets `transform`/`channelTracks`/`keyframeMarks` from `gestureSnapshot`'s baseline
+    /// before every recomputation, mirroring the resized cel's own `transformTracks =
+    /// baselineCel.transformTracks` three lines up. This pins both halves: a multi-tick drag that
+    /// settles past the key reports the key gone (not empty), and a drag that goes past the key and
+    /// back within the same gesture reports nothing, because the last tick recomputes from the
+    /// untouched baseline rather than from an intermediate crop.
+    ///
+    /// Watched failing with the three baseline-reset lines removed from `resizeCelRightEdge`: the
+    /// multi-tick assertion below reads an empty crop and the key survives at a frame no block covers.
+    func testAMultiTickDragCropsFromTheGesturesBaselineNotFromThePreviousTick() throws {
+        let (manager, _) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+        let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+        XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 8], "Premise")
+
+        // Walk the end down one frame at a time, as `TimelineTrackView`'s pan handler does on every
+        // `.changed` — each call recomputing from the same `gestureSnapshot`, exactly as the resized
+        // cel's own crop already does.
+        manager.beginStructureGesture()
+        for end in stride(from: 11, through: 6, by: -1) {
+            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: end)
+        }
+        manager.commitStructureGesture(label: .resizeFrame)
+
+        XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 5],
+                       "the key at 8 is gone and 5 gains the boundary pose — not whatever an "
+                       + "intermediate tick's own insertion left behind")
+        guard case .keyframesCropped(let crop)? = manager.notice?.kind else {
+            return XCTFail("the committed crop is announced, not swallowed by the last tick's own reset")
+        }
+        XCTAssertEqual(crop.frames, [8], "the key actually discarded, from the gesture's one true baseline")
+
+        // And the mirror the fix must not break: past the key and back within *one* gesture (a
+        // single bracket the whole way, not a second commit) keeps it, exactly as it always did for
+        // a cel's own crop — a fresh document, since the first half above already committed its crop
+        // and a *second* gesture on the same track is `testLengtheningAfterACroppedBarDoesNotBringTheKeyBack`'s
+        // case, not this one's.
+        let (outAndBack, _) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+        let outAndBackMover = try XCTUnwrap(outAndBack.layers.firstIndex { $0.name == "mover" })
+        outAndBack.beginStructureGesture()
+        for end in [11, 6, 12] {
+            outAndBack.resizeCelRightEdge(layerIndex: outAndBackMover, celIndex: 0, newEndFrame: end)
+        }
+        outAndBack.commitStructureGesture(label: .resizeFrame)
+        XCTAssertEqual(outAndBack.layers[outAndBackMover].transform?.track.keys.map(\.frame), [0, 8],
+                       "settled back past the key, in the same gesture — nothing was cropped")
+        XCTAssertNil(outAndBack.notice, "nothing to announce")
+    }
+
     /// **A frame past the bar resolves to no pose at all in `layerPoses`, so nothing downstream is
     /// paid for** — no derivation, no cache entry, no canvas-sized render — which is the same safety
     /// property `testADocumentWithNoTransformLayerMintsNoPoses` pins for a document that never had

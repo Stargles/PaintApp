@@ -633,13 +633,33 @@ extension CanvasManager {
         }
         // **TODO (62), reversed (txcrop):** a `.transform` layer's own tracks crop to its blocks too
         // — computed only now, after every pushed predecessor of *this* layer is in its final
-        // position, since `cropTransformLayerKeysToBlocks` reads the whole layer's `cels`. Only when
-        // this edge actually shrank the block (`clampedStart` moved later): a push or a lengthen
-        // never removes coverage. Folded into the one `crop` this function already returns and notes,
-        // rather than a second `noteKeyframeCrop` call, which would *replace* the cel-level report
-        // inside a gesture instead of adding to it.
-        if layers[layerIndex].kind == .transform, clampedStart > baselineCel.startFrame {
-            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertBelow: clampedStart))
+        // position, since `cropTransformLayerKeysToBlocks` reads the whole layer's `cels`. A boundary
+        // key is inserted only when this edge actually shrank the block relative to the *gesture's*
+        // baseline (`clampedStart` moved later): a push or a lengthen never removes coverage and
+        // mints nothing. Folded into the one `crop` this function already returns and notes, rather
+        // than a second `noteKeyframeCrop` call, which would *replace* the cel-level report inside a
+        // gesture instead of adding to it.
+        //
+        // **Reset from the baseline first, on *every* call, exactly as the resized cel's own
+        // `transformTracks` is three lines up** — and for the identical reason, found the hard way by
+        // this feature's own cold-start test. `TimelineTrackView`'s pan handler calls this on every
+        // `.changed` of the same open gesture. Two failures without the unconditional reset, in order:
+        // first, cropping the **live** track (already carrying a previous tick's boundary insertion)
+        // discarded a *different* key on every tick — watched directly: `frames=[8]`, then `[7]`,
+        // `[6]`, `[5]`…, ending on an empty crop and no banner, because the last tick found nothing
+        // left to discard that its own prior insertion hadn't already replaced. Second, *conditioning
+        // the reset itself* on `clampedStart > baselineCel.startFrame` left a mid-gesture crop
+        // standing once the drag came back out past the baseline's own start — the condition is exactly
+        // false there (nothing to shrink further), so nothing ever undid the earlier tick's crop.
+        // The reset must run whether or not this tick shrinks anything; only the *insertion* is
+        // conditional. `cropTransformLayerKeysToBlocks` finding nothing to discard against a
+        // freshly-reset, in-baseline track is the cheap common-case fast path both crops already have.
+        if layers[layerIndex].kind == .transform {
+            layers[layerIndex].transform = baseline[layerIndex].transform
+            layers[layerIndex].channelTracks = baseline[layerIndex].channelTracks
+            layers[layerIndex].keyframeMarks = baseline[layerIndex].keyframeMarks
+            let edge = clampedStart > baselineCel.startFrame ? clampedStart : nil
+            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertBelow: edge))
         }
         noteKeyframeCrop(crop)
         // VIDEO.md §2.2, and this edge crops the **head**: the block's end never moves, so neither
@@ -737,10 +757,18 @@ extension CanvasManager {
         }
 
         // **TODO (62), reversed (txcrop):** the right-edge twin of `resizeCelLeftEdge`'s own crop —
-        // see that function's comment for why this reads after the cascade and folds into one `crop`
-        // rather than a second `noteKeyframeCrop`. Only when this edge actually shrank the block.
-        if layers[layerIndex].kind == .transform, clampedEnd < baselineCel.endFrame {
-            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertAbove: clampedEnd - 1))
+        // see that function's comment for why this resets *unconditionally* from the baseline on
+        // every call (two bugs, not one: cropping the live already-cropped track, and skipping the
+        // reset itself whenever this tick isn't a further shrink, which left a mid-gesture crop
+        // standing once the drag came back out past the baseline's own end) and folds into one `crop`
+        // rather than a second `noteKeyframeCrop`. Only the *insertion* is conditional on this edge
+        // actually shrinking the block relative to the gesture's baseline.
+        if layers[layerIndex].kind == .transform {
+            layers[layerIndex].transform = baseline[layerIndex].transform
+            layers[layerIndex].channelTracks = baseline[layerIndex].channelTracks
+            layers[layerIndex].keyframeMarks = baseline[layerIndex].keyframeMarks
+            let edge = clampedEnd < baselineCel.endFrame ? clampedEnd - 1 : nil
+            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertAbove: edge))
         }
         noteKeyframeCrop(crop)
         // VIDEO.md §2.2's other edge. The block's start never moves, so the head of the crop is
