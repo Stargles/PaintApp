@@ -48,6 +48,117 @@ rather than assuming it still holds.
 
 ---
 
+## (59) Five control and panel fixes the owner asked for in one breath
+
+**Status** — not started, all reported 2026-09-10. Grouped because each is small and they are all the
+same kind of thing: a control that is the wrong size, reaches for the wrong input, or says nothing.
+**One branch, one pass**; they are listed separately only so none is lost.
+
+- [ ] **Transformations hide scale X, scale Y and skew by default.** > *"transformations should hide
+      scale x, scale y, and skew by default. Includes transformation layers and normal move."* So the
+      six-curve band and the Move box both show the short list first. Note the graph editor's channel
+      list is *"a filter"* (KEYFRAMES §11.5), so this is likely that filter's default rather than a new
+      mechanism — and a hidden channel that **carries a curve** must still be findable, or an artist
+      loses an animation they made. Say what happens in that case.
+- [ ] **Box-select on graph nodes is the pen's, not a finger's.** > *"right now in the graph menu, the
+      finger can be used for the box select on nodes. Should only be the pen (in pen mode)"* — i.e. it
+      obeys the existing pencil-only toggle (`paintapp.pencilOnlyDrawing`) rather than inventing a
+      second preference. **XCUITest cannot synthesise a pencil**, so the test for this is a refusal of a
+      *finger*, and the pen half is unprovable here — say so rather than implying coverage.
+- [ ] **The lasso fill menu is far too tall.** > *"the lasso fill menu is way too tall. Try to compact
+      the height. You can expand it horizontally. The paint outside selection for example takes a whole
+      layer for a switch. The animation group section only really needs to be up when in graph editor."*
+      Three things: compact the panel (wider and flatter, which is the owner's standing preference), put
+      the paint-outside switch on a shared row rather than its own, and **hide the Animation Group band
+      unless the graph editor is open** — that band shipped 2026-09-10 and this is the owner's first
+      look at it, so it is feedback on new work rather than old debt.
+- [ ] **Adjusting opacity shows the percentage while you drag.** > *"adjusting opacity should display
+      the % when you do."* Both the layer rail's slider and the folder's. Note the rail is a hand-laid
+      UIKit cell, not SwiftUI.
+
+---
+
+## (60) Bloom takes a colour and Sobel takes a gain
+
+**Status** — not started, reported 2026-09-10.
+
+> *"some changes and new effects: ability to change the color of bloom, ability to change the gain of
+> sobel"*
+
+Both are existing effects gaining a parameter, so the work is the shader, the parameter plumbing and the
+settings UI rather than anything new in the pipeline. **Two things already decided that bear on it:**
+EFFECT_BACKDROP.md rules that Bloom and Sobel each get an artist-facing choice of input, and that
+**Sobel's new default changes how it looks in existing documents** — so this pass must not silently
+change it a second time. And a Sobel divisor has been mis-debugged here before (PERFORMANCE/CLAUDE.md
+record a session "fixing" three effects that were already correct, because the failing run predated the
+rebuild): **diff the constant a test names against the value it reports before believing a numeric red.**
+
+---
+
+## (61) The transform layer becomes its own layer type, with five new modes
+
+**Status** — not started, specified by the owner 2026-09-10. **This is a feature with a spec's worth of
+decisions in it, not a row — it wants a design document and a conversation before a line is written**,
+the way KEYFRAMES.md and RENDER.md were.
+
+> *"make the transform layer its own layer type instead of attached to the value layer. Additionally,
+> add these modes to it: parralax, rotate, repeat, screen shake, duplicate offset."*
+
+**6a — parallax.** > *"Parralax will look at all the child layers or groups directly under it in the
+tree (child group counts as one item, stuff in the group do not). When moving, the move layer thing
+proportionally applies to these layers, while each layers parralax % is adjustable (slider from 0 to
+100, but also can input negative values or higher). Default is proportional, for example with 4 layers,
+it is 100%, 75, 50, 25."*
+
+**6b — rotate.** > *"In rotate you input the rotation speed. I also like the functionality of having an
+easy interface for rotating in elipses like they are in perspective. I think it could easily be
+achieved. Just make the center of rotation the center of the box. Perspective is achieved by if the user
+wishes to switch to distort."*
+
+**6c — repeat.** > *"repeat layer: this layer is a bit different from the others. It will simply repeat
+the cels under it in a loop until the repeat cel ends."*
+
+**6d — screen shake.** > *"screenshake is self explanatory. Shake x, shake y, rotate shake sliders would
+be preferred so that they can be keyframed."* — so the three amounts are channels, which means they are
+`TargetChannel` rows (KEYFRAMES §3.6) and the second, third and fourth non-pose channels after opacity.
+
+**6e — duplicate offset.** > *"the idea behind this is that it duplicates whatever is undeneath it, makes
+it a solid color, then you resize or offset it and blend it with whatever is underneath it. This is
+useful for rim lighting and shadows. It should come with the option to color the rim (areas where
+original layer present but not duplicate layer) or the intersection (areas where both bottom and top
+layer are present), default to rim. Thus, this layer must have a color option, move box, and blend mode.
+Note: this may not belong in the transform layers, it might be better suited for a value layer effect. I
+prefer value layer effect but do whatever is cleanest."*
+
+**What to settle in the design, because these are not all the same shape:** 6a, 6b and 6d are *poses* —
+they produce a transform per frame, which is what a transformation layer already is. **6c is not a
+transform at all** (it re-times the cels beneath it, which is a timeline operation), and **6e is a
+compositing operation** (it reads what is below, derives a mask, and blends) — the owner has already
+spotted that and prefers it as a value-layer effect. So the honest answer may be *three* homes rather
+than one layer type with five modes, and the spec should say which and why rather than forcing them
+together. The owner's own instruction is **"do whatever is cleanest"**.
+
+---
+
+## (62) Keyframes and moved objects that end up outside the cel
+
+**Status** — **not started and the ask needs one clarification before anyone designs it.**
+
+> *"keyframes on transform layers or move layers objects outside of the active cel should be deleted. If
+> the cel size is adjusted, then they are cropped out etc. This gets refuted if you have a good reason
+> to keep them in."*
+
+**Two readings, and they are different pieces of work.** (a) *Keyframes* that fall outside the active
+cel's span in the timeline are deleted, and shortening a cel crops the keys beyond its end. (b) Drawn
+*objects* that a transform or Move has pushed outside the canvas are deleted, and changing the canvas
+size crops what now falls outside. The sentence can carry either and "if the cel size is adjusted" reads
+like the first while "objects outside of the active cel" reads like the second.
+**Ask before building.** The owner explicitly invited a refutation, so whichever it is, weigh it: a
+transform track that outlives its cel is cheap to keep and expensive to lose, and ink pushed off-canvas
+is exactly what an artist pulls back next.
+
+---
+
 ## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
 
 **Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
