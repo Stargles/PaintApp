@@ -169,6 +169,50 @@ enum PoseComponents {
             case .skew: return 40
             }
         }
+
+        /// **How far this component may wander across a channel's keys and still not be an
+        /// animation** — and it exists because `!=` is the wrong test for a *derived* number.
+        ///
+        /// `AnimationCurve.isAnimated` asks `keys.contains { $0.value != first.value }`, which is
+        /// exactly right for a stored value an artist typed or dragged and **wrong here**: these six
+        /// are computed by `decompose`, out of quad corners that have been through an addition and a
+        /// subtraction of the same translation. MEASURED 2026-09-11 on the seeded document
+        /// `-uiTestSeedKeyframedMove` builds — a 2048-wide box slid 819.2 points and nothing else —
+        /// the band reported `containerPose.scaleX` as an **animation**, because
+        /// `(2048 + 819.2) - 819.2` is not 2048 in binary floating point and the axis length came
+        /// back as 0.9999999999999998 at one key and 1 at the other.
+        ///
+        /// So `listedAnimationChannelIDs`' own doc — *"a pure translation leaves Scale X, Scale Y,
+        /// Rotation and Skew flat"* — was a statement about the mathematics that the arithmetic did
+        /// not keep, and every consumer of `Channel.isAnimated` inherited the lie: the band drew a
+        /// solid curve where §11.4 says dashed, the channel list dropped the word "flat" from the
+        /// row, and TODO (59)'s default declined to hide the one row the owner asked it to.
+        ///
+        /// **Chosen far below anything an artist can author and far above the noise**: the measured
+        /// error is ~1e-16 in a scale and ~1e-14 degrees in an angle, and a scale that differs by one
+        /// part in a billion or an angle by a millionth of a degree is not an animation on any
+        /// canvas. It is deliberately *not* a relative tolerance: `x` and `y` are canvas points and
+        /// their zero is the canvas origin, so a proportional test would be coarse at the right of a
+        /// wide canvas and meaningless at the left.
+        var flatTolerance: Double {
+            switch self {
+            case .x, .y: return 1e-6          // a millionth of a pixel
+            case .scaleX, .scaleY: return 1e-9 // one part in a billion
+            case .rotation, .skew: return 1e-6 // a millionth of a degree
+            }
+        }
+    }
+
+    /// **Whether one decomposed component actually moves across a channel's keys** —
+    /// `AnimationCurve.isAnimated`'s rule with `Component.flatTolerance` in place of `!=`, and the
+    /// only place a pose channel's `isAnimated` is decided.
+    ///
+    /// Compared against the **first** value rather than pairwise, exactly as `AnimationCurve` does,
+    /// so the two predicates answer the same question about the same shape of data and a reader
+    /// moving between them is not learning a second rule.
+    static func isAnimated(_ values: [Double], component: Component) -> Bool {
+        guard let first = values.first, values.count > 1 else { return false }
+        return values.contains { abs($0 - first) > component.flatTolerance }
     }
 
     /// A pose's six numbers.

@@ -412,6 +412,54 @@ final class PoseBandLogicTests: XCTestCase {
                        "and starts with the same three switched off")
     }
 
+    /// **A pure slide on a full-size canvas leaves Scale X flat, and exact equality said otherwise.**
+    ///
+    /// The numbers are the ones `-uiTestSeedKeyframedMove` builds and the owner works at
+    /// (PERFORMANCE.md §1): a 2048-wide box slid `2048 * 0.4` points and nothing else.
+    /// `(2048 + 819.2) - 819.2` is not 2048 in binary floating point, so `decompose` reads the x
+    /// axis back a few bits short and `AnimationCurve.isAnimated`'s `!=` called the channel an
+    /// animation — which drew it solid where §11.4 says dashed, dropped the word "flat" from its row
+    /// in the channel list, and made TODO (59)'s default decline to hide the one row the ask names.
+    ///
+    /// **The two operands are the decomposed values and the verdict**, and the first is what stops
+    /// this passing vacuously: the test asserts the two keys' Scale X are *not* bit-equal — so the
+    /// fixture really does carry the error the tolerance exists for — and then that the channel is
+    /// still not an animation and is still hidden by default.
+    func testAFullSizeSlideLeavesScaleXFlatDespiteTheDecompositionsFloatingPointNoise() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        let wide = CGRect(x: 0, y: 0, width: 2048, height: 1024)
+        manager.layers[1].fill = nil
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(restingIn: wide),
+            track: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: wide)),
+                .init(frame: 11, pose: PoseQuad(box: wide,
+                                                mappedBy: CGAffineTransform(translationX: 2048 * 0.4,
+                                                                            y: 0)))]))
+        manager.currentLayerIndex = 1
+        manager.isGraphEditorOpen = true
+
+        let scaleX = try XCTUnwrap(channel(try listed(manager),
+                                           PoseChannelID.container.parameterID(.scaleX)))
+        let values = scaleX.curve.keys.map(\.value)
+        XCTAssertEqual(values.count, 2, "PREMISE: two keys")
+        XCTAssertNotEqual(values[0], values[1],
+                          "PREMISE: the decomposition really is bit-unequal across a pure slide — "
+                          + "without this the tolerance would be testing nothing")
+        XCTAssertEqual(values[0], values[1], accuracy: 1e-9,
+                       "…and the difference is float noise, not a scale the artist authored")
+
+        XCTAssertFalse(scaleX.isAnimated,
+                       "A pure slide leaves Scale X flat, which is what `listedAnimationChannelIDs` "
+                       + "already claimed and `!=` did not deliver")
+        XCTAssertFalse(manager.listedAnimationChannelIDs(of: .layer(id: manager.layers[1].id))
+            .contains(PoseChannelID.container.parameterID(.scaleX)),
+                       "…and the two readers of that verdict agree, as they are pinned to")
+        XCTAssertFalse(try drawnIDs(manager).contains(PoseChannelID.container.parameterID(.scaleX)),
+                       "…so TODO (59)'s default hides it on the document the owner actually works on")
+    }
+
     /// **A grade's channels are untouched by the default**, which is the boundary the rule draws:
     /// the ask is about transformations, and an effect parameter called anything at all keeps being
     /// drawn.

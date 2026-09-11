@@ -628,7 +628,13 @@ enum TimelineGraphBand {
                                         modelDomain: component.modelDomain,
                                         format: component.format,
                                         descriptorIndex: index,
-                                        isAnimated: curve.isAnimated,
+                                        // **`PoseComponents.isAnimated`, not `curve.isAnimated`** —
+                                        // see `Component.flatTolerance`. These six are *derived*
+                                        // numbers, and an exact `!=` reported a pure slide's Scale X
+                                        // as an animation because the quad's corners had been
+                                        // through a float round trip.
+                                        isAnimated: PoseComponents.isAnimated(values,
+                                                                              component: component),
                                         gestures: .dragAndHandles,
                                         frameWindows: windows))
                 index += 1
