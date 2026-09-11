@@ -52,6 +52,10 @@ final class CelSpanCropUITests: PaintUITestCase {
     /// which is what draws the diamonds) and on the banner's case code, not on anything stored.
     func testShorteningABlockPastAKeyframeRemovesItsDiamondSaysSoAndUndoBringsItBack() throws {
         let app = XCUIApplication()
+        // The banner is read after the drag and `CanvasNotice.duration` is 2.6 s, which is a race no
+        // `waitForExistence` can win on a loaded machine — `UITestSeeds.noticeDurationOverride`
+        // carries the measurement. Simulator-only, nil in any shipped build.
+        app.launchArguments += ["-uiTestNoticeSeconds", "120"]
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))

@@ -120,6 +120,22 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(crop.discarded, [TransformChannelID.cel.id: [9]], "attributed to its channel")
     }
 
+    /// **The boundary is `frameCount`, and a key on it is outside.** A cel whose end is dragged to 9
+    /// covers frames 0...8, so a key at 9 is one past its last frame and goes; dragged to 10 it
+    /// stays. The off-by-one that keeps a key on the frame *after* the block is the one a `>` would
+    /// make, and no other test here shortens to exactly a key's frame.
+    ///
+    /// Watched failing with `cropped(toFrameCount:)`'s `>=` changed to `>`: the first crop is empty.
+    func testAKeyOnTheFrameJustPastTheNewEndIsOutside() {
+        let manager = fixture()
+        XCTAssertEqual(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 9).frames, [9])
+        XCTAssertEqual(keyFrames(manager), [0, 4])
+
+        let again = fixture()
+        XCTAssertTrue(again.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 10).isEmpty)
+        XCTAssertEqual(keyFrames(again), [0, 4, 9], "a key on the last frame the block covers is inside")
+    }
+
     /// The frames the span still covers show what the artist would expect of a curve that lost its
     /// last key: the pose at frame 4 is what it was, and frame 5 — which used to be a quarter of the
     /// way from key 4 to key 9 — now holds key 4's pose. That is what "cropped" means for the picture,
@@ -495,6 +511,24 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.commitStructureGesture(label: .resizeFrame)
         XCTAssertEqual(croppedNotice(manager)?.frames, [9])
         XCTAssertTrue(manager.history.canUndo, "and the step it promises is on the stack")
+    }
+
+    /// **A cancelled drag reports nothing, then or later.** The verb parked a crop during the drag;
+    /// the cancel recorded no step, so that crop has no step to belong to — and it must not be
+    /// claimed by the next unrelated step, which would announce a crop that never happened.
+    ///
+    /// Watched failing with `pendingKeyframeCrop = nil` removed from `cancelStructureGesture`: the
+    /// `addCel` below raises the resize's crop as its own.
+    func testACancelledDragReportsNothingThenOrLater() {
+        let manager = fixture()
+        manager.beginStructureGesture()
+        manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
+        manager.cancelStructureGesture()
+        XCTAssertNil(manager.notice)
+        XCTAssertNil(manager.pendingKeyframeCrop)
+
+        XCTAssertTrue(manager.addCel(layerIndex: 1, startFrame: 20))
+        XCTAssertNil(manager.notice, "an unrelated step later does not inherit the cancelled drag's crop")
     }
 
     /// A bare call outside any bracket registers no undo step, so it raises nothing: the sentence
