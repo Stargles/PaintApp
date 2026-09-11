@@ -14,103 +14,104 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**No branches, no worktrees, stash empty, no simulator debris.**
+**No branches, no worktrees, stash empty, no simulator debris.** Session 40 closed at `d2205d5`,
+71 commits, everything merged and pushed.
 
-**Fast tier: 3547 total / 3544 passed / 0 failed / 3 skipped**, Debug *and* Release, reconciled at
-each step (3533 → 3540 → 3544, and each increment is exactly the tests added).
+**Fast tier: 3761 total / 3758 passed / 0 failed / 3 skipped, Debug *and* Release**, reconciled
+against a static `func test` count at every step.
 
-**No full suite has run for two passes, and the last two both changed the render path.** The onion
-skin moved off the main thread and `CanvasView.updateUIView` was restructured around it; the fast
-tier selects logic suites by filename and **runs no XCUITest**, so nothing in either pass is evidence
-about anything on screen. `RecordingUITests` and any onion-skin UI test are unverified. **A full run
-is owed before the next merge.**
+**Full suite at `d2205d5`: 4034 total / 3977 passed / 3 failed / 54 skipped.** All three passed clean
+in isolation. **Nine full suites ran this session** and every one is recorded in git log; the class
+table in CLAUDE.md is current as of `b79f879`.
 
-**The owner has confirmed on their own iPad, on `Test1`, that playback now holds 24 fps.**
+**The owner's iPad has `main` on it** (Release, installed 2026-09-10) and has not reported back on it.
+Ten artist-facing features landed in that build — see "What shipped" — so **the first thing worth doing
+next session is asking what they found**, rather than starting a new item cold.
 
-## The thing to read before measuring anything
+## The one thing to read before trusting a red test
 
-**Three consecutive passes measured large wins on a Mac and delivered nothing the owner could feel**
-— the undo lock (25.6 → 1.7 ms), the thumbnail render (34.1 → 1.08 ms), and playback engagement
-(115.9 → 9.8 ms a flip). All three numbers were true. **All three benches call an engine function and
-none of them runs a SwiftUI pass**, and the cost was inside `CanvasView.updateUIView`, which none of
-them ever entered.
+**The failing set has been different on every full run of this session** — 8, then 3, then 2, then 3,
+with almost no overlap — and every failure passed in isolation. CLAUDE.md now states the rule this
+taught: **a regression fails the same tests twice.** Two runs of the same bytes that disagree about
+*which* tests fail mean the run is the variable, whatever the assertion messages say. The old rule
+("a cluster with no assertion messages") did **not** fire: five failures once read as one coherent
+eraser regression, with messages, in a branch that had just changed a panel's layout. None reproduced.
 
-So the correction is not "the simulator is faster" — that is calibrated at ~1.3x. It is that **a
-bench measuring a component cannot find a cost in the composition.** What broke the deadlock was a
-runloop-observer pair (`PlaybackTrace`) measuring main-thread-busy whether or not the code under it
-is instrumented, on the device, with Core Animation's commit bracketed rather than inferred — which
-also refuted the leading hypothesis for free (`caCommit` is **0.00 ms** across 349 commits, so the
-64 MB texture upload was never the cost).
+Rule out the cheap causes first (disk, clone debris, `Restarting after unexpected exit` in the log, a
+stray booted device), then **re-run whole on a freshly created device** before reading a list as a
+finding. The fresh device is a partial cure as well as a control — eight failures became three on the
+same commit.
 
-**Measure on the iPad.** `PlaybackProbe` + `PlaybackTrace` drive the real editor from launch
-arguments with no test runner attached, and write a JSON report into the container to be pulled back.
-Device `E3B83820-DF74-5042-B52B-0D5BA17E4877`; CLAUDE.md's "Deploy to iPad" section has the rest.
+**Four flakes are filed in BUGS.md**, three pre-existing and one fixed. **Two of them are *logic*
+tests, which the fast tier does run** — so the tier is not blind to them by selection; it is blind
+because they only fail under the contention a full suite creates. **A green fast tier is not evidence
+that a logic test is deterministic.**
 
 ## What shipped this pass
 
-**The onion skin did every pixel of its work synchronously inside `updateUIView`** — on by default,
-not persisted, so every launch had it, and **nobody had ever timed it**. It was in none of the
-candidate lists three separate briefs offered. MEASURED on the device: **52.7 ms a frame flip at
-4096²** against a 41.7 ms budget. The fix is one rule applied to the one path exempt from it — RENDER
-§2.2 says the main thread never composites, this app has four renderers and three had queues. Deleted
-with it: `onionSkinClipInputs`, the `onionSkinClip` memo, `onionSkinKey`, and the synchronous
-composite/clip/ink calls.
+**Three items closed and deleted whole**: (57) the on-disk project layout, (36) the chosen folder, and
+(56) the per-edit cost — the last closed by the owner rather than a measurement (*"35ms is great at
+least for now"*).
 
-**`frameRingByteBudget` was a fixed 96 MiB, which is smaller than two 4096² frames** — and a ring
-holding one frame of a two-frame loop serves it *not at all*: every tick missed, decoded 67 MB of LZ4
-on the display thread, and evicted the frame `fillRingAhead` had just placed. It is a function of the
-frame now, floored at 96 MiB and ceilinged at `CompositorBudget.textureBudgetBytes`, and **switched
-off above that ceiling**, because holding one frame is strictly worse than holding none.
+**Performance, all MEASURED on the owner's iPad in Release.** Per-edit main-thread busy **115.4 →
+35.7 ms** at forty strokes a cel, and forty strokes now cost *less* per edit than one. The debounce-
+window stall the owner called "the second flicker" went **29 of 36 operations → 0 of 72**. Undo of a
+fill is **12x** faster (1071.9 → 89.5 ms at 2,000 strokes). Two renderers left the main thread: the cel
+thumbnail (the fifth, and the last one there) and the onion skin during playback.
 
-MEASURED on the owner's iPad, 4096², 3 layers, 2 frames: **16.0 → 24.0 fps**; `updateUIView` per flip
-**76.6 → 1.1 ms**; on-main decode **22.8 → 0.0 ms**; ring **0/83 → 255/0**. 2048² with **8 layers and
-6 frames** also holds 24.0 fps, so the layer term is gone. PERFORMANCE.md §16 is the measurement.
+**Keyframes**: layer *and* folder opacity are keyframable through the first non-pose channel kind
+(`TargetChannel`); animation-group membership is three operations (add, remove, move) under the owner's
+"stays where it looks on screen" ruling; folders can place a keyframe from their options panel; and the
+take recorder has all three surfaces — slider, Move box and **canvas**, where a stroke drawn while a
+take runs is cut at cel boundaries.
 
-**The disk-bandwidth wall the owner offered was declined, because it is the wrong name.** The file
-read inside `loadDecoded` is 0.1 ms; the cost is the **LZ4 decode**, CPU and proportional to pixels.
-The honest boundary is a **product — canvas area × distinct frames in the loop** — about two 4096²
-frames or six 2048² ones on a 3 GB device.
+**The recorder arms and starts in two acts**, per the owner: record turns blue and nothing moves, and
+the take begins when the pencil lands.
+
+**The disappearing strokes are CLOSED.** `UnlandedInk` holds a finished stroke's display image until a
+base containing it lands. Neither of BUGS.md's two options was taken: nothing composites on the main
+thread, and the held ink is **2.6 MiB at any canvas size** — *less* than the `StrokeScratch` the shipped
+code held for the same window.
+
+**Docs**: CLAUDE.md 1103 → ~800 lines (fourteen dated class tables became eleven conclusions), memory
+36 → 33 files, and (45)'s spec sweep checked **314 numbered anchors** and found ~130 displaced plus
+nine places the code had moved out from under a spec's own claim.
 
 ## Start here
 
-**(57), then (56) — and (56) is where the owner's attention is.**
+**Ask the owner what they found on their iPad first.** Then, in queue order:
 
-**(56) is half done and the half that is left is the one the owner will notice.** Per-edit
-main-thread busy is **20-121 ms** at 4096² after §16, down from 64-214, and their bar is *"no
-noticeable lag... no matter how many strokes or cels or layers"*. The two stalls per edit are
-identified — one at 401-402 ms is the debounced thumbnail and the SwiftUI pass it raises, the other
-is the operation's own — and §16 removed the onion skin from both. **What those two passes still do
-is the next measurement, and it must be taken on the device.**
+**(60)** is the biggest of the small work: bloom colour and Sobel gain, plus four new effects the owner
+added on 2026-09-10 — a computer-screen look, hue colorize, dither, and **recolour**, whose design is
+already settled in the item (Oklab tolerance, softness, first-match-wins, shading preserved) along with
+its eyedropper, whose *from* colour must sample **under** the effect rather than off the screen. Two of
+the four may not be new effects at all; the item says which and why.
 
-**The disappearing strokes are CLOSED** — the entry left BUGS.md on 2026-09-09 and PERFORMANCE.md
-§11.12 is the measurement. The window is MEASURED on the owner's own Test1 at **14.4 ms at 4096² and
-27.3–30.2 ms once the padding slider is at its max (6000²)**, and the reason they hit it reliably is
-area rather than a lost fast path: the incremental append still runs after a `setCanvasPadding` (85
-dabs stamped on both sides), and what is left is one canvas-sized allocation plus one canvas-sized
-blit. `UnlandedInk` holds the finished stroke's own display image until a base containing it lands,
-so neither of BUGS.md's two options was taken: nothing is composited on the main thread, and the ink
-held is **2.6 MiB for an ordinary stroke at any canvas size** — less than the `StrokeScratch` the
-shipped code was holding for the same window.
+**(61) wants a design document and a conversation, not a branch.** The transform layer becoming its own
+type with five modes — and the five are not one shape: parallax, rotate and screen shake are poses,
+repeat is a timeline operation, and duplicate offset is a compositing one. The owner spotted the last
+themselves and prefers it as a value-layer effect. **The spec's first job is to say how many homes these
+want**, with *"do whatever is cleanest"* as the owner's own instruction.
 
-After that, in queue order: **(36)**'s one remaining box, **(41)**, then **(42)**.
+**(62)** is settled and small: keys outside a cel's span are cropped, as one undo step that says what it
+discarded.
+
+After those: **(41)**'s two remaining boxes (a rewrite in place needs a hook at the mutation site, before
+it overwrites — that is the shape, not yet built), **(21)**'s folder graph band and stage 6, then (42),
+(22), (10), (37), (45)'s remainder.
 
 ## Waiting on the owner
 
-- **Should the onion skin draw during playback at all?** It costs the main thread nothing now but
-  still ~49-111 ms of a background core per flip, and it draws ghosts over the animation while it
-  plays. One guard removes it; it changes what they see.
-- **6000² is killed by jetsam before it can play** — one layer, two frames, and **reproduced on
-  `origin/main` with only the harness added, so it is pre-existing rather than a regression.** In
-  BUGS.md. The lever is a memory decision on a 3 GB iPad, not a bug to fix in isolation.
-- **The disappearing strokes' fix** — see above; it reverses a RENDER.md ruling either way.
-- **(21) stage 7's other half.** §5 asks for one mechanism on two surfaces and only the slider is
-  built; the Move box needs rulings on resampling and tolerance for a **quad**, which `ValueRecording`
-  cannot express. Stage 10 sits on a whole stage 7.
-- **(21) animation-group membership** — retagging, which changes the meaning of every key on both
-  groups' tracks. The refusal half shipped 2026-09-03 (§2.29).
+- **What they found on the device.** Nothing else here is blocked.
+- **(61)'s design conversation**, before any of it is built.
+- **(21) animation-group retagging** is no longer waiting — ruled 2026-09-10 and shipped.
+- **Two interpretations they should sanity-check**, both recorded in the items and both mine rather than
+  theirs: that "stays where it looks on screen" means *at the frame you are on* (every frame is not
+  expressible — only groups carry tracks), and that a hidden scale/skew channel **carrying a curve**
+  stays visible so an animation cannot be lost behind a default.
 - **(22)** and **(10)** deprioritised; **(37)**'s importer dropped.
 - **BUGS.md's five remaining `.popover`s** have the timeline's swallow-every-drag defect. Three are
   colour pickers whose chrome would visibly change — the owner's call.
-- **The pencil half of (47)** cannot be driven by any test here: XCUITest cannot synthesise a pencil.
-  **Nor can it reach the Move-box bake fixed on 2026-09-08** — `MoveBoxCommitUITests` records the five
-  runs that established it so nobody spends them again.
+- **XCUITest cannot synthesise a Pencil**, and three things now rest on that: the pen half of the graph
+  editor's box-select, pressure across a stage-10 cel seam, and the pencil half of (47). **The owner has
+  granted device build and deploy**, so these are now checkable on the iPad rather than unprovable.

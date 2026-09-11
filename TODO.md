@@ -48,36 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (59) Five control and panel fixes the owner asked for in one breath
-
-**Status** — not started, all reported 2026-09-10. Grouped because each is small and they are all the
-same kind of thing: a control that is the wrong size, reaches for the wrong input, or says nothing.
-**One branch, one pass**; they are listed separately only so none is lost.
-
-- [ ] **Transformations hide scale X, scale Y and skew by default.** > *"transformations should hide
-      scale x, scale y, and skew by default. Includes transformation layers and normal move."* So the
-      six-curve band and the Move box both show the short list first. Note the graph editor's channel
-      list is *"a filter"* (KEYFRAMES §11.5), so this is likely that filter's default rather than a new
-      mechanism — and a hidden channel that **carries a curve** must still be findable, or an artist
-      loses an animation they made. Say what happens in that case.
-- [ ] **Box-select on graph nodes is the pen's, not a finger's.** > *"right now in the graph menu, the
-      finger can be used for the box select on nodes. Should only be the pen (in pen mode)"* — i.e. it
-      obeys the existing pencil-only toggle (`paintapp.pencilOnlyDrawing`) rather than inventing a
-      second preference. **XCUITest cannot synthesise a pencil**, so the test for this is a refusal of a
-      *finger*, and the pen half is unprovable here — say so rather than implying coverage.
-- [ ] **The lasso fill menu is far too tall.** > *"the lasso fill menu is way too tall. Try to compact
-      the height. You can expand it horizontally. The paint outside selection for example takes a whole
-      layer for a switch. The animation group section only really needs to be up when in graph editor."*
-      Three things: compact the panel (wider and flatter, which is the owner's standing preference), put
-      the paint-outside switch on a shared row rather than its own, and **hide the Animation Group band
-      unless the graph editor is open** — that band shipped 2026-09-10 and this is the owner's first
-      look at it, so it is feedback on new work rather than old debt.
-- [ ] **Adjusting opacity shows the percentage while you drag.** > *"adjusting opacity should display
-      the % when you do."* Both the layer rail's slider and the folder's. Note the rail is a hand-laid
-      UIKit cell, not SwiftUI.
-
----
-
 ## (60) Bloom takes a colour and Sobel takes a gain
 
 **Status** — not started, reported 2026-09-10.
