@@ -676,10 +676,23 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 
         // Isolate the one row a pure rotation actually animates.
         app.buttons["timeline.graphChannelsButton"].tap()
-        for hidden in ["containerPose.x", "containerPose.y", "containerPose.scaleX",
-                       "containerPose.scaleY", "containerPose.skew"] {
+        // **TODO (59) has already done three fifths of that**, and this is where the default is
+        // checked on the surface an artist actually reads: the three rows are *listed* — so they can
+        // be switched back on — and their boxes are empty. `"off,flat"` is the row's two facts in
+        // one string (`AnimationTimeline.graphChannelRow`), so this states both that the default hid
+        // them and that they were flat, which is the condition under which it is allowed to.
+        for defaulted in ["containerPose.scaleX", "containerPose.scaleY", "containerPose.skew"] {
+            let checkbox = app.buttons["timeline.graphChannels.\(defaulted)"]
+            XCTAssertTrue(checkbox.waitForExistence(timeout: 5),
+                          "Missing row: \(defaulted) — a hidden channel must still be listed")
+            XCTAssertEqual(checkbox.value as? String, "off,flat",
+                           "TODO (59): \(defaulted) starts switched off, and is still findable here")
+        }
+        for hidden in ["containerPose.x", "containerPose.y"] {
             let checkbox = app.buttons["timeline.graphChannels.\(hidden)"]
             XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "Missing row: \(hidden)")
+            XCTAssertEqual(checkbox.value as? String, "on,flat",
+                           "PREMISE: \(hidden) is drawn until this tap, so the default is the three above")
             checkbox.tap()
         }
         app.buttons["timeline.graphChannelsButton"].tap()

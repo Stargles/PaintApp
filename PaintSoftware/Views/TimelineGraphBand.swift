@@ -2075,8 +2075,15 @@ extension CanvasManager {
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
         let listing = graphBandListing(of: target)
-        let shown = TimelineGraphChannelList.visible(listing.channels,
-                                                     hidden: graphChannelFilter.hidden(on: target))
+        // **The defaults are resolved here, from the listing, and not stored** — TODO (59). The
+        // filter's own set is what the *artist* switched off; `defaultHidden` is what a band they
+        // have not touched starts with, and it has to be derived per band because it depends on
+        // which channels that band lists and on which of them are animations.
+        let shown = TimelineGraphChannelList.visible(
+            listing.channels,
+            hidden: graphChannelFilter.hidden(
+                on: target,
+                defaults: TimelineGraphChannelList.defaultHidden(in: listing.channels)))
         return TimelineGraphBand.Content(layerIndex: expansion.layerIndex,
                                          height: expansion.height,
                                          channels: shown,

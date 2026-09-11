@@ -98,22 +98,34 @@ enum TimelineGraphChannelList {
     /// artist has not seen. So the filter carries the `KeyframeTarget` it was authored against and
     /// answers `[]` for any other, and `CanvasManager.isGraphEditorOpen` clears it on close. One
     /// sentence: **the filter lives exactly as long as the band it was made on.**
+    ///
+    /// **Since TODO (59) the *untouched* state is not the empty set** — `defaultHidden(in:)` is, and
+    /// the two states this type now has to keep apart are "the artist has not touched this band"
+    /// (`target != self.target`, so the defaults apply) and "the artist has switched everything back
+    /// on" (`target == self.target` with an empty `hidden`, so nothing does). That is why `setting`
+    /// no longer collapses to `.none`: collapsing would make un-ticking the last box read as
+    /// untouched and snap the three default-hidden channels straight back.
     struct Filter: Equatable {
-        /// Nothing hidden, no band. The state every document starts and ends in.
+        /// Nothing hidden, no band, **and no band touched** — so a band opening under this one takes
+        /// `defaultHidden(in:)`. The state every document starts and ends in.
         static let none = Filter(target: nil, hidden: [])
 
-        /// The band this was authored on, or nil when nothing is hidden.
+        /// The band this was authored on, or nil when the artist has touched no band.
         let target: KeyframeTarget?
         /// `EffectParameter.id`s. Always a subset of what that band listed at the last toggle —
         /// `setting` prunes — so the set cannot accumulate ids from grades the layer no longer has.
         let hidden: Set<String>
 
         /// The hidden ids **as they apply to `target`**: this filter's set on the band it was made
-        /// on, and nothing at all on any other. A band that opens on another layer starts from
-        /// everything visible, which is the state the artist expects from a surface whose whole
-        /// premise is that it shows every animated channel.
-        func hidden(on target: KeyframeTarget) -> Set<String> {
-            self.target == target ? hidden : []
+        /// on, and `defaults` on any other. A band the artist has not touched starts from the
+        /// default, which until TODO (59) was "everything visible" and is now everything visible bar
+        /// the flat scale and skew rows a transform channel carries.
+        ///
+        /// `defaults` is defaulted to `[]` so a caller asking the pre-(59) question — *"what has the
+        /// artist switched off"*, as opposed to *"what is the band drawing"* — still gets that
+        /// answer, and so that a test can state one without the other.
+        func hidden(on target: KeyframeTarget, defaults: Set<String> = []) -> Set<String> {
+            self.target == target ? hidden : defaults
         }
 
         /// **One row's box, or a whole group's, flipped.**
@@ -124,17 +136,55 @@ enum TimelineGraphChannelList {
         /// for a group's — the owner's *"visible or invisible like a whole"*, which is one call with
         /// a longer array rather than a second code path.
         ///
-        /// Returns `.none` rather than an empty-but-scoped filter when nothing is left hidden, so
-        /// "is anything filtered" is `!= .none` and there is one spelling of the neutral state.
+        /// **The first toggle on a band captures `defaults` into the stored set**, which is what
+        /// makes the default a *starting point* rather than a floor: ticking Scale X on writes a
+        /// filter that hides the other two and no longer hides that one, and a later untick of all
+        /// three leaves a scoped, empty filter that keeps meaning "everything on".
         func setting(_ ids: [String], visible: Bool, on target: KeyframeTarget,
-                     listed: [String]) -> Filter {
+                     listed: [String], defaults: Set<String> = []) -> Filter {
             let listedSet = Set(listed)
-            var next = hidden(on: target).intersection(listedSet)
+            var next = hidden(on: target, defaults: defaults).intersection(listedSet)
             for id in ids where listedSet.contains(id) {
                 if visible { next.remove(id) } else { next.insert(id) }
             }
-            return next.isEmpty ? .none : Filter(target: target, hidden: next)
+            return Filter(target: target, hidden: next)
         }
+    }
+
+    // MARK: - What a band starts with switched off
+
+    /// **The three components a transform channel starts folded away** — TODO (59), the owner
+    /// 2026-09-10: *"transformations should hide scale x, scale y, and skew by default. Includes
+    /// transformation layers and normal move."*
+    ///
+    /// The components rather than the channels, so the rule reaches all three pose channel kinds at
+    /// once — a cel's Move, an animation group's, and a transformation layer's or folder's
+    /// `containerPose` — which is what *"includes transformation layers and normal move"* asks for
+    /// and what `PoseChannelID.resolve(parameterID:)` makes one line rather than three.
+    static let poseComponentsHiddenByDefault: Set<PoseComponents.Component> = [.scaleX, .scaleY, .skew]
+
+    /// **The ids a band the artist has not touched starts with hidden**, out of everything it could
+    /// draw.
+    ///
+    /// **Only a channel that is *not* an animation**, and that qualifier is the whole of the ask's
+    /// one real hazard: a default that hid an animated Scale X would take an animation the artist
+    /// made off the surface they made it on. A pure slide leaves all three of these with two keys of
+    /// equal value — `AnimationCurve.isAnimated` is false, the band draws them as dashed flat lines,
+    /// and those are exactly the rows the owner is complaining about. Scale something and the curve
+    /// stops being flat and the row comes back by itself.
+    ///
+    /// A hidden row is still **listed**: `groups(of:hidden:names:)` is built from the band's
+    /// unfiltered channels, so all three appear in the channel list with an empty box and one tap
+    /// puts any of them back. `CanvasManager.graphBandHasHiddenChannels` tints the list's button
+    /// blue while they are off, which is the visible sign §11.5 requires of any filter.
+    static func defaultHidden(in channels: [TimelineGraphBand.Channel]) -> Set<String> {
+        var ids: Set<String> = []
+        for channel in channels where !channel.isAnimated {
+            guard let resolved = PoseChannelID.resolve(parameterID: channel.parameterID),
+                  poseComponentsHiddenByDefault.contains(resolved.component) else { continue }
+            ids.insert(channel.parameterID)
+        }
+        return ids
     }
 
     // MARK: - What the artist has folded shut
@@ -391,10 +441,12 @@ extension CanvasManager {
         for (id, name) in TimelineGraphBand.poseGroupNames(poseSources(of: target)) {
             names[id] = name
         }
-        return TimelineGraphChannelList.groups(of: channels,
-                                               hidden: graphChannelFilter.hidden(on: target),
-                                               names: names,
-                                               collapsed: graphChannelFold.collapsed(on: target))
+        return TimelineGraphChannelList.groups(
+            of: channels,
+            hidden: graphChannelFilter.hidden(
+                on: target, defaults: TimelineGraphChannelList.defaultHidden(in: channels)),
+            names: names,
+            collapsed: graphChannelFold.collapsed(on: target))
     }
 
     /// Whether anything is switched off on the band that is open.
@@ -412,9 +464,10 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return }
-        let listed = graphBandListing(of: target).channels.map(\.parameterID)
-        graphChannelFilter = graphChannelFilter.setting(ids, visible: visible,
-                                                        on: target, listed: listed)
+        let channels = graphBandListing(of: target).channels
+        graphChannelFilter = graphChannelFilter.setting(
+            ids, visible: visible, on: target, listed: channels.map(\.parameterID),
+            defaults: TimelineGraphChannelList.defaultHidden(in: channels))
     }
 
     /// **One group's chevron, flipped on the band that is open** — §11.7's fold, and

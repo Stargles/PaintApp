@@ -65,6 +65,25 @@ final class PoseBandLogicTests: XCTestCase {
         try XCTUnwrap(manager.graphBandContent)
     }
 
+    /// **Every channel the band *lists*, before TODO (59)'s default filter subtracts from it.**
+    ///
+    /// `graphBandContent` is the *drawn* half and has been the filtered one since (59): a transform
+    /// channel's flat Scale X, Scale Y and Skew start switched off
+    /// (`TimelineGraphChannelList.defaultHidden(in:)`). A test asking what a pose *becomes* — six
+    /// curves, at which frames, carrying which ease — is asking about the listing, so it reads this;
+    /// `testATransformChannelStartsWithItsFlatScaleAndSkewRowsHidden` is the one test that owns the
+    /// default, and it is the only place that states it.
+    private func listed(_ manager: CanvasManager) throws -> [TimelineGraphBand.Channel] {
+        let expansion = try XCTUnwrap(manager.graphBandExpansion, "the band is not open")
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: expansion.layerIndex))
+        return manager.graphBandListing(of: target).channels
+    }
+
+    private func channel(_ channels: [TimelineGraphBand.Channel],
+                         _ id: String) -> TimelineGraphBand.Channel? {
+        channels.first { $0.parameterID == id }
+    }
+
     private func channel(_ content: TimelineGraphBand.Content,
                          _ id: String) -> TimelineGraphBand.Channel? {
         content.channels.first { $0.parameterID == id }
@@ -87,14 +106,16 @@ final class PoseBandLogicTests: XCTestCase {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
 
-        let content = try content(manager)
-        XCTAssertEqual(content.channels.map(\.parameterID),
+        // The **listing**, not the drawn content: TODO (59) starts three of the six switched off,
+        // and what this test is about is that a pose decomposes into six curves at the right frames.
+        let listed = try listed(manager)
+        XCTAssertEqual(listed.map(\.parameterID),
                        PoseComponents.Component.allCases.map { PoseChannelID.cel(.cel).parameterID($0) },
                        "Six channels, in `Component.allCases` order")
-        XCTAssertEqual(content.channels.map(\.name),
+        XCTAssertEqual(listed.map(\.name),
                        ["X", "Y", "Scale X", "Scale Y", "Rotation", "Skew"])
 
-        let x = try XCTUnwrap(channel(content, celX))
+        let x = try XCTUnwrap(channel(listed, celX))
         XCTAssertEqual(x.curve.keys.map(\.frame), [4, 12],
                        "The cel starts at 4, so its cel-local 0 and 8 are absolute 4 and 12")
         XCTAssertNotEqual(x.curve.keys.map(\.frame), [0, 8],
@@ -111,8 +132,11 @@ final class PoseBandLogicTests: XCTestCase {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID, dx: 24)
 
-        let content = try content(manager)
-        let x = try XCTUnwrap(channel(content, celX))
+        // The listing, for `testACelPoseChannelIsSixCurvesAtAbsoluteFrames`' reason: the claim here
+        // is about which of the six the *model* calls an animation, which is upstream of (59)'s
+        // default filter and is in fact the input that default reads.
+        let listed = try listed(manager)
+        let x = try XCTUnwrap(channel(listed, celX))
         XCTAssertEqual(x.curve.keys.map(\.value), [Double(box.midX), Double(box.midX) + 24],
                        "X is where the box's centre is, in canvas points")
         XCTAssertTrue(x.isAnimated)
@@ -121,11 +145,14 @@ final class PoseBandLogicTests: XCTestCase {
                    celScaleX,
                    PoseChannelID.cel(.cel).parameterID(.rotation),
                    PoseChannelID.cel(.cel).parameterID(.skew)] {
-            let flat = try XCTUnwrap(channel(content, id), id)
+            let flat = try XCTUnwrap(channel(listed, id), id)
             XCTAssertFalse(flat.isAnimated, "\(id) is in force and is not an animation")
             XCTAssertEqual(Set(flat.curve.keys.map(\.value)).count, 1, "\(id) really is flat")
         }
-        XCTAssertEqual(TimelineGraphBand.encode(content).contains("~"), true,
+        // Y and Rotation are flat *and drawn*, so the dash reaches the encoding of what is on screen
+        // — which is the half of this claim (59) could otherwise have quietly deleted by hiding
+        // every flat row.
+        XCTAssertEqual(TimelineGraphBand.encode(try content(manager)).contains("~"), true,
                        "…which the tier that cannot see a dash reads as `~` rather than `:`")
     }
 
@@ -254,6 +281,155 @@ final class PoseBandLogicTests: XCTestCase {
                        "The model's own answer, in the band's own order")
         XCTAssertFalse(manager.listedAnimationChannelIDs(of: target(manager)).contains(celScaleX),
                        "…and a flat component is not an animation")
+    }
+
+    // MARK: - What a transform channel starts with switched off — TODO (59)
+
+    /// Poses the cel's own channel so that a *scale* varies across its two keys, which is what makes
+    /// `celPose.scaleX` an animation rather than a flat row.
+    private func scaleCel(_ manager: CanvasManager, layerID: UUID, celID: UUID) {
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 8,
+                                    pose: PoseQuad(box: box,
+                                                   mappedBy: CGAffineTransform(scaleX: 2, y: 1)))
+    }
+
+    private func drawnIDs(_ manager: CanvasManager) throws -> [String] {
+        try content(manager).channels.map(\.parameterID)
+    }
+
+    /// **The owner's ask, whole** — 2026-09-10: *"transformations should hide scale x, scale y, and
+    /// skew by default."*
+    ///
+    /// The two operands are the band's **listing** and the band's **drawn content**, taken from one
+    /// fixture: six channels are listed and three are drawn, and the three missing ones are exactly
+    /// the three the ask names. Stating both is what stops this passing against an implementation
+    /// that stopped *listing* them — which would be a different and much worse change, because a row
+    /// that is not listed cannot be switched back on.
+    func testATransformChannelStartsWithItsFlatScaleAndSkewRowsHidden() throws {
+        let (manager, layerID, celID) = celFixture()
+        animateCel(manager, layerID: layerID, celID: celID)
+
+        XCTAssertEqual(try listed(manager).map(\.parameterID),
+                       PoseComponents.Component.allCases.map { PoseChannelID.cel(.cel).parameterID($0) },
+                       "PREMISE: all six are still listed — the default is a filter, not a deletion")
+        XCTAssertEqual(try drawnIDs(manager),
+                       [PoseChannelID.cel(.cel).parameterID(.x),
+                        PoseChannelID.cel(.cel).parameterID(.y),
+                        PoseChannelID.cel(.cel).parameterID(.rotation)],
+                       "Scale X, Scale Y and Skew are off the band before the artist touches anything")
+        XCTAssertTrue(manager.graphBandHasHiddenChannels,
+                      "…and the channel-list button is tinted, so the filter has a visible sign")
+    }
+
+    /// **A hidden row is still findable, and switching it on sticks** — the one hazard the ask
+    /// carries, answered on the surface an artist would actually use.
+    ///
+    /// The list is built from the band's *unfiltered* channels, so all six rows are there with the
+    /// three default-hidden ones unchecked. One tap on Scale X's box draws it, and — the second
+    /// operand — Scale Y and Skew stay off, which is what proves the first toggle captured the
+    /// default rather than discarding it.
+    func testSwitchingADefaultHiddenRowBackOnDrawsThatOneAndLeavesTheOthersOff() throws {
+        let (manager, layerID, celID) = celFixture()
+        animateCel(manager, layerID: layerID, celID: celID)
+
+        let rows = try XCTUnwrap(manager.graphChannelGroups?.first?.rows)
+        XCTAssertEqual(rows.count, 6, "Every channel is in the list, hidden or not")
+        XCTAssertEqual(rows.filter { !$0.isVisible }.map(\.parameterID),
+                       [celScaleX,
+                        PoseChannelID.cel(.cel).parameterID(.scaleY),
+                        PoseChannelID.cel(.cel).parameterID(.skew)],
+                       "…and the three unticked boxes are the three the default hid")
+
+        manager.setGraphChannels([celScaleX], visible: true)
+        XCTAssertTrue(try drawnIDs(manager).contains(celScaleX),
+                      "One tap puts Scale X back on the band")
+        XCTAssertFalse(try drawnIDs(manager).contains(PoseChannelID.cel(.cel).parameterID(.scaleY)),
+                       "…and Scale Y stays off, so the first toggle kept the rest of the default")
+
+        manager.setGraphChannels([celScaleX], visible: false)
+        XCTAssertFalse(try drawnIDs(manager).contains(celScaleX), "…and it can go off again")
+
+        // **Switching all three on leaves an *empty but scoped* filter, not the neutral one**, which
+        // is the state `Filter.setting` used to collapse away. The operands are the stored set (now
+        // empty) and what the band draws (now all six): if the empty set read as "untouched" the
+        // defaults would apply again and the band would fall back to three.
+        manager.setGraphChannels(rows.map(\.parameterID), visible: true)
+        XCTAssertEqual(manager.graphChannelFilter.hidden, [], "Nothing is switched off any more")
+        XCTAssertEqual(try drawnIDs(manager).count, 6,
+                       "…and all six are drawn, so an emptied filter does not read as untouched")
+    }
+
+    /// **An animated scale is never hidden**, which is the qualifier that keeps the default from
+    /// taking an artist's own animation off the surface they made it on.
+    ///
+    /// The operands are two fixtures that differ in exactly one thing: the second key's pose is a
+    /// slide in one and a stretch in the other. The same channel id is absent from the band in the
+    /// first and present in the second, so what this measures is `isAnimated` and not the id.
+    func testAnAnimatedScaleIsDrawnWhereAFlatOneIsHidden() throws {
+        let slid = celFixture()
+        animateCel(slid.manager, layerID: slid.layerID, celID: slid.celID)
+        XCTAssertFalse(try drawnIDs(slid.manager).contains(celScaleX),
+                       "A pure slide leaves Scale X flat, so the default hides it")
+
+        let scaled = celFixture()
+        scaleCel(scaled.manager, layerID: scaled.layerID, celID: scaled.celID)
+        XCTAssertTrue(try drawnIDs(scaled.manager).contains(celScaleX),
+                      "An animated Scale X is an animation the artist made, and it is drawn")
+        XCTAssertTrue(try XCTUnwrap(channel(try listed(scaled.manager), celScaleX)).isAnimated,
+                      "PREMISE: the fixture really did animate it")
+    }
+
+    /// **"Includes transformation layers and normal move"** — the same default on §3.1's other time
+    /// base, where the pose lives on the layer rather than on a cel.
+    ///
+    /// `PoseChannelID.resolve` is what makes this one rule rather than three, so the operand worth
+    /// stating is the `containerPose` id: a rule written against `"celPose"` would pass every test
+    /// above and fail exactly here.
+    func testTheDefaultReachesATransformationLayersOwnPose() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        let canvasBox = CGRect(origin: .zero, size: size)
+        manager.layers[1].fill = nil
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(restingIn: canvasBox),
+            track: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
+                .init(frame: 9, pose: PoseQuad(box: canvasBox,
+                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
+        manager.currentLayerIndex = 1
+        manager.isGraphEditorOpen = true
+
+        XCTAssertEqual(try listed(manager).map(\.parameterID),
+                       PoseComponents.Component.allCases.map { PoseChannelID.container.parameterID($0) },
+                       "PREMISE: a transformation layer lists the same six")
+        XCTAssertEqual(try drawnIDs(manager),
+                       [PoseChannelID.container.parameterID(.x),
+                        PoseChannelID.container.parameterID(.y),
+                        PoseChannelID.container.parameterID(.rotation)],
+                       "and starts with the same three switched off")
+    }
+
+    /// **A grade's channels are untouched by the default**, which is the boundary the rule draws:
+    /// the ask is about transformations, and an effect parameter called anything at all keeps being
+    /// drawn.
+    func testAGradesFlatChannelIsStillDrawn() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1,
+                                                                                    contrast: 1)))
+        manager.currentLayerIndex = 1
+        // Two keys of **equal** value, so the channel is in force and is not an animation — the same
+        // state the three default-hidden pose rows are in, on a channel the default must not touch.
+        manager.setEffectParameterTrack(layerIndex: 1, parameterID: "brightnessContrast.brightness",
+                                        to: AnimationCurve(keys: [.init(frame: 0, value: 1),
+                                                                  .init(frame: 6, value: 1)]))
+        manager.isGraphEditorOpen = true
+
+        XCTAssertEqual(try drawnIDs(manager), ["brightnessContrast.brightness"],
+                       "A flat grade channel is drawn dashed, exactly as §11.4 rules")
+        XCTAssertFalse(manager.graphBandHasHiddenChannels, "…and nothing is filtered on this band")
     }
 
     // MARK: - The channel list — the fold and the navigator, §11.7
@@ -846,9 +1022,14 @@ final class PoseBandLogicTests: XCTestCase {
         let height = TimelineGraphBand.height
         let ppf: CGFloat = 30
         let before = try content(manager)
+        // The listing again: the claim is that one stored key's ease belongs to all six rows a pose
+        // decomposes into, which is a fact about the decomposition. TODO (59) hides three of them by
+        // default, and `handleRows` correctly answers about whatever array it is handed — so handing
+        // it the drawn three would turn this into a test of the filter.
+        let beforeRows = try listed(manager)
         let node = TimelineGraphBand.KeyRef(parameterID: celX, frame: 4)
 
-        XCTAssertEqual(TimelineGraphBand.handleRows(of: node, in: before.channels),
+        XCTAssertEqual(TimelineGraphBand.handleRows(of: node, in: beforeRows),
                        PoseComponents.Component.allCases.map {
                            TimelineGraphBand.KeyRef(parameterID: PoseChannelID.cel(.cel).parameterID($0),
                                                     frame: 4)
@@ -859,11 +1040,11 @@ final class PoseBandLogicTests: XCTestCase {
         let snapshot = manager.graphBandPoseSnapshot(layerIndex: before.layerIndex)
         XCTAssertTrue(manager.writeGraphBandPoseEdits(
             TimelineGraphBand.poseHandleEdits(.init(key: node, side: .outgoing),
-                                              in: before.channels, translation: travel,
+                                              in: beforeRows, translation: travel,
                                               pixelsPerFrame: ppf, bandHeight: height),
             from: snapshot, layerIndex: before.layerIndex))
 
-        let after = try content(manager)
+        let after = try listed(manager)
         let stored = try XCTUnwrap(manager.layers.first { $0.id == layerID }?
             .cels.first { $0.id == celID }?
             .transformTracks[TransformChannelID.cel.id]?.keys.first { $0.frame == 0 })
@@ -881,7 +1062,7 @@ final class PoseBandLogicTests: XCTestCase {
             XCTAssertEqual(key.outHandle.deltaValue, stored.outHandle.deltaValue * rise,
                            accuracy: 1e-9,
                            "\(component.name)'s drawn rise is the stored ease through its own segment")
-            let dots = TimelineGraphBand.handles(of: .init(parameterID: id, frame: 4), in: after.channels,
+            let dots = TimelineGraphBand.handles(of: .init(parameterID: id, frame: 4), in: after,
                                                  pixelsPerFrame: ppf, bandHeight: height)
             XCTAssertEqual(dots.isEmpty, rise == 0,
                            "\(component.name) offers a dot exactly where its own segment moves")
