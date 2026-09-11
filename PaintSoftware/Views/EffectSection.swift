@@ -47,6 +47,9 @@ enum EffectCatalog {
             .outline(Effect.Outline(width: 2)),
             .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
             .noise(Effect.Noise(amount: 0.08)),
+            // A filter, so it arrives visible: the CRT preset, not the type's all-zero identity —
+            // `Blur.radius`'s convention, argued above. TODO (60).
+            .crtScreen(Effect.CRTScreen.preset(.crt)),
         ],
     ]
 
@@ -400,6 +403,38 @@ struct EffectSettingsBar: View {
             note(params.entries.isEmpty
                  ? "Add a colour, then tap its eyedropper and tap the canvas to pick what to change."
                  : "The first colour in the list that matches wins. Preserve Shading keeps each pixel's light and dark.")
+
+        case .crtScreen(let params):
+            // **The preset first, and it writes the six sliders below it.** Nothing is stored for
+            // it: `CRTScreen.preset` reads which name the fields currently are, and a field one tick
+            // off every preset reads "Custom" — so the row never claims a look the sliders have
+            // left, which a stored name would the moment one moved (`Effect.CRTScreen`'s doc).
+            // One undo step per pick, bracketed like Reroll Grain: a pick is one act, not a drag.
+            pickerRow("Preset", current: params.preset?.rawValue ?? "Custom", identifier: "crtPreset") {
+                ForEach(Effect.CRTScreen.Preset.allCases, id: \.self) { preset in
+                    Button {
+                        onEditBegan()
+                        onChange(.crtScreen(Effect.CRTScreen.preset(preset)))
+                        onEditEnded()
+                    } label: {
+                        if preset == params.preset {
+                            Label(preset.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(preset.rawValue)
+                        }
+                    }
+                    .accessibilityIdentifier("effectSettings.crtPreset.\(preset.rawValue.lowercased())")
+                }
+            }
+            slider("crtScreen.scanlines")
+            slider("crtScreen.scanlinePeriod")
+            slider("crtScreen.apertureMask")
+            slider("crtScreen.curvature")
+            slider("crtScreen.vignette")
+            slider("crtScreen.aberration")
+            // Bloom is not an ingredient — `Effect.CRTScreen`'s doc — and this is where the artist
+            // is told, since the menu they came from is where the Bloom node is.
+            note("Curvature bends the picture and leaves its corners clear. For a glow, add a Bloom layer above this one.")
         }
     }
 

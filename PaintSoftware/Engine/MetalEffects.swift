@@ -109,12 +109,15 @@ final class EffectPipelines {
     @discardableResult
     /// `origin` is where the buffer being graded sits in the frame — RENDER.md §3.8's strip, and
     /// `(0, 0)` for every whole-frame composite. It reaches the kernel inside `EffectParams`, through
-    /// the same `Effect.passes(inFrameAt:)` the CPU reference calls, so the two cannot stamp it
-    /// differently.
+    /// the same `Effect.passes(inFrameAt:frameSize:)` the CPU reference calls, so the two cannot
+    /// stamp it differently. `frameSize` is the whole frame's, nil meaning "this texture is the
+    /// frame" — resolved to the source's size here exactly as `EffectReference.apply` resolves it.
     func encode(_ effect: Effect, source: MTLTexture, into result: MTLTexture,
                 encoder: MTLComputeCommandEncoder,
-                origin: (x: UInt32, y: UInt32) = (0, 0)) -> Bool {
-        let passes = effect.passes(inFrameAt: origin)
+                origin: (x: UInt32, y: UInt32) = (0, 0),
+                frameSize: (width: UInt32, height: UInt32)? = nil) -> Bool {
+        let frame = frameSize ?? (UInt32(source.width), UInt32(source.height))
+        let passes = effect.passes(inFrameAt: origin, frameSize: frame)
         guard let last = passes.indices.last else { return false }
         // Named for what it is rather than for the property it comes from: `self.scratch` is a map
         // over sizes and this is the one size's pair, so shadowing the name would read as the map.
@@ -257,7 +260,12 @@ final class MetalEffectEngine {
     /// Returns nil for a degenerate size or an allocation this device would not make — never a
     /// silently wrong answer, so a caller can fall back to `EffectReference` the way
     /// `Compositor.composite` falls back to `CoreGraphicsCompositor`.
-    func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int) -> [UInt8]? {
+    ///
+    /// `origin` and `frameSize` are `EffectReference.apply`'s, with the same defaults — a whole frame
+    /// — so a parity test can hand both backends one strip window and compare what they stamp.
+    func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int,
+               origin: (x: UInt32, y: UInt32) = (0, 0),
+               frameSize: (width: UInt32, height: UInt32)? = nil) -> [UInt8]? {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return nil }
         guard let source = makeTexture(width: width, height: height, usage: [.shaderRead]),
               let result = makeTexture(width: width, height: height, usage: [.shaderWrite]),
@@ -269,7 +277,8 @@ final class MetalEffectEngine {
             source.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                            withBytes: base, bytesPerRow: width * 4)
         }
-        guard pipelines.encode(effect, source: source, into: result, encoder: encoder) else {
+        guard pipelines.encode(effect, source: source, into: result, encoder: encoder,
+                               origin: origin, frameSize: frameSize) else {
             encoder.endEncoding()
             return nil
         }

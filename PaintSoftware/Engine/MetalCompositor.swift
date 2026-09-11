@@ -803,7 +803,8 @@ final class CompositorMetalEngine {
                         // it, and mixing that in would put a previous frame on screen.
                         guard effects.encode(effect, source: inkFront, into: graded,
                                              encoder: encoder,
-                                             origin: request.effectOrigin) else { return false }
+                                             origin: request.effectOrigin,
+                                             frameSize: request.effectFrameSize) else { return false }
                         // `inkFront` is dead the moment the grade has read it and `inkBack` holds a
                         // stale intermediate, so the paper-plus-graded picture is built in the pair
                         // already held rather than in a fourth texture — the same observation the
@@ -843,7 +844,8 @@ final class CompositorMetalEngine {
                     // `CoreGraphicsCompositor`, which has no allocation to decline and computes the
                     // grade correctly, just slower.
                     guard effects.encode(effect, source: front, into: scratch, encoder: encoder,
-                                         origin: request.effectOrigin) else {
+                                         origin: request.effectOrigin,
+                                         frameSize: request.effectFrameSize) else {
                         pool.release(scratch)
                         return false
                     }
@@ -921,7 +923,8 @@ final class CompositorMetalEngine {
                 if let effect = node.effect {
                     guard let effects, let scratch = pool.acquire() else { return false }
                     guard effects.encode(effect, source: groupFront, into: scratch, encoder: encoder,
-                                         origin: request.effectOrigin) else {
+                                         origin: request.effectOrigin,
+                                         frameSize: request.effectFrameSize) else {
                         pool.release(scratch)
                         return false
                     }

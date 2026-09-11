@@ -989,7 +989,8 @@ enum CoreGraphicsCompositor {
             // rules differ about. Nothing here looks inside the `Effect`; `Effect.swift` resolved it
             // once.
             graded = EffectReference.apply(effect, to: backdrop, width: width, height: height,
-                                           origin: request.effectOrigin)
+                                           origin: request.effectOrigin,
+                                           frameSize: request.effectFrameSize)
         }
         mixBack(graded, over: backdrop, by: node, of: request, in: bounds,
                 context: context, width: width, height: height)
@@ -1109,7 +1110,8 @@ enum CoreGraphicsCompositor {
               let ink = premultipliedBytes(inkImage, width: width, height: height) else { return nil }
 
         let gradedInk = EffectReference.apply(effect, to: ink, width: width, height: height,
-                                              origin: request.effectOrigin)
+                                              origin: request.effectOrigin,
+                                              frameSize: request.effectFrameSize)
         guard let gradedInkImage = makeImage(fromPremultiplied: gradedInk, width: width, height: height)
         else { return nil }
         // `fillBackground` rather than a second spelling of the fill, and the renderer starts

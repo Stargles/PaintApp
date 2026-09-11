@@ -438,6 +438,17 @@ struct RenderRequest {
         return (UInt32(max(0, window.origin.x.rounded())), UInt32(max(0, window.origin.y.rounded())))
     }
 
+    /// **How big the whole frame is, as the effect kernels want it** — the window's `frameSize` for a
+    /// strip, and this request's own `canvasSize` for everything else, which is the buffer the
+    /// kernels are already dispatched over. `EffectParams.frameWidth/frameHeight`'s source, and the
+    /// other half of `effectOrigin`: a Computer Screen's curvature and vignette are about the frame's
+    /// centre, which a strip cannot locate from its offset alone. Rounded the way `wholePixels` and
+    /// `effectOrigin` round.
+    var effectFrameSize: (width: UInt32, height: UInt32) {
+        let size = window?.frameSize ?? canvasSize
+        return (UInt32(max(0, size.width.rounded())), UInt32(max(0, size.height.rounded())))
+    }
+
     /// One chunk's link to the chunks before it.
     ///
     /// The accumulator crosses a chunk boundary as a **synthetic leaf** appended past the end of the

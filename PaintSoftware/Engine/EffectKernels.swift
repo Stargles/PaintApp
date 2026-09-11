@@ -50,15 +50,19 @@ enum EffectReference {
     /// `(0, 0)` for every whole-frame composite, which is every caller but the strip driver. It is
     /// stamped into every pass rather than read separately so that `EffectPass` stays a kind and a
     /// parameter block, and so that this and `EffectPipelines.encode` read one field between them.
+    /// **`frameSize` is the whole frame's**, nil meaning "this buffer is the frame" — resolved to
+    /// `(width, height)` here, so the kernels never read a zero frame and have no fallback to agree on.
     static func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int,
-                      origin: (x: UInt32, y: UInt32) = (0, 0)) -> [UInt8] {
+                      origin: (x: UInt32, y: UInt32) = (0, 0),
+                      frameSize: (width: UInt32, height: UInt32)? = nil) -> [UInt8] {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return bytes }
         let lut = effect.lookupTable
         let weights = effect.weights
         let recolor = effect.recolorTable
+        let frame = frameSize ?? (UInt32(width), UInt32(height))
 
         var current = bytes
-        for pass in effect.passes(inFrameAt: origin) {
+        for pass in effect.passes(inFrameAt: origin, frameSize: frame) {
             current = apply(pass, to: current, original: bytes, lut: lut, weights: weights,
                             recolor: recolor, width: width, height: height)
         }
@@ -93,6 +97,8 @@ enum EffectReference {
             return sharpenCombine(bytes, original: original, params: params, width: width, height: height)
         case kOutline:
             return outline(bytes, params: params, width: width, height: height)
+        case kCRTScreen:
+            return crtScreen(bytes, params: params, width: width, height: height)
         default:
             break
         }
@@ -160,6 +166,7 @@ enum EffectReference {
     private static let kSharpenCombine: UInt32 = 11
     private static let kOutline: UInt32 = 12
     private static let kRecolor: UInt32 = 13
+    private static let kCRTScreen: UInt32 = 14
 
     // MARK: - The per-pixel transforms
     //
@@ -354,6 +361,107 @@ enum EffectReference {
             }
         }
         return result
+    }
+
+    // MARK: - The computer screen
+
+    /// **Computer Screen, one pixel** — `Effect.CRTScreen`'s doc is the specification and this is its
+    /// transcription; `crtScreen` in `Composite.metal` is the other one, and the two are held to a
+    /// channel step by `CRTScreenEffectLogicTests`.
+    ///
+    /// The order is the order light takes through a monitor, read backwards from the eye:
+    /// 1. **Where on the tube this pixel is** — the *frame* coordinate (`originX/originY` plus the
+    ///    local one, a strip being a window onto the frame), normalised to `n ∈ [−1, 1]²` about the
+    ///    frame's centre, which is why `frameWidth/frameHeight` had to exist.
+    /// 2. **Curvature** bends it to the source position `w = n · (1 + k·n.yx²)`. Outside the unit
+    ///    square there is no picture, and the pixel is transparent — the one place this effect
+    ///    reshapes coverage.
+    /// 3. **Three taps**: green at `w`, red `aberration · w` pixels outward and blue the same inward,
+    ///    each unpremultiplied by the alpha it was sampled with and the triple re-premultiplied by the
+    ///    green tap's alpha — `chromaticAberration`'s convention, so the fringe is in colour and never
+    ///    in coverage.
+    /// 4. **Scanlines and the RGB mask** on the *picture's* rows and columns — `q`, the warped frame
+    ///    coordinate — so they bend with the tube like the phosphor they stand for; the **vignette** on
+    ///    the unwarped `n`, because it is the room's light on the glass and not the picture.
+    ///
+    /// **Every profile is a tent rather than a step**, and that is a parity decision, not a taste.
+    /// Which row is "the dark one" is `fmod` of a float the two backends compute a last bit apart
+    /// under curvature; a step there is a whole row's darkening on one pixel and a tent is two ulps.
+    /// On integer pixel centres with no curvature the tents are exactly 0 and 1 — one dark row in
+    /// every `period`, one full channel per column — which is what the row-and-column tests pin.
+    private static func crtScreen(_ bytes: [UInt8], params: EffectParams, width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        let frame = SIMD2<Float>(Float(params.frameWidth), Float(params.frameHeight))
+        let origin = SIMD2<Float>(Float(params.originX), Float(params.originY))
+        let k = params.curvature
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = (x + y * width) * 4
+                // 1.
+                let centre = SIMD2<Float>(Float(x), Float(y)) + origin + 0.5
+                let n = centre / frame * 2 - 1
+                // 2.
+                let w = n * (1 + k * SIMD2<Float>(n.y * n.y, n.x * n.x))
+                guard abs(w.x) <= 1, abs(w.y) <= 1 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let q = (w * 0.5 + 0.5) * frame
+                // `sample`'s coordinate is texel-centred (`position == gid` reads texel `gid`), so
+                // the half-pixel that made `centre` comes back off, and the strip's offset with it.
+                let position = q - 0.5 - origin
+                // 3.
+                let green = sample(bytes, position, width: width, height: height)
+                let alpha = green.w
+                guard alpha > 0 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let fringe = w * params.aberration
+                let red = sample(bytes, position + fringe, width: width, height: height)
+                let blue = sample(bytes, position - fringe, width: width, height: height)
+                var colour = clamp(SIMD3<Float>(red.w > 0 ? red.x / red.w : 0,
+                                                green.y / alpha,
+                                                blue.w > 0 ? blue.z / blue.w : 0))
+                // 4.
+                colour *= crtScanline(q.y, params) * crtVignette(n, params)
+                colour *= crtMask(q.x, params)
+                for channel in 0..<3 { result[pixel + channel] = quantize(clamp(colour)[channel] * alpha) }
+                result[pixel + 3] = quantize(alpha)
+            }
+        }
+        return result
+    }
+
+    /// One dark row in every `scanlinePeriod`: a tent one pixel wide centred on the last row of each
+    /// period — `fmod(y, period)` at `period − 0.5` — so a row's pixel centre reads exactly 1 there
+    /// and exactly 0 on every other row. `y` is the warped frame row, `q.y`, never negative.
+    private static func crtScanline(_ y: Float, _ params: EffectParams) -> Float {
+        let period = params.scanlinePeriod
+        let d = fmod(y, period)
+        let tent = 1 - min(abs(d - (period - 0.5)), 0.5) * 2
+        return 1 - params.scanlines * tent
+    }
+
+    /// The RGB grille: a three-column repeat where column `c` passes channel `c` in full and the
+    /// other two at `1 − apertureMask`. Each channel's weight is a tent centred on its own column
+    /// (`c + 0.5` in `fmod(x, 3)`), one column wide, wrapped — so a pixel centre reads 1 in its
+    /// column and 0 in the other two.
+    private static func crtMask(_ x: Float, _ params: EffectParams) -> SIMD3<Float> {
+        let phase = fmod(x, 3)
+        func weight(_ column: Float) -> Float {
+            let distance = abs(phase - (column + 0.5))
+            return 1 - min(min(distance, 3 - distance), 1)
+        }
+        let off = params.apertureMask
+        return SIMD3<Float>(1 - off * (1 - weight(0)), 1 - off * (1 - weight(1)), 1 - off * (1 - weight(2)))
+    }
+
+    /// `1 − vignette · smoothstep(|n|² / 2)`: flat at the centre, full at the corners, half at the
+    /// middle of an edge.
+    private static func crtVignette(_ n: SIMD2<Float>, _ params: EffectParams) -> Float {
+        let r = min(max((n.x * n.x + n.y * n.y) * 0.5, 0), 1)
+        return 1 - params.vignette * (r * r * (3 - 2 * r))
     }
 
     /// Bilinear, clamp-to-edge, on premultiplied values — see `Effect.ChromaticAberration` for why the

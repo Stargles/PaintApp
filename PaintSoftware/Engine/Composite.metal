@@ -376,6 +376,7 @@ constant uint kEffectSobel               = 10;
 constant uint kEffectSharpenCombine      = 11;
 constant uint kEffectOutline             = 12;
 constant uint kEffectRecolor             = 13;
+constant uint kEffectCRTScreen           = 14;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
@@ -415,6 +416,18 @@ struct EffectParams {
     // offset — TODO (60). Appended at the end, like everything since the colour triple.
     uint  recolorEntryCount;
     uint  preserveShading;
+    // How big the whole frame is — the other half of `originX/originY`, for the one effect whose
+    // look is about the frame's centre. The buffer's own size for a whole-frame composite; never 0.
+    uint  frameWidth;
+    uint  frameHeight;
+    // The Computer Screen's six knobs, resolved in Swift: strengths in 0…1, the period floored at 1,
+    // `curvature` already `k`, `aberration` in pixels at the frame's edge.
+    float scanlines;
+    float scanlinePeriod;
+    float apertureMask;
+    float curvature;
+    float vignette;
+    float aberration;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -698,6 +711,70 @@ static inline float4 chromaticAberration(texture2d<float, access::read> source,
     return float4(colour * alpha, alpha);
 }
 
+// MARK: The computer screen
+
+/// One dark row in every `scanlinePeriod` — `EffectReference.crtScanline`, transcribed: a tent one
+/// pixel wide centred on the last row of each period, exactly 1 on that row's pixel centre and
+/// exactly 0 on every other's.
+static inline float crtScanline(float y, constant EffectParams &params) {
+    float period = params.scanlinePeriod;
+    float d = fmod(y, period);
+    float tent = 1.0f - min(fabs(d - (period - 0.5f)), 0.5f) * 2.0f;
+    return 1.0f - params.scanlines * tent;
+}
+
+/// The RGB grille — `EffectReference.crtMask`, transcribed: column `c` of every three passes channel
+/// `c` in full and the other two at `1 − apertureMask`, each channel's weight a wrapped tent on its
+/// own column.
+static inline float3 crtMask(float x, constant EffectParams &params) {
+    float phase = fmod(x, 3.0f);
+    float3 distance = fabs(float3(phase) - float3(0.5f, 1.5f, 2.5f));
+    float3 weight = 1.0f - min(min(distance, 3.0f - distance), 1.0f);
+    return 1.0f - params.apertureMask * (1.0f - weight);
+}
+
+/// `1 − vignette · smoothstep(|n|² / 2)` — `EffectReference.crtVignette`, transcribed.
+static inline float crtVignette(float2 n, constant EffectParams &params) {
+    float r = saturate(dot(n, n) * 0.5f);
+    return 1.0f - params.vignette * (r * r * (3.0f - 2.0f * r));
+}
+
+/// Computer Screen, one pixel — `EffectReference.crtScreen`'s twin, and `Effect.CRTScreen`'s doc in
+/// Effect.swift is the sentence both transcribe. The frame coordinate normalised about the frame's
+/// centre; curvature bends it, and outside the unit square the pixel is transparent; three taps under
+/// `chromaticAberration`'s convention, coverage from the green one; then the scanlines and the mask on
+/// the picture's own rows and columns, and the vignette on the glass.
+static inline float4 crtScreen(texture2d<float, access::read> source, constant EffectParams &params,
+                               uint2 gid) {
+    float2 frame = float2(float(params.frameWidth), float(params.frameHeight));
+    float2 origin = float2(float(params.originX), float(params.originY));
+    float k = params.curvature;
+    // 1.
+    float2 centre = float2(gid) + origin + 0.5f;
+    float2 n = centre / frame * 2.0f - 1.0f;
+    // 2.
+    float2 w = n * (1.0f + k * float2(n.y * n.y, n.x * n.x));
+    if (fabs(w.x) > 1.0f || fabs(w.y) > 1.0f) { return float4(0.0f); }
+    float2 q = (w * 0.5f + 0.5f) * frame;
+    // `sampleBilinear`'s coordinate is texel-centred, so the half-pixel comes back off, and the
+    // strip's offset with it.
+    float2 position = q - 0.5f - origin;
+    // 3.
+    float4 green = sampleBilinear(source, position);
+    float alpha = green.a;
+    if (!(alpha > 0.0f)) { return float4(0.0f); }
+    float2 fringe = w * params.aberration;
+    float4 red = sampleBilinear(source, position + fringe);
+    float4 blue = sampleBilinear(source, position - fringe);
+    float3 colour = saturate(float3(red.a > 0.0f ? red.r / red.a : 0.0f,
+                                    green.g / alpha,
+                                    blue.a > 0.0f ? blue.b / blue.a : 0.0f));
+    // 4.
+    colour *= crtScanline(q.y, params) * crtVignette(n, params);
+    colour *= crtMask(q.x, params);
+    return float4(saturate(colour) * alpha, alpha);
+}
+
 /// One separable pass: a weighted sum of `2 * taps + 1` samples along `(offsetX, offsetY)`.
 ///
 /// **Premultiplied throughout, and never unpremultiplied.** A convolution is a weighted average, and
@@ -900,6 +977,10 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     }
     if (kind == kEffectOutline) {
         result.write(outline(source, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectCRTScreen) {
+        result.write(crtScreen(source, params, gid), gid);
         return;
     }
 

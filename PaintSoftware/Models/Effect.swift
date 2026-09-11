@@ -100,6 +100,12 @@ enum Effect: Equatable {
     /// the first entry that claims a pixel wins, and shading inside a matched region is kept by
     /// default. One per-pixel pass, no neighbourhood. See `Recolor` for the four rulings.
     case recolor(Recolor)
+    /// **Computer Screen — TODO (60)'s "mimics that computer screen look", designed 2026-09-11.** Six
+    /// ingredients in one gather pass — scanlines, an RGB subpixel mask, barrel curvature, a vignette
+    /// and a radial colour fringe — behind named presets that *write the fields* rather than being
+    /// stored. Each ingredient is zero-able on its own and the effect is the identity when all are.
+    /// See `CRTScreen` for what each knob means and why bloom is not among them.
+    case crtScreen(CRTScreen)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -118,6 +124,7 @@ enum Effect: Equatable {
         case .sharpen:             return "Sharpen"
         case .outline:             return "Outline"
         case .recolor:             return "Recolour"
+        case .crtScreen:           return "Computer Screen"
         }
     }
 
@@ -138,10 +145,15 @@ enum Effect: Equatable {
     /// Stated as a property rather than a comment because it is the precondition of a test: everything
     /// answering false is swept for byte-exact alpha, and a grade that quietly started reshaping
     /// coverage would have to come here and say so first.
+    ///
+    /// **Computer Screen is the sixth, for curvature.** A barrel-bent picture no longer reaches its own
+    /// corners, and a texel pulled from outside the image is transparent (`crtScreen` in either
+    /// backend) — so coverage moves where the curvature is non-zero, and it is pinned like the
+    /// other five on convolving *premultiplied* texels rather than on alpha equality.
     var reshapesCoverage: Bool {
         switch self {
-        case .blur, .bloom, .sobel, .sharpen, .outline: return true
-        default:                                        return false
+        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen: return true
+        default:                                                    return false
         }
     }
 
@@ -165,7 +177,7 @@ enum Effect: Equatable {
 
     /// The §4 table in code. **Exhaustive with no `default:`, deliberately**, for the reason
     /// CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of
-    /// exceptions rots, and a fourteenth effect added later must be *forced* to answer this question
+    /// exceptions rots, and a sixteenth effect added later must be *forced* to answer this question
     /// rather than inherit an answer that happens to be wrong for it. `reshapesCoverage` above takes
     /// the other bargain — it has a `default:` — and is the reason this one does not.
     ///
@@ -216,6 +228,11 @@ enum Effect: Equatable {
         // ink over the paper, and a from-colour the paper happens to match would recolour the paper
         // too — which is what an adjustment layer means, and what the artist's tolerance controls.
         case .recolor:
+            return .backdrop
+        // **A screen look over paper is the point** (TODO (60)): the scanlines and the mask have
+        // to cross the white of the canvas, or the picture is a drawing with stripes on the ink
+        // and none on the paper, which is not a monitor. Over the paper the whole frame is the tube.
+        case .crtScreen:
             return .backdrop
         case .outline:
             return .ink
@@ -496,6 +513,112 @@ extension Effect {
         var preserveShading: Bool = true
     }
 
+    /// **A computer screen over the picture** — TODO (60)'s *"mimics that computer screen look. You
+    /// can add options for different presets"*, designed 2026-09-11. One gather pass, six knobs:
+    ///
+    /// - **`scanlines`** darkens one row in every `scanlinePeriod` by this much. The dark row is a
+    ///   one-pixel tent on the picture's own rows (post-curvature), so it bends with the tube and
+    ///   anti-aliases under a fractional period rather than flickering row to row.
+    /// - **`scanlinePeriod`** is in **output pixels** — the pixels of the buffer being composited,
+    ///   which is what every other pixel-unit knob in this file means (`Blur.radius`, `Outline.width`,
+    ///   `ChromaticAberration.offsetX`). `RenderResolution` is a live-canvas draft setting applied in
+    ///   `makeSandwichRecipe` and "nothing downstream has to know a scale was applied at all"; a period
+    ///   in canvas pixels would make this the one effect that has to, and the bake store is keyed by
+    ///   resolution anyway. So at 50% the lines are twice as coarse on screen, exactly as a blur is
+    ///   twice as wide; the exported frame is what the number describes.
+    /// - **`apertureMask`** is the RGB subpixel grille: a three-column repeat where each column passes
+    ///   its own channel and attenuates the other two by this much. Also a tent per column, for the
+    ///   scanline's reason.
+    /// - **`curvature`** is barrel distortion about the centre — `w = n · (1 + k·n.yx²)` on the
+    ///   normalised frame coordinate, `k = curvature · maxCurvature`, the shape every CRT shader uses
+    ///   since Lottes'. A destination pixel whose warped source falls outside the frame is
+    ///   **transparent**; that is what makes this effect reshape coverage, and it is why the corners
+    ///   of a curved screen show whatever the canvas paints behind its composite.
+    /// - **`vignette`** darkens toward the corners on the *unwarped* frame coordinate — it is the
+    ///   monitor's lighting, not the picture's — with a flat centre (`smoothstep` of `|n|²/2`).
+    /// - **`aberration`** is a radial per-channel offset, **in pixels at the frame's edge**: red is
+    ///   sampled outward and blue inward by `aberration · w`, green where it is, under the sampling
+    ///   convention `ChromaticAberration` states (bilinear, clamp-to-edge, premultiplied, each channel
+    ///   unpremultiplied by the alpha it was sampled with). Its kernel is not called; the three taps
+    ///   are this pass's own, so the whole look is one dispatch.
+    ///
+    /// **Bloom is deliberately not an ingredient.** It is four passes (`Bloom`), and a node carries
+    /// one effect, so a glow goes on a Bloom node of its own above this one — the settings bar says so.
+    /// The multi-pass contract would make an in-effect bloom no cheaper than that node: the same
+    /// threshold, blur, blur, combine, run inside a fifth pass list instead of its own.
+    ///
+    /// **The type's default is the identity, and the catalogue hands the artist a preset.** That is
+    /// `Blur`'s convention exactly: `Blur.radius` is 0 and `EffectCatalog` starts at 8, because a
+    /// filter that arrives invisible reads as broken. Here `CRTScreen()` has every strength at 0 —
+    /// which `testAllZeroIsTheIdentityByteForByte` pins — and `EffectCatalog` starts at `.crt`.
+    ///
+    /// **Presets are written, not stored.** `preset(_:)` returns the six fields a name means and the
+    /// settings bar writes them through the same `onChange` a slider uses; `preset` reads back which
+    /// name the current fields are, or nil when they are none of them, which the bar shows as "Custom".
+    /// Storing the name instead would make it a seventh field that could disagree with the other six
+    /// the moment any slider moved, and the document would then carry a lie about itself. Every one of
+    /// the six is a continuous `Double` and keyable through the existing track machinery.
+    struct CRTScreen: Equatable {
+        /// How dark the dark row is, 0…1. 0 is no scanlines at all.
+        var scanlines: Double = 0
+        /// Rows between dark rows, in output pixels. Floored at 1 by `params`; 1 darkens every row.
+        var scanlinePeriod: Double = CRTScreen.defaultScanlinePeriod
+        /// How much the two off-columns of each RGB triplet are attenuated, 0…1.
+        var apertureMask: Double = 0
+        /// Barrel amount, 0…1 — `maxCurvature` at 1.
+        var curvature: Double = 0
+        /// Corner darkening, 0…1.
+        var vignette: Double = 0
+        /// Radial colour fringe, in pixels at the frame's edge. Negative swaps red and blue.
+        var aberration: Double = 0
+
+        static let defaultScanlinePeriod = 3.0
+
+        /// `k` at `curvature == 1`. Lottes' CRT shader ships `1/32` and `1/24` as its two warps, so
+        /// 0.25 puts a subtle tube at about a tenth of the slider and a fishbowl at the top of it.
+        static let maxCurvature = 0.25
+
+        /// The named looks. Four rather than five: the fifth candidate, "Off", is `CRTScreen()` and is
+        /// what deleting the node does better.
+        enum Preset: String, CaseIterable, Equatable {
+            case crt = "CRT"
+            case arcade = "Arcade"
+            case lcd = "LCD"
+            case portable = "Portable"
+        }
+
+        /// The six fields a preset name means. **The only place the numbers live**: `preset` reads
+        /// back by comparing against these, so a tuned value here moves both directions at once.
+        static func preset(_ preset: Preset) -> CRTScreen {
+            switch preset {
+            // A living-room tube: fine lines, a gentle curve, a soft fringe.
+            case .crt:      return CRTScreen(scanlines: 0.45, scanlinePeriod: 3, apertureMask: 0.2,
+                                             curvature: 0.12, vignette: 0.3, aberration: 1)
+            // An arcade cabinet: heavy lines, the strongest curve, the widest fringe.
+            case .arcade:   return CRTScreen(scanlines: 0.7, scanlinePeriod: 4, apertureMask: 0.4,
+                                             curvature: 0.25, vignette: 0.45, aberration: 2)
+            // A flat panel: a fine subpixel grid, faint lines, no curve, no fringe.
+            case .lcd:      return CRTScreen(scanlines: 0.25, scanlinePeriod: 2, apertureMask: 0.35,
+                                             curvature: 0, vignette: 0.1, aberration: 0)
+            // A handheld: a coarse grid and heavy lines, dim toward the edges, flat.
+            case .portable: return CRTScreen(scanlines: 0.5, scanlinePeriod: 5, apertureMask: 0.45,
+                                             curvature: 0, vignette: 0.4, aberration: 0)
+            }
+        }
+
+        /// Which preset these fields are, or nil — "Custom" — when they match none of them. Exact
+        /// equality, deliberately: a slider nudged one tick off a preset is no longer that preset, and
+        /// saying it still was would tell the artist a knob had not moved when it had.
+        var preset: Preset? {
+            Preset.allCases.first { CRTScreen.preset($0) == self }
+        }
+
+        /// Every strength at zero — the identity, whatever the period says.
+        var isIdentity: Bool {
+            scanlines == 0 && apertureMask == 0 && curvature == 0 && vignette == 0 && aberration == 0
+        }
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     enum Screen: String, Codable, Equatable, CaseIterable {
@@ -693,6 +816,27 @@ struct EffectParams: Equatable {
     /// block and `setBytes` carries it as `weights` is carried.
     var recolorEntryCount: UInt32 = 0
     var preserveShading: UInt32 = 0
+    /// **How big the whole frame is** — the second half of what `originX/originY` began. A strip
+    /// (RENDER.md §3.8) is a window onto the frame, and an effect whose look is a function of *where
+    /// in the frame* a pixel sits — the screen's centre for a curvature and a vignette — needs the
+    /// frame's extent as well as the window's offset, and neither is something a smaller buffer can
+    /// say about itself. Stamped by `passes(inFrameAt:frameSize:)` for every pass, on both backends,
+    /// and equal to the buffer's own size for every whole-frame composite. Never zero by the time a
+    /// kernel reads it: both dispatchers substitute the buffer's size when a caller has no frame to
+    /// name, so the kernels have one code path and no fallback.
+    var frameWidth: UInt32 = 0
+    var frameHeight: UInt32 = 0
+    /// **The Computer Screen's six knobs** (TODO (60)), resolved: the four strengths clamped to 0…1,
+    /// the period floored at 1, `curvature` already multiplied by `CRTScreen.maxCurvature` so the
+    /// kernel holds `k` and not the slider, and `aberration` in pixels at the frame's edge. Named
+    /// fields rather than aliases of `amount`/`mix`/`threshold`, for the reader of the kernel: six
+    /// borrowed names would be six comments explaining which knob each one is this time.
+    var scanlines: Float = 0
+    var scanlinePeriod: Float = 1
+    var apertureMask: Float = 0
+    var curvature: Float = 0
+    var vignette: Float = 0
+    var aberration: Float = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -750,6 +894,7 @@ extension Effect {
         case .sharpen:             return 7
         case .outline:             return 12
         case .recolor:             return 13
+        case .crtScreen:           return 14
         }
     }
 
@@ -823,6 +968,17 @@ extension Effect {
             // The count the kernel walks is the *table's*, which is capped — see `recolorTable`.
             p.recolorEntryCount = UInt32(min(recolor.entries.count, Self.maxRecolorEntries))
             p.preserveShading = recolor.preserveShading ? 1 : 0
+        case .crtScreen(let screen):
+            // Resolved once here, `Effect.swift`'s own rule: the kernel is handed `k`, not the slider,
+            // and a strength past 1 or below 0 means the end of the slider rather than a picture
+            // neither backend was written for. A non-finite value is its identity.
+            func unit(_ v: Double) -> Float { v.isFinite ? Float(min(max(v, 0), 1)) : 0 }
+            p.scanlines = unit(screen.scanlines)
+            p.scanlinePeriod = screen.scanlinePeriod.isFinite ? Float(max(screen.scanlinePeriod, 1)) : 1
+            p.apertureMask = unit(screen.apertureMask)
+            p.curvature = Float(Double(unit(screen.curvature)) * CRTScreen.maxCurvature)
+            p.vignette = unit(screen.vignette)
+            p.aberration = screen.aberration.isFinite ? Float(screen.aberration) : 0
         }
         return p
     }
@@ -878,18 +1034,22 @@ extension Effect {
         }
     }
 
-    /// **`passes`, with every pass told where this buffer sits in the frame** — RENDER.md §3.8.
+    /// **`passes`, with every pass told where this buffer sits in the frame and how big the frame
+    /// is** — RENDER.md §3.8.
     ///
     /// One place rather than two, because both backends need the same stamp and a pass built with a
     /// different origin on the GPU than on the CPU is a divergence a parity sweep would report as an
-    /// effect bug. The identity at the origin, so a whole-frame composite allocates and copies
-    /// nothing extra and `passes` itself is unchanged for every existing caller.
-    func passes(inFrameAt origin: (x: UInt32, y: UInt32)) -> [EffectPass] {
-        guard origin.x != 0 || origin.y != 0 else { return passes }
-        return passes.map {
+    /// effect bug. `frameSize` is the buffer's own size for every whole-frame composite — both
+    /// dispatchers substitute it when a caller names no frame — so `passes` itself is unchanged for
+    /// every existing caller and no kernel ever reads a zero frame.
+    func passes(inFrameAt origin: (x: UInt32, y: UInt32),
+                frameSize: (width: UInt32, height: UInt32)) -> [EffectPass] {
+        passes.map {
             var stamped = $0
             stamped.params.originX = origin.x
             stamped.params.originY = origin.y
+            stamped.params.frameWidth = frameSize.width
+            stamped.params.frameHeight = frameSize.height
             return stamped
         }
     }
@@ -965,10 +1125,15 @@ extension Effect {
     ///   `int searchRadius = int(ceil(radius))` in the kernel walks.
     /// - `chromaticAberration` is the ceiling of its vertical displacement **plus one**, because the
     ///   tap is bilinear: a sample at y + 2.5 reads rows 2 and 3 away.
+    /// - `crtScreen` is **the one reach that depends on the frame**, which is why this takes
+    ///   `frameHeight` at all. Its curvature pulls a corner's source `k · H/2` rows inward
+    ///   (`w.y = n.y · (1 + k·n.x²)`, at most `k` in normalised units, over a half-height of `H/2`),
+    ///   and its fringe reaches `|aberration|` pixels more at the edge, bilinear, so plus one. Every
+    ///   other effect ignores the argument.
     /// - Every per-pixel grade is 0. `noise` and a screened `posterize` are 0 *here* and are not
     ///   therefore free under a strip — they read absolute position rather than a neighbourhood, so
     ///   no apron can carry them and `EffectParams.originX/originY` is what does.
-    var verticalKernelRadius: Int {
+    func verticalKernelRadius(frameHeight: Int) -> Int {
         switch self {
         case .blur(let blur): return Self.tapCount(forRadius: blur.radius)
         case .bloom(let bloom): return Self.tapCount(forRadius: bloom.radius)
@@ -979,6 +1144,10 @@ extension Effect {
         case .chromaticAberration(let aberration):
             guard aberration.offsetY.isFinite else { return 0 }
             return Int(abs(aberration.offsetY).rounded(.up)) + 1
+        case .crtScreen:
+            let p = params
+            let pull = Double(p.curvature) * Double(max(frameHeight, 0)) / 2
+            return Int(pull.rounded(.up)) + Int(abs(Double(p.aberration)).rounded(.up)) + 1
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
              .recolor:
             return 0
@@ -991,12 +1160,16 @@ extension Effect {
     /// `noiseValue(gid, …)` hashes the pixel's coordinates and `screenValue(kind, gid)` indexes a 4x4
     /// screen by `gid.y & 3`, so a buffer that is a *window* onto the frame reads a shifted field
     /// unless it is told where its window sits. `EffectParams.originX/originY` is what tells it, and
-    /// this is the predicate a test asserts the two lists against so a fourteenth effect that reads
+    /// this is the predicate a test asserts the two lists against so a sixteenth effect that reads
     /// `gid` cannot be added without one.
     var readsAbsolutePosition: Bool {
         switch self {
         case .noise: return true
         case .posterize(let posterize): return posterize.screen != .none
+        // The third, and the first that reads a neighbourhood *as well*: its curvature and vignette
+        // are about the frame's centre and its scanlines about the frame's rows, so it needs the
+        // origin and the frame size, and its curvature needs an apron on top of both.
+        case .crtScreen: return true
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
              .blur, .bloom, .sobel, .sharpen, .outline, .recolor:
             return false
@@ -1289,7 +1462,7 @@ extension Effect: Codable {
 
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
-             posterize, noise, blur, bloom, sobel, sharpen, outline, recolor
+             posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen
     }
 
     private var kind: Kind {
@@ -1308,6 +1481,7 @@ extension Effect: Codable {
         case .sharpen:             return .sharpen
         case .outline:             return .outline
         case .recolor:             return .recolor
+        case .crtScreen:           return .crtScreen
         }
     }
 
@@ -1336,6 +1510,7 @@ extension Effect: Codable {
         case .sharpen:             self = .sharpen(try params(Sharpen.self, Sharpen()))
         case .outline:             self = .outline(try params(Outline.self, Outline()))
         case .recolor:             self = .recolor(try params(Recolor.self, Recolor()))
+        case .crtScreen:           self = .crtScreen(try params(CRTScreen.self, CRTScreen()))
         }
     }
 
@@ -1357,6 +1532,7 @@ extension Effect: Codable {
         case .sharpen(let p):             try container.encode(p, forKey: .params)
         case .outline(let p):             try container.encode(p, forKey: .params)
         case .recolor(let p):             try container.encode(p, forKey: .params)
+        case .crtScreen(let p):           try container.encode(p, forKey: .params)
         }
     }
 }
@@ -1516,6 +1692,26 @@ extension Effect.Recolor: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         entries = try c.decodeIfPresent([RecolorEntry].self, forKey: .entries) ?? []
         preserveShading = try c.decodeIfPresent(Bool.self, forKey: .preserveShading) ?? true
+    }
+}
+
+/// Every field defaulted, `Sharpen`'s recipe: a document written before a knob existed has the
+/// knob's identity, and one written before the effect existed never names it at all. Encodes
+/// synthesized. **The preset is not here**, because it is not stored — `CRTScreen`'s doc.
+extension Effect.CRTScreen: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case scanlines, scanlinePeriod, apertureMask, curvature, vignette, aberration
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scanlines = try c.decodeIfPresent(Double.self, forKey: .scanlines) ?? 0
+        scanlinePeriod = try c.decodeIfPresent(Double.self, forKey: .scanlinePeriod)
+            ?? Self.defaultScanlinePeriod
+        apertureMask = try c.decodeIfPresent(Double.self, forKey: .apertureMask) ?? 0
+        curvature = try c.decodeIfPresent(Double.self, forKey: .curvature) ?? 0
+        vignette = try c.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
+        aberration = try c.decodeIfPresent(Double.self, forKey: .aberration) ?? 0
     }
 }
 
@@ -1817,12 +2013,12 @@ extension Effect {
     /// **Exhaustive, with no `default:`** — the same bargain `Effect.input` takes and the opposite
     /// of `reshapesCoverage`'s, and here it is load-bearing rather than stylistic. `Effect` cannot
     /// be `CaseIterable` (it has associated values) and every all-effects sweep in the suite is a
-    /// hand-typed literal, so nothing else in this codebase would notice a fourteenth effect
+    /// hand-typed literal, so nothing else in this codebase would notice a sixteenth effect
     /// missing from this table. A `default:` would hand it an empty parameter list, its keyframe
     /// channels would silently not exist, and the first symptom would be an artist unable to
     /// animate a knob they can see.
     ///
-    /// **Fourteen cases, fifteen menu entries.** Gaussian and Directional Blur are one case split
+    /// **Fifteen cases, sixteen menu entries.** Gaussian and Directional Blur are one case split
     /// by `Blur.isDirectional`, so they share one branch here and `blur.directional` is itself a
     /// parameter — which is the honest shape, since an artist can flip a Gaussian blur into a
     /// directional one without changing effect.
@@ -2013,6 +2209,29 @@ extension Effect {
                            componentDomain: 0...1, keyPath: \Recolor.entries),
                 l.boolean("recolor.preserveShading", "Preserve Shading", "preserveShading",
                           \.preserveShading),
+            ]
+
+        case .crtScreen:
+            let l = EffectCaseLens<CRTScreen>(extract: { if case .crtScreen(let p) = $0 { return p }; return nil },
+                                             embed: { .crtScreen($0) })
+            // Six continuous `Double`s, every one keyable. The preset picker above them in the bar is
+            // not a parameter: it writes these six and stores nothing (`CRTScreen`'s doc).
+            return [
+                // The four strengths clamp to exactly their slider in `params`, like `bloom.threshold`.
+                l.double("crtScreen.scanlines", "Scanlines", "scanlines", \.scanlines,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                // Floored at 1 by `params` and capped by nothing; the slider's 16 is its own.
+                l.double("crtScreen.scanlinePeriod", "Line Spacing", "scanlinePeriod", \.scanlinePeriod,
+                         ui: 1...16, model: 1...(.infinity), format: "%.1f px"),
+                l.double("crtScreen.apertureMask", "RGB Stripes", "apertureMask", \.apertureMask,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("crtScreen.curvature", "Curvature", "curvature", \.curvature,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("crtScreen.vignette", "Vignette", "vignette", \.vignette,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                // Negative swaps which channel goes outward, and is meaningful; the slider stops at 0.
+                l.double("crtScreen.aberration", "Colour Fringe", "aberration", \.aberration,
+                         ui: 0...8, model: EffectParameter.unbounded, format: "%.1f px"),
             ]
         }
     }
