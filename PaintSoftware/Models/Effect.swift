@@ -673,6 +673,26 @@ extension Effect {
 
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
+    ///
+    /// **No error-diffusion screen, and that is a ruling rather than an omission (TODO (60)'s
+    /// Dither).** Floyd-Steinberg and its relatives spread each pixel's quantization error onto its
+    /// not-yet-visited neighbours, which makes the pattern a function of every pixel that came before
+    /// it in scan order — change one input pixel and the diffusion downstream of it changes too. That
+    /// is invisible in a still image and is the opposite of invisible in an animated one: the exact
+    /// same drawing, unposed one frame later by a millisecond of pose interpolation, re-diffuses from
+    /// scratch and the whole dither pattern **crawls** across the frame rather than holding still with
+    /// the ink it is dithering. Ordered dithering (`.ordered`, `.halftone`) has no such history — each
+    /// pixel's threshold is a pure function of its own position (`screenValue`'s `gid & 3`), so two
+    /// frames with the same ink read the same dither, which is the property an animated medium needs
+    /// and a still-image editor never has to ask for.
+    ///
+    /// **The Bayer matrix size (2×2 / 4×4 / 8×8) is not exposed, and it is not a one-constant change**
+    /// — `kBayer4`/`kClustered4` here and in `Composite.metal`'s `screenValue` are literal 16-entry
+    /// tables addressed by a hard-coded `& 3` mask; an 8×8 Bayer matrix is a different recursive
+    /// construction (not an extension of the 4×4 one) and a 2×2 is a distinct 4-entry table, so a size
+    /// option would mean new tables in both languages and a mask that varies with the size, not a
+    /// single number moving. Recorded here rather than built, per TODO (60)'s own instruction to do
+    /// exactly that when the premise ("if it's a one-constant change") does not hold.
     enum Screen: String, Codable, Equatable, CaseIterable {
         case none
         case ordered
