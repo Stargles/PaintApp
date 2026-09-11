@@ -266,4 +266,187 @@ final class OptionsPanelUITests: PaintUITestCase {
                                  what, height, BottomDock.preferredWidth),
                           file: file, line: line)
     }
+
+    // MARK: - TODO (60): a slider and a swatch that must actually reach the render
+
+    /// Reads `canvas.host` once and hands back a closure over its raw bytes — `DistortUITests
+    /// .inkProbe`'s shape, restated here rather than shared, for the same per-class-helper reason
+    /// every fixture function in this suite is duplicated instead of factored out.
+    private func canvasBytes(_ canvas: XCUIElement) throws -> (width: Int, height: Int, bytes: [UInt8]) {
+        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
+        let width = image.width, height = image.height
+        var buffer = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
+                                              bitsPerComponent: 8, bytesPerRow: width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return (width, height, buffer)
+    }
+
+    /// The brightest red channel byte in a vertical strip at `dx`, over `dyRange` — a *scan* rather
+    /// than one exact point, because neither Sobel's edge nor Bloom's glow lands at a pixel this file
+    /// can compute in advance (stroke width and glow radius are both screen-scale-dependent). Sobel's
+    /// output is `(m, m, m, a)`, so the red channel alone already carries the whole edge magnitude.
+    private func maxRedChannel(_ canvas: XCUIElement, dx: Double, dyRange: ClosedRange<Double>,
+                               samples: Int = 40) throws -> UInt8 {
+        let (width, height, buffer) = try canvasBytes(canvas)
+        let x = min(max(Int(dx * Double(width)), 0), width - 1)
+        var best: UInt8 = 0
+        for i in 0...samples {
+            let dy = dyRange.lowerBound
+                + (dyRange.upperBound - dyRange.lowerBound) * Double(i) / Double(samples)
+            let y = min(max(Int(dy * Double(height)), 0), height - 1)
+            best = max(best, buffer[(y * width + x) * 4])
+        }
+        return best
+    }
+
+    /// The largest (red − green) found in the same kind of scan — "how red is the reddest pixel here,
+    /// net of any grey it is riding on". Bloom's white default tints nothing, so this reads near zero
+    /// under it; a red tint should not.
+    private func maxRedness(_ canvas: XCUIElement, dx: Double, dyRange: ClosedRange<Double>,
+                            samples: Int = 40) throws -> Int {
+        let (width, height, buffer) = try canvasBytes(canvas)
+        let x = min(max(Int(dx * Double(width)), 0), width - 1)
+        var best = Int.min
+        for i in 0...samples {
+            let dy = dyRange.lowerBound
+                + (dyRange.upperBound - dyRange.lowerBound) * Double(i) / Double(samples)
+            let y = min(max(Int(dy * Double(height)), 0), height - 1)
+            let offset = (y * width + x) * 4
+            best = max(best, Int(buffer[offset]) - Int(buffer[offset + 1]))
+        }
+        return best
+    }
+
+    /// Re-reads a scan until two consecutive readings agree or `timeout` runs out — the bake pipeline
+    /// this file has no other visibility into may still be settling a frame after a slider drag or a
+    /// panel close, and a single screenshot taken on the very next line can catch it mid-flight
+    /// (`DistortUITests.settledProbe` is the precedent for waiting on stability rather than on a fixed
+    /// delay).
+    private func settled<T: Equatable>(timeout: TimeInterval = 4, _ read: () throws -> T) rethrows -> T {
+        var last: T?
+        let deadline = Date().addingTimeInterval(timeout)
+        var current = try read()
+        while Date() < deadline {
+            if current == last { return current }
+            last = current
+            usleep(150_000)
+            current = try read()
+        }
+        return current
+    }
+
+    /// **TODO (60), cold start: Sobel's new Gain slider actually changes the picture.** A model
+    /// assertion on `Effect.Sobel.gain` proves nothing about whether an artist can reach or see it
+    /// (CLAUDE.md's "prove the artist can use it" rule). Sobel is always `.backdrop` with no control
+    /// of its own, so a plain stroke against the default white paper already gives it an edge to
+    /// draw — no brush colour needs picking first, unlike the Bloom test below.
+    func testChangingSobelsGainChangesWhatIsDrawn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let sobelItem = app.buttons["layerOptions.blendMode.sobel"]
+        XCTAssertTrue(sobelItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Sobel")
+        sobelItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let gainSlider = app.sliders["effectSettings.gain"]
+        XCTAssertTrue(gainSlider.waitForExistence(timeout: 5),
+                      "Sobel's Gain slider did not open — the artist cannot reach it")
+        gainSlider.adjust(toNormalizedSliderPosition: 0.0)   // gain 0.25, the dimmest on offer
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)   // close the panel so the canvas is clear
+        let dim = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: 0.4...0.6) }
+        attach(app, "sobel-gain-dim")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.effectSettings"].tap()
+        XCTAssertTrue(gainSlider.waitForExistence(timeout: 5), "Reopening should show the same Gain slider")
+        gainSlider.adjust(toNormalizedSliderPosition: 1.0)   // gain 8, the brightest
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let bright = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: 0.4...0.6) }
+        attach(app, "sobel-gain-bright")
+
+        XCTAssertGreaterThan(bright, dim, """
+            Dragging Sobel's Gain slider must change the edge it draws. Dim (gain 0.25) read \(dim), \
+            bright (gain 8) read \(bright) — equal or close readings mean the slider is not reaching \
+            the render.
+            """)
+    }
+
+    /// **TODO (60), cold start: Bloom's new Colour swatch actually changes the picture.** Same
+    /// argument as the Sobel test above, aimed at the other new knob. Bright ink is needed first
+    /// because Bloom's threshold gates on *luminance* and the default black brush never crosses it —
+    /// `Lum(black) == 0` clears no positive threshold — so this test sets the brush colour through the
+    /// toolbar's own colour panel before drawing, `SandwichCompositingUITests.setBrushColor`'s pattern
+    /// restated here rather than shared across files.
+    func testChangingBloomsColourChangesWhatIsDrawn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
+        colorButton.tap()
+        let brushHex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(brushHex.waitForExistence(timeout: 5))
+        setHexField(app, brushHex, to: "FFFFFF")
+        colorButton.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let bloomItem = app.buttons["layerOptions.blendMode.bloom"]
+        XCTAssertTrue(bloomItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Bloom")
+        bloomItem.tap()
+
+        app.buttons["layerOptions.effectSettings"].tap()
+        let radiusSlider = app.sliders["effectSettings.radius"]
+        XCTAssertTrue(radiusSlider.waitForExistence(timeout: 5), "Bloom's settings did not open")
+        radiusSlider.adjust(toNormalizedSliderPosition: 1.0)                        // the widest glow
+        app.sliders["effectSettings.intensity"].adjust(toNormalizedSliderPosition: 1.0)  // the strongest
+
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)   // close the panel so the canvas is clear
+        let beforeRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.3...0.7) }
+        attach(app, "bloom-colour-before")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.effectSettings"].tap()
+        let colorSwatch = app.buttons["effectSettings.color"]
+        XCTAssertTrue(colorSwatch.waitForExistence(timeout: 5),
+                      "Bloom's Colour swatch did not open — the artist cannot reach it")
+        colorSwatch.tap()
+        let tintHex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(tintHex.waitForExistence(timeout: 5), "The swatch must open ColorPickerPanel")
+        setHexField(app, tintHex, to: "FF0000")
+        // Dismiss the popover by tapping the panel behind it, away from the swatch it is anchored to
+        // — `LayerPanelControlsUITests.testTheCanvasColourRowOpensTheSamePickerTheBrushUses`'s move.
+        app.staticTexts["layerOptions.subMenuTitle"].tap()
+
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        let afterRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.3...0.7) }
+        attach(app, "bloom-colour-after")
+
+        XCTAssertGreaterThan(afterRedness, beforeRedness + 15, """
+            Changing Bloom's Colour swatch to red must change what is drawn. Redness before \
+            \(beforeRedness), after \(afterRedness) — close readings mean the swatch is not reaching \
+            the render.
+            """)
+    }
 }

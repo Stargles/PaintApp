@@ -132,7 +132,10 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "intensity|Intensity|0.0...4.0|%.2f",
         ])
 
-        XCTAssertEqual(sliderRows(.sobel(Effect.Sobel())), [])
+        // TODO (60). Sobel's first slider.
+        XCTAssertEqual(sliderRows(.sobel(Effect.Sobel())), [
+            "gain|Gain|0.25...8.0|%.2f",
+        ])
 
         XCTAssertEqual(sliderRows(.sharpen(Effect.Sharpen())), [
             "radius|Radius|0.0...32.0|%.1f px",
@@ -161,17 +164,19 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         ])
     }
 
-    /// 31 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
-    /// `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour, whose
-    /// sliders are per entry (see above), and 31 with the Computer Screen's six.
-    func testThereAreThirtyOneSlidersInTheWholeCatalogue() {
+    /// 32 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
+    /// `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour (whose
+    /// tolerance/softness are per entry, not a `slider(...)` row of their own — see above), 26 with
+    /// TODO (60)'s `sobel.gain` (`bloom.color` does not add one: a `.compound` value has no
+    /// `uiRange`), and 32 with the Computer Screen's six.
+    func testThereAreThirtyTwoSlidersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Both blur entries are one case; count it once.
             if case .blur(let blur) = $0 { return !blur.isDirectional }
             return true
         }
         XCTAssertEqual(cases.count, 15, "Fifteen cases behind sixteen menu entries")
-        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 31)
+        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 32)
     }
 
     /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
@@ -185,7 +190,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// band would start reading a number differently from the settings bar.
     func testEveryAnimatableParameterCarriesAFormatForTheGraphEditorToRead() {
         // By id, because `everyMenuEntry` lists Gaussian and Directional Blur separately and they are
-        // one case sharing one table — the same dedup `testThereAreTwentyFiveSlidersInTheWholeCatalogue`
+        // one case sharing one table — the same dedup `testThereAreThirtyTwoSlidersInTheWholeCatalogue`
         // does by filtering the case, reached from the other side. Ids are unique across the
         // catalogue (`testIdsAreUniqueWithinAndAcrossEffects`), so a set of them is the true count.
         var animatable: Set<String> = []
@@ -195,10 +200,10 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                 animatable.insert(parameter.id)
             }
         }
-        XCTAssertEqual(animatable.count, 30,
+        XCTAssertEqual(animatable.count, 31,
                        "PREMISE: the animatable set — got \(animatable.sorted())")
         XCTAssertFalse(animatable.contains("posterize.levels"), """
-            PREMISE: 30 and not 31, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
+            PREMISE: 31 and not 32, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
             """)
     }
 
@@ -214,9 +219,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **41 stored fields over 15 payload structs, and every one of them addressable.** The count
-    /// is the point: a field added to a payload struct and not to the table is a knob no keyframe
-    /// can reach, and nothing else in the app would say so.
+    /// **43 stored fields over 15 payload structs, and every one of them addressable.** 33 the day
+    /// the table was written, plus Recolour's own 2 (its new payload struct), TODO (60)'s
+    /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), and the Computer Screen's 6 (its
+    /// own new payload struct). The count is the point: a field added to a payload struct and not to
+    /// the table is a knob no keyframe can reach, and nothing else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
         let expected: [(Effect, Int)] = [
             (.levels(Effect.Levels()), 5),
@@ -228,8 +235,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.posterize(Effect.Posterize()), 3),
             (.noise(Effect.Noise()), 3),
             (.blur(Effect.Blur()), 3),
-            (.bloom(Effect.Bloom()), 4),
-            (.sobel(Effect.Sobel()), 0),
+            (.bloom(Effect.Bloom()), 5),
+            (.sobel(Effect.Sobel()), 1),
             (.sharpen(Effect.Sharpen()), 2),
             (.outline(Effect.Outline()), 3),
             (.recolor(Effect.Recolor()), 2),
@@ -243,7 +250,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 41)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 43)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -266,10 +273,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         }
     }
 
-    /// **Sobel is the zero-parameter effect and the table says so with an empty list**, not with a
-    /// missing entry. Anything drawing a channel list has to survive it.
-    func testSobelHasNoParameters() {
-        XCTAssertEqual(Effect.sobel(Effect.Sobel()).parameters.count, 0)
+    /// **Sobel was the zero-parameter effect until TODO (60)** — it now has exactly one, `sobel.gain`,
+    /// and the table says so with a one-entry list rather than the empty one it used to return.
+    func testSobelHasOneParameter() {
+        XCTAssertEqual(Effect.sobel(Effect.Sobel()).parameters.count, 1)
+        XCTAssertEqual(Effect.sobel(Effect.Sobel()).parameters.first?.id, "sobel.gain")
         XCTAssertEqual(Effect.sobel(Effect.Sobel()).displayName, "Sobel")
     }
 
@@ -279,7 +287,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         // The two blur entries are one case, so the flattened list repeats blur's three; `Set`
         // folds them back together.
         XCTAssertEqual(Set(Self.everyMenuEntry.flatMap { ids($0) }).sorted(), [
-            "bloom.input", "bloom.intensity", "bloom.radius", "bloom.threshold",
+            "bloom.color", "bloom.input", "bloom.intensity", "bloom.radius", "bloom.threshold",
             "blur.angle", "blur.directional", "blur.radius",
             "brightnessContrast.brightness", "brightnessContrast.contrast",
             "chromaticAberration.offsetX", "chromaticAberration.offsetY",
@@ -295,6 +303,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "posterize.levels", "posterize.screen", "posterize.screenStrength",
             "recolor.entries", "recolor.preserveShading",
             "sharpen.amount", "sharpen.radius",
+            "sobel.gain",
         ])
     }
 
@@ -305,7 +314,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 41)
+        XCTAssertEqual(seen.count, 43)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -330,6 +339,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                        \Effect.Curves.points)
         XCTAssertEqual(parameter("posterize.screen", of: .posterize(Effect.Posterize()))?.keyPath,
                        \Effect.Posterize.screen)
+        // TODO (60).
+        XCTAssertEqual(parameter("bloom.color", of: .bloom(Effect.Bloom()))?.keyPath,
+                       \Effect.Bloom.color)
+        XCTAssertEqual(parameter("sobel.gain", of: .sobel(Effect.Sobel()))?.keyPath,
+                       \Effect.Sobel.gain)
     }
 
     // MARK: - Animation kinds
@@ -362,17 +376,20 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(Set(componentwise), ["curves.points", "gradientMap.stops"])
     }
 
-    /// 30 `Double`s plus `Outline.color`, whose four channels tween as one value with a fixed count
-    /// — which is why it is continuous rather than componentwise. 24 + 1 until the Computer Screen's
-    /// six arrived, every one a continuous `Double` — the brief's *"every numeric field keyable"*.
-    func testThirtyOneParametersAreContinuous() {
+    /// 31 `Double`s plus two colours (`Bloom.color`, `Outline.color`), each of whose four channels
+    /// tween as one value with a fixed count — which is why they are continuous rather than
+    /// componentwise. 24 doubles and one colour the day the table was written; TODO (60) added
+    /// `sobel.gain` (a double) and `bloom.color` (a colour); the Computer Screen's six, every one a
+    /// continuous `Double`, brought the doubles to 31.
+    func testThirtyThreeParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
             .filter { if case .blur(let b) = $0 { return !b.isDirectional }; return true }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
-        XCTAssertEqual(continuous.count, 31)
-        XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id), ["outline.color"])
-        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 30)
+        XCTAssertEqual(continuous.count, 33)
+        // Bloom precedes Outline in `everyMenuEntry`, so its colour is encountered first.
+        XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id), ["bloom.color", "outline.color"])
+        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 31)
     }
 
     /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
@@ -424,6 +441,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         let intensity = parameter("bloom.intensity", of: .bloom(Effect.Bloom()))
         XCTAssertEqual(intensity?.uiRange, 0...4)
         XCTAssertEqual(intensity?.modelDomain, 0...(.infinity))
+
+        // TODO (60). `max(gain, 0)` — the same shape as `bloom.intensity` two lines up.
+        let gain = parameter("sobel.gain", of: .sobel(Effect.Sobel()))
+        XCTAssertEqual(gain?.uiRange, 0.25...8)
+        XCTAssertEqual(gain?.modelDomain, 0...(.infinity))
 
         // Outline is the one parameter where the two agree exactly: the slider's ceiling *is*
         // `maxOutlineRadius`, which is also what `params` clamps to.
@@ -556,8 +578,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(radius?.write(bloom, 40), bloom)
     }
 
-    /// The four compound values have no single number, so the scalar bridge refuses them rather
-    /// than half-addressing one. Three need a channel that speaks their own type; the recolour's
+    /// The five compound values have no single number, so the scalar bridge refuses them rather
+    /// than half-addressing one. Four need a channel that speaks their own type; the recolour's
     /// list is ruled to have none at all.
     func testCompoundParametersHaveNoScalarBridge() {
         let compound: [(String, Effect)] = [
@@ -565,6 +587,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             ("gradientMap.stops", .gradientMap(Effect.GradientMap())),
             ("outline.color", .outline(Effect.Outline())),
             ("recolor.entries", .recolor(Effect.Recolor())),
+            ("bloom.color", .bloom(Effect.Bloom())),
         ]
         for (id, effect) in compound {
             let p = parameter(id, of: effect)
@@ -633,5 +656,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                        "Outline's *width* rides EffectParams.amount")
         XCTAssertEqual(Effect.noise(Effect.Noise(amount: 0.25)).params.amount, 0.25)
         XCTAssertEqual(Effect.sharpen(Effect.Sharpen(amount: 2)).params.amount, 2)
+
+        // TODO (60). `gain` folds into the same scalar the fixed divisor already occupies — on top
+        // of it, not instead of it, so gain 1 (the default) is unchanged and gain 2 doubles it exactly.
+        XCTAssertEqual(Effect.sobel(Effect.Sobel(gain: 2)).params.amount,
+                       Float(2.0 / 20.0.squareRoot()), accuracy: 1e-6,
+                       "gain multiplies the fixed divisor rather than replacing it")
     }
 }

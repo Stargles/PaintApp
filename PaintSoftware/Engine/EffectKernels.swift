@@ -568,17 +568,27 @@ enum EffectReference {
     /// `rgb` is re-clamped against the summed alpha afterwards. Addition can push a channel above the
     /// coverage that carries it, which is not a representable premultiplied colour and would surface
     /// much later as an unpremultiply above 1 in whatever read the texture next.
+    ///
+    /// **TODO (60) — the glow is tinted before it is scaled by `intensity` and added.** `colorR/G/B`
+    /// ride the same trailing scalars `outline` binds its stroke colour to (`EffectParams`'s own doc:
+    /// appended at the end so a new field cannot shift another effect's), safe because bloom's combine
+    /// and outline's one pass never run in the same dispatch. Only `rgb` is tinted — `glow.w` (coverage)
+    /// is untouched by colour, which is `Bloom.color`'s alpha-is-ignored rule paid out here: a glow's
+    /// *reach* is `intensity`'s question, tint only recolours what was already going to glow. White
+    /// `(1,1,1)` multiplies every channel by 1, which is why an untinted bloom is unchanged by this.
     private static func bloomCombine(_ bytes: [UInt8], original: [UInt8], params: EffectParams,
                                      width: Int, height: Int) -> [UInt8] {
         var result = bytes
+        let tint = SIMD3<Float>(params.colorR, params.colorG, params.colorB)
         for y in 0..<height {
             for x in 0..<width {
                 let base = texel(original, x, y, width: width, height: height)
                 let glow = texel(bytes, x, y, width: width, height: height)
+                let tintedGlow = SIMD3<Float>(glow.x, glow.y, glow.z) * tint
                 let alpha = min(max(base.w + glow.w * params.intensity, 0), 1)
                 let pixel = (x + y * width) * 4
                 for channel in 0..<3 {
-                    let value = min(max(base[channel] + glow[channel] * params.intensity, 0), 1)
+                    let value = min(max(base[channel] + tintedGlow[channel] * params.intensity, 0), 1)
                     result[pixel + channel] = quantize(min(value, alpha))
                 }
                 result[pixel + 3] = quantize(alpha)

@@ -133,7 +133,7 @@ func effectMenuSlug(_ effect: Effect) -> String {
 /// for Gradient Map, which is the only unbounded one. **The bar is therefore as tall as one effect's
 /// own rows, up to a ceiling** — wider than the rail was, so the sliders gained travel rather than
 /// losing it, and ceilinged in height so it can never grow to eat the canvas it was moved to uncover.
-/// Sobel, which has no controls at all, is a header and a caption; Levels' five sliders land exactly on
+/// Sobel, with its one Gain slider, is close to the shortest; Levels' five sliders land exactly on
 /// the ceiling; Curves and a many-stop Gradient Map reach it and scroll. It shipped as a *fixed* card
 /// at that ceiling and the owner asked for this the same day — see `BottomDock.maxScrollHeight`. The alternative —
 /// reflowing the rows into columns to use the extra width — is a change to the controls themselves and
@@ -181,7 +181,7 @@ struct EffectSettingsBar: View {
     /// (`EffectParameter.isScalarAnimatable` names why for each). A slider is different in two ways
     /// that both need the id: §2.26's routing has to write a key on **exactly the channel
     /// touched**, and recovering which one moved from a whole-`Effect` diff would be a comparison over
-    /// thirty-three closures to learn something the caller already knew. The id is only in scope
+    /// thirty-seven closures to learn something the caller already knew. The id is only in scope
     /// inside `slider(_:)`, so that is where the branch is taken.
     ///
     /// The bar does not decide what the edit *means* — see `KeyframeControl.write`, which is in the
@@ -216,8 +216,9 @@ struct EffectSettingsBar: View {
     var onBack: () -> Void
     var onClose: () -> Void
 
-    /// Outline's colour swatch popover. One `@State` for the whole panel rather than one per row,
-    /// because exactly one effect has a colour and only one settings panel is ever on screen.
+    /// Outline's or Bloom's colour swatch popover — one `@State` for the whole panel rather than one
+    /// per row, because only one settings panel is ever on screen and it shows exactly one effect's
+    /// rows, so the two colour rows can never be open at once (TODO (60) made Bloom the second one).
     @State private var showingColorPicker = false
 
     var body: some View {
@@ -364,17 +365,21 @@ struct EffectSettingsBar: View {
             toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
                 params.input = $0 ? .backdrop : .ink; onChange(.bloom(params))
             }
+            // TODO (60). `Outline`'s colour row exactly, with its own `CanvasPresentation` case
+            // (`.effectBloomColour`) so a recording says which swatch was actually open.
+            colorRow("Colour", color: params.color, identifier: "color", presentation: .effectBloomColour) { picked in
+                params.color = picked; onChange(.bloom(params))
+            }
             note("Pixels brighter than the threshold glow.")
 
         case .sobel:
-            // **Sobel is the zero-control effect, and the only one** — a note and nothing else, and so
-            // the degenerate case `ContentHeightCap` has to survive: it is the one effect whose rows
-            // are a single caption, and the bar comes out about 90pt tall for it against Levels' 344.
-            // It had an "Include Canvas Color" toggle for a few hours on 2026-08-27; the owner
-            // deleted the setting the same day (EFFECT_BACKDROP.md §5.2), and Sobel always grades the
-            // canvas colour now. Bloom above keeps the identically-named toggle, which is real.
-            // `Effect.parameters` returns an empty array for it, which is the same fact in the model.
-            note("Edge detection. The divisor that keeps the magnitude from clipping is fixed.")
+            // TODO (60). Sobel gained its first control: a gain on the same divisor-normalized
+            // magnitude the caption below still describes. It had an "Include Canvas Color" toggle
+            // for a few hours on 2026-08-27; the owner deleted the setting the same day
+            // (EFFECT_BACKDROP.md §5.2), and Sobel always grades the canvas colour now, unconditionally
+            // — Bloom above keeps the identically-named toggle, which is real.
+            slider("sobel.gain")
+            note("Edge detection. The divisor that keeps the magnitude from clipping is fixed; Gain scales the result on top of it.")
 
         case .sharpen:
             slider("sharpen.radius")
@@ -384,7 +389,7 @@ struct EffectSettingsBar: View {
         case .outline(var params):
             slider("outline.width")
             slider("outline.threshold")
-            colorRow("Colour", color: params.color, identifier: "color") { picked in
+            colorRow("Colour", color: params.color, identifier: "color", presentation: .effectOutlineColour) { picked in
                 params.color = picked; onChange(.outline(params))
             }
             note("Painted outside the shape only; pixels already inside are left untouched.")
@@ -599,7 +604,14 @@ struct EffectSettingsBar: View {
     /// drag's beginning and end. That reasoning is unchanged by the picker behind the swatch becoming
     /// `ColorPickerPanel` — it writes through its binding on every drag tick exactly as the stock
     /// control did.
+    ///
+    /// **`presentation` is a parameter rather than a hard-coded `.effectOutlineColour` since TODO
+    /// (60)**, when Bloom became this row's second caller. The two can never be on screen at once —
+    /// `rows` shows exactly one effect's controls — so `showingColorPicker` staying one `@State` for
+    /// the whole panel is still correct; only the *name* `ActionRecorder` writes has to say which
+    /// swatch was actually open, which is `CanvasPresentation`'s own argument for a case each.
     private func colorRow(_ label: String, color: CodableColor, identifier: String,
+                          presentation: CanvasPresentation,
                           onChange change: @escaping (CodableColor) -> Void) -> some View {
         HStack(spacing: 10) {
             Text(label).font(.system(size: 12)).foregroundColor(.white.opacity(0.85))
@@ -623,7 +635,7 @@ struct EffectSettingsBar: View {
             // rail. This panel used to carry a hand-written `.onDisappear` to catch that; the
             // modifier runs `onDismiss` however the presentation ends, so it no longer needs one —
             // and must not have one, since two of them would close the bracket twice.
-            .canvasPresentation(.effectOutlineColour, isPresented: $showingColorPicker,
+            .canvasPresentation(presentation, isPresented: $showingColorPicker,
                                 canvasManager: canvasManager,
                                 onPresent: onEditBegan, onDismiss: onEditEnded) {
                 ColorPickerPanel(color: Binding(get: { color.color }, set: { change($0.effectColor) }))

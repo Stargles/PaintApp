@@ -329,9 +329,10 @@ such a field and no longer does**, which needs the mirror-image guarantee: a doc
 existed must decode with the retired key *ignored* rather than throwing (§5.2, §6 step 5).
 
 **One knock-on cost, and it is smaller than this section first said.** Bloom gains one control in the
-effect settings bar; Sobel briefly gained one and lost it again, so **Sobel is still the zero-control
-degenerate case** the bar has to handle and the per-effect control counts item (18) is sizing against are
-unchanged for it. And one more `.ink`-input node exists in the wild than §3 assumed when it argued the
+effect settings bar; Sobel briefly gained one and lost it again, so **Sobel was the zero-control
+degenerate case** the bar had to handle and the per-effect control counts item (18) was sizing against —
+**superseded by TODO (60)**, which gave Sobel a Gain slider (input itself is still fixed, with no
+control). And one more `.ink`-input node exists in the wild than §3 assumed when it argued the
 re-walk's cost is bounded; the argument still holds, since the count is per *document* and a document has
 one or two effect layers, not ten.
 

@@ -149,6 +149,10 @@ final class EffectMultiPassLogicTests: XCTestCase {
         ("directionalAtAnAngle", .blur(Effect.Blur(radius: 6, angleDegrees: 27, isDirectional: true))),
         ("bloom", .bloom(Effect.Bloom(threshold: 0.4, radius: 5, intensity: 0.9))),
         ("bloomWide", .bloom(Effect.Bloom(threshold: 0.15, radius: 12, intensity: 1.6))),
+        // TODO (60). A non-white, non-identity tint exercising the new multiply on top of everything
+        // else the sweep above already varies (threshold, radius, intensity).
+        ("bloomTinted", .bloom(Effect.Bloom(threshold: 0.35, radius: 6, intensity: 1.1,
+                                            color: CodableColor(red: 1, green: 0.4, blue: 0.15, alpha: 1)))),
     ]
 
     /// The parameters that mean "do nothing". Both are reachable from a UI at rest: a blur slider at
@@ -434,6 +438,60 @@ final class EffectMultiPassLogicTests: XCTestCase {
         XCTAssertEqual(passes[1].params.offsetY, 0)
         XCTAssertEqual(passes[2].params.offsetX, 0)
         XCTAssertEqual(passes[2].params.offsetY, 1)
+    }
+
+    // MARK: - (2b′) Bloom's colour — TODO (60)
+
+    /// **White is the identity, stated as a byte-for-byte equality rather than left to infer from the
+    /// old tests above staying green.** An explicit opaque white tint must render exactly as no colour
+    /// at all, on both backends — which is also *why* the old tests above (all at `Bloom()`'s default)
+    /// are unchanged by this field's arrival: they were never exercising a code path this one bypasses.
+    func testAnExplicitWhiteBloomTintIsByteForByteTheDefaultUntinted() throws {
+        let bytes = spectrumBytes()
+        let untinted = Effect.bloom(Effect.Bloom(threshold: 0.35, radius: 6, intensity: 1.1))
+        let explicitWhite = Effect.bloom(Effect.Bloom(threshold: 0.35, radius: 6, intensity: 1.1,
+                                                      color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1)))
+        XCTAssertEqual(cpu(untinted, bytes), cpu(explicitWhite, bytes),
+                       "An explicit opaque-white tint must be the identity, byte for byte")
+
+        try skipUnlessGPUAvailable()
+        guard let engine = MetalEffectEngine.shared else { return }
+        XCTAssertEqual(engine.apply(untinted, to: bytes, width: Self.side, height: Self.side),
+                       engine.apply(explicitWhite, to: bytes, width: Self.side, height: Self.side),
+                       "…and on the GPU too")
+    }
+
+    /// **A red tint proves the multiply is per-channel, not a brightness scale.** A single white
+    /// impulse's whole glow is red alone once tinted red: green and blue must come out exactly zero
+    /// wherever the glow reaches, not merely dimmer than red — which is what would happen if the tint
+    /// were folded into `intensity` instead of multiplying `rgb` directly.
+    func testARedBloomTintZeroesTheGlowsGreenAndBlueChannels() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = impulseBytes(at: centre)
+        let redTint = Effect.bloom(Effect.Bloom(threshold: 0.1, radius: 6, intensity: 1,
+                                                color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))
+        for (backend, out) in bothBackends(redTint, input) {
+            let glow = pixel(out, centre.x + 2, centre.y)
+            XCTAssertGreaterThan(glow[0], 0, "\(backend): the red channel must glow. Got \(glow)")
+            XCTAssertEqual(glow[1], 0, "\(backend): green must be zeroed by a pure-red tint. Got \(glow)")
+            XCTAssertEqual(glow[2], 0, "\(backend): blue must be zeroed by a pure-red tint. Got \(glow)")
+            XCTAssertGreaterThan(glow[3], 0,
+                                 "\(backend): alpha (coverage) is unaffected by colour and must still glow. Got \(glow)")
+        }
+    }
+
+    /// **`Bloom.color`'s own alpha is ignored — `intensity` already says how much glow reaches.** A
+    /// translucent tint and the same tint made opaque must render identically, which is the documented
+    /// design decision (`Bloom.color`'s own doc) stated as an assertion rather than left to be
+    /// rediscovered from a control that quietly does nothing.
+    func testBloomsTintAlphaIsIgnoredIntensityAlreadyControlsStrength() {
+        let bytes = spectrumBytes()
+        let opaqueRed = Effect.bloom(Effect.Bloom(threshold: 0.35, radius: 6, intensity: 1.1,
+                                                  color: CodableColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1)))
+        let translucentRed = Effect.bloom(Effect.Bloom(threshold: 0.35, radius: 6, intensity: 1.1,
+                                                       color: CodableColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 0.2)))
+        XCTAssertEqual(cpu(opaqueRed, bytes), cpu(translucentRed, bytes),
+                       "The tint's own alpha must be ignored — `intensity` already controls how much glow is added")
     }
 
     // MARK: - (2c) The arithmetic measured against mathematics rather than against itself
@@ -984,6 +1042,37 @@ final class EffectMultiPassLogicTests: XCTestCase {
             XCTAssertEqual(edge[3], 255, "\(backend): the edge is opaque. Got \(edge)")
             XCTAssertLessThanOrEqual(abs(edge[0] - 228), 1,
                                      "\(backend): 4 / sqrt(20) = 0.894427 → 228. Got \(edge)")
+        }
+    }
+
+    /// **TODO (60) — gain multiplies the normalised magnitude on top of the fixed divisor, never
+    /// instead of it.** Gain 1 must reproduce `testSobelImpulseMatchesTheKnownGradientKernels`'s
+    /// hand-worked table exactly, byte for byte — the pin that a document with no gain set (every
+    /// document saved before this merge) renders unchanged. Gain 2 must double the same table's
+    /// edge-centre and corner values, both of which sit comfortably under 1.0 even after doubling
+    /// (0.4472 → 0.8944 and 0.3162 → 0.6325), so this is genuinely testing the multiply rather than
+    /// the clamp beside it.
+    func testSobelGainMultipliesTheNormalisedMagnitudeBeforeTheClamp() {
+        let centre = (x: Self.side / 2, y: Self.side / 2)
+        let input = opaqueImpulseBytes(at: centre)
+
+        for (backend, out) in bothBackends(.sobel(Effect.Sobel(gain: 1)), input) {
+            let edgeCentre = pixel(out, centre.x + 1, centre.y)
+            let corner = pixel(out, centre.x + 1, centre.y + 1)
+            XCTAssertEqual(edgeCentre, [114, 114, 114, 255],
+                           "\(backend) gain 1 must match the ungained fixture. Got \(edgeCentre)")
+            XCTAssertEqual(corner, [81, 81, 81, 255],
+                           "\(backend) gain 1 must match the ungained fixture. Got \(corner)")
+        }
+
+        for (backend, out) in bothBackends(.sobel(Effect.Sobel(gain: 2)), input) {
+            let edgeCentre = pixel(out, centre.x + 1, centre.y)
+            let corner = pixel(out, centre.x + 1, centre.y + 1)
+            XCTAssertLessThanOrEqual(abs(edgeCentre[0] - 228), 1,
+                                     "\(backend) gain 2: 2 × 0.4472136 → 228. Got \(edgeCentre)")
+            XCTAssertLessThanOrEqual(abs(corner[0] - 161), 1,
+                                     "\(backend) gain 2: 2 × 0.3162278 → 161. Got \(corner)")
+            XCTAssertEqual(edgeCentre[3], 255, "\(backend): alpha is untouched by gain. Got \(edgeCentre)")
         }
     }
 

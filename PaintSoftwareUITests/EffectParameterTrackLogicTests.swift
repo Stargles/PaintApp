@@ -129,7 +129,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     /// curvature keyed 0 → 1 over ten frames is 0.5 at frame 5, held outside its keys, and the stored
     /// screen is still the preset the artist picked. Every one of its six is `.continuous`, so the
     /// writer takes each; the sweep at `testExactlyTheContinuousScalarParametersAreAnimatableAtThisStage`
-    /// counts them among the thirty.
+    /// counts them among the thirty-one.
     func testAKeyedComputerScreenKnobTweensAndTheStoredScreenStaysPut() {
         let stored = Effect.crtScreen(Effect.CRTScreen.preset(.lcd))
         let manager = gradedManager(stored)
@@ -162,6 +162,29 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         XCTAssertEqual(resolved, expected, "Only the keyed knob moves; the LCD's other five stay")
         XCTAssertNil(resolved.preset, "A keyed screen mid-tween is no preset — the bar reads Custom")
         XCTAssertEqual(manager.layers[gradeIndex].effect, stored,
+                       "Resolution derives a value for a frame; it never writes one back into the model")
+    }
+
+    /// **TODO (60)'s `sobel.gain`, end to end through this stage's actual machinery** — not merely
+    /// `EffectParameter.write`'s scalar bridge (`EffectParameterCharacterizationTests` covers that),
+    /// but a stored track resolved at a frame through `layerEffect(atFrame:)`, the same path
+    /// `testAKeyedParameterIsItsKeysAtThemAndTweensBetweenThem` pins for `brightnessContrast.brightness`
+    /// above. A second effect through the identical path is what shows the writer's continuous-Double
+    /// acceptance is a general rule and not a brightness-specific accident.
+    func testAKeyedSobelGainIsItsKeysAtThemAndTweensBetweenThem() {
+        let manager = gradedManager(.sobel(Effect.Sobel()))
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "sobel.gain",
+                                                      to: linear([(0, 1.0), (10, 3.0)])))
+
+        func gain(atFrame frame: Int) -> Double? {
+            guard case .sobel(let params)? = manager.layers[gradeIndex].layerEffect(atFrame: frame)
+            else { return nil }
+            return params.gain
+        }
+        XCTAssertEqual(gain(atFrame: 0) ?? .nan, 1.0, accuracy: 1e-9, "At the first key")
+        XCTAssertEqual(gain(atFrame: 10) ?? .nan, 3.0, accuracy: 1e-9, "At the last key")
+        XCTAssertEqual(gain(atFrame: 5) ?? .nan, 2.0, accuracy: 1e-9, "Halfway along a linear segment")
+        XCTAssertEqual(manager.layers[gradeIndex].effect, .sobel(Effect.Sobel()),
                        "Resolution derives a value for a frame; it never writes one back into the model")
     }
 
@@ -198,7 +221,9 @@ final class EffectParameterTrackLogicTests: XCTestCase {
 
     // MARK: - Scope: which parameter kinds this stage drives
 
-    /// **The eleven parameters stage 2 refuses, listed by name.**
+    /// **The twelve parameters stage 2 refuses, listed by name** — nine the day this test was
+    /// written, plus TODO (60)'s `bloom.color` (`outline.color`'s twin) and Recolour's
+    /// `recolor.entries` and `recolor.preserveShading`.
     ///
     /// A test rather than a comment because the alternative to refusing them is worse than not
     /// shipping them: a `.stepped` field driven by a `Double` curve renders as a staircase the graph
@@ -215,6 +240,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         }
 
         XCTAssertEqual(refused.sorted(), [
+            "bloom.color",           // .continuous but compound — TODO (60), `outline.color`'s twin
             "blur.directional",     // .stepped — rewrites the pass list from two entries to one
             "bloom.input",          // .stepped — decides whether the compositor performs a sub-walk
             "curves.points",        // .componentwise — a variable-length list wants a channel each
@@ -228,10 +254,10 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "recolor.preserveShading", // .stepped — a boolean
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
-        XCTAssertEqual(animatable.count, 30,
-                       "30 of the 41 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+        XCTAssertEqual(animatable.count, 31,
+                       "31 of the 43 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 41, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 43, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as
@@ -250,6 +276,18 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         XCTAssertFalse(outline.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "outline.color",
                                                        to: linear([(0, 0), (10, 1)])),
                        "`outline.color` is continuous and compound — the one that looks free and is not")
+
+        // TODO (60). `bloom.color` is `outline.color`'s twin and is refused for the identical reason;
+        // `sobel.gain` is an ordinary continuous Double and the writer takes it, `sharpen.amount`'s shape.
+        let bloom = gradedManager(.bloom(Effect.Bloom()))
+        XCTAssertFalse(bloom.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "bloom.color",
+                                                     to: linear([(0, 0), (10, 1)])),
+                       "`bloom.color` is continuous and compound — the one that looks free and is not")
+
+        let sobel = gradedManager(.sobel(Effect.Sobel()))
+        XCTAssertTrue(sobel.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "sobel.gain",
+                                                    to: linear([(0, 1), (10, 4)])),
+                      "sobel.gain is a continuous Double, so the writer takes it")
 
         let blur = gradedManager(.blur(Effect.Blur(radius: 4)))
         XCTAssertFalse(blur.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "bloom.intensity",

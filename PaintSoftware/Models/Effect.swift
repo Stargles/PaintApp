@@ -431,18 +431,32 @@ extension Effect {
         /// `.ink`, which is today's shipped look, so a document saved before this field existed
         /// decodes into the same picture it already drew.
         var input: Effect.Input = .ink
+        /// **TODO (60) — a multiply on the glow before it is added in the combine pass, not a second
+        /// grade.** Opaque white is the identity (`(1,1,1) × glow == glow`), which is why it is the
+        /// default: a document saved before this field existed decodes into the same picture it
+        /// already drew, the same guarantee `input` above makes. The tint's own alpha is ignored —
+        /// `intensity` already controls how much glow is added, so a second, weaker way to say the
+        /// same thing would just be two knobs fighting over one effect. Precedent is `Outline.color`:
+        /// same type, same swatch-opens-a-picker row, same reason a colour can't ride `EffectParams`
+        /// as a scalar.
+        var color: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
     }
 
-    /// **Sobel has no parameters at all, and the empty struct is the whole of it.** The divisor that
-    /// keeps the magnitude from clipping is a resolved constant (`Effect.params`) rather than an
-    /// artist-facing number, and the `input` field that lived here for a few hours on 2026-08-27 was
-    /// deleted by the owner's ruling — `Effect.input`'s Sobel bullet carries the two measurements and
-    /// EFFECT_BACKDROP.md §5.2 the superseded ruling it replaced.
+    /// **TODO (60) — Sobel's one knob**, and the reason it is a knob rather than a second effect: it
+    /// scales the same normalized magnitude the fixed divisor already produces, applied *after* that
+    /// divisor rather than instead of it (`Effect.params`'s own comment says where). Default 1 is the
+    /// identity, so a document saved before this field existed decodes into the same picture it
+    /// already drew — the divisor alone, exactly as it always was.
     ///
-    /// Kept as an empty struct rather than collapsed into a bare `case sobel`, for `Effect.Curves`'
-    /// reason in reverse: the payload is where a knob goes if one is ever ruled, and adding a field is
-    /// a smaller change than reshaping the enum and the `{"kind":…,"params":…}` every document writes.
-    struct Sobel: Equatable {}
+    /// **This is not the `input` field that lived here for a few hours on 2026-08-27 and was deleted
+    /// by the owner's ruling** (`Effect.input`'s Sobel bullet carries the two measurements,
+    /// EFFECT_BACKDROP.md §5.2 the superseded ruling). That was a choice of what the kernel reads;
+    /// this is a scale on what it computes, and `Sobel`'s own `Codable` conformance below still has no
+    /// key named `input` — a document written while that field existed decodes with it ignored, same
+    /// as before this struct gained a field of its own.
+    struct Sobel: Equatable {
+        var gain: Double = 1
+    }
 
     /// The blur half is **exactly** `Effect.blur(Blur(radius: radius))` — same `gaussianHalfKernel`,
     /// same σ = radius/3, same 128-tap cap — which is the load-bearing fact `weights` states in code
@@ -939,7 +953,15 @@ extension Effect {
             p.threshold = Float(min(max(bloom.threshold, 0), 1))
             p.intensity = Float(max(bloom.intensity, 0))
             p.taps = UInt32(Self.tapCount(forRadius: bloom.radius))
-        case .sobel:
+            // The glow's tint — see `Bloom.color`'s doc for why alpha is ignored and white is the
+            // identity. Reuses the same trailing scalars `Outline` binds its stroke colour to
+            // (`EffectParams`'s own doc: appended at the end so a new field cannot shift another
+            // effect's), which is safe because the two never run in the same pass: this is bloom's
+            // combine pass and that is outline's one pass.
+            p.colorR = Float(min(max(bloom.color.red, 0), 1))
+            p.colorG = Float(min(max(bloom.color.green, 0), 1))
+            p.colorB = Float(min(max(bloom.color.blue, 0), 1))
+        case .sobel(let sobel):
             // The divisor that peak-normalizes the magnitude without ever clipping it. Max |Gx| = 4
             // for input in [0, 1], but the true maximum of sqrt(Gx² + Gy²) over all binary 3×3
             // patterns is sqrt(20) ≈ 4.4721 (attained at Gx = 2, Gy = 4, a diagonal step — enumerated
@@ -949,7 +971,16 @@ extension Effect {
             // see — both backends receive whatever `amount` Swift resolved — so it is recorded here
             // rather than as a shader literal, and `testTheSobelImpulseMatchesTheKnownGradientKernels`
             // states the expected bytes this produces.
-            p.amount = Float(1.0 / 20.0.squareRoot())
+            //
+            // **The divisor stays exactly this: `gain` multiplies it rather than replacing it.**
+            // `amount` still carries their product into `EffectParams`, because both kernels apply it
+            // with one multiply before the clamp to `rgb <= a` — `magnitude · (divisor · gain)` and
+            // `magnitude · divisor · gain` are the same float either way, so folding the two into one
+            // scalar here costs nothing and needs no new field. Floored at 0 rather than capped, the
+            // same shape `bloom.intensity` takes two lines up: a negative gain would flip which side
+            // of an edge reads bright, which is not a knob anything asked for.
+            let divisor = Float(1.0 / 20.0.squareRoot())
+            p.amount = divisor * Float(max(sobel.gain, 0))
         case .sharpen(let sharpen):
             p.taps = UInt32(Self.tapCount(forRadius: sharpen.radius))
             p.offsetX = 1
@@ -1640,7 +1671,7 @@ extension Effect.Blur: Codable {
 }
 
 extension Effect.Bloom: Codable {
-    private enum CodingKeys: String, CodingKey { case threshold, radius, intensity, input }
+    private enum CodingKeys: String, CodingKey { case threshold, radius, intensity, input, color }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1651,17 +1682,31 @@ extension Effect.Bloom: Codable {
         // not the struct's own default literal repeated by coincidence (see `Sobel` below, where the
         // decode default and the ruled default are the same value for a different reason).
         input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .ink
+        // TODO (60). Absent means "saved before this field existed" — decodes to opaque white, the
+        // identity, so a document from before this knob shipped renders the same picture it always did.
+        color = try c.decodeIfPresent(CodableColor.self, forKey: .color)
+            ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
     }
 }
 
-/// **Empty, synthesized, and that synthesis is a compatibility guarantee rather than an omission.**
-/// Sobel carried an `input` key for a few hours on 2026-08-27, so documents saved in that window hold
-/// `{"kind":"sobel","params":{"input":"ink"}}`. A keyed container reads only the keys its `CodingKeys`
-/// names, and an empty struct names none — so the stale key is ignored and the node decodes into the
-/// one Sobel there is, rather than throwing and taking the artist's whole project down with it.
-/// `testASobelSavedWithTheDeletedInputKeyStillDecodes` demonstrates that in this file's own two-step
-/// decode path rather than trusting the language rule.
-extension Effect.Sobel: Codable {}
+/// **Sobel had no keys at all until TODO (60), and the one it gains now is `gain` — never `input`.**
+/// `Effect.Sobel.input` lived here for a few hours on 2026-08-27 and the owner deleted it the same
+/// day; documents saved in that window hold `{"kind":"sobel","params":{"input":"ink"}}`. A keyed
+/// container reads only the keys its `CodingKeys` names, and this one still does not name `input` —
+/// so that stale key stays ignored exactly as it was when the struct was empty, and a document written
+/// with this new `gain` key decodes it the ordinary way. `testASobelSavedWithTheDeletedInputKeyStillDecodes`
+/// demonstrates the ignore in this file's own two-step decode path rather than trusting the language
+/// rule, and `testASobelSavedBeforeTheGainControlExistedKeepsItsShippedLook` is `gain`'s half of the
+/// same guarantee: absent means "saved before this knob existed" and decodes to 1, the identity, so
+/// the picture such a document rendered does not change.
+extension Effect.Sobel: Codable {
+    private enum CodingKeys: String, CodingKey { case gain }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gain = try c.decodeIfPresent(Double.self, forKey: .gain) ?? 1
+    }
+}
 
 extension Effect.Sharpen: Codable {
     private enum CodingKeys: String, CodingKey { case radius, amount }
@@ -1843,7 +1888,7 @@ struct EffectParameter: Identifiable {
     /// because the two answer different questions: `id` is what a saved document stores, this is
     /// what an XCUITest taps, and neither may be changed to make it match the other.
     ///
-    /// Non-nil for every parameter that has a control today, which is all 33 of them.
+    /// Non-nil for every parameter that has a control today, which is all 35 of them.
     let controlIdentifier: String?
 
     let value: EffectParameterValue
@@ -1921,7 +1966,7 @@ private struct EffectCaseLens<P> {
             })
     }
 
-    /// A `Double` field — 24 of the 33, and every one of them `.continuous`.
+    /// A `Double` field — 25 of the 35, and every one of them `.continuous`.
     func double(_ id: String, _ name: String, _ control: String,
                 _ keyPath: WritableKeyPath<P, Double>,
                 ui: ClosedRange<Double>?, model: ClosedRange<Double>, format: String?,
@@ -2157,13 +2202,27 @@ extension Effect {
                 // Decides whether the compositor re-walks everything below into a fresh transparent
                 // buffer. The settings bar shows it as an inverted "Include Canvas Color" toggle.
                 l.option("bloom.input", "Input", "includeCanvasColor", \.input),
+                // TODO (60). Compound and continuous, `Outline.color`'s shape exactly: tweened per
+                // channel with no single number behind it, so the scalar bridge refuses it the same
+                // way (`EffectParameterTrackLogicTests.testTheWriterRefusesEveryTrackThisStageCouldNotRender`).
+                l.compound("bloom.color", "Colour", "color",
+                           value: .colour, animation: .continuous,
+                           componentDomain: 0...1, keyPath: \Bloom.color),
             ]
 
         case .sobel:
-            // **The zero-parameter effect, and the only one.** Its settings bar is a single caption
-            // and this is an empty list, so anything rendering a channel list has to survive one —
-            // that is not a degenerate case to guard against, it is a shipped effect.
-            return []
+            // TODO (60). Sobel's one knob, added beside the divisor rather than in place of it — see
+            // `Sobel.gain`'s own doc. The domain is picked off the impulse fixture
+            // (`EffectMultiPassLogicTests`'s Sobel section): at gain 1 an edge-centre reads 114/255 and
+            // a corner 81/255, both well under the 255 ceiling, so 0.25 is a visibly fainter line and 8
+            // is comfortably past where every edge in the fixture has clipped to solid white — 1 sits
+            // in the middle of that useful range, which is also the identity.
+            let l = EffectCaseLens<Sobel>(extract: { if case .sobel(let p) = $0 { return p }; return nil },
+                                         embed: { .sobel($0) })
+            return [
+                l.double("sobel.gain", "Gain", "gain", \.gain,
+                         ui: 0.25...8, model: 0...(.infinity), format: "%.2f"),
+            ]
 
         case .sharpen:
             let l = EffectCaseLens<Sharpen>(extract: { if case .sharpen(let p) = $0 { return p }; return nil },
@@ -2312,7 +2371,7 @@ extension Effect {
     /// turn an effect on or off. Stage 2 did not spend either.
     ///
     /// **The empty-`tracks` guard is not merely an optimisation.** `parameters` builds its descriptor
-    /// list — thirty-three closures at the largest — on every call, and this method is reached once
+    /// list — thirty-seven closures at the largest — on every call, and this method is reached once
     /// per graded layer per tree derivation, which is several times a frame. The overwhelming
     /// majority of documents have no track at all, and for those this is one dictionary
     /// `isEmpty` and a return.
@@ -2373,7 +2432,7 @@ extension Effect {
                                                from entries: [String: Value]) -> [String: Value] {
         guard !entries.isEmpty else { return entries }
         guard let effect else { return [:] }
-        // `parameters` builds up to thirty-three closures per call, which is why `resolved` above
+        // `parameters` builds up to thirty-seven closures per call, which is why `resolved` above
         // guards against paying it on every render. Here it is once per discrete pick — the price a
         // mode picker can afford, and the reason this is not folded into the resolver.
         let addressable = Set(effect.parameters.map(\.id))

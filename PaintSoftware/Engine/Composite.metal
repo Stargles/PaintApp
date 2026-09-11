@@ -833,13 +833,20 @@ static inline float4 bloomThreshold(texture2d<float, access::read> source,
 /// `rgb` is re-clamped against the summed alpha afterwards. Addition can push a channel above the
 /// coverage carrying it, which is not a representable premultiplied colour and would surface much later
 /// as an unpremultiply above 1 in whatever read the texture next.
+///
+/// **TODO (60) — the glow is tinted before it is scaled by `intensity` and added.** `colorR/G/B` are
+/// the same trailing scalars `outline` binds its stroke colour to, safe to share because the two never
+/// run in the same dispatch. Alpha is untouched by the tint — `light.a` is coverage, and `Bloom.color`'s
+/// own alpha is ignored by design (`intensity` already says how much glow reaches, tint only recolours
+/// it). White `(1,1,1)` is the identity, which is why an untinted bloom renders exactly as it always has.
 static inline float4 bloomCombine(texture2d<float, access::read> glow,
                                   texture2d<float, access::read> original,
                                   constant EffectParams &params, uint2 gid) {
     float4 base = original.read(gid);
     float4 light = glow.read(gid);
+    float3 tint = float3(params.colorR, params.colorG, params.colorB);
     float alpha = saturate(base.a + light.a * params.intensity);
-    return float4(min(saturate(base.rgb + light.rgb * params.intensity), alpha), alpha);
+    return float4(min(saturate(base.rgb + light.rgb * tint * params.intensity), alpha), alpha);
 }
 
 /// The 3×3 Sobel gradient magnitude of `Lum`, read on the **premultiplied** texel — never

@@ -753,7 +753,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// Empty until something is keyed, and then the descriptor table's order — not the dictionary's,
     /// which has none. The `effectTracks.isEmpty` fast path is the same one `Effect.resolved` takes and
     /// for the same reason: this is read from a SwiftUI body and `Effect.parameters` rebuilds up to
-    /// thirty-three closures per call.
+    /// thirty-seven closures per call.
     func testCurvedChannelIDsFollowTheDescriptorTable() {
         let manager = gradedManager()
         XCTAssertEqual(manager.curvedEffectChannelIDs(of: layerTarget(manager)), [],

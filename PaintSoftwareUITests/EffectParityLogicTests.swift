@@ -620,6 +620,53 @@ final class EffectParityLogicTests: XCTestCase {
         XCTAssertEqual(try roundTrip(sobel), sobel, "The empty Sobel did not survive encode/decode")
     }
 
+    /// TODO (60)'s decode-default, `Bloom.input`'s recipe exactly: a manifest written before
+    /// `Bloom.color` existed — no `color` key, or no `params` key at all — must decode into opaque
+    /// white, which is also the value that made every glow before this field existed. Pinned byte for
+    /// byte so an artist's saved bloom does not silently tint on the next open.
+    func testABloomSavedBeforeTheColourControlExistedKeepsItsShippedLook() throws {
+        let bareBloom = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"bloom"}"#.utf8))
+        XCTAssertEqual(bareBloom, .bloom(Effect.Bloom()), "No params object at all means an untouched bloom")
+        guard case .bloom(let params) = bareBloom else { return XCTFail("not a bloom") }
+        XCTAssertEqual(params.color, CodableColor(red: 1, green: 1, blue: 1, alpha: 1),
+                       "…which reads opaque white, exactly as an unset glow always has")
+
+        let bloomNoColor = try JSONDecoder().decode(Effect.self,
+                                                    from: Data(#"{"kind":"bloom","params":{"threshold":0.5}}"#.utf8))
+        XCTAssertEqual(bloomNoColor, .bloom(Effect.Bloom(threshold: 0.5)),
+                       "A params object saved before `color` existed decodes the rest and defaults `color` to white")
+    }
+
+    /// TODO (60)'s decode-default on the other new field: a manifest written before `Sobel.gain`
+    /// existed — no `gain` key, or no `params` key at all, which was every document until this
+    /// merge — must decode into gain 1, the identity, so the existing fixtures' bytes do not move.
+    /// The stale `input` key from Sobel's brief 2026-08-27 existence must still be ignored, exactly as
+    /// `testASobelSavedWithTheDeletedInputKeyStillDecodes` already pins — restated here because that
+    /// struct's `CodingKeys` changed shape with this merge and the guarantee is worth re-checking
+    /// against the new decoder rather than assumed to survive it.
+    func testASobelSavedBeforeTheGainControlExistedKeepsItsShippedLook() throws {
+        let bareSobel = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"sobel"}"#.utf8))
+        XCTAssertEqual(bareSobel, .sobel(Effect.Sobel()), "No params object at all means an untouched sobel")
+        guard case .sobel(let params) = bareSobel else { return XCTFail("not a sobel") }
+        XCTAssertEqual(params.gain, 1, "…which reads gain 1, the identity — the divisor alone, as it always was")
+
+        let staleInputKey = try JSONDecoder().decode(Effect.self,
+                                                     from: Data(#"{"kind":"sobel","params":{"input":"ink"}}"#.utf8))
+        XCTAssertEqual(staleInputKey, .sobel(Effect.Sobel(gain: 1)),
+                       "The withdrawn `input` key must still be ignored now that `Sobel` has a real key of its own")
+    }
+
+    /// The concrete non-default cases the two decode-default tests above do not cover, since a present
+    /// key is the ordinary path every other field already takes through `roundTrip`.
+    func testBloomsColourAndSobelsGainSurviveAJSONRoundTrip() throws {
+        let tinted = Effect.bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 2,
+                                               color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1)))
+        XCTAssertEqual(try roundTrip(tinted), tinted, "Bloom's non-default colour did not survive encode/decode")
+
+        let gained = Effect.sobel(Effect.Sobel(gain: 3.5))
+        XCTAssertEqual(try roundTrip(gained), gained, "Sobel's non-default gain did not survive encode/decode")
+    }
+
     /// The discriminator is a stable string, not a case ordinal — so reordering the enum cannot
     /// silently repaint every document, which is the mistake `BlendMode.shaderCode`'s comment warns
     /// about in the shader-code direction.
