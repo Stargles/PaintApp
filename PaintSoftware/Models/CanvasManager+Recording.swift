@@ -657,15 +657,23 @@ extension CanvasManager {
             guard let base = take.baseChannelValues[channel.id] else { continue }
             setStoredValue(of: take.target, channel: channel, to: base)
         }
-        // **And the same restore for the container's own pose** — the Move box surface, KEYFRAMES.md
-        // §5. Unconditional and direct, exactly as the two above are: `showContainerPoseLive` wrote the
-        // stored pose on every tick of the drag so the artist could see the box move, and
-        // `commitContainerFloat` makes the identical restore for the identical reason on an *unrecorded*
-        // Move — *"without this line that baseline would be the drag — one press of Undo would put the
-        // drawing back exactly where the artist had just dragged it, which is a control that appears not
-        // to work."* Written through `applyContainerPose` rather than `writeContainerPose` so it stays
-        // off the history: it is undoing a preview, not making an edit.
-        if take.basePose != nil { applyContainerPose(take.basePose, target: take.target) }
+        // **There is deliberately no third restore here for the container's own pose**, and the reason
+        // is an asymmetry worth stating rather than a gap — a line doing it was written, could not be
+        // killed by any mutation, and was removed on that evidence.
+        //
+        // The two restores above are load-bearing because `setEffectParameterCurves` and
+        // `setTargetChannelCurves` write only a channel's *track*: nothing in a successful take would
+        // otherwise put the stored grade or the stored opacity back, so the drag would apply twice.
+        // **`writeContainerPose` writes the whole `LayerPose`, `pose` field included**, and
+        // `commitRecordedPoseTrack` builds what it writes from `take.basePose` rather than from the live
+        // model — so a successful pose take restores the base *as part of* its own write. Every other
+        // pose take writes nothing, and `stopRecording` then calls `cancelStructureGesture`, whose
+        // snapshot was taken at `startRecording` and carries `layers` and `folders` by value.
+        //
+        // So both paths already land on the pose the artist found, and a restore here would be a line
+        // no test could make matter. The claim itself is pinned where it belongs — on the outcome, by
+        // `MoveBoxRecordingLogicTests.testTheStoredBaseIsPutBackAndTheMotionIsOnTheCurveAlone`, whose
+        // operand is `take.basePose`'s provenance one function down.
 
         // **The Move box's half, before the gate below**, because a pose take catches no *channel*: its
         // whole product is one `TransformTrack` on a third store that is neither a grade's
@@ -766,6 +774,13 @@ extension CanvasManager {
         guard !take.poses.isEmpty, let base = take.basePose else { return (0, false) }
         let keys = take.poses.keys(fps: fps, startFrame: take.startFrame,
                                    tolerance: Self.recordingPoseSimplifyPoints)
+        // **Built from `take.basePose`, never from `containerPose(of:)`.** This is the whole of the
+        // scratch-pad restore for this surface: `showContainerPoseLive` has been writing the stored pose
+        // on every tick of the drag so the artist can see the box move, so the live value *is* the drag
+        // — and writing a `LayerPose` derived from it would leave the move in the base **and** on the
+        // curve, applying it twice. `commitContainerFloat` records the same reason for an unrecorded
+        // Move: *"one press of Undo would put the drawing back exactly where the artist had just
+        // dragged it, which is a control that appears not to work."*
         var after = base
         after.track = TransformTrack(keys: keys, step: base.track.step)
         // A channel that lands keys no longer needs its held pose — `setTransformPoseKey`'s rule, one
