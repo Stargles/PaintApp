@@ -85,7 +85,15 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
     ///
     ///  * **`layerOptions.folderKeyframes`' value against the keyframes placed so far.** It is
     ///    `keyframeFrames(of:)`' output — §2.28's one accessor — so this is the panel and the model
-    ///    being asked to agree, on a surface the artist reads.
+    ///    being asked to agree, on a surface the artist reads. **It is a read-back of the same
+    ///    expression the press wrote through**, so it catches a press that did nothing and not one
+    ///    that went to the wrong target. Which is which was settled by mutation, not by reading.
+    ///  * **The timeline's per-row marker bands** — `timeline.folderTrack.<name>.keys` against
+    ///    `timeline.keyMarkers.<layerIndex>`. Which *row* grew a diamond is a fact the panel does
+    ///    not compute, so this is the operand that distinguishes "the group was keyed" from "the
+    ///    current layer was keyed", and the one that kills that mutation. **These bands have existed
+    ///    since stage 3b and nothing had ever read them**; they were assumed unreachable, because the
+    ///    row views they sit inside are themselves accessibility elements. They are reachable.
     ///  * **`layerOptions.addKeyframe`' value against the playhead.** The row says which frame a press
     ///    writes to. A build that captured the frame when the panel opened, or that keyed frame 0
     ///    always, fails at step 3 with no other symptom.
@@ -125,25 +133,57 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         app.buttons["layerOptions.addKeyframe"].tap()
 
         XCTAssertEqual(keyframeSummary(app), "0", """
-            The panel's keyframe summary must name frame 0 after the press. It reads \
-            `keyframeFrames(of: .folder(…))`, so a press that reached the wrong target — the current \
-            *layer* rather than the group — leaves this at "none" while writing a real keyframe \
-            somewhere else, which is the one failure no model test can see.
+            The panel's keyframe summary must name frame 0 after the press — a press that wrote \
+            nothing leaves this at "none".
+
+            **It cannot catch a press that wrote to the wrong target, and that was mutation-tested \
+            rather than assumed.** The summary and the press read the *same* `KeyframeTarget` \
+            expression, so aiming both at the current layer makes this row report the layer's \
+            keyframes and agree with itself; the mutation survived exactly this assertion. The two \
+            operands below are the ones that catch it.
             """)
         XCTAssertTrue(app.buttons["layerOptions.removeKeyframe"].waitForExistence(timeout: 5),
                       "With a keyframe under the playhead the panel offers to take it back")
+        XCTAssertEqual(app.buttons["layerOptions.removeKeyframe"].value as? String, "0",
+                       "…and it names the frame it would take back, which is the playhead's — a row "
+                       + "that said anything else would remove a keyframe the artist is not looking at")
+
+        // **The one operand in this test that the panel does not also compute.** The summary above is
+        // read through the *same* `KeyframeTarget` expression the press wrote through, so a build
+        // that aimed both of them at the wrong target reads back its own write and agrees with
+        // itself — mutation-tested, and it survived. The timeline's marker bands are per row, so
+        // "which row grew a diamond" is a fact neither the panel nor the press can fake.
+        XCTAssertEqual(app.otherElements["timeline.folderTrack.Folder 1.keys"].value as? String, "0",
+                       """
+                       The group's timeline row must draw one diamond, at frame 0. This band is \
+                       `TimelineKeyMarkers.encode` over `keyframeFrames(of: .folder(…))`, fed \
+                       through `TimelineLayoutKey` — so it is the same union the panel reports, \
+                       reached by a different path and attributed to a named row.
+                       """)
+        XCTAssertFalse(app.otherElements["timeline.keyMarkers.0"].exists, """
+            The *layer* inside the document must not have grown a keyframe. Its marker band is \
+            hidden outright when it has none, so its absence is the assertion — and it is the half \
+            that goes red if the panel's row addressed `keyframeTarget` (the current layer) rather \
+            than the folder it was opened on, which is the likeliest way to write this wrong.
+            """)
         attach(app, "folder-keyframe-row-after-first")
 
-        // 3. Move the playhead. The panel must follow it rather than remembering frame 0.
-        closeFolderOptions(app)
+        // 3. Move the playhead **with the panel still open**. The row has to follow it live: the
+        // transport sits below this panel, so an artist can scrub while it is up, and a row that had
+        // captured its frame when the panel opened would quietly write to the wrong one.
         stepForward(app, 4, toFrame: 4)
-        openFolderOptions(app, named: "Folder 1")
-        XCTAssertEqual(app.buttons["layerOptions.addKeyframe"].value as? String, "4",
-                       "The row reads the playhead now, not the frame the panel was last opened on")
+        XCTAssertEqual(app.buttons["layerOptions.addKeyframe"].value as? String, "4", """
+            The Add row must read the playhead as it moves, not the frame the panel was opened on. \
+            This is the assertion that distinguishes reading `currentFrame` in the body from \
+            capturing it — and capturing is what the timeline's own cel menu deliberately does, so \
+            it is a plausible thing to copy across.
+            """)
         XCTAssertEqual(keyframeSummary(app), "0",
-                       "…and the group still carries exactly the one keyframe")
+                       "…and the group still carries exactly the one keyframe, moving the playhead "
+                       + "being a look rather than an edit")
         XCTAssertFalse(app.buttons["layerOptions.removeKeyframe"].exists,
-                       "Frame 4 has no keyframe, so Remove is not offered there")
+                       "Frame 4 has no keyframe, so Remove is not offered there — the negative half "
+                       + "of the pair asserted positively at frame 0 above")
         closeFolderOptions(app)
 
         // 4. Change something — the group's own opacity, the second channel kind.

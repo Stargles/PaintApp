@@ -1211,9 +1211,15 @@ struct FolderOptionsPanel: View {
     /// *decision*. The decision is `keyframeFrames(of:)`, which lives in `KeyframeControl.swift` and
     /// has its own logic tests; these two only spell its answer, and what pins them is the XCUITest
     /// that reads the rendered row.
+    ///
+    /// **"keyframes", never "keys".** A key is one channel's value at a frame — what the graph editor
+    /// draws a node for; a keyframe is §2.28's union of those and the artist's bare marks, which is
+    /// what this row lists and what the timeline draws diamonds for. The first keyframe a group ever
+    /// gets is a mark with no key anywhere, so a caption reading "keys at 0" would be naming the empty
+    /// half of the union. Three device reports came from those two words being treated as one.
     private static func keyframeCaption(frame: Int, placed: [Int]) -> String {
-        guard !placed.isEmpty else { return "At frame \(frame) · this group has none yet" }
-        return "At frame \(frame) · keys at " + placed.map(String.init).joined(separator: ", ")
+        guard !placed.isEmpty else { return "Frame \(frame) · no keyframes yet" }
+        return "Frame \(frame) · keyframes at " + placed.map(String.init).joined(separator: ", ")
     }
 
     /// The same union as a machine-readable value — "none", or the frames comma-separated. Apart from
