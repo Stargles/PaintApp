@@ -156,8 +156,8 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 
 ## (21) Keyframes — four stages and four gaps
 
-**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b, 8 and 10 are merged, and 7 is
-merged except its Move-box surface; 6b was delivered by (29); there is deliberately no stage 9.
+**Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a, 5b, 7, 8 and 10 are merged; 6b was
+delivered by (29); there is deliberately no stage 9.
 
 A cel or an animation group carries a track of quad poses, ink is posed through the `sqrt(|det|)`
 width rule with endpoints bit-exact, a pose channel has a six-curve graph-editor band that is
@@ -165,68 +165,17 @@ read-write, a transformation layer is reachable and usable, animation groups can
 pose key has a node.
 
 **Left to build**
-- [ ] **Stage 7 is half shipped, and the half that is left needs the owner.** Merged 2026-09-07: the
-      editable fps (clamped 1-60, presets, live during playback, no undo step, persisted) and the live
-      take on **the slider surface** — captured at the control's own rate, resampled at `fps`,
-      deviation-simplified, landing as one curve and one undo step, with five refusals and two
-      auto-stop paths. 35 mutations, one survivor found and fixed.
-      **§5 specifies *"one mechanism, two surfaces: a slider, and the Move box"*, and the Move-box
-      surface is not built** — `ValueRecording` is scalar-only while a transform channel stores
-      `PoseQuad` keys, so resampling and tolerance both need definitions nobody has ruled on. §5's
-      *"slow motion is a capture-speed multiplier on the record control"* is **declined** — see below. **Both are
-      owner-facing design and want a conversation before anyone builds them.**
-      **The owner has now ruled on that, and it reverses what this item called "the design".** This
-      row used to end *"at 24 fps a new document's take is over before a person can react, because §5
-      runs a take over the scene you have. That is the design."* It is not. 2026-09-09:
-
-      > *"Right now I dont like where the record button is, and its behavior. The behavior should be
-      > this: You open up graph editor and it displays the record button option. You press the record
-      > button and it turns blue, but nothing happens. Then, you go and put your pencil on a slider or
-      > move box, and playback automatically starts, recording the movement then putting it on the
-      > graph. Currently when you press record it instantly plays the playback, giving you no time to
-      > adjust the sliders or move box."*
-
-      **That ruling is built and merged (2026-09-09), and only the Move-box surface is left of stage 7.**
-      Arming and starting are two acts: the record button lives beside the graph editor's own button and
-      is shown only while the band is open, pressing it turns it blue and moves nothing at all, and the
-      take begins when the pencil lands on a slider — with playback starting at that instant. An arm ends
-      in exactly three ways (a take begins, the button is pressed again, the graph editor closes) and
-      survives everything else, so an artist can arm and then walk two menus to the slider. Arming costs
-      no undo step and opens no gesture bracket. A landing on a *stepped* slider is refused out loud and
-      keeps the arm. See KEYFRAMES §5.1, which also states the four things a new recordable surface has
-      to implement — the trigger is `CanvasManager.beginArmedTake`, built once so that the Move box and
-      stage 10's canvas plug in without rework.
-      **What is left is the Move box itself, and it no longer waits on the owner.** Put to them on
-      2026-09-10 as "resampling and tolerance for a quad" they answered *"i have no idea what the
-      question is"* — correctly, because that sentence is entirely ours. In artist terms it is only
-      this: recording a slider captures **one number** over time, and recording the Move box captures
-      **a shape** — four corners. Both then get thinned, so a straight drag lands as two keyframes
-      rather than sixty. The open part was never a preference; it was *"how much corner movement counts
-      as a change worth keeping"*, which is a **number a person can only judge by feel, after they can
-      see it**. So: build it with the slider's own thinning rule applied to the largest corner
-      movement, in canvas points, and let the owner tune it once a recorded drag exists to look at —
-      the same reasoning as [[render the cost, don't describe it]]. Do not hold the surface for a
-      ruling that cannot usefully be given in advance.
-      **§5's slow-motion multiplier is DECLINED, by the owner, 2026-09-10, and they are right about the
-      mechanism.** They asked: *"for the slow motion multiplier doesnt it just make sense for it to be linked
-      to plauback speed instead of being a separate feature? If playback speed is 12fps for example it will
-      naturally be 2x slower."*
-
-      Verified against the code rather than reasoned about. `CanvasManager`'s playback tick interval is
-      `1.0 / fps`, so a scene at 12 fps takes twice the wall clock of the same scene at 24 — the artist gets
-      exactly twice as long to perform the gesture. A take `resampled(fps:startFrame:)` walks one stop per
-      document frame, and `PoseRecording`'s own comment says why that is exact: *"`startFrame + i` is the
-      playhead at the i-th stop, because playback advances at `fps`"*. So **lowering the rate already is the
-      capture multiplier, at no cost, with no control to build.** 12 fps is a standard animation rate anyway —
-      recording at the rate you intend is normal practice, not a compromise.
-
-      **The one thing the separate multiplier would have added, recorded so the decision is not re-derived.**
-      Keys land on *frame numbers*, and `fps` is the rate those frames play at — so recording at 12 and then
-      setting the rate back to 24 plays the performance twice as fast. The multiplier would have let an artist
-      perform slowly and still land keys at the **full 24 fps density**, so the finished animation plays at 24
-      with their slow-performed motion mapped onto it. That is the only capability lost, and the honest version
-      of it is not a knob on the recorder at all — it is a capture rate that is independent of the document's
-      frame rate, which is a larger idea and one nobody has asked for.
+- [x] **Stage 7, live recording and an editable fps — merged, all three surfaces.** Editable fps
+      (clamped 1-60, presets, live during playback, no undo step, persisted); §5.1's two-act arming
+      per the owner's 2026-09-09 ruling (record turns blue and moves nothing, the take begins when the
+      pencil lands); and every surface is recordable — the slider (effect and opacity channels,
+      merged 2026-09-07), the Move box (2026-09-10, §5.2, `PoseRecording` — a container pose's four
+      corners rather than a slider's one number, thinned by the largest single corner displacement
+      rather than a mean), and the canvas (stage 10 below). A raster lift and a lassoed vector float
+      refuse the Move box out loud, with the arm surviving. §5's slow-motion multiplier is
+      **declined**, by the owner, 2026-09-10 — the editable fps already is the capture multiplier at
+      no cost (the playback tick is `1.0 / fps`, so a scene recorded at 12 fps gives exactly twice the
+      wall clock to perform in). See KEYFRAMES §5-§5.3.
 - [x] **Stage 10, the timing recorder (§7) — built and merged 2026-09-10.** The owner gave the full
       brief on 2026-09-09 and it is larger than §7's laser pointer.
 
@@ -278,20 +227,10 @@ pose key has a node.
       two must not be built at once" is true of a mid-gesture commit and does not apply to a partition.
       A frame with no block gets one, by the rule that already ships for touching a blank frame. One
       gesture is one undo press, blocks included.
-- [ ] **A folder's keyframes have no entry point, and that is now two channel kinds deep.** Folder
-      opacity animates and renders correctly (merged 2026-09-10), and so have a folder's *grade*
-      channels since stage 2b — but **Add Keyframe** lives only on a layer row's cel menu and the
-      timeline has no folder rows, so an artist cannot place the first key on a folder at all. Model
-      correct, feature unreachable, which is the exact shape of the three defects the owner found in a
-      minute on 2026-09-03. **Asked on 2026-09-10, the owner ruled *"You decide how to do it"*, so this
-      is a build item and not a question.** The obvious shape, not yet weighed against the code: a
-      folder already has an options menu, and a layer's Add Keyframe lives on its cel menu — so the
-      cheapest honest answer is probably the folder's own options menu, keyed at the playhead. Weigh
-      that against giving folders timeline rows, which is a much larger change and would also answer
-      several other things.
-- [ ] **Stage 6, bake to cels**, parked by that same ruling rather than dropped. It is cheaper than
-      when it was planned — it shares its frame-walker with RENDER (29), which shipped, and the video
-      bake merged 2026-09-06 is the same shape of operation with a worked pattern to copy. §6.
+- [ ] **Stage 6, bake to cels**, parked by the owner's 2026-09-06 scheduling ruling (stage 7 before
+      stage 6) rather than dropped. It is cheaper than when it was planned — it shares its
+      frame-walker with RENDER (29), which shipped, and the video bake merged 2026-09-06 is the same
+      shape of operation with a worked pattern to copy. §6.
 - [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
       because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
       `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
