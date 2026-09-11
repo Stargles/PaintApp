@@ -69,11 +69,6 @@ each is a `case` on `Effect` with its shader, its `lookupTable`/`params` arms an
 enum's own comment says adding a case fails to compile until every arm is written, which is the safety
 this list relies on.
 
-- [ ] **Computer screen.** > *"computer screen: mimics that computer screen look. You can add options for
-      different presets"* — scanlines, subpixel structure, curvature, vignette, and a little chromatic
-      aberration and bloom, behind named presets. Two of those ingredients **already exist as effects**
-      (`chromaticAberration`, `bloom`), so the question the build should answer first is whether this is
-      one new effect or a preset that stacks existing ones.
 - [ ] **Hue colorize.** > *"hue colorize option: look into adobe after effects for this. Useful for color
       correcting images to look like the background"* — After Effects' Tint / Colorize: map the image's
       luminance onto a colour ramp, or pull its hue toward a target, so a pasted photo takes on the
