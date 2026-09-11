@@ -1,22 +1,23 @@
 import XCTest
 
-/// **Can an artist see that a transform layer's bar means "only here", keep a keyframe past it, and
-/// be told why Move refuses out there?** — TRANSFORM_LAYER.md §2 rulings 1 and 17, driven the way
-/// the artist drives it, from a fresh document with no prior state.
+/// **Can an artist see that a transform layer's bar means "only here", have a keyframe past it
+/// cropped like a drawing's, and be told why Move refuses out there?** — TRANSFORM_LAYER.md §2
+/// rulings 1 and 17 (17 reversed 2026-09-11, txcrop), driven the way the artist drives it, from a
+/// fresh document with no prior state.
 ///
 /// `TransformLayerLogicTests` and `TransformLayerEntryLogicTests` own the rule: the pose resolves to
-/// nil past the bar, the keys are inert rather than cropped, the box is refused with a notice. What
-/// they cannot say, and what this file is for:
+/// nil past the bar, a key past it is cropped with a boundary key first, the box is refused with a
+/// notice. What they cannot say, and what this file is for:
 ///
 ///  * that **the layer can be made and keyed at all** from the `+` menu — add, mark, scrub, Move,
 ///    Done, mark — because every step is a different view;
-///  * that **dragging the bar's right edge in past the second key leaves its diamond on the timeline
-///    and puts no crop banner up** — the opposite of what `CelSpanCropUITests` proves for a drawing's
-///    block, on the same handle, which is the whole content of ruling 17 as drawn;
+///  * that **dragging the bar's right edge in past the second key removes its diamond and puts up
+///    the same crop banner** — exactly what `CelSpanCropUITests` proves for a drawing's block, on the
+///    same handle, since ruling 17's reversal made the two read alike;
 ///  * that **tapping Move with the playhead past the bar raises no box and does say why**, by the
 ///    banner's case code;
-///  * and that **dragging the edge back out** is the way in the banner names: the same tap then
-///    raises the box.
+///  * and that **dragging the edge back out does not bring the cropped key back** — only undo does —
+///    while Move still raises the box again, since the bar covers the frame either way.
 ///
 /// A small class on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
 final class TransformLayerSpanUITests: PaintUITestCase {
@@ -54,11 +55,11 @@ final class TransformLayerSpanUITests: PaintUITestCase {
     }
 
     /// **Add, mark, scrub, Move, Done, mark; drag the bar's right edge in past the second key; read
-    /// the band and the (absent) banner; tap Move out there and read the banner; drag the edge back
-    /// out and tap Move again.** The assertions are on the marker band (`TimelineKeyMarkers.encode`
+    /// the band and the crop banner; tap Move out there and read the refusal banner; drag the edge
+    /// back out and tap Move again.** The assertions are on the marker band (`TimelineKeyMarkers.encode`
     /// over §2.28's union, which is what draws the diamonds), on the Move bar's presence (which is
     /// `DrawingView` reporting a live box), and on the banner's case code — not on anything stored.
-    func testShorteningTheBarKeepsTheKeyframeAndMoveOutsideItIsRefusedWithANotice() throws {
+    func testShorteningTheBarCropsTheKeyframeAndMoveOutsideItIsRefusedWithANotice() throws {
         let app = XCUIApplication()
         // The banner is read after a tap and `CanvasNotice.duration` is 2.6 s, which is a race no
         // `waitForExistence` can win on a loaded machine — `UITestSeeds.noticeDurationOverride`
@@ -114,14 +115,18 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         XCTAssertLessThanOrEqual(shortened.length, second,
                                  "Premise: the bar's new end (\(shortened.length)) is at or before the second key (\(second))")
 
-        // What is drawn: both diamonds are still on the band. Ruling 17 — a layer's keys are its own,
-        // whatever its bars do; this is the exact drag that removes a *drawing's* key (TODO (62)).
-        XCTAssertEqual(markers(app), two, "the key past the bar is still drawn — kept, not cropped")
-        // What is (not) said: no crop banner, because nothing was cropped.
+        // What is drawn: the diamond at the second key is gone — ruling 17, reversed 2026-09-11
+        // (txcrop): a transform layer's keys past its bar are cropped exactly as a drawing's are.
+        let afterShorten = markers(app)
+        XCTAssertNotEqual(afterShorten, two, "the marker band changed — a key was actually cropped")
+        let framesAfterShorten = (afterShorten ?? "").split(separator: "|").compactMap { Int($0) }
+        XCTAssertFalse(framesAfterShorten.contains(second), "the diamond at the second key is gone: \(afterShorten ?? "nil")")
+        // What is said: the same crop banner `CelSpanCropUITests` reads for a drawing's block.
         let notice = app.staticTexts["canvasNotice"]
-        XCTAssertFalse(notice.exists && notice.value as? String == "keyframesCropped",
-                       "no crop is announced, because a transform layer's keys are not cropped")
-        attach(app, "2-bar-shortened-keys-still-drawn")
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "the crop is announced")
+        XCTAssertEqual(notice.value as? String, "keyframesCropped",
+                       "the same notice a drawing's own crop raises, reused verbatim")
+        attach(app, "2-bar-shortened-key-cropped")
 
         // Move, with the playhead still at the second key — now past the bar. No box, and a reason.
         app.buttons["toolbar.moveButton"].tap()
@@ -134,17 +139,21 @@ final class TransformLayerSpanUITests: PaintUITestCase {
                       "the sentence names the bar, which is what the artist has to lengthen or scrub inside: \(notice.label)")
         attach(app, "3-move-refused-outside-the-bar")
 
-        // What the artist does next: drag the edge back out, and the same tap raises the box.
+        // What the artist does next: drag the edge back out. The bar covers the second key's frame
+        // again, but the cropped key itself does not come back — only undo brings it back, exactly as
+        // for a drawing's own crop.
         performDrag(app, identifier: "timeline.cel.1.0.rightHandle", totalDelta: 300)
         guard let lengthened = readCel(app, layerIndex: 1, celIndex: 0) else {
             return XCTFail("Could not read the bar after lengthening")
         }
-        XCTAssertGreaterThan(lengthened.length, second, "Premise: the bar covers the second key again")
-        XCTAssertEqual(markers(app), two, "…and the keys are exactly what they were — nothing was lost")
+        XCTAssertGreaterThan(lengthened.length, second, "Premise: the bar covers the second key's frame again")
+        let framesAfterLengthen = (markers(app) ?? "").split(separator: "|").compactMap { Int($0) }
+        XCTAssertFalse(framesAfterLengthen.contains(second),
+                       "…but the diamond does not come back — lengthening restores the span, not the crop")
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
-                      "Inside the bar again, Move raises the box")
-        attach(app, "4-bar-lengthened-move-works")
+                      "Inside the bar again, Move raises the box regardless of the crop")
+        attach(app, "4-bar-lengthened-move-works-key-still-gone")
         app.buttons["moveBar.doneButton"].tap()
     }
 }

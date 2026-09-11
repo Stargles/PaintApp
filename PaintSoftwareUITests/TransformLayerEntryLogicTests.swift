@@ -930,9 +930,11 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     }
 
     /// **Lengthen the bar and the same frame takes the box**, which is the way out the notice names.
-    /// The keys a Move wrote inside the bar are untouched by the bar's length in either direction
-    /// (ruling 17 — `TransformLayerLogicTests` pins the shortening half against the render), so
-    /// dragging the edge out to frame 30 puts the pose back in force at 20 with nothing re-authored.
+    /// This never shrinks the bar, so it exercises neither ruling 17 as it stood nor its 2026-09-11
+    /// reversal (`TransformLayerLogicTests` pins the shortening half, both against the render and
+    /// against the crop, since the fix): `moveBox` here writes only `LayerPose.pose`, the stored base,
+    /// with no track key at all, and lengthening never touches that field either way. Dragging the
+    /// edge out to frame 30 puts the pose back in force at 20 with nothing re-authored.
     func testLengtheningTheBarPutsTheFrameBackInsideAndTheBoxComesUp() throws {
         let manager = CanvasManager()
         manager.canvasSize = size

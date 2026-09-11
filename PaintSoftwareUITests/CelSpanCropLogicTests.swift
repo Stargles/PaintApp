@@ -10,14 +10,20 @@ import CoreGraphics
 ///
 /// Three things are pinned here, in order of how much damage each would do unpinned.
 ///
-/// 1. **Which tracks the crop touches, and which it must not.** Only `Cel.transformTracks` is stored
-///    on a cel in cel-local frames (KEYFRAMES.md §3.1's first row). `Layer.effectTracks`,
-///    `Layer.channelTracks`, `Layer.keyframeMarks` and a transformation layer's `Layer.transform.track`
-///    are on the layer in absolute document frames, apply at every frame of the document whether or
-///    not the layer has a block there (`RenderTree` reads `layerTransform` with no cel gate), and are
-///    therefore not "keys on a cel" at all. The no-op is pinned so a future "fix" cannot start
-///    cropping document-frame tracks — that would be the silent loss this item exists to prevent,
-///    reached through the other door.
+/// 1. **Which tracks *this* crop touches, and which it must not.** Only `Cel.transformTracks` is
+///    stored on a cel in cel-local frames (KEYFRAMES.md §3.1's first row), and this is the crop that
+///    reaches it. `Layer.effectTracks`, `Layer.channelTracks` and `Layer.keyframeMarks` are on the
+///    layer in absolute document frames, apply at every frame of the document whether or not the
+///    layer has a block there (`RenderTree` reads `layerTransform` with no cel gate), and are
+///    therefore not "keys on a cel" at all — this crop is a no-op for them on every kind, pinned so a
+///    future "fix" cannot start cropping document-frame tracks from this door.
+///    **A `.transform` layer's own `channelTracks`, `keyframeMarks` and `Layer.transform.track` are
+///    the one exception, and since 2026-09-11 (txcrop) they crop too — through a second, independent
+///    crop, `CanvasManager.cropTransformLayerKeysToBlocks`, run from the same resize handles.**
+///    TRANSFORM_LAYER.md §2 ruling 17 was "kept, inert"; the owner reversed it (*"I don't care about
+///    data loss if the cel is shortened then expanded"*), and `TransformLayerLogicTests` pins that
+///    crop against the render. This file pins only that the two crops stay independent — a drawing
+///    layer's own `channelTracks` and marks are untouched by both.
 /// 2. **Every verb that can shorten a span crops, from inside the undo step it already had.** The
 ///    two handles, split, a clamped duplicate and paste, and a video speed change. Each returns what
 ///    went, and the handle drags recompute from the gesture baseline so an out-and-back drag within
@@ -424,18 +430,26 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertNil(manager.notice)
     }
 
-    // MARK: - The tracks the crop must not touch
+    // MARK: - The tracks this crop must not touch — and the one row that has its own, since txcrop
 
-    /// **A layer-level track is untouched by any span change, and that is by construction rather
-    /// than by exemption.** `channelTracks` (opacity), `effectTracks`, `keyframeMarks` and a
-    /// transformation layer's own pose track are stored on the layer in absolute document frames and
-    /// apply at every frame whether or not the layer has a block there — so there is no span for a key
-    /// of theirs to be outside of. The ask is a no-op for them, pinned so a future "fix" cannot start
-    /// cropping document-frame tracks.
+    /// **A layer-level track is untouched by *this* crop — the cel's own, `Cel.cropPoseKeysToSpan` —
+    /// and that is by construction rather than by exemption, on every kind.** `channelTracks`
+    /// (opacity), `effectTracks` and `keyframeMarks` are stored on the layer in absolute document
+    /// frames and apply at every frame whether or not the layer has a block there — so there is no
+    /// *cel* span for a key of theirs to be outside of.
     ///
-    /// Watched failing with a deliberate `channelTracks` filter added beside the crop: the opacity
-    /// keys read `[0]` and `keyframeFrames` lost frame 9.
-    func testLayerLevelTracksAndMarksAreUntouchedByEverySpanChange() {
+    /// **A `.transform` layer's own tracks are the one exception, and since 2026-09-11 (txcrop,
+    /// TRANSFORM_LAYER.md §2 ruling 17 reversed) they have their own crop, `CanvasManager.
+    /// cropTransformLayerKeysToBlocks`, run from the same resize handles for exactly that kind.** It
+    /// is a second, independent crop rather than a widened version of this one — a drawing layer's
+    /// `channelTracks` and `keyframeMarks` stay untouched by both, and this test pins that half
+    /// alongside the transform layer's own reversal so the two are not confused for one rule.
+    ///
+    /// Watched failing with a deliberate `channelTracks` filter added beside the cel-level crop: the
+    /// opacity keys read `[0]` and `keyframeFrames` lost frame 9. Watched failing a second way with
+    /// `cropTransformLayerKeysToBlocks`'s call removed from `resizeCelRightEdge`: `layers[2].transform`'s
+    /// key at 11 survives past a block that ends at 4.
+    func testLayerLevelTracksAreUntouchedExceptATransformLayersOwnWhichCropsWithItsBlock() {
         let manager = fixture()
         let layerID = manager.layers[1].id
         let opacity = AnimationCurve(keys: [.init(frame: 0, value: 1), .init(frame: 9, value: 0.2)])
@@ -457,13 +471,15 @@ final class CelSpanCropLogicTests: XCTestCase {
         crop.merge(manager.resizeCelRightEdge(layerIndex: 2, celIndex: 0, newEndFrame: 4))
         crop.merge(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 4))
 
-        XCTAssertEqual(crop.discarded.keys.sorted(), [TransformChannelID.cel.id],
-                       "only the cel's own channel ever appears in a crop")
-        XCTAssertEqual(manager.layers[1].channelTracks[TargetChannel.opacity.id]?.keys.map(\.frame), [0, 9])
+        XCTAssertEqual(crop.discarded.keys.sorted(), [TransformChannelID.cel.id, "transform"],
+                       "the drawing layer's own channel, and the transform layer's, and nothing else")
+        XCTAssertEqual(manager.layers[1].channelTracks[TargetChannel.opacity.id]?.keys.map(\.frame), [0, 9],
+                       "opacity on the drawing layer is untouched — it is not a transform layer")
         XCTAssertEqual(manager.layers[1].effectTracks["blur.radius"]?.keys.map(\.frame), [0, 11])
         XCTAssertEqual(manager.layers[1].keyframeMarks, [8], "a mark is the layer's, not the cel's, and it stays")
-        XCTAssertEqual(manager.layers[2].transform?.track.keyedFrames, [0, 11],
-                       "a transformation layer's keys are in document frames and do not ride its block")
+        XCTAssertEqual(manager.layers[2].transform?.track.keyedFrames, [0, 3],
+                       "the transform layer's own key at 11 is gone — its block now ends at 4 — and 3, "
+                       + "the new last frame, gains the pose the track showed there")
         XCTAssertTrue(manager.keyframeFrames(of: .layer(id: layerID)).contains(8),
                       "the timeline still draws the mark, on a frame no block of this layer covers")
         XCTAssertTrue(manager.keyframeFrames(of: .layer(id: layerID)).contains(9),

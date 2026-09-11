@@ -1054,10 +1054,15 @@ extension CanvasManager {
         // every mode. So the accumulator asks `activeCelIndex` before it composes, and a layer with
         // no block at this frame contributes no pose — exactly the gate a grade or a flat colour
         // already passes through in `leafSnapshots`, reached here because the pose is spent in the
-        // walk rather than in the leaf. Its keys are **not** cropped to the block (ruling 17): they
-        // stay stored in absolute frames, inert outside every block and back in force the moment the
-        // bar is lengthened over them, which is what lets one layer own several blocks with a key
-        // between them interpolating across the gap. This is the one place the rule is applied, and
+        // walk rather than in the leaf. Its keys stay stored in absolute frames — this walk has no
+        // opinion on which of them exist, only on whether the frame it is asking about has a block —
+        // and **since 2026-09-11 (ruling 17, reversed, worktree `txcrop`) a key outside every block a
+        // `.transform` layer owns does not exist for long**: `CanvasManager.resizeCelLeftEdge` /
+        // `resizeCelRightEdge` crop `transform.track` (and the layer's mode scalars and marks) to the
+        // union of its blocks the moment a resize shrinks one, so the "several blocks with a gap key
+        // interpolating between them" reading this comment used to give is gone with the keys that
+        // made it possible. What this walk reads is whatever survived that crop, evaluated exactly as
+        // before — it still asks nothing about blocks except "is there one at this frame". And
         // every consumer — the live canvas, the sandwich key, the bake, the interpolation previews —
         // reads `layerPoses(atFrame:)` off this walk, so none of them can disagree about it.
         //

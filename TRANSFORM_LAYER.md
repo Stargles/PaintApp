@@ -43,10 +43,13 @@ model and render path are specified there and this document does not restate the
   gates it in the leaf derivation so one rule covers every pixel-less leaf. `newLayerBlockLength` is
   `contentEndFrame`, so a new pixel-less layer's block already reached the scene's end at creation;
   the layer *"made early and used late"* is the one the scene grew past, and lengthening its bar is
-  the timeline's own Extend to End. **TODO (62) sharpened the split**: a cel's pose keys are cropped
-  to its span; a layer's tracks — `effectTracks`, `channelTracks`, `keyframeMarks`,
-  `transform.track` — are untouched *by construction*, and shortening a transform layer's block
-  crops none of its keys (ruling 17).
+  the timeline's own Extend to End. **TODO (62) sharpened the split, and its own review reversed the
+  transform-layer half of it (2026-09-11, worktree `txcrop`)**: a cel's pose keys are cropped to its
+  span; `effectTracks` is untouched *by construction* on every kind (a grade's channel is not gated by
+  a block); but a `.transform` layer's own `channelTracks` (its mode scalars), `keyframeMarks` and
+  `transform.track` now crop to the union of the layer's blocks exactly as a cel's keys crop to its
+  span — ruling 17 was "kept, inert" and is now "cropped, with a boundary key first," on the owner's
+  own *"I don't care about data loss if the cel is shortened then expanded."*
 - **`TargetChannel` is the descriptor for "one `Double` a layer or folder owns"**: an undotted id,
   ui range, model domain, two labels and **a `WritableKeyPath` into each of the two homes**. One
   row in `TargetChannel.all` buys storage in `channelTracks`, a place in `KeyframeState` and §2.28's
@@ -143,6 +146,15 @@ reading anything in this repo, and carried a recommended answer); every one is n
     when you shorten its block), or kept and simply do nothing until you lengthen the bar again?"*
     Kept — a layer's keyframes are drawn on its row whatever its bars do, so nothing is hidden; a
     layer may have several blocks, and they come back into force when the bar is lengthened. Stage 1.
+    **Reversed 2026-09-11, on being shown the consequence drawn** (TODO (62), worktree `txcrop`): *"why
+    are there keyframes outside of a transform cel? … I'm pretty sure I explicitly wanted keyframes to
+    be clamped to inside the cels. … I don't care about data loss if the cel is shortened then
+    expanded."* A transform layer's own tracks — `transform.track`, its mode scalars in
+    `channelTracks`, and its `keyframeMarks` — now crop to the union of its blocks
+    (`CanvasManager.transformLayerBlockCoverage`) exactly as a cel's own pose keys crop to its span
+    (TODO (62)'s own rule, one level up): a boundary key lands on the new edge first, carrying the pose
+    or value the track showed there, so the frames that remain keep the motion they had. §0's and §4's
+    paragraphs below are corrected in place rather than left standing against this.
 
 ## 3. Homes — how many, and why
 
@@ -271,14 +283,21 @@ supply for free**: rotate needs an origin frame, shake needs an end, and repeat'
 **Gate — the block is the span, for every mode and for the grade and flat colour too.** A pixel-less
 layer acts on the frames its block covers and nowhere else. Rotate's angle starts at the block's first
 frame; shake runs while the block runs; repeat loops within it; Move poses within it. Its keys stay in
-absolute frames (§2.4 stands) and are **inert outside the block, not cropped** — the rule every
-layer-level track already lives under (an opacity key on a frame the layer has no cel on is inert
-today), and a rule that cannot be the crop, because a layer may have several blocks and a key between
-them is what interpolates across the gap. BUGS.md's value-layer filing closes as *the default is
-wrong, not the gate*: a new pixel-less layer's block is stamped to the scene's end, and lengthening it
-after the scene grows is the timeline's own Extend to End, exactly as a held background is. A Move
-raised at a frame outside the block is **refused with a notice naming the block**, which reverses §4.4's
-deletion of that gate — there was nothing to refuse then; there is now.
+absolute frames (§2.4 stands). **Reversed 2026-09-11 (TODO (62), worktree `txcrop`), on the owner's own
+*"I don't care about data loss if the cel is shortened then expanded"*: a transform layer's own tracks
+— `transform.track`, its mode scalars in `channelTracks`, `keyframeMarks` — are no longer inert outside
+the block; they crop to the union of the layer's own blocks exactly as a cel's own pose keys crop to
+its span, a boundary key landing on the new edge first so the frames that remain keep the motion they
+had.** Opacity, and every layer-wide channel no mode reads, stays exactly as it was — it is not gated
+by a block at all (an opacity key on a frame the layer has no cel on is in force today, same as ever),
+so there is no "outside the block" for it to be inert or cropped in. What goes with the old rule is the
+gap trick it made possible — a key placed between two of a layer's blocks purely to interpolate the
+pose across the space between them — since a gap key is exactly a key outside every block, and is
+pruned the next time either bordering block's span changes. BUGS.md's value-layer filing closes as *the
+default is wrong, not the gate*: a new pixel-less layer's block is stamped to the scene's end, and
+lengthening it after the scene grows is the timeline's own Extend to End, exactly as a held background
+is. A Move raised at a frame outside the block is **refused with a notice naming the block**, which
+reverses §4.4's deletion of that gate — there was nothing to refuse then; there is now.
 
 **No gate — a transform layer is a rule, not a drawing.** It acts at every frame; time extent is
 expressed with keys (speed to 0, amplitude to 0), rotate needs a start-frame number of its own, and
@@ -473,7 +492,7 @@ hold a rotation, key the speed to 0; to hold a shake, key its amplitudes.
 | §2.3 re-pose, never resample | the four pose modes ride the derivation; duplicate offset resamples *pixels* because it is a grade on the accumulator, which is what a grade is | — |
 | §11.7 six rows | the band draws the authored pose; the function is not a curve | rotate, shake |
 | `movesItsContents` frame-invariant | must read the mode and the scalars' *tracks*, not one frame | rotate, shake |
-| (62) crop is cel-only | inert-outside-block for layer keys, never cropped | all, under §4 |
+| (62) crop, reversed for a transform layer's own tracks (2026-09-11, txcrop) | its `transform.track`, mode scalars and `keyframeMarks` crop to the union of its own blocks; every *other* layer-level track (opacity, `effectTracks`) stays uncropped, ungated | all, under §4 |
 | hidden layer contributes nothing | the accumulator reads `isVisible`; a hidden repeat does not remap | all (BUGS.md) |
 
 ## 8. Build order

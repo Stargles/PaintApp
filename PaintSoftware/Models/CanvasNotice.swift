@@ -234,6 +234,13 @@ struct CanvasNotice: Identifiable, Equatable {
         /// keys past its new end*. The owner chose that rule with its objection in front of them, on
         /// condition that the crop is one undo step and says what it discarded; this is the saying.
         ///
+        /// **The same case, reused verbatim, for a `.transform` layer's own tracks** — reversed
+        /// 2026-09-11 (TRANSFORM_LAYER.md §2 ruling 17, worktree `txcrop`): shortening a transform
+        /// layer's block now crops its `transform.track`, its mode scalars and its `keyframeMarks` to
+        /// the union of its own blocks, exactly as a cel's keys crop to its span, and this is the same
+        /// notice saying so — same wording, same one undo step, same doors
+        /// (`CanvasManager.cropTransformLayerKeysToBlocks`).
+        ///
         /// Raised once, when the step that owns the crop reaches the undo stack — not on every
         /// `.changed` of a handle drag, and not at all for a drag that went past a key and came back
         /// (`CanvasManager.pendingKeyframeCrop`). Carries the crop rather than a rendered sentence for

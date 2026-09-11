@@ -456,14 +456,22 @@ rather than "it falls out of cel-local time":
   records a step (`withStructureUndo`, `withInterpolationUndo`, `commitStructureGesture`), and a
   discrete step that crops more than once — a merge splitting both layers at every boundary — names
   every crop; only a handle drag replaces, since each `.changed` recomputes from the baseline.
-  **Layer-level tracks are untouched by all of it, by construction**: `effectTracks`,
-  `channelTracks`, `keyframeMarks` and a transformation layer's own `transform.track` are in absolute
-  document frames and apply at every frame whether or not the layer has a block there, so there is no
-  span for a key of theirs to be outside of; `CelSpanCropLogicTests` pins the no-op.
+  **Layer-level tracks are untouched by this — the *cel's own* crop, from `Cel.cropPoseKeysToSpan` —
+  by construction**: `effectTracks`, `channelTracks`, `keyframeMarks` and a transformation layer's own
+  `transform.track` are in absolute document frames and apply at every frame whether or not the layer
+  has a block there, so there is no *cel* span for a key of theirs to be outside of;
+  `CelSpanCropLogicTests` pins the no-op.
   **Revised 2026-09-11**: before a key past an edge is deleted, a key is inserted at the new edge
   carrying the pose the track showed there — the new last frame on the right edge, the new first frame
   on the left, symmetrically — so the frames that remain keep the motion they had up to the new end
   instead of snapping to whichever key was still inside.
+  **Reversed a second time, the same day, for a `.transform` layer's own tracks (worktree `txcrop`,
+  TRANSFORM_LAYER.md §2 ruling 17)**: those are untouched by *this* crop, but a `.transform` layer's
+  `transform.track`, its mode scalars in `channelTracks` and its own `keyframeMarks` now crop to the
+  union of the *layer's* blocks (`CanvasManager.cropTransformLayerKeysToBlocks`) with the identical
+  boundary-key mercy, on the owner's *"I don't care about data loss if the cel is shortened then
+  expanded."* Opacity and `effectTracks` stay exactly as this paragraph first described them, on every
+  kind — neither is gated by a block at all.
 
 ### 3.2 The curve
 

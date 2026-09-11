@@ -286,6 +286,57 @@ struct TransformTrack: Equatable {
         return (TransformTrack(keys: kept, step: step), discarded)
     }
 
+    // MARK: - Cropping a *layer's* track to its blocks — TODO (62), reversed 2026-09-11 (txcrop)
+
+    /// **`cropped(toFrameCount:)` one level up: this track is a `.transform` layer's own
+    /// `LayerPose.track`, in absolute document frames, and `coverage` is the union of that layer's
+    /// blocks (`CanvasManager.transformLayerBlockCoverage`) rather than one window starting at 0.**
+    ///
+    /// The owner's reversal (worktree `txcrop`, 2026-09-11): *"why are there keyframes outside a
+    /// transform cel? … I'm pretty sure I explicitly wanted keyframes to be clamped to inside the
+    /// cels."* TRANSFORM_LAYER.md §2 ruling 17 (kept, inert) is gone; a layer's keys outside every
+    /// block it has are now deleted exactly as a cel's own keys are deleted past its span.
+    ///
+    /// **`insertBelow`/`insertAbove` name the one edge *this call's own operation* just moved inward
+    /// — never every covered interval's edge.** A layer can own several blocks (ruling 17's own
+    /// premise), and inserting a boundary key at every interval's edge merely because *some* key
+    /// elsewhere in the track is outside *some* interval would plant keys the artist never asked for
+    /// on blocks nobody touched. So a caller passes only the edge its own resize produced — the new
+    /// last frame inside for a right-edge shrink, the new first frame inside for a left-edge one —
+    /// and nil for the edge it did not move. Passing nil for both only prunes.
+    ///
+    /// **Removal is unconditional and global**: any key outside `coverage`, from any block, goes —
+    /// including a key a document written under the old ruling parked in a gap between two blocks to
+    /// interpolate across it. The owner's own words are the ruling on that: *"I don't care about data
+    /// loss if the cel is shortened then expanded."*
+    ///
+    /// Mirrors `cropped(toFrameCount:)` in every other respect: the inserted key's pose comes from
+    /// `self` before anything is removed, its interpolation is inherited from the segment that was
+    /// carrying the edge, and nothing is inserted where a key already stands on the edge or where
+    /// nothing is actually being discarded past it.
+    func croppedToBlocks(_ coverage: [Range<Int>], insertBelow: Int? = nil, insertAbove: Int? = nil)
+        -> (kept: TransformTrack, discarded: [Int]) {
+        func isCovered(_ frame: Int) -> Bool { coverage.contains { $0.contains(frame) } }
+
+        let discarded = keys.filter { !isCovered($0.frame) }.map(\.frame)
+        guard !discarded.isEmpty else { return (self, []) }
+
+        var working = keys
+        if let edge = insertBelow, isCovered(edge), key(atFrame: edge) == nil,
+           keys.contains(where: { $0.frame < edge }), let edgePose = pose(atDocumentFrame: edge) {
+            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
+            working.append(Key(frame: edge, pose: edgePose, interpolation: segment))
+        }
+        if let edge = insertAbove, isCovered(edge), key(atFrame: edge) == nil,
+           keys.contains(where: { $0.frame > edge }), let edgePose = pose(atDocumentFrame: edge) {
+            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
+            working.append(Key(frame: edge, pose: edgePose, interpolation: segment))
+        }
+
+        let kept = working.filter { isCovered($0.frame) }
+        return (TransformTrack(keys: kept, step: step), discarded)
+    }
+
     private static func normalised(_ input: [Key]) -> [Key] {
         guard input.count > 1 else { return input }
         let sorted = input.enumerated()

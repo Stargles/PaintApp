@@ -234,6 +234,42 @@ struct AnimationCurve: Codable, Hashable {
 
     func key(atFrame frame: Int) -> Key? { keys.first { $0.frame == frame } }
 
+    // MARK: - Cropping to a transform layer's blocks — TODO (62), reversed 2026-09-11 (txcrop)
+
+    /// **`TransformTrack.croppedToBlocks(_:insertBelow:insertAbove:)`'s exact shape, for a scalar
+    /// channel** — a `.transform` layer's mode scalar (`rotateSpeed`, `parallaxShare`, and whatever
+    /// TRANSFORM_LAYER.md §3.3 adds later) lives in `Layer.channelTracks` as an `AnimationCurve` in
+    /// absolute document frames, and is gated by the layer's blocks exactly as its pose track is —
+    /// **`opacity` is the one member of that dictionary excluded**, since every layer owns it and it
+    /// is never gated by a block (`CanvasManager.cropTransformLayerKeysToBlocks` is the one caller and
+    /// is what excludes it).
+    ///
+    /// `coverage` is the union of the layer's blocks; `insertBelow`/`insertAbove` name the one edge
+    /// the caller's own resize just moved inward, never every interval's edge — see the `TransformTrack`
+    /// twin for why. Removal is unconditional and global, the owner's own ruling on data loss.
+    func croppedToBlocks(_ coverage: [Range<Int>], insertBelow: Int? = nil, insertAbove: Int? = nil)
+        -> (kept: AnimationCurve, discarded: [Int]) {
+        func isCovered(_ frame: Int) -> Bool { coverage.contains { $0.contains(frame) } }
+
+        let discarded = keys.filter { !isCovered($0.frame) }.map(\.frame)
+        guard !discarded.isEmpty else { return (self, []) }
+
+        var working = keys
+        if let edge = insertBelow, isCovered(edge), key(atFrame: edge) == nil,
+           keys.contains(where: { $0.frame < edge }) {
+            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
+            working.append(Key(frame: edge, value: evaluate(at: Double(edge)), interpolation: segment))
+        }
+        if let edge = insertAbove, isCovered(edge), key(atFrame: edge) == nil,
+           keys.contains(where: { $0.frame > edge }) {
+            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
+            working.append(Key(frame: edge, value: evaluate(at: Double(edge)), interpolation: segment))
+        }
+
+        let kept = working.filter { isCovered($0.frame) }
+        return (AnimationCurve(keys: kept, step: step), discarded)
+    }
+
     /// Decision 4, applied at the two places a `keys` array can enter the type.
     private static func normalised(_ input: [Key]) -> [Key] {
         guard input.count > 1 else { return input }

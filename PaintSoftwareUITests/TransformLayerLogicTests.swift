@@ -102,6 +102,21 @@ final class TransformLayerLogicTests: XCTestCase {
                   ]))
     }
 
+    /// **`animatedPose`'s shape, but every segment `.linear`** — for a "the pose the block showed at
+    /// every remaining frame is unchanged by the crop" test, which `.bezier`/`.autoClamped`'s default
+    /// tangent cannot honestly make: `AnimationCurve.effectiveHandles(at:)` computes a key's tangent
+    /// from *both* neighbours, so removing a key past it changes the *other* neighbour's tangent too
+    /// — a segment strictly between two keys that never moved can still change shape. `.linear`
+    /// (`AnimationCurve.value(inSegmentStartingAt:at:)`'s `.linear` case) reads only a segment's own
+    /// two endpoints, so a key's crop cannot be felt anywhere but past it.
+    private func linearAnimatedPose(_ keys: [(frame: Int, transform: CGAffineTransform)]) -> LayerPose {
+        LayerPose(pose: PoseQuad(restingIn: canvasBox),
+                  track: TransformTrack(keys: keys.map {
+                    .init(frame: $0.frame, pose: PoseQuad(box: canvasBox, mappedBy: $0.transform),
+                         interpolation: .linear)
+                  }))
+    }
+
     private func inkBounds(_ image: UIImage) -> CGRect? { PixelOps.opaqueContentBounds(image) }
 
     private func index(of id: UUID, in manager: CanvasManager) -> Int {
@@ -714,18 +729,14 @@ final class TransformLayerLogicTests: XCTestCase {
     // MARK: - The span (TRANSFORM_LAYER.md §2 ruling 1: the bar means "only here")
 
     /// **Shorten the bar and the frames past it show the drawing unposed, on both backends, byte for
-    /// byte — and the keys past the bar are still there.** The pose is keyed 0 → 24 px over frames
-    /// 0…8 and in force at 8 while the bar covers it; cut the bar back to 6 and frame 8's composite
-    /// is exactly the composite of the same document with the transform layer hidden, while the
-    /// layer's track still holds both keys. Ruling 17: inert, never cropped. Watched failing two
-    /// ways — with the accumulator's `activeCelIndex` clause removed (frame 8 still posed), and with
-    /// a deliberate `transform?.track` crop added to `resizeCelRightEdge` (the second key gone).
-    func testShorteningTheBarLeavesTheFramesPastItUnposedAndTheKeysInPlace() throws {
+    /// byte — ruling 1, unaffected by ruling 17's reversal.** The pose is keyed 0 → 24 px over frames
+    /// 0…8 and in force at 8 while the bar covers it; cut the bar back to 6 and frame 8's composite is
+    /// exactly the composite of the same document with the transform layer hidden. Watched failing
+    /// with the accumulator's `activeCelIndex` clause removed: frame 8 stays posed.
+    func testShorteningTheBarLeavesTheFramesPastItUnposed() throws {
         try onBothBackends { backend in
             let (manager, drawn) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
             let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
-            let keysBefore = manager.layers[mover].transform?.track.keys.map(\.frame)
-            XCTAssertEqual(keysBefore, [0, 8], "Premise: two keys, the second at 8")
             XCTAssertNotNil(manager.layerPoses(atFrame: 8)[drawn], "Premise: posed at 8 while the bar covers it")
             let posed = try compositeBytes(manager, atFrame: 8)
 
@@ -744,32 +755,116 @@ final class TransformLayerLogicTests: XCTestCase {
             XCTAssertEqual(try compositeBytes(manager, atFrame: 8), unposed,
                            "…and what is drawn at 8 is the unposed drawing, byte for byte (\(backend))")
             XCTAssertNotNil(manager.layerPoses(atFrame: 4)[drawn], "Inside the bar the pose is still in force")
-            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), keysBefore,
-                           "The key at 8 is inert, not cropped — a layer's keys are its own, whatever "
-                           + "its bars do (ruling 17)")
-            XCTAssertEqual(manager.keyframeFrames(of: .layer(id: manager.layers[mover].id)), [0, 8],
-                           "…and the timeline still lists it, which is what draws its diamond")
         }
     }
 
-    /// **Lengthen the bar back and the pose is in force again with nothing lost** — the other half
-    /// of ruling 17, and what makes "inert" different from "deleted": the composite at 8 after
-    /// shorten-then-lengthen is byte-identical to the composite before either.
-    func testLengtheningTheBarBringsThePoseBackWithNothingLost() throws {
+    /// **Ruling 17, reversed 2026-09-11 (txcrop): shortening the bar past a key crops it, with a
+    /// boundary key first, one undo step, and a banner** — replacing the old "kept, inert" pin.
+    /// Keyed 0 → 12 px → 24 px over frames 0, 4 and 8 (three keys, not two, so "a key inside stays"
+    /// is not the same case as "the edge survives"), `linearAnimatedPose` rather than `animatedPose`
+    /// (see that helper's doc for why); shorten to 6 and 8 is discarded, 4 stays untouched, and a key
+    /// lands on 5 — the new last frame — carrying whatever the block showed there before the crop,
+    /// measured against a render taken *before* the resize rather than hand-derived, on both backends.
+    ///
+    /// Watched failing two ways: with `cropTransformLayerKeysToBlocks`'s call removed from
+    /// `resizeCelRightEdge` (the keys read `[0, 4, 8]` and every frame-0..<6 assertion still passes,
+    /// since nothing was cropped to disagree with the "before" snapshot — this is the mutation the
+    /// crop assertion catches); and with the boundary insertion suppressed inside
+    /// `TransformTrack.croppedToBlocks` (the keys read `[0, 4]` and frame 5's composite changes,
+    /// which is the mutation the every-remaining-frame assertion catches).
+    func testShorteningTheBarCropsTheKeyPastItWithABoundaryAndTellsTheArtist() throws {
+        try onBothBackends { backend in
+            let (manager, _) = posedVectorLayer(linearAnimatedPose([
+                (frame: 0, transform: .identity),
+                (frame: 4, transform: CGAffineTransform(translationX: 12, y: 0)),
+                (frame: 8, transform: CGAffineTransform(translationX: 24, y: 0)),
+            ]))
+            let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 8], "Premise")
+
+            var before: [[UInt8]] = []
+            for frame in 0..<6 { before.append(try compositeBytes(manager, atFrame: frame)) }
+
+            let undoCountBefore = manager.history.undoStack.count
+            manager.withStructureUndo(label: .resizeFrame) {
+                manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
+            }
+            XCTAssertEqual(manager.history.undoStack.count, undoCountBefore + 1,
+                           "one undo step covers the span and the crop together (\(backend))")
+            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 5],
+                           "8 is gone; 4 stays, solidly inside; 5 gains the pose the block showed there (\(backend))")
+            guard case .keyframesCropped(let crop)? = manager.notice?.kind else {
+                return XCTFail("the artist is told a crop happened (\(backend))")
+            }
+            XCTAssertEqual(crop.frames, [8], "only the key actually discarded is named, in absolute frames (\(backend))")
+
+            for frame in 0..<6 {
+                XCTAssertEqual(try compositeBytes(manager, atFrame: frame), before[frame],
+                               "frame \(frame) is exactly what the block showed before the crop (\(backend))")
+            }
+
+            manager.undo()
+            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 8],
+                           "the span and the key come back together, in the same press (\(backend))")
+        }
+    }
+
+    /// **The ruling's hard half, one level up from (62)'s own**: lengthening the bar back does *not*
+    /// bring a cropped key back — only undo does. Frame 8 holds at whatever the boundary key at 5
+    /// preserved, not at the old key's pose, exactly as a track holds past its own last key.
+    func testLengtheningAfterACroppedBarDoesNotBringTheKeyBack() throws {
         try onBothBackends { backend in
             let (manager, _) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
             let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
-            let before = manager.layers[mover].transform
-            let posed = try compositeBytes(manager, atFrame: 8)
+            let posedAt8 = try compositeBytes(manager, atFrame: 8)
 
-            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
-            XCTAssertNotEqual(try compositeBytes(manager, atFrame: 8), posed, "Premise: shortened, 8 is unposed")
-            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 12)
+            manager.withStructureUndo(label: .resizeFrame) {
+                manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
+            }
+            XCTAssertNotEqual(try compositeBytes(manager, atFrame: 8), posedAt8, "Premise: shortened, 8 is unposed")
+            let heldAt5 = try compositeBytes(manager, atFrame: 5)
+            manager.notice = nil   // the banner's timer, which the view owns
 
-            XCTAssertEqual(manager.layers[mover].transform, before, "Pose, track and keys, to the field")
-            XCTAssertEqual(try compositeBytes(manager, atFrame: 8), posed,
-                           "…and the picture at 8 is exactly what it was (\(backend))")
+            manager.withStructureUndo(label: .resizeFrame) {
+                manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 12)
+            }
+            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 5],
+                           "the key at 8 is gone until undo — lengthening does not bring it back (\(backend))")
+            XCTAssertEqual(try compositeBytes(manager, atFrame: 8), heldAt5,
+                           "…so frame 8 holds at the pose the crop preserved at 5, not the old key's (\(backend))")
+            XCTAssertNil(manager.notice, "lengthening removed nothing, so it says nothing (\(backend))")
         }
+    }
+
+    /// **A transform layer's mode scalars crop with its block too, not only its pose track** —
+    /// `channelTracks` (TRANSFORM_LAYER.md §3.3's `rotateSpeed` row is the concrete case), while
+    /// `opacity` — the one member of that dictionary every layer owns — is untouched, since it is
+    /// never gated by a block on any kind (`Layer.channelTracks`'s own doc). This is orthogonal to
+    /// `mode`: the crop reads the dictionary, not which mode is selected, so no rotate fixture is
+    /// needed to pin it.
+    ///
+    /// Watched failing with the `id != TargetChannel.opacity.id` filter removed from
+    /// `cropTransformLayerKeysToBlocks`: opacity's key at 8 is cropped too, which it must never be.
+    func testAModeScalarCropsWithTheBlockAndOpacityDoesNot() throws {
+        let (manager, _) = posedVectorLayer(pose(CGAffineTransform.identity))
+        let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
+        manager.layers[mover].channelTracks[TargetChannel.rotateSpeed.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: 5), .init(frame: 8, value: 15)])
+        manager.layers[mover].channelTracks[TargetChannel.opacity.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: 1), .init(frame: 8, value: 0.5)])
+
+        manager.withStructureUndo(label: .resizeFrame) {
+            manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 6)
+        }
+
+        XCTAssertEqual(manager.layers[mover].channelTracks[TargetChannel.rotateSpeed.id]?.keys.map(\.frame), [0, 5],
+                       "the speed's key at 8 is gone; 5 — the new last frame — gains the value the curve showed there")
+        XCTAssertEqual(manager.layers[mover].channelTracks[TargetChannel.opacity.id]?.keys.map(\.frame), [0, 8],
+                       "opacity is untouched — it is not gated by a block at all")
+        guard case .keyframesCropped(let crop)? = manager.notice?.kind else {
+            return XCTFail("the artist is told")
+        }
+        XCTAssertEqual(crop.frames, [8], "only the speed's discarded key is named, not opacity's")
     }
 
     /// **A frame past the bar resolves to no pose at all in `layerPoses`, so nothing downstream is

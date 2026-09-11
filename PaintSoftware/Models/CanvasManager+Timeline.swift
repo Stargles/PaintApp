@@ -434,6 +434,91 @@ extension CanvasManager {
         return (lower, upper ?? Int.max)
     }
 
+    // MARK: - A transform layer's own keys crop to its blocks — TODO (62), reversed 2026-09-11 (txcrop)
+    //
+    // The owner, shown that keyframes past a shortened transform-layer bar are kept and inert:
+    // *"why are there keyframes outside of a transform cel? … I'm pretty sure I explicitly wanted
+    // keyframes to be clamped to inside the cels. … I don't care about data loss if the cel is
+    // shortened then expanded."* This replaces TRANSFORM_LAYER.md §2 ruling 17 (kept, inert), stage 1.
+
+    /// **The union of `layerIndex`'s own blocks** — its `cels`, merged wherever two touch or overlap
+    /// — what `cropTransformLayerKeysToBlocks` crops a transform layer's tracks to.
+    ///
+    /// Every layer kind has blocks in this sense (`Layer.cels`); this reads them with no kind test of
+    /// its own, and it is `cropTransformLayerKeysToBlocks` that gates which kind's tracks are ever
+    /// cropped against the answer.
+    func transformLayerBlockCoverage(layerIndex: Int) -> [Range<Int>] {
+        guard layers.indices.contains(layerIndex) else { return [] }
+        let spans = layers[layerIndex].cels.map { $0.startFrame ..< $0.endFrame }
+            .sorted { $0.lowerBound < $1.lowerBound }
+        var merged: [Range<Int>] = []
+        for span in spans {
+            if let last = merged.last, span.lowerBound <= last.upperBound {
+                merged[merged.count - 1] = last.lowerBound ..< max(last.upperBound, span.upperBound)
+            } else {
+                merged.append(span)
+            }
+        }
+        return merged
+    }
+
+    /// **Crops a `.transform` layer's own tracks — `transform.track`, its mode scalars in
+    /// `channelTracks`, and `keyframeMarks` — to the union of its blocks**
+    /// (`transformLayerBlockCoverage`), inserting a boundary key first exactly as `Cel.cropPoseKeysToSpan`
+    /// does one level down.
+    ///
+    /// **A no-op on every kind but `.transform`.** A drawing layer's pose keys are cel-scoped and are
+    /// (62)'s own concern (`Cel.cropPoseKeysToSpan`); an effect layer's and a folder's tracks stay
+    /// absolute and untouched — TRANSFORM_LAYER.md §4's table names the one row that gates, and this
+    /// is that row.
+    ///
+    /// **`opacity` is excluded from `channelTracks`.** Every layer owns it, and it is never gated by
+    /// a block — `Layer.channelTracks`'s own doc: an opacity key is a keyframe on a plain drawing
+    /// layer with no grade whatsoever, which a transform layer is not an exception to.
+    ///
+    /// - Parameters:
+    ///   - insertBelow: the new *first* frame inside, when this call's own operation just moved a
+    ///     block's start later — never every covered interval's own edge. See
+    ///     `TransformTrack.croppedToBlocks` for why only the one edge the caller moved.
+    ///   - insertAbove: the new *last* frame inside, symmetric, for an operation that moved a block's
+    ///     end earlier.
+    /// - Returns: what was removed, in absolute frames — `"transform"` for the pose track, the
+    ///   scalar's own `TargetChannel.id` for a mode channel, `"marks"` for `keyframeMarks` — for the
+    ///   caller to fold into whatever its own cel-level crop already found, so the notice and the undo
+    ///   step are the ones (62) already built (`noteKeyframeCrop`).
+    @discardableResult
+    func cropTransformLayerKeysToBlocks(layerIndex: Int, insertBelow: Int? = nil, insertAbove: Int? = nil) -> KeyframeCrop {
+        var crop = KeyframeCrop()
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .transform else { return crop }
+        let coverage = transformLayerBlockCoverage(layerIndex: layerIndex)
+
+        if let track = layers[layerIndex].transform?.track {
+            let (kept, discarded) = track.croppedToBlocks(coverage, insertBelow: insertBelow, insertAbove: insertAbove)
+            crop.record(channel: "transform", frames: discarded)
+            if !discarded.isEmpty { layers[layerIndex].transform?.track = kept }
+        }
+
+        for (id, curve) in layers[layerIndex].channelTracks where id != TargetChannel.opacity.id {
+            let (kept, discarded) = curve.croppedToBlocks(coverage, insertBelow: insertBelow, insertAbove: insertAbove)
+            guard !discarded.isEmpty else { continue }
+            crop.record(channel: id, frames: discarded)
+            if kept.isEmpty {
+                layers[layerIndex].channelTracks.removeValue(forKey: id)
+            } else {
+                layers[layerIndex].channelTracks[id] = kept
+            }
+        }
+
+        let isCovered: (Int) -> Bool = { frame in coverage.contains { $0.contains(frame) } }
+        let discardedMarks = layers[layerIndex].keyframeMarks.filter { !isCovered($0) }
+        if !discardedMarks.isEmpty {
+            crop.record(channel: "marks", frames: discardedMarks)
+            layers[layerIndex].keyframeMarks.removeAll { !isCovered($0) }
+        }
+
+        return crop
+    }
+
     /// Drag the block's left edge: keeps the right edge fixed, changes startFrame/frameCount.
     /// Deliberately NOT wrapped in `withStructureUndo` here — `TimelineTrackView`'s pan handler
     /// calls this on every `.changed` event of the drag, so it brackets the whole gesture itself
@@ -528,9 +613,8 @@ extension CanvasManager {
         // The span is written above, so the crop reads the new origin; the keys come from the
         // baseline so the drag is idempotent, and shift by the distance the origin moved.
         layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
-        let crop = layers[layerIndex].cels[celIndex]
+        var crop = layers[layerIndex].cels[celIndex]
             .cropPoseKeysToSpan(shiftingKeysBy: baselineCel.startFrame - clampedStart)
-        noteKeyframeCrop(crop)
 
         let pushedIndices = Set(provisional.map(\.index))
         for entry in provisional {
@@ -547,6 +631,17 @@ extension CanvasManager {
             layers[layerIndex].cels[index].startFrame = predecessor.startFrame
             layers[layerIndex].cels[index].frameCount = predecessor.frameCount
         }
+        // **TODO (62), reversed (txcrop):** a `.transform` layer's own tracks crop to its blocks too
+        // — computed only now, after every pushed predecessor of *this* layer is in its final
+        // position, since `cropTransformLayerKeysToBlocks` reads the whole layer's `cels`. Only when
+        // this edge actually shrank the block (`clampedStart` moved later): a push or a lengthen
+        // never removes coverage. Folded into the one `crop` this function already returns and notes,
+        // rather than a second `noteKeyframeCrop` call, which would *replace* the cel-level report
+        // inside a gesture instead of adding to it.
+        if layers[layerIndex].kind == .transform, clampedStart > baselineCel.startFrame {
+            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertBelow: clampedStart))
+        }
+        noteKeyframeCrop(crop)
         // VIDEO.md §2.2, and this edge crops the **head**: the block's end never moves, so neither
         // does the tail of the crop. The pushed predecessors keep their own lengths and therefore
         // their own crops, which is right — being shoved along the timeline is not being cropped.
@@ -613,8 +708,7 @@ extension CanvasManager {
         layers[layerIndex].cels[celIndex].startFrame = baselineCel.startFrame
         layers[layerIndex].cels[celIndex].frameCount = clampedEnd - baselineCel.startFrame
         layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
-        let crop = layers[layerIndex].cels[celIndex].cropPoseKeysToSpan()
-        noteKeyframeCrop(crop)
+        var crop = layers[layerIndex].cels[celIndex].cropPoseKeysToSpan()
 
         // Successors this push could reach, nearest first, from the same baseline the resized cel's
         // own new end was just computed from.
@@ -642,6 +736,13 @@ extension CanvasManager {
             }
         }
 
+        // **TODO (62), reversed (txcrop):** the right-edge twin of `resizeCelLeftEdge`'s own crop —
+        // see that function's comment for why this reads after the cascade and folds into one `crop`
+        // rather than a second `noteKeyframeCrop`. Only when this edge actually shrank the block.
+        if layers[layerIndex].kind == .transform, clampedEnd < baselineCel.endFrame {
+            crop.merge(cropTransformLayerKeysToBlocks(layerIndex: layerIndex, insertAbove: clampedEnd - 1))
+        }
+        noteKeyframeCrop(crop)
         // VIDEO.md §2.2's other edge. The block's start never moves, so the head of the crop is
         // fixed and the tail follows the new length — up to the clip's own duration, past which
         // there is no more footage to reveal and the last frame holds (§4.3's clamp).
