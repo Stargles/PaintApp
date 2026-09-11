@@ -452,7 +452,7 @@ hold a rotation, key the speed to 0; to hold a shake, key its amplitudes.
 | §2.28 union, computed never stored | mode scalars ride `channelTracks` through `KeyframeState`; no new store | none — by §3.3's choice |
 | §2.4 / §3.1 time bases | layer tracks stay absolute; repeat remaps the **read**, never the storage | repeat |
 | §3.4.1 compensation, `C` and `I` cancel | `I` is per entry under parallax and per frame under rotate/shake, but it is one value per cel, so it still cancels; under repeat it must be read at the **source** frame | repeat |
-| RENDER §2.16 / §3.3, same frame same bytes | the resolved pose is the one value in the version; shake's noise is pure; repeat is the identity key | shake |
+| RENDER §2.16 / §3.3, same frame same bytes | the resolved pose is the one value in the version; shake's noise is pure; repeat is the identity key. **And the baker has to be told** — `FrameBaker.StructuralStamp` reads the tree, which carries no pose by design, so it now stamps the container poses (base, track, mode) and the two scalars; before stage 3 a moved box after the first sweep was a permanent miss on the display path, found by the rotate cold-start test drawing the ink unturned | shake |
 | §4.5 three keys | nothing new to carry — but a test over a **raster** fixture must go red if a mode's function is dropped from the resolved map | rotate, shake |
 | §2.3 re-pose, never resample | the four pose modes ride the derivation; duplicate offset resamples *pixels* because it is a grade on the accumulator, which is what a grade is | — |
 | §11.7 six rows | the band draws the authored pose; the function is not a curve | rotate, shake |
