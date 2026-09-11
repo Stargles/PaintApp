@@ -3,6 +3,23 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## `duplicateLayer` drops every cel's pose channels and held poses (2026-09-11)
+
+`CanvasManager.duplicateLayer(at:)` builds each copied cel with a memberwise `Cel(...)` that names
+`raster`, `fillImage`, `bakedImage` and `vector` and **not** `transformTracks` or
+`pendingPoseBaselines`, so both default to `[:]`: a duplicated layer comes back as its drawings with
+every Move animation deleted, and nothing says so. It is the same door `duplicateCel`, `splitCel` and
+`pasteCel` fell through before 2026-09-02 (`Cel.transformTracks`' own doc comment records those three
+and asks whoever adds a field to *"owe those three sites a line each"*); this fourth site was missed
+then and found on 2026-09-11 while auditing every `Cel(...)` for TODO (62). The layer-level tracks
+(`effectTracks`, `channelTracks`, `keyframeMarks`, the transformation layer's `transform`) *are*
+carried, which makes the loss harder to notice: the timeline still draws the layer's keyframe marks
+and opacity diamonds on the copy, while the cel's own pose diamonds are gone.
+
+Two lines through `Cel.CopyTiers` (`copyTiers(of:)` already answers both fields, and flattens a derived
+cel per the 2026-09-03 ruling) plus a logic test that duplicates an animated layer and reads the copy's
+`transformTracks`. Not fixed on the (62) branch because it is a copy verb rather than a span change.
+
 ## `FrameBakeKeyLogicTests`' mask-order test can fail to build its own fixture (2026-09-10)
 
 `testTwoMaskStacksInEitherIterationOrderAreOneDigest` perturbs a two-key `Dictionary`'s bucket layout

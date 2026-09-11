@@ -426,12 +426,31 @@ today, because there is no keyframe data for them to touch: `addCel`, `duplicate
 `splitCel`, `addBlankCelAfter` (all in `CanvasManager+Timeline.swift`). The two that need a real rule
 rather than "it falls out of cel-local time":
 
-- **`splitCel`** — keys before the cut go left, keys after go right, and **a key is inserted at the cut
-  in both** so the value is continuous across it.
-- **`resizeCelRightEdge` / `resizeCelLeftEdge`** — keys keep their cel-local frame and are **clamped,
-  not rescaled**. Rescaling would retime an animation as a side effect of dragging a cel edge, which no
-  artist expects. A key pushed outside the new span is held, not deleted, so shrinking and re-growing a
-  cel is lossless.
+- **`splitCel`** — keys before the cut go left, keys after go right, and **a key is inserted at the
+  boundary in both** so the value is continuous across it: the right half's on its first frame (the
+  cut), the left half's on its *last* frame (`cut - 1`). It was inserted at `cut` on both sides until
+  2026-09-11, which left the left half a key one frame past its own span — legal under the resize rule
+  below as it then stood, and forbidden under it as it stands now.
+- **`resizeCelRightEdge` / `resizeCelLeftEdge`** — keys are **never rescaled**: rescaling would retime
+  an animation as a side effect of dragging a cel edge, which no artist expects. **A key pushed outside
+  the new span is deleted** — TODO (62), the owner's ruling of 2026-09-10, reversing this section's
+  earlier "held, not deleted, so shrinking and re-growing a cel is lossless". The owner chose the crop
+  with that objection in front of them, on two conditions that are the whole of the feature: the crop
+  is **one undo step** with the resize (it happens inside the verb's own registration, so one press
+  brings back the length and the keys together), and it **says what it discarded**
+  (`CanvasNotice.keyframesCropped`, raised once when the step lands, naming the count and the frames
+  in the ruler's numbers). Lengthening a cel again after a committed crop restores nothing.
+  `Cel.cropPoseKeysToSpan` is the one crop; the right edge removes keys at or past the new
+  `frameCount`, and the left edge keeps every key on the document frame it was on — local numbers
+  shift by the distance the origin moved, and keys that land below 0 go — which is the same reading
+  `writeVideoCrop` gives the footage on that edge. A drag past a key and back within one gesture is
+  not a crop: the handles recompute from the gesture baseline, and only the committed state is
+  reported. The same crop runs on a duplicate or paste clamped shorter than its source, on a video
+  speed change that shortens the block, and on a split's right half (a stray a pre-ruling document
+  carried). **Layer-level tracks are untouched by all of it, by construction**: `effectTracks`,
+  `channelTracks`, `keyframeMarks` and a transformation layer's own `transform.track` are in absolute
+  document frames and apply at every frame whether or not the layer has a block there, so there is no
+  span for a key of theirs to be outside of; `CelSpanCropLogicTests` pins the no-op.
 
 ### 3.2 The curve
 

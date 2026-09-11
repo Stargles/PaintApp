@@ -835,11 +835,17 @@ extension CanvasManager {
     ///
     /// **Neither half is left holding a key outside its own span** — TODO (62). `split` itself no
     /// longer mints one (its left-half key lands on `cut - 1`, inside), so on a document written
-    /// under the current rules the crop below finds nothing. It runs anyway, on both halves, because
-    /// a document saved while §3.1 still held keys outside a span carries them until something
-    /// touches the cel, and a split is that something: those go here, and the banner names them.
+    /// under the current rules the crop below finds nothing. It runs anyway, on the right half,
+    /// because a document saved while §3.1 still held keys past a span carries them until something
+    /// touches the cel, and a split is that something: a stray at local `f >= frameCount` lands in
+    /// the right half at `f - cut`, still past its end, and goes here with the banner naming it.
+    /// **The left half is not cropped, because it cannot need it**: `split` keeps only keys below
+    /// `cut` on the left and no stored key is below 0 (the left-edge resize crops those), so a crop
+    /// there is a line no document can reach — mutation-tested as such, and
+    /// `CelSpanCropLogicTests.testASplitLeavesEveryKeyInsideItsHalfAndEveryFrameUnchanged` pins the
+    /// invariant against `split` changing its mind.
     ///
-    /// - Returns: what the two halves discarded between them, in absolute frames.
+    /// - Returns: what the split discarded, in absolute frames.
     @discardableResult
     func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) -> KeyframeCrop {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
@@ -857,7 +863,6 @@ extension CanvasManager {
         withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             layers[layerIndex].cels[celIndex].transformTracks = leftTracks
-            crop.merge(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
             var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             crop.merge(secondHalf.cropPoseKeysToSpan())
             noteKeyframeCrop(crop)
