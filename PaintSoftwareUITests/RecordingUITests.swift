@@ -235,4 +235,152 @@ final class RecordingUITests: PaintUITestCase {
                              "Playback ran with the take, which is the half the owner said arming "
                              + "was stealing the time for")
     }
+
+    /// **§5's second surface, end to end from a document with nothing in it: arm, put a finger on the
+    /// Move box, and read the curve off the graph** — KEYFRAMES.md §5, the last unbuilt half of §8
+    /// stage 7.
+    ///
+    /// Every step is one an artist performs, in the order they perform it, and the question *"what does
+    /// the artist do next?"* has an on-screen answer at each one: the Add menu makes the layer, the
+    /// layer's own mode picker makes it a transformation layer, **its Move row raises the box**, the
+    /// graph editor's record button arms, and the banner says a Move box is one of the things to put a
+    /// finger on. Nothing here is a fixture.
+    ///
+    /// **The closing assertions are on what is drawn, not on what is stored.** The graph band publishes
+    /// its own content — `containerPose.x:0,3,9` means *this channel is animated and these are its
+    /// keyed frames* — and the key-marker band under the track is hidden outright when a layer has no
+    /// keys, so its presence is a queryable fact rather than a value to parse. Both would go red if the
+    /// model stayed right and the affordance disappeared, which is the assertion this repo's three
+    /// unusable features were missing.
+    ///
+    /// **The rate is dropped to 8 fps**, the artist's own control: a new document at 24 fps holds a take
+    /// of 0.46 s, which is shorter than a box drag, so the take would end before the finger moved.
+    func testArmingThenLandingOnTheMoveBoxRunsATakeAndLeavesAPoseCurveOnTheGraph() throws {
+        let app = XCUIApplication()
+        // The notice is read below, and `CanvasNotice.duration` is 2.6 s — a self-dismissing banner is
+        // a race no `waitForExistence` can win.
+        app.launchArguments += ["-uiTestNoticeSeconds", "120"]
+        XCTAssertTrue(launchIntoEditor(app), "Setup: a brand-new document, no prior state")
+
+        // 8 fps, one tap on a preset — §2.7's editable rate, used here for what it is for.
+        app.buttons["timeline.frameRateButton"].tap()
+        let preset = app.buttons["frameRate.preset.8"]
+        XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        preset.tap()
+        app.buttons["timeline.frameRateButton"].tap()   // close the panel
+
+        // A transformation layer, made the only way an artist can make one: a value layer, then its own
+        // mode picker. This is also the only way to *get* a recordable pose channel — a fresh document
+        // has none, which is the closed loop this surface has to open rather than sit behind.
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        app.staticTexts["layerPanel.row.1"].tap()       // already selected after the add: opens options
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let transformItem = app.buttons["layerOptions.blendMode.transform"]
+        XCTAssertTrue(transformItem.waitForExistence(timeout: 5))
+        transformItem.tap()
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["toolbar.layersButton"].tap()       // the rail covers the timeline
+
+        // **The marker band hides itself when a layer has no keys**, so its absence here is a real
+        // signal rather than the "asserting `exists` on a hidden view" trap.
+        let markers = app.otherElements["timeline.keyMarkers.1"]
+        XCTAssertFalse(markers.exists,
+                       "PREMISE: this layer animates nothing yet, so anything below is the take's doing")
+
+        app.buttons["timeline.toStartButton"].tap()
+        let framesBefore = try XCTUnwrap(readFrameLabel(app))
+        XCTAssertEqual(framesBefore.current, 1, "PREMISE: the playhead is at the top")
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let record = app.buttons["timeline.recordButton"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5),
+                      "The graph editor displays the record button — this is the artist's entry")
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.value as? String, "empty",
+                       "PREMISE: the band has no curve on it before the take")
+
+        record.tap()
+        XCTAssertEqual(record.value as? String, "armed", "Setup: armed, and nothing has moved")
+        let notice = app.staticTexts["canvasNotice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5),
+                      "Arming says what to do next — the surface is in another panel and nothing on "
+                      + "this button could have said so")
+        // The code rather than the sentence, which is `CanvasNoticeBanner`'s own rule: the wording is
+        // the half most likely to be revised. That it *names the Move box* is a model fact with a model
+        // operand, and `MoveBoxRecordingLogicTests` is where it is pinned.
+        XCTAssertEqual(notice.value as? String, "recordingArmed")
+
+        // **Now the artist raises the box, from the toolbar's own Move glyph.**
+        // `CanvasManager.beginMove` routes a transformation layer straight to `beginContainerPoseMove`,
+        // so this button and Transform mode's `layerOptions.transformMove` row are the same control —
+        // `transformMoveRow`'s own doc says so, and the artist who learns either has learned the other.
+        //
+        // **This route rather than the panel row, and that is a finding rather than a convenience.**
+        // MEASURED while driving this: **closing the layer rail commits a floating Move box.** The box
+        // is raised from inside the layer options panel, so an artist who tidies the screen before
+        // dragging has already settled it. That is pre-existing behaviour, identical for an unrecorded
+        // Move, and nothing in this pass touches it — but it cost this test two runs, both of which
+        // failed 30 s later pointing at the record button, a mile from the cause. The toolbar glyph
+        // needs no panel open and is the route to drive.
+        app.buttons["toolbar.moveButton"].tap()
+        let moveBar = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(moveBar.waitForExistence(timeout: 5),
+                      "The box is up, which the Move bar is how an artist can tell")
+        XCTAssertEqual(record.value as? String, "armed",
+                       "The arm survived the walk to the surface — two panels, a mode change and a "
+                       + "tool button. An arm that dropped on the way would make this unreachable")
+        XCTAssertEqual(try XCTUnwrap(readFrameLabel(app)).current, 1,
+                       "…and still nothing has moved: arming is not starting")
+
+        // **The landing.** One gesture — touch-down, motion, lift. The take begins on the first of
+        // those and playback starts with it; the box is the document rect, so a drag anywhere inside
+        // the canvas is a drag of the box.
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        // **Both ends are computed from `visibleCanvasBounds`, not guessed**, and that is not
+        // fastidiousness either. `canvas.host` is the whole host *including the black surround*, so a
+        // flat fraction of it lands in the letterbox on some frame proportions — and a touch out there
+        // is a touch *outside* the box, which `handleTapOutside` correctly reads as the tap-away that
+        // commits it. Same symptom, second cause.
+        let inside = visibleCanvasBounds(canvas)
+        let span = inside.maxX - inside.minX
+        let vspan = inside.maxY - inside.minY
+        let start = canvas.coordinate(withNormalizedOffset:
+            CGVector(dx: inside.minX + span * 0.3, dy: inside.minY + vspan * 0.35))
+        let end = canvas.coordinate(withNormalizedOffset:
+            CGVector(dx: inside.minX + span * 0.75, dy: inside.minY + vspan * 0.5))
+        start.press(forDuration: 0.2, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
+
+        // **The take ends itself at the end of the scene and takes the box with it**, which is the first
+        // thing the artist sees: the Move bar goes. A box left up would have had its own commit replace
+        // the whole recorded track with a single key the moment they tapped away.
+        let boxGone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: moveBar)
+        wait(for: [boxGone], timeout: 30)
+
+        XCTAssertEqual(record.value as? String, "idle",
+                       "The take is over and the button says so — the same control they armed")
+        XCTAssertGreaterThan(try XCTUnwrap(readFrameLabel(app)).current, framesBefore.current,
+                             "Playback ran with the take — the owner's *\"playback automatically "
+                             + "starts\"*")
+
+        // **\"…then putting it on the graph\"** — the owner's own last clause, read off the band's own
+        // published content rather than off the model. `channel:frames` means animated; `channel~frames`
+        // would mean a flat curve wearing a row, which is the state this assertion has to exclude.
+        let drawn = (band.value as? String) ?? ""
+        XCTAssertTrue(drawn.contains("containerPose."),
+                      "The graph editor draws the pose channel the take wrote. Got \"\(drawn)\"")
+        let animated = drawn.split(separator: "|").first { $0.contains(":") }
+        let keyed = try XCTUnwrap(animated, "At least one pose channel is animated, not flat. "
+                                  + "Got \"\(drawn)\"")
+        XCTAssertTrue(keyed.contains(","),
+                      "…and it carries more than one key, which is what makes it an animation rather "
+                      + "than a pose. Got \"\(keyed)\"")
+
+        XCTAssertTrue(markers.waitForExistence(timeout: 5),
+                      "The key-marker band is drawn on this track now, where it was not before")
+        XCTAssertFalse(((markers.value as? String) ?? "").isEmpty,
+                       "…and it names the frames it is drawing markers on")
+    }
 }

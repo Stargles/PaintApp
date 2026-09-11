@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // MARK: - Live recording — KEYFRAMES.md §5, stage 7
@@ -39,6 +40,32 @@ extension CanvasManager {
         /// otherwise have no base to restore, and the value the artist let go on would silently
         /// become the stored one *and* the curve's — the fade would then apply twice.
         let baseChannelValues: [String: Double]
+
+        /// **The container's own pose as it stood at arm time** — `baseEffect`'s counterpart for
+        /// KEYFRAMES.md §5's second surface, the Move box, and restored at commit for the identical
+        /// reason: `showContainerPoseLive` writes the stored pose on every tick of the drag because an
+        /// artist who cannot see the box move under their finger is recording blind, and the motion
+        /// belongs on the curve rather than in the base it is resolved against.
+        ///
+        /// **Captured whether or not the take turns out to touch a Move box**, which is
+        /// `baseChannelValues`' rule and removes its hazard: a box raised mid-take would otherwise
+        /// have no base to restore, and the pose the artist let go on would silently become the stored
+        /// one *and* the track's — the move would then apply twice.
+        ///
+        /// Nil on a target that poses nothing, which is every target but a transformation layer and a
+        /// posed folder.
+        let basePose: LayerPose?
+
+        /// Every pose the Move box reported, with the wall time it reported it at — `channels`'
+        /// counterpart in the quad currency, and §5.1's *"a quad surface needs its own intercept"*.
+        ///
+        /// **One stream rather than a dictionary**, where a take's scalar side is keyed by parameter
+        /// id. A take is already scoped to one target (see this type's own header) and a container has
+        /// exactly one pose channel — `LayerPose`'s *"there is exactly one of it, it addresses the
+        /// container itself, and its shape never varies"* — so there is nothing for a key to
+        /// distinguish. A cel's pose channels are many, and they are deliberately not recordable here:
+        /// see `beginMoveBoxTake`.
+        var poses = PoseRecording()
 
         /// **How many gesture brackets were open when the take began**, so that `stopRecording` can
         /// tell "a control the artist is still holding opened one *inside* mine" from "brackets that
@@ -93,6 +120,14 @@ extension CanvasManager {
         /// The take covered less than one frame at the document's rate, so there is nowhere for a
         /// second key to go. Reachable by arming and stopping straight away.
         case tooShort
+        /// **Armed, and the pencil landed on a Move box that poses nothing a take can write.**
+        ///
+        /// Distinct from `.notRecordable` because the way out is different and is specific: that one
+        /// says "try another control", which is useless advice to an artist already holding the box
+        /// they meant. A Move box is up over lifted *pixels* or over lassoed *ink* — a raster Move, a
+        /// Duplicate, or a vector float — and none of those writes a container pose, so the answer is
+        /// which layer kind the recorder's second surface is for. See `beginMoveBoxTake`.
+        case moveBoxNotPosing
         /// **Armed, and the pencil landed on a control no take can record.**
         ///
         /// The case in point is a *stepped* slider — Posterize's Levels, Noise's seed — which looks
@@ -114,15 +149,17 @@ extension CanvasManager {
 
         /// **What the artist reads, and each one names what to do next.** A refusal that says only
         /// that something did not happen is worth very little — §2.29/§2.30's two notices are apart
-        /// from each other for exactly this reason, and these six are apart for the same one.
+        /// from each other for exactly this reason, and these seven are apart for the same one.
         var message: String {
             switch self {
             case .noTarget:
                 return "Nothing to record onto — add a layer first."
+            case .moveBoxNotPosing:
+                return "This Move box can't be recorded — a recorded move needs a layer or folder in Transform mode. Still armed, so switch that on and press Move again."
             case .noScene:
                 return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:
-                return "Nothing was recorded — draw on the canvas, or move a layer's opacity or effect slider, while the recorder runs."
+                return "Nothing was recorded — draw on the canvas, drag a transformation layer's Move box, or move a layer's opacity or effect slider, while the recorder runs."
             case .noMotion:
                 return "Nothing moved during the take — a recording needs the value to change, not just be touched."
             case .tooShort:
@@ -142,6 +179,26 @@ extension CanvasManager {
     /// *"Expect it to feel twitchy before it feels good… Smoothing is part of this feature, not polish
     /// on top of it."* It is one constant on purpose so that tuning it is one edit.
     static let recordingSimplifyFraction: Double = 0.005
+
+    /// **How far a corner may be pulled off the straight line between two kept poses before the pose
+    /// between them is kept as well**, in canvas points — the Move box's counterpart to the fraction
+    /// above, and the one number in this feature the owner asked for and could not be given in
+    /// advance.
+    ///
+    /// **Absolute where the scalar tolerance is a fraction, and that is forced rather than
+    /// inconsistent.** A value channel has a `uiRange` to take a fraction of and no common scale
+    /// between channels (opacity runs 0…1, a blur radius 0…500). A pose channel has neither problem
+    /// and needs neither fix: every corner is already in canvas points, which is the unit the artist's
+    /// eye is in, and two points of corner movement means the same amount of visible motion on every
+    /// document. `PoseRecording.cornerDeviation` is what it is compared against.
+    ///
+    /// **2 points is a starting value, not a measured one**, and §5 says in advance that it will want
+    /// tuning: *"Expect it to feel twitchy before it feels good… Smoothing is part of this feature, not
+    /// polish on top of it."* The owner was asked to rule on it before a recorded drag existed and
+    /// answered *"i have no idea what the question is"*, which was the right answer — it is a number a
+    /// person judges by feel, after they can see one. It is one constant on purpose so that tuning it
+    /// is one edit.
+    static let recordingPoseSimplifyPoints: CGFloat = 2
 
     // MARK: - Arming, and the trigger every recordable surface shares
 
@@ -253,6 +310,83 @@ extension CanvasManager {
         return true
     }
 
+    // MARK: - The Move box — KEYFRAMES.md §5's second surface
+
+    /// **The pencil landed on a Move box — begin the take if one is armed.** §5.1 step 1 for the quad
+    /// surface, and the whole of what the box has to implement.
+    ///
+    /// **Called on touch-down from every grip of the box**, which is earlier than any of them reports
+    /// a value: a `UIPanGestureRecognizer` does not reach `.began` until the finger has travelled its
+    /// slop, so a surface that armed on the first delta would lose the artist's run-up and — worse —
+    /// would answer *nothing at all* to a press-and-hold, which is the "looks armed and does nothing"
+    /// defect this repo has shipped twice. `TouchDownPanGestureRecognizer` is what makes touch-down
+    /// reachable; this function is what decides anything.
+    ///
+    /// **Free and silent while the recorder is idle**, which is the property requirement 3 of this
+    /// surface turns on: with nothing armed this is two loads and a return, so a Move box drag is
+    /// exactly the control it was before recording existed, LASSO_MOVE.md §5.19-21 included.
+    ///
+    /// ## Which box is recordable, and why only one of them is
+    ///
+    /// A container pose — a transformation layer's `Layer.transform`, or a posed folder's — is a
+    /// **value** channel: it has a stored base the drag writes as a preview and a track that animates
+    /// it, which is exactly the shape `RecordingTake` already implements for a slider
+    /// (`commitContainerPose`'s own header draws the distinction). So a take over it is the slider's
+    /// take in a different currency, and that is this surface.
+    ///
+    /// **The other two boxes are refused out loud.** A raster Move or Duplicate poses nothing at all —
+    /// it composites pixels into a cel. A lassoed vector float writes a *cel* pose channel, whose
+    /// `.key` arm takes the bake back and whose ink is out of the display list for the length of the
+    /// float (`commitTransformPose`): a take over it would have to drive that bake from the recorder,
+    /// and the honest state is that it is not built. Either way the artist is holding a box that looks
+    /// exactly as recordable as the one that is, so silence is the one answer that is wrong —
+    /// `.moveBoxNotPosing` names the layer mode that makes it work, and **the arm survives**.
+    ///
+    /// - Returns: whether a take is running on this box as a result of, or already before, this call.
+    @discardableResult
+    func beginMoveBoxTake() -> Bool {
+        guard isRecordingArmed || isRecording else { return false }
+        // **Read off the piece rather than off `keyframeTarget`**, `beginArmedTake`'s own rule for its
+        // own reason: the take is aimed at the thing the artist's finger is on, and a folder's box is
+        // raised while a *layer* is current — so the current layer is the wrong answer by construction
+        // for §2.21's twin.
+        if let piece = floatingPiece, piece.kind == .containerPose,
+           let target = piece.containerTarget, containerPose(of: target) != nil {
+            return beginArmedTake(on: target, isRecordable: true)
+        }
+        // **Refused only while *armed*.** With a take already running, a landing on some other box is
+        // not a refused arm — it is a touch on a surface this take is not recording, and a notice there
+        // would interrupt a take that is going perfectly well. The `floatingPiece != nil` test is the
+        // race where the box went away between the touch and the dispatch, which is nothing to say
+        // anything about.
+        guard isRecordingArmed, floatingPiece != nil || vectorFloat != nil else { return false }
+        raise(.recordingRefused(.moveBoxNotPosing))
+        return false
+    }
+
+    /// **One pose the Move box reported** — §5.1 step 3's *"a quad surface needs its own intercept,
+    /// because `ValueRecording` is scalar-only"*, and this is that intercept.
+    ///
+    /// **It suppresses nothing, where `recordParameterSample` suppresses the caller's five arms.** A
+    /// slider has to be stopped from keying per tick, because its ordinary per-tick behaviour *is* a
+    /// routed keyframe write and 24 of those a second is the aliasing §5 forbids. A container float's
+    /// per-tick behaviour is a **preview** — `showContainerPoseLive` writes the stored base so the
+    /// artist can see the box move, and the only keyframe write on this path happens once, at the
+    /// float's commit. So there is nothing here to hold back, and the return value is informational.
+    ///
+    /// The timestamp is `playbackNow()`, the same injectable wall clock playback derives the playhead
+    /// from, so a test hands the recorder numbers instead of sleeping through a take.
+    ///
+    /// - Returns: whether a take took the sample. `false` means nothing was recording, or the box is
+    ///   posing something other than what the take is aimed at.
+    @discardableResult
+    func recordMoveBoxSample(_ target: KeyframeTarget, pose: PoseQuad) -> Bool {
+        guard isRecording, var take = recordingTake, take.target == target else { return false }
+        take.poses.record(pose, at: playbackNow())
+        recordingTake = take
+        return true
+    }
+
     /// **Begin a take now** — playback and capture together, with no arming step.
     ///
     /// Playback starts here rather than being a second press, because a take with no clock running
@@ -304,6 +438,10 @@ extension CanvasManager {
                                       startFrame: currentFrame,
                                       baseEffect: storedEffect(of: target),
                                       baseChannelValues: baseChannelValues,
+                                      // Nil on every target but a transformation layer or a posed
+                                      // folder, and captured unconditionally — `RecordingTake
+                                      // .basePose` carries the hazard that makes it unconditional.
+                                      basePose: containerPose(of: target),
                                       // Read *after* the bracket above, so it counts the brackets
                                       // that were open before the take rather than including its own.
                                       gestureDepthAtStart: structureGestureDepth - 1)
@@ -519,20 +657,38 @@ extension CanvasManager {
             guard let base = take.baseChannelValues[channel.id] else { continue }
             setStoredValue(of: take.target, channel: channel, to: base)
         }
+        // **And the same restore for the container's own pose** — the Move box surface, KEYFRAMES.md
+        // §5. Unconditional and direct, exactly as the two above are: `showContainerPoseLive` wrote the
+        // stored pose on every tick of the drag so the artist could see the box move, and
+        // `commitContainerFloat` makes the identical restore for the identical reason on an *unrecorded*
+        // Move — *"without this line that baseline would be the drag — one press of Undo would put the
+        // drawing back exactly where the artist had just dragged it, which is a control that appears not
+        // to work."* Written through `applyContainerPose` rather than `writeContainerPose` so it stays
+        // off the history: it is undoing a preview, not making an edit.
+        if take.basePose != nil { applyContainerPose(take.basePose, target: take.target) }
+
+        // **The Move box's half, before the gate below**, because a pose take catches no *channel*: its
+        // whole product is one `TransformTrack` on a third store that is neither a grade's
+        // `effectTracks` nor a `TargetChannel`, and asking "did this take catch anything" without it
+        // would report `.nothingCaptured` over a recorded drag.
+        let pose = commitRecordedPoseTrack(take)
 
         // **Ink counts as having captured something, and it is the only thing here that is already
         // in the document** — KEYFRAMES.md §7. A timing take's product is strokes on cels, committed
         // at each pen-up under their own undo step; there is nothing left for this method to write,
         // so it says so and stops. Without this arm the artist who has just drawn across four cels
         // is told to go and move an opacity slider.
-        guard !take.channels.isEmpty else {
+        guard !take.channels.isEmpty || !take.poses.isEmpty else {
             return (take.caughtInk ? nil : .nothingCaptured, 0)
         }
 
         let parameters = take.baseEffect?.parameters ?? []
         var curves: [String: AnimationCurve] = [:]
         var channelCurves: [String: AnimationCurve] = [:]
-        var sawTwoStops = false
+        // **Seeded from the pose half rather than restarted**, so the one rule that tells `.noMotion`
+        // from `.tooShort` is asked once over everything the take caught. A Move box take that produced
+        // two stops and no motion must say "nothing moved", not "that was shorter than a frame".
+        var sawTwoStops = pose.sawTwoStops
 
         for (parameterID, recording) in take.channels {
             // **Which store this id belongs to is decided once, here** — `TargetChannel`'s namespace
@@ -571,6 +727,7 @@ extension CanvasManager {
         // is dropped exactly once.
         let wrote = setEffectParameterCurves(take.target, curves: curves)
             + setTargetChannelCurves(take.target, curves: channelCurves)
+            + pose.wrote
         // **Ink rescues a take whose channels wrote nothing**, and only from the *refusal*: the count
         // is still zero, so `stopRecording` still cancels its bracket. An artist who drew across the
         // cels and also brushed a slider without moving it has recorded something, and "nothing
@@ -580,5 +737,58 @@ extension CanvasManager {
             return (sawTwoStops ? .noMotion : .tooShort, 0)
         }
         return (nil, wrote)
+    }
+
+    /// **The Move box's whole commit** — KEYFRAMES.md §5's second surface, and `setEffectParameterCurves`
+    /// in the quad currency.
+    ///
+    /// **The take replaces the track rather than merging into it**, which is that function's own ruling
+    /// restated: *"a take writes a whole curve per channel and replaces it, because the take is the
+    /// animation rather than an adjustment to one."* `step` is carried across, because it is a property
+    /// of how the channel is read rather than of what was recorded — a stepped channel stays stepped.
+    ///
+    /// **`isAnimated` is the gate, and it is the owner's own definition** — two or more keys not all
+    /// holding one pose. A take that produced less than that wrote nothing, and the shared rule in
+    /// `commitRecordingTake` is what turns "nothing" into the right sentence.
+    ///
+    /// **The box is dismissed on success, and that is load-bearing rather than tidy.** The float's own
+    /// commit (`commitContainerFloat`) restores `containerRest` and writes one key at the playhead — so
+    /// a box left up after a take would overwrite the recorded track the moment the artist tapped away,
+    /// and `showContainerPoseLive` would wipe it on the very next tick of a drag they are still making,
+    /// because it composes onto the pre-take `containerRest` every time. Dismissing is therefore the
+    /// take *taking* its content. On failure the box is deliberately left alone: the artist's drag was
+    /// not recorded, and what they have is the ordinary Move they were making.
+    ///
+    /// - Returns: how many stores it wrote (0 or 1), and whether the resample produced two stops —
+    ///   which is the operand the shared refusal rule needs and not something this function decides.
+    private func commitRecordedPoseTrack(_ take: RecordingTake)
+        -> (wrote: Int, sawTwoStops: Bool) {
+        guard !take.poses.isEmpty, let base = take.basePose else { return (0, false) }
+        let keys = take.poses.keys(fps: fps, startFrame: take.startFrame,
+                                   tolerance: Self.recordingPoseSimplifyPoints)
+        var after = base
+        after.track = TransformTrack(keys: keys, step: base.track.step)
+        // A channel that lands keys no longer needs its held pose — `setTransformPoseKey`'s rule, one
+        // container up.
+        after.baseline = nil
+        guard after.track.isAnimated, after != base else { return (0, keys.count > 1) }
+        dismissRecordedMoveBox(take)
+        writeContainerPose(after, from: base, target: take.target, label: .recordAnimation)
+        return (1, keys.count > 1)
+    }
+
+    /// Takes down the Move box this take recorded, without committing it — see
+    /// `commitRecordedPoseTrack` for why a box left up destroys the take that recorded it.
+    ///
+    /// **`floatingPiece = nil` rather than `commitFloatingPieceIfNeeded()`**, which is the whole point:
+    /// that funnel routes a container float through `commitContainerFloat`, and what this take wrote is
+    /// already the answer that commit would have tried to write.
+    ///
+    /// Narrow on purpose — it touches nothing unless the box still up is the very one the take is aimed
+    /// at. A take that ended while the artist had moved on to a different box leaves that box alone.
+    private func dismissRecordedMoveBox(_ take: RecordingTake) {
+        guard let piece = floatingPiece, piece.kind == .containerPose,
+              piece.containerTarget == take.target else { return }
+        floatingPiece = nil
     }
 }

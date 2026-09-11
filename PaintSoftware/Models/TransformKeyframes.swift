@@ -956,7 +956,13 @@ extension CanvasManager {
     /// a restore has to be able to write it, while a pose left inert by a kind change must not be
     /// treated as one this path may put back into force. A folder has no kind to change, so its arm
     /// is the layer arm with the second field reconciled away — `containerPose(of:)`'s own asymmetry.
-    private func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
+    ///
+    /// **Not `private`: `CanvasManager+Recording.swift` restores a take's base pose through it**
+    /// (KEYFRAMES.md §5's Move box surface), for the same reason `commitContainerFloat` writes the
+    /// field directly — putting a *preview* back is not an edit and must stay off the history. That is
+    /// `targetExists`' precedent one file over, and the alternative was a second spelling of this
+    /// `switch` in the recorder, which is how two writers drift apart.
+    func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
         switch target {
         case .layer(let id):
             guard let index = layers.firstIndex(where: { $0.id == id }) else { return }

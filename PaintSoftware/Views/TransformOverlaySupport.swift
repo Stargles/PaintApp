@@ -33,6 +33,33 @@ extension FloatingTransform: OverlayTransformProjecting {
     var effectiveScaleY: CGFloat { scaleY * (flipV ? -1 : 1) }
 }
 
+/// **A pan that says when its finger landed, not only when it started panning** — KEYFRAMES.md §5.1
+/// step 1, which requires a recordable surface to answer *"on touch-down — not on the first value
+/// change"*.
+///
+/// A `UIPanGestureRecognizer` does not reach `.began` until the touch has travelled its slop, so a
+/// Move box wired to `.began` would lose the artist's run-up and, worse, would answer **nothing** to a
+/// press-and-hold — an armed recorder and a box that does not start, which is the "looks armed and does
+/// nothing" defect this repo has shipped twice. `UIGestureRecognizer.touchesBegan` is delivered at
+/// touch-down, before the pan has decided anything, which is exactly the moment wanted.
+///
+/// **`super` first and nothing else changed**, so this is behaviour-neutral for every caller that leaves
+/// `onTouchDown` nil — and it is nil everywhere but `FloatingPieceOverlayView`.
+///
+/// **A repeat call is harmless by contract rather than by guard.** A second finger on a box whose pan
+/// has `maximumNumberOfTouches = 1` can reach here again; `CanvasManager.beginArmedTake`'s own rule is
+/// that *"landing again during a live take is not a new take"*, so the extra call is a load and a
+/// return. The `numberOfTouches` test below keeps it to the common case anyway.
+final class TouchDownPanGestureRecognizer: UIPanGestureRecognizer {
+    var onTouchDown: (() -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard numberOfTouches <= 1 else { return }
+        onTouchDown?()
+    }
+}
+
 /// A move/scale/rotate handle shown on an on-canvas transform overlay: a small circular or
 /// rounded-square knob. `cornerRadius` defaults to a full circle (12, matching the 24pt frame);
 /// pass an explicit value for a squarer knob (e.g. `FloatingPieceOverlayView`'s scale handles).

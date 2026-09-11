@@ -301,7 +301,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // recorder is mostly for, and the sentence has to reach the surface the artist is already
         // looking at. A sentence that named only the slider is what shipped before stage 10, and it
         // would have sent an artist who armed the recorder to draw into a settings panel instead.
-        case .recordingArmed:   return "Recorder armed — draw on the canvas, or put your pencil on a layer's opacity or effect slider, and playback starts with it."
+        case .recordingArmed:   return "Recorder armed — draw on the canvas, drag a transformation layer's Move box, or put your pencil on a layer's opacity or effect slider, and playback starts with it."
         // **Each sentence says the invisible half out loud**: that nothing moved on this frame is the
         // *design*, and that the change shows up when the artist scrubs is the thing they have to be
         // told or they will read the edit as having failed.

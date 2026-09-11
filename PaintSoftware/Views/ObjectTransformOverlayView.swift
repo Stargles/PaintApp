@@ -61,6 +61,17 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
     var onHandleDragged: ((CGPoint) -> Void)?
     var onHandleDragEnded: (() -> Void)?
 
+    /// **A finger landed on this box** — KEYFRAMES.md §5.1 step 1, the same hook
+    /// `FloatingPieceOverlayView.onBoxTouchDown` carries and for the same reason.
+    ///
+    /// A lassoed or whole-cel vector float writes a **cel** pose channel, which a take cannot record:
+    /// its `.key` arm takes the bake back and its ink is out of the display list for the length of the
+    /// float, so a take over it would have to drive that bake from the recorder. It is not built. The
+    /// hook is wired anyway, and that is the whole point — this box looks exactly as recordable as the
+    /// transformation layer's, so an armed artist landing on it has to be **told**, not ignored. The
+    /// refusal and the arm surviving it are both `CanvasManager.beginMoveBoxTake`'s answer.
+    var onBoxTouchDown: (() -> Void)?
+
     // MARK: - Chrome, in screen points
 
     private static let handleScreenSize: CGFloat = 14
@@ -319,6 +330,9 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
         let point = touch.location(in: self)
         guard let handle = target(at: point) else { return }
         activeHandle = handle
+        // **Before the drag's own latch and its undo bracket**, which is §5.1's load-bearing ordering:
+        // the take's bracket has to be the outer one or the undo step takes the inner surface's label.
+        onBoxTouchDown?()
         onHandleDragBegan?(handle, point)
     }
 

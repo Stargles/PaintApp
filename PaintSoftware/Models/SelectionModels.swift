@@ -614,7 +614,7 @@ extension CanvasManager {
         let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
-            if !stillTargeted {
+            if !stillTargeted, !recordingOwnsMoveBox {
                 commitFloatingPieceIfNeeded()
             }
         }
@@ -635,6 +635,38 @@ extension CanvasManager {
         // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
         // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead
         // moving, so a tick that changes nothing costs nothing.
+    }
+
+    /// **Whether a live take is recording the Move box that is up** — KEYFRAMES.md §5's second surface,
+    /// and the predicate two separate "a touch or a tick would ordinarily settle the float" rules are
+    /// both asked through.
+    ///
+    /// A take *is* playback, so for the whole length of one the playhead crosses cel boundaries and the
+    /// artist's finger sits on the canvas. Two shipped rules would each end the take for doing exactly
+    /// what it is supposed to do:
+    ///
+    ///  * **`handleActiveContextChanged`** commits a floating piece the moment the active cel changes.
+    ///    The first boundary a take crossed would settle the box mid-drag, `commitContainerFloat` would
+    ///    write one key at that frame, and the take would end against a base it had already overwritten.
+    ///  * **`canvasInteractionBegan`** stops playback on any canvas touch, and
+    ///    `CanvasView.handleCatchAllTap` fires it at `.began` for *every* touch on a layer with no
+    ///    drawing surface — which a transformation layer is, by definition. MEASURED by driving it: the
+    ///    very touch that starts a Move-box take was killing it in the same run loop, and the artist got
+    ///    "Nothing was recorded" for a drag they had just made. That is the defect this predicate was
+    ///    written for, and it was invisible to every model-level test because both halves of it are
+    ///    correct in isolation.
+    ///
+    /// The hazard those two guard against — *"the gesture finishes against a different cel than it
+    /// started on"* — does not apply to a container pose at all: `Layer.transform` keys in absolute
+    /// document frames and `RenderTree.renderNodes` composes it with no cel test, which is the same fact
+    /// `beginContainerPoseMove` states when it refuses to require a cel at the playhead.
+    ///
+    /// **Narrow in three ways at once**, so nothing else inherits it: a container float only, a take
+    /// actually running only, and only while that take is aimed at that box's own target.
+    var recordingOwnsMoveBox: Bool {
+        guard isRecording, let piece = floatingPiece, piece.kind == .containerPose,
+              let target = piece.containerTarget else { return false }
+        return recordingTake?.target == target
     }
 
     // MARK: Making a selection
@@ -954,7 +986,33 @@ extension CanvasManager {
     func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
         floatingPiece?.transform = transform
         floatingPiece?.distortQuad = distortQuad
+        // **§5.1 step 3 for the Move box: the quad surface routes its continuous values through the
+        // recorder's own intercept** — KEYFRAMES.md §5. Before the preview rather than after it, so a
+        // sample is timed to when the artist's finger reported the pose and not to whatever the write
+        // below costs; and a no-op whenever no take is running, which is what keeps an unrecorded Move
+        // byte-for-byte the gesture it was.
+        recordContainerPoseSample()
         showContainerPoseLive()
+    }
+
+    /// **The pose the box is at, handed to the recorder** — KEYFRAMES.md §5's Move-box surface.
+    ///
+    /// It computes exactly what `showContainerPoseLive` is about to preview and what
+    /// `commitContainerFloat` would commit, which is the point: a take's keys hold the same absolute
+    /// poses an unrecorded Move would have written, so a recorded drag and a hand-keyed one cannot
+    /// disagree about where the drawing went.
+    ///
+    /// **`resolvedPose(atFrame: currentFrame)` is re-read per sample rather than latched**, and that is
+    /// what makes a take over an *already animated* container right: `containerPose(_:movedBy:)`
+    /// composes the box's delta onto the pose in force at this frame, so the recorded curve carries the
+    /// existing animation plus the drag — and the track it replaces is therefore not lost.
+    private func recordContainerPoseSample() {
+        guard isRecording, let piece = floatingPiece, piece.kind == .containerPose,
+              let target = piece.containerTarget, let restState = piece.containerRest,
+              let posed = Self.containerPose(restState.resolvedPose(atFrame: currentFrame),
+                                             movedBy: piece)
+        else { return }
+        recordMoveBoxSample(target, pose: posed)
     }
 
     /// **The container float's preview: write the pose the box is at, and let the canvas draw it.**

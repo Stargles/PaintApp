@@ -87,6 +87,9 @@
 		E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */; };
 		B3EB2864ABA9B24338A670D1 /* PaintSoftware/Models/CanvasManager+Recording.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */; };
 		94754453A89A482A31962730 /* PaintSoftware/Engine/ValueRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABDFDD632615743EED79EA2 /* PaintSoftware/Engine/ValueRecording.swift */; };
+		6F06F9ADB5AA4E85C165747A /* PaintSoftware/Engine/PoseRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B66F15B3D95433E0149DA9 /* PaintSoftware/Engine/PoseRecording.swift */; };
+		E8B5587B0CC2A3FA8B203440 /* PoseRecordingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF32FE0650280C16E0333DB8 /* PoseRecordingLogicTests.swift */; };
+		E46A0A274F5BF6678BA968F4 /* MoveBoxRecordingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB50A44BBCFA22464D5F997 /* MoveBoxRecordingLogicTests.swift */; };
 		B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */; };
 		A11CE0DE0000000000000004 /* PaintSoftware/Models/AnimationCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */; };
 		1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */; };
@@ -487,6 +490,9 @@
 		8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PlaybackClock.swift; sourceTree = "<group>"; };
 		D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Recording.swift"; sourceTree = "<group>"; };
 		2ABDFDD632615743EED79EA2 /* PaintSoftware/Engine/ValueRecording.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ValueRecording.swift; sourceTree = "<group>"; };
+		B4B66F15B3D95433E0149DA9 /* PaintSoftware/Engine/PoseRecording.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PoseRecording.swift; sourceTree = "<group>"; };
+		AF32FE0650280C16E0333DB8 /* PoseRecordingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseRecordingLogicTests.swift; sourceTree = "<group>"; };
+		9AB50A44BBCFA22464D5F997 /* MoveBoxRecordingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoveBoxRecordingLogicTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeHoldClockLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationCurve.swift; sourceTree = "<group>"; };
 		748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CelContentProvider.swift; sourceTree = "<group>"; };
@@ -993,6 +999,8 @@
 				712A50F700EFEB162EA40D93 /* RecordingLogicTests.swift */,
 				40417AF97D5D77F593FCA9D9 /* TimingRecorderUITests.swift */,
 				4C440ED0290E821338F8AD4A /* TimingRecorderLogicTests.swift */,
+				AF32FE0650280C16E0333DB8 /* PoseRecordingLogicTests.swift */,
+				9AB50A44BBCFA22464D5F997 /* MoveBoxRecordingLogicTests.swift */,
 				EF4CBDD8048BC75617CA2592 /* GalleryOpenLogicTests.swift */,
 				5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */,
 				710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */,
@@ -1130,6 +1138,7 @@
 				8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */,
 				D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */,
 				2ABDFDD632615743EED79EA2 /* PaintSoftware/Engine/ValueRecording.swift */,
+				B4B66F15B3D95433E0149DA9 /* PaintSoftware/Engine/PoseRecording.swift */,
 				A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */,
 				748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */,
 				BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */,
@@ -1477,6 +1486,9 @@
 				E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */,
 				B3EB2864ABA9B24338A670D1 /* PaintSoftware/Models/CanvasManager+Recording.swift in Sources */,
 				94754453A89A482A31962730 /* PaintSoftware/Engine/ValueRecording.swift in Sources */,
+				6F06F9ADB5AA4E85C165747A /* PaintSoftware/Engine/PoseRecording.swift in Sources */,
+				E8B5587B0CC2A3FA8B203440 /* PoseRecordingLogicTests.swift in Sources */,
+				E46A0A274F5BF6678BA968F4 /* MoveBoxRecordingLogicTests.swift in Sources */,
 				B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */,
 				A11CE0DE0000000000000004 /* PaintSoftware/Models/AnimationCurve.swift in Sources */,
 				1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */,

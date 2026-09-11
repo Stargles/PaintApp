@@ -12,6 +12,22 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
     var onPoseChange: ((FloatingTransform, Quad?) -> Void)?
     var onRequestCommit: (() -> Void)?
 
+    /// **A finger landed on the box** — KEYFRAMES.md §5.1 step 1, the Move box's whole implementation
+    /// of the recordable-surface contract.
+    ///
+    /// Fired from every grip (the outline, the four corners, the four edges, the rotate knob) at
+    /// **touch-down**, not at the pan's `.began`, which is what `TouchDownPanGestureRecognizer` exists
+    /// for. Whether that becomes a take is entirely the model's answer
+    /// (`CanvasManager.beginMoveBoxTake`), including the refusal it says out loud for a box that poses
+    /// nothing a curve can drive — this file is not compiled into `PaintSoftwareUITests`, so nothing
+    /// here decides anything.
+    ///
+    /// **Before the gesture's own `.began` latch**, which is the ordering §5.1 calls load-bearing: a
+    /// container float opens no undo bracket per nudge, so the take's bracket is the only one either
+    /// way, but the take must start before the first `apply()` or its first sample is not the pose the
+    /// artist started from.
+    var onBoxTouchDown: (() -> Void)?
+
     /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
     /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
     /// the tap-outside commit below used to run unconditionally, on the theory that settling a float
@@ -76,26 +92,22 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
         for edge in edges { addSubview(edge) }
         addSubview(rotateHandle)
 
-        let move = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))
-        move.maximumNumberOfTouches = 1
-        outlineView.addGestureRecognizer(move)
+        // **All ten pans report touch-down** — see `onBoxTouchDown`. `TouchDownPanGestureRecognizer` is
+        // a `UIPanGestureRecognizer` that calls `super` first and adds one closure call, so every arm
+        // below behaves exactly as it did; `reportingPan` is the one place the wiring is spelled, so a
+        // grip added later cannot be the one grip a take cannot start from.
+        outlineView.addGestureRecognizer(reportingPan(#selector(handleMovePan(_:))))
 
         for (index, corner) in corners.enumerated() {
             corner.tag = index
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(handleCornerPan(_:)))
-            pan.maximumNumberOfTouches = 1
-            corner.addGestureRecognizer(pan)
+            corner.addGestureRecognizer(reportingPan(#selector(handleCornerPan(_:))))
         }
         for (index, edge) in edges.enumerated() {
             edge.tag = index
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
-            pan.maximumNumberOfTouches = 1
-            edge.addGestureRecognizer(pan)
+            edge.addGestureRecognizer(reportingPan(#selector(handleEdgePan(_:))))
         }
 
-        let rotate = UIPanGestureRecognizer(target: self, action: #selector(handleRotatePan(_:)))
-        rotate.maximumNumberOfTouches = 1
-        rotateHandle.addGestureRecognizer(rotate)
+        rotateHandle.addGestureRecognizer(reportingPan(#selector(handleRotatePan(_:))))
 
         // `TouchTypeTapGestureRecognizer`, not a plain `UITapGestureRecognizer` — see
         // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47).
@@ -104,6 +116,17 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// One of the box's ten pans, wired to report its own touch-down into `onBoxTouchDown`.
+    ///
+    /// `maximumNumberOfTouches = 1` is carried from the ten hand-rolled recognizers this replaced and
+    /// is not a new rule: a second finger on a transform grip has never meant anything here.
+    private func reportingPan(_ action: Selector) -> TouchDownPanGestureRecognizer {
+        let pan = TouchDownPanGestureRecognizer(target: self, action: action)
+        pan.maximumNumberOfTouches = 1
+        pan.onTouchDown = { [weak self] in self?.onBoxTouchDown?() }
+        return pan
+    }
 
     /// **`claimsTouch` is not asked and there is no `hitTest` override, so this is a total claim.**
     /// The view is pinned to the whole container, so the moment a piece is floating every touch

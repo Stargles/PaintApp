@@ -290,6 +290,13 @@ struct CanvasView: UIViewRepresentable {
         // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
         // vector-layer whole-layer transforms mutate `VectorCanvas` in place and aren't captured
         // by this value-based snapshot — pre-existing gap, not introduced here.)
+        // **The vector Move box answers the recorder too, and answers "no"** — KEYFRAMES.md §5.1. It
+        // writes a cel pose channel, which a take cannot record (see `onBoxTouchDown`), and it looks
+        // exactly as recordable as the transformation layer's box — so an armed artist landing on it is
+        // told out loud rather than watching nothing happen. The decision is entirely the model's.
+        transformOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.beginMoveBoxTake()
+        }
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
         }
@@ -320,6 +327,13 @@ struct CanvasView: UIViewRepresentable {
         }
         floatingOverlay.onPoseChange = { [weak coordinator = context.coordinator] transform, distortQuad in
             coordinator?.canvasManager.updateFloatingPose(transform: transform, distortQuad: distortQuad)
+        }
+        // **The Move box is §5's second recordable surface, and this line is all of what it
+        // implements** — KEYFRAMES.md §5.1. The finger landing is the trigger; whether that becomes a
+        // take is entirely the model's answer (`beginMoveBoxTake`), including the refusal it says out
+        // loud for a box over lifted pixels or lassoed ink, neither of which poses a container.
+        floatingOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
+            coordinator?.canvasManager.beginMoveBoxTake()
         }
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
@@ -3885,7 +3899,17 @@ struct CanvasView: UIViewRepresentable {
         @objc func handleCatchAllTap(_ recognizer: TouchTypePressRecognizer) {
             guard recognizer.state == .began else { return }
             // Before every other guard, including the tool check: any touch, any tool, any touch type.
-            canvasManager.canvasInteractionBegan()
+            //
+            // **`mayContinueTake` is the Move box's, and this is the second site to need it** —
+            // KEYFRAMES.md §5, and a defect found by driving the feature rather than by reading it.
+            // This recognizer fires on *every* touch on a layer with no drawing surface, which a
+            // transformation layer is by definition (`catchAllIsEnabled`), so the very touch that
+            // starts a Move-box take reached here a moment later and `stopPlayback` ended it — the
+            // artist drags the box and is told "Nothing was recorded". `CanvasManager
+            // .recordingOwnsMoveBox` is the narrow answer and carries the whole argument; the
+            // menu-dismissing half below is untouched, because closing a dropdown mid-take is right.
+            canvasManager.canvasInteractionBegan(
+                mayContinueTake: canvasManager.recordingOwnsMoveBox)
             // `Tool.paintsOnCanvas`, not a second spelling of the same three cases: this path exists
             // to explain why a touch that *would have drawn* did not, so it is asking `shouldInteract`'s
             // tool clause over again and must give the same answer. The fill and the eyedropper have

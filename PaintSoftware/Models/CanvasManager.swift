@@ -1348,8 +1348,8 @@ final class CanvasManager: ObservableObject {
     /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
     /// sixth, added 2026-08-22 and correct from the start.
     ///
-    /// - Parameter mayContinueTake: whether this touch is on the surface a live take can keep
-    ///   recording from — the drawing canvas, and only it. See the `stopPlayback` call below.
+    /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
+    ///   from — the drawing canvas (§7), or the Move box (§5). See the `stopPlayback` call below.
     func canvasInteractionBegan(mayContinueTake: Bool = false) {
         // A touch that is about to become an edit ends playback. The playhead moving under the
         // artist's hand is the whole hazard: a tick lands mid-gesture, `currentFrame`'s `didSet`
@@ -1365,8 +1365,17 @@ final class CanvasManager: ObservableObject {
         // a different cel than it started on" stops being the hazard and becomes the feature — but
         // only for a stroke, and only while a take is actually running. Every other way into this
         // method still stops playback, which is why this is a parameter rather than a bare
-        // `isRecording` test: a fill tap, an eyedropper press or a catch-all tap during a take has
-        // no cel-crossing story and would land against a moving playhead.
+        // `isRecording` test: a fill tap or an eyedropper press during a take has no cel-crossing
+        // story and would land against a moving playhead.
+        //
+        // **§5's Move box is the second caller that passes true, and it was a *defect* that it did
+        // not.** `handleCatchAllTap` fires on every touch on a layer with no drawing surface — which
+        // a transformation layer is by definition — so on that one layer kind the touch that starts
+        // a Move-box take arrived here and ended it, and the artist was told "Nothing was recorded"
+        // for a drag they had just made. The comment above used to name "a catch-all tap" among the
+        // sites that correctly stop a take; that is now true only when the box is *not* the thing
+        // the take is recording, and `CanvasManager.recordingOwnsMoveBox` is the predicate that
+        // splits the two. Found by driving the feature, invisible to every model-level test.
         //
         // **Arming needs no exception.** Arming starts nothing, so playback is not running when the
         // first pen lands; this stops nothing, and `startRecording` calls `play()` a moment later.
