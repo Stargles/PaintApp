@@ -873,7 +873,12 @@ a genuinely nasty coupling. `testTheThreeLargeBudgetsRunOnOneRule` pins the two 
 so the duplication is loud if anyone edits one.
 
 **And there are five budgets, not four** — item 7 found the fifth and left the reconciliation owed.
-Here they are at the owner's 2048×1024 on the owner's iPad 9, before and after:
+**Since risen to seven** — RENDER.md §5 stage 7 added `VectorRenderCache` and the fill session
+(`MetalFillSession`), both real bytes the app was already holding with nothing declaring them; the
+table below is not re-derived here (TODO(45), 2026-09-11) — see `MemoryBudgetLogicTests
+.testTheSevenBudgetsSumToLessThanTheJetsamCeilingOnTheOwnersDevice`, renamed from `testTheFive…`, for
+the current seven terms and sum. Here are the original five at the owner's 2048×1024 on the owner's
+iPad 9, before and after:
 
 | budget | what it holds | rule | before | after |
 |---|---|---|---|---|
@@ -885,9 +890,10 @@ Here they are at the owner's 2048×1024 on the owner's iPad 9, before and after:
 | **sum** | | | **764 MiB** | **656 MiB** |
 
 At 4096² only the mask row differs — 8 × 16 MiB = 128 MiB rather than 16, so the sums are 876 and
-768 MiB. Every figure in that table is INFERRED arithmetic over the constants, and
-`testTheFiveBudgetsSumToLessThanTheJetsamCeilingOnTheOwnersDevice` asserts the whole row rather than
-reciting it.
+768 MiB (these two figures are this original five-budget table's own, now superseded by the seven-
+budget sum above). Every figure in that table is INFERRED arithmetic over the constants, and
+`testTheSevenBudgetsSumToLessThanTheJetsamCeilingOnTheOwnersDevice` (renamed from `testTheFive…`;
+TODO(45)) asserts the whole row rather than reciting it.
 
 **The one story they tell.** The three that are big enough to matter run on one rule, a sixteenth of
 the device each. The two that do not scale say why they do not: a mask cache is bounded by how many
@@ -1191,10 +1197,12 @@ drag and asserts **one** rasterize, on a counter rather than on a millisecond.
 *(b) The live drag rasterizes nothing.* Item 11's finding was that the fix is not a faster re-render
 but no re-render, because Core Animation was compositing the result anyway — and a layer transform is
 the most Core-Animation-friendly operation there is, since the pixels do not change at all, only
-where they land. `StrokeCanvasView.beginLiveLayerTransform(base:)` latches the affine the displayed
-image was rendered at and suppresses `refreshDisplay`; `updateLiveLayerTransform(_:)` assigns
+where they land. **The whole-layer trio these three named is gone with the rest of that mechanism
+(`d8d7ba8`; TODO(45)), but the same shape carries the vector float now:**
+`StrokeCanvasView.beginVectorFloat(image:base:)` latches the affine the displayed
+image was rendered at and suppresses `refreshDisplay`; `updateVectorFloat(_:)` assigns
 `current · base⁻¹`, conjugated for `UIView.transform`'s centre anchor, to the image layer;
-`endLiveLayerTransform()` clears both and rasterizes **once**. It is `TextTransformOverlayView`'s §4
+`endVectorFloat()` clears both and rasterizes **once**. It is `TextTransformOverlayView`'s §4
 rule 2 — "a 60 Hz corner drag rasterizes nothing" — arriving on the overlay ADD_TEXT.md was pointing
 at.
 
@@ -2985,7 +2993,8 @@ id, and `restoreDamage` uses an arriving id's remembered rectangle when the call
 walk *skip* an element, while this is spent only on sizing the rectangle. The arriving element still has
 no `paintedBounds` entry, so `renderLocalContent` draws it, measures it, and widens the clip if it
 escaped — a stale rectangle costs a retry and cannot draw a wrong picture. Only strokes are ever in it,
-because only strokes are ever measured, and `rememberedInk` asks each arrival for its `stroke` rather
+because only strokes are ever measured, and `vacatedInk` (named `rememberedInk` when this was written;
+TODO(45)) asks each arrival for its `stroke` rather
 than looking the id up and hoping.
 
 **Entries live until their id comes back, not for one round trip.** Keeping only the last restore's
@@ -3417,7 +3426,8 @@ answered `.rewritesInPlace` for any session that had reopened an object — dele
 undoing a deleted label paid the cel. An emptied box *removes* its id (`removeTextLocked`), and an id in
 one list and not the other is exactly what `restoreElements` bounds by difference; only a retype keeps
 the id with different content and still says `.everything`.
-`UndoRepairLogicTests.testTheTextCommitBoundsAnAddAndADeletionAndRefusesARetype` drives all three
+`UndoRepairLogicTests.testTheTextCommitBoundsAnAddADeletionAndARetype` (renamed since; TODO(45))
+drives all three
 through the real session API, and `TextUndoFootprintUITests` drives the add, its undo and redo, the
 deletion and its undo from a fresh document, reading the glyph pixels and the stroke's off the screen.
 
