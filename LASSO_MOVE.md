@@ -33,7 +33,7 @@ remaining kinds are a `CGPath` boolean and a centre-point test.
 | the elements a float has lifted, skipped by the flatten | `VectorCanvas.suppressedElementIDs` — `editingElementID` is now a one-element view over it |
 | the float's own picture | `VectorCanvas.renderIsolated(ids:)`, sharing `renderLocalContent(elements:quality:)` with the display so the isolation rules cannot fork |
 | the lifecycle: lift, nudge, bake, cancel, undo | `CanvasManager+LassoMove.swift`, and `VectorFloat` |
-| the piece on screen under a Core Animation transform | `StrokeCanvasView.beginVectorFloat` / `updateVectorFloat` / `endVectorFloat`, modelled line for line on the whole-layer `beginLiveLayerTransform` trio |
+| the piece on screen under a Core Animation transform | `StrokeCanvasView.beginVectorFloat` / `updateVectorFloat` / `endVectorFloat`, modelled line for line on the whole-layer `beginLiveLayerTransform` trio (since deleted with the rest of the whole-layer mechanism, `d8d7ba8`; TODO(45)) |
 | travelling marching ants | `SelectionOverlayView.setLiveSelectionTransform` during a drag; `CanvasManager.moving(_:by:)` writes the real path at each gesture end |
 | a box that offers all six grips — move band, four corners, rotate knob | the default `ObjectTransformFrame.allowedHandles`; the filter is kept for Freeform's edge nodes and the box-only knob, not because anything withholds a grip today. **Freeform itself added no grip** — see below |
 | the way in | `TopToolbar.toggleMove()` — with a selection on a vector cel, `beginVectorLassoMove()` |
@@ -739,7 +739,7 @@ enum Content {
 Three notes on the vector case, and each is a saving rather than a cost:
 
 - **There is no `remainderPreview`.** The "hole" the source shows is the moving pieces being skipped
-  by the flatten — `editingElementIDs` (§1's suppression set) — which costs a `Set<UUID>` where the
+  by the flatten — `suppressedElementIDs` (§1's suppression set) — which costs a `Set<UUID>` where the
   raster path costs a canvas-sized `UIImage`. This is the §4 rule 3 position reached for free.
 - **`preview` is bbox-sized and rendered exactly once, at lift.** The overlay's existing
   `pieceImageView` takes it unchanged, so `FloatingPieceOverlayView` needs **no vector branch at
@@ -759,14 +759,17 @@ learned twice: `setVectorTransform` before `b100d65` pushed a step per gesture-`
 `ADD_TEXT.md` §3 stage 4 found that a per-drag `recordUndo` *underneath* an enclosing session is a
 **dead** entry. Neither failure is per-nudge; both are per-delta or per-nothing.
 
-**The gesture-end seam already exists on the sibling overlay.** `ObjectTransformOverlayView` carries
-`onGestureBegan`/`onGestureEnded`, wired at `CanvasView.swift:266-272` to
-`beginStructureGesture`/`commitStructureGesture`, under a comment that states the rule verbatim:
-*"One undo step per whole move/scale/rotate drag, not per intermediate value."*
-`FloatingPieceOverlayView` has no such pair — every one of its handlers falls into `default: break`
+**The gesture-end seam already exists on the sibling overlay** — this paragraph is the plan; the
+table right below is what actually shipped, and the two disagree about *how* (TODO(45), 2026-09-11).
+`ObjectTransformOverlayView` carries `onHandleDragBegan`/`onHandleDragEnded` (renamed from
+`onGestureBegan`/`onGestureEnded`), wired at `CanvasView.swift:300-307` to `beginObjectTransformDrag`/
+`endObjectTransformDrag`, not to `beginStructureGesture`/`commitStructureGesture` as this paragraph
+proposed — `endObjectTransformDrag`'s own comment says so: *"One gesture, one nudge, one undo step. No
+`commitStructureGesture`."* The float's own path took the direct one-step-per-nudge shape the table
+below describes (`nudgeVectorFloat`) rather than copying the bracket. `FloatingPieceOverlayView` has no
+such pair — every one of its handlers falls into `default: break`
 on `.ended` (`FloatingPieceOverlayView.swift:272, 293, 326, 345`) — so `updateFloatingPose`
-(renamed since; `SelectionModels.swift:954`) writes a transform and records nothing, ever. **Adding the pair
-that the sibling overlay already has is the whole mechanism**, not a new one.
+(renamed since; `SelectionModels.swift:986`) writes a transform and records nothing, ever.
 
 **The shape, and the reason it is not the obvious one:**
 
@@ -819,8 +822,8 @@ of one. That is the same currency every vector edit already spends — a brush s
 erase and a text commit each register one — and `UndoHistory`'s budget is now device-derived with a
 memory-pressure trim (session 55), so the failure mode is a graceful trim of the oldest steps. If a
 nudge-heavy session ever pushes it, the cheap fix is a translation-only step for nudges 2..N holding
-two offsets rather than two arrays, which is `closeVectorTransformBracket`'s two-affine shape
-(`CanvasManager.swift:373-397`). **Do not build that first**: one mechanism, used the way every other
+two offsets rather than two arrays, which is the two-affine shape `closeVectorTransformBracket`
+had before it was deleted with the rest of the whole-layer mechanism (`d8d7ba8`; TODO(45)). **Do not build that first**: one mechanism, used the way every other
 edit uses it, is worth more than a second undo shape saved against an unmeasured cost.
 
 **The whole-layer transform does not yet obey this ruling, and now it should.** Session 56's bracket
@@ -960,7 +963,8 @@ mean storing a display-list snapshot in a structure named and documented as a tr
 **A `recordUndo` per drag *delta*.** `setVectorTransform`'s pre-`b100d65` defect — hundreds of steps
 for one gesture. A step per *nudge* is the owner's ruling and is a different thing entirely: a nudge
 is one gesture, touch-down to touch-up, and the seam that reports it already exists
-(`ObjectTransformOverlayView`'s `onGestureEnded`, `CanvasView.swift:266-272`).
+(`ObjectTransformOverlayView`'s `onHandleDragEnded`, renamed from `onGestureEnded`,
+`CanvasView.swift:306-308`).
 
 **Let the bake register the atomic step, with the nudges underneath it.** This is what an earlier
 draft of this document specified, and the owner's §5.2 ruling rules it out. Four nudge steps sitting
@@ -1172,8 +1176,8 @@ split here happens exactly once.
    artist took, against the 60-per-second a per-delta design would have cost. Every bump cascades
    into `RasterizeKey`, `LayerContentVersion`, `SandwichKey` and both upload caches, each costing a
    canvas-sized flatten and an LRU eviction — so **do not let a nudge fire on a gesture that moved
-   nothing**, which is `vectorTransformsAreIndistinguishable`'s tolerance test
-   (`CanvasManager.swift:399-407`) applied to a translation.
+   nothing**, which is the tolerance test `vectorTransformsAreIndistinguishable` ran before it was deleted
+   with the rest of the whole-layer mechanism (`d8d7ba8`; TODO(45)) applied to a translation.
 6. **Membership testing is prefiltered by the spatial index.** `strokeIndex().segments(near:)`
    against the **loop's bounding box** — the query is the size of the loop, not the size of the layer
    (`StrokeSpatialIndex.swift:4-11`). A small loop on a dense drawing must not touch every element.

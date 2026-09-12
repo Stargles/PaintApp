@@ -29,6 +29,14 @@ repo with its citation) or INFERRED (read off the source, not observed on the de
 > explicitly (*"Accept all three, ship stage 1"*), and stage 3's own bake is a pure translation, where
 > none of `mapping`'s three floors can bind.
 
+**Read what follows as the pre-ship snapshot this document analyzed, not current API (TODO(45),
+2026-09-11).** §1's census and the whole-cel Move bracket §2/§4 describe in present tense —
+`isVectorTransforming`, `VectorTransformBracket`, `setVectorTransform`, `closeVectorTransformBracket`,
+`vectorTransformsAreIndistinguishable`, `beginLiveLayerTransform`/`updateLiveLayerTransform`/
+`endLiveLayerTransform` — were all deleted by stage 2 above (`d8d7ba8`, 2026-08-27), the same commit
+this blockquote already reports shipping. The census's *conclusions* (what needs a transform, what
+breaks) are the document's point and still hold; the symbol names it points at to make them do not
+exist any more.
 
 **Verdict: adopt, with changes.** The ruling is right, and it is right for a reason that has nothing
 to do with saving two bytes a sample. `VectorCanvas._transform` is an indirection that **eleven of
