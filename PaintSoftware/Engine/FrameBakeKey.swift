@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Fifteen cases and their payload fields, by hand. Adding a sixteenth without touching this
+// Sixteen cases and their payload fields, by hand. Adding a seventeenth without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -472,6 +472,19 @@ private extension BakeKeyEncoder {
             double(p.curvature)
             double(p.vignette)
             double(p.aberration)
+        case .duplicateOffset(let p):
+            // TODO (61) stage 6: the five scalars the box writes, the region, the mode, the opacity
+            // and the colour — every field, because two frames differing in any one of them are two
+            // pictures, and the disk-backed store collides anything this leaves out onto one file
+            // (`Bloom.color`'s comment above is the failure, found live).
+            tag(0x5F)
+            double(p.offsetX); double(p.offsetY)
+            double(p.scaleX); double(p.scaleY)
+            double(p.rotationDegrees)
+            tag(p.region == .rim ? 0x65 : 0x66)
+            tag(p.blendMode.bakeKeyTag)
+            double(p.opacity)
+            encode(codableColor: p.color)
         }
     }
 

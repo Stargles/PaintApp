@@ -327,8 +327,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
         case .began:
             dragStartTransform = piece.transform
             // Latched at touch-down with everything else on this gesture, so flipping the Move bar's
-            // picker mid-drag cannot change what the finger already down means.
-            distortDrag = piece.mode == .distort ? FloatingDistortDrag(piece: piece, corner: index) : nil
+            // picker mid-drag cannot change what the finger already down means. A kind that refuses
+            // Distort (`FloatingPieceKind.acceptsDistort` — the effect box) takes the scaling arm
+            // instead, with the bar's caption saying why, rather than a corner that does nothing.
+            distortDrag = piece.mode == .distort && piece.kind.acceptsDistort
+                ? FloatingDistortDrag(piece: piece, corner: index) : nil
             // **The anchor is the *quad's* opposite corner, not the box's** — see
             // `FloatingResizeDrag`, which is where the whole of this arm's arithmetic now lives and
             // where the reduction to the old box expression is pinned. Latching the box corner is

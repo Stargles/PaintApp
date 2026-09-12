@@ -127,6 +127,8 @@
 		DF0C1E3E46A41DA1656B5503 /* CRTScreenEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A6A996D0E8110EF35F684C9 /* CRTScreenEffectLogicTests.swift */; };
 		AE5C307F58B4C6A15D309C35 /* HueColorizeEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4327F69418258C6D36E46A0A /* HueColorizeEffectLogicTests.swift */; };
 		9FB71109F4C06510694AECB2 /* CRTScreenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E95CA365094D88CC38E4AED /* CRTScreenUITests.swift */; };
+		7BB903449639F930A09A8939 /* DuplicateOffsetUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA452C1BD1AC69A1339D770B /* DuplicateOffsetUITests.swift */; };
+		014463F976356E0E09673FF1 /* DuplicateOffsetEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A09F4BCAF9D0C69BC763B6 /* DuplicateOffsetEffectLogicTests.swift */; };
 		C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A266D16C60715591E6F9256 /* ToolLogicTests.swift */; };
 		53BF15DB3E42C6DF9733FC6D /* PaintSoftware/Models/CanvasTouchOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A02A59C9FBBA808D9B9A5A9 /* PaintSoftware/Models/CanvasTouchOwner.swift */; };
 		1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */; };
@@ -547,6 +549,8 @@
 		2A6A996D0E8110EF35F684C9 /* CRTScreenEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CRTScreenEffectLogicTests.swift; sourceTree = "<group>"; };
 		4327F69418258C6D36E46A0A /* HueColorizeEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HueColorizeEffectLogicTests.swift; sourceTree = "<group>"; };
 		6E95CA365094D88CC38E4AED /* CRTScreenUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CRTScreenUITests.swift; sourceTree = "<group>"; };
+		FA452C1BD1AC69A1339D770B /* DuplicateOffsetUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DuplicateOffsetUITests.swift; sourceTree = "<group>"; };
+		F5A09F4BCAF9D0C69BC763B6 /* DuplicateOffsetEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DuplicateOffsetEffectLogicTests.swift; sourceTree = "<group>"; };
 		0A266D16C60715591E6F9256 /* ToolLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolLogicTests.swift; sourceTree = "<group>"; };
 		1A02A59C9FBBA808D9B9A5A9 /* PaintSoftware/Models/CanvasTouchOwner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchOwner.swift; sourceTree = "<group>"; };
 		9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ActivePanel.swift; sourceTree = "<group>"; };
@@ -1031,6 +1035,8 @@
 				2A6A996D0E8110EF35F684C9 /* CRTScreenEffectLogicTests.swift */,
 				4327F69418258C6D36E46A0A /* HueColorizeEffectLogicTests.swift */,
 				6E95CA365094D88CC38E4AED /* CRTScreenUITests.swift */,
+				FA452C1BD1AC69A1339D770B /* DuplicateOffsetUITests.swift */,
+				F5A09F4BCAF9D0C69BC763B6 /* DuplicateOffsetEffectLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
 				A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */,
 				E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */,
@@ -1581,6 +1587,8 @@
 				DF0C1E3E46A41DA1656B5503 /* CRTScreenEffectLogicTests.swift in Sources */,
 				AE5C307F58B4C6A15D309C35 /* HueColorizeEffectLogicTests.swift in Sources */,
 				9FB71109F4C06510694AECB2 /* CRTScreenUITests.swift in Sources */,
+				7BB903449639F930A09A8939 /* DuplicateOffsetUITests.swift in Sources */,
+				014463F976356E0E09673FF1 /* DuplicateOffsetEffectLogicTests.swift in Sources */,
 				C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */,
 				53BF15DB3E42C6DF9733FC6D /* PaintSoftware/Models/CanvasTouchOwner.swift in Sources */,
 				1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */,

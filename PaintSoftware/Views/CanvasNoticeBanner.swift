@@ -101,6 +101,8 @@ struct CanvasNoticeBanner: View {
         // The timeline's glyph, `cannotMoveDerivedFrame`'s reason: the message is about which frame
         // the artist is standing on against where a bar is, and both ways out are on the timeline.
         case .moveOutsideTransformBlock: return "film"
+        // The same sentence about the same timeline, one layer kind over.
+        case .effectBoxOutsideBlock: return "film"
         // Not a warning either: the merge happened and gave the artist a layer. What the glyph says
         // is *which kind* of layer came back, which is the whole content of the message.
         case .mergedAsPixels:   return "square.on.square"

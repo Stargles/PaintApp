@@ -243,30 +243,52 @@ what keeps "a seed never outlives the pose it qualifies" structural, `LayerPose.
 
 It reads what is beneath (paper excluded — `Input.ink`, the re-walk that Outline and Bloom already
 take), flattens the copy to a colour with the coverage kept, resamples that copy through a box, derives
-**rim** = `orig.a · (1 − dup.a)` or **intersection** = `orig.a · dup.a`, and paints the colour there
-through a blend mode over the accumulator. Both regions are subsets of the original's coverage, so it
-**never reshapes coverage** — it is an adjustment in the strict sense, and it cannot draw a shadow
+**rim** = `max(orig.a − dup.a, 0)` or **intersection** = `min(orig.a, dup.a)`, and paints the colour
+there through a blend mode over the accumulator. Both regions are subsets of the original's coverage, so
+it **never reshapes coverage** — it is an adjustment in the strict sense, and it cannot draw a shadow
 *outside* the drawing (§2 ruling 14). Two passes: a resample (the copy, gathered through the box's inverse
-map, bilinear — chromatic aberration's tap generalised from a translation to an affine) and a combine
-that reads the original as bloom's combine does. What it needs that no effect has:
+map, bilinear and transparent outside the frame — chromatic aberration's tap generalised from a
+translation to an affine) and a combine that reads the original as bloom's combine does.
+
+**The regions were first written as products — `orig.a · (1 − dup.a)` and `orig.a · dup.a` — and stage
+6 changed them, because the products make the identity not the identity.** Porter-Duff's `out` and `in`
+assume the two coverages are uncorrelated within a pixel; a copy of the *same drawing* is the most
+correlated case there is, and at zero offset `orig.a · (1 − orig.a)` is positive on every anti-aliased
+edge, so a Duplicate Offset that has not been moved painted a faint rim along every soft edge of the ink.
+`max`/`min` is exact at rest, agrees with the products wherever the alpha is binary, and inside the
+drawing the two are the same; `DuplicateOffsetEffectLogicTests.testTheIdentityPaintsNothingOnSoftInk` pins
+it on soft ink and goes red under the products (MEASURED by mutation, 2026-09-11). What it needs that no
+effect had:
 
 - **A Move box as a writer.** The box's five numbers — offset x, offset y, scale x, scale y,
   rotation — are ordinary scalar `EffectParameter`s (keyable through `effectTracks`, drawn by the
   band, sliders in the bar), and a `FloatingPieceKind.effectBox` whose commit writes those five is a
   *second writer* onto them. Distort is refused by kind, as a placed image's is
-  (`distortUnavailableReason`), since five scalars cannot hold a keystone.
+  (`distortUnavailableReason`), since five scalars cannot hold a keystone. **Shipped as designed, with
+  one thing the design did not say**: the box comes up *at the copy's current pose* rather than at rest
+  and composing, because a `FloatingTransform` is exactly a position, two scales and a turn — so the
+  box the artist sees is drawn around the copy, `CanvasManager.effectBoxScalars` reads the five straight
+  back off it, and a mirror is a negative scale seeded as the flip bit. The preview writes the five
+  live (a key at the playhead on a keyed channel, the base otherwise — `showContainerPoseLive`'s shape),
+  the commit restores the rest state and routes each through `applyEffectParameterEdit` inside one
+  gesture bracket, and a box that ended where it began writes nothing.
 - **A colour**: `Outline.color`'s exact shape, `colorR/G/B`, refused at the writer as not animatable.
 - **A blend mode inside a kernel.** The Metal side is a `switch` on a mode code calling the blend
-  functions `Composite.metal` already holds. The CPU twin is the cost: `Compositor.coreGraphicsBlendMode`
-  reaches **nine** modes through CoreGraphics (normal, multiply, screen, overlay, darken, lighten, hard
-  light, difference, exclusion) and hand-rolls the other sixteen; a per-pixel combine cannot go
-  through CoreGraphics, so those nine separable formulas have to be written in Swift beside the
-  sixteen and pinned byte-for-byte against the Metal ones (`EffectParityLogicTests`' gate). Bounded —
-  the sixteen harder ones exist — and still the largest single item in this document.
-- **Strips.** `verticalKernelRadius` is the box's largest vertical displacement over the frame's
-  corners, plus one for the bilinear tap; `readsAbsolutePosition` is true, since the box is about a
-  point in the frame. A large offset makes a large apron, which the planner already degrades to a
-  whole-frame composite.
+  functions `Composite.metal` already holds. The CPU twin was the cost, and it was smaller than this
+  paragraph first counted: `Compositor.coreGraphicsBlendMode` reaches nine modes through CoreGraphics
+  (normal, multiply, screen, overlay, darken, lighten, hard light, difference, exclusion), but
+  `handRolledChannel` already held exclusion and normal is the source itself, so **seven** formulas were
+  written in Swift beside the rest — not nine, and not §8's "eleven" — behind one entry point,
+  `BlendMode.blendUnpremultiplied`, and pinned to a channel step against the Metal ones for every mode
+  in both regions (`DuplicateOffsetEffectLogicTests`), and to W3C's arithmetic by hand for the seven.
+  The layer path is untouched: `draw` still reaches those seven through `CGBlendMode`.
+- **Strips.** `verticalKernelRadius` is the box's inverse map read at the frame's four corners — the
+  largest vertical displacement, plus one for the bilinear tap — and it needs the frame's **width** as
+  well as its height, since a turned copy on a wide frame pulls further at the far corners; the apron
+  therefore takes a frame *size* now (`StripedCompositor.apron(of:maskStacks:frameSize:)`).
+  `readsAbsolutePosition` is true, since the box is about the frame's centre. A large offset makes a
+  large apron, which the planner pays in shorter strips rather than in a seam; pinned under the driver
+  on both backends at a twenty-row slide.
 
 **Not a fourth payload of the value layer**: it grades the accumulator and needs nothing a grade does
 not already have a home for, and a payload would have to reinvent `Input`, the strip apron and the
@@ -455,9 +477,14 @@ everything beneath, which no cel operation can express.
 
 ### 5.6 Duplicate offset
 
-§3.4 is the design. The artist's surface is the value layer's Effect list: **Duplicate Offset** with a
-colour swatch, a Rim / Intersection toggle (rim default), a blend-mode picker, a Move-box row that
-raises the box, and the five scalars as sliders. Opacity of the effect is `mix`, as every grade's is.
+§3.4 is the design. The artist's surface is the value layer's Blend Mode menu: **Duplicate Offset**,
+beside Outline, and its Effect Settings bar top to bottom — a colour swatch (white by default; the
+catalogue seeds a rim eight pixels up and to the right so the pick shows something), a Region picker
+(Rim / Intersection, rim default), a Blend Mode picker (the layer blend modes in the layer panel's own
+groups, without Clip to Below), an Opacity slider (`mix`, as every grade's is), **Adjust Box** — which
+raises the Move box over the copy, standing the bar down until Done — and the five scalars as sliders
+under it for the precise way in. Adjust Box at a frame the layer's bar does not cover is refused with
+`CanvasNotice.effectBoxOutsideBlock`, stage 1's ruling reached from this row. **Shipped 2026-09-11.**
 
 ## 6. What a keyframe means on a mode whose pose is a function of time
 
@@ -508,9 +535,9 @@ reachability XCUITest from a fresh document and an assertion on what is drawn, p
 | 3 ✅ | **Rotate** — `rotateSpeed` row, integration from the block start, box-centre pivot pre-composed, `movesItsContents`. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: 15°/frame → 90° at `s + 6` about the box centre with `s = 4`, nothing at `s`, nothing before the block; keyed 15→0 integrates (no backward snap, holds where it stopped); a mark holds the box, not the angle, and keeps the mode; `hasContainerPoseInForce` reads the mode and the speed's track; under a keystoned box the orbit of one point is the conic (four extremes, and not a circle about the mapped centre); a raster fixture on both backends is drawn turned and reddens when the function is dropped from the map, same frame same bytes, the version differing across frames; a folder in Rotate spins its children from frame 0. `TransformLayerModesUITests` types 15 into the speed field, reads the frames-per-turn line, scrubs six frames in and measures the quarter turn off the canvas |
 | 4 ✅ | **Shake** — `shakeX`/`shakeY`/`shakeRotation` rows, `LayerPose.shakePeriod` and `shakeSeed`, value noise smoothstepped between beats, Re-roll. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: the noise pinned at one raw value against a Python splitmix64 and a second Swift spelling; a 10-point amplitude at rest moves a point `10·n(seed, 0, k)` at frame *k* and the same frame twice is the same map; two seeds differ; a 2× box shakes 20 for 10 and a Move key rides under the jolt (the order of composition); the period eases between beats with smoothstep; the beats count from the block's start so a slid bar shakes the same way; the mode switch mints a seed, Re-roll is one undo step named for it, the period is clamped and undoable; `movesItsContents` reads the three amplitudes' tracks; a raster fixture on both backends is drawn `10·n(k)` to the side, same frame same bytes, two versions for two frames; the seed, period and amplitudes round-trip through both manifests and a real package. `FrameBakerLogicTests`: the seed, the period and an amplitude are structural edits. `TransformLayerModesUITests` draws a band, `+` → Transform Layer → Mode → Shake, types 300, and reads the band moved on the bar's first frames, the same on the way back, elsewhere after Re-roll, and back after one undo |
 | 5 ✅ | **Repeat** — the (pose, frame) carry in `renderNodes` / `leafSnapshots` / `contentVersion`, `LayerPose.repeatPeriod` typed and pre-filled, the edit redirect, the ghost blocks. **Shipped 2026-09-11.** | `TransformLayerModesLogicTests`: `leafFrames` is `s + ((f − s) mod p)` and the composite at a repeated frame is the source frame's bytes on both backends, blank past the bar; `FrameBakeKey(s + p + k) == FrameBakeKey(s + k)` (the cache, for free); an opacity curve, a Rotate layer and a folder beneath all repeat; a repeat under a repeat composes (periods 5 over 2, chosen to differ from the inner alone) and a hidden one loops nothing; `movesItsContents` reads the period; the pre-fill is where the drawings beneath end (a held background makes it 12, a tint counts for nothing, measured from the bar's start, the bar's length with nothing beneath), typed as one undo step, refused on a folder; drawing at a repeated frame is handed the source cel, spawns at the source frame when it is empty, and ignores a held block under the playhead; the ghost segments run by source drawing and agree with the walk frame for frame on a nested fixture; the period survives a manifest and a package. `FrameBakerLogicTests`: the period is a structural edit. `TransformLayerModesUITests` cuts the born block twice through the cel menu, draws on frames 1–3, `+` → Transform Layer → Mode → Repeat, reads the period pre-filled to 12, types 3, reads the ghost band's value off the row, and measures frame 5 drawing frame 2's band, frame 4 frame 1's, and a band drawn on frame 5 appearing on frame 2 and not on frame 3 |
-| 6 | **Duplicate offset** — the case, two passes on both backends, the eleven CPU blend formulas, the box writer, strip reach. | parity byte-for-byte per mode; rim and intersection over a known shape; `testNoEffectChangesAlpha` holds; the box commit writes the five scalars; a strip seam test at a large offset |
+| 6 ✅ | **Duplicate offset** — `Effect.duplicateOffset`, two passes on both backends (the resample through the box's inverse, the combine under a layer blend mode), the seven CPU blend formulas, `FloatingPieceKind.effectBox` as the second writer, the frame-size apron. **Shipped 2026-09-11.** | `DuplicateOffsetEffectLogicTests`: the identity paints nothing on soft ink (the `min`/`max` regions, §3.4); rim and intersection over a disc slid half a radius counted pixel for pixel and held to the two circles' areas; a quarter turn carries the copy clockwise on screen on both backends; a half-size copy's rim is the annulus; the seven CoreGraphics modes against W3C by hand; every blend mode in both regions to a channel step against the shader, MEASURED max 1; the same on a strip window off the frame's centre; a strip with its apron is the rows of the whole and one without is not; `params` resolved once; the round trip and the bare-kind decode; the box comes up at the copy's pose, previews live, writes the five as one step and one undo restores them; an unmoved box writes nothing and Mirror is a negative scale; a key at the playhead on a keyed channel; the refusal past the bar with its notice; Distort refused by name; the composited canvas shows the rim on both backends. `EffectParityLogicTests.testNoEffectChangesAlpha` sweeps both regions; `FrameBakeKeyLogicTests` drops each of the nine fields; `StripedCompositeLogicTests` / `…MetalLogicTests` pin the twenty-row slide under the driver and the width-dependent reach. `DuplicateOffsetUITests` drives it from a fresh document — draw, `+`, the scrolled menu, the swatch's picker, Adjust Box, the Distort caption, the drag, Done — and reads a red rim and black intersection off the canvas, then the written Offset X off the reopened slider |
 
-Stage 6 depends on nothing here and is what remains. The mode picker in `LayerPanel.transformModeRow`
+Every stage has shipped. The mode picker in `LayerPanel.transformModeRow`
 lists every case of `TransformLayerMode` (`Models/TransformLayerMode.swift`) on a layer and
 `TransformLayerMode.folderCases` on a folder, which is all of them but Repeat — **not `TransformMode`,
 which was taken**: that name is the Move bar's Uniform / Freeform / Distort picker, and stage 2 found

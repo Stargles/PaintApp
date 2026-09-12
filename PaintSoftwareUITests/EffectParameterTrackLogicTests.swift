@@ -88,6 +88,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         .bloom(Effect.Bloom()),
         .sobel(Effect.Sobel()),
         .outline(Effect.Outline(width: 2)),
+        .duplicateOffset(Effect.DuplicateOffset(offsetX: -8, offsetY: 8)),
         .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
         .noise(Effect.Noise(amount: 0.08)),
         .crtScreen(Effect.CRTScreen.preset(.crt)),
@@ -226,10 +227,12 @@ final class EffectParameterTrackLogicTests: XCTestCase {
 
     // MARK: - Scope: which parameter kinds this stage drives
 
-    /// **The thirteen parameters stage 2 refuses, listed by name** — nine the day this test was
+    /// **The sixteen parameters stage 2 refuses, listed by name** — nine the day this test was
     /// written, plus `bloom.color` (`outline.color`'s twin), Recolour's `recolor.entries` and
-    /// `recolor.preserveShading`, and TODO (60)'s `hsvShift.colorize` (`blur.directional`'s twin —
-    /// swaps what the other two HSV Shift knobs mean and the effect's own name).
+    /// `recolor.preserveShading`, TODO (60)'s `hsvShift.colorize` (`blur.directional`'s twin —
+    /// swaps what the other two HSV Shift knobs mean and the effect's own name), and TODO (61)'s
+    /// Duplicate Offset's three: its colour (a third compound colour), its region and its blend mode
+    /// (each a formula, not a quantity).
     ///
     /// A test rather than a comment because the alternative to refusing them is worse than not
     /// shipping them: a `.stepped` field driven by a `Double` curve renders as a staircase the graph
@@ -259,12 +262,15 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "recolor.entries",      // .notAnimatable — TODO (60)'s ruling: the colour list is not keyed
             "recolor.preserveShading", // .stepped — a boolean
             "hsvShift.colorize",    // .stepped — TODO (60), `blur.directional`'s twin
+            "duplicateOffset.color",     // .continuous but compound — TODO (61), the third colour
+            "duplicateOffset.region",    // .stepped — half a rim is not a region
+            "duplicateOffset.blendMode", // .stepped — there is nothing between Multiply and Screen
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
-        XCTAssertEqual(animatable.count, 31,
-                       "31 of the 44 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+        XCTAssertEqual(animatable.count, 37,
+                       "37 of the 53 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 44, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 53, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as

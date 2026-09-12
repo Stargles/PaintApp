@@ -106,6 +106,13 @@ enum Effect: Equatable {
     /// stored. Each ingredient is zero-able on its own and the effect is the identity when all are.
     /// See `CRTScreen` for what each knob means and why bloom is not among them.
     case crtScreen(CRTScreen)
+    /// **Duplicate Offset — TRANSFORM_LAYER.md §3.4 and §5.6, TODO (61) stage 6, designed
+    /// 2026-09-11.** A copy of the drawing beneath, flattened to one colour, slid, resized and turned
+    /// through a box, and painted back *inside the original's own coverage* under a layer blend mode
+    /// — on the rim (where the original is and the copy is not) or the intersection (where both are).
+    /// Two passes on both backends: the resample, then the combine. See `DuplicateOffset` for the
+    /// coverage rule and the five scalars the box writes.
+    case duplicateOffset(DuplicateOffset)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -137,6 +144,7 @@ enum Effect: Equatable {
         case .outline:             return "Outline"
         case .recolor:             return "Recolour"
         case .crtScreen:           return "Computer Screen"
+        case .duplicateOffset:     return "Duplicate Offset"
         }
     }
 
@@ -162,6 +170,12 @@ enum Effect: Equatable {
     /// corners, and a texel pulled from outside the image is transparent (`crtScreen` in either
     /// backend) — so coverage moves where the curvature is non-zero, and it is pinned like the
     /// other five on convolving *premultiplied* texels rather than on alpha equality.
+    ///
+    /// **Duplicate Offset answers false, and that is a property of its two regions rather than a
+    /// choice.** Rim is `orig − dup` and intersection is `orig ∩ dup`, both subsets of the
+    /// original's coverage (TRANSFORM_LAYER.md §2 ruling 14), so the combine writes the alpha it was
+    /// handed back byte for byte and paints colour only under it — an adjustment in the strict sense,
+    /// which is what lets it sit anywhere in a tree, and what `testNoEffectChangesAlpha`'s sweep pins.
     var reshapesCoverage: Bool {
         switch self {
         case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen: return true
@@ -247,6 +261,13 @@ enum Effect: Equatable {
         case .crtScreen:
             return .backdrop
         case .outline:
+            return .ink
+        // **Duplicate Offset reads shape, so it is ink like Outline** — TRANSFORM_LAYER.md §3.4. Both
+        // of its regions are derived from the original's alpha as *coverage*: over an opaque backdrop
+        // the whole frame is "the drawing", the copy of the whole frame slid sideways still covers
+        // nearly all of it, and the rim collapses to a sliver at the frame's edge. Fixed, not a
+        // default — `.backdrop` would not be a mode, it would be an effect that draws nothing.
+        case .duplicateOffset:
             return .ink
         case .bloom(let params):
             return params.input
@@ -671,6 +692,102 @@ extension Effect {
         }
     }
 
+    /// **A duplicate of the drawing, flattened to a colour, moved through a box and painted back
+    /// inside the original** — TRANSFORM_LAYER.md §3.4's design, §5.6's surface, and the owner's own
+    /// words in TODO (61): *"it duplicates whatever is underneath it, makes it a solid color, then you
+    /// resize or offset it and blend it with whatever is underneath it. This is useful for rim
+    /// lighting and shadows."*
+    ///
+    /// **The box is five scalars, and the box is the canvas frame.** The effect reads the ink beneath
+    /// it (`Effect.input` is `.ink`, fixed) and has no geometry of its own, so the rect the copy is
+    /// posed about is the frame — exactly `beginContainerPoseMove`'s argument for a transform layer —
+    /// and its centre `c` is the frame's centre. The forward map from the original to the copy is
+    /// `M(x) = c + (offsetX, offsetY) + R(θ)·diag(scaleX, scaleY)·(x − c)`, which is
+    /// `FloatingTransform.affineTransform` with the box's local space centred on `c`: translate,
+    /// rotate, scale, in that order. Distort is refused by kind (`FloatingPieceKind.effectBox`) —
+    /// five scalars cannot hold a keystone, the same reason a placed image refuses it — per §2
+    /// ruling 15. The kernel gathers through the *inverse* of `M`, bilinear, transparent outside the
+    /// frame; the five are resolved once in `Effect.params` (cos, sin, the reciprocal scales) so the
+    /// two backends receive the same floats rather than each evaluating a transcendental.
+    ///
+    /// **Coverage is correlated, not independent — `rim = max(orig − dup, 0)` and
+    /// `intersection = min(orig, dup)`, never the products §3.4 first wrote.** Porter-Duff's `A out B`
+    /// and `A in B` assume the two coverages are uncorrelated within a pixel; a copy of the *same
+    /// drawing* is the most correlated case there is. At an anti-aliased edge a slid copy's partial
+    /// coverage sits *inside* the original's partial coverage (the same edge, moved), and the
+    /// product formula counts a rim there that does not exist: at zero offset and unit scale it paints
+    /// `opacity · (1 − a)` of the colour along every soft edge of the drawing, so the identity is not
+    /// the identity. `min`/`max` is exact at the identity (`testTheIdentityPaintsNothing` pins it on
+    /// soft ink), agrees with the products wherever the alpha is binary, and inside the drawing the
+    /// two are the same. `region` picks which; a rim at rest is empty and an intersection at rest is
+    /// the whole drawing, which is why the type's default is rim.
+    ///
+    /// **The blend is a layer blend mode at an opacity, and that is the whole of it** (§2 ruling 16).
+    /// The combine unpremultiplies the original, blends the colour onto it with `blendMode`'s formula
+    /// — the same `blendChannels` `Composite.metal` composites layers with, and on the CPU the same
+    /// `BlendMode` arithmetic `CoreGraphicsCompositor` hand-rolls, completed for the seven modes it
+    /// used to reach only through `CGBlendMode` — and mixes the result back by `opacity` times the
+    /// region's share of the pixel's coverage. Alpha is untouched, so it never paints outside the
+    /// drawing and `reshapesCoverage` is false.
+    ///
+    /// **The type's default is the identity, and the catalogue hands the artist a visible rim.**
+    /// `Blur`'s convention: `DuplicateOffset()` is zero offset, unit scale, no turn, rim — which
+    /// paints nothing — and `EffectCatalog` starts at a white rim eight pixels up and to the right,
+    /// so the pick shows something. `clipToBelow` is a `BlendMode` case and not a blend; the
+    /// settings bar does not offer it and `params` composites it as Normal, as the layer panel does.
+    struct DuplicateOffset: Equatable {
+        /// Where the copy's centre sits relative to the original's, in output pixels — the same unit
+        /// `ChromaticAberration.offsetX` and every other pixel knob in this file mean. The box's
+        /// `position − frame centre`.
+        var offsetX: Double = 0
+        var offsetY: Double = 0
+        /// The copy's size relative to the original, about the box centre. Negative mirrors — the
+        /// Move bar's Mirror buttons write a negative scale here. `params` floors the magnitude at
+        /// `minimumScale` so a collapsed copy is a thin copy rather than a division by zero.
+        var scaleX: Double = 1
+        var scaleY: Double = 1
+        /// The copy's turn about the box centre, degrees, clockwise on screen — `FloatingTransform.
+        /// rotation` in the artist's units.
+        var rotationDegrees: Double = 0
+        /// Which part of the original the colour lands on. Rim by default, per the owner.
+        var region: Region = .rim
+        /// How the colour combines with the original's own colour where it lands.
+        var blendMode: BlendMode = .normal
+        /// How much of the blend reaches the pixel — `EffectParams.mix`, every grade's "how much".
+        var opacity: Double = 1
+        /// The colour the copy is flattened to. `Outline.color`'s exact shape; alpha is ignored, as
+        /// `Bloom.color`'s is — `opacity` already says how much, and two knobs for one quantity would
+        /// fight.
+        var color: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
+
+        /// Rim or intersection — §2 ruling 14: *only* these two, both inside the drawing. **Codes
+        /// must match `kDuplicateRegion…` in `Composite.metal`.**
+        enum Region: String, Codable, Equatable, CaseIterable {
+            /// Where the original is present and the copy is not — a highlight on the side the copy
+            /// moved away from, which is what rim lighting is.
+            case rim
+            /// Where both are present — a shadow the copy casts onto the drawing.
+            case intersection
+
+            var code: UInt32 { self == .rim ? 0 : 1 }
+
+            var displayName: String { self == .rim ? "Rim" : "Intersection" }
+        }
+
+        /// The smallest scale magnitude the kernel is handed. A scale of exactly zero collapses the
+        /// copy to a line and its inverse to infinity; a thousandth is a copy one pixel wide on a
+        /// thousand-pixel canvas, which reads as "gone" without dividing by nothing.
+        static let minimumScale = 1e-3
+
+        /// Whether this paints nothing whatever the colour: the copy lies exactly on the original
+        /// and the region is the rim, or the opacity is zero.
+        var isIdentity: Bool {
+            opacity <= 0
+                || (region == .rim && offsetX == 0 && offsetY == 0 && scaleX == 1 && scaleY == 1
+                    && rotationDegrees == 0)
+        }
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     ///
@@ -915,6 +1032,19 @@ struct EffectParams: Equatable {
     /// it into one of them would make "0" ambiguous between "shift by nothing" and "colorize toward
     /// hue 0". Appended at the end for the reason every field since the colour triple was.
     var isColorize: UInt32 = 0
+    /// **Duplicate Offset's box, resolved** (TODO (61) stage 6). The offset rides `offsetX/offsetY`
+    /// — literally "a displacement in pixels", which is what that pair is for — the opacity rides
+    /// `mix` and the colour the trailing triple, so only what no other field means is new: the
+    /// reciprocal scales and the turn's cosine and sine (resolved in Swift, `Blur`'s own precedent
+    /// for a step vector, so neither backend evaluates a transcendental), the region's code and the
+    /// blend mode's `shaderCode`. Appended at the end for the reason every field since the colour
+    /// triple was.
+    var dupInverseScaleX: Float = 1
+    var dupInverseScaleY: Float = 1
+    var dupCos: Float = 1
+    var dupSin: Float = 0
+    var dupRegion: UInt32 = 0
+    var dupBlendMode: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -973,6 +1103,8 @@ extension Effect {
         case .outline:             return 12
         case .recolor:             return 13
         case .crtScreen:           return 14
+        // Pass 0 of a duplicate offset is the resample; the combine's code is reached through `passes`.
+        case .duplicateOffset:     return 15
         }
     }
 
@@ -1077,6 +1209,31 @@ extension Effect {
             p.curvature = Float(Double(unit(screen.curvature)) * CRTScreen.maxCurvature)
             p.vignette = unit(screen.vignette)
             p.aberration = screen.aberration.isFinite ? Float(screen.aberration) : 0
+        case .duplicateOffset(let dup):
+            // The box, resolved once for both backends — `DuplicateOffset`'s doc says which field
+            // carries which. A non-finite scalar is its identity; a scale under `minimumScale` in
+            // magnitude is floored there with its sign kept, so a mirrored copy stays mirrored.
+            func finite(_ v: Double, _ fallback: Double) -> Double { v.isFinite ? v : fallback }
+            func scale(_ v: Double) -> Double {
+                let s = finite(v, 1)
+                return abs(s) < DuplicateOffset.minimumScale
+                    ? (s < 0 ? -DuplicateOffset.minimumScale : DuplicateOffset.minimumScale) : s
+            }
+            p.offsetX = Float(finite(dup.offsetX, 0))
+            p.offsetY = Float(finite(dup.offsetY, 0))
+            p.dupInverseScaleX = Float(1 / scale(dup.scaleX))
+            p.dupInverseScaleY = Float(1 / scale(dup.scaleY))
+            let radians = finite(dup.rotationDegrees, 0) * .pi / 180
+            p.dupCos = Float(cos(radians))
+            p.dupSin = Float(sin(radians))
+            p.dupRegion = dup.region.code
+            // `compositedMode`, as the layer panel does: `clipToBelow` is not a blend and composites
+            // as Normal wherever it reaches a backend.
+            p.dupBlendMode = dup.blendMode.compositedMode.shaderCode
+            p.mix = Float(min(max(finite(dup.opacity, 1), 0), 1))
+            p.colorR = Float(min(max(dup.color.red, 0), 1))
+            p.colorG = Float(min(max(dup.color.green, 0), 1))
+            p.colorB = Float(min(max(dup.color.blue, 0), 1))
         }
         return p
     }
@@ -1126,6 +1283,15 @@ extension Effect {
             var combine = first
             combine.kind = Self.kSharpenCombine
             return [first, vertical, combine]
+
+        case .duplicateOffset:
+            // The resample (pass 0, `kindCode`) gathers the copy's coverage through the box's inverse;
+            // the combine reads that beside the effect's *original* — bloom's combine shape exactly,
+            // with the same parameter block, since the combine reads the colour, the mode and the
+            // region and the resample reads the box.
+            var combine = first
+            combine.kind = Self.kDuplicateCombine
+            return [first, combine]
 
         default:
             return [first]
@@ -1223,15 +1389,23 @@ extension Effect {
     ///   `int searchRadius = int(ceil(radius))` in the kernel walks.
     /// - `chromaticAberration` is the ceiling of its vertical displacement **plus one**, because the
     ///   tap is bilinear: a sample at y + 2.5 reads rows 2 and 3 away.
-    /// - `crtScreen` is **the one reach that depends on the frame**, which is why this takes
-    ///   `frameHeight` at all. Its curvature pulls a corner's source `k · H/2` rows inward
+    /// - `crtScreen` is **a reach that depends on the frame**, which is why this takes the frame's
+    ///   size at all. Its curvature pulls a corner's source `k · H/2` rows inward
     ///   (`w.y = n.y · (1 + k·n.x²)`, at most `k` in normalised units, over a half-height of `H/2`),
-    ///   and its fringe reaches `|aberration|` pixels more at the edge, bilinear, so plus one. Every
-    ///   other effect ignores the argument.
+    ///   and its fringe reaches `|aberration|` pixels more at the edge, bilinear, so plus one.
+    /// - `duplicateOffset` is the second, and the one that needs the frame's **width** as well: its
+    ///   gather is the box's inverse map, an affine of the frame coordinate, so the source row's
+    ///   distance from the destination row is itself affine in `(x, y)` and takes its largest value
+    ///   at one of the frame's four corners — which is where it is read, exactly, rather than bounded
+    ///   by a guess. A turned copy on a wide canvas pulls further vertically at the far corners than
+    ///   at the near ones, which is what a height-only bound would miss. Plus one for the bilinear
+    ///   tap. A large offset or a small scale makes a large apron, and the planner pays it in shorter
+    ///   strips rather than in a seam.
     /// - Every per-pixel grade is 0. `noise` and a screened `posterize` are 0 *here* and are not
     ///   therefore free under a strip — they read absolute position rather than a neighbourhood, so
     ///   no apron can carry them and `EffectParams.originX/originY` is what does.
-    func verticalKernelRadius(frameHeight: Int) -> Int {
+    func verticalKernelRadius(frameSize: (width: Int, height: Int)) -> Int {
+        let frameHeight = frameSize.height
         switch self {
         case .blur(let blur): return Self.tapCount(forRadius: blur.radius)
         case .bloom(let bloom): return Self.tapCount(forRadius: bloom.radius)
@@ -1246,10 +1420,39 @@ extension Effect {
             let p = params
             let pull = Double(p.curvature) * Double(max(frameHeight, 0)) / 2
             return Int(pull.rounded(.up)) + Int(abs(Double(p.aberration)).rounded(.up)) + 1
+        case .duplicateOffset:
+            let width = Double(max(frameSize.width, 0)), height = Double(max(frameHeight, 0))
+            var reach = 0.0
+            for corner in [SIMD2<Double>(0, 0), SIMD2<Double>(width, 0),
+                           SIMD2<Double>(0, height), SIMD2<Double>(width, height)] {
+                let source = Self.duplicateSource(of: corner, params: params,
+                                                  frame: SIMD2<Double>(width, height))
+                reach = max(reach, abs(source.y - corner.y))
+            }
+            guard reach.isFinite else { return Int(height.rounded(.up)) + 1 }
+            return Int(reach.rounded(.up)) + 1
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
              .recolor:
             return 0
         }
+    }
+
+    /// **Where a duplicate offset's copy reads from, for one frame position** — the box's inverse
+    /// map, stated once in `Double` so the apron above and `DuplicateOffsetEffectLogicTests`' hand
+    /// computations share it with the two kernels' `Float` transcriptions
+    /// (`EffectReference.duplicateResample`, `duplicateResample` in `Composite.metal`).
+    ///
+    /// `M(x) = c + t + R(θ)·S·(x − c)`, so `M⁻¹(p) = c + S⁻¹·R(−θ)·(p − c − t)`, with `R(−θ)·v =
+    /// (v.x·cos θ + v.y·sin θ, −v.x·sin θ + v.y·cos θ)` — `CGAffineTransform.rotated(by:)`'s
+    /// convention, which is the Move box's. `params` already holds `cos`, `sin` and the reciprocal
+    /// scales, so this reads the resolved block rather than the knobs.
+    static func duplicateSource(of position: SIMD2<Double>, params: EffectParams,
+                                frame: SIMD2<Double>) -> SIMD2<Double> {
+        let centre = frame * 0.5
+        let q = position - centre - SIMD2<Double>(Double(params.offsetX), Double(params.offsetY))
+        let cosine = Double(params.dupCos), sine = Double(params.dupSin)
+        let turned = SIMD2<Double>(cosine * q.x + sine * q.y, -sine * q.x + cosine * q.y)
+        return centre + turned * SIMD2<Double>(Double(params.dupInverseScaleX), Double(params.dupInverseScaleY))
     }
 
     /// **Whether this effect's pixels depend on where in the frame they are**, rather than only on
@@ -1268,6 +1471,9 @@ extension Effect {
         // are about the frame's centre and its scanlines about the frame's rows, so it needs the
         // origin and the frame size, and its curvature needs an apron on top of both.
         case .crtScreen: return true
+        // The fourth: the box is about the frame's centre, so the copy is gathered from a frame
+        // coordinate, and a strip has to know where in the frame it sits to gather the right rows.
+        case .duplicateOffset: return true
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
              .blur, .bloom, .sobel, .sharpen, .outline, .recolor:
             return false
@@ -1299,6 +1505,7 @@ extension Effect {
     private static let kBlur1D: UInt32 = 7
     private static let kBloomCombine: UInt32 = 9
     private static let kSharpenCombine: UInt32 = 11
+    private static let kDuplicateCombine: UInt32 = 16
 
     /// 256 RGBA entries, 1024 bytes — the resolved transfer table, and **the only form a curve reaches
     /// either backend in**.
@@ -1560,7 +1767,8 @@ extension Effect: Codable {
 
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
-             posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen
+             posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen,
+             duplicateOffset
     }
 
     private var kind: Kind {
@@ -1580,6 +1788,7 @@ extension Effect: Codable {
         case .outline:             return .outline
         case .recolor:             return .recolor
         case .crtScreen:           return .crtScreen
+        case .duplicateOffset:     return .duplicateOffset
         }
     }
 
@@ -1609,6 +1818,7 @@ extension Effect: Codable {
         case .outline:             self = .outline(try params(Outline.self, Outline()))
         case .recolor:             self = .recolor(try params(Recolor.self, Recolor()))
         case .crtScreen:           self = .crtScreen(try params(CRTScreen.self, CRTScreen()))
+        case .duplicateOffset:     self = .duplicateOffset(try params(DuplicateOffset.self, DuplicateOffset()))
         }
     }
 
@@ -1631,6 +1841,7 @@ extension Effect: Codable {
         case .outline(let p):             try container.encode(p, forKey: .params)
         case .recolor(let p):             try container.encode(p, forKey: .params)
         case .crtScreen(let p):           try container.encode(p, forKey: .params)
+        case .duplicateOffset(let p):     try container.encode(p, forKey: .params)
         }
     }
 }
@@ -1827,6 +2038,30 @@ extension Effect.CRTScreen: Codable {
         curvature = try c.decodeIfPresent(Double.self, forKey: .curvature) ?? 0
         vignette = try c.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
         aberration = try c.decodeIfPresent(Double.self, forKey: .aberration) ?? 0
+    }
+}
+
+/// Every field defaulted, `CRTScreen`'s recipe: a document written before a knob existed has the
+/// knob's identity, and one written before the effect existed never names it at all. The region and
+/// the blend mode decode by their raw names, so a mode this build does not know reads as the default
+/// rather than as corrupt. Encodes synthesized.
+extension Effect.DuplicateOffset: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case offsetX, offsetY, scaleX, scaleY, rotationDegrees, region, blendMode, opacity, color
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        offsetX = try c.decodeIfPresent(Double.self, forKey: .offsetX) ?? 0
+        offsetY = try c.decodeIfPresent(Double.self, forKey: .offsetY) ?? 0
+        scaleX = try c.decodeIfPresent(Double.self, forKey: .scaleX) ?? 1
+        scaleY = try c.decodeIfPresent(Double.self, forKey: .scaleY) ?? 1
+        rotationDegrees = try c.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0
+        region = try c.decodeIfPresent(Region.self, forKey: .region) ?? .rim
+        blendMode = try c.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        color = try c.decodeIfPresent(CodableColor.self, forKey: .color)
+            ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
     }
 }
 
@@ -2366,6 +2601,43 @@ extension Effect {
                 // Negative swaps which channel goes outward, and is meaningful; the slider stops at 0.
                 l.double("crtScreen.aberration", "Colour Fringe", "aberration", \.aberration,
                          ui: 0...8, model: EffectParameter.unbounded, format: "%.1f px"),
+            ]
+
+        case .duplicateOffset:
+            let l = EffectCaseLens<DuplicateOffset>(
+                extract: { if case .duplicateOffset(let p) = $0 { return p }; return nil },
+                embed: { .duplicateOffset($0) })
+            // **The box's five scalars first, every one a continuous `Double`, keyable** — the ids
+            // the Move box writes through (`CanvasManager.commitEffectBoxFloat` looks them up by
+            // name, so these five strings are load-bearing twice: a saved track stores them and the
+            // box's commit addresses them). The sliders are the precise way in; the box is the
+            // gestural one, and both write the same address.
+            return [
+                l.double("duplicateOffset.offsetX", "Offset X", "offsetX", \.offsetX,
+                         ui: -200...200, model: EffectParameter.unbounded, format: "%.1f px"),
+                l.double("duplicateOffset.offsetY", "Offset Y", "offsetY", \.offsetY,
+                         ui: -200...200, model: EffectParameter.unbounded, format: "%.1f px"),
+                // The slider stops short of zero and of a mirror; `params` floors the magnitude at
+                // `minimumScale` and keeps the sign, and the Move bar's Mirror is how a negative
+                // scale is reached.
+                l.double("duplicateOffset.scaleX", "Scale X", "scaleX", \.scaleX,
+                         ui: 0.1...4, model: EffectParameter.unbounded, format: "%.2f×"),
+                l.double("duplicateOffset.scaleY", "Scale Y", "scaleY", \.scaleY,
+                         ui: 0.1...4, model: EffectParameter.unbounded, format: "%.2f×"),
+                // Cyclic, so a key past ±180 is a real turn and not an out-of-range one.
+                l.double("duplicateOffset.rotation", "Rotation", "rotation", \.rotationDegrees,
+                         ui: -180...180, model: EffectParameter.unbounded, format: "%.0f°"),
+                // Rim or intersection: two pictures with nothing between them.
+                l.option("duplicateOffset.region", "Region", "region", \.region),
+                // A blend mode is a formula, not a quantity — `posterize.screen`'s argument.
+                l.option("duplicateOffset.blendMode", "Blend Mode", "blendMode", \.blendMode),
+                // Clamped to exactly its slider in `params`, like `bloom.threshold`.
+                l.double("duplicateOffset.opacity", "Opacity", "opacity", \.opacity,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                // `Outline.color`'s shape: compound, continuous, refused by the scalar bridge.
+                l.compound("duplicateOffset.color", "Colour", "color",
+                           value: .colour, animation: .continuous,
+                           componentDomain: 0...1, keyPath: \DuplicateOffset.color),
             ]
         }
     }

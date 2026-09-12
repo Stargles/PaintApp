@@ -423,7 +423,12 @@ struct DrawingView: View {
             // blend mode, which `setMixBlendMode` clears the effect for — takes the effect away while
             // the bar is open. The old rail version fell back to its own edit rows in that state; here,
             // a flag-driven bar would leave the rail suppressed with nothing on screen to bring it back.
-            if let editing = effectBeingEdited {
+            // **And it stands down while a piece is floating** — the Select panel's rule, for the
+            // Duplicate Offset's Adjust Box (TODO (61) stage 6): the row raises the Move box over the
+            // effect's copy, the box and its bar dock here, and the artist has to see the canvas to
+            // drag on it. The presentation is suppressed and nothing else moves, so Done on the box
+            // puts this bar straight back with the same grade's rows.
+            if let editing = effectBeingEdited, !canvasManager.isAnyPieceFloating {
                 EffectSettingsBar(
                     effect: editing.effect,
                     canvasManager: canvasManager,
@@ -466,6 +471,9 @@ struct DrawingView: View {
                     },
                     // The recolour's eyedroppers arm the tool for *this* node's pairs (TODO (60)).
                     pickTarget: editing.target,
+                    // The Duplicate Offset's box, over *this* node's copy (TODO (61) stage 6). The
+                    // model decides whether one comes up and says so if not.
+                    onAdjustBox: { canvasManager.beginEffectBoxMove(for: editing.target) },
                     onBack: { showingEffectSettings = false },
                     onClose: { layerOptionsID = nil })
                 .bottomDockCard(width: width)
@@ -642,7 +650,7 @@ struct DrawingView: View {
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
              .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .recordingRefused,
              .recordingArmed, .animationGroupMembershipChanged, .animationGroupEditRefused,
-             .keyframesCropped, .moveOutsideTransformBlock:
+             .keyframesCropped, .moveOutsideTransformBlock, .effectBoxOutsideBlock:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner
             // never offers a button that would land here. Every case is spelled out rather than
             // defaulted so that adding a new kind is a compile error here, not a silent no-op.

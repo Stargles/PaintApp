@@ -2082,10 +2082,13 @@ final class EffectLayerLogicTests: XCTestCase {
             // would be stripes on a drawing, not a monitor. Its curvature reshapes coverage, but it
             // reads colour and position, not shape, so it has no use for the ink-only re-walk.
             ("Computer Screen",      .crtScreen(Effect.CRTScreen.preset(.crt)),                  .backdrop),
+            // TODO (61) stage 6: reads shape — both of its regions are derived from the original's
+            // alpha as coverage, and over an opaque backdrop the whole frame would be "the drawing".
+            ("Duplicate Offset",     .duplicateOffset(Effect.DuplicateOffset(offsetX: 4)),       .ink),
         ]
 
-        XCTAssertEqual(expected.count, 15,
-                       "Fifteen effects exist; a sixteenth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 16,
+                       "Sixteen effects exist; a seventeenth has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {
@@ -2096,11 +2099,12 @@ final class EffectLayerLogicTests: XCTestCase {
         }
 
         // Stated separately because it is the load-bearing consequence, not a restatement: exactly
-        // the three effects that read alpha as *shape* rather than colour can want the ink alone, and
+        // the effects that read alpha as *shape* rather than colour can want the ink alone, and
         // an effect that reads colour asking for `.ink` would be asking for a re-walk it has no use
-        // for. Sobel is in the list of three and still defaults to `.backdrop`, which is the ruling.
+        // for. Sobel reads shape too and still defaults to `.backdrop`, which is the ruling; the
+        // Duplicate Offset (TODO (61)) is the third ink reader, for Outline's reason.
         let inkReaders = expected.filter { $0.2 == .ink }.map(\.0)
-        XCTAssertEqual(inkReaders, ["Outline", "Bloom"],
+        XCTAssertEqual(inkReaders, ["Outline", "Bloom", "Duplicate Offset"],
                        "Only the shape-reading effects take the ink-only input, and Sobel is ruled out "
                        + "of that set by its own default rather than by its kernel")
     }

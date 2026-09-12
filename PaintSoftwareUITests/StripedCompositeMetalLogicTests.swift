@@ -118,6 +118,41 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         return StripedCompositor.plan(for: recipe, budgetBytes: budget).count
     }
 
+    // MARK: - A gather that reaches past the strip, on the GPU
+
+    /// **`testADuplicateOffsetGathersTheFrameNotTheStrip`, on the backend the app ships** — TODO (61)
+    /// stage 6's strip-reach pin, both backends. The same bars, the same twenty-row slide, the same
+    /// 32-row plan; `duplicateResample` in `Composite.metal` gathers through the frame origin the
+    /// strip stamps, and the apron the planner pays is what puts the source rows in the strip's
+    /// texture. Held byte for byte, Metal against Metal.
+    func testADuplicateOffsetGathersTheFrameNotTheStripOnTheGPU() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let bars = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64),
+                                           format: PixelOps.transparentFormat()).image { context in
+            for top in stride(from: 0, to: 64, by: 8) {
+                context.cgContext.setFillColor((top / 8) % 2 == 0 ? UIColor.red.cgColor : UIColor.blue.cgColor)
+                context.cgContext.fill(CGRect(x: 4, y: top, width: 56, height: 5))
+            }
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, bars)
+        let effect = Effect.duplicateOffset(Effect.DuplicateOffset(
+            offsetX: 3, offsetY: 20, region: .intersection, blendMode: .normal, opacity: 1,
+            color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1)))
+        manager.addValueLayer(effect: effect)
+        guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
+            return XCTFail("Fixture must mint")
+        }
+        XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
+                                               frameSize: (64, 64)), 21,
+                       "Premise: twenty rows of slide and the bilinear row")
+
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 32,
+                                                     "A Metal strip must gather the copy from the "
+                                                     + "frame's rows, not from its own")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
+    }
+
     // MARK: - The zoo, on the GPU
 
     /// **The pin.** Byte for byte, Metal against Metal, on `CanvasFixture.stripingZoo()` — the same
@@ -218,7 +253,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height)), 0,
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height))), 0,
                        "Premise: noise reads no neighbour, so no apron can be what saves this")
 
         let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
@@ -396,7 +431,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height)), 0,
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height))), 0,
                        "Premise: no kernel here, so the strips are all exactly 16 rows and collide by size")
         let budget = budgetBytes(forStripBufferRows: 16, recipe: recipe)
         let plan = StripedCompositor.plan(for: recipe, budgetBytes: budget)

@@ -259,6 +259,14 @@ struct CanvasNotice: Identifiable, Equatable {
         /// the second is what a layer made early and used late wants, and it is the timeline's own
         /// Extend to End rather than anything this banner could press.
         case moveOutsideTransformBlock(frame: Int)
+
+        /// **Adjust Box was tapped on a Duplicate Offset at a frame the layer's bar does not cover**
+        /// — the same ruling one home over (TODO (61) stage 6). Stage 1 made an adjustment layer's
+        /// bar mean "only here" too: past it the grade is the ungraded floor, so a box raised there
+        /// would be dragging a copy the canvas is not drawing, and the drag would appear to do
+        /// nothing. Carries the frame for `moveOutsideTransformBlock`'s reason and names the same
+        /// two ways out.
+        case effectBoxOutsideBlock(frame: Int)
     }
 
     /// Which of the three operations happened, in the artist's own nouns — the group's display name,
@@ -374,6 +382,8 @@ struct CanvasNotice: Identifiable, Equatable {
             return "\(crop.count) \(one ? "keyframe" : "keyframes") outside the block's new length \(one ? "was" : "were") removed (\(where_) \(Self.list(crop.frames))). Undo brings \(one ? "it" : "them") back."
         case .moveOutsideTransformBlock(let frame):
             return "Frame \(frame + 1) is outside this transform layer's bar, and it only moves things where its bar is — scrub to a frame inside the bar, or drag the bar's edge out to here."
+        case .effectBoxOutsideBlock(let frame):
+            return "Frame \(frame + 1) is outside this layer's bar, and the effect only applies where its bar is — scrub to a frame inside the bar, or drag the bar's edge out to here."
         }
     }
 
@@ -469,6 +479,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // or a handle drag — and neither is a tap this banner could make for them without deciding
         // which of the two they meant.
         case .moveOutsideTransformBlock: return nil
+        case .effectBoxOutsideBlock: return nil
         }
     }
 
@@ -516,6 +527,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .animationGroupEditRefused: return "animationGroupEditRefused"
         case .keyframesCropped: return "keyframesCropped"
         case .moveOutsideTransformBlock: return "moveOutsideTransformBlock"
+        case .effectBoxOutsideBlock: return "effectBoxOutsideBlock"
         }
     }
 

@@ -28,7 +28,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// `Effect.parameters` is an exhaustive switch with no `default:`: nothing here would notice a
     /// sixteenth effect, so the compiler has to.
     ///
-    /// **Nineteen entries over fifteen cases.** Sixteen the day the Computer Screen shipped. Gaussian
+    /// **Twenty entries over sixteen cases.** Sixteen entries the day the Computer Screen shipped,
+    /// nineteen with TODO (60)'s splits, twenty with TODO (61)'s Duplicate Offset. Gaussian
     /// and Directional Blur are one case split by `Blur.isDirectional`, and both are listed so the
     /// "same case, same table" claim is exercised rather than assumed; TODO (60)'s Dither and Halftone
     /// (`Posterize.screen`) and Hue Colorize (`HSVShift.colorize`) are the same claim reached through
@@ -36,7 +37,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// by the smaller equivalence checks in `testTheSlidersMatchTheSettingsBarCallSitesTheyReplaced`.
     /// None of the three adds a stored field or a slider — every sweep below that would otherwise
     /// triple-count Posterize's or HSV Shift's own parameters across their split entries dedupes the
-    /// same way `testThereAreThirtyTwoSlidersInTheWholeCatalogue` already deduped the two blurs.
+    /// same way `testThereAreThirtyEightSlidersInTheWholeCatalogue` already deduped the two blurs.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
@@ -54,6 +55,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         .bloom(Effect.Bloom()),
         .sobel(Effect.Sobel()),
         .outline(Effect.Outline(width: 2)),
+        .duplicateOffset(Effect.DuplicateOffset(offsetX: -8, offsetY: 8)),
         .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
         .noise(Effect.Noise(amount: 0.08)),
         .crtScreen(Effect.CRTScreen.preset(.crt)),
@@ -182,14 +184,27 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "vignette|Vignette|0.0...1.0|%.2f",
             "aberration|Colour Fringe|0.0...8.0|%.1f px",
         ])
+
+        // The Duplicate Offset's six (TODO (61) stage 6): the box's five scalars, which the Move box
+        // writes as well, and the opacity. Region, blend mode and colour are a picker, a picker and a
+        // swatch. Transcribed from `EffectSettingsBar.rows` the day the case was added, 2026-09-11.
+        XCTAssertEqual(sliderRows(.duplicateOffset(Effect.DuplicateOffset())), [
+            "offsetX|Offset X|-200.0...200.0|%.1f px",
+            "offsetY|Offset Y|-200.0...200.0|%.1f px",
+            "scaleX|Scale X|0.1...4.0|%.2f×",
+            "scaleY|Scale Y|0.1...4.0|%.2f×",
+            "rotation|Rotation|-180.0...180.0|%.0f°",
+            "opacity|Opacity|0.0...1.0|%.2f",
+        ])
     }
 
-    /// 32 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
+    /// 38 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
     /// `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour (whose
     /// tolerance/softness are per entry, not a `slider(...)` row of their own — see above), 26 with
     /// TODO (60)'s `sobel.gain` (`bloom.color` does not add one: a `.compound` value has no
-    /// `uiRange`), and 32 with the Computer Screen's six.
-    func testThereAreThirtyTwoSlidersInTheWholeCatalogue() {
+    /// `uiRange`), 32 with the Computer Screen's six, and 38 with the Duplicate Offset's six (five
+    /// box scalars and an opacity; its region, mode and colour are not sliders).
+    func testThereAreThirtyEightSlidersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Blur, Posterize and HSV Shift each back more than one menu entry; count each case once,
             // through whichever entry is its "base" reading.
@@ -198,8 +213,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
             return true
         }
-        XCTAssertEqual(cases.count, 15, "Fifteen cases behind nineteen menu entries")
-        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 32)
+        XCTAssertEqual(cases.count, 16, "Sixteen cases behind twenty menu entries")
+        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 38)
     }
 
     /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
@@ -213,7 +228,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// band would start reading a number differently from the settings bar.
     func testEveryAnimatableParameterCarriesAFormatForTheGraphEditorToRead() {
         // By id, because `everyMenuEntry` lists Gaussian and Directional Blur separately and they are
-        // one case sharing one table — the same dedup `testThereAreThirtyTwoSlidersInTheWholeCatalogue`
+        // one case sharing one table — the same dedup `testThereAreThirtyEightSlidersInTheWholeCatalogue`
         // does by filtering the case, reached from the other side. Ids are unique across the
         // catalogue (`testIdsAreUniqueWithinAndAcrossEffects`), so a set of them is the true count.
         var animatable: Set<String> = []
@@ -223,10 +238,10 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                 animatable.insert(parameter.id)
             }
         }
-        XCTAssertEqual(animatable.count, 31,
+        XCTAssertEqual(animatable.count, 37,
                        "PREMISE: the animatable set — got \(animatable.sorted())")
         XCTAssertFalse(animatable.contains("posterize.levels"), """
-            PREMISE: 31 and not 32, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
+            PREMISE: 37 and not 38, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
             """)
     }
 
@@ -242,14 +257,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **44 stored fields over 15 payload structs, and every one of them addressable.** 33 the day
+    /// **53 stored fields over 16 payload structs, and every one of them addressable.** 33 the day
     /// the table was written, plus Recolour's own 2 (its new payload struct), the same day's
     /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), the Computer Screen's 6 (its own
-    /// new payload struct), and TODO (60)'s `HSVShift.colorize` (1 more, the boolean mode switch
-    /// `Effect.displayName` and `EffectReference`'s colorize branch both key on). Dither and Halftone
-    /// add no field of their own — `Posterize.screen` already existed. The count is the point: a field
-    /// added to a payload struct and not to the table is a knob no keyframe can reach, and nothing
-    /// else in the app would say so.
+    /// new payload struct), TODO (60)'s `HSVShift.colorize` (1 more, the boolean mode switch
+    /// `Effect.displayName` and `EffectReference`'s colorize branch both key on), and TODO (61)'s
+    /// Duplicate Offset's 9 (its own payload struct: the box's five, region, blend mode, opacity,
+    /// colour). Dither and Halftone add no field of their own — `Posterize.screen` already existed.
+    /// The count is the point: a field added to a payload struct and not to the table is a knob no
+    /// keyframe can reach, and nothing else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
         let expected: [(Effect, Int)] = [
             (.levels(Effect.Levels()), 5),
@@ -267,6 +283,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.outline(Effect.Outline()), 3),
             (.recolor(Effect.Recolor()), 2),
             (.crtScreen(Effect.CRTScreen()), 6),
+            (.duplicateOffset(Effect.DuplicateOffset()), 9),
         ]
         for (effect, count) in expected {
             XCTAssertEqual(effect.parameters.count, count,
@@ -276,7 +293,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 44)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 53)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -296,6 +313,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         case .outline(let p):             return Mirror(reflecting: p).children.count
         case .recolor(let p):             return Mirror(reflecting: p).children.count
         case .crtScreen(let p):           return Mirror(reflecting: p).children.count
+        case .duplicateOffset(let p):     return Mirror(reflecting: p).children.count
         }
     }
 
@@ -320,6 +338,10 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "crtScreen.aberration", "crtScreen.apertureMask", "crtScreen.curvature",
             "crtScreen.scanlinePeriod", "crtScreen.scanlines", "crtScreen.vignette",
             "curves.points",
+            "duplicateOffset.blendMode", "duplicateOffset.color",
+            "duplicateOffset.offsetX", "duplicateOffset.offsetY", "duplicateOffset.opacity",
+            "duplicateOffset.region", "duplicateOffset.rotation",
+            "duplicateOffset.scaleX", "duplicateOffset.scaleY",
             "gradientMap.mix", "gradientMap.stops",
             "hsvShift.colorize", "hsvShift.hue", "hsvShift.saturation", "hsvShift.value",
             "levels.gamma", "levels.inputBlack", "levels.inputWhite",
@@ -340,7 +362,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 44)
+        XCTAssertEqual(seen.count, 53)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -376,14 +398,16 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Animation kinds
 
-    /// **Eight structural fields hold, and these are they.** Three of the eight change the render
+    /// **Ten structural fields hold, and these are they.** TODO (61)'s Duplicate Offset added two:
+    /// its region and its blend mode are each a formula, not a quantity — half a rim is not a region
+    /// and there is nothing between Multiply and Screen. Three of the original eight change the render
     /// *shape* rather than a number — `blur.directional` rewrites the pass list from two passes to
     /// one, `bloom.input` decides whether the compositor performs an entire sub-walk into two borrowed
     /// textures, and TODO (60)'s `hsvShift.colorize` swaps what `hueDegrees`/`saturation` mean and the
     /// effect's own `displayName` (its own doc: the same shape as `blur.directional`, reached through
     /// `HSVShift` instead of `Blur`) — so none of the three could be tweened even in principle.
     /// `recolor.preserveShading` is a `Bool` like `noise.monochrome`.
-    func testTheEightSteppedParametersAreTheStructuralOnes() {
+    func testTheTenSteppedParametersAreTheStructuralOnes() {
         let stepped = Self.everyMenuEntry
             .flatMap { $0.parameters }
             .filter { $0.animation == .stepped }
@@ -393,6 +417,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
             "recolor.preserveShading", "hsvShift.colorize",
+            "duplicateOffset.region", "duplicateOffset.blendMode",
         ])
     }
 
@@ -406,14 +431,16 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(Set(componentwise), ["curves.points", "gradientMap.stops"])
     }
 
-    /// 31 `Double`s plus two colours (`Bloom.color`, `Outline.color`), each of whose four channels
-    /// tween as one value with a fixed count — which is why they are continuous rather than
-    /// componentwise. 24 doubles and one colour the day the table was written; TODO (60) added
-    /// `sobel.gain` (a double) and `bloom.color` (a colour); the Computer Screen's six, every one a
-    /// continuous `Double`, brought the doubles to 31. Dither/Halftone/Hue Colorize add none of their
-    /// own — `hsvShift.colorize` is `.stepped`, not `.continuous` — so the same dedup this file's
-    /// header comment names keeps the count from tripling what Posterize and HSV Shift each contribute.
-    func testThirtyThreeParametersAreContinuous() {
+    /// 37 `Double`s plus three colours (`Bloom.color`, `Outline.color`, `DuplicateOffset.color`),
+    /// each of whose four channels tween as one value with a fixed count — which is why they are
+    /// continuous rather than componentwise. 24 doubles and one colour the day the table was written;
+    /// TODO (60) added `sobel.gain` (a double) and `bloom.color` (a colour); the Computer Screen's
+    /// six, every one a continuous `Double`, brought the doubles to 31; TODO (61)'s Duplicate Offset
+    /// added six more doubles (the box's five and an opacity) and a colour. Dither/Halftone/Hue
+    /// Colorize add none of their own — `hsvShift.colorize` is `.stepped`, not `.continuous` — so the
+    /// same dedup this file's header comment names keeps the count from tripling what Posterize and
+    /// HSV Shift each contribute.
+    func testFortyParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
             .filter {
                 if case .blur(let b) = $0 { return !b.isDirectional }
@@ -423,10 +450,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
-        XCTAssertEqual(continuous.count, 33)
-        // Bloom precedes Outline in `everyMenuEntry`, so its colour is encountered first.
-        XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id), ["bloom.color", "outline.color"])
-        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 31)
+        XCTAssertEqual(continuous.count, 40)
+        // Bloom precedes Outline precedes Duplicate Offset in `everyMenuEntry`.
+        XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id),
+                       ["bloom.color", "outline.color", "duplicateOffset.color"])
+        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 37)
     }
 
     /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
@@ -573,6 +601,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "noise.monochrome", "noise.seed",
             "blur.directional", "bloom.input",
             "recolor.preserveShading", "hsvShift.colorize",
+            // TODO (61): two enums, a region and a blend mode.
+            "duplicateOffset.region", "duplicateOffset.blendMode",
         ])
     }
 

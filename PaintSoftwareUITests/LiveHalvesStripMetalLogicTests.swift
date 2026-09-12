@@ -208,7 +208,7 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
                        "Premise: the lower half must be handed to the GPU at all")
         XCTAssertEqual(StripedCompositor.apron(of: recipe.belowRecipe.tree,
                                                maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.belowRecipe.canvasSize.height)), 0,
+                                               frameSize: (Int(recipe.belowRecipe.canvasSize.width), Int(recipe.belowRecipe.canvasSize.height))), 0,
                        "Premise: no kernel here, so every strip but the last is exactly the same size "
                        + "and they collide on the key by construction")
 

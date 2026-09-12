@@ -175,6 +175,29 @@ enum FloatingPieceKind {
     /// place — *"re-poses the vector objects below it, rather than resampling the composited pixels
     /// below it"* — so a preview built by resampling would be a picture of the wrong feature.
     case containerPose
+    /// **A Duplicate Offset's box** — TRANSFORM_LAYER.md §3.4's *"A Move box as a writer"*, TODO (61)
+    /// stage 6, and the second kind that carries no pixels.
+    ///
+    /// The effect's copy is posed by five scalars (`Effect.DuplicateOffset`: offset x/y, scale x/y,
+    /// rotation) that are ordinary keyable `EffectParameter`s, and this box is a **second writer**
+    /// onto them beside the settings bar's sliders: it comes up *at the copy's current pose* (the
+    /// frame, slid, scaled and turned by the five — a `FloatingTransform` holds exactly those), the
+    /// drag writes the five live so the render draws the copy moving, and the commit routes them
+    /// through `applyEffectParameterEdit` as one undo step. Distort is refused by this kind
+    /// (`distortUnavailableReason`) for a placed image's reason: five scalars cannot hold a keystone.
+    case effectBox
+
+    /// Whether a corner drag in Distort mode may pull this piece's corners. False for the effect
+    /// box alone — `CanvasManager.distortUnavailableReason` carries the sentence.
+    var acceptsDistort: Bool { self != .effectBox }
+}
+
+/// **What a `.effectBox` found when it came up** — the stored grade and its curves, put back before
+/// the commit so the routed write's undo baseline is the value the drag started from rather than the
+/// value the preview left. `FloatingPiece.containerRest`'s job, one payload over.
+struct EffectBoxRest: Equatable {
+    var effect: Effect
+    var tracks: [String: AnimationCurve]
 }
 
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
@@ -257,8 +280,18 @@ struct FloatingPiece {
     /// lifted at frame `n` is committed at frame `n` and there is no second frame to store.
     var containerRest: LayerPose?
 
+    /// **The grade exactly as an `.effectBox` found it** — `.effectBox` only, nil on every other
+    /// kind, and `containerRest`'s argument applied to a grade: `showEffectBoxLive` writes the five
+    /// scalars into the stored effect (or a key at the playhead, on a keyed channel) on every tick
+    /// of the drag, so the commit has to put this back before it routes, or one press of Undo would
+    /// restore the *dragged* copy.
+    var effectRest: EffectBoxRest?
+
     /// **What a `.containerPose` box actually poses** — a transformation layer or, since §2.21's
-    /// folder twin, a folder — nil on every other kind.
+    /// folder twin, a folder — nil on every other kind. **And which grade home an `.effectBox`
+    /// writes** — the same `KeyframeTarget` naming a value layer or a graded folder, because the two
+    /// questions have one answer type and a second field typed the same way would be a second place
+    /// for them to disagree.
     ///
     /// **`sourceLayerID`/`targetLayerID` still name the layer that was current when the box went up,
     /// even when this names a folder**, and that is bookkeeping rather than a second address for the
@@ -876,6 +909,149 @@ extension CanvasManager {
         return true
     }
 
+    /// **Raises the Move box over a Duplicate Offset's copy** — TRANSFORM_LAYER.md §3.4's *"A Move
+    /// box as a writer"*, and the Effect Settings bar's Adjust Box row (TODO (61) stage 6).
+    ///
+    /// **The box is the canvas frame, at the copy's current pose.** The effect has no geometry of
+    /// its own — it reads the ink beneath — so the rect it is about is the frame, the same fallback
+    /// `beginContainerPoseMove` takes; and unlike that box, which lifts at rest and composes because
+    /// a `FloatingTransform` cannot hold a skew, this one *can* come up where the copy already is:
+    /// the five scalars are exactly a position, two scales and a turn, so the box the artist sees is
+    /// drawn around the copy and the commit reads the five straight back off it. A negative scale (a
+    /// mirror) is seeded as a positive scale plus the flip bit, which is how `affineTransform` spells
+    /// it and what the Mirror buttons toggle.
+    ///
+    /// **Refused at a frame the layer's bar does not cover, and it says so** — stage 1's ruling that
+    /// an adjustment layer's bar means "only here": past it the grade is the ungraded floor, so a box
+    /// raised there would drag a copy the canvas is not drawing. `CanvasNotice.effectBoxOutsideBlock`
+    /// rather than silence; a folder has no bar and its arm has no gate.
+    ///
+    /// - Returns: whether a box came up. False when `target` holds no Duplicate Offset, when the
+    ///   layer's bar does not cover the playhead, or before the document has a canvas size.
+    @discardableResult
+    func beginEffectBoxMove(for target: KeyframeTarget) -> Bool {
+        commitAllInteractiveState()
+        guard let canvasSize, layers.indices.contains(currentLayerIndex),
+              let stored = storedEffect(of: target), case .duplicateOffset = stored,
+              let resolved = resolvedEffect(of: target, atFrame: currentFrame),
+              case .duplicateOffset(let dup) = resolved
+        else { return false }
+        if case .layer(let id) = target, let index = layers.firstIndex(where: { $0.id == id }),
+           activeCelIndex(inLayer: index, atFrame: currentFrame) == nil {
+            raise(.effectBoxOutsideBlock(frame: currentFrame))
+            return false
+        }
+
+        let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        let lift = FloatingTransform(
+            position: CGPoint(x: canvasRect.midX + dup.offsetX, y: canvasRect.midY + dup.offsetY),
+            scaleX: abs(dup.scaleX), scaleY: abs(dup.scaleY),
+            rotation: dup.rotationDegrees * .pi / 180,
+            flipH: dup.scaleX < 0, flipV: dup.scaleY < 0)
+        let layerID = layers[currentLayerIndex].id
+        let celID = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
+            .map { layers[currentLayerIndex].cels[$0].id }
+        floatingPiece = FloatingPiece(
+            kind: .effectBox,
+            sourceLayerID: layerID, sourceCelID: celID,
+            targetLayerID: layerID, targetCelID: celID,
+            // A clear pixel, `beginContainerPoseMove`'s reason: the box has no bitmap, and what it
+            // appears to hold is the copy the render draws through the effect.
+            pieceImage: Self.clearPixel, baseSize: canvasRect.size,
+            remainderPreview: nil,
+            transform: lift, liftTransform: lift,
+            mode: transformMode,
+            effectRest: EffectBoxRest(effect: stored, tracks: keyframeState(of: target).tracks),
+            containerTarget: target)
+        return true
+    }
+
+    /// **The five scalars an effect box is at**, by parameter id — read off the box's transform the
+    /// way `beginEffectBoxMove` seeded it, in reverse. The one place the correspondence between a
+    /// `FloatingTransform` and `Effect.DuplicateOffset`'s fields is spelled, so the preview and the
+    /// commit cannot read the box differently.
+    static func effectBoxScalars(of piece: FloatingPiece, canvasSize: CGSize) -> [String: Double] {
+        let t = piece.transform
+        return [
+            "duplicateOffset.offsetX": Double(t.position.x - canvasSize.width / 2),
+            "duplicateOffset.offsetY": Double(t.position.y - canvasSize.height / 2),
+            "duplicateOffset.scaleX": Double(t.scaleX * (t.flipH ? -1 : 1)),
+            "duplicateOffset.scaleY": Double(t.scaleY * (t.flipV ? -1 : 1)),
+            "duplicateOffset.rotation": Double(t.rotation * 180 / .pi),
+        ]
+    }
+
+    /// **The effect box's preview: write the five where the render reads them, and let the canvas
+    /// draw the copy there.** `showContainerPoseLive`'s shape for a grade: the stored base on an
+    /// unkeyed channel, a key at the playhead on a keyed one — composed onto the *rest* state rather
+    /// than the live one, so a hundred ticks leave one key rather than a hundred baselines of drift.
+    /// Records no undo step; `commitEffectBoxFloat` puts the rest back before it routes.
+    private func showEffectBoxLive() {
+        guard let piece = floatingPiece, piece.kind == .effectBox,
+              let target = piece.containerTarget, let rest = piece.effectRest,
+              let canvasSize, storedEffect(of: target) != nil
+        else { return }
+        var effect = rest.effect
+        var tracks = rest.tracks
+        let scalars = Self.effectBoxScalars(of: piece, canvasSize: canvasSize)
+        for parameter in effect.parameters where parameter.isScalarAnimatable {
+            guard let value = scalars[parameter.id] else { continue }
+            if var curve = tracks[parameter.id], !curve.isEmpty {
+                curve.setKey(AnimationCurve.Key(frame: currentFrame, value: value))
+                tracks[parameter.id] = curve
+            } else {
+                effect = parameter.write(effect, value)
+            }
+        }
+        writeEffectStateOffHistory(target, effect: effect, tracks: tracks)
+    }
+
+    /// **A direct write of a grade and its curves onto either home, recording nothing** — the
+    /// preview's and the restore's write, and no one else's: an edit goes through
+    /// `applyEffectParameterEdit`. The only reason this is not `setStoredEffect` is that that one
+    /// records a step, and a preview that recorded a step per tick is the failure every slider row's
+    /// undo bracket exists to avoid.
+    private func writeEffectStateOffHistory(_ target: KeyframeTarget, effect: Effect,
+                                            tracks: [String: AnimationCurve]) {
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            if layers[index].effect != effect { layers[index].effect = effect }
+            if layers[index].effectTracks != tracks { layers[index].effectTracks = tracks }
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+            if folders[index].effect != effect { folders[index].effect = effect }
+            if folders[index].effectTracks != tracks { folders[index].effectTracks = tracks }
+        }
+    }
+
+    /// **An effect box's whole commit** — put the grade back where the drag found it, then route each
+    /// of the five through the settings bar's own writer inside one gesture bracket, so the drag is
+    /// one undo step whether it wrote values or keys. `commitContainerFloat`'s shape, one payload
+    /// over, and with the same rule: a box that ended where it began writes nothing at all.
+    private func commitEffectBoxFloat(_ piece: FloatingPiece) {
+        guard let target = piece.containerTarget, let rest = piece.effectRest, let canvasSize,
+              storedEffect(of: target) != nil else { return }
+        writeEffectStateOffHistory(target, effect: rest.effect, tracks: rest.tracks)
+        guard let resolved = resolvedEffect(of: target, atFrame: currentFrame) else { return }
+        let scalars = Self.effectBoxScalars(of: piece, canvasSize: canvasSize)
+        let moved = rest.effect.parameters.filter { parameter in
+            guard parameter.isScalarAnimatable, let value = scalars[parameter.id],
+                  let was = parameter.read(resolved) else { return false }
+            return abs(value - was) > 1e-9
+        }
+        guard !moved.isEmpty else { return }
+        beginStructureGesture()
+        var wroteKey = false
+        for parameter in moved {
+            let route = applyEffectParameterEdit(target, parameter: parameter,
+                                                 newValue: scalars[parameter.id] ?? 0,
+                                                 atFrame: currentFrame)
+            if route == .key || route == .seedAndKey { wroteKey = true }
+        }
+        commitStructureGesture(label: wroteKey ? .effectKeyframes : .valueLayerEffect)
+    }
+
     /// **The pose a container float is showing right now** — the rest pose it came up on, carried
     /// through the delta the box has travelled.
     ///
@@ -993,6 +1169,7 @@ extension CanvasManager {
         // byte-for-byte the gesture it was.
         recordContainerPoseSample()
         showContainerPoseLive()
+        showEffectBoxLive()
     }
 
     /// **The pose the box is at, handed to the recorder** — KEYFRAMES.md §5's Move-box surface.
@@ -1094,7 +1271,16 @@ extension CanvasManager {
         // through `VectorCanvas.posing(_:through: Homography)` and the raster tier through
         // `ImageWarp` — so the refusal ended when the linearisation did, and `containerPose(_:
         // movedBy:)` carries the residue the drag was already writing.
-        guard transformMode == .distort, let float = vectorFloat else { return nil }
+        guard transformMode == .distort else { return nil }
+        // **A Duplicate Offset's box is refused by kind** — TRANSFORM_LAYER.md §2 ruling 15 and
+        // §3.4: the copy is posed by five scalars (offset, scale, turn), and there is nowhere in
+        // them for a keystone to live, which is a placed image's refusal exactly. The overlay reads
+        // `FloatingPieceKind.acceptsDistort` so a corner drag in this mode scales rather than doing
+        // nothing; this is the sentence that says why.
+        if let piece = floatingPiece, !piece.kind.acceptsDistort {
+            return "Distort can't reshape a Duplicate Offset — its box slides, resizes and turns."
+        }
+        guard let float = vectorFloat else { return nil }
         // **Named in the artist's own vocabulary, and it says what to do rather than what is wrong.**
         // §5.14's rule is that a reader must be able to tell a deferral from a refusal, and the artist
         // is a reader too — so this names the kind that is in the way and the move that clears it.
@@ -1203,6 +1389,7 @@ extension CanvasManager {
             // site that moves a piece has to end here — `updateFloatingPose`'s tail. Free on a raster
             // piece: the first guard fails and nothing is read.
             showContainerPoseLive()
+            showEffectBoxLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1224,6 +1411,7 @@ extension CanvasManager {
                                                                           lift: piece.liftTransform.rotation,
                                                                           eighths: eighths)
             showContainerPoseLive()
+            showEffectBoxLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1317,6 +1505,7 @@ extension CanvasManager {
             // the box back has to snap the pose back with it — `updateFloatingPose`'s tail, reached
             // from the one other place that moves a piece without going through it.
             showContainerPoseLive()
+            showEffectBoxLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1343,6 +1532,12 @@ extension CanvasManager {
             commitContainerFloat(piece)
             return true
         }
+        // And the effect box, for the same reason: no bitmap, no remainder, no cel — its commit is
+        // five routed writes onto a grade.
+        if piece.kind == .effectBox {
+            commitEffectBoxFloat(piece)
+            return true
+        }
         // §5.6, and since 2026-08-22 the raster tool's rule as well as the vector one: the ants clear
         // when the piece bakes, not when it lifts. `.duplicate` cleared its own at lift and is
         // untouched — a copy is not a region the artist is still holding.
@@ -1354,8 +1549,8 @@ extension CanvasManager {
         let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
 
         switch piece.kind {
-        case .containerPose:
-            // Unreachable: the early return above takes this kind before a pixel is touched. Spelled
+        case .containerPose, .effectBox:
+            // Unreachable: the early returns above take both kinds before a pixel is touched. Spelled
             // out rather than folded into a `default:`, so the next kind to arrive is a compiler
             // error here instead of a silent bake into somebody's cel.
             break

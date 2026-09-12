@@ -151,7 +151,7 @@ final class StripedCompositeLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         let apron = StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height))
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height)))
         XCTAssertGreaterThan(apron, 0, "Premise: this fixture must have a kernel, or there is no apron to floor against")
 
         // One row of apron less than the apron needs: the core cannot be positive, so it floors.
@@ -245,7 +245,7 @@ final class StripedCompositeLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         let apron = StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height))
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height)))
         XCTAssertEqual(apron, 6, "A radius-6 Gaussian is six taps, and its vertical pass steps six rows")
 
         // 18 − 2×6 = a six-row core, so no core row is more than three rows from a seam and all of
@@ -283,20 +283,20 @@ final class StripedCompositeLogicTests: XCTestCase {
         }
         // 5 taps + 1 sobel row + ceil(3.2) = 10. A `max` would answer 5.
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height)), 10,
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height))), 10,
                        "Three stacked kernels reach the sum of their radii, not the largest of them")
 
-        XCTAssertEqual(Effect.blur(Effect.Blur(radius: 5)).verticalKernelRadius(frameHeight: 64), 5)
-        XCTAssertEqual(Effect.sobel(Effect.Sobel()).verticalKernelRadius(frameHeight: 64), 1,
+        XCTAssertEqual(Effect.blur(Effect.Blur(radius: 5)).verticalKernelRadius(frameSize: (64, 64)), 5)
+        XCTAssertEqual(Effect.sobel(Effect.Sobel()).verticalKernelRadius(frameSize: (64, 64)), 1,
                        "A 3x3 gather reaches one row")
         XCTAssertEqual(Effect.outline(Effect.Outline(width: 3.2,
                                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                                     threshold: 0.4)).verticalKernelRadius(frameHeight: 64), 4,
+                                                     threshold: 0.4)).verticalKernelRadius(frameSize: (64, 64)), 4,
                        "The kernel walks `int(ceil(radius))`, so a fractional width rounds up")
-        XCTAssertEqual(Effect.brightnessContrast(Effect.BrightnessContrast()).verticalKernelRadius(frameHeight: 64), 0,
+        XCTAssertEqual(Effect.brightnessContrast(Effect.BrightnessContrast()).verticalKernelRadius(frameSize: (64, 64)), 0,
                        "A per-pixel grade costs no apron at all")
         // The frame height reaches exactly one effect — every other radius ignores it.
-        XCTAssertEqual(Effect.blur(Effect.Blur(radius: 5)).verticalKernelRadius(frameHeight: 4096), 5,
+        XCTAssertEqual(Effect.blur(Effect.Blur(radius: 5)).verticalKernelRadius(frameSize: (4096, 4096)), 5,
                        "A blur's reach is its taps whatever the frame is")
     }
 
@@ -328,7 +328,7 @@ final class StripedCompositeLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height)), 0,
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height))), 0,
                        "Premise: noise reads no neighbour, so the apron is zero and cannot be what saves this")
         XCTAssertTrue(Effect.noise(Effect.Noise(amount: 0.5)).readsAbsolutePosition,
                       "Noise is one of the two effects the origin exists for")
@@ -380,8 +380,8 @@ final class StripedCompositeLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         let apron = StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                            frameHeight: Int(recipe.canvasSize.height))
-        XCTAssertEqual(apron, screen.verticalKernelRadius(frameHeight: 64),
+                                            frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height)))
+        XCTAssertEqual(apron, screen.verticalKernelRadius(frameSize: (64, 64)),
                        "Premise: the apron is the screen's own reach on this frame")
         XCTAssertEqual(apron, 8 + 1 + 1, "Premise: an 8-row pull, a 1-row fringe, and the bilinear row")
         XCTAssertTrue(screen.readsAbsolutePosition, "Premise: the screen is one of the effects the origin exists for")
@@ -389,6 +389,50 @@ final class StripedCompositeLogicTests: XCTestCase {
         let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 32,
                                                 "A strip must bend, light and line the frame's picture, not its own")
         XCTAssertGreaterThan(strips, 2, "The fixture must actually cut, and more than once")
+    }
+
+    /// **A Duplicate Offset gathers its copy from the frame, not from the strip** — TODO (61)
+    /// stage 6, and the strip-reach test TRANSFORM_LAYER.md §8 row 6 asks for. A copy slid twenty
+    /// rows down on a 64-row frame reads its source twenty rows above every destination pixel, which
+    /// is outside every 32-row strip buffer's own core; the apron is what puts those rows in the
+    /// buffer, and `verticalKernelRadius` is what sizes it (21: the twenty rows and the bilinear
+    /// tap). Bars all the way down, `testAComputerScreenBendsTheFrameNotTheStrip`'s reason: the copy
+    /// of a bar pattern shifted by twenty is a *different* bar pattern, so the intersection paints in
+    /// every band and a strip that gathered nothing from above shows a seam in every band.
+    ///
+    /// MEASURED by mutation (2026-09-11): with the `.duplicateOffset` arm of `verticalKernelRadius`
+    /// returning 0, the apron is 0, the 32-row plan cuts the frame in two, and the stripped frame
+    /// differs from the whole at the first row of the second strip — the copy's source is in the
+    /// first strip and the buffer does not hold it.
+    func testADuplicateOffsetGathersTheFrameNotTheStrip() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let bars = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64),
+                                           format: PixelOps.transparentFormat()).image { context in
+            for top in stride(from: 0, to: 64, by: 8) {
+                context.cgContext.setFillColor((top / 8) % 2 == 0 ? red.cgColor : blue.cgColor)
+                context.cgContext.fill(CGRect(x: 4, y: top, width: 56, height: 5))
+            }
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, bars)
+        let effect = Effect.duplicateOffset(Effect.DuplicateOffset(
+            offsetX: 3, offsetY: 20, region: .intersection, blendMode: .normal, opacity: 1,
+            color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1)))
+        manager.addValueLayer(effect: effect)
+
+        guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
+            return XCTFail("Fixture must mint")
+        }
+        let apron = StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
+                                            frameSize: (64, 64))
+        XCTAssertEqual(apron, effect.verticalKernelRadius(frameSize: (64, 64)),
+                       "Premise: the apron is the copy's own reach on this frame")
+        XCTAssertEqual(apron, 20 + 1, "Premise: twenty rows of slide and the bilinear row")
+        XCTAssertTrue(effect.readsAbsolutePosition, "Premise: the box is about the frame's centre")
+
+        let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 32,
+                                                "A strip must gather the copy from the frame's rows, "
+                                                + "not from its own")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// The same mechanism through the other effect that reads it: a **screened posterize**, whose
@@ -424,14 +468,19 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// that take `position` are Posterize's screen and Noise, and the one gather that reads
     /// `originX/originY` and the frame size is the Computer Screen (TODO (60)) — the first effect on
     /// *both* lists' worth of machinery, an origin *and* an apron, since its curvature reads a
-    /// neighbourhood whose reach is a fraction of the frame.
-    func testOnlyNoiseAScreenedPosterizeAndTheComputerScreenReadTheirOwnCoordinate() {
+    /// neighbourhood whose reach is a fraction of the frame. The Duplicate Offset (TODO (61)) is the
+    /// second on both lists: its box is about the frame's centre and its gather reaches as far as
+    /// the box slides.
+    func testOnlyNoiseAScreenedPosterizeTheComputerScreenAndTheDuplicateOffsetReadTheirOwnCoordinate() {
         let colour = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
         let positional: [Effect] = [
             .noise(Effect.Noise(amount: 0.3)),
             .posterize(Effect.Posterize(levels: 4, screen: .ordered, screenStrength: 0.5)),
             .posterize(Effect.Posterize(levels: 4, screen: .halftone, screenStrength: 0.5)),
             .crtScreen(Effect.CRTScreen.preset(.crt)),
+            // TODO (61) stage 6: the box is about the frame's centre, so the copy is gathered from a
+            // frame coordinate — an origin *and* an apron, like the screen.
+            .duplicateOffset(Effect.DuplicateOffset(offsetX: 4, offsetY: 2)),
         ]
         let local: [Effect] = [
             .levels(Effect.Levels()), .curves(Effect.Curves()),
@@ -455,20 +504,43 @@ final class StripedCompositeLogicTests: XCTestCase {
         // And a chromatic aberration's vertical reach is its displacement plus one, because the tap
         // is bilinear — the one kernel radius that is not simply the knob.
         XCTAssertEqual(Effect.chromaticAberration(Effect.ChromaticAberration(offsetX: 9, offsetY: 2.5))
-                        .verticalKernelRadius(frameHeight: 64), 4,
+                        .verticalKernelRadius(frameSize: (64, 64)), 4,
                        "ceil(2.5) + 1: a sample at y + 2.5 reads rows 2 and 3 away")
 
         // And the Computer Screen's is the one reach that scales with the frame: its curvature pulls
         // a corner `k · H/2` rows, plus the fringe, plus one for the bilinear tap. `k` is the slider
         // times `maxCurvature`, so curvature 1 on a 400-row frame is 0.25 · 200 = 50 rows.
         let curved = Effect.crtScreen(Effect.CRTScreen(curvature: 1, aberration: 2.5))
-        XCTAssertEqual(curved.verticalKernelRadius(frameHeight: 400), 50 + 3 + 1,
+        XCTAssertEqual(curved.verticalKernelRadius(frameSize: (400, 400)), 50 + 3 + 1,
                        "ceil(0.25 · 400 / 2) + ceil(2.5) + 1")
-        XCTAssertEqual(curved.verticalKernelRadius(frameHeight: 4000), 500 + 3 + 1,
+        XCTAssertEqual(curved.verticalKernelRadius(frameSize: (4000, 4000)), 500 + 3 + 1,
                        "Ten times the frame is ten times the pull")
         XCTAssertEqual(Effect.crtScreen(Effect.CRTScreen(scanlines: 1, apertureMask: 1, vignette: 1))
-                        .verticalKernelRadius(frameHeight: 4000), 1,
+                        .verticalKernelRadius(frameSize: (4000, 4000)), 1,
                        "Lines, mask and vignette read no neighbour; the one row is the bilinear tap")
+
+        // And the Duplicate Offset's is the box's inverse map read at the frame's corners, plus one
+        // (TODO (61) stage 6) — hand-computed from `Effect.duplicateSource`'s formula:
+        // a slide reads `|offsetY|` rows away everywhere;
+        XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(offsetY: 20))
+                        .verticalKernelRadius(frameSize: (64, 64)), 20 + 1,
+                       "A pure slide reads exactly its own offset away, plus the bilinear row")
+        // a half-size copy reads from twice as far: `s.y − p.y = (p.y − c.y) − 2·offsetY`, which at
+        // the bottom corner of a 64-row frame with offsetY 10 is 32 + 20;
+        XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(offsetY: 10, scaleY: 0.5))
+                        .verticalKernelRadius(frameSize: (64, 64)), 32 + 20 + 1,
+                       "(H/2) + 2·offset at the far corner, plus one")
+        // and a quarter turn reads a row from a *column*, so the width is what bounds it: on a 64×64
+        // frame the corner (0, 0) reads from row 64; on a 128×64 frame it reads from row 96.
+        XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 90))
+                        .verticalKernelRadius(frameSize: (64, 64)), 64 + 1,
+                       "A quarter turn on a square frame reaches the whole height")
+        XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 90))
+                        .verticalKernelRadius(frameSize: (128, 64)), 96 + 1,
+                       "…and further on a wide one, which is why the apron takes the width")
+        XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset())
+                        .verticalKernelRadius(frameSize: (4000, 4000)), 1,
+                       "The identity reads its own row; the one row is the bilinear tap")
     }
 
     // MARK: - 3 and 4. The two memos a strip can collide in
@@ -503,7 +575,7 @@ final class StripedCompositeLogicTests: XCTestCase {
             return XCTFail("Fixture must mint")
         }
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
-                                               frameHeight: Int(recipe.canvasSize.height)), 0,
+                                               frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height))), 0,
                        "Premise: no kernel here, so the strips are all exactly 16 rows and collide by size")
         let budget = budgetBytes(forStripBufferRows: 16, recipe: recipe)
         let plan = StripedCompositor.plan(for: recipe, budgetBytes: budget)

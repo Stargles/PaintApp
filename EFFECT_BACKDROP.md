@@ -297,9 +297,9 @@ Whichever option in §3 is taken, an effect gains one property: **what its input
 - `.backdrop` — everything below, paper included.
 - `.ink` — everything below, paper excluded.
 
-**For thirteen effects this is a fixed property. For two it is a control the artist can see**, ruled by
-the owner 2026-08-27 (eleven and two at the time; Recolour and the Computer Screen arrived 2026-09-11 and
-are fixed):
+**For fourteen effects this is a fixed property. For two it is a control the artist can see**, ruled by
+the owner 2026-08-27 (eleven and two at the time; Recolour, the Computer Screen and the Duplicate Offset
+arrived 2026-09-11 and are fixed):
 
 | Effect | Input | Fixed or chosen |
 |---|---|---|
@@ -308,6 +308,7 @@ are fixed):
 | **Recolour** (TODO (60), 2026-09-11) | `.backdrop` | fixed — it reads colour, so it grades what the other grades grade. A from-colour the paper happens to match recolours the paper, which is what an adjustment layer means; the tolerance is the artist's control over it, and the from-eyedropper samples this same backdrop (`CanvasManager.eyedropperRecipe(for:)`) so what it picks is what the kernel will see |
 | **Computer Screen** (TODO (60), 2026-09-11) | `.backdrop` | fixed — a screen look over paper is the point: scanlines, the RGB mask and the vignette have to cross the white of the canvas, or the picture is a drawing with stripes on the ink and none on the paper. It reads colour and *position*, not shape, so it has no use for the ink-only re-walk. Its curvature does reshape coverage — a destination pixel whose bent source falls outside the frame is transparent — which makes it the sixth effect on `reshapesCoverage`'s list and means the corners of a curved screen show whatever sits **behind the composite** (the host's black on the live canvas, since `CanvasView.updatePaper` hides the paper view once the composite carries the paper; alpha in an export), not the paper |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
+| **Duplicate Offset** (TODO (61) stage 6, 2026-09-11) | `.ink` | fixed — Outline's reason: both of its regions are derived from the original's alpha read as *coverage* (TRANSFORM_LAYER.md §3.4), so over an opaque backdrop the whole frame is "the drawing", the copy of the whole frame slid sideways still covers nearly all of it, and the rim collapses to a sliver at the frame's edge. It never reshapes coverage — both regions are subsets of the original's — so it is the one ink reader that is a grade in the strict sense |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
 | **Sobel** | `.backdrop` | **fixed — and it was the artist's choice for a few hours on 2026-08-27.** *"Same with sobel, defaulting this time to taking in the canvas color"* got the default right and the control wrong; the owner deleted the control the same day (*"drop it"*), and §5.2 keeps both rulings. So Sobel's shipped look still changes — bright edges on black, which is what an edge detector conventionally is — but there is no other setting. **Bright-edges-on-black also needs the alpha rule**: see §2.2, whose original claim that it came for free was false and shipped as a transparent canvas. With one mode left that rule is unconditional and needs no parameter |
 

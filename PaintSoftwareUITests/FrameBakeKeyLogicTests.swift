@@ -541,6 +541,20 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("crt curvature", .crtScreen(Effect.CRTScreen(curvature: 0.5))),
             ("crt vignette", .crtScreen(Effect.CRTScreen(vignette: 0.5))),
             ("crt aberration", .crtScreen(Effect.CRTScreen(aberration: 2))),
+            // TODO (61) stage 6's Duplicate Offset: the identity, then each of its nine fields alone —
+            // every row differs from "dup identity" in one field, so an un-encoded field collides
+            // with the baseline rather than staying silent.
+            ("dup identity", .duplicateOffset(Effect.DuplicateOffset())),
+            ("dup offsetX", .duplicateOffset(Effect.DuplicateOffset(offsetX: 6))),
+            ("dup offsetY", .duplicateOffset(Effect.DuplicateOffset(offsetY: 6))),
+            ("dup scaleX", .duplicateOffset(Effect.DuplicateOffset(scaleX: 1.5))),
+            ("dup scaleY", .duplicateOffset(Effect.DuplicateOffset(scaleY: 1.5))),
+            ("dup rotation", .duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 30))),
+            ("dup region", .duplicateOffset(Effect.DuplicateOffset(region: .intersection))),
+            ("dup blendMode", .duplicateOffset(Effect.DuplicateOffset(blendMode: .multiply))),
+            ("dup opacity", .duplicateOffset(Effect.DuplicateOffset(opacity: 0.5))),
+            ("dup colour", .duplicateOffset(Effect.DuplicateOffset(
+                color: CodableColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1)))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

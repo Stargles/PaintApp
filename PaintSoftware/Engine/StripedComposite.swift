@@ -133,27 +133,30 @@ enum StripedCompositor {
     /// tree does. Rule 4 already puts a mask's *sources* inside the chunk width; this is the same
     /// relationship one dimension over.
     ///
-    /// The radius per effect comes from `Effect.verticalKernelRadius(frameHeight:)`, in
+    /// The radius per effect comes from `Effect.verticalKernelRadius(frameSize:)`, in
     /// `Effect.swift`, where that file's own rule puts it: a knob is interpreted exactly once, in
     /// Swift, and both backends consume the result. An apron derived from a radius read a second time
     /// is a seam a few pixels wide with nothing to report it.
     ///
-    /// **`frameHeight` is the whole frame's, in rows**, and exists for one effect: the Computer
-    /// Screen's curvature pulls a corner's source a *fraction of the frame* inward, so its reach is
-    /// not a property of the knob alone. Every other effect ignores it.
+    /// **`frameSize` is the whole frame's, in pixels**, and exists for two effects: the Computer
+    /// Screen's curvature pulls a corner's source a *fraction of the frame* inward, and a Duplicate
+    /// Offset's box is an affine of the frame coordinate whose vertical reach is largest at a corner
+    /// — the width matters to the second, since a turned copy on a wide frame pulls further at the
+    /// far corners. Every other effect ignores it.
     static func apron(of tree: [RenderNode], maskStacks: [MaskSource: [RenderNode]],
-                      frameHeight: Int) -> Int {
-        var total = summedKernelRadius(tree, frameHeight: frameHeight)
-        for stack in maskStacks.values { total += summedKernelRadius(stack, frameHeight: frameHeight) }
+                      frameSize: (width: Int, height: Int)) -> Int {
+        var total = summedKernelRadius(tree, frameSize: frameSize)
+        for stack in maskStacks.values { total += summedKernelRadius(stack, frameSize: frameSize) }
         return total
     }
 
-    private static func summedKernelRadius(_ nodes: [RenderNode], frameHeight: Int) -> Int {
+    private static func summedKernelRadius(_ nodes: [RenderNode],
+                                           frameSize: (width: Int, height: Int)) -> Int {
         var total = 0
         for node in nodes {
-            total += node.effect?.verticalKernelRadius(frameHeight: frameHeight) ?? 0
+            total += node.effect?.verticalKernelRadius(frameSize: frameSize) ?? 0
             guard case .node(_, let inputs) = node.content else { continue }
-            for input in inputs { total += summedKernelRadius(input, frameHeight: frameHeight) }
+            for input in inputs { total += summedKernelRadius(input, frameSize: frameSize) }
         }
         return total
     }
@@ -205,7 +208,8 @@ enum StripedCompositor {
         let frameRows = Int(canvasSize.height.rounded())
         guard frameRows > 0, canvasSize.width > 0 else { return [] }
 
-        let apron = apron(of: tree, maskStacks: maskStacks, frameHeight: frameRows)
+        let apron = apron(of: tree, maskStacks: maskStacks,
+                          frameSize: (Int(canvasSize.width.rounded()), frameRows))
         let bufferRows = ChunkedCompositor.affordableRows(width: canvasSize.width,
                                                           tree: tree, budgetBytes: budgetBytes)
         // The whole frame in one piece — including the case where the apron alone would not fit,

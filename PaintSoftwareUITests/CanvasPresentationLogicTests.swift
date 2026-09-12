@@ -36,7 +36,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
     /// Adding a case to `CanvasPresentation` without adding it below fails the count assertion, and
     /// the message is addressed to whoever is reading it in that moment.
     private let expectedOverlapsLiveCanvas: [String: Bool] = [
-        // The twelve presentations raised from chrome that sits over a mounted, touchable
+        // The thirteen presentations raised from chrome that sits over a mounted, touchable
         // `CanvasView`. Such a presentation left to its own dismissal is dismissed *by* the touch
         // that lands outside it, and this repo has twice observed that the touch is not swallowed:
         // the stroke begins and the teardown lands mid-sequence.
@@ -52,6 +52,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
         "effectGradientStopColour": true,
         "effectRecolorColour": true,
         "effectBloomColour": true,         // ditto — TODO (60)
+        "effectDuplicateOffsetColour": true, // ditto — TODO (61) stage 6
         // The gallery screen mounts no `DrawingView`, so there is no canvas, no `LayerHostView` and
         // no `StrokeGestureRecognizer` for a teardown to strand. `false` here is a fact about
         // `ContentView`'s `switch screen`, not about these two sheets — move the gallery into a sheet

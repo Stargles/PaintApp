@@ -59,6 +59,11 @@ enum EffectCatalog {
         [
             .sobel(Effect.Sobel()),
             .outline(Effect.Outline(width: 2)),
+            // A filter, so it arrives visible: a white rim eight pixels up and to the right of a
+            // drawing — the copy slid down and left, and the rim is where it moved away from. The
+            // type's own default is the identity (zero offset, rim) — `Effect.DuplicateOffset`'s doc.
+            // TODO (61) stage 6.
+            .duplicateOffset(Effect.DuplicateOffset(offsetX: -8, offsetY: 8)),
             .chromaticAberration(Effect.ChromaticAberration(offsetX: 3, offsetY: 0)),
             .noise(Effect.Noise(amount: 0.08)),
             // A filter, so it arrives visible: the CRT preset, not the type's all-zero identity —
@@ -227,12 +232,19 @@ struct EffectSettingsBar: View {
     /// a bar with no home to pick for, which is no shipped caller; it is optional so the previews
     /// and any harness that builds a bar around a bare `Effect` need not invent one.
     var pickTarget: KeyframeTarget? = nil
+    /// **Adjust Box** — the Duplicate Offset's row that raises the Move box over its copy (TODO (61)
+    /// stage 6, TRANSFORM_LAYER.md §3.4's "A Move box as a writer"). The bar only says the artist
+    /// asked; `CanvasManager.beginEffectBoxMove(for:)` is what comes up, and `DrawingView` stands
+    /// this bar down while the box is floating so the canvas is clear to drag on. A default so the
+    /// previews and any harness around a bare `Effect` need not supply one.
+    var onAdjustBox: () -> Void = {}
     var onBack: () -> Void
     var onClose: () -> Void
 
-    /// Outline's or Bloom's colour swatch popover — one `@State` for the whole panel rather than one
-    /// per row, because only one settings panel is ever on screen and it shows exactly one effect's
-    /// rows, so the two colour rows can never be open at once (TODO (60) made Bloom the second one).
+    /// Outline's, Bloom's or Duplicate Offset's colour swatch popover — one `@State` for the whole
+    /// panel rather than one per row, because only one settings panel is ever on screen and it shows
+    /// exactly one effect's rows, so no two colour rows can ever be open at once (TODO (60) made
+    /// Bloom the second one, TODO (61) the third).
     @State private var showingColorPicker = false
 
     var body: some View {
@@ -463,6 +475,67 @@ struct EffectSettingsBar: View {
             // Bloom is not an ingredient — `Effect.CRTScreen`'s doc — and this is where the artist
             // is told, since the menu they came from is where the Bloom node is.
             note("Curvature bends the picture and leaves its corners clear. For a glow, add a Bloom layer above this one.")
+
+        case .duplicateOffset(var params):
+            // TRANSFORM_LAYER.md §5.6's surface, top to bottom: what colour, where it lands, how it
+            // blends, how much — then the box, which is the gestural way to place the copy, and the
+            // five scalars under it as the precise one. Both write the same five ids.
+            colorRow("Colour", color: params.color, identifier: "color",
+                     presentation: .effectDuplicateOffsetColour) { picked in
+                params.color = picked; onChange(.duplicateOffset(params))
+            }
+            pickerRow("Region", current: params.region.displayName, identifier: "region") {
+                ForEach(Effect.DuplicateOffset.Region.allCases, id: \.self) { region in
+                    Button {
+                        onEditBegan()
+                        params.region = region; onChange(.duplicateOffset(params))
+                        onEditEnded()
+                    } label: {
+                        if region == params.region {
+                            Label(region.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(region.displayName)
+                        }
+                    }
+                    .accessibilityIdentifier("effectSettings.region.\(region.rawValue)")
+                }
+            }
+            // The layer blend modes, in the layer panel's own groups and order — every one but Clip
+            // to Below, which is a mask and not a blend (`BlendMode.clipToBelow`'s doc).
+            pickerRow("Blend Mode", current: params.blendMode.displayName, identifier: "blendMode") {
+                ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
+                    let modes = BlendMode.menuGroups[groupIndex].filter { $0 != .clipToBelow }
+                    if !modes.isEmpty {
+                        Section {
+                            ForEach(modes, id: \.self) { mode in
+                                Button {
+                                    onEditBegan()
+                                    params.blendMode = mode; onChange(.duplicateOffset(params))
+                                    onEditEnded()
+                                } label: {
+                                    if mode == params.blendMode {
+                                        Label(mode.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(mode.displayName)
+                                    }
+                                }
+                                .accessibilityIdentifier("effectSettings.blendMode.\(mode.rawValue)")
+                            }
+                        }
+                    }
+                }
+            }
+            slider("duplicateOffset.opacity")
+            actionRow("Adjust Box", systemImage: "arrow.up.and.down.and.arrow.left.and.right",
+                      identifier: "adjustBox", perform: onAdjustBox)
+            slider("duplicateOffset.offsetX")
+            slider("duplicateOffset.offsetY")
+            slider("duplicateOffset.scaleX")
+            slider("duplicateOffset.scaleY")
+            slider("duplicateOffset.rotation")
+            note(params.region == .rim
+                 ? "A copy of the drawing beneath, moved by the box. Rim paints the colour where the drawing is and the copy has moved away — a rim light."
+                 : "A copy of the drawing beneath, moved by the box. Intersection paints the colour where the drawing and the copy overlap — a cast shadow.")
         }
     }
 

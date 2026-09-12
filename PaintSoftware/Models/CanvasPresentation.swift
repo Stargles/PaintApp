@@ -115,6 +115,10 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// tinting a bloom would be the exact evidence-quality loss this type's own header argues against.
     case effectBloomColour
 
+    /// A duplicate offset's colour swatch, in `EffectSettingsBar` — TODO (61) stage 6. A case of its
+    /// own for `effectBloomColour`'s reason: the raw value is what a capture says was open.
+    case effectDuplicateOffsetColour
+
     // MARK: - The gallery
     //
     // **Neither of these registers itself, and that is correct.** `GalleryView` holds no
@@ -158,9 +162,10 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
-             .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour:
-            // All twelve are raised from chrome that sits over a mounted, touchable `CanvasView` —
-            // seven of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
+             .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
+             .effectDuplicateOffsetColour:
+            // All thirteen are raised from chrome that sits over a mounted, touchable `CanvasView` —
+            // eight of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
             // **The rule is the same for both and that is the point of the type**: a presentation
             // left to its own dismissal is dismissed *by* the touch that lands outside it, and this
             // repo has observed twice that the touch is not swallowed:

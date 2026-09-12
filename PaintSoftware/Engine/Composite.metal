@@ -377,6 +377,12 @@ constant uint kEffectSharpenCombine      = 11;
 constant uint kEffectOutline             = 12;
 constant uint kEffectRecolor             = 13;
 constant uint kEffectCRTScreen           = 14;
+constant uint kEffectDuplicateResample   = 15;
+constant uint kEffectDuplicateCombine    = 16;
+
+/// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
+constant uint kDuplicateRegionRim          = 0;
+constant uint kDuplicateRegionIntersection = 1;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
@@ -431,6 +437,16 @@ struct EffectParams {
     // TODO (60) — which of HSV Shift's two readings hueTurns/saturation/value carry. See the Swift
     // declaration this mirrors.
     uint  isColorize;
+    // Duplicate Offset's box, resolved (TODO (61) stage 6): the reciprocal scales, the turn's cosine
+    // and sine, the region's code and the blend mode's code. Its offset rides `offsetX/offsetY`, its
+    // opacity `mix` and its colour the triple above. Appended at the end, like everything since the
+    // colour triple.
+    float dupInverseScaleX;
+    float dupInverseScaleY;
+    float dupCos;
+    float dupSin;
+    uint  dupRegion;
+    uint  dupBlendMode;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -703,6 +719,39 @@ static inline float4 sampleBilinear(texture2d<float, access::read> source, float
     return mix(top, bottom, fraction.y);
 }
 
+/// Bilinear, **transparent** outside the source rather than clamped to its edge, on premultiplied
+/// texels.
+///
+/// The one place this departs from `sampleBilinear` above, and it is not a preference: the source of
+/// a text warp is a glyph bitmap that a sized box has clipped, so its edge texels can be opaque ink.
+/// Clamping would smear that ink outwards as an infinite skirt across the whole destination. A sprite
+/// warp wants nothing at all outside its own rectangle.
+///
+/// `position` is already offset by −0.5, i.e. it is in "texel index" space where index `i` sits at
+/// the centre of texel `i`.
+///
+/// Declared here rather than beside the warp it was written for because `duplicateResample` below
+/// reads through it too: a copy of the drawing slid past the frame's edge has nothing there, and a
+/// clamped tap would smear the edge column across the whole displaced region.
+static inline float4 sampleBilinearTransparent(texture2d<float, access::read> source, float2 position) {
+    int width = int(source.get_width()), height = int(source.get_height());
+    float2 base = floor(position);
+    float2 fraction = position - base;
+    int x = int(base.x), y = int(base.y);
+
+    float4 t00 = float4(0.0f), t10 = float4(0.0f), t01 = float4(0.0f), t11 = float4(0.0f);
+    bool x0 = x >= 0 && x < width, x1 = (x + 1) >= 0 && (x + 1) < width;
+    bool y0 = y >= 0 && y < height, y1 = (y + 1) >= 0 && (y + 1) < height;
+    if (x0 && y0) { t00 = source.read(uint2(uint(x), uint(y))); }
+    if (x1 && y0) { t10 = source.read(uint2(uint(x + 1), uint(y))); }
+    if (x0 && y1) { t01 = source.read(uint2(uint(x), uint(y + 1))); }
+    if (x1 && y1) { t11 = source.read(uint2(uint(x + 1), uint(y + 1))); }
+
+    float4 top = mix(t00, t10, fraction.x);
+    float4 bottom = mix(t01, t11, fraction.x);
+    return mix(top, bottom, fraction.y);
+}
+
 /// The one gather effect in the set: red sampled at `+offset`, blue at `-offset`, green where it is.
 ///
 /// Each channel is unpremultiplied by the alpha it was sampled with, and the triple is re-premultiplied
@@ -787,6 +836,51 @@ static inline float4 crtScreen(texture2d<float, access::read> source, constant E
     colour *= crtScanline(q.y, params) * crtVignette(n, params);
     colour *= crtMask(q.x, params);
     return float4(saturate(colour) * alpha, alpha);
+}
+
+// MARK: Duplicate offset
+
+/// Duplicate Offset's first pass: **the copy, gathered through the box's inverse** —
+/// `EffectReference.duplicateResample`'s twin, and `Effect.duplicateSource` in Effect.swift is the
+/// `Double` statement both transcribe. The destination pixel's centre in the *frame* (origin plus the
+/// local `gid`, plus a half), the box's inverse map about the frame's centre, then a bilinear tap that
+/// is transparent outside the buffer. The whole premultiplied texel is carried, so the pass is a
+/// picture of the copy in its own right; the combine reads only its alpha.
+static inline float4 duplicateResample(texture2d<float, access::read> source,
+                                       constant EffectParams &params, uint2 gid) {
+    float2 frame = float2(float(params.frameWidth), float(params.frameHeight));
+    float2 origin = float2(float(params.originX), float(params.originY));
+    float2 centre = frame * 0.5f;
+    float2 p = float2(gid) + origin + 0.5f;
+    float2 q = p - centre - float2(params.offsetX, params.offsetY);
+    float2 turned = float2(params.dupCos * q.x + params.dupSin * q.y,
+                           -params.dupSin * q.x + params.dupCos * q.y);
+    float2 s = centre + turned * float2(params.dupInverseScaleX, params.dupInverseScaleY);
+    // Texel-centred, so the half-pixel comes back off, and the strip's offset with it.
+    return sampleBilinearTransparent(source, s - 0.5f - origin);
+}
+
+/// Duplicate Offset's second pass: **the colour, blended onto the original where the region is** —
+/// `EffectReference.duplicateCombine`'s twin. `original` is the effect's own input (the ink) and
+/// `copy` is the first pass. The region's share of the pixel's coverage is correlated, not a product
+/// (`Effect.DuplicateOffset`'s doc): rim is `max(oa − da, 0) / oa`, intersection `min(oa, da) / oa`.
+/// The blend is `blendChannels`' — the same formula a layer in that mode composites with — on the
+/// unpremultiplied original and the flat colour, mixed back by `mix` times that share, and the alpha
+/// is written back untouched: the effect never paints outside the drawing.
+static inline float4 duplicateCombine(texture2d<float, access::read> copy,
+                                      texture2d<float, access::read> original,
+                                      constant EffectParams &params, uint2 gid) {
+    float4 base = original.read(gid);
+    float oa = base.a;
+    if (!(oa > 0.0f)) { return float4(0.0f); }
+    float da = copy.read(gid).a;
+    float share = params.dupRegion == kDuplicateRegionRim ? max(oa - da, 0.0f) / oa : min(oa, da) / oa;
+    float amount = params.mix * saturate(share);
+    float3 cb = saturate(base.rgb / oa);
+    float3 cs = float3(params.colorR, params.colorG, params.colorB);
+    float3 blended = blendChannels(params.dupBlendMode, cb, cs);
+    float3 colour = mix(cb, blended, amount);
+    return float4(saturate(colour) * oa, oa);
 }
 
 /// One separable pass: a weighted sum of `2 * taps + 1` samples along `(offsetX, offsetY)`.
@@ -953,8 +1047,8 @@ static inline float4 outline(texture2d<float, access::read> source, constant Eff
 /// need whether the effect runs once or four times.
 ///
 /// `original` is the effect's own input, unchanged by any earlier pass, and equals `source` on pass 0.
-/// Only `kEffectBloomCombine` reads it, but it is bound for every pass so the binding contract does not
-/// vary by kind — the same rule `lut` follows, and `recolor` (one zeroed entry for every effect but
+/// Only the three combines (`kEffectBloomCombine`, `kEffectSharpenCombine`, `kEffectDuplicateCombine`)
+/// read it, but it is bound for every pass so the binding contract does not vary by kind — the same rule `lut` follows, and `recolor` (one zeroed entry for every effect but
 /// the recolour) follows it too.
 ///
 /// Dispatched with `dispatchThreads` like every kernel above, so out-of-bounds threads are never
@@ -1004,6 +1098,14 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
         result.write(crtScreen(source, params, gid), gid);
         return;
     }
+    if (kind == kEffectDuplicateResample) {
+        result.write(duplicateResample(source, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectDuplicateCombine) {
+        result.write(duplicateCombine(source, original, params, gid), gid);
+        return;
+    }
 
     float4 src = source.read(gid);
     float alpha = src.a;
@@ -1045,35 +1147,6 @@ struct WarpParams {
     float m3, m4, m5;
     float m6, m7, m8;
 };
-
-/// Bilinear, **transparent** outside the source rather than clamped to its edge, on premultiplied
-/// texels.
-///
-/// The one place this departs from `sampleBilinear` above, and it is not a preference: the source of
-/// a text warp is a glyph bitmap that a sized box has clipped, so its edge texels can be opaque ink.
-/// Clamping would smear that ink outwards as an infinite skirt across the whole destination. A sprite
-/// warp wants nothing at all outside its own rectangle.
-///
-/// `position` is already offset by −0.5, i.e. it is in "texel index" space where index `i` sits at
-/// the centre of texel `i`.
-static inline float4 sampleBilinearTransparent(texture2d<float, access::read> source, float2 position) {
-    int width = int(source.get_width()), height = int(source.get_height());
-    float2 base = floor(position);
-    float2 fraction = position - base;
-    int x = int(base.x), y = int(base.y);
-
-    float4 t00 = float4(0.0f), t10 = float4(0.0f), t01 = float4(0.0f), t11 = float4(0.0f);
-    bool x0 = x >= 0 && x < width, x1 = (x + 1) >= 0 && (x + 1) < width;
-    bool y0 = y >= 0 && y < height, y1 = (y + 1) >= 0 && (y + 1) < height;
-    if (x0 && y0) { t00 = source.read(uint2(uint(x), uint(y))); }
-    if (x1 && y0) { t10 = source.read(uint2(uint(x + 1), uint(y))); }
-    if (x0 && y1) { t01 = source.read(uint2(uint(x), uint(y + 1))); }
-    if (x1 && y1) { t11 = source.read(uint2(uint(x + 1), uint(y + 1))); }
-
-    float4 top = mix(t00, t10, fraction.x);
-    float4 bottom = mix(t01, t11, fraction.x);
-    return mix(top, bottom, fraction.y);
-}
 
 /// One destination pixel of a projective warp.
 ///

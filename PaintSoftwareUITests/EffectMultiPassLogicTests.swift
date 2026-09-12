@@ -1261,6 +1261,8 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .outline(Effect.Outline()),
             .recolor(Effect.Recolor(entries: [RecolorEntry.blank])),
             .crtScreen(Effect.CRTScreen.preset(.arcade)),
+            // TODO (61) stage 6: two passes, the second reached through `passes` alone.
+            .duplicateOffset(Effect.DuplicateOffset(offsetX: 6, scaleX: 1.2, rotationDegrees: 15)),
         ]
         for effect in everything {
             XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params),

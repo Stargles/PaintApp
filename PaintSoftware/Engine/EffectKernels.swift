@@ -70,8 +70,9 @@ enum EffectReference {
     }
 
     /// One pass over one buffer. `original` is the effect's own input, unchanged by any earlier pass —
-    /// bloom's combine is the one kernel that reads it, and it is passed to every pass rather than
-    /// declared per pass so that `EffectPass` stays a kind and a parameter block. `recolor` is the
+    /// the three combines (bloom's, sharpen's and the duplicate offset's) are the kernels that read
+    /// it, and it is passed to every pass rather than declared per pass so that `EffectPass` stays a
+    /// kind and a parameter block. `recolor` is the
     /// same shape of thing as `lut` and `weights`: a derived value bound for every pass and read by
     /// one kind.
     private static func apply(_ pass: EffectPass, to bytes: [UInt8], original: [UInt8],
@@ -99,6 +100,10 @@ enum EffectReference {
             return outline(bytes, params: params, width: width, height: height)
         case kCRTScreen:
             return crtScreen(bytes, params: params, width: width, height: height)
+        case kDuplicateResample:
+            return duplicateResample(bytes, params: params, width: width, height: height)
+        case kDuplicateCombine:
+            return duplicateCombine(bytes, original: original, params: params, width: width, height: height)
         default:
             break
         }
@@ -167,6 +172,8 @@ enum EffectReference {
     private static let kOutline: UInt32 = 12
     private static let kRecolor: UInt32 = 13
     private static let kCRTScreen: UInt32 = 14
+    private static let kDuplicateResample: UInt32 = 15
+    private static let kDuplicateCombine: UInt32 = 16
 
     // MARK: - The per-pixel transforms
     //
@@ -483,6 +490,100 @@ enum EffectReference {
     private static func crtVignette(_ n: SIMD2<Float>, _ params: EffectParams) -> Float {
         let r = min(max((n.x * n.x + n.y * n.y) * 0.5, 0), 1)
         return 1 - params.vignette * (r * r * (3 - 2 * r))
+    }
+
+    // MARK: - Duplicate offset
+
+    /// **The copy, gathered through the box's inverse** — Duplicate Offset's first pass, and the
+    /// transcription of `Effect.duplicateSource` (Effect.swift) that `duplicateResample` in
+    /// `Composite.metal` also is. For each destination pixel: its centre in the *frame* (a strip is a
+    /// window, so the origin is added and a half), the inverse map about the frame's centre, and a
+    /// bilinear tap that is **transparent** outside the buffer rather than clamped — a copy slid past
+    /// the edge has nothing there, and a clamped tap would smear the edge column across the whole
+    /// displaced region. The whole premultiplied texel is carried so the pass is a picture of the copy;
+    /// the combine reads only its alpha.
+    private static func duplicateResample(_ bytes: [UInt8], params: EffectParams,
+                                          width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        let frame = SIMD2<Float>(Float(params.frameWidth), Float(params.frameHeight))
+        let origin = SIMD2<Float>(Float(params.originX), Float(params.originY))
+        let centre = frame * 0.5
+        let offset = SIMD2<Float>(params.offsetX, params.offsetY)
+        let inverseScale = SIMD2<Float>(params.dupInverseScaleX, params.dupInverseScaleY)
+        for y in 0..<height {
+            for x in 0..<width {
+                let p = SIMD2<Float>(Float(x), Float(y)) + origin + 0.5
+                let q = p - centre - offset
+                let turned = SIMD2<Float>(params.dupCos * q.x + params.dupSin * q.y,
+                                          -params.dupSin * q.x + params.dupCos * q.y)
+                let source = centre + turned * inverseScale
+                // Texel-centred, so the half-pixel comes back off, and the strip's offset with it.
+                let texel = sampleTransparent(bytes, source - 0.5 - origin, width: width, height: height)
+                let pixel = (x + y * width) * 4
+                for channel in 0..<4 { result[pixel + channel] = quantize(texel[channel]) }
+            }
+        }
+        return result
+    }
+
+    /// **The colour, blended onto the original where the region is** — Duplicate Offset's second
+    /// pass, `duplicateCombine` in `Composite.metal`'s twin. `original` is the effect's own input and
+    /// `bytes` the first pass. The region's share of the pixel's coverage is correlated, not a product
+    /// (`Effect.DuplicateOffset`'s doc says why): rim is `max(oa − da, 0) / oa`, intersection
+    /// `min(oa, da) / oa`. The blend is `BlendMode.blendUnpremultiplied` — the twenty-five formulas
+    /// `CoreGraphicsCompositor` hand-rolls, completed for the seven it used to reach only through
+    /// `CGBlendMode` — on the unpremultiplied original and the flat colour, mixed back by `mix` times
+    /// that share. **The alpha byte is copied through**, not requantized: the effect never paints
+    /// outside the drawing, and `testNoEffectChangesAlpha` reads it byte for byte.
+    private static func duplicateCombine(_ bytes: [UInt8], original: [UInt8], params: EffectParams,
+                                         width: Int, height: Int) -> [UInt8] {
+        var result = bytes
+        let mode = BlendMode.allCases.first { $0.compositedMode.shaderCode == params.dupBlendMode
+                                              && $0.compositedMode == $0 } ?? .normal
+        let colour = SIMD3<Float>(params.colorR, params.colorG, params.colorB)
+        let isRim = params.dupRegion == 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = (x + y * width) * 4
+                let oa = Float(original[pixel + 3]) / 255
+                guard oa > 0 else {
+                    for channel in 0..<4 { result[pixel + channel] = 0 }
+                    continue
+                }
+                let da = Float(bytes[pixel + 3]) / 255
+                let share = isRim ? max(oa - da, 0) / oa : min(oa, da) / oa
+                let amount = params.mix * min(max(share, 0), 1)
+                let cb = clamp(SIMD3<Float>(Float(original[pixel]), Float(original[pixel + 1]),
+                                            Float(original[pixel + 2])) / 255 / oa)
+                let blended = mode.blendUnpremultiplied(backdrop: cb, source: colour)
+                let mixed = cb + (blended - cb) * amount
+                for channel in 0..<3 { result[pixel + channel] = quantize(clamp(mixed)[channel] * oa) }
+                result[pixel + 3] = original[pixel + 3]
+            }
+        }
+        return result
+    }
+
+    /// Bilinear, **transparent** outside the buffer, on premultiplied values — `sampleBilinear\
+    /// Transparent` in `Composite.metal`, transcribed: a tap whose four texels are all outside reads
+    /// zero, one straddling the edge reads the inside texels weighted and zero for the rest.
+    private static func sampleTransparent(_ bytes: [UInt8], _ position: SIMD2<Float>,
+                                          width: Int, height: Int) -> SIMD4<Float> {
+        let base = SIMD2<Float>(position.x.rounded(.down), position.y.rounded(.down))
+        let fraction = position - base
+        // A position far outside the buffer floors to an `Int` that need not be representable in
+        // 32 bits; the tap is transparent there whatever the integer would have been.
+        guard abs(base.x) < 1e9, abs(base.y) < 1e9 else { return SIMD4<Float>(repeating: 0) }
+        let x0 = Int(base.x), y0 = Int(base.y)
+        func texelOrClear(_ x: Int, _ y: Int) -> SIMD4<Float> {
+            guard x >= 0, x < width, y >= 0, y < height else { return SIMD4<Float>(repeating: 0) }
+            return texel(bytes, x, y, width: width, height: height)
+        }
+        let c00 = texelOrClear(x0, y0), c10 = texelOrClear(x0 + 1, y0)
+        let c01 = texelOrClear(x0, y0 + 1), c11 = texelOrClear(x0 + 1, y0 + 1)
+        let top = c00 + (c10 - c00) * fraction.x
+        let bottom = c01 + (c11 - c01) * fraction.x
+        return top + (bottom - top) * fraction.y
     }
 
     /// Bilinear, clamp-to-edge, on premultiplied values — see `Effect.ChromaticAberration` for why the

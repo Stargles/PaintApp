@@ -536,8 +536,28 @@ extension BlendMode {
     /// `min`/`max` rather than restating dodge-and-burn or darken-and-lighten, for the same reason
     /// `Composite.metal`'s versions call `blendColorDodge`/`blendColorBurn`: one definition of each,
     /// so a future fix to Color Dodge cannot fix it in three places and miss a fourth.
+    ///
+    /// **The seven CoreGraphics modes are here as well since TODO (61) stage 6, and `draw` never
+    /// reaches them.** `drawHandRolled` is entered only for a mode whose `coreGraphicsBlendMode` is
+    /// nil, so Multiply, Screen, Overlay, Darken, Lighten, Hard Light and Difference still composite
+    /// through Apple's primitive on the layer path exactly as before — nothing about a layer's
+    /// picture moved. What needed them written out is a *per-pixel* caller: Duplicate Offset's
+    /// combine blends a flat colour onto an unpremultiplied pixel inside a kernel, where there is no
+    /// `CGContext` to hand a `CGBlendMode` to, and `blendUnpremultiplied` below is that caller's way
+    /// in. Each is the W3C Level 1 formula `Composite.metal`'s `blendChannels` holds, transcribed;
+    /// `DuplicateOffsetEffectLogicTests` holds every mode to a channel step against the shader and
+    /// the seven to hand-computed values from the spec.
     fileprivate func handRolledChannel(backdrop cb: Float, source cs: Float) -> Float {
         switch self {
+        case .multiply:    return cb * cs
+        case .screen:      return cb + cs - cb * cs
+        // Hard light with the operands swapped — written as the swap, as the shader writes it, so
+        // the two cannot drift apart.
+        case .overlay:     return BlendMode.hardLight.handRolledChannel(backdrop: cs, source: cb)
+        case .darken:      return min(cb, cs)
+        case .lighten:     return max(cb, cs)
+        case .hardLight:   return cs <= 0.5 ? cb * (2 * cs) : (cb + (2 * cs - 1) - cb * (2 * cs - 1))
+        case .difference:  return abs(cb - cs)
         case .add:         return min(1, cb + cs)
         case .subtract:    return max(0, cb - cs)
         case .linearLight: return min(1, max(0, cb + 2 * cs - 1))
@@ -616,6 +636,26 @@ extension BlendMode {
         case .lighterColor: return lum(cs) >= lum(cb) ? cs : cb
         case .darkerColor:  return lum(cs) <= lum(cb) ? cs : cb
         default:            return cs
+        }
+    }
+
+    /// **`B(cb, cs)` for any mode, on unpremultiplied triples in `[0, 1]`** — `blendChannels` in
+    /// `Composite.metal`, on this side of the fence. The one entry point a per-pixel kernel takes
+    /// (Duplicate Offset's combine, `EffectReference.duplicateCombine`), so that the twenty-five
+    /// formulas keep living in the two functions above and nothing outside this file spells one.
+    /// Normal — and `clipToBelow`, which composites as Normal everywhere — is the source itself, which
+    /// is what `blendChannels`' `default:` answers too.
+    func blendUnpremultiplied(backdrop cb: SIMD3<Float>, source cs: SIMD3<Float>) -> SIMD3<Float> {
+        switch compositedMode {
+        case .normal:
+            return cs
+        case let mode where mode.isNonSeparable:
+            let blended = mode.handRolledTriple(backdrop: (cb.x, cb.y, cb.z), source: (cs.x, cs.y, cs.z))
+            return SIMD3<Float>(blended.r, blended.g, blended.b)
+        case let mode:
+            return SIMD3<Float>(mode.handRolledChannel(backdrop: cb.x, source: cs.x),
+                                mode.handRolledChannel(backdrop: cb.y, source: cs.y),
+                                mode.handRolledChannel(backdrop: cb.z, source: cs.z))
         }
     }
 }

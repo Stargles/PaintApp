@@ -415,12 +415,29 @@ final class EffectParityLogicTests: XCTestCase {
         }
     }
 
+    /// **The grades outside `sweep` that still answer `reshapesCoverage == false`**, so the alpha pin
+    /// below covers them: the Duplicate Offset (TODO (61) stage 6) in both regions, at a slid, scaled,
+    /// turned box, under a non-separable mode and a separable one, at partial opacity — every knob
+    /// away from its identity, so a combine that leaked colour into coverage would do it here. Not in
+    /// `sweep` itself, whose kind codes are pinned to the seven per-pixel kernels.
+    private static let coverageKeepingExtras: [(String, Effect)] = [
+        ("duplicateOffset rim", .duplicateOffset(Effect.DuplicateOffset(
+            offsetX: 5.5, offsetY: -3.25, scaleX: 1.3, scaleY: 0.8, rotationDegrees: 20,
+            region: .rim, blendMode: .hue, opacity: 0.7,
+            color: CodableColor(red: 0.9, green: 0.3, blue: 0.2, alpha: 1)))),
+        ("duplicateOffset intersection", .duplicateOffset(Effect.DuplicateOffset(
+            offsetX: -4, offsetY: 6, scaleX: 0.9, scaleY: 1.1, rotationDegrees: -35,
+            region: .intersection, blendMode: .multiply, opacity: 0.85,
+            color: CodableColor(red: 0.1, green: 0.2, blue: 0.8, alpha: 1)))),
+    ]
+
     /// **No effect changes coverage**, which is what lets one sit anywhere in a tree without altering
     /// what a mask or a blend beneath it resolves to. Swept over the configured effects rather than the
     /// identities, because a formula that leaked into alpha would do it at non-default parameters.
     func testNoEffectChangesAlpha() {
         let bytes = spectrumBytes()
-        for (name, effect) in Self.sweep {
+        for (name, effect) in Self.sweep + Self.coverageKeepingExtras {
+            XCTAssertFalse(effect.reshapesCoverage, "\(name) is swept here because it claims not to reshape coverage")
             let out = cpu(effect, bytes)
             let differing = stride(from: 3, to: bytes.count, by: 4).first { out[$0] != bytes[$0] }
             XCTAssertNil(differing,
@@ -479,9 +496,13 @@ final class EffectParityLogicTests: XCTestCase {
     ///
     /// **Thirty-three since Hue Colorize (TODO (60), same day)**: `isColorize`, one flag at the end,
     /// same rule as every group before it.
-    func testTheParameterBlockIsThirtyThreePackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 132)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 132)
+    ///
+    /// **Thirty-nine since the Duplicate Offset (TODO (61) stage 6, same day)**: the box's reciprocal
+    /// scales, its cosine and sine, the region and the blend mode — six at the end. Its offset,
+    /// opacity and colour ride fields that already meant exactly those things.
+    func testTheParameterBlockIsThirtyNinePackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 156)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 156)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract
