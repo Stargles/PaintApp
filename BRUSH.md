@@ -127,12 +127,18 @@ level table is preferred."* A stroke holds a small index, not a `Brush` by value
 to them.** Editing mints a new table entry; existing strokes keep the entry they were drawn with. A
 separate command re-points a selection, a layer, or the document at the edited brush, as one undo step.
 
-**That verb is one arm of a tool the owner has asked for**, which also changes a selection's brush *kind*,
-size and colour with the result visible live while it is being adjusted — [TODO.md](TODO.md) (42). Two
-things follow for the stages before it. The table (§12 stage 6) is what makes re-pointing cheap, since it
-is an index write rather than a per-stroke `Brush` rewrite. And **live adjustment is a middle-of-list edit
-on every tick**, which is the case TODO (41) exists for: at the owner's measured density a whole-cel
-re-walk is ~142 ms, so a slider driving one would be unusable long before the drawing is large.
+**That verb is one arm of the tool the owner asked for, and the tool shipped 2026-09-11 (TODO (42),
+closed)**: the Select panel's edit band is Colour · Brush · Size · Opacity, one flat row, up while a
+selection exists. Colour is a swatch that opens the app's one picker *on the selection's own colour*
+(the most common when the loop holds several, and the swatch says "Mixed"); Size and Opacity are sliders
+that preview on every tick and commit one undo step on lift; Brush is this verb. Each control writes one
+field and nothing else — `VectorStroke.size` is absolute, the same number the brush's own Size slider
+wrote at draw time — so re-pointing a line at a new brush leaves its width alone and widening it leaves
+its tip alone. `CanvasManager+SelectionEdit.swift` is the session; the table (§12 stage 6) is what makes
+re-pointing cheap, since it is an index write rather than a per-stroke `Brush` rewrite; and **live
+adjustment is a middle-of-list edit on every tick**, which is the case TODO (41) bounded — a tick rewrites
+in place through `restoreElements(_:changedInk:rewriting:)` and costs the selection's rectangle rather
+than the cel (PERFORMANCE.md §11.11f, §11.11g).
 
 **2.11 Opacity and Flow are separate controls, and the per-stroke buffer they require is accepted.**
 Opacity caps what the whole stroke can reach however often it crosses itself; Flow is what one stamp

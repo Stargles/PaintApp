@@ -133,42 +133,6 @@ are superseded and kept; the file says which.
 
 ---
 
-## (42) Editing the strokes inside a selection, not just their colour
-
-**Status** — not started. **The owner set the order 2026-09-07: (41) first, then this.** (41) has
-now left this file whole (PERFORMANCE.md §11.11f, 2026-09-11): a slider tick on a selection is a
-*rewrite in place*, and `VectorCanvas.restoreElements(_:changedInk:rewriting:)` bounds one by the
-union of where each rewritten element was and where it will be — including a tick that lands before
-the previous tick's render has measured anything. MEASURED in Release at 2,000 strokes for a
-fifty-stroke selection: the press itself is ~4.5 ms and the render that follows is ~300 ms against
-1,090 ms for the whole cel (~60 ms at 200 strokes). So the live requirement is buildable on the seam
-as it stands; what a drag still needs is above it — preview-then-commit (the third box) and dropping
-a render the next tick has made stale rather than queueing it.
-
-> *"i plan to replace the change color of selection into a better tool where you can also change the
-> brush type, size, etc. of the strokes inside the selection. The color changer also shouldnt be the
-> current selected color, but instead show the color picker menu defaulting to the current color. all
-> changes able to be seen live in the drawing."*
-
-Half of it shipped: the Select panel's **Brush** button re-points a selection at a brush as one undo
-step (BRUSH.md §2.10), and `applyBrushToSelection`'s own doc says size, opacity and colour are
-deliberately untouched and points back here.
-
-**The live requirement is the load-bearing one, and its prerequisite shipped.** Adjusting a selection
-rewrites elements in place, so every tick of a slider is a mid-list edit — a whole-cel re-walk was
-~142 ms at the owner's density and 745 ms at 1,000 strokes, and a slider driving one was unusable.
-Since (41)'s last box a tick is bounded to the selection's own rectangle; the numbers are in the status
-above. **The colour changer today applies the brush's current colour** — the Select panel's Recolour
-uses `brushColor` — which is what the picker below replaces.
-
-**Left to build**
-- [ ] Brush kind and size at selection scope, alongside colour
-- [ ] A colour **picker** defaulting to the strokes' current colour, rather than applying the palette's
-      current one blindly
-- [ ] Preview-then-commit so a drag previews without an undo entry per tick and commits once
-
----
-
 ## (22) Select multiple cels at once
 
 **Status** — not started, and **deprioritised by the owner 2026-09-07**. The menu row exists and is `.disabled(true)` with an empty action; no
