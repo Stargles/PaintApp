@@ -341,6 +341,28 @@ and "Left to build" bullet checked out. **That list is history, not the current 
       bullet above) — README.md, KEYFRAMES.md's header and §9, and BRUSH.md's two cited claims that
       this branch's own commits touch or introduce were separately checked against the code and held
       up. A full sweep of every remaining spec is still owed.
+      **Sweep completed, 2026-09-11** (branch `tmp/audit`), over RENDER.md, KEYFRAMES.md,
+      EFFECT_BACKDROP.md, LASSO_MOVE.md, LASSO_FILL.md, CANVAS_RESIZE.md, LAYER_TRANSFORM.md,
+      VECTOR_INTERPOLATION.md, BRUSH.md, PERFORMANCE.md, ARCHITECTURE_REVIEW.md, README.md and this
+      file's own Docs section — TRANSFORM_LAYER.md's §8 rows and (61) skipped, active under `tmp/dupoffset`
+      at the time. ~230 backticked citations checked by symbol existence (declaration-aware, both source
+      trees); ~30 fixed or annotated across 7 documents, most tracing to one cause — `d8d7ba8` (2026-08-27)
+      deleted the whole-layer vector-transform mechanism (`isVectorTransforming`, `VectorTransformBracket`,
+      `beginLiveLayerTransform`/`endLiveLayerTransform`, `closeVectorTransformBracket`,
+      `vectorTransformsAreIndistinguishable`) and LAYER_TRANSFORM.md, LASSO_MOVE.md and PERFORMANCE.md
+      still cited it as current in ten-plus places; the rest were one-off renames (`sandwichImages` →
+      `sandwichFull`/`sandwichHalves`, `DabLattice.seedID` → `VectorStroke.seed`/`arcOffset`,
+      `EffectPipelines.scratchSize` → `.scratch`, `canBeStretched`/`canBeMirrored` → `canBeMapped`,
+      `onGestureBegan`/`onGestureEnded` → `onHandleDragBegan`/`onHandleDragEnded`, four renamed test
+      functions) and stale counts (`Effect` recounted at **16** cases, not thirteen or seventeen — three
+      of them now have a non-constant `displayName`, not one; the memory reconciliation is **seven**
+      budgets, not five; `CanvasResizeLogicTests` is 44, not 46). The great majority of flagged citations
+      were false positives already framed correctly as history (BRUSH.md's grain/`StrokeSampleGate`
+      passages, most of EFFECT_BACKDROP.md, external tool names in VECTOR_INTERPOLATION.md) — the
+      checker cannot tell "gone" from "still live," a human read every hit. CLAUDE.md's Docs section
+      gained the two specs it had no line for at all (ARCHITECTURE_REVIEW.md, TRANSFORM_LAYER.md, the
+      latter flagged as a name collision with LAYER_TRANSFORM.md). Full list and the two rotted worst
+      (LAYER_TRANSFORM.md, LASSO_MOVE.md) in the session report.
 
 ---
 

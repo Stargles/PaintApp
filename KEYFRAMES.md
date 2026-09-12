@@ -1009,7 +1009,12 @@ BUGS.md's entry closed as *the bar is right* rather than as a defect. The defaul
 scene's end (`newLayerBlockLength`), so the layer made early and used late is lengthened from the
 timeline, which the notice says.
 
-**A third thing, found only by trying to drive it.** The Transform entry sat at the bottom of its menu,
+**A third thing, found only by trying to drive it — and the whole scenario below is history, not
+current UI (TODO(45), 2026-09-11).** Transform left the Blend Mode menu entirely on 2026-09-11
+(TRANSFORM_LAYER.md §2 ruling 2, `LayerPanel.valueBlendModeRow`'s own doc comment): it is a `LayerKind`
+of its own now, added from the `+` menu, so there is no longer a Transform *entry* in this menu to be
+above or below the grade catalogue. What follows describes why it was moved to the top of that menu,
+a fix now superseded by removing it from the menu altogether. The Transform entry sat at the bottom of its menu,
 below the thirteen-item grade catalogue — which is **past the point where an accessibility client can see a
 menu item at all** (BUGS.md's *"The effects menu only exposes its first few items to XCUITest"*, a
 scrollable-menu limit rather than an app defect). An artist scrolling by hand could still reach it, so it
@@ -1672,9 +1677,10 @@ frame of it — the same argument interpolation's identity already makes for omi
    it is a full-canvas sheet, so posing it means posing a quad and leaving transparency outside —
    plausible. In *effect* mode it holds no pixels at all and grades the accumulator, so there is nothing
    to pose. Same layer kind, two answers.
-3. **What happens to a curve whose two keys have different cardinality?** Two of the thirteen effects
-   have variable-length parameter arrays — `Curves.points` and `GradientMap.stops`. Tweening a 3-point
-   curve to a 5-point curve needs a definition or a refusal.
+3. **What happens to a curve whose two keys have different cardinality?** Three of the sixteen effects
+   now have variable-length parameter arrays — `Curves.points`, `GradientMap.stops` and `Recolor.entries`
+   (TODO(60), added since this question was written; TODO(45) recount, 2026-09-11). Tweening a 3-point
+   curve to a 5-point curve — or a two-pair Recolor to a four-pair one — needs a definition or a refusal.
 4. **Where does the playback cache's disk tier live, and do cached spans outlive the session?**
    §4.6 settles that a disk tier is required rather than optional — 64 MiB of memory is about 32 frames
    at preview resolution and a 48-frame span does not fit — and recommends `Library/Caches` over the
@@ -2418,17 +2424,20 @@ pinned by nothing, which is the same reason the grouping and the toggle arithmet
 descriptor table" was true only of the channels. `EffectParameter.name` is a field label ("Radius"); a
 group has no descriptor row, so `TimelineGraphChannelList.groupNames(of:)` reads the effect's own
 `displayName`, which is the word the artist picked the grade by. Splitting camel case out of the prefix
-instead would have worked for twelve of the thirteen and spelled `hsvShift` "Hsv Shift".
+instead would have worked for most of the sixteen (thirteen when this was written; TODO(45) recount,
+2026-09-11) and spelled `hsvShift` "Hsv Shift".
 
 **It is read at the popup and *not* carried on `TimelineGraphBand.Channel`, which is the cheap spelling
 and a layout-key defect.** A `Channel` is inside `Content` and `Content` is inside `TimelineLayoutKey`,
 so a field the band never draws still gates `relayout()` — and `Effect.displayName` is constant per case
-for twelve of the thirteen effects but not for `.blur`, which answers "Directional Blur" or "Gaussian
-Blur" off a toggle. One tap on Directional therefore relaid out every row frame, every cel accessibility
+for thirteen of the sixteen effects (TODO(45) recount, 2026-09-11 — TODO(60) added two more
+non-constant cases since this was written) but not for `.blur`, which answers "Directional Blur" or
+"Gaussian Blur" off a toggle, `.hsvShift` ("HSV Shift" or "Hue Colorize"), or `.posterize` ("Posterize",
+"Dither" or "Halftone"). One tap on Directional therefore relaid out every row frame, every cel accessibility
 identifier and the ruler's per-frame CoreText loop, for a band whose curves had not moved. The rule the
 fix states is the general one: **a `Channel` carries only what the band draws with.** The list is SwiftUI,
 is built only while the popup is up, and `graphChannelGroups` already holds the effect, so reading the
-name there costs one walk of at most thirteen descriptors on a surface that is off screen the rest of the
+name there costs one walk of at most sixteen descriptors (thirteen when written; TODO(45)) on a surface that is off screen the rest of the
 time. `testFlippingTheDirectionalToggleDoesNotReflowTheTimeline` pins it, on a *named* layer: an unnamed
 value layer is renamed to its grade's `displayName` by `setLayerEffect`, so the name column moves the key
 too and hides what is being measured.
