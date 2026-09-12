@@ -155,6 +155,18 @@ final class CanvasManager: ObservableObject {
     /// getter a SwiftUI body calls, so publishing it would invalidate the view that is mid-evaluation.
     var selectionAnimationGroupMemo: SelectionAnimationGroupMemo?
 
+    /// The memo behind `selectionStyle` (`CanvasManager+SelectionEdit.swift`) — TODO (42). Here for
+    /// `selectionAnimationGroupMemo`'s two reasons, one line up: a Swift extension cannot declare a
+    /// stored property, and publishing a value a SwiftUI body writes would invalidate the view that is
+    /// mid-evaluation.
+    var selectionStyleMemo: SelectionStyleMemo?
+
+    /// The selection edit in progress — one drag of the Select panel's Colour, Size or Opacity, from
+    /// `beginSelectionEdit` to its commit or cancel (`CanvasManager+SelectionEdit.swift`). Nil between
+    /// drags. Not `@Published`: every tick already publishes through `celContentChangedOutsideStroke`,
+    /// and the readout reads this on the pass that publish causes.
+    var selectionEdit: SelectionEditSession?
+
     /// Every guide stroke in the document. Document-level for the same reason, and because a guide
     /// is meant to be *referenced* by several intervals rather than copied into each, which only
     /// works if it has one home and a stable id.
@@ -700,7 +712,20 @@ final class CanvasManager: ObservableObject {
     /// happens in is load-bearing (see `CanvasManager+LassoMove.swift`).
     @Published var selectionMembership: LassoMembership = .cutting
     @Published var magicWandTolerance: Double = 0.15
-    @Published var selection: Selection?
+    @Published var selection: Selection? {
+        didSet {
+            // **A selection cleared or replaced mid-drag cancels the drag** (TODO (42)): the session
+            // rewrites what *this* loop caught, and with the loop gone there is nothing for the drag
+            // to be about, so the pre-drag list goes back and no step is recorded. Reached by
+            // `deselect()`, by `handleActiveContextChanged` when the artist walks to another cel, and
+            // by a new loop drawn while a slider is still held. Cheap when no session is open, which
+            // is every assignment but that one.
+            guard let session = selectionEdit else { return }
+            if let selection, selection.layerID == session.layerID, selection.celID == session.celID,
+               let old = oldValue, old.path === selection.path { return }
+            cancelSelectionEdit()
+        }
+    }
     @Published var floatingPiece: FloatingPiece? {
         didSet {
             // Only the transitions in and out are recorded, not every transform tick: a floating
@@ -1434,6 +1459,10 @@ final class CanvasManager: ObservableObject {
     /// floating would otherwise be stranded or silently discarded.
     func commitAllInteractiveState() {
         beginCanvasEdit()
+        // A selection edit still open when the tool changes out from under the artist is committed
+        // as the one step it was going to be (TODO (42)) — the lifted-but-adjustable fill's rule. A
+        // drag with nothing applied yet commits to nothing and records nothing.
+        commitSelectionEdit()
         commitFloatingPieceIfNeeded()
         // A lasso move's float joins the raster piece at the same chokepoint, and that one line is
         // what covers tool switch, panel switch, save and backgrounding. Missing one of those is how
@@ -3969,6 +3998,10 @@ final class CanvasManager: ObservableObject {
         // `finalizeVectorFloatForHistoryAction`, where the zero-nudge case is the one that has to be
         // un-happened rather than stepped back from.
         finalizeVectorFloatForHistoryAction()
+        // A selection edit under the finger is the fill's first arm — discarded, not committed. There
+        // is no lifted-but-adjustable state for it to have: the slider's lift *is* the commit, so a
+        // session that is still open when undo lands is one the artist is still dragging.
+        cancelSelectionEdit()
     }
 
     func refreshUndoRedoState() {

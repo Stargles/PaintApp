@@ -1238,7 +1238,7 @@ extension CanvasManager {
 
     /// Why **Distort** cannot act on what is floating, or nil when it can. One line under the Move
     /// bar's mode picker, in the artist's terms — the shape `selectionMembershipUnavailableReason`
-    /// and `recolorUnavailableReason` already use, and for their reason: a control that does nothing
+    /// and `selectionEditUnavailableReason` already use, and for their reason: a control that does nothing
     /// says why.
     ///
     /// **It replaces `TransformMode.isImplemented` and the blanket *"Coming soon — acts like Uniform
@@ -1329,13 +1329,13 @@ extension CanvasManager {
     }
 
     /// Why the membership picker cannot be *changed* on the active layer, or nil when it can. Shown
-    /// under the picker in `SelectPanel`, in the artist's terms — the shape `recolorUnavailableReason`
+    /// under the picker in `SelectPanel`, in the artist's terms — the shape `selectionEditUnavailableReason`
     /// already uses, and for its reason: a control that is off says why.
     ///
     /// **A pixel layer is fixed on Cut, and it is a real limit rather than a policy.** Every one of
     /// the three consumers cuts at the selection there and can do nothing else: `PixelOps.maskedPiece`
     /// *is* Move's cut, `PixelOps.clear` is Clear's, and a recolour refuses on a pixel layer outright
-    /// (`recolorUnavailableReason`). A raster cel has pixels and no elements, so "the strokes the loop
+    /// (`selectionEditUnavailableReason`). A raster cel has pixels and no elements, so "the strokes the loop
     /// touches" has nothing to name.
     ///
     /// **It reads the layer, not the float, and that is TODO item (23) rather than a refactor.**
@@ -1651,7 +1651,7 @@ extension CanvasManager {
 
     /// **Everything the loop catches goes, under the rule the artist picked in the Select panel**
     /// (LASSO_MOVE.md §5.26) — Enclosed, Cut or Touching, the same three `beginVectorLassoMove` and
-    /// `recolorSelection` read, with no exception for this button.
+    /// `beginSelectionEdit` read, with no exception for this button.
     ///
     /// > *"clear does not work (in the selection menu). It should clear all the stuff in the
     /// > selection."* — owner, 2026-08-28.
@@ -1784,7 +1784,7 @@ extension CanvasManager {
             // The timeline and layer-panel thumbnails are a third thing, and
             // `registerVectorElementsUndo` refreshes them on the undo and redo sides but **not** on
             // the initial apply. This used to lean on `setFillImage` publishing through
-            // `@Published layers`, which `recolorSelection`'s comment already calls an accident of
+            // `@Published layers`, which an earlier recolour's comment already called an accident of
             // that function's shape rather than a guarantee — so it is asked for explicitly, as the
             // recolour and `bakePreciseStrokes` both do.
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
@@ -1798,255 +1798,18 @@ extension CanvasManager {
         }
     }
 
-    // MARK: Change Colour (a one-shot recolour of what the selection caught)
-
-    /// Why **Change Colour** is unavailable on the active cel, or nil when it is available. Shown in
-    /// the Select panel, in the artist's terms, rather than the button going quietly grey — the same
-    /// rule and the same voice as `selectionMembershipUnavailableReason` beside it.
-    ///
-    /// Says nothing about whether a selection exists: the whole action row is already disabled
-    /// without one (`SelectPanel.hasSelection`), so folding that in would put two captions on screen
-    /// saying the same thing.
-    ///
-    /// **Both sentences say "Recolour", which is the word on the button** — not "Change Colour",
-    /// which is the owner's name for the feature and appears nowhere the artist can see. A refusal
-    /// that names something other than the control it is about is a refusal the artist has to
-    /// translate; the screenshot of the raster case is what made that obvious.
-    ///
-    /// **Pixel layers are out of scope** (owner, 2026-08-28). A recolour rewrites a colour *field* on
-    /// a stored element; a raster cel has pixels and no elements, and the nearest raster equivalent
-    /// — replace-colour, or hue-shift the selected pixels — is a different feature with its own
-    /// tolerance question. Saying so beats a button that looks live and does nothing.
-    ///
-    /// **And an in-between refuses, for `TopToolbar.toggleMove`'s reason**: an interpolated cel's
-    /// frame is derived, so the write would land on a `VectorCanvas` the displayed image is not
-    /// computed from. Note `fillSelection` and `clearSelectionPixels` are *missing* that guard — see
-    /// BUGS.md; the hole is pre-existing and is deliberately not fixed here, since changing when Fill
-    /// and Clear refuse is a behaviour change nobody has asked the owner about.
-    var recolorUnavailableReason: String? {
-        guard layers.indices.contains(currentLayerIndex) else { return nil }
-        guard layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].vector != nil else {
-            return "Recolour works on vector layers only."
-        }
-        if activeCelIsInBetween { return "Recolour can't edit an in-between frame." }
-        return nil
-    }
-
-    /// Every stroke, fill and text object the selection caught takes the picked colour — under the
-    /// rule the artist picked in the Select panel.
-    ///
-    /// > *"When the user uses select, there should be an option called something like change color
-    /// > which changes the color of all the strokes and fills inside the selection to the current
-    /// > picked color. It's alright if part of the stroke is outside the selection."* — owner,
-    /// > 2026-08-28.
-    ///
-    /// > *"i feel like it would be better in select menu because i want it to affect recolour. For
-    /// > enclosed on recolour, it would have to split the strokes and other objects around the lasso
-    /// > border and then recolour the ones inside. Luckly, the splitting already exists in enclosed
-    /// > move, so you can reuse that."* — owner, 2026-08-29 (TODO item (23)).
-    ///
-    /// **The second quote supersedes the first, and it is the whole of what changed here.** Until
-    /// item (23) this function was ruled to split nothing: a straddling stroke took the colour whole,
-    /// on the strength of *"It's alright if part of the stroke is outside"*. The newer ask is for the
-    /// opposite to be **available**, and it is now one of three rules rather than the only one:
-    ///
-    ///   * **Enclosed** — only elements lying wholly inside the loop are recoloured, whole.
-    ///   * **Cut** (the default) — the display list is split at the loop and only the inside pieces
-    ///     take the colour. This is the arm the owner described, and it is
-    ///     `VectorCanvas.splitForLassoMove` — the same call `beginVectorLassoMove` and
-    ///     `clearSelectionPixels` make, so no new geometry was written for it.
-    ///   * **Touching** — anything the loop reaches is recoloured whole, ink outside the loop
-    ///     included. This is the 2026-08-28 behaviour, still one tap away.
-    ///
-    /// **The owner's word was "enclosed" and the mode that splits is Cut.** Their sentence describes
-    /// the behaviour unambiguously — *"split the strokes … around the lasso border and then recolour
-    /// the ones inside"* — and that is `LassoMembership.cutting`, whose own doc comment already says
-    /// *"Only `.cutting` [cuts at the boundary], and that is the whole difference in the engine."*
-    /// Reading it as `.enclosed` would have given one mode two meanings depending on which tool asked,
-    /// which is the per-tool copy item (23) exists to end.
-    ///
-    /// **A consequence worth stating: the default recolour now splits.** `.cutting` is the shared
-    /// default, so a plain lasso-and-Recolour leaves the outside piece behind as its own stroke in the
-    /// old colour, where until 2026-09-02 the whole line changed. Touching is the rule that restores
-    /// the old behaviour, and it is in the same panel as the button.
-    ///
-    /// **Elements the recolour cannot touch are split along with the rest**, because the split is one
-    /// pass over the display list and cannot be told to spare them: a straddling `.erase` punch caught
-    /// under Cut becomes two punches that draw the identical hole. That is LASSO_MOVE.md §5.7's rule
-    /// — an eraser mark is an ordinary element — and it costs nothing visible. It is only ever
-    /// committed when something else in the same loop actually changed colour: `changed == 0` returns
-    /// before the new list is assigned, so a loop that caught only erasers discards the split too.
-    ///
-    /// **Only the hue travels; the opacity stays** (owner, 2026-08-28): a faint stroke stays faint, a
-    /// solid one stays solid, a fill keeps the transparency it was made with. That is one write
-    /// pattern for all three kinds and not, as it first looks, two — **replace the RGB triple and
-    /// touch nothing else.** The asymmetry between the kinds is in how they are *constructed*, not in
-    /// what preserving their opacity requires when one is edited in place: a stroke is built with
-    /// `brushOpacity` in its own `opacity` field, while `fillSelection` folds it into `color.alpha`
-    /// and leaves `opacity` at 1 — but a fill's effective alpha is `color.alpha * opacity` either
-    /// way, so leaving both fields alone preserves it bit for bit whichever path made the fill.
-    /// Reading `brushColor`'s alpha instead would overwrite it, and folding in `brushOpacity` would
-    /// overwrite it twice.
-    ///
-    /// **Three kinds, not four, and one stroke composite of the two.** A placed image has no colour
-    /// field at all (`VectorImageElement`). An `.erase` stroke is composited `.destinationOut`, which
-    /// reads only alpha — recolouring one changes no pixel, so it would be an undo step that lies
-    /// about what happened. Neither is counted either, so a lasso that caught only a photo and a
-    /// punch reports nothing changed and records nothing. Detected *shapes* need no arm: a shape
-    /// bakes into a plain `VectorStroke` (`CanvasManager+Shape.swift`), so they are already covered.
-    ///
-    /// **In-betweens inherit a keyframe's recolour live and do not tween it.**
-    /// `InterpolationEvaluator.warped(...)` carries `color` through unchanged, so recolouring
-    /// keyframe A changes A's contribution to every in-between across the span while B's stays as it
-    /// was, and the artist sees the two colours cross-fade. That is what deriving a frame from two
-    /// drawings means, it needs no code, and it will be reported as a bug at least once.
-    func recolorSelection() {
-        let requested = selection
-        // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection outlives a Move lift (see
-        // `beginMove`), so without settling the piece first this would rewrite colours on a cel that
-        // is currently showing a hole, and the float would then bake its own old colours over the top.
-        commitAllInteractiveState()
-        guard recolorUnavailableReason == nil,
-              let selection = requested,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
-              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
-
-        // Both preconditions `splitForLassoMove` states, for the same two reasons: `selection.path`
-        // is canvas space and stored geometry is local, and Core Graphics leaves the boolean ops
-        // undefined on the self-intersecting path a lasso becomes the moment the artist loops back
-        // over their own line.
-        let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
-                                .normalized(using: VectorCanvas.lassoFillRule)
-        // Pulled back per element, §5.26's "no exception" applied to the space rather than to the
-        // rule — see `CanvasManager.beginVectorLassoMove`. Empty overrides on an ordinary cel.
-        let loops = CanvasManager.lassoLoops(
-            drawn, posedBy: celPoseMaps(vectorCanvas.elements,
-                                        layerID: layers[currentLayerIndex].id,
-                                        celID: layers[currentLayerIndex].cels[celIndex].id,
-                                        atFrame: currentFrame))
-
-        // **The one branch the three rules cost.** Cut is the only rule that changes geometry, which
-        // is `LassoMembership.cutsAtTheBoundary`'s whole job — so it takes `splitForLassoMove`, whose
-        // `insideIDs` is exactly the recolour list, and the other two take the classifier that cuts
-        // nothing. Both doors answer "what did the loop catch" out of the same `caughtIDs` body, so
-        // Touching here and Touching on a Move cannot drift apart.
-        let membership = selectionMembership
-        let elementsBefore = vectorCanvas.elements
-        let working: [VectorElement]
-        let caught: Set<UUID>
-        if membership.cutsAtTheBoundary {
-            // Nil is "the loop caught nothing", and for a recolour that is a silent no-op with no
-            // undo step — `clearSelectionPixels` reads the same nil the same way.
-            guard let split = vectorCanvas.splitForLassoMove(insideLoops: loops,
-                                                             membership: membership) else { return }
-            // Cut cannot reach §5.24's case — it catches everything Touching does for strokes and
-            // fills — so a nil here really is bare paper and stays silent, exactly as a lift's does.
-            working = split.elements
-            caught = split.insideIDs
-        } else {
-            working = elementsBefore
-            caught = vectorCanvas.elementIDs(insideLoops: loops, membership: membership)
-            guard !caught.isEmpty else {
-                // **Enclosed catching nothing says so here too** (LASSO_MOVE.md §5.24). The ruling is
-                // written about a lift, but its argument names no tool: a loop full of ink, a rule the
-                // artist has just picked, and a button that does nothing and says nothing reads as
-                // broken. A recolour reaches that state through the same property since item (23), so
-                // it raises the same notice through the same call.
-                noteALassoThatCaughtNothing(vector: vectorCanvas, loops: loops)
-                return
-            }
-        }
-
-        // `brushColor`, not `activeEditColor`: after `commitAllInteractiveState()` the two are
-        // identical, and reading the computed one only opens a window in which they could differ.
-        let picked = brushColor.rgbaComponents
-        /// The element's own alpha kept, the hue replaced — see the ruling above.
-        func recoloured(_ existing: CodableColor) -> CodableColor {
-            CodableColor(red: picked.r, green: picked.g, blue: picked.b, alpha: existing.alpha)
-        }
-
-        // Rewritten **in place** at each index rather than gathered into per-kind buckets and
-        // assigned back. Since `addFill` appends (LASSO_FILL.md §2a) a canvas can hold fills above
-        // *and* below the same stroke, and a recolour must not be what silently restacks them. Under
-        // Cut the list walked is the *split* one, whose two halves already replace their parent at
-        // the parent's index (`splitForLassoMove`), so z-order survives the split the same way.
-        var newElements = working
-        var changed = 0
-        for (index, element) in working.enumerated() {
-            switch element {
-            case .stroke(var stroke):
-                guard caught.contains(stroke.id), stroke.composite == .paint,
-                      recoloured(stroke.color) != stroke.color else { continue }
-                stroke.color = recoloured(stroke.color)
-                newElements[index] = .stroke(stroke)
-                changed += 1
-
-            case .fill(var fill):
-                guard caught.contains(fill.id), recoloured(fill.color) != fill.color else { continue }
-                fill.color = recoloured(fill.color)
-                newElements[index] = .fill(fill)
-                changed += 1
-
-            case .text(var text):
-                guard caught.contains(text.id),
-                      recoloured(text.recipe.color) != text.recipe.color else { continue }
-                text.recipe.color = recoloured(text.recipe.color)
-                newElements[index] = .text(text)
-                changed += 1
-
-            case .image, .video:
-                // **A refusal, and the same one for both.** Change Colour recolours the artist's own
-                // marks; a photograph and a video frame are neither, and there is no field on either
-                // to put a colour in. Tinting them would be an effect (`Effect`, the adjustment-layer
-                // path), not a recolour.
-                continue
-            }
-        }
-        // Nothing changed, nothing recorded — a loop that caught only erasers and a photo, or one
-        // whose contents are already the picked colour, must not cost the artist an undo press for
-        // an edit they cannot see. `bakePreciseStrokes` states the same idiom. **Under Cut this also
-        // throws the split away**, which is why a Cut recolour that recolours nothing leaves no cut
-        // behind: `working` is a local list and nothing has been assigned to the canvas yet.
-        guard changed > 0 else { return }
-
-        // **The forward edit and its two presses all go through one seam, and it is told which ids
-        // it may find rewritten** — TODO (41)'s last box. `elements =` plus `bumpVersion()` was the
-        // whole-cel walk; `restoreElements(_:changedInk:rewriting:)` bounds the swap by the union of
-        // where each caught element was and where it will be, and under Cut it bounds the split's
-        // pieces too (they arrive under fresh ids, which is the id-difference half). `caught` rather
-        // than the exact changed set, on purpose: over-declaring costs an unchanged element its own
-        // footprint of repair, under-declaring is a wrong picture, and the selection is the unit
-        // TODO (42)'s slider will rewrite per tick.
-        vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: caught)
-        // Clear the transient tier, or a stale pre-recolour fill preview composites over the top.
-        setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
-        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
-                                   newElements: vectorCanvas.elements,
-                                   layerID: layers[currentLayerIndex].id,
-                                   celID: layers[currentLayerIndex].cels[celIndex].id,
-                                   label: .recolorSelection,
-                                   // A recolour writes `stroke.color` and puts the stroke back at
-                                   // its own index under its own id — see the loop above — so both
-                                   // lists hold the same ids with different content, and these are
-                                   // the ids. Under Cut it splits *as well*, which the same seam
-                                   // bounds by id difference.
-                                   swap: .rewritesInPlace(caught))
-        // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
-        // on the undo and redo sides but **not** on the initial apply — `clearSelectionPixels` gets
-        // away with that only because `setFillImage` publishes through `@Published layers`, which is
-        // an accident of its shape rather than a guarantee. `bakePreciseStrokes` calls this
-        // explicitly and so does this.
-        celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
-                                       celID: layers[currentLayerIndex].cels[celIndex].id)
-    }
+    // MARK: Colour, Size and Opacity on a selection
+    //
+    // `recolorSelection()` lived here until TODO (42) and read `brushColor` — the palette's current
+    // colour, applied silently — which the owner ruled against. The tool that replaced it is
+    // `CanvasManager+SelectionEdit.swift`: a colour picker that opens on the selection's own colour,
+    // plus Size and Opacity, each a live drag that rewrites the caught elements in place through
+    // `restoreElements(_:changedInk:rewriting:)` and commits as one undo step. The membership rules,
+    // the split under Cut, the §5.24 notice and the per-kind table (an eraser takes no colour, a
+    // photograph takes nothing) all moved with it, unchanged.
 
     /// Why Apply Brush is unavailable, in the artist's terms, or nil when it is. Word for word
-    /// `recolorUnavailableReason`'s rule with the control's own name in it: both rewrite a stored
+    /// `selectionEditUnavailableReason`'s rule with the control's own name in it: both rewrite a stored
     /// field on the elements a loop caught, so both want a vector cel that is not derived, and a
     /// refusal that names the wrong button is a refusal the artist has to translate.
     var applyBrushUnavailableReason: String? {
@@ -2072,24 +1835,25 @@ extension CanvasManager {
     /// sets. Nothing here touches geometry, so the walk, the dab lattice and §4's randomness are all
     /// untouched: the same dabs land in the same places drawn with a different tip.
     ///
-    /// **`size`, `opacity` and `color` are deliberately not touched.** A stored stroke's width is
-    /// `VectorStroke.size`, not the brush's, and its colour is its own field — so this changes the tip,
-    /// hardness, spacing, scatter, dynamics and blend mode and nothing else. Changing size and colour
-    /// live beside it is [TODO.md](TODO.md) (42), a tool this verb is one arm of; doing it here would
-    /// be deciding (42)'s behaviour without asking.
+    /// **`size`, `opacity` and `color` are deliberately not touched**, and since TODO (42) each has a
+    /// control of its own beside this button. A stored stroke's width is `VectorStroke.size`, not the
+    /// brush's, and its colour is its own field — so this changes the tip, hardness, spacing, scatter,
+    /// dynamics and blend mode and nothing else, and the Select panel's Colour, Size and Opacity
+    /// (`CanvasManager+SelectionEdit.swift`) change those three and nothing else. One field per
+    /// control is what lets the artist re-point a line at a new brush without its width jumping to
+    /// that brush's, and widen a line without its tip changing.
     ///
-    /// **Erasers are re-pointed too**, unlike `recolorSelection`'s. That function skips them because
-    /// recolouring one changes no pixel and would be an undo step that lies; re-pointing one changes
-    /// the shape of the hole it punches, which is a visible edit and the only way an artist can change
-    /// an eraser mark's tip at all. LASSO_MOVE.md §5.7's *"an eraser mark is an ordinary element"*.
+    /// **Erasers are re-pointed too**, unlike a recolour's. That arm skips them because recolouring
+    /// one changes no pixel and would be an undo step that lies; re-pointing one changes the shape of
+    /// the hole it punches, which is a visible edit and the only way an artist can change an eraser
+    /// mark's tip at all. LASSO_MOVE.md §5.7's *"an eraser mark is an ordinary element"*.
     ///
     /// Membership is the selection's, with no exception — LASSO_MOVE.md §5.26. This is a fourth
-    /// consumer of the same rule, reading it through the same two doors `recolorSelection` does.
+    /// consumer of the same rule, reading it through the same two doors `beginSelectionEdit` does.
     func applyBrushToSelection() {
         let requested = selection
-        // `commitAllInteractiveState`, not `beginCanvasEdit`, for `recolorSelection`'s reason: a
-        // selection outlives a Move lift, and a float still up would bake its own strokes over the top
-        // carrying the brush this is replacing.
+        // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection outlives a Move lift, and a
+        // float still up would bake its own strokes over the top carrying the brush this is replacing.
         commitAllInteractiveState()
         guard applyBrushUnavailableReason == nil,
               let selection = requested,
@@ -2144,8 +1908,8 @@ extension CanvasManager {
         // split away with it, because nothing has been assigned to the canvas yet.
         guard changed > 0 else { return }
 
-        // One seam for the edit and both its presses, told the ids — `recolorSelection` carries the
-        // argument. A re-pointed brush changes what the stroke paints, so the new half of each
+        // One seam for the edit and both its presses, told the ids — `ElementSwap.rewritesInPlace`
+        // carries the argument. A re-pointed brush changes what the stroke paints, so the new half of each
         // rewritten stroke's rectangle is `strokeInkHint(of:)` at the *new* brush's reach rather
         // than the old measurement, and the render's escape check stands behind it.
         vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: caught)
@@ -2156,8 +1920,8 @@ extension CanvasManager {
                                    layerID: layers[currentLayerIndex].id,
                                    celID: layers[currentLayerIndex].cels[celIndex].id,
                                    label: .applyBrushToSelection,
-                                   // `stroke.brushRef = ref` under the stroke's own id — the
-                                   // recolour's answer, with the same ids.
+                                   // `stroke.brushRef = ref` under the stroke's own id — these are
+                                   // the ids.
                                    swap: .rewritesInPlace(caught))
         celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
                                        celID: layers[currentLayerIndex].cels[celIndex].id)

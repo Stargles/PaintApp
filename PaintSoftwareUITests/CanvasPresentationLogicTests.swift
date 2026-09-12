@@ -53,6 +53,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
         "effectRecolorColour": true,
         "effectBloomColour": true,         // ditto — TODO (60)
         "effectDuplicateOffsetColour": true, // ditto — TODO (61) stage 6
+        "selectionColour": true,           // ditto — TODO (42); closes a selection edit on the way out
         // The gallery screen mounts no `DrawingView`, so there is no canvas, no `LayerHostView` and
         // no `StrokeGestureRecognizer` for a teardown to strand. `false` here is a fact about
         // `ContentView`'s `switch screen`, not about these two sheets — move the gallery into a sheet

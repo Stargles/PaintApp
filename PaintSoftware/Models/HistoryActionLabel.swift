@@ -44,6 +44,13 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// change different things about the same strokes and an artist reaching for undo needs to see
     /// which one is coming back.
     case applyBrushToSelection
+    /// The Select panel's Size slider — every stroke the loop caught takes the dragged width, as one
+    /// step for the whole drag (TODO (42)). "Strokes" is in the name because size reaches only
+    /// strokes; a fill or a text box in the same loop is untouched, and an artist reading "undo
+    /// resize selection" would expect the loop's *extent* to change back.
+    case resizeSelectionStrokes
+    /// The Select panel's Opacity slider — one step for the whole drag (TODO (42)).
+    case changeSelectionOpacity
     /// Baking a floating Move piece into its target cel.
     case move
     /// Baking a floating Duplicate piece — distinct from `.duplicateLayer`/`.duplicateFrame`/
@@ -251,6 +258,8 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .clearSelection: return "clear selection"
         case .recolorSelection: return "recolour selection"
         case .applyBrushToSelection: return "apply brush to selection"
+        case .resizeSelectionStrokes: return "resize strokes in selection"
+        case .changeSelectionOpacity: return "change selection opacity"
         case .move: return "move"
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"

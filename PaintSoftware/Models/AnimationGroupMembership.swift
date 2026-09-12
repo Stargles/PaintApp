@@ -132,7 +132,7 @@ extension CanvasManager {
 
     /// Why the Animation Group control is off, in the artist's terms, or nil when it is on.
     ///
-    /// Word for word `recolorUnavailableReason`'s shape and for its reason — a control that does
+    /// Word for word `selectionEditUnavailableReason`'s shape and for its reason — a control that does
     /// nothing says why — with this control's own subject in it. Both refusals are the same two:
     /// membership is a field on a stored element, so it wants a vector cel that is not derived.
     var animationGroupEditUnavailableReason: String? {

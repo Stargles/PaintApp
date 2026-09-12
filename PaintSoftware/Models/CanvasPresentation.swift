@@ -119,6 +119,16 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// own for `effectBloomColour`'s reason: the raw value is what a capture says was open.
     case effectDuplicateOffsetColour
 
+    // MARK: - The Select panel
+
+    /// The Select panel's Colour swatch — TODO (42)'s picker, defaulting to the selection's own colour.
+    /// Brackets a selection edit over its lifetime (`CanvasManager.beginSelectionEdit` on present,
+    /// `commitSelectionEdit` on dismiss), which is `valueLayerColour`'s shape: the picker writes
+    /// through its binding on every drag tick, so the popover's life is the drag and its dismissal is
+    /// the one undo step. A canvas touch closes it *first*, so the step is recorded before the stroke
+    /// that follows begins.
+    case selectionColour
+
     // MARK: - The gallery
     //
     // **Neither of these registers itself, and that is correct.** `GalleryView` holds no
@@ -163,7 +173,7 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
              .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour:
+             .effectDuplicateOffsetColour, .selectionColour:
             // All thirteen are raised from chrome that sits over a mounted, touchable `CanvasView` —
             // eight of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
             // **The rule is the same for both and that is the point of the type**: a presentation

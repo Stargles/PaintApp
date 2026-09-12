@@ -3,44 +3,56 @@ import SwiftUI
 /// The Select tool's bottom-docked bar (Procreate reference: mode tabs across the top of the bar,
 /// action icons across the bottom), shown whenever the Select tool is engaged — see `DrawingView`,
 /// which docks this near the bottom the same way `MoveTransformBottomBar` docks for Move. The action
-/// row (Duplicate/Fill/Recolour/Brush/Clear/Deselect) is disabled until a selection actually exists; the
-/// mode tabs and the outside-interaction toggle are available immediately so a mode can be picked
-/// before the first selection is drawn.
+/// row (Duplicate/Fill/Clear/Deselect) is disabled until a selection actually exists; the mode tabs
+/// and the outside-interaction toggle are available immediately so a mode can be picked before the
+/// first selection is drawn.
 ///
-/// **Brush is BRUSH.md §2.10's apply-to-existing verb** — every stroke the loop caught is re-pointed
-/// at the brush now selected, which is the only door in the app to *"the brush I just edited, on the
-/// line I already drew"*. It sits beside Recolour because the two are the pair that push the current
-/// tool settings onto ink that already exists, and it is captioned in one word for the reason
-/// Recolour is: six tabs now share the 360 pt bar.
+/// **The edit band — Colour, Brush, Size, Opacity — is TODO (42)**, the owner's *"a better tool where
+/// you can also change the brush type, size, etc. of the strokes inside the selection … all changes
+/// able to be seen live in the drawing."* It is the four things the toolbar shows for the *current*
+/// brush, applied to ink that already exists, and it is up only while a selection exists: the panel
+/// the owner called too tall (TODO (59)) is measured without one, and a band of sliders that is dim
+/// with nothing to drive would be height for nothing. Colour is a swatch that opens the app's one
+/// colour picker **on the selection's own colour** — *"defaulting to the current color"* — rather
+/// than applying the palette's; Size and Opacity are sliders that preview on every tick and commit
+/// **one** undo step on lift (`CanvasManager.beginSelectionEdit` / `previewSelectionEdit` /
+/// `commitSelectionEdit`); Brush is BRUSH.md §2.10's apply-to-existing verb, one press. Every
+/// control reads the selection's rule (`selectionMembership`) with no exception, LASSO_MOVE.md §5.26.
 ///
-/// **Recolour sits beside Fill** rather than at the end of the row, because the two are the pair
-/// that apply the currently picked colour and reading them together is what tells them apart. It is
-/// captioned in one word for a plain layout reason: five tabs share a 360 pt bar, so 72 pt each, and
-/// "Duplicate" was already the longest caption `.caption2` had to fit.
+/// **The band can refuse, and it says why rather than going quietly grey** —
+/// `CanvasManager.selectionEditUnavailableReason`, the rule and the voice `MoveTransformBottomBar`
+/// states for Mirror. At most one caption is ever on screen at the foot of the bar: the refusal
+/// replaces the "draw a selection" hint rather than stacking under it.
 ///
-/// **It is the one action here that can refuse**, and it says why rather than going quietly grey —
-/// `CanvasManager.recolorUnavailableReason`, the rule and the voice `MoveTransformBottomBar` states
-/// for Mirror. At most one caption is ever on screen at the foot of the bar: the refusal replaces the
-/// "draw a selection" hint rather than stacking under it.
-///
-/// **"What the loop catches" sits directly above the action row** (TODO item (23)), because that row
-/// is what obeys it: Move — reached from the toolbar, not from here — Recolour and Brush all read
-/// `CanvasManager.selectionMembership`, so the artist should be able to read the rule and the buttons
-/// in one glance. It is above rather than below because it is chosen *first*: the panel's order is
-/// how you select (the mode tabs), what the loop then catches, and what to do with it.
+/// **"What the loop catches" sits directly above the edit band and the action row** (TODO item
+/// (23)), because those are what obey it: Move — reached from the toolbar, not from here — Colour,
+/// Brush, Size, Opacity and Clear all read `CanvasManager.selectionMembership`, so the artist should
+/// be able to read the rule and the controls in one glance. It is above rather than below because it
+/// is chosen *first*: the panel's order is how you select (the mode tabs), what the loop then
+/// catches, and what to do with it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
     private var hasSelection: Bool { canvasManager.selection != nil }
 
-    /// Why Change Colour is off, or nil. Read once per body pass and used twice — to gate the button
-    /// and to caption it — so the two can never disagree.
-    private var recolorReason: String? { canvasManager.recolorUnavailableReason }
+    /// Why Colour, Size and Opacity are off, or nil. Read once per body pass and used twice — to gate
+    /// the band and to caption it — so the two can never disagree.
+    private var editReason: String? { canvasManager.selectionEditUnavailableReason }
 
-    /// Why Apply Brush is off, or nil — read once and used twice, exactly as `recolorReason` is.
-    /// BRUSH.md §2.10's verb refuses on the same cels a recolour does, so today these two are never
+    /// Why Apply Brush is off, or nil — read once and used twice, exactly as `editReason` is.
+    /// BRUSH.md §2.10's verb refuses on the same cels the band does, so today these two are never
     /// independently non-nil; reading both is what keeps that a fact rather than an assumption.
     private var applyBrushReason: String? { canvasManager.applyBrushUnavailableReason }
+
+    /// The colour picker over the Colour swatch. Its transitions are the drag's beginning and end —
+    /// see `colourSwatch`.
+    @State private var showingColourPicker = false
+
+    /// The value under the finger while a slider is being dragged, or nil between drags — so the
+    /// slider follows the finger rather than the model's rounded readout, `ChannelScalarControl`'s
+    /// own `dragValue`.
+    @State private var sizeDrag: Double?
+    @State private var opacityDrag: Double?
 
     /// **Three bands, not six** — TODO item (49), the owner: *"too tall and obstructs your view. Make
     /// all of them wider and flatter."* At `BottomDock.preferredWidth` the mode tabs sit beside the
@@ -135,17 +147,20 @@ struct SelectPanel: View {
                 divider
             }
 
+            // **Up only with a selection** — see the type's doc. `hasSelection` rather than
+            // `editReason == nil`, so that on a pixel layer the band is *dim and captioned* rather
+            // than absent: an artist who lassoed a raster cel should read why the sliders are off,
+            // not wonder where they went.
+            if hasSelection {
+                editBand
+                divider
+            }
+
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
                     .accessibilityIdentifier("selectPanel.duplicateButton")
                 actionTab(icon: "paintbrush.fill", title: "Fill") { canvasManager.fillSelection() }
                     .accessibilityIdentifier("selectPanel.fillButton")
-                actionTab(icon: "paintpalette.fill", title: "Recolour",
-                          enabled: recolorReason == nil) { canvasManager.recolorSelection() }
-                    .accessibilityIdentifier("selectPanel.recolorButton")
-                actionTab(icon: "paintbrush.pointed.fill", title: "Brush",
-                          enabled: applyBrushReason == nil) { canvasManager.applyBrushToSelection() }
-                    .accessibilityIdentifier("selectPanel.applyBrushButton")
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
@@ -163,6 +178,161 @@ struct SelectPanel: View {
                     .padding(.vertical, 6)
             }
         }
+    }
+
+    // MARK: - The edit band (TODO (42))
+
+    /// **Colour · Brush · Size · Opacity, one flat row** — the four things the toolbar shows for the
+    /// current brush, pointed at the ink the loop caught. Flat rather than stacked for TODO (49)'s and
+    /// (59)'s reason: the owner asked for wider and shorter, and at `BottomDock.preferredWidth` a
+    /// swatch, a button and two sliders fit one line.
+    ///
+    /// Every control here is gated on `editLive` and the band is captioned through `caption` when it
+    /// is not — the refusal says *why*, in words, which is the rule every other refusing control in
+    /// this panel already follows.
+    private var editBand: some View {
+        let style = canvasManager.selectionStyle
+        let live = hasSelection && editReason == nil
+        return HStack(alignment: .center, spacing: 12) {
+            colourSwatch(style, live: live)
+
+            Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 36)
+
+            actionTab(icon: "paintbrush.pointed.fill", title: "Brush",
+                      enabled: applyBrushReason == nil) { canvasManager.applyBrushToSelection() }
+                .accessibilityIdentifier("selectPanel.applyBrushButton")
+                .fixedSize()
+
+            Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 36)
+
+            bandSlider("Size", identifier: "selectPanel.sizeSlider",
+                       current: style.size.map(Double.init), mixed: style.sizeIsMixed,
+                       range: 1...50, drag: $sizeDrag, live: live && style.size != nil,
+                       display: { String(format: "%.0f pt", $0) },
+                       kind: .size, value: { .size(CGFloat($0)) })
+
+            bandSlider("Opacity", identifier: "selectPanel.opacitySlider",
+                       current: style.opacity, mixed: style.opacityIsMixed,
+                       range: 0...1, drag: $opacityDrag, live: live && style.opacity != nil,
+                       display: { String(format: "%.0f%%", $0 * 100) },
+                       kind: .opacity, value: { .opacity($0) })
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    /// **The swatch opens the picker on the selection's own colour, and the picker's life is the
+    /// drag.** `LayerOptionsPanel.valueColorRow`'s shape and `EffectSettingsBar.colorRow`'s: the
+    /// picker writes through its binding on every tick of its own sliders, so bracketing each write
+    /// would record a step per tick, and instead `onPresent` opens the session and `onDismiss` —
+    /// which runs however the popover ends, a canvas touch included — commits it once.
+    ///
+    /// `supportsOpacity: false`, because the session discards the picked alpha by rule (only the hue
+    /// travels; the Opacity slider beside this is the one door to alpha) and a slider whose value is
+    /// thrown away is a control that lies.
+    ///
+    /// **"Mixed" is said in the swatch's own caption**, not in the picker: the picker opens on the
+    /// most common colour and shows that; what the artist needs to know before the first tick is
+    /// that the loop holds more than one, and that belongs where the swatch is.
+    private func colourSwatch(_ style: SelectionStyle, live: Bool) -> some View {
+        let enabled = live && style.color != nil
+        let shown = style.color.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
+        return Button {
+            showingColourPicker = true
+        } label: {
+            VStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(shown ?? Color.white.opacity(0.08))
+                    .frame(width: 44, height: 26)
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .stroke(Color.white.opacity(enabled ? 0.35 : 0.15), lineWidth: 1))
+                Text(style.colorIsMixed ? "Mixed" : "Colour")
+                    .font(.caption2)
+                    .foregroundColor(enabled ? .white : .white.opacity(0.3))
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(!enabled)
+        .accessibilityIdentifier("selectPanel.colourSwatch")
+        // The hex rather than the resolved `Color`, for `EffectSettingsBar.colorRow`'s reason: a
+        // test can read what the swatch opens on. "Mixed" is a value too — it is what the loop says.
+        .accessibilityValue(style.color.map { Color(red: $0.red, green: $0.green, blue: $0.blue).hexString
+                                                  + (style.colorIsMixed ? " mixed" : "") } ?? "none")
+        .canvasPresentation(.selectionColour, isPresented: $showingColourPicker,
+                            canvasManager: canvasManager,
+                            onPresent: { canvasManager.beginSelectionEdit(.color) },
+                            onDismiss: { canvasManager.commitSelectionEdit() }) {
+            // No `.accessibilityIdentifier` on this view — `EffectSettingsBar.colorRow` found live
+            // that one here stamps the identifier onto every descendant and hides the panel's own.
+            ColorPickerPanel(color: Binding(
+                get: {
+                    let colour = canvasManager.selectionStyle.color
+                    return colour.map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? .black
+                },
+                set: { picked in
+                    let c = picked.rgbaComponents
+                    canvasManager.previewSelectionEdit(.color(CodableColor(red: c.r, green: c.g,
+                                                                          blue: c.b, alpha: 1)))
+                }), supportsOpacity: false)
+                .frame(width: ColorPickerPanel.popoverSize.width,
+                       height: ColorPickerPanel.popoverSize.height)
+        }
+    }
+
+    /// One of the two sliders. Touch-down opens the session, every value write previews, lift
+    /// commits — `ChannelScalarControl`'s bracket, with `beginSelectionEdit` for
+    /// `beginStructureGesture`. The readout is a **value** (`accessibilityValue`), so a test asserting
+    /// on it goes red if the control stops resolving what the loop holds.
+    ///
+    /// **"Mixed" shows beside the value the slider opens on**, and the first tick makes every caught
+    /// element agree — which is what dragging a Size slider over three lines of three widths means,
+    /// and what the caption is there to say before it happens.
+    private func bandSlider(_ title: String, identifier: String,
+                            current: Double?, mixed: Bool, range: ClosedRange<Double>,
+                            drag: Binding<Double?>, live: Bool,
+                            display: @escaping (Double) -> String,
+                            kind: SelectionEditKind,
+                            value: @escaping (Double) -> SelectionEditValue) -> some View {
+        // The slider is clamped to its range; the readout is not. A line drawn wider than 50 pt
+        // reads its true width beside a thumb pinned at the end, rather than a number that is
+        // true of no stroke.
+        let shown = drag.wrappedValue ?? current.map { min(max($0, range.lowerBound), range.upperBound) }
+            ?? range.lowerBound
+        let read = drag.wrappedValue ?? current ?? range.lowerBound
+        let readout = current == nil ? "—" : (mixed && drag.wrappedValue == nil
+                                              ? "Mixed · \(display(read))" : display(read))
+        return HStack(spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(live ? .white : .white.opacity(0.3))
+                .fixedSize()
+            Slider(value: Binding(
+                get: { shown },
+                set: { newValue in
+                    drag.wrappedValue = newValue
+                    canvasManager.previewSelectionEdit(value(newValue))
+                }),
+                   in: range,
+                   onEditingChanged: { editing in
+                       if editing {
+                           canvasManager.beginSelectionEdit(kind)
+                       } else {
+                           canvasManager.commitSelectionEdit()
+                           drag.wrappedValue = nil
+                       }
+                   })
+            .tint(.blue)
+            .disabled(!live)
+            .accessibilityIdentifier(identifier)
+            .accessibilityValue(readout)
+            Text(readout)
+                .font(.caption.monospacedDigit())
+                .foregroundColor(live ? .gray : .white.opacity(0.3))
+                .frame(minWidth: 52, alignment: .trailing)
+                .accessibilityIdentifier("\(identifier).readout")
+                .accessibilityValue(readout)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// **The paint-outside rule, sharing the first row rather than owning one** — TODO (59), the
@@ -453,7 +623,7 @@ struct SelectPanel: View {
         // other two do — a non-vector cel and an in-between — so with a selection in hand it is never
         // independently non-nil. Reading all three is what keeps that a fact rather than an assumption,
         // which is `applyBrushReason`'s own note one property up.
-        return recolorReason ?? applyBrushReason ?? canvasManager.animationGroupEditUnavailableReason
+        return editReason ?? applyBrushReason ?? canvasManager.animationGroupEditUnavailableReason
     }
 
     /// `enabled` is *additional* to `hasSelection`, never instead of it — every tab in this row is

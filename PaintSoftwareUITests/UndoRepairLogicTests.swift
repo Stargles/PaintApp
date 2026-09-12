@@ -1560,10 +1560,10 @@ final class UndoRepairLogicTests: XCTestCase {
             let canvas = Self.drawnCanvas(48)
             let before = canvas.elements
             let manager = manager(around: canvas, selecting: loop, membership: membership)
-            manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+            let colour = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
 
             let repairsBefore = canvas.regionRepairs
-            manager.recolorSelection()
+            manager.recolorSelection(to: colour)
             XCTAssertNotEqual(fingerprints(canvas.elements), fingerprints(before),
                               "\(what): fixture — the loop caught nothing, so nothing below is about "
                               + "a recolour at all")
@@ -1815,8 +1815,8 @@ final class UndoRepairLogicTests: XCTestCase {
     func testAnUnmeasuredDepartureUnderARewriteStillSaysEverything() {
         let canvas = Self.canvas(48)
         let manager = manager(around: canvas, selecting: Self.straddlingLoop, membership: .cutting)
-        manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
-        manager.recolorSelection()
+        let colour = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(canvas.lastDamage, .everything,
                        "a cel with no measured footprints cannot bound the parents a Cut replaces")
         XCTAssertEqual(canvas.rasterizations, 0, "fixture: nothing has walked")

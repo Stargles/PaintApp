@@ -3461,8 +3461,8 @@ final class LassoMoveLogicTests: XCTestCase {
         // on this very loop makes two strokes out of it — see `testAStrokeCrossingTheLoop…`.
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         manager.setSelectionMembership(.touching)
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.count, 1, "Touching splits nothing — the stroke stays one stroke")
         XCTAssertEqual(vector.elements[0].id, originalID, "and keeps its identity")
@@ -3495,9 +3495,9 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertEqual(manager.selectionMembership, .cutting, "fixture precondition: Cut is the default")
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.count, 2, "the stroke was cut at the loop")
         let strokes = vector.elements.compactMap(\.stroke)
@@ -3526,8 +3526,8 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         manager.setSelectionMembership(.enclosed)
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.map(\.id), [straddling, inside], "nothing was cut and nothing moved")
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the straddling stroke is not wholly inside")
@@ -3542,18 +3542,18 @@ final class LassoMoveLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
         manager.setSelectionMembership(.enclosed)
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(stepsSince(baseline, manager), 0, "no stroke lies completely inside the loop")
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "so nothing took the colour")
         XCTAssertEqual(manager.notice?.code, "nothingWhollyInside", "and the artist is told why")
 
         manager.notice = nil
         select(manager, layerIndex, loop(CGRect(x: 4, y: 44, width: 16, height: 16)))
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
         XCTAssertNil(manager.notice,
                      "but bare paper says nothing — §5.9, where the artist can see the reason")
     }
@@ -3569,9 +3569,9 @@ final class LassoMoveLogicTests: XCTestCase {
         let originalID = vector.elements[0].id
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
-        manager.brushColor = picked(0, 0, 0)              // exactly what the stroke already is
+        let colour = picked(0, 0, 0)              // exactly what the stroke already is
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.count, 1, "the stroke is still one stroke")
         XCTAssertEqual(vector.elements[0].id, originalID, "with the id it was drawn with")
@@ -3586,9 +3586,9 @@ final class LassoMoveLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 8), to: CGPoint(x: 54, y: 8), size: 40))
         select(manager, layerIndex, loop(CGRect(x: 4, y: 16, width: 56, height: 40)))
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the spine is outside, so nothing is caught")
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and nothing is recorded")
@@ -3608,9 +3608,9 @@ final class LassoMoveLogicTests: XCTestCase {
                                 size: 4, composite: .erase))
 
         select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 48, height: 30)))
-        manager.brushColor = picked(0, 1, 0)
+        let colour = picked(0, 1, 0)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         let strokes = vector.elements.compactMap(\.stroke)
         assertRGB(strokes.first { $0.composite == .paint }?.color, 0, 1, 0, "the paint stroke takes the colour")
@@ -3635,9 +3635,9 @@ final class LassoMoveLogicTests: XCTestCase {
         let before = vector.elements
 
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 50, height: 34)))
-        manager.brushColor = picked(1, 0, 1)
+        let colour = picked(1, 0, 1)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(stepsSince(baseline, manager), 0,
                        "nothing recolourable was caught, so no undo step is owed")
@@ -3653,9 +3653,9 @@ final class LassoMoveLogicTests: XCTestCase {
         vector.addStroke(stroke(from: CGPoint(x: 4, y: 4), to: CGPoint(x: 12, y: 6)))
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 30, width: 20, height: 20)))
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(stepsSince(baseline, manager), 0)
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the far-away stroke is not touched")
@@ -3677,8 +3677,8 @@ final class LassoMoveLogicTests: XCTestCase {
         // Overlaps the fill's right-hand end only — a move, or a Cut recolour, cuts it in two here.
         select(manager, layerIndex, loop(CGRect(x: 40, y: 2, width: 24, height: 60)))
         manager.setSelectionMembership(.touching)
-        manager.brushColor = picked(1, 0.5, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0.5, 0)
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.count, 1, "Touching splits no fill either")
         XCTAssertEqual(vector.elements[0].id, originalID)
@@ -3701,8 +3701,8 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 40, y: 2, width: 24, height: 60)))
         XCTAssertEqual(manager.selectionMembership, .cutting, "fixture precondition: Cut is the default")
-        manager.brushColor = picked(1, 0.5, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0.5, 0)
+        manager.recolorSelection(to: colour)
 
         let fills = vector.elements.compactMap(\.fill)
         XCTAssertEqual(fills.count, 2, "the fill was cut at the loop")
@@ -3735,9 +3735,9 @@ final class LassoMoveLogicTests: XCTestCase {
             vector.upsertText(element)
 
             select(manager, layerIndex, loop(loopRect))
-            manager.brushColor = picked(0, 0, 1)
+            let colour = picked(0, 0, 1)
             let baseline = manager.history.undoStack.count
-            manager.recolorSelection()
+            manager.recolorSelection(to: colour)
 
             let text = vector.elements.compactMap(\.text).first
             if expectsRecolour {
@@ -3781,9 +3781,9 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 44)))
         // Neither of these two may reach the artwork.
-        manager.brushColor = picked(0.2, 0.4, 0.8, 0.9)
+        let colour = picked(0.2, 0.4, 0.8, 0.9)
         manager.brushOpacity = 0.2
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         let stroke = vector.elements.compactMap(\.stroke).first
         assertRGB(stroke?.color, 0.2, 0.4, 0.8, "the stroke takes the hue")
@@ -3817,9 +3817,9 @@ final class LassoMoveLogicTests: XCTestCase {
                                                              size: CGSize(width: 12, height: 8))))
 
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 44)))
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(stepsSince(baseline, manager), 1, "three elements, one step")
         XCTAssertEqual(manager.history.undoStack.last?.label, .recolorSelection)
 
@@ -3860,8 +3860,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(try redPixelCount(), 0, "fixture precondition: the stroke is black")
 
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 48)))
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
 
         XCTAssertGreaterThan(try redPixelCount(), 0,
                              "the picked colour must reach the flatten, not just the display list")
@@ -3875,13 +3875,13 @@ final class LassoMoveLogicTests: XCTestCase {
         let (manager, _, _) = fixture()
         manager.currentLayerIndex = 0                       // the raster layer the fixture starts with
         select(manager, 0, loop(CGRect(x: 8, y: 8, width: 40, height: 40)))
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
 
-        let reason = manager.recolorUnavailableReason
+        let reason = manager.selectionEditUnavailableReason
         XCTAssertNotNil(reason, "a raster layer must say why, not go grey")
         XCTAssertFalse(reason?.isEmpty ?? true)
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and the action itself is a no-op")
     }
 
@@ -3896,14 +3896,14 @@ final class LassoMoveLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 18, y: 20), to: CGPoint(x: 44, y: 20), size: 5))
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 40)))
-        manager.brushColor = picked(1, 0, 0)
+        let colour = picked(1, 0, 0)
 
-        XCTAssertNil(manager.recolorUnavailableReason, "fixture precondition: a keyframe is fine")
+        XCTAssertNil(manager.selectionEditUnavailableReason, "fixture precondition: a keyframe is fine")
         manager.layers[layerIndex].cels[0].interpolation = InterpolationRecipe(references: [], t: 0.5)
 
-        XCTAssertNotNil(manager.recolorUnavailableReason, "a derived cel must say why")
+        XCTAssertNotNil(manager.selectionEditUnavailableReason, "a derived cel must say why")
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "and write nothing")
         XCTAssertEqual(stepsSince(baseline, manager), 0)
     }
@@ -3915,10 +3915,10 @@ final class LassoMoveLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 18, y: 20), to: CGPoint(x: 44, y: 20), size: 5))
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 40)))
-        manager.brushColor = picked(0, 0, 0)              // exactly what the stroke already is
+        let colour = picked(0, 0, 0)              // exactly what the stroke already is
 
         let baseline = manager.history.undoStack.count
-        manager.recolorSelection()
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(stepsSince(baseline, manager), 0)
     }
@@ -3944,8 +3944,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNotNil(vector.elements[1].stroke, "fixture precondition: a stroke between two fills")
 
         select(manager, layerIndex, loop(CGRect(x: 6, y: 6, width: 50, height: 44)))
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
 
         XCTAssertEqual(vector.elements.map(\.id), before, "the display list is rewritten in place")
         for element in vector.elements {
@@ -4286,8 +4286,8 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(rect))
         manager.setSelectionMembership(.touching)
 
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(vector.elements.map(\.id), [originalID], "Touching recoloured it whole")
 
         select(manager, layerIndex, loop(rect))
@@ -4833,8 +4833,8 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         manager.setSelectionMembership(.touching)
 
-        manager.brushColor = picked(1, 0, 0)
-        manager.recolorSelection()
+        let colour = picked(1, 0, 0)
+        manager.recolorSelection(to: colour)
         XCTAssertEqual(vector.elements.count, 1, "Touching recoloured the straddling stroke whole")
         XCTAssertEqual(vector.elements[0].id, originalID, "and cut nothing")
 

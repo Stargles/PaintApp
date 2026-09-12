@@ -1,7 +1,8 @@
 import XCTest
 
-/// **From a fresh document: draw two red lines, lasso one, Recolour it blue, undo, redo — and at every
-/// step what is *drawn* is asserted, not what is stored.** The cold-start reachability test for
+/// **From a fresh document: draw two red lines, lasso one, recolour it blue through the Select panel's
+/// picker, undo, redo — and at every step what is *drawn* is asserted, not what is stored.** The
+/// cold-start reachability test for
 /// TODO (41)'s last box, which bounded a rewrite in place — a recolour, an Apply Brush, a text retype,
 /// a nudge — by the union of where each rewritten element was and where it will be, instead of the
 /// whole cel.
@@ -45,22 +46,26 @@ final class RewriteUndoFootprintUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, l2Mid, isRed), "PREMISE: the second red line is on screen")
         XCTAssertTrue(waitUntil(canvas, paperBetween, isPaper), "PREMISE: the paper between them is bare")
 
-        // 2. Blue is the colour the recolour will apply — the Select panel's Recolour uses the
-        //    brush's current colour (TODO (42) is the picker). What the artist does next: change the
-        //    swatch, open Select, choose Rectangle, drag a loop around the first line.
-        setBrushColour(app, hex: "0000FF")
+        // 2. What the artist does next: open Select, choose Rectangle, drag a loop around the first
+        //    line. The Select panel's Colour swatch appears with the loop, showing the line's own red
+        //    (TODO (42): the picker opens on the selection's colour, not the palette's).
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
         rectangle.tap()
         dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
-        let recolour = app.buttons["selectPanel.recolorButton"]
-        XCTAssertTrue(recolour.waitForExistence(timeout: 5), "the Select panel offers Recolour")
-        XCTAssertTrue(recolour.isEnabled, "the loop made a selection, so Recolour is available")
+        let swatch = app.buttons["selectPanel.colourSwatch"]
+        XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the Select panel offers the Colour swatch")
+        XCTAssertTrue(swatch.isEnabled, "the loop made a selection, so Colour is available")
 
-        // 3. Recolour: the first line turns blue and only the first line. What the artist does next:
-        //    press Recolour.
-        recolour.tap()
+        // 3. Recolour: tap the swatch, type blue into the picker, tap away — the first line turns
+        //    blue and only the first line. What the artist does next: exactly that.
+        swatch.tap()
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "the swatch opens the colour picker")
+        setHexField(app, hexField, to: "0000FF")
+        app.staticTexts["Size"].firstMatch.tap()
+        XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker, which commits")
         XCTAssertTrue(waitUntil(canvas, l1Mid, isBlue),
                       "Recolour did not turn the lassoed line blue on screen")
         XCTAssertTrue(isRed(rgba(canvas, l2Mid)), "Recolour changed the line outside the loop")
