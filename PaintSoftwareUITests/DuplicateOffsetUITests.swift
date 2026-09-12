@@ -28,19 +28,10 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         add(shot)
     }
 
-    /// `OptionsPanelUITests.scrollMenuTo`, restated here rather than shared: the Blend Mode menu's
-    /// `CollectionView` realises cells only as it scrolls, and `swipeUp()` on the collection view
-    /// itself is the one gesture that drives it without closing the menu.
-    private func scrollMenuTo(_ app: XCUIApplication, identifier: String, maxSwipes: Int = 10) -> XCUIElement {
-        let item = app.buttons[identifier]
-        let collection = app.collectionViews.firstMatch
-        for _ in 0..<maxSwipes {
-            if item.exists { break }
-            guard collection.exists else { break }
-            collection.swipeUp()
-        }
-        return item
-    }
+    // `scrollMenuTo` used to be restated here rather than shared; it is now `PaintUITestCase`'s
+    // (TODO(45), 2026-09-11) — this file's own copy was byte-identical and, once lifted, collided
+    // with the inherited one (a private method cannot narrow an inherited internal one). Inherited
+    // from `PaintUITestCase` instead.
 
     /// Reads until two consecutive reads agree, so a probe taken while the render is still landing
     /// is not the number the test reasons about.
