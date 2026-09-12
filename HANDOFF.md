@@ -14,104 +14,112 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**No branches, no worktrees, stash empty, no simulator debris.** Session 40 closed at `d2205d5`,
-71 commits, everything merged and pushed.
+**No branches, no worktrees, stash empty, no simulator debris.** Session 41 closed at `921e1ce`,
+**68 commits** past session 40's `aff11df`, everything merged and pushed.
 
-**Fast tier: 3761 total / 3758 passed / 0 failed / 3 skipped, Debug *and* Release**, reconciled
-against a static `func test` count at every step.
+**Fast tier at `921e1ce`: 3971 total / 3968 passed / 0 failed / 3 skipped**, Debug and Release
+(3761 at the session's start), reconciled against a static `func test` count at every one of the
+seventeen merges. The 3-count gap between static and xcresult is three `private static func
+testBrush()` fixture helpers — constant, and every worker re-derived it.
 
-**Full suite at `d2205d5`: 4034 total / 3977 passed / 3 failed / 54 skipped.** All three passed clean
-in isolation. **Nine full suites ran this session** and every one is recorded in git log; the class
-table in CLAUDE.md is current as of `b79f879`.
+**The full UI suite has NOT been run since `d2205d5` (session 40).** Every worker ran the UI classes it
+touched in isolation — about forty class-runs, all green — but no run has tried the ~20 new UI classes
+against each other under four parallel clones, and CLAUDE.md's class table predates all of them.
+**Run the full suite on a freshly created device before anything else**, take the per-class table
+immediately after (the bundle gets evicted), and triage by the rule session 40 taught: **a regression
+fails the same tests twice.** Two classes to expect near the top: `TransformLayerModesUITests` (~350 s
+across four tests, measured in isolation) and `TransformLayerSpanUITests`.
 
-**The owner's iPad has `main` on it** (Release, installed 2026-09-10) and has not reported back on it.
-Ten artist-facing features landed in that build — see "What shipped" — so **the first thing worth doing
-next session is asking what they found**, rather than starting a new item cold.
-
-## The one thing to read before trusting a red test
-
-**The failing set has been different on every full run of this session** — 8, then 3, then 2, then 3,
-with almost no overlap — and every failure passed in isolation. CLAUDE.md now states the rule this
-taught: **a regression fails the same tests twice.** Two runs of the same bytes that disagree about
-*which* tests fail mean the run is the variable, whatever the assertion messages say. The old rule
-("a cluster with no assertion messages") did **not** fire: five failures once read as one coherent
-eraser regression, with messages, in a branch that had just changed a panel's layout. None reproduced.
-
-Rule out the cheap causes first (disk, clone debris, `Restarting after unexpected exit` in the log, a
-stray booted device), then **re-run whole on a freshly created device** before reading a list as a
-finding. The fresh device is a partial cure as well as a control — eight failures became three on the
-same commit.
-
-**Four flakes are filed in BUGS.md**, three pre-existing and one fixed. **Two of them are *logic*
-tests, which the fast tier does run** — so the tier is not blind to them by selection; it is blind
-because they only fail under the contention a full suite creates. **A green fast tier is not evidence
-that a logic test is deterministic.**
+**The owner's iPad has `921e1ce` on it** (Release, installed 2026-09-12). They tried the 2026-09-10
+build and found nothing wrong; this one carries everything below and has not been reported on.
 
 ## What shipped this pass
 
-**Three items closed and deleted whole**: (57) the on-disk project layout, (36) the chosen folder, and
-(56) the per-edit cost — the last closed by the owner rather than a measurement (*"35ms is great at
-least for now"*).
+**Five items closed whole and deleted: (60), (61), (62), (41), (42), plus (45).**
 
-**Performance, all MEASURED on the owner's iPad in Release.** Per-edit main-thread busy **115.4 →
-35.7 ms** at forty strokes a cel, and forty strokes now cost *less* per edit than one. The debounce-
-window stall the owner called "the second flicker" went **29 of 36 operations → 0 of 72**. Undo of a
-fill is **12x** faster (1071.9 → 89.5 ms at 2,000 strokes). Two renderers left the main thread: the cel
-thumbnail (the fifth, and the last one there) and the onion skin during playback.
+- **(60)** — six effect changes: Recolour with its under-the-effect eyedropper (Oklab tolerance,
+  softness, ordered entries claiming what earlier entries left unclaimed, shading preserved), Bloom
+  colour, Sobel gain, Computer Screen (six knobs, four presets, strip-apron aware), Dither/Halftone
+  as menu entries over the existing ordered screen, Hue Colorize as a mode of HSV Shift. `Effect.Kind`
+  is **16 cases** (13 → `recolor`, `crtScreen`, `duplicateOffset`); Dither, Halftone and Hue Colorize
+  are menu entries over existing cases, the Blur precedent. Recount before quoting.
+- **(61)** — the transform layer is its own `LayerKind` with a migration, and all five modes shipped
+  from a spec written and ruled the same morning: Parallax, Rotate, Shake, Repeat (a per-entry frame
+  carry in `renderNodes`; the frame store hits for free), and Duplicate Offset as a value-layer effect
+  with the Move box as its writer. [TRANSFORM_LAYER.md](TRANSFORM_LAYER.md) §2 holds the seventeen
+  rulings; **the bar means "only here" for every non-drawing layer** — an effect layer's grade now stops
+  at its bar too, which changes existing documents whose effect bar is shorter than the scene (the owner
+  accepted that knowingly).
+- **(62)** — keys past a shortened block are cropped, one undo step, a banner names them. Built, then
+  **adversarially reviewed** (four real findings: a third undo door leaked the banner, a second split
+  erased the first's report, two live key writers minted keys outside the span on a fresh document —
+  which refuted the invariant the builder had deleted a crop on — and a wrong BUGS.md filing). The
+  owner then ruled **twice against what was built**: the crop first inserts a key at the new last frame
+  so the remaining frames keep their motion; and a transform layer's own keys are cropped to its bar
+  rather than kept inert (*"I explicitly wanted keyframes clamped to inside the cels … I don't care
+  about data loss"*). Both shipped.
+- **(41)** — the `autoSize` text box is bounded by measured glyph ink (undo of a title at 2,000 strokes
+  **1,082 → 128 ms** MEASURED, Release), and a rewrite in place gets its hook at the mutation site
+  (undo of a recolour of 50 at 2,000: **1,093 → 303 ms**; the hook costs ~0.2–0.5 ms a tick). PERFORMANCE
+  §11.11e/f.
+- **(42)** — colour, size and opacity at selection scope, live, one undo step per drag; the picker opens
+  on the selection's own colour; a rasterize the canvas outran is now *shown* as an intermediate frame
+  rather than thrown away (§11.11g — the brief's coalescing premise was backwards, and the worker said
+  so and did the opposite).
+- **(45)** — the audit re-run: ~230 citations checked, ~30 fixed across seven specs; most rot traced to
+  one deletion (`d8d7ba8`, the whole-layer vector transform) that LAYER_TRANSFORM.md, LASSO_MOVE.md and
+  PERFORMANCE.md still cited as live. Those three are annotated, not rewritten — **their bodies still
+  describe that mechanism as history**, which is where a future reader will be confused first.
+- **(21)** — two boxes reconciled as already shipped (stage 7's Move-box surface, the folder keyframe
+  entry point); two remain.
+- **Small defects**: `duplicateLayer` no longer drops animation/transform/in-betweens; three colour
+  pickers' stomped identifiers; a hidden transform layer poses nothing; every artist-facing frame
+  number counts from 1; `RecolorUITests` scrolls to its entry (and the scroll helper is shared).
 
-**Keyframes**: layer *and* folder opacity are keyframable through the first non-pose channel kind
-(`TargetChannel`); animation-group membership is three operations (add, remove, move) under the owner's
-"stays where it looks on screen" ruling; folders can place a keyframe from their options panel; and the
-take recorder has all three surfaces — slider, Move box and **canvas**, where a stroke drawn while a
-take runs is cut at cel boundaries.
+**What the cold-start UI tests found that nothing else did** — five defects, each in a green fast
+tier: the bake key ignored `Bloom.color`/`Sobel.gain` (a slider that painted nothing); an
+`.accessibilityIdentifier` on a container stomping every child; the baker's `StructuralStamp` never
+seeing container poses (every rotated frame stale on the display path — pre-existing); a multi-tick
+bar drag cropping a different key every tick; `press(forDuration:thenDragTo:)` returning ~0.6 s after
+the lift, which let a deferred implementation pass a "live" assertion. **The rule is CLAUDE.md's and
+it held every time: assert what is drawn.**
 
-**The recorder arms and starts in two acts**, per the owner: record turns blue and nothing moves, and
-the take begins when the pencil lands.
-
-**The disappearing strokes are CLOSED.** `UnlandedInk` holds a finished stroke's display image until a
-base containing it lands. Neither of BUGS.md's two options was taken: nothing composites on the main
-thread, and the held ink is **2.6 MiB at any canvas size** — *less* than the `StrokeScratch` the shipped
-code held for the same window.
-
-**Docs**: CLAUDE.md 1103 → ~800 lines (fourteen dated class tables became eleven conclusions), memory
-36 → 33 files, and (45)'s spec sweep checked **314 numbered anchors** and found ~130 displaced plus
-nine places the code had moved out from under a spec's own claim.
+**Process**: the session ran two lanes (one Opus, one Sonnet) of one agent per item, each carrying
+survey → build → mutate → drive → merge, ~450–620 K tokens each; a fresh reviewer only for (62). Two
+workers ended their turn to "wait for a background run" and could not be resumed (the brief now
+forbids it); two more were cut off by a usage limit and **were** resumed via `SendMessage` with their
+context intact — worktrees survive either way, and every worker had committed as it went.
 
 ## Start here
 
-**Ask the owner what they found on their iPad first.** Then, in queue order:
-
-**(60)** is the biggest of the small work: bloom colour and Sobel gain, plus four new effects the owner
-added on 2026-09-10 — a computer-screen look, hue colorize, dither, and **recolour**, whose design is
-already settled in the item (Oklab tolerance, softness, first-match-wins, shading preserved) along with
-its eyedropper, whose *from* colour must sample **under** the effect rather than off the screen. Two of
-the four may not be new effects at all; the item says which and why.
-
-**(61) wants a design document and a conversation, not a branch.** The transform layer becoming its own
-type with five modes — and the five are not one shape: parallax, rotate and screen shake are poses,
-repeat is a timeline operation, and duplicate offset is a compositing one. The owner spotted the last
-themselves and prefers it as a value-layer effect. **The spec's first job is to say how many homes these
-want**, with *"do whatever is cleanest"* as the owner's own instruction.
-
-**(62)** is settled and small: keys outside a cel's span are cropped, as one undo step that says what it
-discarded.
-
-After those: **(41)**'s two remaining boxes (a rewrite in place needs a hook at the mutation site, before
-it overwrites — that is the shape, not yet built), **(21)**'s folder graph band and stage 6, then (42),
-(22), (10), (37), (45)'s remainder.
+1. **Full suite on a fresh device**, per State. Nothing else until the count is read.
+2. **Ask the owner what they found on the iPad** (`921e1ce`, installed 2026-09-12).
+3. Then, in queue order: **(21)**'s two boxes — the folder graph band (`graphBandExpansion` keyed by
+   `layerIndex` → `KeyframeTarget`, KEYFRAMES §11.7) and stage 6, bake to cels (KEYFRAMES §6 is the
+   spec: follow `bakePreciseStrokes`, mint fresh ids, bake at the channel's step, disclose the
+   permanent save cost with a MEASURED number; a bake under a Repeat layer reads the source frame).
+   Then **(63)** Glare and Colour Wheels (low priority by the owner's word), (22), (10), (37).
 
 ## Waiting on the owner
 
-- **What they found on the device.** Nothing else here is blocked.
-- **(61)'s design conversation**, before any of it is built.
-- **(21) animation-group retagging** is no longer waiting — ruled 2026-09-10 and shipped.
-- **Two interpretations they should sanity-check**, both recorded in the items and both mine rather than
-  theirs: that "stays where it looks on screen" means *at the frame you are on* (every frame is not
-  expressible — only groups carry tracks), and that a hidden scale/skew channel **carrying a curve**
-  stays visible so an animation cannot be lost behind a default.
+- **What they found on the device.** Nothing is blocked on it.
+- **Questions that took a default this pass** — each is reversible and recorded where the behaviour
+  lives; ask when one bites rather than all at once:
+  - Selection editing: dragging Size over lines of several widths sets them all to one width — or
+    scale them together? Same for Opacity. Show the edit band dimmed before a loop is drawn?
+  - Duplicate Offset: default is a white rim 8 px up-right (a black shadow instead?); the box is the
+    whole canvas (sit on the drawing?); the panel closes on the first canvas touch after Adjust Box;
+    all 25 blend modes offered.
+  - Repeat: the brush lands on the source drawing, but Move, lasso and text still see an empty frame
+    there, silently (TRANSFORM_LAYER §5.5 lists them).
+  - Shake speed is 1–12 frames per jolt; a folder in Rotate/Shake counts from the document's first
+    frame (no bar).
+  - Recolour's soft edge blends into the *next* entry rather than the original ink; 64 entries max;
+    the paper can be recoloured if a picked colour is close to it (kept, by the owner).
+  - Computer Screen: bent corners are see-through (kept); line spacing in the picture's own pixels;
+    the Blend Mode menu is four pages long with the effects at the end.
 - **(22)** and **(10)** deprioritised; **(37)**'s importer dropped.
-- **BUGS.md's five remaining `.popover`s** have the timeline's swallow-every-drag defect. Three are
-  colour pickers whose chrome would visibly change — the owner's call.
-- **XCUITest cannot synthesise a Pencil**, and three things now rest on that: the pen half of the graph
-  editor's box-select, pressure across a stage-10 cel seam, and the pencil half of (47). **The owner has
-  granted device build and deploy**, so these are now checkable on the iPad rather than unprovable.
+- **BUGS.md** carries the stepped-split timing change, the simulator-only keyboard band, and the five
+  `.popover`s — none ruled.
+- **XCUITest cannot synthesise a Pencil**; the owner has granted device build and deploy, so the pen
+  halves are checkable on the iPad rather than unprovable.

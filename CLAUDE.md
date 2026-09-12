@@ -60,7 +60,10 @@ work against 31.4 of wall clock — a 16% scheduling gap.
 here, on the same eleven tests. That is the "grows past the floor while nobody is looking" pattern
 repeating rather than a single noisy row, and at 711 s it is 44% of a clone's 27.1 min share — still
 under it, so still not the binding constraint, but it is the only class that has ever reached this
-fraction. **Re-take before adding a twelfth test to it.**
+fraction. **Re-take before adding a twelfth test to it.** And **`TransformLayerModesUITests`, born
+2026-09-11 with four tests, measured ~350 s in isolation before any full suite has seen it** — the
+table above predates it, as it predates the ~20 other UI classes that session added. Re-take on the
+next full run before reading any row here as current.
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
@@ -809,8 +812,10 @@ entry alone was built wrong.
 [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) is the ruling on `VectorCanvas._transform` — whether a vector cel should carry an affine at all, or store every object in canvas coordinates. **Verdict: adopt, with changes** — eleven of its sixteen entry points invert it away again, and it carries three unfiled defects (ink drawn on a shrunk cel is clipped away, a scaled-up cel is a bitmap magnify, and interpolation drops the transform entirely). Its §6 is the honest answer to the bit-width question that started it: **the ruling buys no bits.** That §6 once concluded "(8)'s settled 24 stays 24" and this line repeated it; both are stale. 24 was the live decision for four minutes on 2026-08-26 before `35b541c` settled **16 bits an axis**, and §6 carries its own correction. The stale text was this line.
 [TRANSFORM_LAYER.md](TRANSFORM_LAYER.md) is a **different feature with a confusingly similar name** —
 not `VectorCanvas._transform` above, but TODO (61): making the transform a `LayerKind` of its own with
-five modes (parallax, rotate, repeat, screen shake, duplicate offset). Ruled 2026-09-11, seventeen
-questions answered; §8 is the build order, in progress.
+five modes (parallax, rotate, repeat, screen shake, duplicate offset). **Ruled and shipped in full on
+2026-09-11** — seventeen rulings in §2 (one reversed the same day: a transform layer's keys are cropped
+to its bar, not kept inert), §8's rows carry the commits. Its §3.4 region formulas and CPU blend count
+were corrected by the build; read the file, not the item that named it.
 [README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
 is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
 open issues only. [PERFORMANCE.md](PERFORMANCE.md) is the ranked optimisation programme, the work
