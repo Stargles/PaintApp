@@ -128,4 +128,38 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
         XCTAssertFalse(DeferredVectorRender.mayShow(rendered: 7, current: 7, pending: nil),
                        "Nothing is waiting on this result")
     }
+
+    /// **A rasterize the canvas has outrun is shown as the frame for the instant it was asked at** —
+    /// TODO (42)'s coalescing, `DeferredVectorRender.landing`. Under a held slider every render
+    /// finishes after the next tick, so `mayShow` alone shows none of them and the drag freezes;
+    /// `landing` shows each one while the newer request behind it is drawn, and refuses exactly the
+    /// cases `mayShow` refuses for a reason other than staleness.
+    ///
+    /// Mutation caught: returning `.refuse` from `landing` wherever `mayShow` is false (the shipped
+    /// behaviour before this) reddens the first assertion; dropping the `version > shown` guard
+    /// reddens the out-of-order one, which is the freeze's cousin — an older frame over a newer.
+    func testAStaleRasterizeIsShownAsAnIntermediateFrameWhenANewerOneIsRunning() {
+        typealias L = DeferredVectorRender.Landing
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: 9, shown: 6,
+                                                    hostIsBlanked: false), L.showAsIntermediate,
+                       "the canvas is at 9 and a render for 9 is running: 7 is the frame for now")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 9, current: 9, pending: 9, shown: 7,
+                                                    hostIsBlanked: false), L.show,
+                       "and when 9 lands it is shown and recorded — `mayShow`'s yes, unchanged")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: 9, shown: 8,
+                                                    hostIsBlanked: false), L.refuse,
+                       "a frame older than the one on screen never goes up — frames cannot go backwards")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: nil, shown: 6,
+                                                    hostIsBlanked: false), L.refuse,
+                       "nothing running for 9: refuse, so the caller drops this and asks again")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: 7, shown: 6,
+                                                    hostIsBlanked: false), L.refuse,
+                       "the view is waiting on *this* render and the canvas has left it: the caller re-asks")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 7, pending: 8, shown: 6,
+                                                    hostIsBlanked: false), L.refuse,
+                       "same version, superseded by a newer rasterize of it — `mayShow`'s no, unchanged")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: 9, shown: 6,
+                                                    hostIsBlanked: true), L.refuse,
+                       "blanked: nothing this view draws reaches the screen")
+    }
 }

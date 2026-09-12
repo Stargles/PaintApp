@@ -315,6 +315,7 @@
 		C8714C30085243FA8631F602 /* TextUndoFootprintUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */; };
 		E17E9680C6E6956CAA338402 /* RewriteUndoFootprintUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17E9680C6E6956CAA338401 /* RewriteUndoFootprintUITests.swift */; };
 		4B194DBDD54073D1922384F7 /* SelectionEditUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */; };
+		ABCAB1B09A3153447FFCFC0F /* SelectionEditBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */; };
 		1A5B798603866CFE1387C236 /* SelectionEditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */; };
 		A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */; };
 		3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */; };
@@ -740,6 +741,7 @@
 		C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextUndoFootprintUITests.swift; sourceTree = "<group>"; };
 		E17E9680C6E6956CAA338401 /* RewriteUndoFootprintUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RewriteUndoFootprintUITests.swift; sourceTree = "<group>"; };
 		3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditUITests.swift; sourceTree = "<group>"; };
+		90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditBench.swift; sourceTree = "<group>"; };
 		88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditLogicTests.swift; sourceTree = "<group>"; };
 		A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextRecipeCodableLogicTests.swift; sourceTree = "<group>"; };
 		3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorTextPersistenceLogicTests.swift; sourceTree = "<group>"; };
@@ -934,6 +936,7 @@
 				C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */,
 				E17E9680C6E6956CAA338401 /* RewriteUndoFootprintUITests.swift */,
 				3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */,
+				90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */,
 				88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */,
 				A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */,
 				3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */,
@@ -1498,6 +1501,7 @@
 				C8714C30085243FA8631F602 /* TextUndoFootprintUITests.swift in Sources */,
 				E17E9680C6E6956CAA338402 /* RewriteUndoFootprintUITests.swift in Sources */,
 				4B194DBDD54073D1922384F7 /* SelectionEditUITests.swift in Sources */,
+				ABCAB1B09A3153447FFCFC0F /* SelectionEditBench.swift in Sources */,
 				1A5B798603866CFE1387C236 /* SelectionEditLogicTests.swift in Sources */,
 				A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */,
 				3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */,

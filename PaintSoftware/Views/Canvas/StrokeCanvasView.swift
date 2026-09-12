@@ -248,7 +248,11 @@ final class StrokeCanvasView: UIView {
             // coincidence, so a picture kept across a layer, cel or frame change could be retired by
             // an unrelated number — or, worse, drawn over the *new* cel's base until it was. A layer
             // switch mid-render is exactly when that happens.
-            if oldValue !== vectorCanvas { unlandedInk.removeAll() }
+            if oldValue !== vectorCanvas {
+                unlandedInk.removeAll()
+                // The ordering guard for an intermediate frame is about *this* canvas's counter.
+                shownVectorVersion = StrokeCanvasView.nothingDisplayed
+            }
             refreshDisplay()
         }
     }
@@ -260,6 +264,13 @@ final class StrokeCanvasView: UIView {
     /// background rasterize of it has merely been *started* — stops the view repainting and freezes
     /// the canvas on whatever was up. See `DeferredVectorRender`.
     private var displayedVectorVersion: Int = StrokeCanvasView.nothingDisplayed
+
+    /// The `VectorCanvas.version` of the picture actually in the base slot — `displayedVectorVersion`
+    /// when a current render landed, and the *stale* version when an intermediate frame did
+    /// (`DeferredVectorRender.Landing.showAsIntermediate`, TODO (42)). The two differ exactly while a
+    /// drag is outrunning the renderer; this one is the ordering guard for the next stale frame and
+    /// the other is what `refreshDisplayIfStale` compares. Never claimed early, for the same reason.
+    private var shownVectorVersion: Int = StrokeCanvasView.nothingDisplayed
 
     /// **No version of anything is on screen** — the value `displayedVectorVersion` and
     /// `displayedRasterVersion` take before the first refresh and whenever a refresh deliberately
@@ -625,6 +636,7 @@ final class StrokeCanvasView: UIView {
         switch plan.base {
         case .interpolation:
             displayedVectorVersion = vectorCanvas.version
+            shownVectorVersion = vectorCanvas.version
             base = interpolationImage
             // **A derived in-between replaces the cel's own content outright**, so nothing held
             // against the cel's version is meaningful here — and `retire(upTo:)`'s arithmetic could
@@ -647,6 +659,7 @@ final class StrokeCanvasView: UIView {
                 // `LayerHostView.setBlanked` is what asks for the repaint on that edge.
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = StrokeCanvasView.nothingDisplayed
+                shownVectorVersion = StrokeCanvasView.nothingDisplayed
                 // Nothing held can reach the screen either, and the pass that un-blanks the host
                 // repaints from the canvas — so the pictures would be bytes nobody can see, held
                 // against a base that is deliberately not being kept current.
@@ -656,12 +669,14 @@ final class StrokeCanvasView: UIView {
             case .showNow(let version):
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = version
+                shownVectorVersion = version
                 base = cached.image
                 installedVersion = version
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRenderVersion = nil
                     displayedVectorVersion = version
+                    shownVectorVersion = version
                     base = PlaybackTrace.span(.vectorRasterize) { vectorCanvas.render() }
                     installedVersion = version
                 } else {
@@ -726,8 +741,13 @@ final class StrokeCanvasView: UIView {
     private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
-        guard let image, DeferredVectorRender.mayShow(rendered: version, current: canvas.version,
-                                                      pending: pendingVectorRenderVersion) else {
+        // Nil is a rasterize that never ran — `render(quality:ifStillAtVersion:)` found the canvas
+        // already past `version` before walking anything — so there is no picture to be a frame.
+        let landing: DeferredVectorRender.Landing = image == nil ? .refuse
+            : DeferredVectorRender.landing(rendered: version, current: canvas.version,
+                                           pending: pendingVectorRenderVersion,
+                                           shown: shownVectorVersion, hostIsBlanked: hostIsBlanked)
+        guard let image, landing != .refuse else {
             // Two ways to be here. **Superseded**: a newer rasterize is already running and will
             // land, so leave `pendingVectorRenderVersion` naming it and do nothing. **The canvas
             // moved with nothing running for the new version**: the request this view is waiting on
@@ -739,13 +759,20 @@ final class StrokeCanvasView: UIView {
             }
             return
         }
-        pendingVectorRenderVersion = nil
+        if landing == .show { pendingVectorRenderVersion = nil }
         // **Before the assignment and in the same main-thread turn**, so Core Animation commits the
         // new base and the removal of the ink it now contains together. One turn apart is one frame
-        // with the stroke drawn twice.
+        // with the stroke drawn twice. Right for an intermediate frame too: it is a base rasterized
+        // at `version`, so everything held up to `version` is in it and everything held after stays
+        // drawn over it.
         retireUnlandedInk(coveredBy: version)
         if imageView.image !== image { imageView.image = image }
-        displayedVectorVersion = version
+        shownVectorVersion = version
+        // **Recorded as displayed only when it is the canvas's own version.** An intermediate frame
+        // (`DeferredVectorRender.landing`, TODO (42)) leaves `displayedVectorVersion` stale on
+        // purpose: it is what `refreshDisplayIfStale` compares, and the newer render this frame is
+        // standing in for has to be asked for again if it is ever dropped.
+        if landing == .show { displayedVectorVersion = version }
         // **The raw scratch rather than a `VectorPreviewPlan`'s**, and it is the same answer: the one
         // role the plan would filter out is `.none`, which stamps nothing into its window, so its
         // `image` is nil and its `replacesBase` is false. Both branches below are then the no-ops

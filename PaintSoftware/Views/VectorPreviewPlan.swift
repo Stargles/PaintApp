@@ -183,4 +183,48 @@ enum DeferredVectorRender {
     static func mayShow(rendered version: Int, current: Int, pending: Int?) -> Bool {
         version == current && pending == version
     }
+
+    /// What a finished rasterize is to the base slot.
+    enum Landing: Equatable {
+        /// Install it and record its version as displayed — `mayShow`'s yes.
+        case show
+        /// **Install it, record nothing.** The canvas has moved on since this was asked for, a newer
+        /// rasterize is already running for where it is now, and this picture is newer than the one
+        /// on screen — so it is the frame for the instant it was asked at, and the artist sees it
+        /// while the newer one is drawn. `displayedVectorVersion` stays where it is, which is what
+        /// keeps `refreshDisplayIfStale` asking; `pendingVectorRenderVersion` keeps naming the newer
+        /// render, which is what keeps the request queue at one entry.
+        case showAsIntermediate
+        /// Do nothing with it.
+        case refuse
+    }
+
+    /// `mayShow` with a third answer for the picture that used to be thrown away — TODO (42).
+    ///
+    /// **A slider over a selection invalidates the canvas on every tick, and a tick is ~16 ms where a
+    /// render of the selection's rectangle is 60 ms at 200 strokes and 300 ms at 2,000.** So under a
+    /// held finger every rasterize finishes after the canvas has moved again, and under `mayShow`
+    /// alone not one of them reaches the screen: the picture freezes for the length of the drag and
+    /// lands only when the finger pauses for a whole render. Every one of those walks was real work
+    /// producing a real picture of a version the artist did ask for, a few ticks ago — and the
+    /// request queue behind it has already collapsed to one entry, since a superseded request costs
+    /// a lock acquisition (`VectorCanvas.render(quality:ifStillAtVersion:)`). Showing the picture is
+    /// what makes the drag *live*: one frame per render, lagging by at most two, rather than none.
+    ///
+    /// The alternative — stopping the walk the moment a tick supersedes it — was considered and
+    /// refuted by the same arithmetic: with ticks faster than a walk, every walk would be stopped
+    /// and nothing would be drawn until the finger stopped, which is the freeze again with less work.
+    ///
+    /// - Parameter shown: the version of the picture actually in the base slot, whatever it is —
+    ///   `StrokeCanvasView.shownVectorVersion`. The ordering guard: a stale frame is shown only when
+    ///   it is *newer* than what is up, so two stale frames landing out of order cannot go backwards.
+    /// - Parameter hostIsBlanked: nothing this view draws reaches the screen, so a stale frame is
+    ///   not worth the assignment — `Step.blankedByTheComposite`'s reason.
+    static func landing(rendered version: Int, current: Int, pending: Int?, shown: Int,
+                        hostIsBlanked: Bool) -> Landing {
+        if mayShow(rendered: version, current: current, pending: pending) { return .show }
+        guard !hostIsBlanked, version != current, let pending, pending != version,
+              version > shown else { return .refuse }
+        return .showAsIntermediate
+    }
 }

@@ -3558,17 +3558,84 @@ rewritten — to pair each rewritten id with its old value.
 ~4.5 ms on the main thread at 2,000 strokes and a render of the selection's own rectangle off it —
 ~300 ms at 2,000 for a fifty-stroke selection covering a sixth of the canvas, ~60 ms at 200 — and a tick
 that arrives before the previous render has measured anything is bounded the same way rather than
-falling to the cel. What (42) still owes is above this seam: a preview-then-commit so a drag is one undo
-step (its own third box), and a render that is *dropped* when the next tick lands rather than queued
-(`install`'s version gate already discards a stale walk's result; what it does not do is stop the walk).
-`RewriteUndoFootprintUITests` drives the whole thing from a fresh document — draw, lasso, Recolour,
-undo, redo — reading the recoloured line's pixels and its neighbour's off the screen.
+falling to the cel. What (42) still owed above this seam — a preview-then-commit so a drag is one undo
+step, and what to do with a render the next tick has made stale — is §11.11g, which shipped the tool
+and measured the drag. `RewriteUndoFootprintUITests` drives the whole thing from a fresh document —
+draw, lasso, recolour through the picker, undo, redo — reading the recoloured line's pixels and its
+neighbour's off the screen.
 
 **Not converted, and why.** `applyInterpolationState` restores whole display lists for every canvas an
 interpolation step touched and knows nothing about which same-id elements changed; a rewritten set it
 cannot name would be every id, which is a canvas-sized rectangle and the full walk it already pays. The
 three motion-group retag sites' *forward* edits do declare their ids and are bounded; their undo is that
 wholesale swap and stays `.everything`.
+
+### 11.11g The live slider over a selection, and the frame that used to be thrown away (2026-09-11)
+
+TODO (42) shipped on §11.11f's seam: the Select panel's Colour, Size and Opacity each open a session
+(`CanvasManager.beginSelectionEdit`), rewrite the caught elements in place on every tick through
+`restoreElements(_:changedInk:rewriting:)` (`previewSelectionEdit`), and commit one undo step on lift
+(`commitSelectionEdit`). The tick is the press §11.11f timed, plus the session's own rewrite of the
+caught elements and the publish that ends in `refreshDisplayIfStale`.
+
+**The coalescing question was answered the other way round from how it was asked.** §11.11f closed
+with *"a render that is dropped when the next tick lands rather than queued … what it does not do is
+stop the walk"*. Two things about that turned out to be true of the shipped code before (42) touched
+it, and one turned out to be wrong:
+
+- **The requests were already coalesced.** `StrokeCanvasView` keeps one serial render queue and
+  `DeferredVectorRender.step` asks for at most one rasterize per version; a request the canvas has
+  outrun costs one lock acquisition (`render(quality:ifStillAtVersion:)`'s cheap look) and no walk.
+  MEASURED below: 180 ticks produce 36 walks at 200 strokes and 7 at 2,000 — one per walk-time, not
+  one per tick.
+- **The walks were already the right number.** Every walk that runs is a picture of a version the
+  artist asked for a few ticks ago, and at a held finger the next one starts the moment it finishes.
+- **What was wrong was what happened to the picture.** `DeferredVectorRender.mayShow` requires the
+  rendered version to be the canvas's *current* one, so under a finger moving faster than a walk not
+  one of those walks reached the screen: **0 frames in three seconds of dragging, at either density**
+  (the `mayShow` rows below). The canvas froze on the pre-drag picture until the finger paused for a
+  whole walk. Stopping the walk when superseded — the fix as asked — would have kept that 0 and done
+  less work to earn it: with ticks faster than a walk, every walk is superseded.
+
+So the change is `DeferredVectorRender.landing`: a finished rasterize the canvas has outrun, with a
+newer one already running and a version newer than the picture on screen, is **shown as the frame for
+the instant it was asked at**, recorded as displayed *not at all* (`displayedVectorVersion` stays
+stale, so `refreshDisplayIfStale` keeps asking), and the request queue behind it stays at one entry.
+`shownVectorVersion` is the ordering guard, so two stale frames cannot land backwards.
+
+**MEASURED, `SelectionEditBench`, Release, iPad Pro 13-inch M4 simulator, iOS 26.5, canvas 2048×1024,
+§11's fixture, 87.7% idle at the end of the run.** Three seconds of the Size slider — 180 ticks, 16 ms
+apart — through the shipped session, over a loop grown about the centre until the selection's own
+classifier reaches **fifty strokes** (which under Cut catches those fifty). The display is scheduled
+exactly as `StrokeCanvasView` schedules it, restated from the same two pure functions, under each
+landing rule in turn, both arms in one process on one canvas. `frames` is how many pictures reached
+the base slot *while the finger was down*; `walk` is the render of the selection's rectangle.
+
+| n strokes | rule | tick (median / max) | frames in 3 s | walks | walk median | latency after last tick | rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | `mayShow` (before) | 1.1 / 44.6 ms | **0** | 36 | 81.5 ms | 138.9 ms | 48.5% |
+| 200 | `landing` (after) | 1.1 / 42.2 ms | **34** | 36 | 81.0 ms | 103.7 ms | 48.5% |
+| 2000 | `mayShow` (before) | 5.9 / 8.2 ms | **0** | 7 | 547.3 ms | 1031.1 ms | 32.7% |
+| 2000 | `landing` (after) | 6.0 / 24.2 ms | **5** | 7 | 558.5 ms | 1110.8 ms | 32.7% |
+
+**At the owner's density the drag went from a frozen picture to eleven frames a second**, and at
+2,000 strokes from frozen to a picture every ~560 ms. The tick itself is 1.1 ms at 200 and ~6 ms at
+2,000 — §11.11f's 4.5 ms seam plus the session's rewrite of fifty elements, the two `current(of:)`
+comparisons that decide whether anything changed, and the publish. Nothing in the tick walks the cel.
+The walks and their count are the same under both rules, which is the operand that says the change
+spent no extra work; the latency after the last tick is at most two walks under either and the
+differences in that column are within the run-to-run spread of the walk itself (547 against 558 on
+the same fixture). The rectangle is wider than §11.11f's 16% because a loop that *reaches* fifty
+400-point arcs is a third of this canvas, where §11.11f's fifty-nearest-the-centre rewrote a cluster
+whose boxes need not be reached by one loop; a first draft of this bench that used that union
+reached 756 elements and measured a different thing from the one it was named for.
+
+**What is still owed, and is not owed by this item.** A walk of the selection's rectangle at 2,000
+strokes is 550 ms, so a frame every half second is what the artist gets at that density; the tick is
+not the cost, the walk is, and §11.11b already says a vector render is its buffer. A cheaper *preview*
+walk while the finger is down — `.preview` quality, which strokes paths rather than stamping dabs — is
+the obvious next step and was not taken here, because the intermediate frame has to be the same
+picture the commit will show or the artist is being shown a lie that lands the moment they let go.
 
 ### 11.12 The disappearing strokes: what the window actually is, on the owner's own document (2026-09-09)
 
