@@ -96,7 +96,9 @@ final class RecolorUITests: PaintUITestCase {
         let modeButton = app.buttons["layerOptions.blendModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "A value layer's Blend Mode row chooses its mode")
         modeButton.tap()
-        let recolourItem = app.buttons["layerOptions.blendMode.recolour"]
+        // The catalogue has grown past the menu's realized-cell window (BUGS.md, 2026-08-30) —
+        // `scrollMenuTo` (`PaintUITestCase`) is the fix on the test side, not a bug in the app.
+        let recolourItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.recolour")
         XCTAssertTrue(recolourItem.waitForExistence(timeout: 5),
                       "Recolour is in the effect catalogue, so it is in the mode menu")
         recolourItem.tap()
@@ -221,15 +223,8 @@ final class RecolorUITests: PaintUITestCase {
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
         // Recolour is past the Blend Mode menu's first ~33 realized cells (BUGS.md, 2026-08-30) —
-        // `swipeUp()` on the menu's own `CollectionView`, not a coordinate and not the cell, is what
-        // actually scrolls it and realizes further cells (`OptionsPanelUITests.scrollMenuTo`'s doc).
-        let recolourItem = app.buttons["layerOptions.blendMode.recolour"]
-        let menu = app.collectionViews.firstMatch
-        for _ in 0..<10 {
-            if recolourItem.exists { break }
-            guard menu.exists else { break }
-            menu.swipeUp()
-        }
+        // `scrollMenuTo` (`PaintUITestCase`) is what actually scrolls it and realizes further cells.
+        let recolourItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.recolour")
         XCTAssertTrue(recolourItem.waitForExistence(timeout: 5), "Recolour should be reachable in the menu")
         recolourItem.tap()
 

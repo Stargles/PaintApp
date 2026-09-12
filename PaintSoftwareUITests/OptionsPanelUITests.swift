@@ -338,30 +338,10 @@ final class OptionsPanelUITests: PaintUITestCase {
         return current
     }
 
-    /// **Scrolls the open Blend Mode / Operation menu until `identifier` exists, then taps it.**
-    ///
-    /// BUGS.md's *"The effects menu only exposes its first few items to XCUITest"* (2026-08-30) is
-    /// real as far as it goes — a plain query never matches Bloom, Sobel, or the four other items
-    /// past Posterize, because the menu's `CollectionView` simply has not realized cells for them
-    /// yet. But that note stopped at "not a bug in the app" without finding the fix on the *test*
-    /// side: XCUITest's own `swipeUp()`, called on the **collection view itself** rather than on a
-    /// coordinate or on one of its cells, does drive its scroll and does realize further cells —
-    /// confirmed here 2026-09-11 after a coordinate-based drag and a cell-targeted `swipeUp()` both
-    /// only closed the menu (the cell one scrolls out from under itself mid-gesture; a raw
-    /// coordinate drag reads as "touch outside the popover" once it strays past the popover's own
-    /// ~520pt visible height, which is far short of the full window). Six effects were unreachable by
-    /// any XCUITest before this method existed; it is the fix BUGS.md's entry says a future session
-    /// should look for rather than re-running the same five things.
-    private func scrollMenuTo(_ app: XCUIApplication, identifier: String, maxSwipes: Int = 10) -> XCUIElement {
-        let item = app.buttons[identifier]
-        let collection = app.collectionViews.firstMatch
-        for _ in 0..<maxSwipes {
-            if item.exists { break }
-            guard collection.exists else { break }
-            collection.swipeUp()
-        }
-        return item
-    }
+    // `scrollMenuTo(_:identifier:maxSwipes:)` lifted into `PaintUITestCase` 2026-09-11 — Recolour
+    // (RecolorUITests) needed the same fix once the catalogue's growth pushed it past the menu's
+    // realized-cell window too, and a second private copy would have been the same failure shipping
+    // again under a different name. See `PaintUITestCase.swift` for the doc and the implementation.
 
     /// **TODO (60), cold start: Sobel's new Gain slider actually changes the picture.** A model
     /// assertion on `Effect.Sobel.gain` proves nothing about whether an artist can reach or see it

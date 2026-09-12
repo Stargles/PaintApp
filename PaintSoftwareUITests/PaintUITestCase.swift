@@ -780,4 +780,32 @@ class PaintUITestCase: XCTestCase {
                       "Done must take the editor down")
     }
 
+    /// **Scrolls the open Blend Mode / Operation / Mix Mode menu until `identifier` exists, then taps
+    /// it.** Shared here since 2026-09-11 — it started as `OptionsPanelUITests`' own private helper,
+    /// and a second copy grew in `RecolorUITests` the same shape rather than reusing it, which is
+    /// exactly the class of latent bug this method exists to close off.
+    ///
+    /// BUGS.md's *"The effects menu only exposes its first few items to XCUITest"* (2026-08-30) is
+    /// real as far as it goes — a plain query never matches an entry past roughly the menu's first
+    /// ~33 cells, because the menu's `CollectionView` simply has not realized cells for them yet. But
+    /// that note stopped at "not a bug in the app" without finding the fix on the *test* side:
+    /// XCUITest's own `swipeUp()`, called on the **collection view itself** rather than on a
+    /// coordinate or on one of its cells, does drive its scroll and does realize further cells —
+    /// confirmed 2026-09-11 after a coordinate-based drag and a cell-targeted `swipeUp()` both only
+    /// closed the menu (the cell one scrolls out from under itself mid-gesture; a raw coordinate drag
+    /// reads as "touch outside the popover" once it strays past the popover's own ~520pt visible
+    /// height, which is far short of the full window). Several effects were unreachable by any
+    /// XCUITest before this method existed, and the catalogue only grows — any test reaching an entry
+    /// past the early rows without calling this first is a latent copy of the same failure.
+    func scrollMenuTo(_ app: XCUIApplication, identifier: String, maxSwipes: Int = 10) -> XCUIElement {
+        let item = app.buttons[identifier]
+        let collection = app.collectionViews.firstMatch
+        for _ in 0..<maxSwipes {
+            if item.exists { break }
+            guard collection.exists else { break }
+            collection.swipeUp()
+        }
+        return item
+    }
+
 }

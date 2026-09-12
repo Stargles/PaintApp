@@ -906,13 +906,16 @@ looked at again on 2026-08-30 and left again. The reasoning, so the next reader 
 So the honest answer is that a taller stack wants a taller panel, the drag is one gesture, and this
 stays a note rather than a fix until the owner says the drag grates.
 
-## The effects menu only exposes its first few items to XCUITest (2026-08-30)
+## The effects menu only exposes its first few items to XCUITest (2026-08-30) — FIXED 2026-09-11
 
-Not a bug in the app, and it will cost a test session. The menu exposes items as far as Gaussian Blur
-— Bloom, Sharpen, Sobel, Outline, Chromatic Aberration and Noise never match, on any query. Almost
-certainly a scrollable-menu accessibility limit rather than an app defect, but a test reaching for one
-of those six will fail to find an element that a human can see, which reads as a broken app. HSV Shift
-and Gaussian Blur are the reachable multi-slider fixtures.
+Not a bug in the app, confirmed: `swipeUp()` called on the menu's own `CollectionView` (not a
+coordinate, not a cell) does scroll it and does realize further cells. `PaintUITestCase
+.scrollMenuTo(_:identifier:maxSwipes:)` is the fix on the test side — found first as
+`OptionsPanelUITests`' own private helper, then lifted here after the catalogue's growth pushed
+Recolour past the same window and `RecolorUITests` had grown a second, inline copy of the same
+scroll rather than reusing it. Any test reaching an entry past the menu's early rows must call this
+first; a bare `app.buttons["layerOptions.blendMode.…"]` (or `.mixMode.…`) query with no preceding
+scroll is a latent copy of this failure, since the catalogue only grows.
 
 ## A popover whose host view disappears re-presents itself when the host comes back (2026-08-29)
 
