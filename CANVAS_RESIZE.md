@@ -128,7 +128,8 @@ scale grip. It takes one element and one similarity and returns the mapped eleme
 scalar that a naive point-map would leave behind:
 
 - `.stroke` — `samples` **and** `lattice.samples` mapped; `size *= k` (guarded on `k != 1` so a pure
-  translation leaves the stored number bit-identical). `parameters`, `seedID`, `visibilityThreshold`
+  translation leaves the stored number bit-identical). `parameters`, `seed`/`arcOffset` (renamed from
+  `DabLattice.seedID`; BRUSH.md §4.2), `visibilityThreshold`
   and `sampleVisibilityThresholds` are dimensionless and untouched, so the seeded `DabRNG` replays
   and a cut piece still selects its parent's dabs.
 - `.fill` — `path.copy(using:)`, id preserved. (Single precision: ~1e-6 of magnitude, not 1e-9.)
@@ -231,7 +232,7 @@ closed off explicitly: **the header and every buffer move together, in one opera
 | `selection`, `floatingPiece`, `vectorFloat`, `shapePreviewTexture`, interactive fill/shape/text | `CanvasManager.swift` (`selection`, `floatingPiece`, `vectorFloat`, `shapePreviewTexture` are all declared there, not on `SelectionModels`) | **bake, then discard** — `commitAllInteractiveState()` + `selection = nil`, exactly as `setCanvasPadding:28-29` already does | same |
 | `copiedCel` | `CanvasManager.swift:715` | **clear it** — see §0 | same |
 | `canvasPadding` | `CanvasManager.swift:27` | preserved literally, in points | preserved literally — see §5 |
-| every size-keyed cache | `PixelOps.RasterizeKey`, `MaskResolver.CacheKey`, `EffectPipelines.scratchSize`, `OnionSkinRasterCache` | self-invalidating; purge to reclaim the bytes | same |
+| every size-keyed cache | `PixelOps.RasterizeKey`, `MaskResolver.CacheKey`, `EffectPipelines.scratch` (renamed from `scratchSize`; TODO(45)), `OnionSkinRasterCache` | self-invalidating; purge to reclaim the bytes | same |
 | compositor admission | `MetalCompositor.swift:516-525` | — | **re-checked implicitly, and the gate is about memory, not speed** — jetsam kills the process before `Metal.makeTexture` would return nil (`:505-506`). Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, a threshold set by the document's layer/effect structure as much as by the canvas. Nothing is shrunk below it — a frame that does not fit is composited in horizontal strips at full size (RENDER §3.8), so growing the canvas costs passes rather than sharpness; the dialog warns and proceeds — §5 rule 14, §6 Q5 |
 
 **A resize that handles the active cel and forgets the other 999 is a data-loss bug**, and the shape
@@ -827,8 +828,9 @@ gate's two thresholds.
 - **`isResizing` and the save gate.** `ScenePhaseSaveGate.mayStartSave(screenIsEditor:hasCanvas:isResizing:)`
   — the second gate, and the one that is not about the scene phase. `ContentView.saveIfNeeded`'s
   existing two-part guard goes through it.
-- **The validation pass and the refusal.** `VectorCanvas.canBeMapped` beside `canBeStretched` /
-  `canBeMirrored`, asked by `planResize` over every element of every cel; a non-empty answer raises
+- **The validation pass and the refusal.** `VectorCanvas.canBeMapped` — `canBeStretched`/
+  `canBeMirrored` are gone (LASSO_MOVE.md stage 3c; TODO(45)), and `canBeMapped` is the one check
+  `planResize` asks now, over every element of every cel; a non-empty answer raises
   `CanvasNotice.resizeRefused` and writes nothing.
 - **The undo step.** `HistoryActionLabel.resizeCanvas`, one step, whose undo is
   `applyCanvasResize(map.inverse, …)` — the same walk backwards. Depth 1 afterwards.
@@ -863,7 +865,8 @@ and the cache purge. The one crop/expand behaviour change worth naming: `testARe
 became `testAResizeClearsTheStackBelowItAndRecordsItself`, which is the only stage-1 assertion this
 stage inverts.
 
-*Tests:* `CanvasResizeLogicTests`, 46 (from 31) — undo of a crop/expand exact including guides; undo
+*Tests:* `CanvasResizeLogicTests`, 44 today (46 at the time this stage shipped, from 31; TODO(45)
+recount, 2026-09-11 — two have since merged or gone elsewhere) — undo of a crop/expand exact including guides; undo
 of a **Fit** inverting through **Fill**, with the Fit-both-ways factor computed independently so the
 test catches the landmine whatever `inverted` returns; depth 1 and the pre-resize stack gone; the
 step's cost flat in the element count; a refusal that mutates nothing, field by field; the refusal

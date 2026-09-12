@@ -24,11 +24,12 @@ Every line here was opened by two agents independently, at commit `500a53e`/`f51
 - **The paper is not in the composite.** It is a `UIView` painted behind the layer host
   (`CanvasView.swift:39-43`, `updatePaper()` at `:540-552`), added before the two sandwich image views
   that carry the composite (`:57-60`).
-- **Every live-canvas request says so explicitly.** `makeSandwichRequests` builds all three halves with
-  `background: nil` (`RenderRequest.swift:547`) and the doc at `:472-476` gives the reason: the live
-  canvas paints its own `paperView`, a background in `below` would be a second one, and a background in
-  `above` would be an opaque sheet over everything beneath it. **That last clause stays true under every
-  option below** — `above` keeps `background: nil` whatever we do.
+- **Every live-canvas request says so explicitly.** `makeSandwichRequests` is deleted since (RENDER.md
+  §3.2, `CanvasView.startSandwichRebuild`/`FrameRecipe` mint the three halves now; TODO(45)) but the
+  rule survives at `FrameRecipe.aboveRecipe`/`request(above, background: nil)` (`FrameRecipe.swift:260-
+  263, 291`): the live canvas paints its own `paperView`, a background in `below` would be a second
+  one, and a background in `above` would be an opaque sheet over everything beneath it. **That last
+  clause stays true under every option below** — `above` keeps `background: nil` whatever we do.
 - **`RenderBackground` was designed for this disagreement.** Its doc (`RenderRequest.swift:318`)
   says the two consumers disagree and both are right, which is why it is a request-level choice. **The
   only caller in the app that passes a background today is the eyedropper**
@@ -434,7 +435,8 @@ tests covering them by enumeration.
 ## §7 — What the build got wrong, found by review before merge (2026-08-27)
 
 Stages 1-4 are built on `tmp/effectbackdrop` (`e71e2a3`, `f1abe03`, `a0e611c`, `fe2743f`) and
-**MUST NOT MERGE AS THEY STAND**. The mechanism is right and `testAnAdjustmentLayerGradesTheEmptyCanvas`
+**MUST NOT MERGE AS THEY STAND**. The mechanism is right and
+`testAnAdjustmentLayerGradesTheEmptyCanvasTheArtistIsLookingAt` (renamed since; TODO(45))
 goes from `[0,0,0,0]` to `[128,128,128,255]` — the owner's report, byte for byte — but three
 independent reviewers found four defects, all measured rather than argued.
 
