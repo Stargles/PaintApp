@@ -743,10 +743,17 @@ final class StrokeCanvasView: UIView {
         guard canvas === vectorCanvas else { return }
         // Nil is a rasterize that never ran — `render(quality:ifStillAtVersion:)` found the canvas
         // already past `version` before walking anything — so there is no picture to be a frame.
+        // The same plan `refreshDisplay` reads: while a derived picture owns the base slot this
+        // render has nowhere to land, and the `.refuse` branch below re-plans rather than stomping
+        // it — `DeferredVectorRender.landing`'s `baseIsDerived`.
+        let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
+                                                    hasScratch: scratch != nil,
+                                                    hasInterpolationImage: interpolationImage != nil)
         let landing: DeferredVectorRender.Landing = image == nil ? .refuse
             : DeferredVectorRender.landing(rendered: version, current: canvas.version,
                                            pending: pendingVectorRenderVersion,
-                                           shown: shownVectorVersion, hostIsBlanked: hostIsBlanked)
+                                           shown: shownVectorVersion, hostIsBlanked: hostIsBlanked,
+                                           baseIsDerived: plan.base == .interpolation)
         guard let image, landing != .refuse else {
             // Two ways to be here. **Superseded**: a newer rasterize is already running and will
             // land, so leave `pendingVectorRenderVersion` naming it and do nothing. **The canvas

@@ -72,26 +72,95 @@ final class PoseBakeUITests: PaintUITestCase {
         }
     }
 
-    /// **The picture on the canvas as a 40×40 grid of ink samples**, taken once the canvas has
-    /// stopped changing: two consecutive grids that agree, or the last at the deadline. The resting
-    /// canvas is served from a baked frame that arrives *after* a gesture, so a grid read on the
-    /// next line can catch the frame before it.
-    private func settledInk(_ canvas: XCUIElement, timeout: TimeInterval = 8) throws -> [Bool] {
+    /// **The picture on the canvas as a grid of ink samples inside the visible paper**, taken once
+    /// the canvas has stopped changing *and is showing a drawing*: two consecutive grids that agree,
+    /// with paper under most of the samples and ink under some.
+    ///
+    /// **Both conditions, because the first alone accepted a blank host.** The resting canvas is
+    /// served from a baked frame that arrives after a gesture, and while it is on its way the host is
+    /// masked black — two reads of that a quarter-second apart "agree", and the first draft of this
+    /// probe returned an all-dark grid for the animated frame and the resting one alike. Sampling only
+    /// inside `visibleCanvasBounds` keeps the letterbox out of the count, and 300 rows are enough that
+    /// a stroke drawn with the size below cannot fall between two of them.
+    private func settledInk(_ canvas: XCUIElement, timeout: TimeInterval = 12) throws -> [Bool] {
+        let bounds = visibleCanvasBounds(canvas)
+        let x0 = bounds.minX + 0.04, x1 = bounds.maxX - 0.04
+        let y0 = bounds.minY + 0.04, y1 = bounds.maxY - 0.04
         func grid(_ probe: (Double, Double) -> Bool) -> [Bool] {
-            (0..<40).flatMap { yi in (0..<40).map { xi in
-                probe(0.12 + 0.76 * Double(xi) / 39, 0.12 + 0.60 * Double(yi) / 39)
+            (0..<300).flatMap { yi in (0..<60).map { xi in
+                probe(x0 + (x1 - x0) * Double(xi) / 59, y0 + (y1 - y0) * Double(yi) / 299)
             } }
         }
+        func showsADrawing(_ g: [Bool]) -> Bool {
+            let inked = g.filter { $0 }.count
+            return inked > 0 && inked < g.count / 2
+        }
+        // Three agreeing reads a third of a second apart, not two: a dismissing alert and the
+        // frame store's hand-off each hold a picture for longer than one interval, and two reads
+        // of a transient once passed this probe as the settled canvas.
+        Thread.sleep(forTimeInterval: 0.5)
         var previous = grid(try inkProbe(canvas))
+        var agreed = 0
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.25)
+            Thread.sleep(forTimeInterval: 0.35)
             let current = grid(try inkProbe(canvas))
-            if current == previous { return current }
+            agreed = current == previous ? agreed + 1 : 0
+            if agreed >= 2, showsADrawing(current) { return current }
             previous = current
         }
         return previous
     }
+
+    /// **Where a grid's ink is**, as its inked rows' and columns' extent, plus the count.
+    private func inkExtent(_ grid: [Bool]) -> (rows: ClosedRange<Int>, cols: ClosedRange<Int>, count: Int)? {
+        let width = 60
+        var minRow = Int.max, maxRow = -1, minCol = Int.max, maxCol = -1, count = 0
+        for (i, inked) in grid.enumerated() where inked {
+            count += 1
+            minRow = min(minRow, i / width); maxRow = max(maxRow, i / width)
+            minCol = min(minCol, i % width); maxCol = max(maxCol, i % width)
+        }
+        guard count > 0 else { return nil }
+        return (minRow...maxRow, minCol...maxCol, count)
+    }
+
+    /// **Two grids show the same drawing** — the same extent to within two rows and columns, and
+    /// no more than a tenth of the ink flipping between them.
+    ///
+    /// **Not equality, because the onion skin is on by default and is part of what the artist sees.**
+    /// While the block is one animated cel it has no neighbours; once baked, the middle frame's cel
+    /// has one on each side and the canvas draws their ghosts in red and green — pale tints that are
+    /// not ink to the probe on white paper, but that shift an antialiased edge pixel of the bar across
+    /// the probe's threshold. A moved drawing fails this comfortably: the resting and posed bars
+    /// below share no rows at all.
+    private func assertSameDrawing(_ got: [Bool], _ want: [Bool], _ message: String,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        guard let g = inkExtent(got), let w = inkExtent(want) else {
+            return XCTFail("\(message) — one of the grids shows no ink", file: file, line: line)
+        }
+        let flipped = zip(got, want).filter { $0 != $1 }.count
+        let tolerance = max(g.count, w.count) / 10
+        XCTAssertLessThanOrEqual(flipped, tolerance,
+                                 "\(message) — \(flipped) samples differ against a tolerance of \(tolerance); "
+                                 + "got \(g.count) inked in rows \(g.rows) cols \(g.cols), "
+                                 + "want \(w.count) inked in rows \(w.rows) cols \(w.cols)",
+                                 file: file, line: line)
+        XCTAssertLessThanOrEqual(abs(g.rows.lowerBound - w.rows.lowerBound), 2, "\(message) — top edge \(g.rows) vs \(w.rows)", file: file, line: line)
+        XCTAssertLessThanOrEqual(abs(g.rows.upperBound - w.rows.upperBound), 2, "\(message) — bottom edge \(g.rows) vs \(w.rows)", file: file, line: line)
+        XCTAssertLessThanOrEqual(abs(g.cols.lowerBound - w.cols.lowerBound), 2, "\(message) — left edge \(g.cols) vs \(w.cols)", file: file, line: line)
+        XCTAssertLessThanOrEqual(abs(g.cols.upperBound - w.cols.upperBound), 2, "\(message) — right edge \(g.cols) vs \(w.cols)", file: file, line: line)
+    }
+
+    /// The opposite: the drawing is somewhere else — its rows do not overlap the other's.
+    private func assertDifferentDrawing(_ got: [Bool], _ want: [Bool], _ message: String,
+                                        file: StaticString = #filePath, line: UInt = #line) {
+        guard let g = inkExtent(got), let w = inkExtent(want) else {
+            return XCTFail("\(message) — one of the grids shows no ink", file: file, line: line)
+        }
+        XCTAssertFalse(g.rows.overlaps(w.rows), "\(message) — rows \(g.rows) and \(w.rows) overlap", file: file, line: line)
+    }
+
 
     /// **Draw, mark, Move, mark; read the row; read the sentence; bake; read the blocks and the
     /// canvas; undo.** The assertions are on what the timeline and the canvas show and on the
@@ -102,7 +171,9 @@ final class PoseBakeUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Something to move, on the default vector layer so it lifts as geometry.
+        // Something to move, on the default vector layer so it lifts as geometry — drawn wide, so
+        // the canvas probe's rows cannot step over it.
+        setBrushSize(app, normalized: 0.7)
         dragOnCanvas(app, from: CGVector(dx: 0.25, dy: 0.30), to: CGVector(dx: 0.60, dy: 0.30))
 
         // The row is not there on an unanimated block — the cel menu, opened for the first mark.
@@ -144,8 +215,8 @@ final class PoseBakeUITests: PaintUITestCase {
         let middle = shown - 1
         XCTAssertTrue(middle > 1 && middle < 11, "the playhead is on a middle frame, read \(shown)")
         let animatedInk = try settledInk(canvas)
-        XCTAssertNotEqual(animatedInk, restingInk,
-                          "premise: the middle frame shows the drawing somewhere other than at rest")
+        assertDifferentDrawing(animatedInk, restingInk,
+                               "premise: the middle frame shows the drawing somewhere other than at rest")
         attach(app, "1-animated-at-the-middle-frame")
 
         // What the artist does next: the block's menu, the Bake row beside Add Keyframe.
@@ -177,13 +248,16 @@ final class PoseBakeUITests: PaintUITestCase {
         XCTAssertTrue(bandAfter == nil || bandAfter == "",
                       "the motion is gone with the channels, so no diamond remains, read \(bandAfter ?? "nil")")
 
-        // What is drawn on the canvas: the middle frame's baked drawing is the animated picture.
-        scrub(app, cel: "timeline.cel.0.\(middle)", toCelFraction: 0.5)
-        XCTAssertEqual(readFrameLabel(app)?.current, shown, "the playhead is back on frame \(shown)")
+        // What is drawn on the canvas: the middle frame's baked drawing is the animated picture. The
+        // playhead did not move — a bake is not a scrub — and it is not tapped again on purpose: a
+        // tap on the block the playhead already sits on raises that block's menu over the canvas.
+        XCTAssertEqual(readFrameLabel(app)?.current, shown, "the playhead is still on frame \(shown)")
+        XCTAssertTrue(app.otherElements["timeline.cel.0.\(middle)"].exists,
+                      "and a one-frame block of its own holds that frame")
         let bakedInk = try settledInk(canvas)
-        XCTAssertEqual(bakedInk, animatedInk,
-                       "the baked drawing at frame \(middle) is the picture the animation showed there")
-        XCTAssertNotEqual(bakedInk, restingInk, "and it is not the resting drawing")
+        assertSameDrawing(bakedInk, animatedInk,
+                          "the baked drawing at frame \(shown) is the picture the animation showed there")
+        assertDifferentDrawing(bakedInk, restingInk, "and it is not the resting drawing")
         attach(app, "3-baked-at-the-middle-frame")
 
         // What the artist does next: one press of Undo, and the one block and its motion return.
@@ -197,9 +271,8 @@ final class PoseBakeUITests: PaintUITestCase {
         XCTAssertEqual(restored.length, before.length, "one press restores the one twelve-frame block")
         XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists, "and there is no second block")
         XCTAssertEqual(markers(app), two, "and the same press restores both keyframes")
-        scrub(app, toCelFraction: 0.54)
-        XCTAssertEqual(readFrameLabel(app)?.current, shown)
-        XCTAssertEqual(try settledInk(canvas), animatedInk, "the middle frame animates again")
+        XCTAssertEqual(readFrameLabel(app)?.current, shown, "the playhead is still on frame \(shown)")
+        assertSameDrawing(try settledInk(canvas), animatedInk, "the middle frame animates again")
         attach(app, "4-after-one-undo")
     }
 }

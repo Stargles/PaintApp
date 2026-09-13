@@ -220,8 +220,19 @@ enum DeferredVectorRender {
     ///   it is *newer* than what is up, so two stale frames landing out of order cannot go backwards.
     /// - Parameter hostIsBlanked: nothing this view draws reaches the screen, so a stale frame is
     ///   not worth the assignment — `Step.blankedByTheComposite`'s reason.
+    /// - Parameter baseIsDerived: `VectorPreviewPlan.forVectorLayer(...).base == .interpolation` —
+    ///   a derived picture (a posed frame, an in-between) owns the base slot, so a render of the
+    ///   cel's *own* ink has nowhere to land and is refused; the caller's refusal path re-plans and
+    ///   the derived picture stays up. **Found by a bake's undo, 2026-09-12**: undoing KEYFRAMES §6's
+    ///   bake bumps the version of the very canvas the host is about to show, one pass starts an
+    ///   off-main render of the resting ink *and then* installs the posed preview, and the render
+    ///   landed over the preview — the artist saw the drawing at its stored position, on a frame
+    ///   whose diamonds said it was posed, until they scrubbed. A split's undo never showed it only
+    ///   because it bumps no version and the memo answered `.showNow`. The render is not wasted: it
+    ///   is memoized on the canvas for the next resting frame.
     static func landing(rendered version: Int, current: Int, pending: Int?, shown: Int,
-                        hostIsBlanked: Bool) -> Landing {
+                        hostIsBlanked: Bool, baseIsDerived: Bool = false) -> Landing {
+        guard !baseIsDerived else { return .refuse }
         if mayShow(rendered: version, current: current, pending: pending) { return .show }
         guard !hostIsBlanked, version != current, let pending, pending != version,
               version > shown else { return .refuse }

@@ -162,4 +162,27 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
                                                     hostIsBlanked: true), L.refuse,
                        "blanked: nothing this view draws reaches the screen")
     }
+
+    /// **A render of the cel's own ink that lands while a derived picture owns the base slot is
+    /// refused, whatever its version** — the one landing `mayShow` would have said yes to and the
+    /// screen would have been wrong for. Undoing KEYFRAMES §6's bake is how it was found: the undo
+    /// bumps the canvas the host is about to show, the pass rasterizes the resting ink off-main and
+    /// then installs the posed preview, and the render landed over the preview until the next scrub.
+    /// The caller's `.refuse` branch re-plans, so the preview stays and the render is memoized for
+    /// the next resting frame.
+    ///
+    /// Mutation caught: dropping the `baseIsDerived` guard from `landing` reddens the first
+    /// assertion; the second is what keeps the guard from being "always refuse".
+    func testARenderLandingUnderADerivedPictureIsRefused() {
+        typealias L = DeferredVectorRender.Landing
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 9, current: 9, pending: 9, shown: 6,
+                                                    hostIsBlanked: false, baseIsDerived: true), L.refuse,
+                       "current and awaited, but a posed frame is in the base slot: the resting ink must not land over it")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 7, current: 9, pending: 9, shown: 6,
+                                                    hostIsBlanked: false, baseIsDerived: true), L.refuse,
+                       "nor as an intermediate frame")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: 9, current: 9, pending: 9, shown: 6,
+                                                    hostIsBlanked: false, baseIsDerived: false), L.show,
+                       "with the base slot its own, the same render is shown — the guard is not 'always refuse'")
+    }
 }
