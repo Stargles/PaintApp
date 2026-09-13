@@ -201,15 +201,17 @@ extension CanvasManager {
     /// of the document, and the confirmation says so with the number.
     ///
     /// **Provenance.** `PerfBaselineTests.testWhatAVectorOnlyDocumentCostsToSaveAndLoad` reports
-    /// `saveMsPerCel` for a sixty-cel vector-only document at 2048×2048 — the kind of cel a pose bake
-    /// writes, since its ink is geometry — and read **2.3 ms/cel** on 2026-09-12 (`bakecels`, this
-    /// Mac at 82% idle, the minimum of three runs, `ProjectStore.lastSaveProfile` wall clock over
-    /// sixty cels). The 15.2 ms/cel figure KEYFRAMES §6 and PERFORMANCE.md §6 carry is the *raster*
-    /// cel's `pngData()`, MEASURED 2026-08-20 before the encode fan-out; a baked drawing pays the
-    /// vector sidecar and its thumbnail, not a canvas-sized PNG. Re-take on a machine that is not this
-    /// one before quoting it there, and read `PerfBaselineTests`' printed row rather than this
-    /// constant — the constant is what the artist is told, the row is what is true today.
-    static let measuredSaveMillisecondsPerVectorCel: Double = 2.3
+    /// `saveMsPerCel` for a sixty-cel vector-only document (`movingSceneStrokes` on every cel, at
+    /// 2048×2048, `pngsEncoded` 0) — the kind of cel a pose bake writes, since its ink is geometry.
+    /// **MEASURED 2026-09-12 on this Mac, Debug, 83% idle, three runs: 2.6 / 2.2 / 2.4 ms a cel**
+    /// (`saveAwaited` 153 / 133 / 145 ms over sixty cels); this is the median. The 15.2 ms/cel figure
+    /// KEYFRAMES §6 and PERFORMANCE.md §6 carry is the *raster* cel's `pngData()`, MEASURED
+    /// 2026-08-20 before the encode fan-out; a baked drawing pays the vector sidecar and its
+    /// thumbnail, not a canvas-sized PNG. It scales with the ink on the cel, not the canvas, so a
+    /// dense drawing costs more than this and an empty one less. Re-take on a machine that is not
+    /// this one before quoting it elsewhere, and read `PerfBaselineTests`' printed row rather than
+    /// this constant — the constant is what the artist is told, the row is what is true today.
+    static let measuredSaveMillisecondsPerVectorCel: Double = 2.4
 
     /// The raster cel's figure, for `videoBakeConfirmationMessage`: a video bakes to *images*, and a
     /// placed image is written as its own PNG. MEASURED 2026-08-20 (PERFORMANCE.md §6), 15.0–16.9 ms
