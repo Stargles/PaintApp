@@ -38,41 +38,40 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-09-12 at `8e2ffff`**, fresh device, idle machine (67.2% idle before start), no clone
-debris: **4270 tests, 4206 passed, 5 failed, 59 skipped, 48.6 min** — the first full run since
-`d2205d5` (session 40), carrying 69 commits and ~20 new UI classes the table below had never seen.
-**10,509 class-seconds across 239 classes**, so four clones hold **43.8 min** of ideal work against
-48.6 of wall clock — a 10% scheduling gap, tighter than the 16% measured 2026-09-10. All five failures
-were triaged serial on the same freshly-erased device and passed 5/5 (see this section's twelfth
-conclusion, below) — none is a confirmed regression.
+**MEASURED 2026-09-13 at `103d540`**, fresh device, idle machine (97.7% idle before start), no clone
+debris: **4332 tests, 4268 passed, 5 failed, 59 skipped, 46.2 min** — the second full run of the
+session, since `8e2ffff` carrying five merged features (the folder graph band, Glare, Bake Animation,
+Colour Wheels, and a coverage sweep). **9,909.8 class-seconds across 247 classes**, so four clones hold
+**41.3 min** of ideal work against 46.2 of wall clock — a 10.6% scheduling gap, in line with the two
+runs before it (10%, 16%). All five failures were triaged in isolation (the one timing-named assertion
+warm and un-erased, the other four erased and run serial together) and passed clean on the first
+attempt — none is a confirmed regression, and **none repeats a failure from `8e2ffff`**
+(that run's `Mode1UITests`/`VectorLayerContentUITests` cluster, `CRTScreenUITests`, `ToolPanelsUITests`
+did not recur here), so the cross-run comparison finds no fails-twice signal.
 
 | class | seconds | tests |
 |---|---|---|
-| **`BrushEditorUITests`** | **812.6** | 11 |
-| `TransformLayerModesUITests` | 453.5 | 4 |
-| `PerfBaselineTests` | 404.7 | 57 |
-| `OptionsPanelUITests` | 404.2 | 12 |
-| `SandwichCompositingUITests` | 375.3 | 10 |
-| `LayerPanelControlsUITests` | 325.4 | 11 |
-| `BrushMenuUITests` | 298.8 | 8 |
-| `DistortUITests` | 290.0 | 2 |
-| `SelectionAndMoveUITests` | 289.1 | 10 |
-| `GraphEditorGestureUITests` | 283.2 | 5 |
+| **`BrushEditorUITests`** | **578.9** | 11 |
+| `TransformLayerModesUITests` | 423.9 | 4 |
+| `OptionsPanelUITests` | 418.6 | 12 |
+| `SandwichCompositingUITests` | 363.3 | 10 |
+| `LayerPanelControlsUITests` | 349.5 | 11 |
+| `PerfBaselineTests` | 324.8 | 57 |
+| `SelectionAndMoveUITests` | 290.0 | 10 |
+| `LayerFolderAndMaskMenuUITests` | 279.4 | 9 |
+| `GraphEditorGestureUITests` | 247.8 | 5 |
+| `BrushMenuUITests` | 239.2 | 8 |
 
-**`BrushEditorUITests` is the one to watch and it is now watched three times**: 586 s → 711 s →
-**812.6 s**, 2026-09-09 → 2026-09-10 → 2026-09-12, on the same eleven tests every time. It is 31% of a
-clone's 43.8 min share here, down from 44% of the smaller 27.1 min share two runs ago — not because the
-class shrank, the share grew faster (the class count nearly doubled, 211 → 239, in one pass). **Re-take
-before adding a twelfth test to it**, and read the percentage against the share measured the same day,
-never an older one. **`TransformLayerModesUITests`, born 2026-09-11 at ~350 s in isolation on four
-tests, now measures 453.5 s unchanged in the full suite** — the isolation figure undercounted by ~30%,
-this file's own "per-class seconds are not independent of co-scheduling" conclusion arriving on
-schedule. Of the other nine classes born since the last full run, only `CRTScreenUITests` (273.0 s, one
-test, and the source of one of the five failures) reaches the top half; `FolderKeyframeEntryUITests`
-(150.1 s), `SelectionEditUITests` (127.4 s), `RecolorUITests` (100.0 s), `TextUndoFootprintUITests`
-(98.2 s), `DuplicateOffsetUITests` (87.9 s), `RewriteUndoFootprintUITests` (64.6 s),
-`TransformLayerSpanUITests` (64.1 s) and `CelSpanCropUITests` (44.4 s) land in the bottom half, none
-close to a clone's share.
+**`BrushEditorUITests` is the one to watch and it just fell for the first time**: 586 s → 711 s →
+812.6 s → **578.9 s**, 2026-09-09 → 2026-09-10 → 2026-09-12 → 2026-09-13, on the same eleven tests
+every time. It is 23% of a clone's 41.3 min share here, down from 31% two days ago — the class was not
+touched, so this is the "only the total is worth trending" conclusion arriving from the other
+direction: `DistortUITests` fell the same way on its own unchanged two tests (290.0 s → 76.0 s), and
+`TransformLayerModesUITests` fell more modestly (453.5 s → 423.9 s) on its unchanged four. **Read a
+drop as noise exactly as readily as a rise** — none of the three was touched this pass. The four newly
+named classes from this pass's merges — `GlareUITests` (94.4 s), `ColorWheelsUITests` (90.3 s),
+`PoseBakeUITests` (77.8 s) and `FolderGraphBandUITests` (75.1 s), each contributing its one test — landed
+in the 40s-to-50s rank of 247 classes, nowhere near the top ten or a clone's share.
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:

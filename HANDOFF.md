@@ -22,13 +22,13 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 seventeen merges. The 3-count gap between static and xcresult is three `private static func
 testBrush()` fixture helpers — constant, and every worker re-derived it.
 
-**The full UI suite ran 2026-09-12 at `8e2ffff`, fresh device, no clone debris: 4270 tests, 4206
-passed, 5 failed, 59 skipped, 48.6 min.** All five failures — the `Mode1UITests`/
-`VectorLayerContentUITests` cut-and-punch cluster, `CRTScreenUITests`, and `ToolPanelsUITests` — passed
-5/5 in an isolated, serial re-run on the same freshly-erased device; none is a confirmed regression, and
-none is a repeat of a prior finding. `TransformLayerModesUITests` measured 453.5 s across its four
-tests (up from a ~350 s isolated estimate); `TransformLayerSpanUITests` measured 64.1 s. CLAUDE.md's
-class table and its twelfth conclusion carry the detail.
+**The full UI suite ran again 2026-09-13 at `103d540`, fresh device, no clone debris: 4332 tests, 4268
+passed, 5 failed, 59 skipped, 46.2 min.** The five failures — `FolderGraphBandUITests`,
+`SandwichCompositingUITests`, `InterpolationModelLogicTests`, `PerfBaselineTests`'s layered-preview
+timing assertion (triaged warm, not erased), and `TimingRecorderUITests` — all passed clean in
+isolation on the first attempt; none is a confirmed regression, and none repeats a failure from the
+prior run at `8e2ffff` (that run's `Mode1UITests`/`VectorLayerContentUITests` cluster, `CRTScreenUITests`,
+`ToolPanelsUITests`). CLAUDE.md's class table carries the detail.
 
 **The owner's iPad has `921e1ce` on it** (Release, installed 2026-09-12). They tried the 2026-09-10
 build and found nothing wrong; this one carries everything below and has not been reported on.
