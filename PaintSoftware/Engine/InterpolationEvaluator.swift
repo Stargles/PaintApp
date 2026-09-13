@@ -461,6 +461,10 @@ enum InterpolationEvaluator {
                 // Hidden with the group like a fill or an image, so a hidden frame hides it.
                 guard !hidden(nil) else { return nil }
                 return element
+            case .stream:
+                // The video arm's refusal, one kind over: passed through unwarped.
+                guard !hidden(nil) else { return nil }
+                return element
             case .text:
                 // Passed through unwarped. A text object's geometry is a layout box plus the four
                 // points its corners map to (`TextFrame`), and warping the box's *corners* through
@@ -767,10 +771,10 @@ enum InterpolationEvaluator {
                 // recipe, and `TextLayout.attributedString` folds it into the glyph colour.
                 text.recipe.opacity *= Double(weight)
                 return .text(text)
-            case .image, .video:
-                // Nothing to scale — point 3 above. Neither kind carries an opacity: a video's
-                // frames are opaque pixels the same way a photo's are, and fading one would need a
-                // scalar the element does not have.
+            case .image, .video, .stream:
+                // Nothing to scale — point 3 above. None of the three carries an opacity: a video's
+                // or a stream's frames are opaque pixels the same way a photo's are, and fading one
+                // would need a scalar the element does not have.
                 return element
             }
         }

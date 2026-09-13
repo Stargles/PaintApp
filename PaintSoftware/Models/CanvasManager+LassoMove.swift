@@ -177,6 +177,12 @@ struct MoveBoxInk {
             return Cluster(hull: [video.transform.position],
                            reach: hypot(video.naturalSize.width, video.naturalSize.height) / 2
                                * max(abs(axes.x), abs(axes.y)))
+        case .stream(let stream):
+            let axes = ObjectTransformFrame.axisScales(scale: stream.transform.scale,
+                                                       aspect: stream.aspect)
+            return Cluster(hull: [stream.transform.position],
+                           reach: hypot(stream.naturalSize.width, stream.naturalSize.height) / 2
+                               * max(abs(axes.x), abs(axes.y)))
         case .text(let text):
             guard !text.frame.corners.isEmpty else { return nil }
             return Cluster(hull: text.frame.corners, reach: 0)

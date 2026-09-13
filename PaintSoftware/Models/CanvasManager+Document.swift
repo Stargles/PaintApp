@@ -649,6 +649,7 @@ extension CanvasManager {
         case .image: return "image"
         case .text: return "text"
         case .video: return "video"
+        case .stream: return "stream"
         }
     }
 

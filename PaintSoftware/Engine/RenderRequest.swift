@@ -211,7 +211,10 @@ struct LayerContentVersion: Hashable {
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
         // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
-        vectorVersion = cel.vector?.version ?? -1
+        // `committedVersion`, not `version`: this key reaches `FrameBakeKey` and `FrameBaker`'s cel
+        // stamps, and a live stream frame must not re-bake a cel's span per tick — see
+        // `VectorCanvas.committedVersion`.
+        vectorVersion = cel.vector?.committedVersion ?? -1
         fillImage = cel.fillImage.map(ObjectIdentifier.init)
         bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
     }

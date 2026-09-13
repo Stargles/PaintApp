@@ -421,7 +421,9 @@ extension CanvasManager {
         let elements = suppressed.isEmpty ? vector.elements
                                           : vector.elements.filter { !suppressed.contains($0.id) }
         let carried = vector.transform
-        let version = vector.version
+        // `committedVersion`: a posed stream cel must not mint a fresh identity — and with it a
+        // fresh bake key — per live frame. See `VectorCanvas.committedVersion`.
+        let version = vector.committedVersion
 
         let identity = PosedCelIdentity(
             celID: cel.id,

@@ -848,6 +848,65 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
     var displayFrame: UIImage? = nil
 }
 
+/// **A live picture of a computer's screen placed on a vector layer** — STREAM.md §5.1, and the
+/// sixth `VectorElement`.
+///
+/// Geometrically it is `VectorVideoElement` again: a rectangle of pixels under a general affine,
+/// conforming to `PlacedRectangle` so the Move box, the lasso's membership rules and every geometry
+/// arm in this file treat it exactly as they treat a placed photo or a video. What it adds is a
+/// **source that is a network address rather than a file**, and a picture that changes without any
+/// edit having been made — which is the whole of what makes it different, and the reason
+/// `VectorCanvas.setStreamFrame(id:image:)` exists beside the ordinary mutation seams.
+///
+/// **`displayFrame` is runtime-only and never persisted**, in `VectorVideoElement.displayFrame`'s
+/// exact sense: the newest decoded frame the coordinator has handed this element, drawn by
+/// `draw(stream:into:)` into the identical rect the placeholder fills, so what the artist lassoes is
+/// what the artist can see whether or not the laptop has sent anything yet. The persisted twin is
+/// `VectorCanvasData.StreamRef`.
+///
+/// **`isFrozen` and `lastFrameFileName` are persisted from the first build and unused by it.**
+/// STREAM.md §5.4 and §5.6 are stage 2; carrying the fields now means a document written by stage 1
+/// reads back unchanged under stage 2 rather than through a migration, and both are non-optional in
+/// the ref for the `VideoRef` argument — no older file exists to be compatible with.
+struct VectorStreamElement: Identifiable, PlacedRectangle {
+    var id: UUID = UUID()
+
+    /// **The laptop's reported picture size**, updated on every STATUS. `placement` maps a rect of
+    /// this size, so a stream with no frame yet still has a rectangle to draw, hit-test and lasso.
+    var naturalSize: CGSize
+
+    /// Where the streamer is — a MagicDNS name or a Tailscale IP, and the `paintstream/1` port.
+    /// Together they name the `ScreenStreamClient` this element reads from; two elements with the
+    /// same pair share one connection (STREAM.md §6).
+    var host: String
+    var port: UInt16
+
+    /// What the laptop said it is sending — the source's `name` from STATUS, for the stage-2 bar.
+    var sourceLabel: String
+
+    /// STREAM.md §5.4 — stage 2. Persisted now, read by nothing in stage 1.
+    var isFrozen: Bool = false
+
+    /// STREAM.md §5.6 — stage 2. The last picture written into the package, so a document opens
+    /// looking as it last did before the laptop answers. Persisted now, written by nothing in stage 1.
+    var lastFrameFileName: String? = nil
+
+    var transform: LayerTransform
+    var aspect: CGFloat = 1
+    var stretchAxis: CGFloat = 0
+    var mirrored: Bool = false
+
+    /// KEYFRAMES.md §3.4 rules the group tag onto every element kind; a stream is as movable as a
+    /// placed photo.
+    var animationGroupID: UUID? = nil
+
+    /// **The newest frame the coordinator has delivered**, or nil before the first one arrives and
+    /// on every load. Never encoded, never compared, and written through
+    /// `VectorCanvas.setStreamFrame(id:image:)` rather than through `elements =`, because a frame
+    /// arriving is not an edit — see that method for what it does and does not invalidate.
+    var displayFrame: UIImage? = nil
+}
+
 /// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
 /// because z-position is what an eraser needs: an `.erase` stroke lowers the alpha of everything
 /// beneath it in this list.
@@ -869,6 +928,12 @@ enum VectorElement: Identifiable {
     /// split, interpolation's warp, a recolour — refuse it in as many words. Its payload holds a file
     /// name rather than pixels, so it needs `ProjectStore`'s asset machinery the way `.image` does.
     case video(VectorVideoElement)
+    /// A live screen stream — STREAM.md §5.1. **A placed rectangle wherever an arm is about the
+    /// rectangle, and refused wherever `.video` is refused**: the lasso never splits it, Change
+    /// Colour skips it, interpolation passes it through unwarped, and it contributes no
+    /// registration points. Its payload holds an address rather than a file, so unlike `.video` it
+    /// needs none of `ProjectStore`'s asset machinery — there is nothing to copy into the package.
+    case stream(VectorStreamElement)
 
     var id: UUID {
         switch self {
@@ -877,6 +942,7 @@ enum VectorElement: Identifiable {
         case .image(let image): return image.id
         case .text(let text): return text.id
         case .video(let video): return video.id
+        case .stream(let stream): return stream.id
         }
     }
 
@@ -902,6 +968,11 @@ enum VectorElement: Identifiable {
 
     var video: VectorVideoElement? {
         if case .video(let video) = self { return video }
+        return nil
+    }
+
+    var stream: VectorStreamElement? {
+        if case .stream(let stream) = self { return stream }
         return nil
     }
 
@@ -935,6 +1006,9 @@ enum VectorElement: Identifiable {
         case .video(var video):
             video.id = UUID(); video.animationGroupID = nil
             return .video(video)
+        case .stream(var stream):
+            stream.id = UUID(); stream.animationGroupID = nil
+            return .stream(stream)
         }
     }
 
@@ -956,19 +1030,21 @@ enum VectorElement: Identifiable {
         case .image(var value): value.id = UUID(); return .image(value)
         case .text(var value): value.id = UUID(); return .text(value)
         case .video(var value): value.id = UUID(); return .video(value)
+        case .stream(var value): value.id = UUID(); return .stream(value)
         }
     }
 
-    /// The element's placement when it *has* one — the two kinds that are a rectangle of pixels under
-    /// an affine, and nil for the three that are ink.
+    /// The element's placement when it *has* one — the three kinds that are a rectangle of pixels
+    /// under an affine, and nil for the three that are ink.
     ///
     /// It exists so `VectorCanvas`'s geometry arms can say "a placed rectangle" once instead of
-    /// spelling `.image` and `.video` twice each; every one of them was a literal duplicate before,
-    /// and a duplicate is how the two kinds come to disagree about where a picture is.
+    /// spelling `.image`, `.video` and `.stream` three times each; every one of them was a literal
+    /// duplicate before, and a duplicate is how the kinds come to disagree about where a picture is.
     var placedRectangle: (any PlacedRectangle)? {
         switch self {
         case .image(let image): return image
         case .video(let video): return video
+        case .stream(let stream): return stream
         case .stroke, .fill, .text: return nil
         }
     }
@@ -1001,6 +1077,10 @@ enum VectorElement: Identifiable {
         case .text(let text):
             return text.recipe.string.utf8.count
         case .video:
+            return 0
+        case .stream:
+            // An address and a label. `displayFrame` is runtime-only and is not what an undo step
+            // holds — it is replaced by the next tick whatever the stack does.
             return 0
         }
     }
@@ -1280,6 +1360,59 @@ final class VectorCanvas {
         return value
     }
 
+    /// The layer's stream elements, back to front. Read-only for `videos`' reason: the one verb that
+    /// changes a stream in place is `setStreamFrame(id:image:)`, which is not a splice.
+    var streams: [VectorStreamElement] {
+        lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.stream)
+    }
+
+    /// **Whether this cel has anything for `ScreenStreamCoordinator` to feed**, memoized against
+    /// `contentVersion` exactly as `holdsVideo` is and for the same reason: the coordinator's sync
+    /// walks every cel of the document on every canvas pass, and a `contains` per cel per pass
+    /// forever is the cost `derivedCelContent`'s contract refuses.
+    var holdsStream: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cachedStreamFlag, cached.version == contentVersion { return cached.value }
+        let value = _elements.contains { if case .stream = $0 { return true } else { return false } }
+        cachedStreamFlag = (contentVersion, value)
+        return value
+    }
+
+    /// **Replaces one stream element's `displayFrame` and invalidates the picture — and only the
+    /// picture.** STREAM.md §5.3's tick comes through here rather than through `elements =`, because
+    /// a frame arriving is not an edit and must not be charged as one.
+    ///
+    /// Three things are distinct about it, and each is a decision:
+    ///
+    /// - **`version` moves; `committedVersion` does not.** `version` is the display's staleness key
+    ///   and the render memo's, and the picture really is stale, so the layer host repaints and the
+    ///   memo re-walks. `committedVersion` is what `LayerContentVersion` reads, and it stays put so
+    ///   `FrameBaker.syncDirty` sees no change — a tick that moved it would dirty every frame the
+    ///   stream cel spans and re-bake them to disk thirty times a second. See `committedVersion`.
+    /// - **The damage is the element's own rectangle**, declared as `.region`, so the re-walk is
+    ///   TODO (41)'s bounded repair rather than a whole-cel walk: everything under and over the
+    ///   stream inside its footprint is redrawn in z-order, and nothing outside it is touched.
+    /// - **A suppressed element invalidates nothing.** While the Move box floats it, the walk skips
+    ///   it, so the memo's picture is still exactly right; the frame is written so the commit draws
+    ///   the newest one, and the caller refreshes the float's own bitmap.
+    ///
+    /// Returns whether the element was found; false for an id that is not a stream on this canvas.
+    @discardableResult
+    func setStreamFrame(id: UUID, image: UIImage?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = _elements.firstIndex(where: { $0.id == id }),
+              case .stream(var stream) = _elements[index] else { return false }
+        stream.displayFrame = image
+        _elements[index] = .stream(stream)
+        guard !_suppressedElementIDs.contains(id) else { return true }
+        let footprint = Self.placedFootprint(of: stream, slack: 1)
+        invalidateRenderOnly(footprint.isNull ? .everything : .region(footprint),
+                             committed: false)
+        return true
+    }
+
     /// The elements skipped by the flatten while something else is drawing them: the one text object
     /// whose editor is open, or the set a lasso move has lifted into a floating piece.
     ///
@@ -1334,6 +1467,21 @@ final class VectorCanvas {
     }
 
     private(set) var version: Int = 0
+
+    /// **`version` minus the live stream frames** — bumped by every invalidation `version` is, except
+    /// a stream frame arriving through `setStreamFrame(id:image:)`.
+    ///
+    /// `LayerContentVersion` reads this rather than `version`, and so do the two derived identities
+    /// a vector cel can mint (`PosedCelIdentity`, `VideoCelIdentity`). That is what keeps the frame
+    /// bake key, `FrameBaker.syncDirty`'s cel stamps and the sandwich's key blind to a live stream by
+    /// construction: a stream cel spans from its frame to the end of the scene, and a key that moved
+    /// per tick would mark that whole span dirty and re-composite it to disk at the tick rate. The
+    /// baked frame of a stream cel therefore holds whichever picture the bake happened to freeze,
+    /// which is what STREAM.md §2.9 asks of playback anyway.
+    ///
+    /// Identical to `version` on every canvas that has never held a stream, so nothing keyed on it
+    /// behaves differently for the documents that exist today.
+    private(set) var committedVersion: Int = 0
 
     /// Bumped by every change to `_elements` (and to `editingElementID`, which filters them), and
     /// **deliberately not by `setTransform`**: an overall transform moves the layer's content in
@@ -1612,6 +1760,8 @@ final class VectorCanvas {
 
     /// Backing store for `holdsVideo`; see there for why it is keyed by version rather than cleared.
     private var cachedVideoFlag: (version: Int, value: Bool)?
+    /// Backing store for `holdsStream`, keyed the same way.
+    private var cachedStreamFlag: (version: Int, value: Bool)?
     private var cachedIndexVersion: Int = -1
 
     init(size: CGSize, elements: [VectorElement], transform: CGAffineTransform = .identity) {
@@ -1715,8 +1865,11 @@ final class VectorCanvas {
         case fill = 0
         case image = 1
         case video = 2
-        case text = 3
-        case stroke = 4
+        /// Beside `.video`, for the same reason `.video` sits beside `.image`: a placed rectangle
+        /// of pixels, whichever clock its pixels move on.
+        case stream = 3
+        case text = 4
+        case stroke = 5
     }
 
     private static func kind(of element: VectorElement) -> Kind {
@@ -1724,6 +1877,7 @@ final class VectorCanvas {
         case .fill: return .fill
         case .image: return .image
         case .video: return .video
+        case .stream: return .stream
         case .text: return .text
         case .stroke: return .stroke
         }
@@ -1842,10 +1996,14 @@ final class VectorCanvas {
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
-    /// layer's own content changed. `setTransform` is the only caller and the only mutation for
-    /// which that distinction is true. Caller must hold `lock`.
-    private func invalidateRenderOnly(_ damage: Damage) {
+    /// layer's own content changed. `setTransform` and `setStreamFrame` are the only callers and the
+    /// only mutations for which that distinction is true. Caller must hold `lock`.
+    ///
+    /// `committed` is false for exactly one caller — a stream frame arriving — and is what keeps
+    /// `committedVersion` still for it; see that property.
+    private func invalidateRenderOnly(_ damage: Damage, committed: Bool = true) {
         version += 1
+        if committed { committedVersion += 1 }
         if case .region(let rect) = damage, rect.isNull {
             // **A null rectangle is a proof that no pixel of any picture this canvas holds has
             // changed, and every memo stays** — TODO (41)'s last box. `restoreDamage` answers it for
@@ -2373,6 +2531,8 @@ final class VectorCanvas {
             return placedFootprint(of: image, slack: slack)
         case .video(let video):
             return placedFootprint(of: video, slack: slack)
+        case .stream(let stream):
+            return placedFootprint(of: stream, slack: slack)
         case .text(let text):
             let box = text.frame.boundingBox
             guard !text.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return .null }
@@ -3436,6 +3596,9 @@ final class VectorCanvas {
                 // A video is content a punch can be hiding for exactly the reason a photo is: the
                 // vector eraser never split it, so any overlap means the punch is still doing work.
                 if Self.bounds(of: video).intersects(box) { return true }
+            case .stream(let stream):
+                // The video arm's reason, on the same numbers.
+                if Self.bounds(of: stream).intersects(box) { return true }
             case .text(let text):
                 // Text is content the punch can be hiding, and geometry the split could never have
                 // removed — the vector eraser does not bite letterforms (`ADD_TEXT.md` §1, §5.4), so
@@ -3514,6 +3677,8 @@ final class VectorCanvas {
             // Its whole rectangle, always. A video has no analogue of the text arm's "ink, not the
             // box" — every pixel of the frame is content, including the black ones.
             return bounds(of: video)
+        case .stream(let stream):
+            return bounds(of: stream)
         case .text(let text):
             // Ink, not the box: an empty or whitespace-only object is not a backdrop, and a punch
             // kept alive by a box with nothing in it is a hole in nothing that never gets collected.
@@ -3725,6 +3890,16 @@ final class VectorCanvas {
             guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
             return area(quad, using: .winding)
 
+        case .stream(let stream):
+            // The placed-rectangle rule again — by its centre under Cut, by its own quad under
+            // Touching and Enclosed — for the video arm's reason above.
+            guard membership != .cutting else {
+                return loop.contains(stream.transform.position, using: rule)
+            }
+            let quad = Self.quad(of: stream)
+            guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
+            return area(quad, using: .winding)
+
         case .text(let text):
             guard membership != .cutting else {
                 let box = text.frame.boundingBox
@@ -3919,6 +4094,13 @@ final class VectorCanvas {
                 // is not what a lasso means anywhere else in the app — VIDEO.md §7 reserves the only
                 // legitimate cut of a video for Split Drawing, which cuts it in *time*.
                 if loop.contains(video.transform.position, using: rule) { insideIDs.insert(video.id) }
+                result.append(element)
+
+            case .stream(let stream):
+                // Whole, by its centre, never split — the video arm's ruling. There is no time axis
+                // to cut it on either; a stream is cut only by Bake Frame (STREAM.md §5.5), which
+                // turns one frame of it into a placed image.
+                if loop.contains(stream.transform.position, using: rule) { insideIDs.insert(stream.id) }
                 result.append(element)
 
             case .text(let text):
@@ -4197,6 +4379,13 @@ final class VectorCanvas {
             if k != 1 { video.transform.scale *= k }
             if theta != 0 { video.transform.rotation += theta }
             return .video(video)
+        case .stream(var stream):
+            // The same six-field arithmetic: a stream is a placed rectangle here too.
+            guard t.a * t.d - t.b * t.c > 0 else { return .stream(placed(stream, through: t)) }
+            stream.transform.position = stream.transform.position.applying(t)
+            if k != 1 { stream.transform.scale *= k }
+            if theta != 0 { stream.transform.rotation += theta }
+            return .stream(stream)
         case .text(let text):
             // **A reflection is safe here, and that is what makes Mirror available on text** — the
             // assert this arm used to carry was policy rather than a real limit, and the owner ruled
@@ -4347,6 +4536,8 @@ final class VectorCanvas {
             // simply what its own placement now is. It is the frame that stretches, not the footage
             // — nothing here reaches the source, and stage 3's decode is unaffected by any of it.
             return .video(placed(video, through: t))
+        case .stream(let stream):
+            return .stream(placed(stream, through: t))
         }
     }
 
@@ -4540,7 +4731,7 @@ final class VectorCanvas {
             return distorted(fill, through: map).map(VectorElement.fill)
         case .text(let text):
             return distorted(text, through: map).map(VectorElement.text)
-        case .image, .video:
+        case .image, .video, .stream:
             return nil
         }
     }
@@ -4820,7 +5011,7 @@ final class VectorCanvas {
             // KEYFRAMES.md §3.4 rules membership onto every element kind for exactly that reason.
             mapped.animationGroupID = fill.animationGroupID
             return .fill(mapped)
-        case .image, .text, .video:
+        case .image, .text, .video, .stream:
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
             // for them itself, because the currency differs — see the header.
             return nil
@@ -4844,7 +5035,7 @@ final class VectorCanvas {
     static func refusesDistort(_ element: VectorElement) -> Bool {
         switch element {
         case .stroke, .fill, .text: return false
-        case .image, .video: return true
+        case .image, .video, .stream: return true
         }
     }
 
@@ -4878,7 +5069,7 @@ final class VectorCanvas {
         switch element {
         // `.video` joins the three that decode nothing on this path: it is a `LayerTransform`, four
         // more numbers and a file name, and the map moves the numbers without ever opening the file.
-        case .stroke, .text, .image, .video: return true
+        case .stroke, .text, .image, .video, .stream: return true
         case .fill(let fill): return fill.cgPath != nil
         }
     }
@@ -6421,6 +6612,9 @@ final class VectorCanvas {
                     // Ends a paint run exactly as an image does (rule 1 above).
                     Self.draw(video: element, into: cg)
                     index += 1
+                case .stream(let element):
+                    Self.draw(stream: element, into: cg)
+                    index += 1
                 case .text(let element):
                     // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
                     // before it and a stroke after it must not blend against each other through it.
@@ -6642,6 +6836,49 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
+    /// **The newest frame the laptop sent, or a placeholder in the same rect** — `draw(video:into:)`
+    /// for a stream, and RENDER §2.10's "never a hole" for a source that may not have answered yet.
+    ///
+    /// The rect is `placement` applied to `naturalSize` either way, which is the rect `quad(of:)`
+    /// tests, so a lasso catches the picture where the artist sees it. The frame is drawn with
+    /// `UIImage.draw(in:)` for the video arm's reason (UIKit's flipped context). The placeholder is
+    /// a grey panel with a "screen" glyph — a rectangle outline with a short stand under it — drawn
+    /// with plain `CGContext` calls so it costs no symbol lookup and reads as "a screen goes here".
+    private static func draw(stream element: VectorStreamElement, into cg: CGContext) {
+        let size = element.naturalSize
+        guard size.width > 0, size.height > 0 else { return }
+        let rect = CGRect(x: -size.width / 2, y: -size.height / 2,
+                          width: size.width, height: size.height)
+        if let frame = element.displayFrame {
+            cg.saveGState()
+            cg.concatenate(element.placement)
+            frame.draw(in: rect)
+            cg.restoreGState()
+            return
+        }
+        cg.saveGState()
+        cg.concatenate(element.placement)
+        cg.setFillColor(UIColor(white: 0.35, alpha: 0.55).cgColor)
+        cg.fill(rect)
+        let scale = max(hypot(element.placement.a, element.placement.b), 1e-6)
+        cg.setStrokeColor(UIColor(white: 0.85, alpha: 0.9).cgColor)
+        cg.setLineWidth(max(2 / scale, 0.5))
+        cg.stroke(rect.insetBy(dx: 1 / scale, dy: 1 / scale))
+        // The glyph: a screen outline sized off the shorter side, with a stand beneath it.
+        let reach = min(rect.width, rect.height) * 0.18
+        let screen = CGRect(x: -reach * 1.4, y: -reach, width: reach * 2.8, height: reach * 1.7)
+        cg.setLineWidth(max(reach * 0.12, 0.5))
+        cg.stroke(screen)
+        let stand = CGMutablePath()
+        stand.move(to: CGPoint(x: 0, y: screen.maxY))
+        stand.addLine(to: CGPoint(x: 0, y: screen.maxY + reach * 0.45))
+        stand.move(to: CGPoint(x: -reach * 0.6, y: screen.maxY + reach * 0.45))
+        stand.addLine(to: CGPoint(x: reach * 0.6, y: screen.maxY + reach * 0.45))
+        cg.addPath(stand)
+        cg.strokePath()
+        cg.restoreGState()
+    }
+
     /// Replays one stored stroke. Its dabs come from `VectorStroke.dabRandom`, a hash of the stroke's
     /// own stored seed and each dab's arc length, so a scattering or jittering brush lands the same
     /// ink across invalidations and save/load — see `DabRandom`.
@@ -6811,6 +7048,32 @@ struct VectorCanvasData: Codable {
         var animationGroupID: UUID?
     }
 
+    /// The persisted form of a `VectorStreamElement` — STREAM.md §5.1's fields, and nothing runtime.
+    ///
+    /// Every key but the two that mean "untagged" and "never written" is non-optional, for
+    /// `VideoRef`'s reason: no build shipped a stream before this one, so there is no older file to
+    /// be compatible with and "absent means the default" would only be a second spelling.
+    /// `lastFrameFileName` is optional because nil is a *value* there — stage 2 writes it on freeze,
+    /// bake, disconnect and save, and a document stage 1 wrote has never had one.
+    struct StreamRef: Codable {
+        var host: String
+        var port: UInt16
+        var sourceLabel: String
+        var isFrozen: Bool
+        var lastFrameFileName: String?
+        /// `VectorStreamElement.naturalSize`, split as `VideoRef` splits it.
+        var width: Double
+        var height: Double
+        var x: Double
+        var y: Double
+        var scale: Double
+        var rotation: Double
+        var aspect: Double
+        var stretchAxis: Double
+        var mirrored: Bool
+        var animationGroupID: UUID?
+    }
+
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
     /// than Swift's synthesized enum encoding, so the on-disk shape is human-readable and extensible.
     ///
@@ -6842,6 +7105,9 @@ struct VectorCanvasData: Codable {
         /// build writes, so the third time it happens the test says so instead of quietly asserting
         /// that a shipped feature is missing.
         case video(VideoRef)
+        /// STREAM.md stage 1. The `"stream"` discriminator; an older build meeting it loses this
+        /// element and keeps the rest of the cel, exactly as `"video"` before it.
+        case stream(StreamRef)
 
         /// The one decode failure worth naming. Everything else stays a `DecodingError` and is
         /// classified as malformed — see `VectorCanvasData.DecodeReport`.
@@ -6850,8 +7116,8 @@ struct VectorCanvasData: Codable {
             case unknownKind(String)
         }
 
-        private enum Kind: String, Codable { case stroke, fill, image, text, video }
-        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text, video }
+        private enum Kind: String, Codable { case stroke, fill, image, text, video, stream }
+        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text, video, stream }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -6866,6 +7132,7 @@ struct VectorCanvasData: Codable {
             case .image: self = .image(try c.decode(ImageRef.self, forKey: .image))
             case .text: self = .text(try c.decode(VectorTextElement.self, forKey: .text))
             case .video: self = .video(try c.decode(VideoRef.self, forKey: .video))
+            case .stream: self = .stream(try c.decode(StreamRef.self, forKey: .stream))
             }
         }
 
@@ -6887,6 +7154,9 @@ struct VectorCanvasData: Codable {
             case .video(let ref):
                 try c.encode(Kind.video, forKey: .kind)
                 try c.encode(ref, forKey: .video)
+            case .stream(let ref):
+                try c.encode(Kind.stream, forKey: .kind)
+                try c.encode(ref, forKey: .stream)
             }
         }
     }
@@ -6996,6 +7266,9 @@ struct VectorCanvasData: Codable {
     var videos: [VideoRef] {
         elements.compactMap { if case .video(let ref) = $0 { return ref } else { return nil } }
     }
+    var streams: [StreamRef] {
+        elements.compactMap { if case .stream(let ref) = $0 { return ref } else { return nil } }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case elements
@@ -7063,6 +7336,20 @@ struct VectorCanvasData: Codable {
                                        stretchAxis: Double(el.stretchAxis),
                                        mirrored: el.mirrored,
                                        animationGroupID: el.animationGroupID))
+            case .stream(let el):
+                // Nothing dropped and nothing resolved: the payload is an address, and
+                // `displayFrame` is runtime-only.
+                return .stream(StreamRef(host: el.host, port: el.port, sourceLabel: el.sourceLabel,
+                                         isFrozen: el.isFrozen,
+                                         lastFrameFileName: el.lastFrameFileName,
+                                         width: Double(el.naturalSize.width),
+                                         height: Double(el.naturalSize.height),
+                                         x: el.transform.position.x, y: el.transform.position.y,
+                                         scale: el.transform.scale, rotation: el.transform.rotation,
+                                         aspect: Double(el.aspect),
+                                         stretchAxis: Double(el.stretchAxis),
+                                         mirrored: el.mirrored,
+                                         animationGroupID: el.animationGroupID))
             }
         }
         transform = []
@@ -7185,6 +7472,18 @@ struct VectorCanvasData: Codable {
                     assetURL: url, assetFileName: ref.fileName,
                     naturalSize: CGSize(width: ref.width, height: ref.height),
                     sourceStart: ref.sourceStart, sourceEnd: ref.sourceEnd, speed: ref.speed,
+                    transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
+                                              scale: ref.scale, rotation: ref.rotation),
+                    aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
+                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID))
+            case .stream(let ref):
+                // No resolver: the element needs no file to exist. `displayFrame` is nil on every
+                // load, so the cel opens on the placeholder until the coordinator's client answers
+                // (stage 2's `lastFrameFileName` reload lands here).
+                return .stream(VectorStreamElement(
+                    naturalSize: CGSize(width: ref.width, height: ref.height),
+                    host: ref.host, port: ref.port, sourceLabel: ref.sourceLabel,
+                    isFrozen: ref.isFrozen, lastFrameFileName: ref.lastFrameFileName,
                     transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),

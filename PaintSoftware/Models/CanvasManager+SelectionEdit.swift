@@ -105,9 +105,9 @@ enum SelectionEditKind: Equatable {
             return .opacity(fill.opacity)
         case (.opacity, .text(let text)):
             return .opacity(text.recipe.opacity)
-        case (.color, .image), (.color, .video),
-             (.size, .fill), (.size, .text), (.size, .image), (.size, .video),
-             (.opacity, .image), (.opacity, .video):
+        case (.color, .image), (.color, .video), (.color, .stream),
+             (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
+             (.opacity, .image), (.opacity, .video), (.opacity, .stream):
             return nil
         }
     }
@@ -144,9 +144,9 @@ enum SelectionEditKind: Equatable {
         case (.opacity(let opacity), .text(var text)):
             text.recipe.opacity = opacity
             return .text(text)
-        case (.color, .image), (.color, .video),
-             (.size, .fill), (.size, .text), (.size, .image), (.size, .video),
-             (.opacity, .image), (.opacity, .video):
+        case (.color, .image), (.color, .video), (.color, .stream),
+             (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
+             (.opacity, .image), (.opacity, .video), (.opacity, .stream):
             return nil
         }
     }

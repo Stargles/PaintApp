@@ -1212,6 +1212,9 @@ extension CanvasManager {
                 // inside it moving — and a bigger lattice makes every *other* element's warp coarser.
                 // VIDEO.md §4.2: a video is not interpolatable.
                 continue
+            case .stream:
+                // The video arm's refusal: a stream is not interpolatable either.
+                continue
             case .text:
                 // Deliberately contributes nothing. `InterpolationEvaluator` passes text through
                 // unwarped (see its element switch), so sizing the lattice to cover a text object
@@ -1369,7 +1372,9 @@ extension CanvasManager {
             guides: guideStrokes,
             thicknessFade: options.thicknessFade,
             hiddenGroups: options.hiddenGroups,
-            subjectVersion: cel.vector?.version ?? -1,
+            // `committedVersion`, not `version`: a live stream frame must not mint a new pose
+            // identity per tick — see `VectorCanvas.committedVersion`.
+            subjectVersion: cel.vector?.committedVersion ?? -1,
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
@@ -1443,7 +1448,7 @@ extension CanvasManager {
         let identity = VideoCelIdentity(
             celID: cel.id,
             canvas: ObjectIdentifier(vector),
-            vectorVersion: vector.version,
+            vectorVersion: vector.committedVersion,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
             maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
