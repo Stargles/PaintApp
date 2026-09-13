@@ -376,7 +376,11 @@ in the sheet.
 - The stream cel runs **from the current frame to the end of the timeline** (a video is clipped to
   its length; a stream has none).
 - One connection per `host:port` per document, shared by all its stream layers; one **source** per
-  laptop at a time (the laptop's picker is global).
+  laptop at a time (the laptop's picker is global). **And a document keeps a connection to the
+  last-used laptop open even with no stream layer in it** (stage 4), held `pause`d unless a stream
+  element needs pictures — so the drop box lands files and Send to Computer is enabled whenever a
+  document is open, not only after Stream Screen. The laptop encodes nothing for a paused client, and
+  a laptop that is off costs the iPad one connection attempt every 5 s.
 - Port **47301**; the firewall rule admits only Tailscale addresses.
 - Freeze is **not** an undo step; Bake Frame is **one**.
 - Snapshots are stored at the laptop's native pixel size, not the canvas's.
