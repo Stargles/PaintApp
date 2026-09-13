@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -95,25 +94,37 @@ public partial class MainWindow : Window, IFrameSink
     // deliverable 2). All queueing logic lives in FileOutbox/ClipboardImageStore (Core,
     // testable); this class only translates WPF events into calls on them. ----
 
-    private void DropBox_DragEnter(object sender, DragEventArgs e)
+    // Several WPF types below (DragEventArgs, KeyEventArgs, DataFormats,
+    // DragDropEffects, Key, Keyboard, ModifierKeys, Clipboard) have same-named
+    // counterparts in System.Windows.Forms — UseWindowsForms=true (for
+    // NotifyIcon/FolderBrowserDialog) and UseWPF=true together make the bare names
+    // ambiguous (CS0104), so every one of them is spelled out in full below rather than
+    // relying on which "using" wins.
+    private void DropBox_DragEnter(object sender, System.Windows.DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
         e.Handled = true;
     }
 
-    private void DropBox_Drop(object sender, DragEventArgs e)
+    private void DropBox_Drop(object sender, System.Windows.DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+        if (!e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) return;
+        if (e.Data.GetData(System.Windows.DataFormats.FileDrop) is not string[] paths) return;
         foreach (var path in paths)
         {
             if (File.Exists(path)) _fileOutbox.Enqueue(path);
         }
     }
 
-    private void Window_KeyDown(object sender, KeyEventArgs e)
+    private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control) return;
+        if (e.Key != System.Windows.Input.Key.V ||
+            System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control)
+        {
+            return;
+        }
 
         if (System.Windows.Clipboard.ContainsFileDropList())
         {

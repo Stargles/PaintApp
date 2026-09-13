@@ -246,7 +246,7 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
                 {
                     Frame frame = await _reader.ReadFrameAsync(_cts.Token).ConfigureAwait(false);
                     _lastRx = DateTime.UtcNow;
-                    await DispatchAsync(frame, fileInbox, onControl).ConfigureAwait(false);
+                    Dispatch(frame, fileInbox, onControl);
                 }
             }
             finally
@@ -256,7 +256,11 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
             }
         }
 
-        private async Task DispatchAsync(Frame frame, FileInbox fileInbox, Action<ControlMessage>? onControl)
+        // FileInbox's BeginFile/WriteChunk/EndFile are all synchronous (fast local disk
+        // I/O under a lock), so once BeginFile stopped being the stub's Task-returning
+        // BeginFileAsync (stage 4), nothing here awaits anything any more — sync, not
+        // async-with-no-await (which is what CS1998 was warning about).
+        private void Dispatch(Frame frame, FileInbox fileInbox, Action<ControlMessage>? onControl)
         {
             if (!frame.TryGetKnownType(out var type))
             {

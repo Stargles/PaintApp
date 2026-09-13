@@ -58,7 +58,15 @@ case "$cmd" in
         # both sides -- shipping streamer/ alone and not this file makes `dotnet test`
         # fail at MSBuild's copy-to-output step with "could not copy ... was not found",
         # which looks like a missing file rather than an incomplete tar.
-        tar czf "$tmp_tar" -C "$src" streamer tools/windows \
+        #
+        # COPYFILE_DISABLE=1 stops macOS's bsdtar from writing an AppleDouble "._Foo.cs"
+        # sidecar for every file carrying an xattr (this Mac tags files it creates with
+        # com.apple.provenance, so this is every .cs file, not a stray few) — found for
+        # real on stage 4's first deploy: `dotnet publish` globs **/*.cs, so it compiled
+        # both Foo.cs and the sidecar and failed the whole build on the sidecar with
+        # "CS2015: ... is a binary file instead of a text file", against a source tree
+        # that was otherwise perfectly fine.
+        COPYFILE_DISABLE=1 tar czf "$tmp_tar" -C "$src" streamer tools/windows \
             PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264
 
         echo "== Copying to the laptop via scp =="

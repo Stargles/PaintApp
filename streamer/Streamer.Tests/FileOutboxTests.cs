@@ -92,7 +92,7 @@ public class FileOutboxTests : IDisposable
 
         // b must not have started yet — only one BEGIN so far.
         await Task.Delay(100);
-        Assert.Single(transport.Sent.Where(f => f.Type == (byte)MessageType.FileBegin));
+        Assert.Single(transport.Sent, f => f.Type == (byte)MessageType.FileBegin);
 
         transport.Reply(beginA.Id, ok: true);
         await WaitForState(events, OutboundFileState.Inserted);
@@ -142,8 +142,11 @@ public class FileOutboxTests : IDisposable
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         outbox.Enqueue(path);
-        var waiting = await WaitForState(events, OutboundFileState.Queued);
-        Assert.Equal("Waiting for the iPad…", waiting.Reason);
+        // Enqueue() itself raises an immediate Queued (Reason: null) synchronously,
+        // before the pump task — on another thread — gets to the front of the queue and
+        // discovers there is no client; wait for THAT specific follow-up event rather
+        // than "any Queued", or this can observe the first one and return early.
+        await WaitUntil(() => events.Any(e => e.State == OutboundFileState.Queued && e.Reason == "Waiting for the iPad…"));
         Assert.Empty(transport.Sent);
 
         transport.HasClient = true;
