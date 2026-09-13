@@ -648,7 +648,7 @@ struct DrawingView: View {
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
              .nothingWhollyInside, .cannotMoveDerivedFrame, .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
-             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .recordingRefused,
+             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .poseBakeRefused, .recordingRefused,
              .recordingArmed, .animationGroupMembershipChanged, .animationGroupEditRefused,
              .keyframesCropped, .moveOutsideTransformBlock, .effectBoxOutsideBlock:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner

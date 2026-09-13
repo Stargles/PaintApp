@@ -226,6 +226,9 @@ struct VectorStroke: Identifiable, Codable {
         case id, brush, color, size, opacity, samples, composite, lattice, seed, arcOffset
         case motionGroupID, animationGroupID, visibilityThreshold, sampleVisibilityThresholds
         case distort
+        /// `StrokeDistort.rest` and `.restLattice`, written beside `distort` rather than inside it —
+        /// see that type's `CodingKeys`. Present only on a stroke KEYFRAMES.md §6's bake wrote.
+        case distortRest, distortRestLattice
     }
 }
 
@@ -323,6 +326,55 @@ struct StrokeDistort: Codable, Equatable {
     /// `VectorStroke.size` before this map's envelope was multiplied into it — the width
     /// `BrushStamper.stampStroke` walks with, in the space the artist drew in.
     var restSize: CGFloat
+
+    /// **The artist's own spine, kept rather than recovered** — set only by KEYFRAMES.md §6's bake,
+    /// nil on every stroke a hand Distort committed.
+    ///
+    /// **Why a bake keeps it when a Distort does not.** `VectorStroke.effectiveWalk` recovers the
+    /// rest spine by pulling `samples` back through `map`'s inverse, which is a floating-point round
+    /// trip — MEASURED at 4e-15 pt on a 24 pt slide-and-scale, and on three of twelve frames of an
+    /// integer fixture that was enough to drop the last dab of a 29-dab walk: `Int(length / spacing)`
+    /// sits on a knife edge that any error crosses. A Distort is the artist's own edit and an ulp is
+    /// nothing to it; a bake's promise is that the drawing it writes is *the frame the animation
+    /// rendered*, and the round trip breaks that at exactly the places a test can find. **And across
+    /// a save the round trip is not an ulp but an eighth of a pixel**: `samples` are written
+    /// quarter-pixel quantised, and pulling a quantised posed spine back through the map does not land
+    /// on the artist's spine. This one is written through the same packing the animated stroke's own
+    /// `samples` get, so a baked document reopens to the frames the animated one would have.
+    ///
+    /// **Valid only while it is the pre-image of `samples` under `map`.** A writer that rewrites
+    /// `samples` by something other than composing an affine onto `map` — the interpolation warp, a
+    /// detached eraser piece, a local edit's reprojection — must drop it (`withoutStoredRest`), and
+    /// the walk falls back to the pull-back, which is what a hand Distort always does. `drawn(_:through:)`
+    /// keeps it, because a Move composes onto the map and the artist's spine is unchanged.
+    var rest: StrokeSamples? = nil
+
+    /// The walk's lattice at rest, for a baked stroke that was a cut piece — `VectorStroke.lattice`
+    /// before the bake posed it. Only its `samples` are read (`effectiveWalk` takes the parameters
+    /// from the live lattice, so a later trim is honoured), and only while they are the pre-image of
+    /// `lattice.samples`, which every writer of the lattice keeps true or clears.
+    var restLattice: DabLattice? = nil
+
+    /// **Off this type's own wire.** `VectorStroke.encode` writes `rest` and `restLattice` under keys
+    /// of its own, through `VectorSample.packed` with the stroke's `precise` flag — the only encoder
+    /// that knows the quantisation origin and the layout, and the one whose bytes the animated
+    /// stroke's `samples` would have taken.
+    enum CodingKeys: String, CodingKey {
+        case map, restSize
+    }
+
+    init(map: Homography, restSize: CGFloat, rest: StrokeSamples? = nil, restLattice: DabLattice? = nil) {
+        self.map = map
+        self.restSize = restSize
+        self.rest = rest
+        self.restLattice = restLattice
+    }
+
+    /// This map with the stored spine forgotten — for a writer that has just moved `samples` by
+    /// something the map cannot express.
+    var withoutStoredRest: StrokeDistort {
+        StrokeDistort(map: map, restSize: restSize)
+    }
 }
 
 extension DabLattice {
@@ -372,12 +424,25 @@ extension VectorStroke {
     /// is the honest fallback: the ink is in the right place and its width is the envelope.
     var effectiveWalk: StrokeRestWalk? {
         if let restWalk { return restWalk }
-        guard let distort, let inverse = distort.map.inverse,
-              let rest = samples.mapped(through: inverse) else { return nil }
+        guard let distort, let inverse = distort.map.inverse else { return nil }
+        // The artist's own spine when a bake kept it (`StrokeDistort.rest`), else recovered.
+        let rest: StrokeSamples
+        if let kept = distort.rest {
+            rest = kept
+        } else {
+            guard let pulled = samples.mapped(through: inverse) else { return nil }
+            rest = pulled
+        }
         var pulled: DabLattice?
         if var lattice = self.lattice {
-            guard let walked = lattice.samples.mapped(through: inverse) else { return nil }
-            lattice.samples = walked
+            // Only the *spine* comes from the stored copy; the parameters — which dabs of the parent's
+            // walk this piece draws — are the live lattice's, so a trim that narrowed them is honoured.
+            if let kept = distort.restLattice, kept.samples.count == lattice.samples.count {
+                lattice.samples = kept.samples
+            } else {
+                guard let walked = lattice.samples.mapped(through: inverse) else { return nil }
+                lattice.samples = walked
+            }
             pulled = lattice
         }
         return StrokeRestWalk(samples: rest, lattice: pulled, size: distort.restSize,
@@ -399,6 +464,7 @@ extension VectorStroke {
         var copy = self
         copy.precise = true
         copy.lattice?.precise = true
+        copy.distort?.restLattice?.precise = true
         return copy
     }
 }
@@ -440,6 +506,12 @@ extension VectorStroke {
         // (12). `restWalk` is deliberately *not* here and never will be — it is a view of a stroke
         // that a keyframe pose mints per frame, and this is the artist's own edit.
         distort = try c.decodeIfPresent(StrokeDistort.self, forKey: .distort)
+        if distort != nil, c.contains(.distortRest) {
+            // The same decoder `samples` went through, so the spine comes back exactly as the
+            // animated stroke's own would have — which is the whole point of storing it.
+            distort?.rest = try VectorSample.decodeRun(from: c, forKey: .distortRest).samples
+            distort?.restLattice = try c.decodeIfPresent(DabLattice.self, forKey: .distortRestLattice)
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -485,6 +557,12 @@ extension VectorStroke {
         try c.encodeIfPresent(sampleVisibilityThresholds, forKey: .sampleVisibilityThresholds)
         // Written only when present, so an undistorted stroke's payload is byte-for-byte what it was.
         try c.encodeIfPresent(distort, forKey: .distort)
+        // A baked stroke's rest spine, packed exactly as `samples` are — same origin, same layout —
+        // so the bytes a reload hands the walk are the bytes the animated stroke would have stored.
+        if let rest = distort?.rest {
+            try c.encode(VectorSample.packed(rest, for: encoder, precise: precise), forKey: .distortRest)
+            try c.encodeIfPresent(distort?.restLattice, forKey: .distortRestLattice)
+        }
     }
 }
 
@@ -857,6 +935,27 @@ enum VectorElement: Identifiable {
         case .video(var video):
             video.id = UUID(); video.animationGroupID = nil
             return .video(video)
+        }
+    }
+
+    /// **This element under a fresh id and nothing else changed** — KEYFRAMES.md §6's rule that a
+    /// bake mints ids *"unlike every existing copy path"*, for the ink a bake carries across as well
+    /// as for the picture it converts.
+    ///
+    /// **Not `adoptedByAnotherCel()`, and the difference is the group tags.** That one is for a
+    /// drawing that has *arrived* in a cel it was not drawn in, so its tags would name a stranger's
+    /// groups; a baked element stays in the cel its animation lived on, and its `animationGroupID`
+    /// still says which of the artist's groups it belongs to — the same reason `bakeVideoToCels`
+    /// carries the tag onto the image it writes. What the two share is the id: a bake writes one
+    /// display list into *n* cels, and elements aliasing one id across them is exactly what §6 warns
+    /// against.
+    func reidentified() -> VectorElement {
+        switch self {
+        case .stroke(var value): value.id = UUID(); return .stroke(value)
+        case .fill(var value): value.id = UUID(); return .fill(value)
+        case .image(var value): value.id = UUID(); return .image(value)
+        case .text(var value): value.id = UUID(); return .text(value)
+        case .video(var value): value.id = UUID(); return .video(value)
         }
     }
 
@@ -3249,6 +3348,14 @@ final class VectorCanvas {
         let mapped = stroke.lattice.map { parameters.map($0.parentParameter(of:)) } ?? parameters
         piece.lattice = DabLattice(samples: stroke.lattice?.samples ?? stroke.samples,
                                    parameters: mapped)
+        // A baked stroke's stored rest spine becomes the piece's rest *lattice*, under the same
+        // parameters as the posed one — the walk is the parent's whole walk either way, and the
+        // piece's own sub-run is not something a stored spine can name. `StrokeDistort.rest`'s rule.
+        if let distort = stroke.distort {
+            let restWalk = distort.restLattice?.samples ?? distort.rest
+            piece.distort = StrokeDistort(map: distort.map, restSize: distort.restSize, rest: nil,
+                                          restLattice: restWalk.map { DabLattice(samples: $0, parameters: mapped) })
+        }
         piece.sampleVisibilityThresholds = remapped(stroke.sampleVisibilityThresholds, onto: parameters)
         return piece
     }
@@ -3270,6 +3377,8 @@ final class VectorCanvas {
         piece.id = UUID()
         piece.samples = stroke.samples.replacingSamples(samples)
         piece.lattice = nil
+        // A detached piece walks its own sub-run, which no stored spine names — `StrokeDistort.rest`.
+        piece.distort = stroke.distort?.withoutStoredRest
         piece.arcOffset = detachedArcOffset(of: stroke, startParameter: startParameter)
         return piece
     }
@@ -4360,6 +4469,57 @@ final class VectorCanvas {
         }
     }
 
+    /// **`posing(_:through:)`'s *persisted* form** — the same picture, written so that it survives a
+    /// save. KEYFRAMES.md §6's bake writes this into the artist's own cels.
+    ///
+    /// **Why neither existing commit path will do, and it is the byte pin that rules both out.** A
+    /// bake's whole promise is that the frame it writes is the frame the animation rendered, and
+    /// what the animation rendered is `posing`: the dab walk run in *rest* space and each finished
+    /// dab carried through the pose (§4.2). `posing` records that as a transient `restWalk`, which is
+    /// off the wire by construction — so a cel that stored `posing`'s output would draw the animated
+    /// frame until the document was saved and a re-walked one after it was reopened, and the
+    /// difference is the very re-phase §4.2 exists to remove (a *translation* re-phases 110 dabs to
+    /// 111, measured there). The affine commit, `mapping(_:throughStretch:)`, is what a Move writes
+    /// and it stores no walk at all: the ink re-walks in posed space from the first render, which is
+    /// §4.2's finding 4 — *"still re-samples under a committed Move"* — and is wrong here for the
+    /// same reason.
+    ///
+    /// **The projective commit already is the persisted form, and it does not care that the map is
+    /// affine.** `distorted(_:through:)` stores the posed spine and `StrokeDistort` — the map and the
+    /// rest width — and `effectiveWalk` rebuilds the rest walk from them on every read, so
+    /// `stamp` runs the identical `PosedDabTarget` path a pose runs. `mapping(_:through: Homography)`
+    /// short-circuits an affine map away from that arm, which is right for a Distort dragged back to
+    /// a parallelogram (§8 stage 5b: a stage-5 document must not reach the projective code) and
+    /// wrong for a bake, whose map is affine in the ordinary case and must persist regardless. So
+    /// this is the one caller that takes the projective arm for an affine map, on purpose.
+    ///
+    /// **What is *not* bit-exact, said out loud.** `effectiveWalk` recovers the rest spine by pulling
+    /// the stored posed samples back through the map's inverse, so the walk runs on samples that are
+    /// a floating-point round trip away from the artist's own. The pose, the rest width and the
+    /// lattice are the same values `posing` carries. `PoseBakeLogicTests` pins the rendered frames
+    /// byte for byte against the animated ones on both compositor backends; that is a measurement
+    /// on real strokes, and it is the pin, not a proof about every stroke there could be.
+    ///
+    /// **Every other kind goes through `posing` unchanged**, because for them it *is* the persisted
+    /// form: a fill is a `CGPath` and a placed image is six numbers, both mapped in place with no
+    /// walk to lose; text is four corners. And a placed image or a video under a keystone declines
+    /// there, so this answers nil for exactly the elements `posed(_:through:inheriting:)` leaves at
+    /// rest — the caller keeps them at rest too, which is what the animated frame showed.
+    ///
+    /// **A stroke whose composed map has no usable local scale** — a singular pose, reachable only
+    /// through a composition of two channels that is singular without either being so — cannot carry
+    /// a `distort`, and falls back to the affine commit with the transient walk stripped: the ink is
+    /// where the pose put it and, at a scale of zero, draws nothing either way.
+    static func baking(_ element: VectorElement, through map: PoseMap) -> VectorElement? {
+        guard case .stroke(let stroke) = element else { return posing(element, through: map) }
+        if let committed = distorted(stroke, through: map.homography, keepingRest: true) {
+            return .stroke(committed)
+        }
+        guard case .stroke(var fallback)? = posing(element, through: map) else { return nil }
+        fallback.restWalk = nil
+        return .stroke(fallback)
+    }
+
     /// **`posing(_:through:)`'s commit form** — the same geometry, written into the artist's own
     /// stroke rather than into a throwaway copy of it.
     ///
@@ -4399,7 +4559,8 @@ final class VectorCanvas {
     /// any one of them. A footprint reader must never under-estimate — an under-estimate is ink
     /// outside the damage rectangle, which is a stale pixel nothing repairs — and the mean or the
     /// midpoint linearisation are both under-estimates somewhere on a keystone by construction.
-    private static func distorted(_ stroke: VectorStroke, through map: Homography) -> VectorStroke? {
+    private static func distorted(_ stroke: VectorStroke, through map: Homography,
+                                  keepingRest: Bool = false) -> VectorStroke? {
         guard let moved = stroke.samples.mapped(through: map) else { return nil }
         let walk = Self.composedWalk(over: stroke, under: map)
         var out = stroke
@@ -4423,7 +4584,11 @@ final class VectorCanvas {
         }
         guard widest > 0 else { return nil }
         out.size = walk.size * widest
-        out.distort = StrokeDistort(map: walk.pose.map, restSize: walk.size)
+        // `walk.samples`/`walk.lattice` are the artist's own spine and lattice whatever the stroke
+        // already carried: `composedWalk` reads them off an existing walk rather than off `samples`.
+        out.distort = StrokeDistort(map: walk.pose.map, restSize: walk.size,
+                                    rest: keepingRest ? walk.samples : nil,
+                                    restLattice: keepingRest ? walk.lattice : nil)
         return out
     }
 

@@ -160,7 +160,7 @@ extension CanvasManager {
                 let posed = Self.posed(bakedVector.elements, through: mappings, inheriting: nil)
                 let rebuilt = posed.map { element -> VectorElement in
                     guard case .video(let posedVideo) = element else {
-                        return Self.reidentified(element)
+                        return element.reidentified()
                     }
                     // **`atDocumentFrame: frame` collapses to `elapsedDocumentFrames == 0` here,
                     // always** — every cel is one document frame by now, so the only frame
@@ -198,18 +198,5 @@ extension CanvasManager {
         }
 
         return .baked(cels: endFrame - startFrame)
-    }
-
-    /// A fresh id on whichever case `element` is, every other field untouched — KEYFRAMES.md §6's
-    /// rule that a bake mints ids "unlike every existing copy path", extended to the ink a bake
-    /// carries across as well as to the video it converts.
-    private static func reidentified(_ element: VectorElement) -> VectorElement {
-        switch element {
-        case .stroke(var value): value.id = UUID(); return .stroke(value)
-        case .fill(var value): value.id = UUID(); return .fill(value)
-        case .image(var value): value.id = UUID(); return .image(value)
-        case .text(var value): value.id = UUID(); return .text(value)
-        case .video(var value): value.id = UUID(); return .video(value)
-        }
     }
 }

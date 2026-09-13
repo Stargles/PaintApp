@@ -128,17 +128,9 @@ extension CanvasManager {
                       inheriting inherited: PoseMap? = nil) -> [VectorElement] {
         guard !mappings.isEmpty || inherited != nil else { return elements }
         return elements.map { element in
-            var composed = PoseMap.identity
-            var carried = false
-            for (channel, map) in mappings where element.isMoved(by: channel) {
-                composed = composed.concatenating(map)
-                carried = true
+            guard let composed = composedPose(of: element, through: mappings, inheriting: inherited) else {
+                return element
             }
-            if let inherited {
-                composed = composed.concatenating(inherited)
-                carried = true
-            }
-            guard carried, !composed.isIdentity else { return element }
             // **An element a keystone cannot carry is left where it rests**, which is
             // `applyToVectorFloat`'s own answer to the same question one tier over: a placed image and
             // a video store six numbers and a mirror bit, and `distortUnavailableReason` refuses the
@@ -146,6 +138,48 @@ extension CanvasManager {
             // and not a case anything walks into — and it is nil only on the projective arm, since
             // `posing(_:through: CGAffineTransform)` always answers.
             return VectorCanvas.posing(element, through: composed) ?? element
+        }
+    }
+
+    /// **The one map an element is shown through, or nil when nothing here moves it** — the
+    /// composition `posed(_:through:inheriting:)` applies, factored so that KEYFRAMES.md §6's bake
+    /// writes the picture through the *same* membership rule and the same composition order rather
+    /// than a second copy of either. The comment on `poseMappings` is the argument for the order.
+    private static func composedPose(of element: VectorElement,
+                                     through mappings: [(TransformChannelID, PoseMap)],
+                                     inheriting inherited: PoseMap?) -> PoseMap? {
+        var composed = PoseMap.identity
+        var carried = false
+        for (channel, map) in mappings where element.isMoved(by: channel) {
+            composed = composed.concatenating(map)
+            carried = true
+        }
+        if let inherited {
+            composed = composed.concatenating(inherited)
+            carried = true
+        }
+        guard carried, !composed.isIdentity else { return nil }
+        return composed
+    }
+
+    /// **The display list `posed` would show, written to keep** — KEYFRAMES.md §6. The same
+    /// composition per element as `posed(_:through:)`, committed through `VectorCanvas.baking` so it
+    /// survives a save, and every element under a fresh id whether the pose moved it or not.
+    ///
+    /// **No `inheriting` parameter, and that is the scope §6 settles for now.** A bake consumes the
+    /// cel's *own* channels — what the bake then clears from the cel. A container pose above it (a
+    /// folder's, a transformation layer's) is not consumed and keeps posing the baked cels exactly as
+    /// it posed the animated one, so the picture at every frame is unchanged by the bake; what the
+    /// artist cannot do is draw *in the container's posed space*, since their new ink lands at rest
+    /// under a pose that is still live. Baking the composed pose instead would have to lift the cel
+    /// out from under its container, which is a restructure this verb does not make.
+    static func baked(_ elements: [VectorElement],
+                      through mappings: [(TransformChannelID, PoseMap)]) -> [VectorElement] {
+        elements.map { element in
+            guard let composed = composedPose(of: element, through: mappings, inheriting: nil) else {
+                return element.reidentified()
+            }
+            return (VectorCanvas.baking(element, through: composed) ?? element).reidentified()
         }
     }
 

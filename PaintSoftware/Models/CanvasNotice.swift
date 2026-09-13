@@ -190,6 +190,11 @@ struct CanvasNotice: Identifiable, Equatable {
         /// direct caller or a test does.
         case videoBakeRefused(CanvasManager.VideoBakeRefusal)
 
+        /// KEYFRAMES.md §6: Bake on an animated block refused. The menu row shows only on a block
+        /// that carries a pose channel, so an artist never meets `.notAnimated`; `.noDrawing` is a
+        /// cel with channels and no vector tier, which nothing in the app writes today.
+        case poseBakeRefused(CanvasManager.PoseBakeRefusal)
+
         /// A live take could not start, or ended having caught nothing — KEYFRAMES.md §5, stage 7.
         ///
         /// **The refused-with-nothing case is why this exists at all.** A recorder that runs for
@@ -342,6 +347,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
+        case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .recordingRefused(let refusal): return refusal.message
         // **The canvas is named first and the slider second** — KEYFRAMES.md §7, stage 10. The order
         // is the ranking an artist reads as "the usual thing": drawing the timing is what the
@@ -456,6 +462,8 @@ struct CanvasNotice: Identifiable, Equatable {
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
         case .videoBakeRefused: return nil
+        // Nor this one, for the same reason: neither of its cases names a thing a button could do.
+        case .poseBakeRefused: return nil
         // Nor this one, and each of its six cases fails the button test for its own reason. Two
         // name a thing to do *while recording* — open a layer's effect settings, move the slider —
         // which is not an action after the fact; one says the take was too short, whose fix is to
@@ -506,6 +514,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
         case .videoBakeRefused: return "videoBakeRefused"
+        case .poseBakeRefused: return "poseBakeRefused"
         // One code for all four, matching `videoBakeRefused`'s precedent: a test asserting a take was
         // refused reads this, and a test that cares *which* refusal reads `RecordingRefusal` off the
         // model, where the fast tier can compare the case itself rather than a string.

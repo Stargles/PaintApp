@@ -79,6 +79,11 @@ struct AnimationTimeline: View {
     /// before the artist answers.
     @State private var pendingVideoBake: (layerIndex: Int, celIndex: Int, cels: Int)?
 
+    /// **KEYFRAMES.md §6's Bake on an animated block**, waiting on the artist's confirmation — the
+    /// same shape as `pendingVideoBake` above, and `cels` is read at the tap for the same reason:
+    /// the sentence names a count, and the count must be the one the bake that follows will make.
+    @State private var pendingPoseBake: (layerIndex: Int, celIndex: Int, cels: Int)?
+
     // Press-and-hold reorder state for the pinned name column.
     /// The animation group the rename alert is open on, and the text field's draft — the shape
     /// `LayerPanel`'s own rename alert uses, and `@State` for the reason the popovers just above are:
@@ -214,7 +219,27 @@ struct AnimationTimeline: View {
                 pendingVideoBake = nil
             }
         } message: {
-            Text(pendingVideoBake.map { Self.videoBakeConfirmationMessage(cels: $0.cels) } ?? "")
+            Text(pendingVideoBake.map { CanvasManager.videoBakeConfirmationMessage(cels: $0.cels) } ?? "")
+        }
+        // KEYFRAMES.md §6. The same two disclosures as the video bake's alert — how many drawings,
+        // and what every future save then costs — and the sentence is built on `CanvasManager`
+        // rather than here so the fast tier reads the words the artist reads.
+        .alert("Bake Animation?",
+               isPresented: Binding(get: { pendingPoseBake != nil },
+                                    set: { if !$0 { pendingPoseBake = nil } })) {
+            Button("Cancel", role: .cancel) { pendingPoseBake = nil }
+            Button("Bake") {
+                if let request = pendingPoseBake {
+                    switch canvasManager.bakePoseToCels(layerIndex: request.layerIndex,
+                                                        celIndex: request.celIndex) {
+                    case .baked: break
+                    case .refused(let reason): canvasManager.raise(.poseBakeRefused(reason))
+                    }
+                }
+                pendingPoseBake = nil
+            }
+        } message: {
+            Text(pendingPoseBake.map { CanvasManager.poseBakeConfirmationMessage(cels: $0.cels) } ?? "")
         }
         // **There is deliberately no `.onReceive(canvasManager.interactionBegan)` here any more.**
         //
@@ -422,6 +447,17 @@ struct AnimationTimeline: View {
                     }
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
+                    }
+                    // KEYFRAMES.md §6 / §2.9. Beside the keyframe rows because it is about the
+                    // same thing they are — the block's animation — and shown only on a block that
+                    // carries one, Bake to Images' own choice: on an ordinary drawing there is no
+                    // motion to bake, so the row would be a permanently disabled promise.
+                    if canvasManager.celHasPoseAnimation(layerIndex: layerIndex, celIndex: celIndex) {
+                        menuButton("Bake Animation", icon: "square.stack.3d.down.right") {
+                            let cels = canvasManager.poseBakeCelCount(layerIndex: layerIndex,
+                                                                      celIndex: celIndex)
+                            pendingPoseBake = (layerIndex, celIndex, cels)
+                        }
                     }
                     keyframeItems(layerIndex: layerIndex, frame: frame,
                                   clearing: canvasManager.celFrameRange(layerIndex: layerIndex,
@@ -632,27 +668,6 @@ struct AnimationTimeline: View {
     /// compared with a tolerance rather than by `==`: 24/30 is not 0.8 in binary and a checkmark that
     /// depended on that would simply never appear.
     private static func isSameSpeed(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
-
-    /// KEYFRAMES.md §6's disclosure, spelled out for the artist rather than left to a number they'd
-    /// have to already know to worry about: **"Save cost is permanent"**, MEASURED at 15.2 ms/cel at
-    /// this app's own 2048×1024 baseline (95.6% of it `pngData()`, parallelised across cores) — a
-    /// canvas at a different size will pay a different rate, which is why this is phrased as the
-    /// app's own measured figure rather than a promise about this document specifically.
-    private static func videoBakeConfirmationMessage(cels: Int) -> String {
-        let added = max(cels - 1, 0)
-        let plural = cels == 1 ? "cel" : "cels"
-        guard added > 0 else {
-            return "This turns the block into 1 cel of images. This can be undone."
-        }
-        let ms = Double(added) * 15.2
-        let costPhrase = ms >= 1000
-            ? String(format: "about %.1f s more", ms / 1000)
-            : "about \(Int(ms.rounded())) ms more"
-        let addedPlural = added == 1 ? "cel" : "cels"
-        return "This turns the block into \(cels) \(plural) of images. Every future save then writes "
-            + "\(added) more \(addedPlural) — \(costPhrase) each time, at this app's own measured "
-            + "rate. This can be undone."
-    }
 
     private func menuList<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }

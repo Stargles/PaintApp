@@ -956,6 +956,16 @@ extension CanvasManager {
                         lattice.precise = false
                         stroke.lattice = lattice
                     }
+                    // A baked stroke's stored rest spine goes to the same grid — it is written with
+                    // the stroke's own `precise` flag, so it is the same bytes either way.
+                    if let rest = stroke.distort?.rest {
+                        stroke.distort?.rest = PackedSampleRun(rest, about: centre).samples
+                    }
+                    if var restLattice = stroke.distort?.restLattice {
+                        restLattice.samples = PackedSampleRun(restLattice.samples, about: centre).samples
+                        restLattice.precise = false
+                        stroke.distort?.restLattice = restLattice
+                    }
                     stroke.precise = false
                     return .stroke(stroke)
                 }

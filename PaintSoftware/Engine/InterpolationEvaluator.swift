@@ -523,6 +523,10 @@ enum InterpolationEvaluator {
         guard kept.count < stroke.samples.count else { return trimmed }
 
         trimmed.samples = stroke.samples.replacingSamples(kept.map { stroke.samples[$0] })
+        // A stored rest spine names every sample; a trimmed sub-run is not that, so the walk
+        // recovers it from the map instead (`StrokeDistort.rest`). The rest *lattice* stays: it is
+        // the parent's whole walk, which trimming does not touch.
+        trimmed.distort?.rest = nil
         // A piece's `parameters` are aligned with its own samples, so they trim at the same indices.
         // The parent walk in `lattice.samples` is untouched — trimming narrows the piece's `range`,
         // which is exactly the effect wanted: fewer of the parent's dabs are drawn.
@@ -549,6 +553,10 @@ enum InterpolationEvaluator {
             result.samples = stroke.samples.replacingPositions({ _ in i += 1; return moved[i] },
                                                                angleRotation: 0)
         }
+        // The warp moved the spine by something the map cannot express, so a bake's stored rest spine
+        // no longer names it — the walk pulls the warped spine back instead, which is the round trip
+        // the comment below says cancels where it matters (`StrokeDistort.rest`).
+        result.distort = result.distort?.withoutStoredRest
         // A piece's dabs come from its *parent's* walk, so the parent's samples have to travel too —
         // otherwise the stroke's geometry moves and its ink stays behind. See `DabLattice`.
         if var lattice = result.lattice {

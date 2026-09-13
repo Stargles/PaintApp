@@ -477,6 +477,8 @@ extension CanvasManager {
         var i = -1
         stored.samples = stroke.samples.replacingPositions({ _ in i += 1; return plan.restPoints[i] },
                                                            angleRotation: 0)
+        // Reprojected by a lattice warp, so a stored rest spine would be stale — `StrokeDistort.rest`.
+        stored.distort = stored.distort?.withoutStoredRest
         // τ = `t`: enforced by the evaluator's `t >= τ` test, so sliding earlier than where it was
         // drawn hides the edit again.
         stored.visibilityThreshold = recipe.t
