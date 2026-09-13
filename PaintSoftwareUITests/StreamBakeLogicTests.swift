@@ -239,10 +239,15 @@ final class StreamBakeLogicTests: XCTestCase {
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
         assertGreen(compositedPixel(f, atFrame: 1, x: 32, y: 32), "the bake is the green frame")
 
-        // The stream goes red. The tick feeds the cel at the current frame, so visit both neighbours.
+        // The stream goes red. The tick feeds the cel at the current frame, so visit all three —
+        // **the baked frame included**: a tick there is what tells a placed image apart from a
+        // stream copy nobody has fed yet, which would also still be green. MEASURED by mutation:
+        // with the swap made to keep the stream, this assertion is what goes red.
         f.manager.currentFrame = 0
         feed(f, color: .red, index: 2)
         f.manager.currentFrame = 3
+        feed(f, color: .red, index: 2)
+        f.manager.currentFrame = 1
         feed(f, color: .red, index: 2)
 
         assertRed(compositedPixel(f, atFrame: 0, x: 32, y: 32), "[1] follows the stream")
