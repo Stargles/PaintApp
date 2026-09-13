@@ -34,7 +34,9 @@ the laptop.
 - **Import entry points**: `ActionsMenu` (`Views/ActionsMenu.swift`) → `CanvasManager.insertImage(_:)`
   (joins the active vector layer or makes one, then lifts the element into the Move box) and
   `insertVideo(at:consumingSource:)` (always a new layer, VIDEO.md §2.1; the cel spans
-  `min(clip, contentEndFrame)` from the current frame, §2.4). The drop box lands on these two.
+  `min(clip, contentEndFrame)` **from frame 0**, not from the current frame — `addVectorLayer`'s cel
+  starts at 0 and `VideoImportLogicTests` pins `startFrame == 0`; this file said "from the current
+  frame" until stage 1 read the code). The drop box lands on these two.
 - **Export**: `Views/ExportSheet.swift` with `FrameExportSession`, finishing in `.finished(url)`.
   "Send to computer" is a destination for that URL.
 - **Render**: `VectorCanvas.renderLocalContent` draws `.video` through `Self.draw(video:into:)` —
@@ -270,13 +272,38 @@ one buffer; a slow consumer sees the newest frame, never a queue). The slot hand
 
 `ScreenStreamCoordinator` (main actor, owned by `CanvasManager`) subscribes to each client's
 frame-arrived signal and runs a **tick at most every 33 ms** (coalesced, `CADisplayLink`-free — a
-`DispatchSourceTimer` armed on arrival) that, for each unfrozen stream element **whose layer is
-visible and whose cel is the one at the current frame**, sets `displayFrame` from the slot and calls
-`celContentChangedOutsideStroke(layerID:celID:)`. That is the whole cost on the main thread: one
-version bump per tick, then the compositor's usual path. The tick does nothing while
-`isPlaying` (2.9), while the app is backgrounded, and while a Move box floats over that element (the
-box's own redraw covers it). MEASURE the tick on the device before merging stage 2 — the aim is that
-a live 1080p stream costs the main thread under 2 ms per tick.
+`DispatchQueue.main.asyncAfter` armed on arrival) that, for each unfrozen stream element **whose
+layer is visible and whose cel is the one at the current frame**, sets `displayFrame` from the slot.
+The tick does nothing while `isPlaying` (2.9) or while the app is backgrounded. MEASURE the tick on
+the device before merging stage 2 — the aim is that a live 1080p stream costs the main thread under
+2 ms per tick.
+
+**Stage 1 built it, and three sentences this section used to carry were wrong against the code:**
+
+- *"One version bump per tick, then the compositor's usual path."* A `bumpVersion()` moves
+  `LayerContentVersion.vectorVersion`, which is the leaf half of `FrameBakeKey` and of
+  `FrameBaker.syncDirty`'s cel stamps — so one tick would dirty the stream cel's whole span (the
+  current frame to the end of the scene, §6) and re-composite it to disk at the tick rate. The frame
+  goes through `VectorCanvas.setStreamFrame(id:image:)` instead: `version` moves (the host repaints,
+  the memo repairs the element's own `.region`), and a new `committedVersion` — which
+  `LayerContentVersion` and the posed/video identities now read — does not. The bake, the dirty
+  sweep and the sandwich key are blind to a live frame by construction. The consequence: a canvas on
+  the engaged sandwich at rest (a blend mode, a mask, an effect, a container pose) shows the stream
+  at whatever the bake froze. Stage 2 decides what that case should do.
+- *"…and calls `celContentChangedOutsideStroke`."* That is `objectWillChange`, a whole SwiftUI pass
+  thirty times a second. The tick repaints the layer host directly through a closure `CanvasView`
+  installs (`StrokeCanvasView.guideOverlayNeedsUpdate`'s shape) and publishes once a second for the
+  thumbnail, whose 400 ms debounce a per-tick call would reset forever.
+- *"…while a Move box floats over that element (the box's own redraw covers it)."* The float is a
+  bitmap latched at the lift (`StrokeCanvasView.beginVectorFloat`) and nothing re-renders it per
+  nudge, so without a tick the artist would connect and see the placeholder in the box until they
+  committed it. The tick re-mints the float's bitmap off the main thread instead, one render in
+  flight at a time.
+
+MEASURED on the simulator (Debug, 2048² canvas, a 1920×1080 `testsrc` from the fake streamer): the
+tick costs **~0.3–0.5 ms** of main thread whether the element floats or is committed, and
+`latestCGImage()` (`VTCreateCGImageFromCVPixelBuffer` on the BGRA IOSurface) **~0.04 ms**. The
+float re-mint was **~15 ms** a tick while it ran on the main actor, which is why it does not.
 
 ### 5.4 Freeze
 
@@ -352,7 +379,7 @@ only what is stored (CLAUDE.md, *"A feature is not finished because its model is
 | stage | what | proves |
 |---|---|---|
 | **0** ✓ | STREAM.md; `tools/stream/fake-streamer.py` — a Python `paintstream/1` server on this Mac (ffmpeg `avfoundation` screen or `testsrc -re` → `h264_videotoolbox` → Annex-B; also `--send <file>` and a save folder; `stream-client-check.py` is the conformance client both servers are proved against; `--screen` needs Screen Recording permission for the terminal, `--pattern` is the CI path); a ≤200 KB H.264 fixture of `testsrc` for logic tests | the protocol has a reference implementation the iPad is tested against before the laptop exists |
-| **1** | iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box | a live picture of this Mac's screen moves in the simulator against the fake streamer; a cold-start XCUITest reaches the sheet from a new document |
+| **1** ✓ | ~~iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box~~ **Built.** `Engine/ScreenStream/`, `Views/StreamConnectSheet.swift`, `CanvasManager.insertStream(host:port:status:)`; five suites (`StreamElementLogicTests`, `StreamFramingLogicTests`, `H264StreamDecoderLogicTests`, `StreamInsertLogicTests`, `StreamScreenUITests`). §5.3 carries what the build corrected | driven against `fake-streamer.py --pattern`: the pattern moves in the Move box and on the committed layer (two screenshots 2 s apart differ in 15–18% of the rect's sampled pixels); the cold-start XCUITest reaches the sheet |
 | **2** | iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it) | driven; the tick's main-thread cost MEASURED on the device |
 | **3** | Windows: `Streamer.Core`, `Streamer.Tray`, tests, `install-streamer.ps1`, `streamer.ps1`; installed on the laptop over SSH and started as the task | the iPad shows Blender from the laptop; source switch, window close, laptop reboot all behave as §4.5/2.8 |
 | **4** | Files both ways: drop box → insert, Ctrl+V bitmap, refusal reasons; Send to Computer | driven end to end |
@@ -366,5 +393,8 @@ Stages 1–2 (iPad, simulator) and 3 (Windows, SSH, no simulator) run in paralle
 - Which encoder element the laptop actually has (GPU vendor unknown until SSH) — `EncoderProbe`.
 - The exact main-thread cost of a 1080p tick and of `VTCreateCGImageFromCVPixelBuffer` on the iPad
   9th gen — stage 2, MEASURED; if it is over budget the draw moves to a `CVMetalTextureCache` path.
+  Simulator figures are in §5.3 (0.3–0.5 ms and 0.04 ms); the CGImage is a wrap of the BGRA
+  IOSurface, so on that count a texture path buys nothing — what a device run has to price is the
+  off-main `.region` re-walk that draws the frame into the cel's memo.
 - Whether `tcpclientsink` on localhost or `fdsink` is the cleaner hand-off on Windows — stage 3.
 - Tailscale MTU is 1280; irrelevant to TCP framing, noted in case UDP is ever tried.
