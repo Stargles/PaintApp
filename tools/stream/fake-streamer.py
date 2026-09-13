@@ -453,14 +453,32 @@ class ClientSession:
         if self.args.send:
             background_tasks.append(asyncio.create_task(self._send_queued_files()))
 
-        done, pending = await asyncio.wait(core_tasks, return_when=asyncio.FIRST_COMPLETED)
-        for t in pending:
-            t.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        for t in background_tasks:
-            if not t.done():
+        # This whole block is wrapped in try/finally because run() itself can be
+        # cancelled from outside (a second client evicting this one, §3's "a second
+        # connection replaces the first"). That cancellation lands on whatever await
+        # is current — e.g. the asyncio.wait() below — and propagates immediately,
+        # skipping every line after it, including the cancel-and-gather cleanup that
+        # was meant to tear down core_tasks/background_tasks. Without the finally,
+        # eviction left reader/sender/watchdog/rate-log tasks running with no one
+        # left to await them; each one eventually hit the now-closed socket and
+        # logged "Task exception was never retrieved" straight from asyncio's default
+        # handler, bypassing this class's own logging entirely.
+        done = []
+        try:
+            done, pending = await asyncio.wait(core_tasks, return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
                 t.cancel()
-        await asyncio.gather(*background_tasks, return_exceptions=True)
+            await asyncio.gather(*pending, return_exceptions=True)
+            for t in background_tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+        finally:
+            for t in core_tasks + background_tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*core_tasks, *background_tasks, return_exceptions=True)
+
         for t in list(done) + background_tasks:
             if not t.done() or t.cancelled():
                 continue  # Task.exception() raises CancelledError for a cancelled task
@@ -705,6 +723,23 @@ async def run_server(args):
     stop_event = asyncio.Event()
     hostname = socket.gethostname().split(".")[0]
 
+    # Signal handlers are registered here, against the loop this coroutine actually
+    # runs on, and they set stop_event rather than calling loop.stop() directly.
+    # loop.stop() was tried first and is wrong: it yanks the loop out from under
+    # run_until_complete() while this coroutine is still suspended inside
+    # server.serve_forever(), which raises "RuntimeError: Event loop stopped before
+    # Future completed" — and since add_signal_handler(SIGINT, ...) replaces
+    # Python's normal Ctrl-C handling, that RuntimeError (not a clean
+    # KeyboardInterrupt) is what a plain Ctrl-C hit on every run. Waiting on an
+    # Event lets serve_forever() be cancelled and the `async with server` block
+    # exit normally instead.
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except NotImplementedError:
+            pass  # e.g. Windows; Ctrl-C falls back to a plain KeyboardInterrupt there
+
     async def _handler(reader, writer):
         await handle_client(reader, writer, args, hostname)
 
@@ -716,7 +751,11 @@ async def run_server(args):
         if args.once:
             await stop_event.wait()
         else:
-            await server.serve_forever()
+            serve_task = asyncio.create_task(server.serve_forever())
+            await stop_event.wait()
+            serve_task.cancel()
+            await asyncio.gather(serve_task, return_exceptions=True)
+    log("server stopped")
 
 
 def _cleanup_orphans():
@@ -775,24 +814,14 @@ def main(argv=None):
     VERBOSE = args.verbose
     os.makedirs(args.save_dir, exist_ok=True)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, loop.stop)
-            except NotImplementedError:
-                pass
-        loop.run_until_complete(run_server(args))
+        asyncio.run(run_server(args))
     except KeyboardInterrupt:
-        pass
+        # only reached on a platform where add_signal_handler raised
+        # NotImplementedError inside run_server (e.g. Windows)
+        log("interrupted, shutting down")
     finally:
         _cleanup_orphans()
-        try:
-            loop.run_until_complete(asyncio.sleep(0.05))
-        except Exception:
-            pass
-        loop.close()
     return 0
 
 
