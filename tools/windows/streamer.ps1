@@ -1,0 +1,124 @@
+<#
+.SYNOPSIS
+  Drives the PaintStreamer Scheduled Task from SSH (STREAM.md §4.3/§4.1, deliverable 5).
+
+.DESCRIPTION
+  start   — Start-ScheduledTask; the task's LogonType=Interactive means this launches
+            the exe inside kevin's already-open console session 1, not this SSH
+            session's own non-interactive window station.
+  stop    — Stop-ScheduledTask, with a fallback Stop-Process if the exe outlives it.
+  status  — task state + the running process (name, session id, CPU) if any.
+  log [n] — tail the last n lines (default 50) of log.txt.
+  sources — runs --list-sources TWO ways for comparison: once directly over this SSH
+            session (which, being non-interactive, sees the 1024x768 "WinDisc"
+            placeholder — proof of the session point), and once via a temporary
+            Scheduled Task in kevin's own session (which sees the real monitor and
+            real windows) whose output is read back from log.txt.
+  deploy  — assumes source already copied to -SourceDir (the Mac-side
+            streamer-remote.sh does the tar/scp); re-runs install-streamer.ps1
+            (idempotent: republish + firewall + re-register) then restarts the task.
+#>
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidateSet("start", "stop", "status", "log", "sources", "deploy")]
+    [string]$Command,
+
+    [Parameter(Position = 1)]
+    [int]$Lines = 50,
+
+    [string]$SourceDir = "C:\Users\PC\src\streamer",
+    [string]$AppDir = "C:\Users\kevin\AppData\Local\PaintStreamer",
+    [int]$Port = 47301
+)
+
+$ErrorActionPreference = "Stop"
+$TaskName = "PaintStreamer"
+$LogPath = Join-Path $AppDir "log.txt"
+$ExePath = Join-Path (Join-Path $AppDir "app") "Streamer.Tray.exe"
+
+function Show-Status {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Host "Task '$TaskName' is not registered. Run install-streamer.ps1 first."
+        return
+    }
+    $info = Get-ScheduledTaskInfo -TaskName $TaskName
+    Write-Host "Task state:      $($task.State)"
+    Write-Host "Last run:        $($info.LastRunTime)"
+    Write-Host "Last result:     $($info.LastTaskResult)  (0 = still running or last run OK)"
+    $procs = Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue
+    if ($procs) {
+        $procs | Select-Object Id, SessionId, CPU, StartTime | Format-Table -AutoSize
+    } else {
+        Write-Host "No Streamer.Tray.exe process is currently running."
+    }
+}
+
+switch ($Command) {
+    "start" {
+        Start-ScheduledTask -TaskName $TaskName
+        Start-Sleep -Seconds 2
+        Show-Status
+    }
+    "stop" {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        $lingering = Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue
+        if ($lingering) {
+            Write-Host "Process outlived Stop-ScheduledTask; killing directly."
+            $lingering | Stop-Process -Force
+        }
+        Show-Status
+    }
+    "status" {
+        Show-Status
+    }
+    "log" {
+        if (-not (Test-Path $LogPath)) {
+            Write-Host "No log yet at $LogPath"
+        } else {
+            Get-Content -Path $LogPath -Tail $Lines
+        }
+    }
+    "sources" {
+        Write-Host "=== Direct over this SSH session (non-interactive window station) ==="
+        Write-Host "--- expect the fake 1024x768 'WinDisc' placeholder here, not the real desktop ---"
+        & $ExePath --list-sources
+        Write-Host ""
+        Write-Host "=== Via a one-off Scheduled Task in kevin's own interactive session ==="
+        $tmpTask = "PaintStreamerListSourcesOnce"
+        Get-ScheduledTask -TaskName $tmpTask -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+        $before = 0
+        if (Test-Path $LogPath) { $before = (Get-Item $LogPath).Length }
+        $action = New-ScheduledTaskAction -Execute $ExePath -Argument "--list-sources"
+        $principal = New-ScheduledTaskPrincipal -UserId "kevin" -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $tmpTask -Action $action -Principal $principal | Out-Null
+        Start-ScheduledTask -TaskName $tmpTask
+        $deadline = (Get-Date).AddSeconds(15)
+        do {
+            Start-Sleep -Milliseconds 500
+            $state = (Get-ScheduledTask -TaskName $tmpTask).State
+        } while ($state -eq "Running" -and (Get-Date) -lt $deadline)
+        Start-Sleep -Seconds 1  # let the log flush
+        Unregister-ScheduledTask -TaskName $tmpTask -Confirm:$false
+        if (Test-Path $LogPath) {
+            $stream = [System.IO.File]::Open($LogPath, 'Open', 'Read', 'ReadWrite')
+            $stream.Seek($before, 'Begin') | Out-Null
+            $reader = New-Object System.IO.StreamReader($stream)
+            $reader.ReadToEnd()
+            $reader.Close()
+        } else {
+            Write-Host "No log produced — check the task ran (state was: $state)"
+        }
+    }
+    "deploy" {
+        Write-Host "=== deploy: re-publishing from $SourceDir and restarting the task ==="
+        & (Join-Path $PSScriptRoot "install-streamer.ps1") -SourceDir $SourceDir -AppDir $AppDir -Port $Port
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName $TaskName
+        Start-Sleep -Seconds 2
+        Show-Status
+    }
+}

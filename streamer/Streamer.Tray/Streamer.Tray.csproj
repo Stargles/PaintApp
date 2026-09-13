@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Streamer.Tray</RootNamespace>
+    <AssemblyName>Streamer.Tray</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms only for NotifyIcon and FolderBrowserDialog — fewer external
+         dependencies than pulling in Hardcodet.NotifyIcon.Wpf (STREAM.md's "your call,
+         fewer dependencies wins"). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon />
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Streamer.Core\Streamer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

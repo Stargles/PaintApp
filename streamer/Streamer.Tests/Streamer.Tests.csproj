@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Streamer.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Streamer.Core\Streamer.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The same fixture the iPad's KEYFRAMES-adjacent logic tests use (STREAM.md §7
+         stage 0/1): 60 access units, IDRs at 0 and 30, each already starting SPS,PPS.
+         Copied alongside the test binary so a relative path works under `dotnet test`
+         regardless of working directory. -->
+    <None Include="..\..\PaintSoftwareUITests\Fixtures\stream-testsrc-640x360.h264">
+      <Link>Fixtures\stream-testsrc-640x360.h264</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

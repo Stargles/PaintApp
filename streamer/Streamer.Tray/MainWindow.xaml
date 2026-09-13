@@ -1,0 +1,52 @@
+<Window x:Class="Streamer.Tray.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PaintStreamer" Height="620" Width="520">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12">
+
+            <TextBlock Text="Status" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
+            <Border BorderBrush="#888" BorderThickness="1" Padding="8" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock x:Name="StatusText" Text="Not streaming" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="RateText" Text="" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="EncoderText" Text="" Margin="0,4,0,0"/>
+                    <TextBlock Text="Connect from the iPad to:" Margin="0,8,0,0" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="AddressText" Text="" FontFamily="Consolas"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Source" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
+            <Button x:Name="RefreshButton" Content="Refresh sources" Width="140" HorizontalAlignment="Left"
+                    Click="RefreshButton_Click" Margin="0,0,0,6"/>
+            <ListBox x:Name="SourceList" Height="260" Margin="0,0,0,4">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="2">
+                            <Image Source="{Binding Thumbnail}" Width="80" Height="45" Stretch="Uniform" Margin="0,0,8,0"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SubText}" Foreground="#666" FontSize="11"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Button x:Name="StreamButton" Content="Stream selected source" Width="180" HorizontalAlignment="Left"
+                    Click="StreamButton_Click" Margin="0,0,0,12"/>
+
+            <TextBlock Text="Drop box" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
+            <Border BorderBrush="#888" BorderThickness="1" Padding="16" Margin="0,0,0,12"
+                    Background="#f3f3f3">
+                <TextBlock Text="Files arrive in a later version." HorizontalAlignment="Center" Foreground="#666"/>
+            </Border>
+
+            <TextBlock Text="Save folder for exports from the iPad" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
+            <DockPanel Margin="0,0,0,12">
+                <Button Content="Change..." DockPanel.Dock="Right" Click="ChangeFolder_Click"/>
+                <TextBlock x:Name="SaveFolderText" Text="" VerticalAlignment="Center" Margin="0,0,8,0" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

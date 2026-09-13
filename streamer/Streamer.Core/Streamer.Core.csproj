@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Streamer.Core</RootNamespace>
+    <AssemblyName>Streamer.Core</AssemblyName>
+    <!-- Class library only: no UI references, no process-global (static) state per
+         STREAM.md §4.6 — a future in-process host must be able to new() this up
+         without inheriting window-station or singleton assumptions. -->
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <EnableWindowsTargetPlatformSpecificApi>true</EnableWindowsTargetPlatformSpecificApi>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only for SourceCatalog's window/monitor thumbnails (GDI Bitmap -> PNG bytes).
+         No WinForms/WPF dependency pulled in by this package alone. -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>
