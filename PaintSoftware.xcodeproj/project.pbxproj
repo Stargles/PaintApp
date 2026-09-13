@@ -250,6 +250,11 @@
 		3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */; };
 		3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */; };
 		9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */; };
+		B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */; };
+		39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */; };
+		8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */; };
+		14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */; };
+		79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */; };
 		082C6EE2D2F0F29701AF5AC7 /* StreamScreenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */; };
 		608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */ = {isa = PBXBuildFile; fileRef = C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */; };
 		833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */; };
@@ -695,6 +700,11 @@
 		1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFramingLogicTests.swift; sourceTree = "<group>"; };
 		037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = H264StreamDecoderLogicTests.swift; sourceTree = "<group>"; };
 		7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamInsertLogicTests.swift; sourceTree = "<group>"; };
+		D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSandwichBench.swift; sourceTree = "<group>"; };
+		85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamPersistenceLogicTests.swift; sourceTree = "<group>"; };
+		B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBarStateLogicTests.swift; sourceTree = "<group>"; };
+		448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBakeLogicTests.swift; sourceTree = "<group>"; };
+		F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+StreamBake.swift"; sourceTree = "<group>"; };
 		EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamScreenUITests.swift; sourceTree = "<group>"; };
 		C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264; sourceTree = "<group>"; };
 		AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameMapLogicTests.swift; sourceTree = "<group>"; };
@@ -1039,6 +1049,10 @@
 				1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */,
 				037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */,
 				7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */,
+				D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */,
+				85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */,
+				B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */,
+				448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */,
 				EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */,
 				F742644B1FB19B0E3D7F367B /* VideoBakeLogicTests.swift */,
 				CDEECFCF28940EF39034A157 /* PoseBakeLogicTests.swift */,
@@ -1290,6 +1304,7 @@
 				19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */,
 				725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */,
 				D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */,
+				F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */,
 				C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
 				636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */,
@@ -1880,6 +1895,11 @@
 				3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */,
 				3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */,
 				9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */,
+				B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */,
+				39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */,
+				8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */,
+				14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */,
+				79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */,
 				082C6EE2D2F0F29701AF5AC7 /* StreamScreenUITests.swift in Sources */,
 				833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */,
 				C5D5F98B9EE6C3CF2372D1ED /* VideoFrameReaderLogicTests.swift in Sources */,

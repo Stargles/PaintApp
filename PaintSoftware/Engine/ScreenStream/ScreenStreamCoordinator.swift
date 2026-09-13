@@ -120,6 +120,10 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// Whether `sync()` and `connect(to:)` open sockets. **False in every `CanvasFixture` manager**,
     /// so a logic test that inserts a stream does not start a client resolving `laptop:47301` in
     /// the background for the rest of the run. True in the app.
+    ///
+    /// When false the client objects still exist — made and never started — so a logic test can
+    /// read `sentControlCommands` and drive `stateChanged`/`statusArrived` against a real endpoint
+    /// entry; `ScreenStreamClient.send` on a client with no connection is a no-op.
     var startsClients = true
 
     init(manager: CanvasManager) {
@@ -218,6 +222,9 @@ final class ScreenStreamCoordinator: ObservableObject {
         if let status = statuses[endpoint], clients[endpoint]?.state == .connected {
             return status
         }
+        guard startsClients else {
+            throw ConnectFailure(sentence: "This document does not open connections.")
+        }
         return try await withCheckedThrowingContinuation { continuation in
             pendingConnects[endpoint, default: []].append(continuation)
             if clients[endpoint] == nil { startClient(for: endpoint) }
@@ -225,9 +232,9 @@ final class ScreenStreamCoordinator: ObservableObject {
     }
 
     private func startClient(for endpoint: StreamEndpoint) {
-        guard startsClients else { return }
         let client = ScreenStreamClient(endpoint: endpoint)
         clients[endpoint] = client
+        guard startsClients else { return }
         connectionStates[endpoint] = .connecting
         client.onStateChange = { [weak self] state in
             self?.stateChanged(state, at: endpoint)
@@ -310,7 +317,6 @@ final class ScreenStreamCoordinator: ObservableObject {
     ///
     /// Internal rather than private so a logic test can drive the bar's state with no socket.
     func stateChanged(_ state: ScreenStreamClient.State, at endpoint: StreamEndpoint) {
-        guard clients[endpoint] != nil || state == .stopped else { return }
         if state == .stopped {
             connectionStates.removeValue(forKey: endpoint)
         } else {
