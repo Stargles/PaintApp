@@ -2698,12 +2698,28 @@ existed to fix.** `FolderOptionsPanel` now carries the same `transformMoveRow` a
 does, behind a Transform toggle `setFolderTransform` turns on and off, and `beginContainerPoseMove`
 takes a `KeyframeTarget` so the box it raises can be a folder's own rather than always the current
 layer's — `LayerFolder.transform` had no writer of any kind before this; the field could not become
-non-nil outside a hand-edited save file. **This channel-list row is not that entry and is still
-without one**: it is reachable only from an *open* graph band, and `graphBandExpansion` — what a band
-is open *on* — is keyed by `layerIndex` throughout `TimelineLayoutKey`/`TimelineGraphChannelList`, so
-a folder's pose channels, while fully modelled and drawn by `poseSources`/`graphBandListing`, cannot
-be opened into a band at all today. Widening `graphBandExpansion` to a `KeyframeTarget` is the
-prerequisite this row is still waiting on, and it is a larger stage than a row and a box.
+non-nil outside a hand-edited save file. **The other half shipped 2026-09-12, TODO (21)'s folder
+band.** `graphBandExpansion` — what a band is open *on* — was keyed by `layerIndex` throughout
+`TimelineLayoutKey`/`TimelineGraphChannelList`, so a folder's channels, while fully modelled and
+drawn by `poseSources`/`graphBandListing`, could not be opened into a band at all. It is a
+`KeyframeTarget` now (`TimelineRowLayout.Expansion.target`, `TimelineGraphBand.Content.target`,
+`LayerStackRow.keyframeTarget` for the row resolution), every band writer is addressed by target,
+and `revealPoseChannel`'s `.container` arm raises `beginContainerPoseMove(for: graphBandTarget)`
+— the row the band is on, which closes this entry.
+
+**The row a folder is named by is `CanvasManager.selectedFolderID`, the timeline's second row
+selection**, read by `graphBandTarget` ahead of `currentLayerIndex`. It is scoped to the band on
+purpose: the brush still draws on the current layer and the layer panel's folder tap still means
+expand/collapse; a folder is where curves live, not where ink lands. A layer pick — a cel, a slot, a
+panel row, a timeline name, a block lifted (`selectLayer`) — drops it, and so does any *change* of
+`currentLayerIndex`; an undo that writes the same index back does not, which is the case a folder
+band's own drag reaches (its undo is a structure snapshot restore). The two doors, both driven cold
+in `FolderGraphBandUITests`: **a tap on a name in the timeline's name column picks that row** (a
+layer's or a folder's — the column was inert before), and **`FolderOptionsPanel` has a "Show in Graph
+Editor" row** beside Add Keyframe, since that panel is where the folder's keyframes are placed from. A
+folder row that is expanded keeps the block half for its bar and diamonds, as a layer row does; its
+pose group is headed "Group Transform" rather than `defaultName`'s "Layer Transform"; and the
+channel list's empty text says "group". `FolderGraphBandLogicTests` pins the rest.
 
 #### The fold, and the two funnels
 

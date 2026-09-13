@@ -55,8 +55,9 @@ delivered by (29); there is deliberately no stage 9.
 
 A cel or an animation group carries a track of quad poses, ink is posed through the `sqrt(|det|)`
 width rule with endpoints bit-exact, a pose channel has a six-curve graph-editor band that is
-read-write, a transformation layer is reachable and usable, animation groups can be named, and every
-pose key has a node.
+read-write, a transformation layer is reachable and usable, animation groups can be named, every
+pose key has a node, and a folder's channels open into the band from its name in the timeline or
+from its options panel (2026-09-12).
 
 **Left to build**
 - [x] **Stage 7, live recording and an editable fps — merged, all three surfaces.** Editable fps
@@ -125,9 +126,6 @@ pose key has a node.
       stage 6) rather than dropped. It is cheaper than when it was planned — it shares its
       frame-walker with RENDER (29), which shipped, and the video bake merged 2026-09-06 is the same
       shape of operation with a worked pattern to copy. §6.
-- [ ] A folder's pose channels are modelled and drawn but **cannot be opened into a graph band**,
-      because `graphBandExpansion` is keyed by `layerIndex` throughout. Widening it to a
-      `KeyframeTarget` is a stage, not a row — surfaced by the folder-transform work, KEYFRAMES §11.7.
 **Spec** KEYFRAMES.md — **§2 is thirty owner rulings and §8 is the build order.** Four rulings
 are superseded and kept; the file says which.
 
