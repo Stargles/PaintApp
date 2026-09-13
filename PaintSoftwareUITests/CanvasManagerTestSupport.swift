@@ -30,6 +30,13 @@ enum CanvasFixture {
         let manager = CanvasManager()
         manager.brushLibraryOverride = isolatedBrushLibrary()
         manager.canvasSize = canvasSize
+        // No sockets from a logic test: a stream element inserted here must not leave a client
+        // resolving its address in the background for the rest of the run. The coordinator is
+        // main-actor and this fixture is not; every test that inserts a stream is `@MainActor`,
+        // and a caller off the main thread never reaches a socket anyway.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { manager.streamCoordinator.startsClients = false }
+        }
         for _ in 0..<layerCount { manager.addLayer() }
         return manager
     }

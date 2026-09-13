@@ -1,0 +1,51 @@
+import XCTest
+
+/// **Cold-start reachability for Actions → Stream Screen** — STREAM.md §7 stage 1's "a cold-start
+/// XCUITest reaches the sheet from a new document", and CLAUDE.md's rule that a feature whose
+/// only entry point cannot be reached from a fresh document is not finished whatever its model
+/// says.
+///
+/// From the gallery: New Canvas → Create → Actions → the Stream Screen row → the sheet with an
+/// address field, a port field prefilled with 47301 and a Connect button. **It does not connect** —
+/// there is no laptop in the suite, and `StreamInsertLogicTests` covers everything past the sheet
+/// with a status built by hand. What it also pins: Connect is disabled while the address is empty,
+/// and enabled once one is typed, so the artist is never looking at a button that does nothing.
+///
+/// Its own class rather than a row in `ToolPanelsUITests`, against that file's own advice, because
+/// the sheet is the whole of a new feature's front door and a red here should name it.
+final class StreamScreenUITests: PaintUITestCase {
+
+    func testStreamScreenIsReachableFromANewDocumentAndOpensTheConnectSheet() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor")
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.streamScreenRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Stream Screen is a row in the Actions menu")
+        XCTAssertTrue(row.isEnabled, "…and a document with a canvas can host a stream")
+        row.tap()
+
+        let address = app.textFields["streamConnect.addressField"]
+        XCTAssertTrue(address.waitForExistence(timeout: 5), "the row opens the connect sheet")
+        let port = app.textFields["streamConnect.portField"]
+        XCTAssertTrue(port.exists, "with a port field")
+        XCTAssertEqual(port.value as? String, "47301", "prefilled with paintstream/1's port")
+        let connect = app.buttons["streamConnect.connectButton"]
+        XCTAssertTrue(connect.exists, "and a Connect button")
+
+        if (address.value as? String ?? "").isEmpty || address.value as? String == "Computer's address" {
+            XCTAssertFalse(connect.isEnabled, "Connect is disabled until there is an address to connect to")
+            address.tap()
+            address.typeText("desktop-cbr0fl6")
+            XCTAssertTrue(connect.waitForExistence(timeout: 2))
+            XCTAssertTrue(connect.isEnabled, "and enabled once one is typed")
+        } else {
+            // A previous run on this simulator left an address in `UserDefaults`; the prefill is
+            // the feature working, and Connect must already be enabled on it.
+            XCTAssertTrue(connect.isEnabled, "a prefilled address enables Connect")
+        }
+
+        app.buttons["streamConnect.cancelButton"].tap()
+        XCTAssertFalse(address.waitForExistence(timeout: 2), "Cancel closes the sheet without connecting")
+    }
+}

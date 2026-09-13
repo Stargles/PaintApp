@@ -244,6 +244,7 @@ final class StrokeHandoffBench: XCTestCase {
         case .fill: return "fill"
         case .image: return "image"
         case .video: return "video"
+        case .stream: return "stream"
         case .text: return "text"
         }
     }

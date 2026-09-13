@@ -242,6 +242,16 @@
 		67620C66EAD38DD9AB2FDF27 /* PoseBakeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C74896D173BB083124FED52 /* PoseBakeUITests.swift */; };
 		4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */; };
 		163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */; };
+		767CD15BD8DCFBDC68DA8C9D /* PaintSoftware/Engine/ScreenStream/StreamProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7400C2D1181AB3DB2A36FC56 /* PaintSoftware/Engine/ScreenStream/StreamProtocol.swift */; };
+		809BAE0C3C182EE401DBF9F5 /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */; };
+		C309D545A183B1F622870F4A /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */; };
+		E2B5B4D182B2B83A8B2B6F07 /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */; };
+		F20EBC07008F679715968705 /* StreamElementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */; };
+		3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */; };
+		3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */; };
+		9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */; };
+		082C6EE2D2F0F29701AF5AC7 /* StreamScreenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */; };
+		608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */ = {isa = PBXBuildFile; fileRef = C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */; };
 		833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */; };
 		C5D5F98B9EE6C3CF2372D1ED /* VideoFrameReaderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */; };
 		502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */; };
@@ -677,6 +687,16 @@
 		6C74896D173BB083124FED52 /* PoseBakeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseBakeUITests.swift; sourceTree = "<group>"; };
 		BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameMap.swift; sourceTree = "<group>"; };
 		372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameReader.swift; sourceTree = "<group>"; };
+		7400C2D1181AB3DB2A36FC56 /* PaintSoftware/Engine/ScreenStream/StreamProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/StreamProtocol.swift; sourceTree = "<group>"; };
+		19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift; sourceTree = "<group>"; };
+		725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift; sourceTree = "<group>"; };
+		D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift; sourceTree = "<group>"; };
+		BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamElementLogicTests.swift; sourceTree = "<group>"; };
+		1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFramingLogicTests.swift; sourceTree = "<group>"; };
+		037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = H264StreamDecoderLogicTests.swift; sourceTree = "<group>"; };
+		7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamInsertLogicTests.swift; sourceTree = "<group>"; };
+		EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamScreenUITests.swift; sourceTree = "<group>"; };
+		C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264; sourceTree = "<group>"; };
 		AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameMapLogicTests.swift; sourceTree = "<group>"; };
 		201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameReaderLogicTests.swift; sourceTree = "<group>"; };
 		42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ScenePhaseSaveGate.swift; sourceTree = "<group>"; };
@@ -1015,6 +1035,11 @@
 				51F4E66292D810D298CC69FB /* VideoSpeedLogicTests.swift */,
 				6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */,
 				3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */,
+				BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */,
+				1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */,
+				037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */,
+				7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */,
+				EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */,
 				F742644B1FB19B0E3D7F367B /* VideoBakeLogicTests.swift */,
 				CDEECFCF28940EF39034A157 /* PoseBakeLogicTests.swift */,
 				59F3D8EFC9CA883476C58E88 /* VideoBakeUITests.swift */,
@@ -1261,6 +1286,11 @@
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */,
 				372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */,
+				7400C2D1181AB3DB2A36FC56 /* PaintSoftware/Engine/ScreenStream/StreamProtocol.swift */,
+				19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */,
+				725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */,
+				D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */,
+				C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
 				636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */,
 				EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */,
@@ -1442,6 +1472,7 @@
 			files = (
 				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
 				9731E4DA5B5DFE376F4370A4 /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json in Resources */,
+				608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */,
 				A903366A8FF7893CAD8D4F92 /* PaintSoftware/Resources/brushtip-square-bevel-wide.png in Resources */,
 				9D6CE0CE88C71A19D09B6EFA /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png in Resources */,
 				2C7F3821D34D8A34531C0046 /* PaintSoftware/Resources/brushtip-pencil-hard.png in Resources */,
@@ -1841,6 +1872,15 @@
 				67620C66EAD38DD9AB2FDF27 /* PoseBakeUITests.swift in Sources */,
 				4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */,
 				163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */,
+				767CD15BD8DCFBDC68DA8C9D /* PaintSoftware/Engine/ScreenStream/StreamProtocol.swift in Sources */,
+				809BAE0C3C182EE401DBF9F5 /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift in Sources */,
+				C309D545A183B1F622870F4A /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift in Sources */,
+				E2B5B4D182B2B83A8B2B6F07 /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift in Sources */,
+				F20EBC07008F679715968705 /* StreamElementLogicTests.swift in Sources */,
+				3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */,
+				3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */,
+				9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */,
+				082C6EE2D2F0F29701AF5AC7 /* StreamScreenUITests.swift in Sources */,
 				833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */,
 				C5D5F98B9EE6C3CF2372D1ED /* VideoFrameReaderLogicTests.swift in Sources */,
 				502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */,

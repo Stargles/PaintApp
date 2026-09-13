@@ -416,7 +416,7 @@ final class MemoryAuditBench: XCTestCase {
         case .image(let image):
             guard let cg = image.image.cgImage else { return 0 }
             return cg.bytesPerRow * cg.height
-        case .fill, .text, .video:
+        case .fill, .text, .video, .stream:
             return 0
         }
     }

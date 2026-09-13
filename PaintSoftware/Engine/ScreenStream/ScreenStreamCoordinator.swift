@@ -83,6 +83,11 @@ final class ScreenStreamCoordinator {
     /// A test seam: a decoder image source per endpoint that stands in for a socket. Nil in the app.
     var frameSourceOverride: ((StreamEndpoint) -> (index: Int, image: CGImage)?)?
 
+    /// Whether `sync()` and `connect(to:)` open sockets. **False in every `CanvasFixture` manager**,
+    /// so a logic test that inserts a stream does not start a client resolving `laptop:47301` in
+    /// the background for the rest of the run. True in the app.
+    var startsClients = true
+
     init(manager: CanvasManager) {
         self.manager = manager
         let center = NotificationCenter.default
@@ -181,6 +186,7 @@ final class ScreenStreamCoordinator {
     }
 
     private func startClient(for endpoint: StreamEndpoint) {
+        guard startsClients else { return }
         let client = ScreenStreamClient(endpoint: endpoint)
         clients[endpoint] = client
         client.onStatus = { [weak self] status in
@@ -199,7 +205,9 @@ final class ScreenStreamCoordinator {
         client.start()
     }
 
-    private func statusArrived(_ status: StreamStatus, from endpoint: StreamEndpoint) {
+    /// Internal rather than private so `StreamInsertLogicTests` can hand the coordinator a STATUS
+    /// with no socket; the app reaches it only through a client's `onStatus`.
+    func statusArrived(_ status: StreamStatus, from endpoint: StreamEndpoint) {
         statuses[endpoint] = status
         applyStatusToElements(status, endpoint: endpoint)
         if let continuations = pendingConnects.removeValue(forKey: endpoint) {

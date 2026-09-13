@@ -4894,7 +4894,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 }
             case .text(let text):
                 points = text.frame.corners
-            case .image, .video:
+            case .image, .video, .stream:
                 XCTFail("this oracle does not model a placed rectangle")
             }
             let pad = CGPoint(x: reach * canvasScale / s.x, y: reach * canvasScale / s.y)

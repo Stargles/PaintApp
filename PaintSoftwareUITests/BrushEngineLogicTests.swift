@@ -421,6 +421,7 @@ final class BrushEngineLogicTests: XCTestCase {
             case .image: return "image"
             case .text: return "text"
             case .video: return "video"
+            case .stream: return "stream"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -433,6 +434,7 @@ final class BrushEngineLogicTests: XCTestCase {
             case .image: return "image"
             case .text: return "text"
             case .video: return "video"
+            case .stream: return "stream"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }

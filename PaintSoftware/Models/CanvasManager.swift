@@ -673,6 +673,7 @@ final class CanvasManager: ObservableObject {
     /// `status` is handed in rather than fetched, so the verb needs no socket: the sheet connects
     /// through `ScreenStreamCoordinator.connect(to:)` and calls this with what the laptop answered.
     /// Nil when the status carries no usable size or the document has no canvas.
+    @MainActor
     @discardableResult
     func insertStream(host: String, port: UInt16, status: StreamStatus) -> VectorStreamElement? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
