@@ -304,7 +304,21 @@ the device before merging stage 2 — the aim is that a live 1080p stream costs 
   `LayerContentVersion` and the posed/video identities now read — does not. The bake, the dirty
   sweep and the sandwich key are blind to a live frame by construction. The consequence: a canvas on
   the engaged sandwich at rest (a blend mode, a mask, an effect, a container pose) shows the stream
-  at whatever the bake froze. Stage 2 decides what that case should do.
+  at whatever the bake froze. **Stage 2 measured the alternative and kept the staleness, in words.**
+  A per-tick in-memory composite of the current frame — the cel's own re-walk with `committedVersion`
+  moved (every memo the composite reads is keyed on it), the request's flattens, one composite —
+  MEASURED on the simulator (Debug, 2048², three layers, a 1920×1080 frame, the stream layer on
+  Multiply; `StreamSandwichBench`): **45.8 ms a tick on CoreGraphics (20.2 + 7.0 + 18.6) and 72.7 ms
+  on Metal**, an order of magnitude over the ~4 ms a 30 Hz tick could carry, and PERFORMANCE.md's
+  device figure for the composite alone (~18 ms of a 54.8 ms six-layer rebuild) says the iPad is not
+  going to close that gap. So the bar says it instead — `StreamBarState.sandwichNote`, *"Live
+  picture pauses while a blend mode, mask, effect or transformation layer is in the document"*, shown
+  while `CanvasManager.streamPictureIsHeldByTheSandwich` (the tree's `needsCompositorOnCanvas` or a
+  container pose, the same clauses as `sandwichEngagesOnCanvas` minus playback and a float). A
+  *dimmed* reference is a layer opacity, which stays on the flat row and stays live; it is a
+  *multiplied* one that pauses. Never silent staleness. The tick's drawn-frame memo is keyed by
+  **cel and element**, because a split (Bake Frame, Split Drawing) copies the stream element's id into
+  the new cel and a memo on the id alone left the copy on its older picture until the next frame.
 - *"…and calls `celContentChangedOutsideStroke`."* That is `objectWillChange`, a whole SwiftUI pass
   thirty times a second. The tick repaints the layer host directly through a closure `CanvasView`
   installs (`StrokeCanvasView.guideOverlayNeedsUpdate`'s shape) and publishes once a second for the
@@ -319,14 +333,37 @@ MEASURED on the simulator (Debug, 2048² canvas, a 1920×1080 `testsrc` from the
 tick costs **~0.3–0.5 ms** of main thread whether the element floats or is committed, and
 `latestCGImage()` (`VTCreateCGImageFromCVPixelBuffer` on the BGRA IOSurface) **~0.04 ms**. The
 float re-mint was **~15 ms** a tick while it ran on the main actor, which is why it does not.
+**Stage 2 gave the measurement an outlet**: every tick is an `OSSignposter` interval
+(`PaintSoftware` / `ScreenStream`) and once a second the coordinator logs the ticks since the last
+line with their mean and worst main-actor cost — `log stream --predicate 'subsystem ==
+"PaintSoftware" && category == "ScreenStream"'` on a device, `xcrun simctl spawn <udid> log stream …`
+on the simulator. There were no signposts before this; stage 1's figure came from
+`lastTickDuration` read in a harness.
 
 ### 5.4 Freeze
 
-Freeze sets `isFrozen`, writes the current frame to `lastFrameFileName` at once (5.6), and stops the
-tick for that element; Unfreeze clears it and asks for a keyframe. When every stream element on the
-connection is frozen the client sends `pause`; the first unfreeze sends `resume`. **Freeze is not an
-undo step** — it is a viewing state like the render-resolution knob, persisted with the document.
-Bake works while frozen and bakes the frozen picture.
+Freeze sets `isFrozen` and stops the tick for that element; Unfreeze clears it and asks for a
+keyframe. When every stream element on the connection is frozen the client sends `pause`; the first
+unfreeze sends `resume` (whose keyframe §3 guarantees — no second request rides with it), and an
+unfreeze on a connection that was not paused sends `keyframe`. **Freeze is not an undo step** — it is
+a viewing state like the render-resolution knob, persisted with the document. Bake works while
+frozen and bakes the frozen picture.
+
+**Built (stage 2), with two corrections.** *"Writes the current frame to `lastFrameFileName` at
+once"* is gone: `ProjectStore` stages a whole new package on every save and swaps it in by rename, so
+a file written into the live package outside a save is in no package the next load reads — the
+picture a freeze holds is `displayFrame`, which the next save encodes (§5.6). And the verb is
+addressed by cel — `CanvasManager.setStreamFrozen(layerIndex:celIndex:elementID:_:)` — because a
+split copies an element's id into a second cel, so after a Bake Frame the cels either side hold two
+streams with one id and the artist freezes the one they are standing on. The pause is reconciled by
+one function (`ScreenStreamCoordinator.syncPauseState`) on freeze, on backgrounding, on foregrounding
+and on every `.connected` transition, since a laptop just reconnected to knows nothing of the pause
+the old connection carried; the decoder is reset on `resume` rather than on `pause`, so the resume's
+keyframe is the first thing decoded and an access unit still in flight after a pause is not turned
+into a keyframe *request* (which the fake streamer answers by restarting the pipeline the pause
+stopped). One consequence to know: the flag lives on the element, and the element is what an undo
+step snapshots — so undoing a bake made *while* frozen puts the stream back frozen even if it was
+unfrozen since. Reported rather than special-cased.
 
 ### 5.5 Bake Frame (2.4)
 
@@ -337,13 +374,37 @@ Bake works while frozen and bakes the frozen picture.
 the package as the image path already does. Refusals: `.noFrameYet` (*"No picture from the computer
 yet"*), `.notOnStreamCel`. The playhead stays. A bake on a one-frame cel is the swap alone.
 
+**Built (stage 2), `CanvasManager+StreamBake.swift`.** Which ids move: the image is minted fresh and
+every other element on the baked cel is `reidentified()` as the video bake does; **the cels either
+side keep their ids verbatim, the stream's included** — they are `splitCel`'s own copies, which is
+what Split Drawing does to every cel it cuts, and nothing keys on a stream id across cels (the
+coordinator's memo is per cel for exactly this). The picture is `displayFrame` — live, frozen, or
+the one the last save wrote and the load put back — so a bake with the laptop off bakes the last
+picture it sent. A decoded frame whose pixel size disagrees with the STATUS-reported `naturalSize` is
+resampled to `naturalSize` (`streamSnapshot`), because the stream drew its frame *into* that rect and
+a placed image's rect is its own pixel size. A pose channel on the cel is baked into the geometry
+and dropped, the video bake's rule. `StreamBakeLogicTests` pins [1] [2] [3–4], [1] [2–4], [1–3]
+[4], the one-frame swap, four cels after a second bake, undo to one ticking stream cel, and the baked
+frame green through the real compositor while both neighbours follow the stream to red.
+
 ### 5.6 Surviving the computer being off (2.8)
 
-`lastFrameFileName` is written on freeze, on bake, on disconnect, and on save (JPEG, quality 0.9, in
-the project package like an image element's file — never per frame). On load `displayFrame` is that
-file, so the layer opens looking as it last did; the coordinator starts the client, which reconnects
-in the background. The bar says **Live** / **Frozen** / **Reconnecting…** / **Not streaming — <reason
-from STATUS>**. Nothing modal, ever.
+`lastFrameFileName` is written **on save, and only on save** (JPEG, quality 0.9, in the project
+package beside the placed images — never per frame): `ProjectStore` stages a whole package on every
+save and swaps it in, so "on freeze, on bake, on disconnect" — what this section said until stage 2 —
+would have written files into a package the next save replaces. Every one of those events leaves the
+picture in `displayFrame`, and the save encodes whatever it holds: the live frame, the frozen one, or
+the last one received before the laptop went away. The name is minted per cel and per element
+(`<celID>_stream_<elementID>.jpg`) rather than reused, because a split copies an element's id into a
+second cel and two cels writing one name would keep whichever wrote last. On load `displayFrame` is
+that file (`UIImage(contentsOfFile:)` — the decode waits for the first draw), so the layer opens
+looking as it last did; the coordinator starts the client on the first canvas pass, which reconnects
+in the background, and nothing waits on it. A missing file is a log line, not damage. The bar says
+**Live** / **Frozen** / **Reconnecting…** / **Not streaming — <reason from STATUS>** — and
+**Connecting…** for the first attempt, before any answer, which a document just opened is in for up
+to five seconds. Nothing modal, ever. `StreamPersistenceLogicTests` pins the JPEG in `images/`, the
+reloaded cel drawing it, a bake of it with the laptop off, and an open with the laptop unreachable
+that blocks nothing.
 
 ### 5.7 The bar and the Actions entry (2.2, 2.3)
 
@@ -359,6 +420,16 @@ the current frame holds a stream element, unless a piece floats (the Move bar wi
 label and state (5.6), **Freeze** ⇄ **Unfreeze**, **Bake Frame**, and the address for reconnecting to a
 different laptop. It is not an `ActivePanel` case, so `canvasInteractionBegan`'s `activePanel = .none`
 cannot close it — a two-finger pan keeps it up.
+
+**Built (stage 2).** `DrawingView.bottomDock` reads `CanvasManager.activeStreamCel`; the bar observes
+`ScreenStreamCoordinator` (an `ObservableObject` now — connection states and STATUSes published,
+never frames) and shows `barState(for:)`'s word, with the sandwich note (§5.3) under it while the
+canvas is on the composite. The address row opens `StreamConnectSheet` with a `StreamRetarget`, and a
+successful connect there is `CanvasManager.retargetStream` — host, port, label and size rewritten on
+the element in one undo step, placement and picture kept — rather than a second layer. Identifiers
+`streamBar.sourceLabel` / `stateLabel` (value: `live` · `frozen` · `connecting` · `reconnecting` ·
+`notStreaming`) / `freezeButton` / `bakeFrameButton` / `addressButton` / `sandwichNote`.
+`StreamBarStateLogicTests` pins the cold-start reach, the word's precedence and the pause protocol.
 
 ### 5.8 Files (2.10)
 
@@ -384,7 +455,10 @@ in the sheet.
 - Port **47301**; the firewall rule admits only Tailscale addresses.
 - Freeze is **not** an undo step; Bake Frame is **one**.
 - Snapshots are stored at the laptop's native pixel size, not the canvas's.
-- The last frame is saved as JPEG q0.9; the bake snapshot as the image path's existing format.
+- The last frame is saved as JPEG q0.9, on save alone (§5.6); the bake snapshot as the image
+  path's existing format.
+- A bake's neighbours keep the stream element's id; only the baked cel is re-identified (§5.5).
+- The engaged sandwich says the live picture is paused rather than paying a per-tick composite (§5.3).
 - Bitrate ~6 Mbit/s, 30 fps cap, GOP 2 s — tune on measurement.
 - During playback the picture holds; on stop the next tick resumes it.
 

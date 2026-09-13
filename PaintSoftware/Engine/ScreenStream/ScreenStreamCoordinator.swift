@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import UIKit
 
 /// **Redrawing without an edit** — STREAM.md §5.3, the first thing in the app that repaints a cel
@@ -113,6 +114,16 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// Wall time the last tick took on the main actor, in seconds. MEASURED per tick so a device
     /// run can quote it; STREAM.md §5.3 asks for under 2 ms at 1080p.
     private(set) var lastTickDuration: TimeInterval = 0
+
+    /// **The measurement's own outlet.** Every tick is an `OSSignposter` interval, and once a
+    /// second — on the same cadence as the ordinary publish — one `Logger` line carries the ticks
+    /// since the last one with their mean and worst main-actor cost. Read it on a device with
+    /// `log stream --predicate 'subsystem == "PaintSoftware" && category == "ScreenStream"'`, or
+    /// on the simulator through `xcrun simctl spawn <udid> log stream …`; a tick-per-second count
+    /// is the frame rate the tick actually delivered to the canvas. Costs one string a second.
+    private static let log = Logger(subsystem: "PaintSoftware", category: "ScreenStream")
+    private static let signposter = OSSignposter(subsystem: "PaintSoftware", category: "ScreenStream")
+    private var tickDurationsSincePublish: [TimeInterval] = []
 
     /// A test seam: a decoder image source per endpoint that stands in for a socket. Nil in the app.
     var frameSourceOverride: ((StreamEndpoint) -> (index: Int, image: CGImage)?)?
@@ -442,6 +453,8 @@ final class ScreenStreamCoordinator: ObservableObject {
         lastTick = started
         guard let manager, !manager.isPlaying, !isInBackground else { return }
         tickCount += 1
+        let signpost = Self.signposter.beginInterval("tick")
+        defer { Self.signposter.endInterval("tick", signpost) }
         let shownFrames = manager.displayedFrames(atFrame: manager.currentFrame)
         let float = manager.vectorFloat
         let publishDue = started - lastPublish >= Self.publishInterval
@@ -478,8 +491,19 @@ final class ScreenStreamCoordinator: ObservableObject {
             }
             if floatNeedsRepaint { onFloatNeedsRepaint?(layer.id) }
         }
-        if published { lastPublish = started }
         lastTickDuration = CFAbsoluteTimeGetCurrent() - started
+        tickDurationsSincePublish.append(lastTickDuration)
+        if published {
+            let elapsed = started - lastPublish
+            let durations = tickDurationsSincePublish
+            let mean = durations.reduce(0, +) / Double(max(durations.count, 1))
+            let worst = durations.max() ?? 0
+            if lastPublish > 0 {
+                Self.log.info("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
+            }
+            tickDurationsSincePublish.removeAll(keepingCapacity: true)
+            lastPublish = started
+        }
     }
 
     private func latestFrame(for endpoint: StreamEndpoint) -> (index: Int, image: CGImage)? {
