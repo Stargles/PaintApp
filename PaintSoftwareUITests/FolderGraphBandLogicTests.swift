@@ -317,8 +317,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
         let before = try content(manager).channels.count
         manager.setGraphChannels([opacityID], visible: false)
         XCTAssertEqual(try content(manager).channels.count, before - 1, "One row fewer is drawn")
-        XCTAssertEqual(manager.graphChannelFilter.hidden(on: target, defaults: []), [opacityID],
-                       "The filter is authored on the folder…")
+        XCTAssertTrue(manager.graphChannelFilter.hidden(on: target, defaults: []).contains(opacityID),
+                      "The filter is authored on the folder — beside (59)'s materialised defaults")
         XCTAssertEqual(manager.graphChannelFilter.hidden(on: layerRow(manager, 0), defaults: []), [],
                        "…and answers nothing for the layer's band")
     }
@@ -366,9 +366,12 @@ final class FolderGraphBandLogicTests: XCTestCase {
         let content = try content(manager)
         let node = TimelineGraphBand.KeyRef(parameterID: opacityID, frame: 8)
 
-        // Straight up by half the band: opacity's `uiRange` is 0…1, so that is +0.5.
+        // Straight up from the 0 line to the 0.5 line, through the band's own y mapping — opacity's
+        // `uiRange` is 0…1 and the band insets its axis, so half the band is not half the range.
+        let lift = TimelineGraphBand.y(ofValue: 0.5, in: 0...1, bandHeight: band)
+            - TimelineGraphBand.y(ofValue: 0, in: 0...1, bandHeight: band)
         let moves = TimelineGraphBand.moves(of: [node], in: content.channels,
-                                            translation: CGSize(width: 0, height: -band / 2),
+                                            translation: CGSize(width: 0, height: lift),
                                             pixelsPerFrame: ppf, bandHeight: band)
         let written = TimelineGraphBand.applying(moves, to: content.channels)
         let rewritten = try XCTUnwrap(written[opacityID], "The drag rewrote the opacity curve")

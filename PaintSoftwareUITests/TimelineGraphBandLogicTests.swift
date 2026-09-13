@@ -568,8 +568,10 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.isGraphEditorOpen = true
 
         // Synthetic rows, so layer *n* is row *n* and the test is about the band rather than about
-        // which end of the stack the layer panel puts a new layer on.
-        let rows: [LayerStackRow] = (0..<2).map { .layer(id: UUID(), index: $0, depth: 0) }
+        // which end of the stack the layer panel puts a new layer on. The ids are the document's
+        // own: an expansion is resolved to its row by `KeyframeTarget` since TODO (21)'s folder
+        // band, so a row minted with a fresh `UUID()` is a row no band can find.
+        let rows: [LayerStackRow] = (0..<2).map { .layer(id: manager.layers[$0].id, index: $0, depth: 0) }
         func y(ofRow row: Int) -> CGFloat {
             TimelineRowLayout.make(rows: rows, rulerHeight: 18, rowHeight: 34,
                                    expansion: manager.graphBandExpansion).y(ofRow: row)
