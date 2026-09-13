@@ -42,6 +42,7 @@ FILE_CHUNK_MAX = 256 * 1024
 
 NAL_SPS = 7
 NAL_PPS = 8
+NAL_AUD = 9
 _START_CODE_RE = re.compile(rb"\x00\x00\x01")
 
 VERBOSE = False
@@ -121,7 +122,20 @@ class Invariants:
         self.last_pts = pts_us
         types = nal_types_of(au_bytes)
         if is_keyframe:
-            if types[:2] != [NAL_SPS, NAL_PPS]:
+            # STREAM.md §3's own AU rule says AUD "belongs to the FOLLOWING access
+            # unit" alongside SPS/PPS/SEI, which only says an AUD may be grouped into
+            # the same AU as the SPS/PPS that follow it -- not that it must come
+            # after them. A real hardware encoder exercises exactly that: qsvh264enc
+            # (Intel Quick Sync, MEASURED on the Windows laptop stage-3 build) emits
+            # an Access Unit Delimiter as NAL 9 before SPS/PPS on every keyframe --
+            # [9, 7, 8, 6, 5] rather than [7, 8, 6, 5]. The AU is still correct and
+            # still decodes (VTDecompressionSession / CMVideoFormatDescription only
+            # need to find SPS and PPS somewhere in the parameter data, not at a
+            # fixed offset), so the strict types[:2] == [SPS, PPS] this check used
+            # to require was tighter than STREAM.md's own rule and than a real
+            # decoder needs. Skip a single leading AUD before checking.
+            leading = types[1:] if types[:1] == [NAL_AUD] else types
+            if leading[:2] != [NAL_SPS, NAL_PPS]:
                 self.fail(f"keyframe AU #{self.frames} did not start with SPS,PPS "
                           f"(got NAL types {types[:4]}...)")
 
@@ -147,6 +161,7 @@ class Client:
         self.pending_out_results = {}
         self.next_out_id = 1
         self.pause_test_result = None  # None until attempted; True/False after
+        self.dump_fh = open(args.dump, "wb") if getattr(args, "dump", None) else None
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(self.args.host, self.args.port)
@@ -216,6 +231,8 @@ class Client:
                 (pts_us,) = struct.unpack(">Q", payload[1:9])
                 au_bytes = payload[9:]
                 self.inv.note_video(flags, pts_us, au_bytes)
+                if self.dump_fh is not None:
+                    self.dump_fh.write(au_bytes)
             elif mtype == T_PING:
                 await send_frame(self.writer, T_PONG)
             elif mtype == T_PONG:
@@ -344,6 +361,8 @@ class Client:
         self.pause_test_result = True
 
     async def close(self):
+        if self.dump_fh is not None:
+            self.dump_fh.close()
         if self.writer:
             try:
                 self.writer.close()
@@ -390,6 +409,11 @@ def parse_args(argv=None):
     p.add_argument("--pause-after", type=float, default=None, metavar="SECONDS",
                     help="send CONTROL pause at this offset, verify streaming stops, "
                          "then resume and verify a fresh keyframe arrives")
+    p.add_argument("--dump", metavar="FILE.h264",
+                    help="write every received VIDEO access unit's raw bytes, "
+                         "concatenated Annex-B, to this file (for `ffmpeg -i FILE.h264 "
+                         "-frames:v 1 laptop.png` — a look-at-the-picture check, not "
+                         "just a protocol one)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p.parse_args(argv)
 

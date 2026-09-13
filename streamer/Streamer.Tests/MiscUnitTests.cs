@@ -1,4 +1,5 @@
 using Streamer.Core;
+using Streamer.Core.Protocol;
 using Xunit;
 
 namespace Streamer.Tests;
@@ -83,7 +84,7 @@ public class FileInboxStubTests
     public async Task AlwaysRefusesWithNotSupportedYet()
     {
         var inbox = new FileInbox();
-        var result = await inbox.BeginFileAsync(new Protocol.FileBeginMessage { Id = 3, Name = "x.png", Size = 10, Kind = "image" });
+        var result = await inbox.BeginFileAsync(new FileBeginMessage { Id = 3, Name = "x.png", Size = 10, Kind = "image" });
         Assert.Equal(3, result.Id);
         Assert.False(result.Ok);
         Assert.Equal("Not supported yet", result.Reason);

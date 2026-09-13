@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Streamer.Core.Protocol;
 
 namespace Streamer.Core;
@@ -23,6 +24,15 @@ public sealed class StreamerSession : IAsyncDisposable
     private bool _hasClient;
     private readonly RateTracker _rate = new();
     private bool? _downloadConvertWorks; // null = not yet measured on this box (STREAM.md §8)
+    // Owns pts_us for the WHOLE connection lifetime, not per-pipeline-instance.
+    // GstProcess computes its own pts relative to when ITS process started, which
+    // resets to ~0 every time the pipeline is restarted (pause/resume, keyframe
+    // request, source change) — found for real via stream-client-check.py's
+    // --pause-after test: "pts_us went backwards: 172254 < 3262942" the instant
+    // resume spun up a fresh GstProcess. STREAM.md §3 requires pts_us monotonic for
+    // the connection, so StreamerSession re-stamps every access unit against this
+    // Stopwatch (started once, here) instead of trusting GstProcess's own value.
+    private readonly Stopwatch _sessionClock = Stopwatch.StartNew();
 
     public EncoderChoice? Encoder { get; private set; }
     public CaptureSource? CurrentSource
@@ -134,14 +144,23 @@ public sealed class StreamerSession : IAsyncDisposable
         pipeline.AccessUnitReady += (_, e) =>
         {
             _rate.Note(e.Unit.Bytes.Length);
+            ulong ptsUs = (ulong)_sessionClock.Elapsed.TotalMicroseconds; // see _sessionClock's doc comment
             lock (_gate)
             {
-                foreach (var sink in _sinks) sink.OnVideoFrame(e.Unit.Keyframe, e.PtsUs, e.Unit.Bytes);
+                foreach (var sink in _sinks) sink.OnVideoFrame(e.Unit.Keyframe, ptsUs, e.Unit.Bytes);
             }
         };
         pipeline.UnexpectedExit += (_, reason) => BroadcastStatus(reason);
+        pipeline.Started += (_, _) => BroadcastStatus();
         lock (_gate) _pipeline = pipeline;
         await pipeline.StartAsync().ConfigureAwait(false);
+        // Keep the display (and system) awake for as long as a pipeline is meant to be
+        // running -- see NativeMethods.SetThreadExecutionState's doc comment for the
+        // MEASURED reason this exists: a 60s AC display timeout on the laptop, and
+        // SetCursorPos (unlike real hardware input) does not reset it, so the capture
+        // stayed "live" while the physical display went black underneath it.
+        NativeMethods.SetThreadExecutionState(
+            NativeMethods.ES_CONTINUOUS | NativeMethods.ES_SYSTEM_REQUIRED | NativeMethods.ES_DISPLAY_REQUIRED);
     }
 
     /// <summary>
@@ -172,41 +191,63 @@ public sealed class StreamerSession : IAsyncDisposable
         return true;
     }
 
+    private static readonly TimeSpan ConvertShapeProbeWindow = TimeSpan.FromSeconds(3);
+
     private async Task<bool> RunsCleanAsync(CaptureSource source, bool downloadAndConvert)
     {
+        // Unlike EncoderProbe's videotestsrc smoke test (which self-terminates cleanly
+        // via num-buffers), this probe captures a LIVE, indefinite source with no
+        // num-buffers (PipelineBuilder.BuildCaptureTestArgs's doc comment has the
+        // measurement) — so it never exits on its own, by design. "Success" here means
+        // "still alive and healthy after a few seconds", and WE kill it once that window
+        // passes; ProcessRunner's TimedOut is therefore the SUCCESS path for this one
+        // caller, inverted from what it means for a bounded pipeline. An early exit
+        // (before the window closes) means gst-launch itself gave up — always a failure.
         string args = PipelineBuilder.BuildCaptureTestArgs(source, Encoder!.ElementName, downloadAndConvert);
         try
         {
+            // Goes through ProcessRunner (not a bare Process.Start) so stdout/stderr are
+            // actually drained while waiting — see its doc comment for the deadlock this
+            // fixed in EncoderProbe, which used the exact same redirect-and-never-read
+            // shape this probe originally copied.
             var psi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = Path.Combine(_gstBinDir, "gst-launch-1.0.exe"),
-                Arguments = $"-q -e {args}",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
+                Arguments = $"-q {args}",
             };
-            using var proc = System.Diagnostics.Process.Start(psi)!;
-            bool completed = await Task.Run(() => proc.WaitForExit(8000)).ConfigureAwait(false);
-            if (!completed)
+            var result = await ProcessRunner.RunAsync(psi, ConvertShapeProbeWindow, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (result.TimedOut)
             {
-                try { proc.Kill(entireProcessTree: true); } catch { }
-                return false;
+                _log($"StreamerSession: convert-shape probe ({ShapeLabel(downloadAndConvert)}) " +
+                     $"still running after {ConvertShapeProbeWindow.TotalSeconds:0}s — treating as negotiated");
+                return true;
             }
-            return proc.ExitCode == 0;
+            string tail = result.StdErr.Length > 300 ? result.StdErr[^300..] : result.StdErr;
+            _log($"StreamerSession: convert-shape probe ({ShapeLabel(downloadAndConvert)}) exited early " +
+                 $"({result.ExitCode}) within {ConvertShapeProbeWindow.TotalSeconds:0}s — treating as a negotiation failure: {tail.Trim()}");
+            return false;
         }
         catch (Exception e)
         {
-            _log($"StreamerSession: convert-shape probe failed ({(downloadAndConvert ? "d3d11download+videoconvert" : "d3d11convert")}): {e.Message}");
+            _log($"StreamerSession: convert-shape probe failed ({ShapeLabel(downloadAndConvert)}): {e.Message}");
             return false;
         }
     }
+
+    private static string ShapeLabel(bool downloadAndConvert) =>
+        downloadAndConvert ? "d3d11download+videoconvert" : "d3d11convert";
 
     private async Task StopPipelineAsync()
     {
         GstProcess? old;
         lock (_gate) { old = _pipeline; _pipeline = null; }
         if (old != null) await old.DisposeAsync().ConfigureAwait(false);
+        // Release the keep-awake request set in StartPipelineLockedAsync -- ES_CONTINUOUS
+        // alone (no ES_SYSTEM_REQUIRED / ES_DISPLAY_REQUIRED) clears this thread's own
+        // prior request without touching any other process's. Safe to call even if no
+        // pipeline was actually running (pause with nothing picked, etc).
+        NativeMethods.SetThreadExecutionState(NativeMethods.ES_CONTINUOUS);
     }
 
     public void BroadcastStatus(string? reason = null)
@@ -225,7 +266,14 @@ public sealed class StreamerSession : IAsyncDisposable
             Fps = PipelineBuilder.TargetFps,
             Codec = "h264",
             Streaming = streaming,
-            Reason = streaming ? null : (reason ?? (source == null ? "No source selected" : "Paused")),
+            // "Paused" is reserved for an actual client-initiated pause (HandleControlAsync
+            // passes that reason explicitly). The gap between a client connecting and the
+            // pipeline actually producing frames — encoder negotiation, the convert-shape
+            // probe on a source's first use — is a real, different, transient state and
+            // reporting it as "Paused" would tell the iPad the user asked for this. Found by
+            // watching a live STATUS say reason:"Paused" a full 20s into a fresh connection
+            // while nothing had been paused by anyone.
+            Reason = streaming ? null : (reason ?? (source == null ? "No source selected" : (paused ? "Paused" : "Starting"))),
         };
         lock (_gate)
         {

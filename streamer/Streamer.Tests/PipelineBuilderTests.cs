@@ -99,6 +99,12 @@ public class PipelineBuilderTests
         string args = PipelineBuilder.BuildCaptureTestArgs(Monitor(), "qsvh264enc", downloadAndConvert: false);
         Assert.Contains("fakesink", args);
         Assert.DoesNotContain("tcpclientsink", args);
-        Assert.Contains("num-buffers=30", args);
+        // No num-buffers: MEASURED on the laptop that d3d11screencapturesrc does not
+        // reach EOS from it the way videotestsrc does (both convert-shape probes "timed
+        // out" identically at the same ceiling on first real use, while the real
+        // num-buffers-free capture pipeline connected and streamed within a second) —
+        // see StreamerSession.RunsCleanAsync, which now bounds this probe by killing the
+        // process after a fixed window instead of waiting for a natural exit.
+        Assert.DoesNotContain("num-buffers", args);
     }
 }

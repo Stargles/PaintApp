@@ -4,7 +4,7 @@ using Streamer.Core;
 
 namespace Streamer.Tray;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     public const string AppName = "PaintStreamer";
     public const string AppVersion = "0.1.0";
@@ -80,7 +80,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"FATAL: encoder probe failed: {ex.Message}");
-            MessageBox.Show($"No usable H.264 encoder was found:\n{ex.Message}", AppName,
+            System.Windows.MessageBox.Show($"No usable H.264 encoder was found:\n{ex.Message}", AppName,
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
 

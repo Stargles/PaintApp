@@ -1,25 +1,25 @@
 <#
 .SYNOPSIS
-  Idempotent installer for PaintStreamer (STREAM.md §4.3/§4.1). Run as Administrator,
+  Idempotent installer for PaintStreamer (STREAM.md section 4.3/section 4.1). Run as Administrator,
   normally over SSH as PC: this script assumes it is NOT the account the app will run
   as (see the AppDir note below).
 
 .DESCRIPTION
-  1. Checks the .NET 8 SDK and GStreamer are present (does not install them — they
+  1. Checks the .NET 8 SDK and GStreamer are present (does not install them - they
      already are on this laptop; a machine missing them gets a clear message instead
      of a half-attempted winget install that needs an interactive session anyway).
   2. Publishes Streamer.Tray (framework-dependent, win-x64) from -SourceDir into
      $AppDir\app.
   3. Ensures the Tailscale-only firewall rule for port 47301 exists.
   4. Registers (or re-registers) the "PaintStreamer" Scheduled Task to run the
-     published exe AS KEVIN, interactively, at logon — so it can actually see the
-     desktop (STREAM.md §4.3: an SSH session is a non-interactive window station and
+     published exe AS KEVIN, interactively, at logon - so it can actually see the
+     desktop (STREAM.md section 4.3: an SSH session is a non-interactive window station and
      neither the app nor gst-launch-1.0 can capture from there).
 
 .NOTES
   AppDir is an EXPLICIT path, not %LOCALAPPDATA%. Reason: this script runs as PC over
   SSH, so $env:LOCALAPPDATA here resolves to PC's own profile
-  (C:\Users\PC\AppData\Local), not kevin's — even though the app is being installed
+  (C:\Users\PC\AppData\Local), not kevin's - even though the app is being installed
   FOR kevin. C:\Users\kevin\AppData\Local\PaintStreamer is spelled out explicitly so
   the files land where kevin's own session (which DOES correctly see %LOCALAPPDATA%
   as its own, once the exe is actually running as kevin) expects them: the app's own
@@ -43,7 +43,7 @@ function Fail($msg) {
 
 Write-Host "== PaintStreamer installer =="
 
-# ---- 1. Preconditions — check, do not install (STREAM.md: "the script should check
+# ---- 1. Preconditions - check, do not install (STREAM.md: "the script should check
 #         for them and say what to do if missing rather than installing"). ----
 if (-not (Test-Path $DotnetExe)) {
     Fail ".NET SDK not found at $DotnetExe. Install the .NET 8 SDK, or pass -DotnetExe with its path."
@@ -54,7 +54,7 @@ if (-not (Test-Path $gstLaunch)) {
 }
 $gstInspect = Join-Path $GstBinDir "gst-inspect-1.0.exe"
 if (-not (Test-Path $gstInspect)) {
-    Fail "gst-inspect-1.0.exe not found beside gst-launch-1.0.exe in $GstBinDir — GStreamer install looks incomplete."
+    Fail "gst-inspect-1.0.exe not found beside gst-launch-1.0.exe in $GstBinDir - GStreamer install looks incomplete."
 }
 if (-not (Test-Path $SourceDir)) {
     Fail "Source not found at $SourceDir. Ship it first: tar cz -C <worktree> streamer | ssh ... 'tar xz -C C:\Users\PC\src'"
@@ -63,7 +63,7 @@ Write-Host "  .NET SDK:    OK ($DotnetExe)"
 Write-Host "  GStreamer:   OK ($GstBinDir)"
 Write-Host "  Source:      OK ($SourceDir)"
 
-# ---- 2. Publish (framework-dependent — the .NET 8 runtime is already on this box) ----
+# ---- 2. Publish (framework-dependent - the .NET 8 runtime is already on this box) ----
 $trayProj = Join-Path $SourceDir "Streamer.Tray\Streamer.Tray.csproj"
 if (-not (Test-Path $trayProj)) { Fail "Streamer.Tray.csproj not found under $SourceDir" }
 $publishDir = Join-Path $AppDir "app"
@@ -74,10 +74,10 @@ Write-Host "== Publishing Streamer.Tray to $publishDir =="
 if ($LASTEXITCODE -ne 0) { Fail "dotnet publish failed (exit $LASTEXITCODE)" }
 
 $exePath = Join-Path $publishDir "Streamer.Tray.exe"
-if (-not (Test-Path $exePath)) { Fail "Publish succeeded but $exePath does not exist — check the publish output above" }
+if (-not (Test-Path $exePath)) { Fail "Publish succeeded but $exePath does not exist - check the publish output above" }
 Write-Host "  Published: $exePath"
 
-# ---- 3. Firewall rule (idempotent; Tailscale range only per STREAM.md §4.3) ----
+# ---- 3. Firewall rule (idempotent; Tailscale range only per STREAM.md section 4.3) ----
 $ruleName = "PaintStreamer-In-TCP"
 $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
 if (-not $existingRule) {
@@ -85,7 +85,7 @@ if (-not $existingRule) {
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP `
         -LocalPort $Port -RemoteAddress 100.64.0.0/10 -Action Allow | Out-Null
 } else {
-    Write-Host "  Firewall rule $ruleName already exists — left as is."
+    Write-Host "  Firewall rule $ruleName already exists - left as is."
 }
 
 # ---- 4. Scheduled Task, running AS KEVIN, interactively, at logon ----
@@ -107,5 +107,5 @@ Write-Host "== Verifying =="
 Get-ScheduledTask -TaskName $taskName | Format-List TaskName, State
 Write-Host ""
 Write-Host "Install complete. Start it now with: tools/windows/streamer.ps1 start"
-Write-Host "(the AtLogOn trigger only fires on the NEXT logon — 'start' runs it immediately"
+Write-Host "(the AtLogOn trigger only fires on the NEXT logon - 'start' runs it immediately"
 Write-Host " against kevin's already-open session 1, which is the same mechanism.)"

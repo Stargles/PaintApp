@@ -39,7 +39,7 @@ public class FrameTests
     }
 
     [Fact]
-    public async Task RoundTrip_Status_StreamingTrue_HasNoReasonField()
+    public void RoundTrip_Status_StreamingTrue_HasNoReasonField()
     {
         var status = new StatusMessage
         {

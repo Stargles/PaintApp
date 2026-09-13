@@ -113,7 +113,28 @@ public static class SourceCatalog
                 return true;
             }
 
-            NativeMethods.GetWindowRect(hWnd, out var rect);
+            // GetWindowRect on a MINIMIZED window does not return its real size — Windows
+            // reports a fixed, off-screen placeholder rect instead (observed on the laptop:
+            // two completely different windows, one PowerShell and one Firefox, both came
+            // back as the identical L=-25600 T=-25600 W=159 H=27 — the tell that it is a
+            // sentinel, not real geometry). GetWindowPlacement's rcNormalPosition is the
+            // window's restored size regardless of current show state, so use that instead
+            // whenever IsIconic says the window is minimized.
+            NativeMethods.Rect rect;
+            if (NativeMethods.IsIconic(hWnd))
+            {
+                var placement = new NativeMethods.WindowPlacement
+                {
+                    length = Marshal.SizeOf<NativeMethods.WindowPlacement>(),
+                };
+                rect = NativeMethods.GetWindowPlacement(hWnd, ref placement)
+                    ? placement.rcNormalPosition
+                    : default;
+            }
+            else
+            {
+                NativeMethods.GetWindowRect(hWnd, out rect);
+            }
             string? processName = null;
             try
             {

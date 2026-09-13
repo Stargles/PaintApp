@@ -45,4 +45,5 @@ public readonly struct Frame
 
     public static Frame Of(MessageType type) => new(type);
     public static Frame Of(MessageType type, byte[] payload) => new(type, payload);
+    public static Frame Of(byte type, byte[] payload) => new(type, payload);
 }

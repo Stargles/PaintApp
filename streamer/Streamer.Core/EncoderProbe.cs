@@ -17,6 +17,11 @@ public sealed class EncoderChoice
 /// separate concern from "does this encoder run at all on this box", and conflating
 /// them would misdiagnose a session problem as a missing encoder (see GstProcess and
 /// the note in the stage-3 report about SSH's non-interactive window station).
+///
+/// Both process calls go through <see cref="ProcessRunner"/>, not a bare Process.Start
+/// — the first version here redirected stdout/stderr and never read them, which hung
+/// solid the first time kevin's account ran gst-inspect-1.0 (it writes far more output
+/// than one pipe buffer while building its plugin registry cache on a fresh profile).
 /// </summary>
 public sealed class EncoderProbe
 {
@@ -24,6 +29,9 @@ public sealed class EncoderProbe
     {
         "nvh264enc", "qsvh264enc", "amfh264enc", "mfh264enc", "openh264enc", "x264enc",
     };
+
+    private static readonly TimeSpan InspectTimeout = TimeSpan.FromSeconds(60); // first-run registry build is slow
+    private static readonly TimeSpan SmokeTimeout = TimeSpan.FromSeconds(15);
 
     private readonly string _gstBinDir;
     private readonly Action<string> _log;
@@ -53,7 +61,7 @@ public sealed class EncoderProbe
                 {
                     ElementName = name,
                     Reason = reasons.Count == 0
-                        ? $"first in preference order and available"
+                        ? "first in preference order and available"
                         : $"first available and working after: {string.Join("; ", reasons)}",
                 };
             }
@@ -67,10 +75,14 @@ public sealed class EncoderProbe
     {
         try
         {
-            var psi = MakePsi("gst-inspect-1.0.exe", element);
-            using var proc = Process.Start(psi)!;
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-            return proc.ExitCode == 0;
+            var result = await ProcessRunner.RunAsync(MakePsi("gst-inspect-1.0.exe", element), InspectTimeout, ct)
+                .ConfigureAwait(false);
+            if (result.TimedOut)
+            {
+                _log($"EncoderProbe: gst-inspect-1.0 {element} timed out after {InspectTimeout.TotalSeconds:0}s");
+                return false;
+            }
+            return result.ExitCode == 0;
         }
         catch (Exception e)
         {
@@ -87,15 +99,15 @@ public sealed class EncoderProbe
             $"! {element} {encoderArgs} ! h264parse ! fakesink";
         try
         {
-            var psi = MakePsi("gst-launch-1.0.exe", $"-q {pipeline}");
-            using var proc = Process.Start(psi)!;
-            var completed = await Task.Run(() => proc.WaitForExit(5000), ct).ConfigureAwait(false);
-            if (!completed)
+            var result = await ProcessRunner.RunAsync(MakePsi("gst-launch-1.0.exe", $"-q {pipeline}"), SmokeTimeout, ct)
+                .ConfigureAwait(false);
+            if (result.TimedOut)
             {
-                try { proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                return (false, "smoke pipeline did not finish within 5s");
+                return (false, $"smoke pipeline did not finish within {SmokeTimeout.TotalSeconds:0}s");
             }
-            return proc.ExitCode == 0 ? (true, "") : (false, $"gst-launch-1.0 exited {proc.ExitCode}");
+            return result.ExitCode == 0
+                ? (true, "")
+                : (false, $"gst-launch-1.0 exited {result.ExitCode}: {Tail(result.StdErr)}");
         }
         catch (Exception e)
         {
@@ -103,13 +115,12 @@ public sealed class EncoderProbe
         }
     }
 
+    private static string Tail(string s, int maxLen = 300) =>
+        s.Length <= maxLen ? s.Trim() : s[^maxLen..].Trim();
+
     private ProcessStartInfo MakePsi(string exe, string args) => new()
     {
         FileName = Path.Combine(_gstBinDir, exe),
         Arguments = args,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true,
     };
 }

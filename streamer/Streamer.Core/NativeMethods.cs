@@ -69,7 +69,45 @@ internal static class NativeMethods
     public static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point
+    {
+        public int X, Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WindowPlacement
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public Point ptMinPosition;
+        public Point ptMaxPosition;
+        public Rect rcNormalPosition;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowPlacement(IntPtr hWnd, ref WindowPlacement lpwndpl);
+
+    [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     public const uint PW_RENDERFULLCONTENT = 0x00000002;
+
+    // SetThreadExecutionState (STREAM.md doesn't mention this, but it has to exist:
+    // this laptop's display timeout is 60s on AC power (powercfg /Q ... VIDEOIDLE),
+    // and a synthetic SetCursorPos does NOT reset it the way real hardware input does
+    // -- confirmed by capturing a frame with a correctly-rendered cursor over a
+    // completely black desktop, minutes into a still-"streaming" session. Without
+    // this, the feature's own use case ("leave the laptop running Blender and
+    // rotoscope from the iPad") guarantees a black stream within a minute of the
+    // artist's last physical touch on the laptop.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+
+    public const uint ES_CONTINUOUS = 0x80000000;
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
 }

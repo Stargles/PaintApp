@@ -39,6 +39,12 @@ public sealed class GstProcess : IAsyncDisposable
 
     public event EventHandler<AccessUnitEventArgs>? AccessUnitReady;
     public event EventHandler<string>? UnexpectedExit;
+    // Fired once the pipeline actually connects and starts producing frames — distinct
+    // from StartAsync() returning, which happens immediately and before any of that has
+    // occurred. StreamerSession uses this to re-broadcast STATUS once streaming:true is
+    // actually true, rather than only at the moment the client connected (when the
+    // convert-shape probe or first-launch negotiation may still be running).
+    public event EventHandler? Started;
 
     public bool IsRunning { get; private set; }
 
@@ -148,6 +154,7 @@ public sealed class GstProcess : IAsyncDisposable
         IsRunning = true;
         var startedAt = DateTime.UtcNow;
         _log("GstProcess: pipeline connected, streaming");
+        Started?.Invoke(this, EventArgs.Empty);
 
         var splitter = new AccessUnitSplitter();
         var buffer = new byte[65536];

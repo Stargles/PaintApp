@@ -76,11 +76,20 @@ public static class PipelineBuilder
     /// own rather than needing to be killed.
     /// </summary>
     public static string BuildCaptureTestArgs(
-        CaptureSource source, string encoderElement, bool downloadAndConvert, int numBuffers = 30)
+        CaptureSource source, string encoderElement, bool downloadAndConvert)
     {
+        // No num-buffers here (an earlier version had it, matching EncoderProbe's
+        // videotestsrc smoke test): videotestsrc honors num-buffers and reaches a clean
+        // EOS on its own, but d3d11screencapturesrc measurably does not on this laptop —
+        // both convert shapes "timed out" identically at the same 10s ceiling on first
+        // real use, which is the signature of a probe that never self-terminates rather
+        // than two genuine negotiation failures (the real, num-buffers-free capture
+        // pipeline connected and streamed within a second once StreamerSession fell
+        // through to trying it anyway). So this probe is bounded by the CALLER killing
+        // the process after a fixed window instead — see StreamerSession.RunsCleanAsync.
         string src = source.Kind == SourceKind.Monitor
-            ? $"d3d11screencapturesrc capture-api=wgc monitor-index={source.Id} num-buffers={numBuffers}"
-            : $"d3d11screencapturesrc capture-api=wgc window-handle={source.Id} num-buffers={numBuffers}";
+            ? $"d3d11screencapturesrc capture-api=wgc monitor-index={source.Id}"
+            : $"d3d11screencapturesrc capture-api=wgc window-handle={source.Id}";
         string convertChain = downloadAndConvert ? "d3d11download ! videoconvert" : "d3d11convert";
         string encoderArgs = EncoderPropertiesFor(encoderElement);
         return $"{src} ! video/x-raw(memory:D3D11Memory),framerate={TargetFps}/1 ! {convertChain} " +

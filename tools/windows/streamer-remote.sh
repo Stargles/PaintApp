@@ -12,6 +12,12 @@
 #   tools/windows/streamer-remote.sh test                           # dotnet test on the laptop
 #   tools/windows/streamer-remote.sh raw '<powershell>'             # escape hatch
 #
+# IMPORTANT: PC's login shell on the laptop IS PowerShell 5.1 (sshd's default shell for
+# that account), so the ssh command argument is fed straight to powershell.exe — do NOT
+# wrap it in `powershell -Command "..."` again, which just adds a second, conflicting
+# layer of quoting (found the hard way: "The string is missing the terminator" on the
+# first real deploy attempt).
+#
 # All state (source, published app, task) lives on the laptop; this script has none of
 # its own beyond the SSH connection details below. streamer.ps1 itself is staged once
 # per deploy to C:\Users\PC\src\streamer-tools (outside the source tree it drives, so
@@ -33,11 +39,11 @@ shift || true
 
 case "$cmd" in
     start|stop|status|sources)
-        ssh_ps "powershell -NoProfile -Command \"& '$REMOTE_TOOLS\\streamer.ps1' $cmd\""
+        ssh_ps "powershell -ExecutionPolicy Bypass -File '$REMOTE_TOOLS\\streamer.ps1' $cmd"
         ;;
     log)
         n="${1:-50}"
-        ssh_ps "powershell -NoProfile -Command \"& '$REMOTE_TOOLS\\streamer.ps1' log $n\""
+        ssh_ps "powershell -ExecutionPolicy Bypass -File '$REMOTE_TOOLS\\streamer.ps1' log $n"
         ;;
     deploy)
         src="."
@@ -46,27 +52,39 @@ case "$cmd" in
         if [[ "$src" == "." ]]; then src="$worktree_root"; fi
 
         tmp_tar="$(mktemp -t stream-payload).tar.gz"
-        echo "== Taring streamer/ and tools/windows from $src =="
-        tar czf "$tmp_tar" -C "$src" streamer tools/windows
+        echo "== Taring streamer/, tools/windows and the AU-splitter fixture from $src =="
+        # Streamer.Tests.csproj references the fixture by a relative path
+        # (..\..\PaintSoftwareUITests\Fixtures\...) so it lands at the same path on
+        # both sides -- shipping streamer/ alone and not this file makes `dotnet test`
+        # fail at MSBuild's copy-to-output step with "could not copy ... was not found",
+        # which looks like a missing file rather than an incomplete tar.
+        tar czf "$tmp_tar" -C "$src" streamer tools/windows \
+            PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264
 
         echo "== Copying to the laptop via scp =="
-        ssh_ps 'powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path C:\Users\PC\src | Out-Null"'
+        ssh_ps 'New-Item -ItemType Directory -Force -Path C:\Users\PC\src | Out-Null'
         scp -i "$SSH_KEY" -o BatchMode=yes -o LogLevel=ERROR "$tmp_tar" "$HOST:C:/Users/PC/src/stream-payload.tar.gz"
         rm -f "$tmp_tar"
 
         echo "== Extracting on the laptop and staging streamer-tools =="
-        ssh_ps 'powershell -NoProfile -Command "Remove-Item -Recurse -Force C:\Users\PC\src\streamer -ErrorAction SilentlyContinue; tar xzf C:\Users\PC\src\stream-payload.tar.gz -C C:\Users\PC\src; Remove-Item C:\Users\PC\src\stream-payload.tar.gz; New-Item -ItemType Directory -Force -Path C:\Users\PC\src\streamer-tools | Out-Null; Copy-Item -Force C:\Users\PC\src\tools\windows\*.ps1 C:\Users\PC\src\streamer-tools\"'
+        # NOTE: no path here may end the whole command string in a bare trailing
+        # backslash — Windows OpenSSH's non-interactive exec wraps this argument in its
+        # own closing double quote, and CommandLineToArgvW's escaping rule reads a
+        # backslash-then-quote at that boundary as an ESCAPED quote, not a terminator
+        # ("The string is missing the terminator" — hit this for real on the first
+        # deploy attempt with a trailing "...streamer-tools\" here).
+        ssh_ps 'Remove-Item -Recurse -Force C:\Users\PC\src\streamer -ErrorAction SilentlyContinue; tar xzf C:\Users\PC\src\stream-payload.tar.gz -C C:\Users\PC\src; Remove-Item C:\Users\PC\src\stream-payload.tar.gz; New-Item -ItemType Directory -Force -Path C:\Users\PC\src\streamer-tools | Out-Null; Copy-Item -Force C:\Users\PC\src\tools\windows\*.ps1 C:\Users\PC\src\streamer-tools'
 
         echo "== Running streamer.ps1 deploy on the laptop (publish + restart) =="
-        ssh_ps "powershell -NoProfile -Command \"& '$REMOTE_TOOLS\\streamer.ps1' deploy -SourceDir '$REMOTE_SRC'\""
+        ssh_ps "powershell -ExecutionPolicy Bypass -File '$REMOTE_TOOLS\\streamer.ps1' deploy -SourceDir '$REMOTE_SRC'"
         ;;
     install)
         echo "== Running install-streamer.ps1 on the laptop (first-time setup) =="
         echo "   (run 'deploy' at least once first, so streamer-tools + source exist)"
-        ssh_ps "powershell -NoProfile -Command \"& '$REMOTE_TOOLS\\install-streamer.ps1' -SourceDir '$REMOTE_SRC'\""
+        ssh_ps "powershell -ExecutionPolicy Bypass -File '$REMOTE_TOOLS\\install-streamer.ps1' -SourceDir '$REMOTE_SRC'"
         ;;
     test)
-        ssh_ps "powershell -NoProfile -Command \"& '$DOTNET_EXE' test '$REMOTE_SRC\\PaintStreamer.sln'\""
+        ssh_ps "& '$DOTNET_EXE' test '$REMOTE_SRC\\PaintStreamer.sln'"
         ;;
     raw)
         ssh_ps "$1"
