@@ -227,14 +227,45 @@ nonisolated enum StreamControlCommand: String, Codable, Equatable {
     }
 }
 
-/// FILE_BEGIN, both directions. Stage 4 builds the transfer; stage 1 parses it only to refuse it
-/// politely (`StreamFileResult.notSupportedYet`).
+/// FILE_BEGIN, both directions. Stage 4 builds the transfer.
 nonisolated struct StreamFileBegin: Codable, Equatable {
     var id: Int
     var name: String
     var size: Int
     /// `"image"`, `"video"` or `"other"`.
     var kind: String
+}
+
+/// FILE_CHUNK, both directions: `u32 id` (big-endian) then up to 256 KiB of the file's bytes — not
+/// JSON, because a JSON envelope around binary payload is base64 and a third larger. Mirrors
+/// `StreamVideoPayload`'s hand-rolled header for the same reason.
+nonisolated struct StreamFileChunk: Equatable {
+    static let headerLength = 4
+
+    var id: Int
+    var bytes: Data
+
+    init(id: Int, bytes: Data) {
+        self.id = id
+        self.bytes = bytes
+    }
+
+    /// Nil for a payload shorter than its own header.
+    init?(payload: Data) {
+        guard payload.count >= Self.headerLength else { return nil }
+        var value: UInt32 = 0
+        for offset in 0 ..< 4 { value = (value << 8) | UInt32(payload[payload.startIndex + offset]) }
+        id = Int(value)
+        bytes = Data(payload[(payload.startIndex + Self.headerLength)...])
+    }
+
+    var encoded: Data {
+        var out = Data(capacity: Self.headerLength + bytes.count)
+        let idBigEndian = UInt32(id).bigEndian
+        withUnsafeBytes(of: idBigEndian) { out.append(contentsOf: $0) }
+        out.append(bytes)
+        return out
+    }
 }
 
 /// FILE_END, both directions.
@@ -247,11 +278,27 @@ nonisolated struct StreamFileResult: Codable, Equatable {
     var id: Int
     var ok: Bool
     var reason: String?
+}
 
-    /// Stage 1's answer to every FILE_BEGIN — the transfer is stage 4, and the fake streamer's
-    /// `--send` gets a clean sentence rather than silence.
-    static func notSupportedYet(id: Int) -> StreamFileResult {
-        StreamFileResult(id: id, ok: false, reason: "Not supported yet")
+/// One inbound file, fully received, size-checked and closed — STREAM.md §5.8. `url` names a temp
+/// file in `StreamTransferStore`'s directory; whoever answers must delete it once they are done with
+/// it, whether the file was inserted or refused.
+nonisolated struct StreamIncomingFile: Equatable {
+    var id: Int
+    var name: String
+    /// `"image"`, `"video"` or `"other"`, exactly as FILE_BEGIN's own `kind` said.
+    var kind: String
+    var url: URL
+}
+
+/// What routing an inbound file decided — becomes FILE_RESULT.
+nonisolated struct StreamFileReceiveOutcome: Equatable {
+    var ok: Bool
+    var reason: String?
+
+    static let ok = StreamFileReceiveOutcome(ok: true, reason: nil)
+    static func refused(_ reason: String) -> StreamFileReceiveOutcome {
+        StreamFileReceiveOutcome(ok: false, reason: reason)
     }
 }
 

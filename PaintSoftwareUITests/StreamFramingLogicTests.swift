@@ -172,15 +172,27 @@ final class StreamFramingLogicTests: XCTestCase {
         XCTAssertNil(StreamControlCommand(payload: Data("{\"cmd\":\"dance\"}".utf8)))
     }
 
-    /// Stage 1's answer to every FILE_BEGIN.
-    func testFileResultNotSupportedYetCarriesTheIdAndASentence() {
-        let result = StreamFileResult.notSupportedYet(id: 7)
-        XCTAssertEqual(result.id, 7)
-        XCTAssertFalse(result.ok)
-        XCTAssertEqual(result.reason, "Not supported yet")
-        XCTAssertEqual(StreamJSON.decode(StreamFileResult.self, from: StreamJSON.encode(result)), result)
+    /// STREAM.md §5.8, stage 4: FILE_RESULT round-trips both an acceptance and a refusal with its
+    /// sentence, and FILE_BEGIN decodes the laptop's JSON exactly.
+    func testFileResultRoundTripsOkAndARefusalSentence() {
+        let ok = StreamFileResult(id: 7, ok: true, reason: nil)
+        XCTAssertEqual(StreamJSON.decode(StreamFileResult.self, from: StreamJSON.encode(ok)), ok)
+        let refused = StreamFileResult(id: 7, ok: false, reason: "The image could not be read")
+        XCTAssertEqual(StreamJSON.decode(StreamFileResult.self, from: StreamJSON.encode(refused)), refused)
         let begin = StreamJSON.decode(StreamFileBegin.self,
                                       from: Data("{\"id\":7,\"name\":\"ref.mp4\",\"size\":12,\"kind\":\"video\"}".utf8))
         XCTAssertEqual(begin, StreamFileBegin(id: 7, name: "ref.mp4", size: 12, kind: "video"))
+    }
+
+    /// FILE_CHUNK's own header: `u32 id` big-endian, then the bytes — not JSON, so a chunk does not
+    /// pay base64 on top of a video-sized transfer.
+    func testFileChunkRoundTripsItsHeader() throws {
+        let bytes = Data([0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02])
+        let chunk = StreamFileChunk(id: 0x0102_0304, bytes: bytes)
+        let encoded = [UInt8](chunk.encoded)
+        XCTAssertEqual(Array(encoded[0 ..< 4]), [1, 2, 3, 4])
+        XCTAssertEqual(Data(encoded[4...]), bytes)
+        XCTAssertEqual(StreamFileChunk(payload: chunk.encoded), chunk)
+        XCTAssertNil(StreamFileChunk(payload: Data([1, 2, 3])), "shorter than its header")
     }
 }
