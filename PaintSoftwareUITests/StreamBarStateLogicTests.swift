@@ -255,25 +255,64 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertEqual(coordinator.sentControlCommands.last?.command, .pause, "re-sent on reconnect")
     }
 
-    /// **A connection nothing names yet is not paused.** Between the sheet's connect and its insert
-    /// no element names the endpoint, and "no elements" is not "every element frozen" — the
-    /// stage-2 drive caught a `pause`/`resume` pair four milliseconds apart on every connect,
-    /// each a pipeline restart on the laptop. Here the element is undone rather than not yet
-    /// inserted; the client is the same client either way.
-    func testAConnectionNoElementNamesIsNotPaused() throws {
-        let (manager, _) = streaming()
+    /// **The sheet's own connect-to-insert window still does not flap.** Between `connect(to:)`
+    /// being called and the element it is about to insert landing, nothing names the endpoint yet —
+    /// the stage-2 drive caught a `pause`/`resume` pair four milliseconds apart on every connect,
+    /// each a pipeline restart on the laptop. `pendingConnects` is exactly that window, and
+    /// `connect(to:)` is the only thing that populates it, so a client `sync()`/`insertStream` made
+    /// is never in it. `b07984d`'s fix for this stays; only its blast radius narrows in stage 4 —
+    /// see `testAConnectionNoElementNamesIsNowPaused` below for what changed.
+    func testAConnectionStillBeingConnectedIsNotPausedMidConnect() async throws {
+        let manager = CanvasFixture.manager(layerCount: 1)   // startsClients == false: no real socket
         let coordinator = manager.streamCoordinator
-        manager.undo()   // the insert: the element is gone, the client object is not
-        XCTAssertTrue(coordinator.referencedEndpoints.isEmpty, "Setup: nothing names the endpoint")
-        XCTAssertTrue(coordinator.activeEndpoints.contains(Self.endpoint), "Setup: the client is still there")
+        let task = Task { try await coordinator.connect(to: Self.endpoint) }
+        // `connect(to:)` registers its continuation and makes the (unstarted, in this fixture)
+        // client synchronously, before the `withCheckedThrowingContinuation` suspends — so by the
+        // time this line runs the window `syncPauseState` must not flap during is already open.
+        XCTAssertTrue(coordinator.referencedEndpoints.isEmpty, "Setup: no element names it yet")
 
         coordinator.stateChanged(.connected, at: Self.endpoint)
-        coordinator.statusArrived(status(), from: Self.endpoint)
-
         XCTAssertTrue(coordinator.sentControlCommands.isEmpty,
-                      "nothing to freeze, nothing to pause: \(coordinator.sentControlCommands.map(\.command))")
-        manager.redo()
-        XCTAssertTrue(coordinator.sentControlCommands.isEmpty, "and the element coming back needs no resume")
+                      "about to be claimed by the sheet's own insert: no pause, or the stage-2 flap is back")
+
+        coordinator.statusArrived(status(), from: Self.endpoint)
+        _ = try await task.value
+        XCTAssertTrue(coordinator.sentControlCommands.isEmpty, "resolving the connect is not an insert either")
+    }
+
+    /// **STREAM.md §6, stage 4: a connection nothing names any more is paused, not left alone.**
+    /// This is the rule `b07984d` (stage 2) did not need and stage 4 adds — read that commit's
+    /// message and this file's old test (now split in two) before changing it again. The document's
+    /// *ambient* connection (`documentEndpointOverride`, standing in for `sync()`'s real
+    /// `StreamEndpoint.lastUsed()` read) can sit connected with no stream element for the rest of a
+    /// session, and it must read as paused so the laptop is not encoding for a canvas nobody is
+    /// showing — pausing costs nothing else, since FILE_* still flows on a paused connection.
+    func testAConnectionNoElementNamesIsNowPaused() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let coordinator = manager.streamCoordinator
+        coordinator.documentEndpointOverride = Self.endpoint
+        coordinator.sync()
+        XCTAssertTrue(coordinator.activeEndpoints.contains(Self.endpoint), "Setup: sync() made the client")
+        XCTAssertTrue(coordinator.referencedEndpoints.isEmpty, "Setup: no element names it")
+
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause],
+                       "nothing needs pictures from it: paused")
+
+        // Adding a stream element on that same endpoint: resume.
+        manager.currentFrame = 0
+        let element = try XCTUnwrap(manager.insertStream(host: Self.endpoint.host, port: Self.endpoint.port,
+                                                          status: status()))
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause, .resume],
+                       "an element now wants pictures from it")
+
+        // Removing it again: pause, once more.
+        let layerIndex = manager.currentLayerIndex
+        manager.deleteLayer(at: layerIndex)
+        coordinator.sync()
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause, .resume, .pause],
+                       "nothing names it again: paused again — \(element.id)")
     }
 
     // MARK: - The sandwich note

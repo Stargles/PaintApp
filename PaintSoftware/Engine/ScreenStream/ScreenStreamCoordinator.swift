@@ -136,6 +136,23 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// A test seam: a decoder image source per endpoint that stands in for a socket. Nil in the app.
     var frameSourceOverride: ((StreamEndpoint) -> (index: Int, image: CGImage)?)?
 
+    /// A test seam for STREAM.md §6's document-level connection: overrides what `UserDefaults`
+    /// would answer for "the last laptop connected to," so a logic test drives the ambient-connection
+    /// rule with no real defaults touched. Outer nil (the default) means "ask `UserDefaults.standard`
+    /// through `StreamEndpoint.lastUsed`"; `.some(nil)` means "nothing is recorded."
+    var documentEndpointOverride: StreamEndpoint??
+
+    /// **STREAM.md §6's new bullet**: the document keeps a connection to the last laptop connected
+    /// to, even with no stream element naming it — so the drop box and Send to Computer work as soon
+    /// as a document is open, not only after Stream Screen. Read fresh on every `sync()` pass rather
+    /// than cached once at document open: `StreamConnectSheet.connect()` writes the defaults on
+    /// every attempt, so connecting to a new laptop becomes "last used" on the very next
+    /// reconciliation pass rather than only after the document is reopened.
+    private var documentEndpoint: StreamEndpoint? {
+        if let documentEndpointOverride { return documentEndpointOverride }
+        return StreamEndpoint.lastUsed()
+    }
+
     /// Whether `sync()` and `connect(to:)` open sockets. **False in every `CanvasFixture` manager**,
     /// so a logic test that inserts a stream does not start a client resolving `laptop:47301` in
     /// the background for the rest of the run. True in the app.
@@ -197,7 +214,9 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// redo starts it again. O(cels) of one memoized `Bool` each.
     func sync() {
         guard manager != nil else { return }
-        let wanted = referencedEndpoints
+        var wanted = referencedEndpoints
+        // §6: the document's own ambient connection, wanted whether or not any element names it.
+        if let documentEndpoint { wanted.insert(documentEndpoint) }
         for endpoint in wanted where clients[endpoint] == nil {
             startClient(for: endpoint)
         }
@@ -237,12 +256,16 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// stays open. A client this call started is left running only if something in the document
     /// ends up naming it — the next `sync()` stops one nothing names, so a refused address does not
     /// keep reconnecting in the background forever.
+    ///
+    /// **Registers the pending continuation even when `startsClients` is false** — bookkeeping
+    /// only, `startClient` itself is what skips the real socket — so a logic test can drive the
+    /// connect-to-insert window (`pendingConnects[endpoint] != nil`, `syncPauseState`'s guard
+    /// against `b07984d`'s flap) by resolving it with `statusArrived`/`failureArrived` instead of a
+    /// real HELLO. Nothing production reaches ever sees `startsClients == false` — only
+    /// `CanvasFixture` sets it.
     func connect(to endpoint: StreamEndpoint) async throws -> StreamStatus {
         if let status = statuses[endpoint], clients[endpoint]?.state == .connected {
             return status
-        }
-        guard startsClients else {
-            throw ConnectFailure(sentence: "This document does not open connections.")
         }
         return try await withCheckedThrowingContinuation { continuation in
             pendingConnects[endpoint, default: []].append(continuation)
@@ -253,6 +276,14 @@ final class ScreenStreamCoordinator: ObservableObject {
     private func startClient(for endpoint: StreamEndpoint) {
         let client = ScreenStreamClient(endpoint: endpoint)
         clients[endpoint] = client
+        // **Wired on every client, started or not** — unlike the callbacks below, which only ever
+        // fire off a real socket. STREAM.md §5.8's tests feed a never-started client `.fileBegin`/
+        // `.fileChunk`/`.fileEnd` directly (`ScreenStreamClient.handle`) and need the real routing
+        // to run, exactly the way `stateChanged`/`statusArrived` being reachable with no socket lets
+        // `StreamInsertLogicTests` and `StreamBarStateLogicTests` drive the bar.
+        client.onFileReceived = { [weak self] file, reply in
+            self?.routeReceivedFile(file, reply: reply)
+        }
         guard startsClients else { return }
         connectionStates[endpoint] = .connecting
         client.onStateChange = { [weak self] state in
@@ -272,6 +303,57 @@ final class ScreenStreamCoordinator: ObservableObject {
             client?.requestKeyframe()
         }
         client.start()
+    }
+
+    // MARK: - Files, laptop → iPad (STREAM.md §5.8)
+
+    /// **Exactly the picker's insert, kind for kind.** `insertImage`/`insertVideo` already do the
+    /// layer choice, the fit and the Move-box lift — this function's whole job is picking which one
+    /// to call and turning its refusal into a sentence. `consumingSource: true` for
+    /// `ActionsMenu.insertVideo`'s own reason: the temp file is this transfer's own copy, ours to
+    /// move rather than copy again. The temp file is deleted here regardless of outcome — a video
+    /// that inserted has already had it *moved* out from under this path by `insertVideo` itself, so
+    /// the `try?` below is a no-op in that case and a real cleanup in every other.
+    @MainActor
+    private func routeReceivedFile(_ file: StreamIncomingFile, reply: @escaping (StreamFileReceiveOutcome) -> Void) {
+        defer { try? FileManager.default.removeItem(at: file.url) }
+        guard let manager else {
+            reply(.refused("No document is open on the iPad"))
+            return
+        }
+        switch file.kind {
+        case "image":
+            guard let image = UIImage(contentsOfFile: file.url.path) else {
+                reply(.refused("The image could not be read"))
+                return
+            }
+            guard manager.insertImage(image) else {
+                reply(.refused("The image could not be inserted"))
+                return
+            }
+            reply(.ok)
+        case "video":
+            guard manager.insertVideo(at: file.url, consumingSource: true) else {
+                reply(.refused("The video could not be read"))
+                return
+            }
+            reply(.ok)
+        default:
+            reply(.refused("PaintApp can insert images and videos only"))
+        }
+    }
+
+    /// The endpoint of a client currently answering `.connected` — for `ExportSheet`'s Send to
+    /// Computer, which needs *some* connected laptop rather than a specific one. Nil when none is.
+    var connectedEndpointForSending: StreamEndpoint? {
+        connectionStates.first { $0.value == .connected }?.key
+    }
+
+    /// The connected laptop's own HELLO name — `"desktop-cbr0fl6"` — for "Saved on desktop-cbr0fl6".
+    /// Nil when nothing is connected.
+    var connectedRemoteName: String? {
+        guard let endpoint = connectedEndpointForSending else { return nil }
+        return clients[endpoint]?.remoteName
     }
 
     /// Internal rather than private so `StreamInsertLogicTests` can hand the coordinator a STATUS
@@ -383,17 +465,32 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// keyframe, and a reset here makes that keyframe the first thing decoded — where a reset on
     /// `pause` would turn any access unit still in flight into a keyframe *request*, which the
     /// fake streamer answers by restarting the very pipeline the pause just stopped.
+    ///
+    /// **STREAM.md §6, corrected by stage 4**: `b07984d` (stage 2) read "no element names this
+    /// endpoint" as "leave it alone," to stop a pause/resume pair firing four milliseconds apart on
+    /// every Stream Screen connect — between the sheet's own `connect()` and the element it goes on
+    /// to insert, nothing names the endpoint yet. §6's new bullet asks for more than that stage 2
+    /// ever needed: a document's *ambient* connection (`documentEndpoint`) can sit with no element
+    /// naming it for the rest of a session, and that must read as **paused**, not as "leave alone."
+    /// The two are told apart by `pendingConnects`: it holds a continuation only for the span between
+    /// `connect(to:)` being called and its STATUS (or failure) resolving it, which is exactly stage
+    /// 2's four-millisecond window and never true of the ambient connection, which nothing calls
+    /// `connect(to:)` for. So the four-millisecond flap stays fixed and the ambient connection is now
+    /// paused, by asking a narrower question of `everyElementIsFrozen`'s nil.
     private func syncPauseState() {
         for (endpoint, client) in clients {
-            // Paused for the background, or for the artist having frozen everything on it. An
-            // endpoint nothing names yet is left alone in the foreground — see `everyElementIsFrozen`.
+            // Paused for the background, for the artist having frozen everything on it, or for
+            // nothing naming it at all. The one exception is the moment between the connect sheet's
+            // own `connect()` and the element it is about to insert — see the doc comment above.
             let wanted: Bool
             if isInBackground {
                 wanted = false
             } else if let allFrozen = everyElementIsFrozen(at: endpoint) {
                 wanted = !allFrozen
+            } else if pendingConnects[endpoint] != nil {
+                wanted = !pausedEndpoints.contains(endpoint)   // about to be claimed — do not flap
             } else {
-                wanted = !pausedEndpoints.contains(endpoint)   // nothing to change
+                wanted = false                                  // §6: nothing names it, so: paused
             }
             let paused = pausedEndpoints.contains(endpoint)
             if !wanted, !paused {
