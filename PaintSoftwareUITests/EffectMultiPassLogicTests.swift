@@ -1302,14 +1302,22 @@ final class EffectMultiPassLogicTests: XCTestCase {
         }
     }
 
-    /// Fifteen kernel branches and every one reachable — the assertion that catches a new case copying
-    /// an existing case's code, which a parity sweep shows only as one effect quietly rendering as
-    /// another. Phase 9c's addition of Sobel, sharpen's combine and outline raised the ceiling from 9
-    /// to 12, TODO (60)'s recolour to 13 and its Computer Screen to 14; each of the four gathers is
-    /// also a gather kind, so a missing entry in either backend's early-out list (Composite.metal,
-    /// EffectKernels.swift) renders as the identity rather than failing here — this test only proves
-    /// the kind is *reachable*, and the effect-specific tests above are what would notice a silent
-    /// identity.
+    /// **Every kernel branch reachable through some pass list** — the assertion that catches a new
+    /// case copying an existing case's code, which a parity sweep shows only as one effect quietly
+    /// rendering as another. Phase 9c's addition of Sobel, sharpen's combine and outline raised the
+    /// ceiling from 9 to 12, TODO (60)'s recolour to 13 and its Computer Screen to 14, TODO (61)'s
+    /// Duplicate Offset to 16 (its resample and its combine, the combine reached through `passes`
+    /// alone) and TODO (63)'s Glare to 17 (one gather kind of its own; its threshold and combine are
+    /// Bloom's 8 and 9). Each gather is also a gather kind, so a missing entry in either backend's
+    /// early-out list (Composite.metal, EffectKernels.swift) renders as the identity rather than
+    /// failing here — this test only proves the kind is *reachable*, and the effect-specific tests
+    /// above are what would notice a silent identity.
+    ///
+    /// **The ceiling is `Self.highestKernelCode`, one number matched by hand to the three private
+    /// `k…` constant tables**, and the array has to reach every code up to it — so a case added
+    /// without an entry in this array goes red naming the code it left unreached, which is what
+    /// happened to 15, 16 and 17 for a day: the array stopped at the Computer Screen while the codes
+    /// went on without it, and a green run was proving nothing about the three newest kinds.
     func testEveryKernelBranchIsReachedThroughSomePassList() {
         let everything: [Effect] = [
             .levels(Effect.Levels()), .brightnessContrast(Effect.BrightnessContrast()),
@@ -1319,10 +1327,23 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .sobel(Effect.Sobel()), .sharpen(Effect.Sharpen(radius: 1, amount: 1)),
             .outline(Effect.Outline()), .recolor(Effect.Recolor()),
             .crtScreen(Effect.CRTScreen()),
+            .duplicateOffset(Effect.DuplicateOffset(offsetX: 1)),
+            .glare(Effect.Glare()),
         ]
-        XCTAssertEqual(Set(everything.flatMap { $0.passes.map(\.kind) }), Set(0...14),
-                       "Every branch of applyEffect must be reachable from some effect's pass list")
+        let reached = Set(everything.flatMap { $0.passes.map(\.kind) })
+        let expected = Set(0...Self.highestKernelCode)
+        XCTAssertEqual(reached, expected, """
+            Every branch of applyEffect must be reachable from some effect's pass list — unreached: \
+            \(expected.subtracting(reached).sorted()), unexpected: \(reached.subtracting(expected).sorted())
+            """)
     }
+
+    /// **The highest kind code either backend switches on** — `kEffectGlareStreaks` in
+    /// `Composite.metal`, `kGlareStreaks` in `EffectKernels.swift` and `Effect.kGlareStreaks`, all 17.
+    /// The three constants are private to their files, so the number is restated here once; a new
+    /// case with a kind of its own raises it, and the sweep above then demands an effect that reaches
+    /// the new code.
+    private static let highestKernelCode: UInt32 = 17
 
     // MARK: - Persistence
 
