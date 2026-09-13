@@ -285,6 +285,11 @@ final class MergeBakeLogicTests: XCTestCase {
             .colorWheels(Effect.ColorWheels(
                 midtones: Effect.ColorWheels.Wheel(hue: 142, saturation: 0.8, luminance: 0.1),
                 global: Effect.ColorWheels.Wheel(hue: 30, saturation: 0.3, luminance: 0.15, strength: 0.7))),
+            // TODO (63)'s other half: Glare is not a grade — it reshapes coverage and reads `.ink` —
+            // and the merge still reaches it through the same `EffectReference.apply`. On a pair
+            // composited onto transparency the ink and the backdrop are the same buffer, so the merge
+            // and the composite agree here too; a threshold low enough that red (Lum 0.3) glows.
+            .glare(Effect.Glare(type: .streaks, threshold: 0.2, intensity: 1, streaks: 2, length: 12)),
         ]
 
         for grade in grades {
