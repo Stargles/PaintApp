@@ -133,7 +133,20 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
   desktop produced one frame in 27 s, not a trickle of P-frames as this section first claimed), so a
   still screen sends nothing, and there is no wall-clock keyframe interval — connect, `resume` and
   `keyframe` each *restart the capture session*, and Windows delivers a first frame on every new
-  session, so a client that needs a picture always gets one within about a second. The iPad decodes
+  session, so a client that needs a picture always gets one within about a second. **Stage 4 MEASURED
+  the edge of that claim**: against the laptop idle and unattended (nobody at the keyboard — screen
+  state not confirmed, possibly locked) the encoder engaged cleanly every time (STATUS went
+  `streaming:true` within ~1.3 s of connect every run, and the GStreamer log shows a clean "pipeline
+  connected, streaming" with no errors on each attempt) but zero VIDEO frames arrived: none in 33 s of
+  passive observation, and none in the 5 s window `stream-client-check.py --pause-after` allows after
+  a `resume`-forced pipeline restart (an `INVARIANT VIOLATION: no VIDEO frame arrived within 5s of
+  resume`). So "within about a second" is conditioned on *some* damage existing for WGC to report —
+  restarting the capture session guarantees a fresh *attempt*, not a fresh *frame*, on a desktop with
+  literally nothing changing. Unconfirmed whether the cause is specifically a locked session (this Mac
+  cannot drive kevin's interactive session 1 to check or to unlock it) or just a quieter idle desktop
+  than the 27 s reference measurement's; either way it is a capture-pipeline question, not a stage-4
+  regression — nothing stage 4 touched (`FileInbox`/`FileOutbox`/the Tray window) is in the video path,
+  and the pipeline's own connect/encode mechanics were clean throughout. The iPad decodes
   nothing until it has seen SPS/PPS, then decodes every AU in order. A decode error requests a
   keyframe and drops AUs until one arrives. A VIDEO payload may begin with an AUD NAL before the
   SPS (`qsvh264enc` always emits one); the rule is that SPS and PPS precede the IDR slice, not that
