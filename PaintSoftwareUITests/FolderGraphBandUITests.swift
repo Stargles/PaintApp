@@ -143,6 +143,21 @@ final class FolderGraphBandUITests: PaintUITestCase {
         XCTAssertTrue(folderName.waitForExistence(timeout: 5))
         XCTAssertTrue(folderName.isSelected,
                       "The name column marks the group as the picked row while the band is on it")
+        // Where the band hangs: directly under the group's own track row, which keeps its block
+        // height — the row's yellow bar and diamonds are measured from that view's own bounds, so a
+        // row handed the expanded height would stretch the bar down across the curves.
+        let folderTrack = app.otherElements["timeline.folderTrack.Folder 1"]
+        XCTAssertTrue(folderTrack.waitForExistence(timeout: 5))
+        XCTAssertLessThan(folderTrack.frame.height, TimelineGraphBand.height, """
+            The group's track row must keep its block height with the band open; it read \
+            \(folderTrack.frame.height) pt, which is at least a band's worth — the bar and the \
+            diamonds are being drawn over the curves.
+            """)
+        XCTAssertEqual(band.frame.minY, folderTrack.frame.maxY, accuracy: 2, """
+            The band hangs directly under the group's row (band top \(band.frame.minY), row bottom \
+            \(folderTrack.frame.maxY)) — a band under any other row is a curve labelled by the \
+            wrong name.
+            """)
         attach(app, "folder-band-open-from-panel")
 
         // 5. Picking the layer's row takes the band back to the layer — a tap on its cel, which is
@@ -186,8 +201,12 @@ final class FolderGraphBandUITests: PaintUITestCase {
             dx: x, dy: TimelineGraphBand.y(ofValue: 1, in: 0...1, bandHeight: bandFrame.height)))
         node.press(forDuration: 0.2, thenDragTo: top, withVelocity: .slow, thenHoldForDuration: 0.3)
 
-        XCTAssertEqual(band.value as? String, "opacity:0,4",
-                       "A vertical drag retimes nothing: both nodes are still at 0 and 4")
+        // `~` rather than `:` when the drag reaches the top: two keys at 1 are a curve that is keyed
+        // and not an animation, and the band's value says which — either way the nodes are at 0 and 4.
+        let afterDrag = band.value as? String ?? "?"
+        XCTAssertTrue(afterDrag == "opacity:0,4" || afterDrag == "opacity~0,4",
+                      "A vertical drag retimes nothing: both nodes are still at 0 and 4 — read "
+                      + "\"\(afterDrag)\"")
         let lifted = folderOpacity(app, named: "Folder 1")
         XCTAssertGreaterThan(lifted, 60, """
             The group's opacity at frame 4 must have risen well above the 0% it was keyed at — the \
