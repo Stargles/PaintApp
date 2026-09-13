@@ -738,6 +738,18 @@ final class OptionsPanelUITests: PaintUITestCase {
     /// primitive, and `pinch`/`rotate` are the only multi-touch gestures it can synthesise, always
     /// delivering both touches in one `touchesBegan` call. That is exactly the case
     /// `onSingleTouchBegan` excludes, so a pinch here is a faithful stand-in for the owner's pan.
+    ///
+    /// **Colour Wheels on a compositor node, not on a value layer — and that choice is load-bearing,
+    /// not decoration.** A value layer *is* the layer a stroke would land on, and `Layer
+    /// .hasNoDrawingSurface` makes `CanvasTouchInputs.activeHostIsInteractive` false for it
+    /// (`reconcileLayers`' `shouldInteract`, verbatim), which disables every layer host's own
+    /// `StrokeGestureRecognizer` while it is current — so a first draft of this test that put Colour
+    /// Wheels on a value layer passed whether or not `onSingleTouchBegan` existed at all: the
+    /// recognizer this bug lives in was never in the loop, and only `handleCatchAllTap` (already
+    /// correct, untouched by this fix) was ever reachable. A node's own settings hang off
+    /// `layerOptionsID`, entirely independent of `currentLayerIndex` — opening one never calls
+    /// `selectLayer` — so the plain vector layer stays current and drawable throughout, and a
+    /// single-finger stroke on it genuinely exercises `StrokeGestureRecognizer.onSingleTouchBegan`.
     func testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -745,16 +757,16 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         openLayerPanel(app)
-        addValueLayerFromAddMenu(app)
-        let row = app.staticTexts["layerPanel.row.1"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
-        row.tap()
-        app.buttons["layerOptions.blendModeButton"].tap()
-        let colorWheels = scrollMenuTo(app, identifier: "layerOptions.blendMode.colourwheels")
+        addMixNodeFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5),
+                      "PREMISE: the node landed in the panel")
+        app.buttons["layerPanel.folder.Mix 1.options"].tap()
+        app.buttons["layerOptions.mixModeButton"].tap()
+        let colorWheels = scrollMenuTo(app, identifier: "layerOptions.mixMode.colourwheels")
         XCTAssertTrue(colorWheels.waitForExistence(timeout: 5), "The menu should list Colour Wheels")
         colorWheels.tap()
 
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
+        let openKnobs = app.buttons["layerOptions.nodeEffectSettings"]
         XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
         openKnobs.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
@@ -762,20 +774,20 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertEqual(title.label, "Colour Wheels")
         attach(app, "colourwheels-bar-open")
 
-        // THE FIX: a two-finger canvas transform must leave it standing.
+        // THE FIX: a two-finger canvas transform must leave it standing. Nothing selected the empty
+        // node's own layer, which also has no drawing surface — layer 0, the document's own vector
+        // layer, is still current and still interactive, so a stroke on it (the control below)
+        // genuinely reaches `StrokeGestureRecognizer`, unlike a value-layer fixture, whose own layer
+        // becoming current would disable that recognizer entirely and pass this test either way —
+        // mutation-tested by reverting the fix and confirming this exact assertion goes red.
         canvas.pinch(withScale: 1.3, velocity: 1.0)
         XCTAssertTrue(title.exists,
                       "THE BUG: a two-finger canvas pinch/pan/rotate must not close the Effect Settings bar")
         XCTAssertEqual(title.label, "Colour Wheels", "…and it must still be showing the same effect")
         attach(app, "colourwheels-bar-survives-pinch")
 
-        // THE CONTROL: a genuine single-finger drawing touch must still close it, same as before —
-        // on the value layer itself, which has no drawing surface, so the touch reaches the canvas
-        // through `handleCatchAllTap` rather than `StrokeGestureRecognizer`; that recognizer's own
-        // `onSingleTouchBegan` is exercised by `BlendModesAndCompositorUITests`' new header test and
-        // by the fresh document's every other drawing test, none of which lost the ability to close
-        // a panel — this asserts the *other* single-touch path, which routes through the unmodified
-        // `canvasInteractionBegan` directly and was never at risk, is still wired.
+        // THE CONTROL: a genuine single-finger drawing touch on that same still-current, still-
+        // drawable layer must still close it — the same recognizer, deciding the other way.
         drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.5), to: CGVector(dx: 0.6, dy: 0.5))
         XCTAssertFalse(title.exists,
                        "A single-finger touch on the canvas must still close the Effect Settings bar")
