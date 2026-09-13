@@ -38,32 +38,41 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-09-10 at `b79f879`**, fresh device, idle machine (95.6% idle), no clone debris:
-**3876 tests, 3824 passed, 0 failed, 52 skipped, 31.4 min** — a clean full run, the fourth in this
-file's history. **6,515 class-seconds across 211 classes**, so four clones hold **27.1 min** of ideal
-work against 31.4 of wall clock — a 16% scheduling gap.
+**MEASURED 2026-09-12 at `8e2ffff`**, fresh device, idle machine (67.2% idle before start), no clone
+debris: **4270 tests, 4206 passed, 5 failed, 59 skipped, 48.6 min** — the first full run since
+`d2205d5` (session 40), carrying 69 commits and ~20 new UI classes the table below had never seen.
+**10,509 class-seconds across 239 classes**, so four clones hold **43.8 min** of ideal work against
+48.6 of wall clock — a 10% scheduling gap, tighter than the 16% measured 2026-09-10. All five failures
+were triaged serial on the same freshly-erased device and passed 5/5 (see this section's twelfth
+conclusion, below) — none is a confirmed regression.
 
 | class | seconds | tests |
 |---|---|---|
-| **`BrushEditorUITests`** | **711** | 11 |
-| `SandwichCompositingUITests` | 419 | 10 |
-| `SelectionAndMoveUITests` | 349 | 10 |
-| `LayerFolderAndMaskMenuUITests` | 340 | 9 |
-| `GraphEditorGestureUITests` | 242 | 5 |
-| `BrushMenuUITests` | 223 | 8 |
-| `LayerPanelControlsUITests` | 213 | 8 |
-| `PerfBaselineTests` | 209 | 57 |
-| `BlendModesAndCompositorUITests` | 204 | 8 |
-| `EraserAndPersistenceUITests` | 199 | 7 |
+| **`BrushEditorUITests`** | **812.6** | 11 |
+| `TransformLayerModesUITests` | 453.5 | 4 |
+| `PerfBaselineTests` | 404.7 | 57 |
+| `OptionsPanelUITests` | 404.2 | 12 |
+| `SandwichCompositingUITests` | 375.3 | 10 |
+| `LayerPanelControlsUITests` | 325.4 | 11 |
+| `BrushMenuUITests` | 298.8 | 8 |
+| `DistortUITests` | 290.0 | 2 |
+| `SelectionAndMoveUITests` | 289.1 | 10 |
+| `GraphEditorGestureUITests` | 283.2 | 5 |
 
-**`BrushEditorUITests` is the one to watch and it is now watched twice**: 586 s the day before, 711 s
-here, on the same eleven tests. That is the "grows past the floor while nobody is looking" pattern
-repeating rather than a single noisy row, and at 711 s it is 44% of a clone's 27.1 min share — still
-under it, so still not the binding constraint, but it is the only class that has ever reached this
-fraction. **Re-take before adding a twelfth test to it.** And **`TransformLayerModesUITests`, born
-2026-09-11 with four tests, measured ~350 s in isolation before any full suite has seen it** — the
-table above predates it, as it predates the ~20 other UI classes that session added. Re-take on the
-next full run before reading any row here as current.
+**`BrushEditorUITests` is the one to watch and it is now watched three times**: 586 s → 711 s →
+**812.6 s**, 2026-09-09 → 2026-09-10 → 2026-09-12, on the same eleven tests every time. It is 31% of a
+clone's 43.8 min share here, down from 44% of the smaller 27.1 min share two runs ago — not because the
+class shrank, the share grew faster (the class count nearly doubled, 211 → 239, in one pass). **Re-take
+before adding a twelfth test to it**, and read the percentage against the share measured the same day,
+never an older one. **`TransformLayerModesUITests`, born 2026-09-11 at ~350 s in isolation on four
+tests, now measures 453.5 s unchanged in the full suite** — the isolation figure undercounted by ~30%,
+this file's own "per-class seconds are not independent of co-scheduling" conclusion arriving on
+schedule. Of the other nine classes born since the last full run, only `CRTScreenUITests` (273.0 s, one
+test, and the source of one of the five failures) reaches the top half; `FolderKeyframeEntryUITests`
+(150.1 s), `SelectionEditUITests` (127.4 s), `RecolorUITests` (100.0 s), `TextUndoFootprintUITests`
+(98.2 s), `DuplicateOffsetUITests` (87.9 s), `RewriteUndoFootprintUITests` (64.6 s),
+`TransformLayerSpanUITests` (64.1 s) and `CelSpanCropUITests` (44.4 s) land in the bottom half, none
+close to a clone's share.
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
@@ -123,6 +132,15 @@ tables themselves are in `git log`, and only these conclusions survived them:
 - **If you split a class, verify by test count from the xcresult** — a test that stops running still
   prints green — and take the count *before* you merge as well as after: a split branch cut before
   something was deleted will silently resurrect it, and the count is the only signal.
+- **A device made fresh for the run still contends with its own parallel clones.** All five of the
+  2026-09-12 run's failures — the `Mode1UITests`/`VectorLayerContentUITests` cut-and-punch cluster this
+  file already named from 2026-09-10, plus `CRTScreenUITests` and `ToolPanelsUITests`, new that day —
+  failed under four parallel clones of a device booted and erased minutes before the suite started, on
+  a 67%-idle machine with zero `Restarting after unexpected exit` or crash blocks in the log. All five
+  passed 5/5 in one serial, `-parallel-testing-enabled NO` re-run on that same device, no further erase.
+  **"Fresh" rules out stale simulator state; it says nothing about clone-vs-clone timing contention** —
+  different failure modes, same fix (an isolated serial re-run), and this run needed the fix for the
+  second reason, not the first.
 
 - Use the dedicated simulator by UDID: `eraser-mutex-test`,
   `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
