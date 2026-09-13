@@ -202,6 +202,27 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertEqual(coordinator.sentControlCommands.last?.command, .pause, "re-sent on reconnect")
     }
 
+    /// **A connection nothing names yet is not paused.** Between the sheet's connect and its insert
+    /// no element names the endpoint, and "no elements" is not "every element frozen" — the
+    /// stage-2 drive caught a `pause`/`resume` pair four milliseconds apart on every connect,
+    /// each a pipeline restart on the laptop. Here the element is undone rather than not yet
+    /// inserted; the client is the same client either way.
+    func testAConnectionNoElementNamesIsNotPaused() throws {
+        let (manager, _) = streaming()
+        let coordinator = manager.streamCoordinator
+        manager.undo()   // the insert: the element is gone, the client object is not
+        XCTAssertTrue(coordinator.referencedEndpoints.isEmpty, "Setup: nothing names the endpoint")
+        XCTAssertTrue(coordinator.activeEndpoints.contains(Self.endpoint), "Setup: the client is still there")
+
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        coordinator.statusArrived(status(), from: Self.endpoint)
+
+        XCTAssertTrue(coordinator.sentControlCommands.isEmpty,
+                      "nothing to freeze, nothing to pause: \(coordinator.sentControlCommands.map(\.command))")
+        manager.redo()
+        XCTAssertTrue(coordinator.sentControlCommands.isEmpty, "and the element coming back needs no resume")
+    }
+
     // MARK: - The sandwich note
 
     /// The bar's note about the held picture is up exactly when the canvas at rest is the baked

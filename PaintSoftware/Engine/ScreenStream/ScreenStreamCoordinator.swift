@@ -116,8 +116,9 @@ final class ScreenStreamCoordinator: ObservableObject {
     private(set) var lastTickDuration: TimeInterval = 0
 
     /// **The measurement's own outlet.** Every tick is an `OSSignposter` interval, and once a
-    /// second — on the same cadence as the ordinary publish — one `Logger` line carries the ticks
-    /// since the last one with their mean and worst main-actor cost. Read it on a device with
+    /// second — on the same cadence as the ordinary publish — one `Logger` line (at `.notice`, the
+    /// level `log stream` shows without `--level info`) carries the ticks since the last one with
+    /// their mean and worst main-actor cost. Read it on a device with
     /// `log stream --predicate 'subsystem == "PaintSoftware" && category == "ScreenStream"'`, or
     /// on the simulator through `xcrun simctl spawn <udid> log stream …`; a tick-per-second count
     /// is the frame rate the tick actually delivered to the canvas. Costs one string a second.
@@ -343,21 +344,26 @@ final class ScreenStreamCoordinator: ObservableObject {
 
     // MARK: - Freeze (STREAM.md §5.4)
 
-    /// Whether an endpoint has anything to send frames *for*: the app in the foreground and at
-    /// least one unfrozen stream element naming it. A hidden layer's element still counts — the tick
-    /// skips it, but the artist can show the layer again without a round trip to the laptop.
-    private func wantsFrames(from endpoint: StreamEndpoint) -> Bool {
-        guard let manager, !isInBackground else { return false }
+    /// **Whether every stream element naming an endpoint is frozen** — §5.4's condition for
+    /// `pause`, asked of the document. Nil when *no* element names it: that is not "all frozen",
+    /// it is the moment between the sheet's connect and its insert (or the moment before `sync()`
+    /// stops a client nothing needs), and a pause there restarted the laptop's pipeline on every
+    /// connect — MEASURED in the stage-2 drive as a `pause`/`resume` pair four milliseconds apart.
+    /// A hidden layer's element still counts as wanting frames: the tick skips it, but the artist
+    /// can show the layer again without a round trip to the laptop.
+    private func everyElementIsFrozen(at endpoint: StreamEndpoint) -> Bool? {
+        guard let manager else { return nil }
+        var sawOne = false
         for layer in manager.layers where layer.kind == .vector {
             for cel in layer.cels {
                 guard let vector = cel.vector, vector.holdsStream else { continue }
-                for stream in vector.streams where !stream.isFrozen
-                    && stream.host == endpoint.host && stream.port == endpoint.port {
-                    return true
+                for stream in vector.streams where stream.host == endpoint.host && stream.port == endpoint.port {
+                    sawOne = true
+                    if !stream.isFrozen { return false }
                 }
             }
         }
-        return false
+        return sawOne ? true : nil
     }
 
     /// **Sends `pause` to every connected laptop nothing wants frames from, and `resume` to every
@@ -372,7 +378,16 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// fake streamer answers by restarting the very pipeline the pause just stopped.
     private func syncPauseState() {
         for (endpoint, client) in clients {
-            let wanted = wantsFrames(from: endpoint)
+            // Paused for the background, or for the artist having frozen everything on it. An
+            // endpoint nothing names yet is left alone in the foreground — see `everyElementIsFrozen`.
+            let wanted: Bool
+            if isInBackground {
+                wanted = false
+            } else if let allFrozen = everyElementIsFrozen(at: endpoint) {
+                wanted = !allFrozen
+            } else {
+                wanted = !pausedEndpoints.contains(endpoint)   // nothing to change
+            }
             let paused = pausedEndpoints.contains(endpoint)
             if !wanted, !paused {
                 client.pause()
@@ -499,7 +514,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             let mean = durations.reduce(0, +) / Double(max(durations.count, 1))
             let worst = durations.max() ?? 0
             if lastPublish > 0 {
-                Self.log.info("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
+                Self.log.notice("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
             }
             tickDurationsSincePublish.removeAll(keepingCapacity: true)
             lastPublish = started
