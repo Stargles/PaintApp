@@ -437,22 +437,35 @@ class ClientSession:
         await self.send_status()
         log(f"video started ({self.args.mode})")
 
-        tasks = [
+        # Only these four gate the session's lifetime. --send's file-push task must NOT
+        # be in this set: it was, and the whole session (video included) tore itself
+        # down the instant the queued files finished sending, because FIRST_COMPLETED
+        # fired on it like any other. It now runs alongside as a background task that
+        # gets cancelled when the session ends for some other reason, but does not
+        # itself end the session.
+        core_tasks = [
             asyncio.create_task(self._reader_loop()),
             asyncio.create_task(self._sender_loop(queue)),
             asyncio.create_task(self._watchdog_loop()),
             asyncio.create_task(self._rate_log_loop()),
         ]
+        background_tasks = []
         if self.args.send:
-            tasks.append(asyncio.create_task(self._send_queued_files()))
+            background_tasks.append(asyncio.create_task(self._send_queued_files()))
 
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait(core_tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        for t in done:
+        for t in background_tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
+        for t in list(done) + background_tasks:
+            if not t.done() or t.cancelled():
+                continue  # Task.exception() raises CancelledError for a cancelled task
             exc = t.exception()
-            if exc is None or isinstance(exc, asyncio.CancelledError):
+            if exc is None:
                 continue
             if isinstance(exc, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError,
                                  asyncio.IncompleteReadError)):

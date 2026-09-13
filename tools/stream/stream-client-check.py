@@ -168,23 +168,35 @@ class Client:
         if self.args.pause_after is not None:
             deadline = max(deadline, time.monotonic() + self.args.pause_after + 4.0)
 
-        tasks = [asyncio.create_task(self._loop())]
-        if self.args.send:
-            tasks.append(asyncio.create_task(self._send_files()))
-        if self.args.pause_after is not None:
-            tasks.append(asyncio.create_task(self._pause_resume_test()))
-
         async def _deadline_waiter():
             await asyncio.sleep(max(0.0, deadline - time.monotonic()))
 
-        tasks.append(asyncio.create_task(_deadline_waiter()))
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        # if the deadline fired first, or a helper task finished, give the others a
-        # moment to be cancelled cleanly
+        # Only _loop and the deadline gate how long the check runs. --send and
+        # --pause-after used to be in this same FIRST_COMPLETED set, which meant a
+        # fast file transfer (or a pause/resume test that finishes well inside
+        # --seconds) ended the WHOLE check the instant it completed — a --send of a
+        # small file exited after receiving zero VIDEO frames even with --seconds 5,
+        # because the file transfer that takes milliseconds "won" the race. They now
+        # run alongside as background tasks and are cancelled once the real gate
+        # fires, but do not themselves end the check early.
+        core_tasks = [asyncio.create_task(self._loop()), asyncio.create_task(_deadline_waiter())]
+        background_tasks = []
+        if self.args.send:
+            background_tasks.append(asyncio.create_task(self._send_files()))
+        if self.args.pause_after is not None:
+            background_tasks.append(asyncio.create_task(self._pause_resume_test()))
+
+        done, pending = await asyncio.wait(core_tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        for t in done:
+        for t in background_tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
+        for t in list(done) + background_tasks:
+            if not t.done() or t.cancelled():
+                continue  # Task.exception() raises CancelledError for a cancelled task
             exc = t.exception()
             if exc:
                 self.inv.fail(f"task error: {exc!r}")
