@@ -82,6 +82,16 @@ enum EffectCatalog {
         ],
     ]
 
+    /// **One title per `groups` entry, same index, TODO (66)** — the owner: *"The Effect / blend
+    /// mode option menu should be organized. Use headers to organize them into groups."* Named for
+    /// what each group actually holds rather than for how it was built: **Colour** is every grade
+    /// (Brightness/Contrast through Colour Wheels) plus the Posterize family, which quantizes rather
+    /// than convolves; **Blur & Light** is the two blurs, Sharpen and Bloom; **Stylise** is
+    /// everything that reshapes the drawing into a new one — Sobel, Outline, Duplicate Offset,
+    /// Chromatic Aberration, Noise, Computer Screen and Glare. British spelling throughout, matching
+    /// `Effect.displayName`'s own "Colour Wheels"/"Recolour".
+    static let groupTitles = ["Colour", "Blur & Light", "Stylise"]
+
     /// Every prototype, flattened — used to resolve a pick back to its group-ordered entry.
     static var all: [Effect] { groups.flatMap { $0 } }
 
@@ -115,7 +125,8 @@ enum EffectCatalog {
 
 // MARK: - Menu sections
 
-/// The Effects half of an operation menu — `Section`s of effect names, tick beside the current one.
+/// The Effects half of an operation menu — `Section`s of effect names, tick beside the current one,
+/// each headed by `EffectCatalog.groupTitles` (TODO (66)).
 ///
 /// Shared by the value layer's Mode menu and the node's Operation menu, which is the whole reason it
 /// is a free function taking an identifier prefix rather than a view with a mode enum: the two menus
@@ -125,7 +136,7 @@ enum EffectCatalog {
 func effectMenuSections(current: Effect?, identifierPrefix: String,
                         onSelect: @escaping (Effect) -> Void) -> some View {
     ForEach(EffectCatalog.groups.indices, id: \.self) { groupIndex in
-        Section {
+        Section(EffectCatalog.groupTitles[groupIndex]) {
             ForEach(EffectCatalog.groups[groupIndex], id: \.displayName) { prototype in
                 Button {
                     onSelect(EffectCatalog.resolve(prototype, given: current))

@@ -493,7 +493,7 @@ struct LayerOptionsPanel: View {
         let blend = canvasManager.layers[index].blendMode
         return Menu {
             ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
-                Section {
+                Section(BlendMode.menuGroupTitles[groupIndex]) {
                     ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
                         Button {
                             canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
@@ -683,7 +683,7 @@ struct LayerOptionsPanel: View {
 private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
     Menu {
         ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
-            Section {
+            Section(BlendMode.menuGroupTitles[groupIndex]) {
                 ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
                     Button {
                         onSelect(mode)
@@ -1242,15 +1242,18 @@ private struct ParallaxItemsSection: View {
     }
 }
 
-/// The picker's list with "Clip to Below" dropped, for a compositor op.
+/// The picker's list with "Clip to Below" dropped, for a compositor op — paired with its own header
+/// (TODO (66)) rather than plain `[[BlendMode]]`, since dropping the one-mode Clip group after
+/// zipping titles on by index would otherwise misalign every title after it.
 ///
 /// That mode is not a blend at all (§7): it is the mask machinery with an *implicit* source, the
 /// entry one step down in the same container. A Mix's operands are two named slots rather than a
 /// stack with something under them, so there is nothing for the implicit source to resolve to — the
 /// pick would silently mean "normal" and read as a mode that quietly does nothing.
-private let compositorOpModeGroups: [[BlendMode]] = BlendMode.menuGroups
-    .map { $0.filter { $0 != .clipToBelow } }
-    .filter { !$0.isEmpty }
+private let compositorOpModeGroups: [(title: String, modes: [BlendMode])] =
+    zip(BlendMode.menuGroupTitles, BlendMode.menuGroups)
+        .map { (title: $0, modes: $1.filter { $0 != .clipToBelow }) }
+        .filter { !$0.modes.isEmpty }
 
 /// One row of an options menu's action list — shared by `LayerOptionsPanel` and
 /// `FolderOptionsPanel` so the two menus render identically.
@@ -1741,13 +1744,12 @@ struct FolderOptionsPanel: View {
         let effect = folder?.effect
         let mixMode: BlendMode? = { if case .mix(let mode)? = folder?.compositorOp { return mode }; return nil }()
         return Menu {
-            // The blend groups keep their own sections (`BlendMode.menuGroups`: darkening,
-            // lightening, contrast) rather than being flattened under one "Blend" header — the
-            // effect groups below are sections too, so SwiftUI's native dividers already separate
-            // blends from effects, and a header would be the only label in a menu that has none.
+            // The blend groups keep their own sections (TODO (66) gave every one of them the header
+            // `BlendMode.menuGroupTitles` names — darkening, lightening, contrast, …) and the effect
+            // groups below are sections too, headed by `EffectCatalog.groupTitles`.
             ForEach(compositorOpModeGroups.indices, id: \.self) { groupIndex in
-                Section {
-                    ForEach(compositorOpModeGroups[groupIndex], id: \.self) { mode in
+                Section(compositorOpModeGroups[groupIndex].title) {
+                    ForEach(compositorOpModeGroups[groupIndex].modes, id: \.self) { mode in
                         Button {
                             canvasManager.setMixBlendMode(folderID, to: mode)
                         } label: {

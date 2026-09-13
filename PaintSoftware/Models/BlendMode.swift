@@ -118,6 +118,17 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
         [.clipToBelow],
     ]
 
+    /// **One title per `menuGroups` entry, same index, TODO (66)** — the owner: *"The Effect / blend
+    /// mode option menu should be organized. Use headers to organize them into groups."* The bare
+    /// `Section { }`s already split the list this way; this is the label `Section("…") { }` prints
+    /// above each. Named the conventional way an artist already knows it (Photoshop/Procreate-style
+    /// grouping), not reworded from the doc comment above: "Inversion" for the difference/subtract/
+    /// exclusion/divide group and "Component/HSL" for hue/saturation/color/luminosity, since those
+    /// are the two names the owner's own phrasing did not already supply. "Clip" for the one-mode
+    /// group at the end — it is not a blend family at all, which is exactly why that group existed
+    /// as its own section before it had a name.
+    static let menuGroupTitles = ["Normal", "Darken", "Lighten", "Contrast", "Inversion", "Component/HSL", "Clip"]
+
     /// Whether this mode is anything other than plain source-over.
     ///
     /// Reads better than `!= .normal` at the call sites that matter — `RenderNode.needsOwnBuffer` and

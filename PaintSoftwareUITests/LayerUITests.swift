@@ -1569,6 +1569,63 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                        "The picker should reflect the layer's blendMode, not reset when the panel reopens")
     }
 
+    /// **TODO (66)** — the owner: *"The Effect / blend mode option menu should be organized. Use
+    /// headers to organize them into groups."* The groups already existed as bare `Section { }`s;
+    /// this pins that `Section("Title") { }` inside a SwiftUI `Menu` actually shows a header on
+    /// iPadOS 26 rather than collapsing it away, which is the one thing CLAUDE.md's ask said to
+    /// confirm by driving rather than assuming — read straight off the live accessibility tree, each
+    /// title is a plain `StaticText` sibling of its group's own rows (no disabled label row, no
+    /// `Divider` standing in for one; the fallback CLAUDE.md named was never needed).
+    ///
+    /// Two pickers, because the effect groups (`EffectCatalog.groupTitles`, unreachable from this
+    /// target the same way `EffectCatalog` itself is — see `EffectParameterCharacterizationTests`'
+    /// own header — so the three names are repeated here as literals) only ever join the blend
+    /// groups on a value layer's merged picker (`valueBlendModeRow`), never on a pixel layer's plain
+    /// `blendModeRow`. `BlendMode.menuGroupTitles` is reachable here, unlike `EffectCatalog`: it is a
+    /// `Models/` file with no SwiftUI in it.
+    func testBlendModeAndEffectMenusShowGroupHeaders() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        // The fresh document's own vector layer: `BlendMode.menuGroupTitles`, no effect groups.
+        let row = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        for title in BlendMode.menuGroupTitles {
+            XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 2),
+                          "The vector layer's blend menu should show a \"\(title)\" header")
+        }
+        app.buttons["layerOptions.blendMode.normal"].tap()   // a no-op re-pick, closes the menu
+
+        // A value layer's merged picker: the same blend headers, plus the effect groups.
+        // `toolbar.layersButton` toggles `activePanel`, and `layerOptions.close` only clears
+        // `layerOptionsID` (never touches it), so the panel is still open here — close, then reopen.
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let valueRow = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(valueRow.waitForExistence(timeout: 5))
+        valueRow.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        // `scrollMenuTo`'s own note: the menu's `CollectionView` only realizes cells near the
+        // current scroll position, so a header past the first few groups does not exist in the
+        // accessibility tree until swept into view the same way an effect entry does.
+        let collection = app.collectionViews.firstMatch
+        for title in BlendMode.menuGroupTitles + ["Colour", "Blur & Light", "Stylise"] {
+            for _ in 0..<10 {
+                if app.staticTexts[title].exists { break }
+                guard collection.exists else { break }
+                collection.swipeUp()
+            }
+            XCTAssertTrue(app.staticTexts[title].exists,
+                          "The value layer's merged menu should show a \"\(title)\" header")
+        }
+    }
+
     /// Same contract as the layer picker above, routed through `setFolderBlendMode` instead — the
     /// group side of §7, which is the same picker (`blendModeRow`) reused rather than a second one.
     func testSettingFolderBlendModeShowsOnRowAndPersists() throws {
