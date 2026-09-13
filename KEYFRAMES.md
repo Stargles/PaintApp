@@ -1722,7 +1722,7 @@ frame of it — the same argument interpolation's identity already makes for omi
    it is a full-canvas sheet, so posing it means posing a quad and leaving transparency outside —
    plausible. In *effect* mode it holds no pixels at all and grades the accumulator, so there is nothing
    to pose. Same layer kind, two answers.
-3. **What happens to a curve whose two keys have different cardinality?** Three of the sixteen effects
+3. **What happens to a curve whose two keys have different cardinality?** Three of the eighteen effects
    now have variable-length parameter arrays — `Curves.points`, `GradientMap.stops` and `Recolor.entries`
    (TODO(60), added since this question was written; TODO(45) recount, 2026-09-11). Tweening a 3-point
    curve to a 5-point curve — or a two-pair Recolor to a four-pair one — needs a definition or a refusal.
@@ -2475,8 +2475,7 @@ instead would have worked for most of the sixteen (thirteen when this was writte
 **It is read at the popup and *not* carried on `TimelineGraphBand.Channel`, which is the cheap spelling
 and a layout-key defect.** A `Channel` is inside `Content` and `Content` is inside `TimelineLayoutKey`,
 so a field the band never draws still gates `relayout()` — and `Effect.displayName` is constant per case
-for thirteen of the sixteen effects (TODO(45) recount, 2026-09-11 — TODO(60) added two more
-non-constant cases since this was written) but not for `.blur`, which answers "Directional Blur" or
+for fifteen of the eighteen effects (recounted 2026-09-13 after Glare and Colour Wheels) but not for `.blur`, which answers "Directional Blur" or
 "Gaussian Blur" off a toggle, `.hsvShift` ("HSV Shift" or "Hue Colorize"), or `.posterize` ("Posterize",
 "Dither" or "Halftone"). One tap on Directional therefore relaid out every row frame, every cel accessibility
 identifier and the ruler's per-frame CoreText loop, for a band whose curves had not moved. The rule the

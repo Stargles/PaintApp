@@ -298,9 +298,9 @@ Whichever option in §3 is taken, an effect gains one property: **what its input
 - `.backdrop` — everything below, paper included.
 - `.ink` — everything below, paper excluded.
 
-**For fourteen effects this is a fixed property. For two it is a control the artist can see**, ruled by
+**For sixteen effects this is a fixed property. For two it is a control the artist can see**, ruled by
 the owner 2026-08-27 (eleven and two at the time; Recolour, the Computer Screen and the Duplicate Offset
-arrived 2026-09-11 and are fixed):
+arrived 2026-09-11, Glare and Colour Wheels on 2026-09-13, all fixed):
 
 | Effect | Input | Fixed or chosen |
 |---|---|---|
