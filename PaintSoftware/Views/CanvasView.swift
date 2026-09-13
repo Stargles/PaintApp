@@ -1462,14 +1462,41 @@ struct CanvasView: UIViewRepresentable {
                     self?.layerHosts[layerID]?.strokeView.refreshDisplayIfStale()
                 }
                 coordinator.onFloatNeedsRepaint = { [weak self] layerID in
-                    guard let self, let float = self.canvasManager.vectorFloat, float.layerID == layerID,
-                          let host = self.layerHosts[layerID], host.strokeView.hasVectorFloat,
-                          let vector = self.canvasManager.vectorCanvas(ofFloat: float) else { return }
-                    host.strokeView.replaceVectorFloatImage(
-                        vector.renderIsolated(ids: float.insideIDs, posedBy: float.poses))
+                    self?.refreshStreamFloat(layerID: layerID)
                 }
             }
             coordinator.sync()
+        }
+
+        /// Whether a float re-mint for a streaming element is already rendering. One at a time and
+        /// the rest dropped — the next tick asks again with a newer frame anyway.
+        private var streamFloatRenderInFlight = false
+
+        /// **Re-mints the Move box's latched bitmap off the main thread.** `renderIsolated` is a
+        /// canvas-sized walk — MEASURED at ~15 ms a tick on the simulator at 2048² with a 1080p
+        /// frame, against ~0.6 ms for the whole tick once the element is committed — so on the
+        /// main actor it would be the very cost STREAM.md §5.3 forbids. It takes the canvas's own
+        /// locks like every other off-main render, and the image lands on the next main turn,
+        /// guarded against the float having ended meanwhile.
+        private func refreshStreamFloat(layerID: UUID) {
+            guard !streamFloatRenderInFlight, let float = canvasManager.vectorFloat,
+                  float.layerID == layerID, let host = layerHosts[layerID],
+                  host.strokeView.hasVectorFloat,
+                  let vector = canvasManager.vectorCanvas(ofFloat: float) else { return }
+            streamFloatRenderInFlight = true
+            let ids = float.insideIDs
+            let poses = float.poses
+            DispatchQueue.global(qos: .userInteractive).async {
+                let image = vector.renderIsolated(ids: ids, posedBy: poses)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.streamFloatRenderInFlight = false
+                    guard let current = self.canvasManager.vectorFloat, current.layerID == layerID,
+                          current.insideIDs == ids, let host = self.layerHosts[layerID],
+                          host.strokeView.hasVectorFloat else { return }
+                    host.strokeView.replaceVectorFloatImage(image)
+                }
+            }
         }
 
         private func syncFrameBake() {
