@@ -18,9 +18,11 @@ struct StreamConnectSheet: View {
     /// (`CanvasManager.retargetStream`) instead of inserting a new layer.
     var retargeting: StreamRetarget? = nil
 
-    /// `UserDefaults` keys for the prefill.
-    static let lastHostKey = "streamScreen.lastHost"
-    static let lastPortKey = "streamScreen.lastPort"
+    /// `UserDefaults` keys for the prefill — `StreamEndpoint.lastHostDefaultsKey`/
+    /// `lastPortDefaultsKey`, so this sheet and `ScreenStreamCoordinator`'s document-level
+    /// connection (STREAM.md §6) cannot drift onto two spellings of "the last laptop."
+    static let lastHostKey = StreamEndpoint.lastHostDefaultsKey
+    static let lastPortKey = StreamEndpoint.lastPortDefaultsKey
 
     @State private var host: String
     @State private var portText: String

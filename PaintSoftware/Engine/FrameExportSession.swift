@@ -103,6 +103,22 @@ final class FrameExportSession: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// STREAM.md §5.8: what "Send to Computer" is doing, once there is a file to send. Separate
+    /// from `phase` because it can only ever apply on top of `.finished` — the sheet keeps `phase`'s
+    /// own share/again/done row and adds this beside it, rather than inventing a sixth `Phase` case
+    /// every other switch over `Phase` would have to grow an arm for.
+    enum SendState: Equatable {
+        case idle
+        /// Bytes sent so far, and the total — for the button's own progress text.
+        case sending(bytesSent: Int, totalBytes: Int)
+        /// The laptop's own HELLO name, for "Saved on <name>".
+        case succeeded(String)
+        /// The laptop's `reason`, or a local one ("Not connected to a computer.").
+        case failed(String)
+    }
+
+    @Published private(set) var sendState: SendState = .idle
+
     /// The frames the current or last export covers — for the sheet's caption and for a test.
     private(set) var frames: ClosedRange<Int>?
 
@@ -152,6 +168,47 @@ final class FrameExportSession: ObservableObject {
     /// Exports one frame as a PNG. `frame` defaults to the playhead.
     func exportFrame(_ frame: Int? = nil) { start(.frame(frame ?? manager?.currentFrame ?? 0)) }
 
+    /// STREAM.md §5.8 — sends the finished export to whatever laptop is connected. A no-op while
+    /// nothing is finished, while a send is already running (a second tap is ignored, not queued),
+    /// or while no client is connected (the sheet already disables the button then, but this is the
+    /// real guard `StreamFileSendLogicTests` drives).
+    func sendToComputer() {
+        guard case .finished(let url) = phase else { return }
+        if case .sending = sendState { return }
+        guard let manager else {
+            sendState = .failed("No document is open on the iPad")
+            return
+        }
+        let coordinator = manager.streamCoordinator
+        guard let endpoint = coordinator.connectedEndpointForSending,
+              let client = coordinator.client(for: endpoint) else {
+            sendState = .failed("Not connected to a computer.")
+            return
+        }
+        let kind = Self.fileKind(forPathExtension: url.pathExtension)
+        sendState = .sending(bytesSent: 0, totalBytes: 0)
+        client.sendFile(url: url, kind: kind, onProgress: { [weak self] sent, total in
+            self?.sendState = .sending(bytesSent: sent, totalBytes: total)
+        }, completion: { [weak self] outcome in
+            guard let self else { return }
+            if outcome.ok {
+                self.sendState = .succeeded(client.remoteName ?? endpoint.host)
+            } else {
+                self.sendState = .failed(outcome.reason ?? "Could not send the file.")
+            }
+        })
+    }
+
+    /// The `kind` FILE_BEGIN carries — exactly `tools/stream/fake-streamer.py`'s own
+    /// `classify_kind`, so the two sides agree on every extension either one might see.
+    static func fileKind(forPathExtension ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg", "png", "heic", "gif": return "image"
+        case "mp4", "mov", "m4v": return "video"
+        default: return "other"
+        }
+    }
+
     /// The document, or the cancellation that its absence means. See `manager`.
     ///
     /// **Read afresh at every use rather than hoisted into a local for the length of the walk**,
@@ -174,6 +231,7 @@ final class FrameExportSession: ObservableObject {
     func reset() {
         cancel()
         phase = .idle
+        sendState = .idle
     }
 
     private func start(_ product: Product) {

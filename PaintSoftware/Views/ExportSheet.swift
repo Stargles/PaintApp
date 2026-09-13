@@ -21,11 +21,15 @@ struct ExportSheet: View {
 
     @ObservedObject var canvasManager: CanvasManager
     @StateObject private var session: FrameExportSession
+    /// STREAM.md §5.8 — reused rather than duplicated: `StreamBar` already observes this same
+    /// object for its own connected/not word, and `connectionStates` is `@Published` there.
+    @ObservedObject private var streamCoordinator: ScreenStreamCoordinator
     @Environment(\.dismiss) private var dismiss
 
     init(canvasManager: CanvasManager) {
         self.canvasManager = canvasManager
         _session = StateObject(wrappedValue: FrameExportSession(manager: canvasManager))
+        _streamCoordinator = ObservedObject(wrappedValue: canvasManager.streamCoordinator)
     }
 
     var body: some View {
@@ -124,6 +128,24 @@ struct ExportSheet: View {
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("export.share")
 
+            // STREAM.md §5.8. Beside Share rather than replacing it: the two destinations are
+            // independent, and an artist mid-session on the laptop may want both.
+            Button {
+                session.sendToComputer()
+            } label: {
+                Label(sendToComputerTitle, systemImage: "laptopcomputer")
+            }
+            .disabled(!canSendToComputer)
+            .accessibilityIdentifier("export.sendToComputer")
+
+            if let sendResultText {
+                Text(sendResultText)
+                    .font(.caption)
+                    .foregroundColor(sendResultIsFailure ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("export.sendResult")
+            }
+
             HStack(spacing: 18) {
                 Button("Export Something Else") { session.reset() }
                     .accessibilityIdentifier("export.againButton")
@@ -131,6 +153,38 @@ struct ExportSheet: View {
                     .accessibilityIdentifier("export.doneButton")
             }
         }
+    }
+
+    /// Enabled only while some laptop is connected, and not while a send is already running — a
+    /// second tap is ignored rather than queued (STREAM.md §5.8).
+    private var canSendToComputer: Bool {
+        guard streamCoordinator.connectedEndpointForSending != nil else { return false }
+        if case .sending = session.sendState { return false }
+        return true
+    }
+
+    private var sendToComputerTitle: String {
+        if case .sending(let sent, let total) = session.sendState, total > 0 {
+            return "Sending… \(Self.byteCount(sent)) of \(Self.byteCount(total))"
+        }
+        return "Send to Computer"
+    }
+
+    private var sendResultText: String? {
+        switch session.sendState {
+        case .idle, .sending: return nil
+        case .succeeded(let name): return "Saved on \(name)"
+        case .failed(let reason): return reason
+        }
+    }
+
+    private var sendResultIsFailure: Bool {
+        if case .failed = session.sendState { return true }
+        return false
+    }
+
+    private static func byteCount(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
     private func failed(_ sentence: String) -> some View {
