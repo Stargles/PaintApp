@@ -126,6 +126,13 @@ final class ScreenStreamCoordinator: ObservableObject {
     private static let signposter = OSSignposter(subsystem: "PaintSoftware", category: "ScreenStream")
     private var tickDurationsSincePublish: [TimeInterval] = []
 
+    /// The last log line's numbers, published once a second on the same cadence, for the one reader
+    /// that cannot open the unified log: an XCUITest on a device (`log collect --device` needs
+    /// root). `StreamBar` puts it on a hidden marker, `streamBar.tickSummary`, the way
+    /// `CanvasHostView` publishes the sandwich's state on `canvas.host` — none of it is otherwise
+    /// visible from a test. Format: `<ticks>/<seconds>s mean:<ms> max:<ms>`.
+    @Published private(set) var lastTickSummary = ""
+
     /// A test seam: a decoder image source per endpoint that stands in for a socket. Nil in the app.
     var frameSourceOverride: ((StreamEndpoint) -> (index: Int, image: CGImage)?)?
 
@@ -514,6 +521,8 @@ final class ScreenStreamCoordinator: ObservableObject {
             let mean = durations.reduce(0, +) / Double(max(durations.count, 1))
             let worst = durations.max() ?? 0
             if lastPublish > 0 {
+                lastTickSummary = String(format: "%d/%.2fs mean:%.3f max:%.3f",
+                                         durations.count, elapsed, mean * 1000, worst * 1000)
                 Self.log.notice("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
             }
             tickDurationsSincePublish.removeAll(keepingCapacity: true)

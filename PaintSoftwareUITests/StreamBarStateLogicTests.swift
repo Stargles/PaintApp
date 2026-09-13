@@ -14,6 +14,59 @@ final class StreamBarStateLogicTests: XCTestCase {
 
     private static let endpoint = StreamEndpoint(host: "laptop", port: 47301)
 
+    private var caches: URL!
+    private var storedResolution: String?
+
+    override func setUp() {
+        super.setUp()
+        Compositor.backend = .coreGraphics
+        caches = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StreamBarStateLogicTests-" + UUID().uuidString, isDirectory: true)
+        FrameBakeStore.cachesDirectoryOverride = caches
+        // Pinned and restored, `BakeWiringLogicTests`' reason: the knob writes through to
+        // `UserDefaults`, and the baked frame below is sized by it.
+        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
+        UserDefaults.standard.set(RenderResolution.full.rawValue, forKey: CanvasManager.renderResolutionDefaultsKey)
+    }
+
+    override func tearDown() {
+        if let storedResolution {
+            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
+        }
+        FrameBakeStore.cachesDirectoryOverride = nil
+        try? FileManager.default.removeItem(at: caches)
+        Compositor.backend = Compositor.defaultBackend
+        super.tearDown()
+    }
+
+    /// Runs the baker to a stop — `BakeWiringLogicTests.drain`.
+    private func drain(_ baker: FrameBaker, timeout: TimeInterval = 60) {
+        var settled = false
+        let idle = expectation(description: "the baker drains and the loop stops")
+        baker.onIdle = {
+            guard !settled else { return }
+            settled = true
+            idle.fulfill()
+        }
+        baker.kick()
+        wait(for: [idle], timeout: timeout)
+        baker.onIdle = nil
+    }
+
+    /// RGBA at a canvas point of a baked frame.
+    private func pixel(_ cg: CGImage, _ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        let width = cg.width, height = cg.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let i = (y * width + x) * 4
+        return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
+    }
+
     private func status(streaming: Bool = true, reason: String? = nil, name: String = "Blender") -> StreamStatus {
         StreamStatus(source: StreamStatus.Source(kind: "window", name: name),
                      width: 1920, height: 1080, fps: 30, streaming: streaming, reason: reason)
@@ -249,5 +302,67 @@ final class StreamBarStateLogicTests: XCTestCase {
 
         XCTAssertFalse(StreamBarState.sandwichNote.isEmpty)
         XCTAssertTrue(StreamBarState.sandwichNote.hasPrefix("Live picture pauses"), StreamBarState.sandwichNote)
+    }
+
+    /// **What the note says is true of the pixels on screen, and the pixels are what this asserts.**
+    /// At rest on an engaged sandwich the canvas shows the baked frame (`FrameBaker.image(atFrame:)`,
+    /// keyed on `FrameBakeKey`, which reads `committedVersion`). With the stream layer on Multiply:
+    /// the bake of frame 0 is green; a red frame ticks in; the key has not moved, the baker has
+    /// nothing to do, and the rest picture is **still green** — the staleness the note names. Then
+    /// an ordinary edit moves the key and the next bake is red. Two operands each way, through the
+    /// real baker; a version-number assertion could not tell "the key stood still" from "nobody
+    /// looked".
+    func testTheRestPictureOnAnEngagedSandwichHoldsWhileTheStreamMovesOnUntilAnEdit() throws {
+        let (manager, element) = streaming()
+        let layerIndex = manager.currentLayerIndex
+        manager.layers[layerIndex].blendMode = .multiply
+        XCTAssertTrue(manager.streamPictureIsHeldByTheSandwich, "Setup: the note is up")
+        let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
+        // The stream's own picture size is 1920×1080 here; frames of that size keep the fit exact.
+        func frame(_ color: UIColor) -> UIImage {
+            CanvasFixture.solidImage(color, rect: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                                     size: CGSize(width: 1920, height: 1080))
+        }
+        let coordinator = manager.streamCoordinator
+        coordinator.onLayerNeedsRepaint = { _ in }
+        var slot: (Int, UIImage) = (1, frame(.green))
+        coordinator.frameSourceOverride = { endpoint in
+            endpoint == Self.endpoint ? (slot.0, slot.1.cgImage!) : nil
+        }
+        coordinator.tick()
+        XCTAssertNotNil(try XCTUnwrap(vector.streams.first).displayFrame, "Setup: green ticked in")
+
+        let baker = manager.frameBaker
+        baker.noteDocumentChanged()
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        let keyBefore = try XCTUnwrap(baker.currentKey(atFrame: 0))
+        let restBefore = try XCTUnwrap(baker.image(atFrame: 0), "the baker has frame 0")
+        let centre = pixel(restBefore, 32, 32)
+        XCTAssertGreaterThan(Int(centre.g), Int(centre.r) + 100, "the rest picture is the green frame (over white paper, multiplied)")
+
+        // The stream moves on to red. The key stands still and so does the picture on screen.
+        slot = (2, frame(.red))
+        coordinator.tick()
+        XCTAssertGreaterThan(Int(pixel(try XCTUnwrap(vector.render().cgImage), 32, 32).r), 100,
+                             "Setup: the cel's own render is red now — the flat row would show it")
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        XCTAssertEqual(baker.currentKey(atFrame: 0), keyBefore, "a tick moves no bake key")
+        let restAfterTick = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
+        XCTAssertGreaterThan(Int(restAfterTick.g), Int(restAfterTick.r) + 100,
+                             "the rest picture is still green: that is what the note tells the artist")
+
+        // An ordinary edit re-keys the frame, and the next rest picture is the red one.
+        vector.setStreamFrame(id: element.id, image: frame(.red))
+        vector.bumpVersion()
+        manager.celContentChangedOutsideStroke(layerID: manager.layers[layerIndex].id,
+                                               celID: manager.layers[layerIndex].cels[0].id)
+        baker.noteDocumentChanged()
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        XCTAssertNotEqual(baker.currentKey(atFrame: 0), keyBefore, "an edit moves the key")
+        let restAfterEdit = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
+        XCTAssertGreaterThan(Int(restAfterEdit.r), Int(restAfterEdit.g) + 100, "and the rest picture follows it")
     }
 }

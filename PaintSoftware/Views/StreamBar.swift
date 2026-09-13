@@ -110,6 +110,17 @@ struct StreamBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // The tick's once-a-second numbers, for a device XCUITest — see
+        // `ScreenStreamCoordinator.lastTickSummary`. Invisible, never takes a touch.
+        .overlay(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("streamBar.tickSummary")
+                .accessibilityValue(coordinator.lastTickSummary)
+                .allowsHitTesting(false)
+        }
         .sheet(isPresented: $showingConnectSheet) {
             StreamConnectSheet(canvasManager: canvasManager,
                                retargeting: StreamRetarget(layerIndex: layerIndex, celIndex: celIndex,
