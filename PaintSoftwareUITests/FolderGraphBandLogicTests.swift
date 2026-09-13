@@ -444,8 +444,12 @@ final class FolderGraphBandLogicTests: XCTestCase {
     func testTheNodeMenusWritersReachAFoldersOwnStores() {
         let (manager, folder, target) = folderManager()
         keyOpacity(manager, target)
+        // The layer's own opacity curve shares the id and the frame 8 key, and carries a third key
+        // the folder's does not: a writer that *read* the layer's curve and wrote the result onto
+        // the folder would leave the folder keyed at 0 and 12, which the folder-only assertion
+        // below refuses — mutation-tested; with identical curves that read went unnoticed.
         XCTAssertTrue(manager.setTargetChannelTrack(layerRow(manager, 0), channelID: opacityID,
-                                                    to: curve([(0, 1), (8, 0)])))
+                                                    to: curve([(0, 1), (8, 0), (12, 0.5)])))
         keyPose(manager, folder)
         let at = folderIndex(manager, folder)
 
@@ -455,8 +459,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
                        "Nothing authored, so Reset Curve is not offered")
         XCTAssertTrue(manager.removeEffectParameterKey(target: target, parameterID: opacityID, frame: 8))
         XCTAssertEqual(manager.folders[at].channelTracks[opacityID]?.keys.map(\.frame), [0],
-                       "The folder's node is gone")
-        XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [0, 8],
+                       "The folder's node is gone, and the folder's curve is the one it was read from")
+        XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [0, 8, 12],
                        "The layer's node on the same id and frame is not")
         XCTAssertFalse(manager.removeEffectParameterKey(target: target, parameterID: opacityID, frame: 8),
                        "A second Delete on the same node is not an edit")
