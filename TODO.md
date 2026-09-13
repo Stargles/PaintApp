@@ -48,6 +48,113 @@ rather than assuming it still holds.
 
 ---
 
+## (27) Stream the computer's screen as a layer
+
+**Status** — briefed by the owner 2026-09-13; design conversation open; not started. Promoted from
+"Later" — it *"requires (26)"* and (26), video import, is merged. Spec to be written at
+[STREAM.md](STREAM.md) once the questions below are answered.
+
+**The owner's brief, 2026-09-13, verbatim in the numbered points:**
+
+1. *"The purpose of this feature is to be able to stream my windows computer's screen as a layer live
+   on the app. The example use case is that the user will open up blender on their computer, then
+   rotoscope a character, move the camera around in the computer, then continue rotoscoping, etc."*
+2. *"This feature will require another app that is to be installed on my windows laptop which will
+   stream the video to the Ipad."*
+3. *"The windows app should also have a drop box for videos or images which when they are pasted into
+   or uploaded, will appear on the app via the import video or image feature. If it is also possible,
+   make the ipad app able to export to the windows app and save to the laptop."*
+4. *"In the app, the stream tool should be under actions, and like a video it makes its own layer with
+   the stream object inside of it."*
+5. *"When the user is actively on the layer, there should be an options bar (the same kind as move or
+   lasso tool), and in it should be the option to freeze the stream, or to bake the current frame. When
+   the user presses bake to frame, the current frame in the layer is split as a new cel, and in that
+   cel will be an image of the screen when it was baked. For example there are 4 frames and the stream
+   layer has one cel stretching the 4 frames. The user is currently on cel 2. Once they hit bake, the
+   cel will split into 3 cels: frame 1, frame 2, and frame 3 to 4. the cels in frame 1 and frame 3 to 4
+   will not change. However, the cel in frame 2 will have the stream object replaced with an image
+   object containing the snapshot of that frame."*
+6. *"The paintapp streamer should be low latency and should not lag the main thread. Running it in a
+   background thread might be smart, your decision. Note that for the most part, the computer side
+   wont move."*
+7. *"Just like a video layer, the user should be able to move the stream object in the layer using the
+   move tool. The architecture for this is already well established."*
+8. *"Note that the user may potentially use many screens or just want to stream a specific app."*
+9. *"Note, this part is for the far future. I eventually intend to make the paint app compatible with
+   windows, and thus there is the idea that instead of having a separate app, the paint app itself
+   contains the streamer. This is a far off feature, but in case the two apps eventually merge, put
+   some thought into the design of the architecture of the computer side streamer app. Better to plan
+   ahead for potential future changes."*
+10. *"There is the case the user may actively stream, then turn off their computer and continue on the
+    app, then turn the computer back on and continue streaming."*
+11. *"stream layers actively moving do not have to be rendered."*
+12. *"The laptop that I want the streamer app in is not this mac but my windows computer. You should
+    see it through tailscale."* — it is `desktop-cbr0fl6`, `100.104.85.111` on the tailnet; the iPad is
+    `100.70.220.4`. SSH on the Windows box was **closed** on 2026-09-13 and needs the owner to enable
+    OpenSSH Server before any Windows-side work can happen from this Mac.
+
+**What is left**
+- [ ] Design conversation → STREAM.md (wire protocol, capture source picker, freeze/bake semantics,
+      reconnect after the computer is off, the drop box and the reverse export).
+- [ ] Windows streamer app (capture core separable from the shell, per point 9).
+- [ ] iPad: stream layer kind/object, Actions entry, options bar (Freeze / Bake Frame), move-tool
+      support, persistence of the last frame so the layer survives the computer being off.
+- [ ] Drop box → import; iPad export → laptop.
+- [ ] Drive it end to end with the real Windows box before calling it done.
+
+---
+
+## (64) Transform-layer settings go in the bottom menu
+
+**Status** — asked 2026-09-13, not started.
+
+*"the settings in the transform layer (example: shake x, shake y, etc. in shake mode) should be the
+bottom menu, like the effect settings for effects."*
+
+**What is left**
+- [ ] Move the per-mode parameters (shake x/y, parallax, rotate, repeat, duplicate offset) out of
+      wherever they live now into the same bottom panel the effect settings use.
+
+---
+
+## (65) HSV Shift and Hue Colorize are one menu entry
+
+**Status** — asked 2026-09-13, not started. `Effect.Kind.hsvShift` already carries `colorize` as a
+mode (TODO (60)); the menu still lists it twice.
+
+*"I'm not sure why HSV Shift and Hue Colorize are two different options. Make them one with just a
+toggle (toggle is already implemented)."*
+
+**What is left**
+- [ ] One entry in the effect picker; the existing toggle selects colorize. Existing documents
+      with either variant must open unchanged.
+
+---
+
+## (66) Organise the Effect / blend-mode menu with headers
+
+**Status** — asked 2026-09-13, not started.
+
+*"The Effect / blend mode option menu should be organized. Use headers to organize them into groups."*
+
+**What is left**
+- [ ] Group the 18 effects and 25 blend modes under section headers in the picker.
+
+---
+
+## (67) Effect settings must not cancel on a two-finger canvas move
+
+**Status** — asked 2026-09-13, not started.
+
+*"The effect settings menus cancels when you move the canvas with two fingers. For example, color
+wheels. There is already an X at the top right corner for that."*
+
+**What is left**
+- [ ] The bottom effect-settings panel stays open through a two-finger pan/zoom; only the X closes it.
+      Check whether the transform-layer panel from (64) and the other bottom panels share the dismissal.
+
+---
+
 ## (22) Select multiple cels at once
 
 **Status** — not started, and **deprioritised by the owner 2026-09-07**. The menu row exists and is `.disabled(true)` with an empty action; no
@@ -100,9 +207,6 @@ against a transcript this audit does not have.
 
 **None of these are designed, and each needs its own conversation with the owner before it starts.**
 
-- **(27) Screen-record the computer as a layer.** Requires (26). The app does have `Transferable` and
-  `UTType` now; what is genuinely absent is the *drop* gesture — no `onDrop`, `dropDestination`,
-  `NSItemProvider` or `fileImporter` anywhere.
 - **(28) Audio.** Its stated blocker is **gone** — `PlaybackClock` is a drift-free wall-clock frame
   counter on the model, delivered by RENDER stage 1, which is exactly the hoist this item said it
   needed. `AVFoundation` is linked (for video), though no audio playback code exists.
