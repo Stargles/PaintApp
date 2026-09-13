@@ -1589,15 +1589,15 @@ struct FolderOptionsPanel: View {
     /// cel menu (`AnimationTimeline.keyframeItems`), and a folder cannot have it there: that menu is
     /// raised by a **two-stage tap** whose first stage *selects the row*, and the timeline's notion of
     /// "the row you are working on" is `currentLayerIndex` — a layer index, with no folder spelling.
-    /// `CanvasManager.keyframeTarget` already says as much ("what it does not have is a timeline row
-    /// for the control to be *next to*"). So a folder row's menu would need a folder selection state
-    /// the document does not have, and inventing one reaches the layer panel, the graph band and the
-    /// channel list. Two smaller refusals sit behind that one: `TimelineFolderRowView` is
-    /// `isUserInteractionEnabled = false` by construction ("cels are edited on the child layers' own
-    /// rows") and would need a coordinator back-reference and a zone model it has no cels to build
-    /// one from; and Clear Keyframes' scope is *the stretch of track you tapped*, which on a folder
-    /// row is its descendants' span — the wrong set, since a folder's own marks are in absolute
-    /// document frames and can sit outside every child's block.
+    /// A folder row *can* be picked in the timeline since TODO (21)'s folder band
+    /// (`CanvasManager.selectedFolderID`), but that pick is the graph editor band's row and
+    /// deliberately not the brush's, and this menu is a menu of a *cel*. Two smaller refusals sit
+    /// behind that one: `TimelineFolderRowView` is `isUserInteractionEnabled = false` by
+    /// construction ("cels are edited on the child layers' own rows") and would need a coordinator
+    /// back-reference and a zone model it has no cels to build one from; and Clear Keyframes' scope
+    /// is *the stretch of track you tapped*, which on a folder row is its descendants' span — the
+    /// wrong set, since a folder's own marks are in absolute document frames and can sit outside
+    /// every child's block.
     ///
     /// **Whereas a folder's animation already lives in this panel.** The Transform toggle and
     /// `transformMoveRow` above are how a folder's *pose* channel is reached at all, and the opacity
@@ -1669,6 +1669,22 @@ struct FolderOptionsPanel: View {
                 canvasManager.removeKeyframe(target, atFrame: frame)
             }
             .accessibilityValue("\(frame)")
+        }
+
+        // **The band, from the surface the keyframes were placed from** — TODO (21)'s folder band.
+        // A layer's band opens on the current layer from the timeline's own button, and a folder
+        // has a second door there too (its name in the timeline's name column picks it); this row
+        // is the one an artist standing *here*, having just pressed Add Keyframe, can see. It picks
+        // the folder's row and opens the editor in one press, and closes this panel so the band it
+        // raised is not under the rail that raised it.
+        // No `endMaskEdit()` here, unlike Delete and the Move row: those make a document edit
+        // before closing and need the session's bracket shut first; this writes no document
+        // state, and `onClose` ends the session by itself (`syncMaskEditSession`).
+        optionsAction("Show in Graph Editor", systemImage: "chart.xyaxis.line",
+                      identifier: "layerOptions.folderGraphEditor") {
+            canvasManager.selectFolderRow(folderID)
+            canvasManager.isGraphEditorOpen = true
+            onClose()
         }
     }
 

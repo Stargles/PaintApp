@@ -75,8 +75,7 @@ final class PoseBandLogicTests: XCTestCase {
     /// default, and it is the only place that states it.
     private func listed(_ manager: CanvasManager) throws -> [TimelineGraphBand.Channel] {
         let expansion = try XCTUnwrap(manager.graphBandExpansion, "the band is not open")
-        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: expansion.layerIndex))
-        return manager.graphBandListing(of: target).channels
+        return manager.graphBandListing(of: expansion.target).channels
     }
 
     private func channel(_ channels: [TimelineGraphBand.Channel],
@@ -775,7 +774,7 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
                        2, "Sanity: the fixture keys the channel twice")
 
-        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 12),
+        XCTAssertTrue(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 12),
                      "Frame 12 is cel-local 8 (the fixture's cel starts at 4), the second key")
 
         let track = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
@@ -802,7 +801,7 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
                        1, "Sanity: exactly one key, so the delete below empties the channel")
 
-        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 4),
+        XCTAssertTrue(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 4),
                       "Frame 4 is cel-local 0 — the fixture's cel starts at 4")
         XCTAssertNil(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id],
                      "The channel is gone from the dictionary, not stored with an empty track")
@@ -813,7 +812,7 @@ final class PoseBandLogicTests: XCTestCase {
     func testRemovePoseChannelKeyRefusesAFrameWithNoKey() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
-        XCTAssertFalse(manager.removePoseChannelKey(layerIndex: 1, parameterID: celX, frame: 7))
+        XCTAssertFalse(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 7))
         XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count, 2,
                        "A refused delete must not have touched the track")
     }
@@ -841,7 +840,7 @@ final class PoseBandLogicTests: XCTestCase {
         let beforeValues = try XCTUnwrap(PoseComponents.decompose(before))
 
         let celScaleY = PoseChannelID.cel(.cel).parameterID(.scaleY)
-        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: 1, parameterID: celScaleY, frame: 8,
+        XCTAssertTrue(manager.addPoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celScaleY, frame: 8,
                                                 value: 3),
                      "Frame 8 is cel-local 4, inside the cel and between the fixture's two keys")
 
@@ -867,13 +866,13 @@ final class PoseBandLogicTests: XCTestCase {
                           by translation: CGSize,
                           pixelsPerFrame: CGFloat = 30) throws -> TimelineGraphBand.Content {
         let content = try content(manager)
-        let snapshot = manager.graphBandPoseSnapshot(layerIndex: content.layerIndex)
+        let snapshot = manager.graphBandPoseSnapshot(of: content.target)
         let moves = TimelineGraphBand.moves(of: [ref], in: content.channels, translation: translation,
                                             pixelsPerFrame: pixelsPerFrame,
                                             bandHeight: TimelineGraphBand.height)
         XCTAssertTrue(manager.writeGraphBandPoseEdits(
             TimelineGraphBand.poseEdits(moves, in: content.channels),
-            from: snapshot, layerIndex: content.layerIndex),
+            from: snapshot, target: content.target),
                       "Fixture: the drag has to reach the document")
         return try self.content(manager)
     }
@@ -1036,9 +1035,9 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertTrue(TimelineGraphBand.draggingHandle(ref, in: before.channels, translation: travel,
                                                        pixelsPerFrame: ppf, bandHeight: height).isEmpty,
                       "…and not through the grade's, which would drop the id without saying so")
-        let snapshot = manager.graphBandPoseSnapshot(layerIndex: before.layerIndex)
+        let snapshot = manager.graphBandPoseSnapshot(of: before.target)
         XCTAssertTrue(manager.writeGraphBandPoseEdits(edits, from: snapshot,
-                                                      layerIndex: before.layerIndex))
+                                                      target: before.target))
 
         let moved = try XCTUnwrap(TimelineGraphBand.handles(of: node, in: try content(manager).channels,
                                                             pixelsPerFrame: ppf,
@@ -1080,12 +1079,12 @@ final class PoseBandLogicTests: XCTestCase {
                        "One node's handles belong to all six of its rows")
 
         let travel = CGSize(width: 9, height: -13)
-        let snapshot = manager.graphBandPoseSnapshot(layerIndex: before.layerIndex)
+        let snapshot = manager.graphBandPoseSnapshot(of: before.target)
         XCTAssertTrue(manager.writeGraphBandPoseEdits(
             TimelineGraphBand.poseHandleEdits(.init(key: node, side: .outgoing),
                                               in: beforeRows, translation: travel,
                                               pixelsPerFrame: ppf, bandHeight: height),
-            from: snapshot, layerIndex: before.layerIndex))
+            from: snapshot, target: before.target))
 
         let after = try listed(manager)
         let stored = try XCTUnwrap(manager.layers.first { $0.id == layerID }?

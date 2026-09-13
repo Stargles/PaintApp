@@ -112,8 +112,9 @@ extension CanvasManager {
     /// compiled into `PaintSoftwareUITests`, so a rule written there is pinned by nothing.
     ///
     /// - Returns: whether a box came up. False for a channel whose ink is not on the cel under the
-    ///   playhead, and — for a container pose — when the band's layer is not a transformation layer,
-    ///   which is the case a stale filter can still name.
+    ///   playhead, and — for a container pose — when the band's row is not posing (a layer that is
+    ///   not a transformation layer, a folder whose Transform is off), which is the case a stale
+    ///   filter can still name.
     @discardableResult
     func revealPoseChannel(_ channel: PoseChannelID) -> Bool {
         guard channel.raisesMoveBox else { return false }
@@ -123,7 +124,12 @@ extension CanvasManager {
         // Move on a transformation layer existed *"this returns true and nothing else changes"*. It
         // is that day; this arm is the one thing that did change, because the box a container pose
         // raises is not a vector float and so cannot go through `beginVectorChannelMove`.
-        case .container: return beginContainerPoseMove()
+        //
+        // **On the band's own row**, which since TODO (21)'s folder band may be a folder — the
+        // list is a control of the open band, so the box it raises is the box for the container
+        // whose curves the artist is looking at. §11.7's *"`LayerFolder.transform` is the case
+        // still without an entry"* closes here.
+        case .container: return beginContainerPoseMove(for: graphBandTarget)
         }
     }
 
@@ -147,22 +153,28 @@ extension CanvasManager {
     /// - Returns: whether the document changed. False for a frame the channel does not key, which is
     ///   the state a menu left up while an undo removed the node underneath it reaches — the same
     ///   guard `removeEffectParameterKey` states for the grade side.
+    ///
+    /// **Addressed by `KeyframeTarget`**, so a folder's own pose — TODO (21)'s folder band — takes
+    /// the same door: its container arm reads `containerPose(of:)` and writes through
+    /// `writeContainerPose(_:from:target:)`, which were already the two-home accessors. A cel
+    /// channel is a layer's alone; on a folder it names nothing and answers false.
     @discardableResult
-    func removePoseChannelKey(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard layers.indices.contains(layerIndex),
+    func removePoseChannelKey(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+        guard targetExists(target),
               let (channel, _) = PoseChannelID.resolve(parameterID: parameterID)
         else { return false }
-        let layerID = layers[layerIndex].id
         switch channel {
         case .container:
-            guard let before = layers[layerIndex].layerTransform, before.track.key(atFrame: frame) != nil
+            guard let before = containerPose(of: target), before.track.key(atFrame: frame) != nil
             else { return false }
             var after = before
             after.track.removeKey(atFrame: frame)
-            writeContainerPose(after, from: before, target: .layer(id: layerID), label: .removeKeyframe)
+            writeContainerPose(after, from: before, target: target, label: .removeKeyframe)
             return true
         case .cel(let id):
-            for cel in layers[layerIndex].cels {
+            guard case .layer(let layerID) = target,
+                  let layer = layers.first(where: { $0.id == layerID }) else { return false }
+            for cel in layer.cels {
                 let local = frame - cel.startFrame
                 guard cel.transformTracks[id.id]?.key(atFrame: local) != nil else { continue }
                 return removeTransformPoseKey(layerID: layerID, celID: cel.id, channel: id,
@@ -190,23 +202,25 @@ extension CanvasManager {
     ///
     /// - Returns: whether the document changed.
     @discardableResult
-    func addPoseChannelKey(layerIndex: Int, parameterID: String, frame: Int, value: Double) -> Bool {
-        guard layers.indices.contains(layerIndex),
+    func addPoseChannelKey(target: KeyframeTarget, parameterID: String, frame: Int,
+                           value: Double) -> Bool {
+        guard targetExists(target),
               let (channel, component) = PoseChannelID.resolve(parameterID: parameterID)
         else { return false }
-        let layerID = layers[layerIndex].id
         switch channel {
         case .container:
-            guard let before = layers[layerIndex].layerTransform,
+            guard let before = containerPose(of: target),
                   let resolved = before.track.pose(atDocumentFrame: frame),
                   let posed = PoseComponents.setting(component, to: value, of: resolved)
             else { return false }
             var after = before
             after.track.setKey(TransformTrack.Key(frame: frame, pose: posed))
-            writeContainerPose(after, from: before, target: .layer(id: layerID), label: .addKeyframe)
+            writeContainerPose(after, from: before, target: target, label: .addKeyframe)
             return true
         case .cel(let id):
-            for cel in layers[layerIndex].cels {
+            guard case .layer(let layerID) = target,
+                  let layer = layers.first(where: { $0.id == layerID }) else { return false }
+            for cel in layer.cels {
                 let local = frame - cel.startFrame
                 guard local >= 0, local < cel.frameCount,
                       let track = cel.transformTracks[id.id],

@@ -29,13 +29,15 @@ struct TimelineRowLayout {
     /// **A row given extra height below its blocks.** The graph editor band (KEYFRAMES.md §11.3),
     /// and today the only such thing — which is why this is one optional rather than a per-row
     /// array: the owner ruled on 2026-08-29 that exactly one band is open at a time, under the
-    /// selected layer.
+    /// selected row.
     ///
-    /// Addressed by **layer index rather than by row position** because that is what the caller
-    /// holds (`CanvasManager.currentLayerIndex`) and what survives a folder collapsing above it;
-    /// `make` resolves it to a position against the rows it is given.
+    /// Addressed by **`KeyframeTarget` rather than by row position** because that is what the
+    /// caller holds (`CanvasManager.graphBandTarget`) and what survives a folder collapsing above
+    /// it; `make` resolves it to a position against the rows it is given. It was a layer index
+    /// until TODO (21)'s folder band: a folder's channels are modelled and drawn exactly as a
+    /// layer's, and an index could not name the row they belong to.
     struct Expansion: Equatable {
-        let layerIndex: Int
+        let target: KeyframeTarget
         let height: CGFloat
     }
 
@@ -46,7 +48,7 @@ struct TimelineRowLayout {
     /// What the content reserves when `rowHeights` is empty, so an empty timeline is a row tall
     /// rather than a sliver.
     let placeholderRowHeight: CGFloat
-    /// Which presented row carries the expansion, resolved from `Expansion.layerIndex` — nil when
+    /// Which presented row carries the expansion, resolved from `Expansion.target` — nil when
     /// nothing is expanded, which is every layout until the artist opens the band.
     let expandedRow: Int?
     /// How much of `expandedRow`'s height is the expansion. Zero when `expandedRow` is nil.
@@ -72,14 +74,15 @@ struct TimelineRowLayout {
     /// extra**: that is the whole seam D1 left for the graph editor, and routing the band through
     /// here is what makes the two columns agreeing structural rather than remembered.
     ///
-    /// An `expansion` naming a layer that is not on screen — one inside a collapsed folder — resolves
-    /// to no row and is ignored, which is the right answer: there is nothing to open the band under.
+    /// An `expansion` naming a row that is not on screen — a layer or folder inside a collapsed
+    /// folder — resolves to no row and is ignored, which is the right answer: there is nothing to
+    /// open the band under.
     static func make(rows: [LayerStackRow],
                      rulerHeight: CGFloat,
                      rowHeight: CGFloat,
                      expansion: Expansion? = nil) -> TimelineRowLayout {
         let expandedRow = expansion.flatMap { wanted in
-            rows.firstIndex { $0.layerIndex == wanted.layerIndex }
+            rows.firstIndex { $0.keyframeTarget == wanted.target }
         }
         let extra = expandedRow == nil ? 0 : (expansion?.height ?? 0)
         return TimelineRowLayout(

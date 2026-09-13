@@ -267,16 +267,40 @@ final class CanvasManager: ObservableObject {
     /// `KeyframeTarget` it was authored against so it cannot.
     @Published var graphChannelFold: TimelineGraphChannelList.Fold = .none
 
-    /// **The layer the band is held under while a timeline gesture owns the track**, or nil when it
+    /// **The row the band is held under while a timeline gesture owns the track**, or nil when it
     /// is free to follow the selection — KEYFRAMES.md §11.3. Written only through
     /// `pinGraphBand()` / `releaseGraphBand()`, which is where the reasoning lives.
     ///
-    /// A layer index rather than a whole `Expansion` because that is the only part of the band a
+    /// A target rather than a whole `Expansion` because that is the only part of the band a
     /// gesture must not be allowed to move: opening and closing it is the artist pressing a button,
     /// which is never a thing that happens under a finger already on the track.
     ///
     /// Transient like `isGraphEditorOpen`, and shorter lived than it — one gesture.
-    @Published var graphBandPinnedLayerIndex: Int?
+    @Published var graphBandPinnedTarget: KeyframeTarget?
+
+    /// **The folder row the artist picked in the timeline**, or nil when the picked row is a layer
+    /// (`currentLayerIndex`) — TODO (21)'s folder band, KEYFRAMES.md §11.7.
+    ///
+    /// The timeline's selection was a layer index alone, and a folder's channels — its opacity, its
+    /// grade, its rotate speed, parallax share and shake rows, its own pose — could be keyed from
+    /// `FolderOptionsPanel` and drawn as diamonds on the folder's row, and could not be opened into
+    /// the graph editor band because nothing could name the folder as the row the band was on. This
+    /// is that name. `graphBandTarget` reads it ahead of `currentLayerIndex`, so a picked folder is
+    /// the band's row until a layer is picked.
+    ///
+    /// **Scoped to the timeline and the band, deliberately.** The brush still draws on
+    /// `currentLayerIndex`, the layer panel still highlights the current layer, and a tap on a
+    /// folder row in the *panel* still means expand/collapse: a folder is where a band's curves
+    /// live, not where ink lands, so this is a second row selection rather than a rival to the
+    /// first. Written through `selectFolderRow(_:)` and cleared by `selectLayer(_:)` — the two
+    /// spellings of "the artist picked this row" — and by any change of `currentLayerIndex`, since
+    /// a layer that becomes current by any route (a new layer, an undo that restores another) is
+    /// the row the band follows by the owner's ruling of 2026-08-29.
+    ///
+    /// Transient view state like `isGraphEditorOpen`, for its reason: it changes no pixel and means
+    /// nothing with the timeline closed. It is **not** dropped when the band closes — a picked
+    /// folder is a selection, and the band opening on the picked row is the whole point of picking.
+    @Published var selectedFolderID: UUID?
 
     /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
     /// order only because the artist picks them that way. Highlighted yellow on the timeline.
@@ -388,6 +412,12 @@ final class CanvasManager: ObservableObject {
     @Published var currentLayerIndex: Int = 0 {
         didSet {
             if oldValue != currentLayerIndex {
+                // A layer that became current by any route is the row the band follows — the
+                // folder pick yields to it. Only on a *change*: an undo's snapshot restore writes
+                // this back to the value it already holds, and a folder band's own drag is undone
+                // through exactly that restore, so an unconditional clear here would move the band
+                // off the folder on the first press of Undo.
+                if selectedFolderID != nil { selectedFolderID = nil }
                 handleActiveContextChanged()
                 // Debug recorder (off by default; see `ActionRecorder.isCapturing`). The *value*, not
                 // just the fact of a change — "which layer was active" is what decides where a stroke
@@ -2127,40 +2157,61 @@ final class CanvasManager: ObservableObject {
     ///
     /// - Returns: whether the document changed. False for a frame the channel does not key, which is
     ///   the state a menu left up while an undo removed the node underneath it reaches.
+    ///
+    /// **Addressed by `KeyframeTarget`** — the band it serves is on a layer or, since TODO (21)'s
+    /// folder band, a folder, and `graphNodeCurve` reads whichever of the two homes the target names.
     @discardableResult
-    func removeEffectParameterKey(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard var curve = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID),
+    func removeEffectParameterKey(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+        guard var curve = graphNodeCurve(target: target, parameterID: parameterID),
               curve.key(atFrame: frame) != nil
         else { return false }
         curve.removeKey(atFrame: frame)
-        return writeGraphNodeCurve(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+        return writeGraphNodeCurve(target: target, parameterID: parameterID, to: curve)
     }
 
     /// **The curve one graph-editor node belongs to, from whichever store owns its id** — the two
-    /// non-pose channel kinds resolved in one place.
+    /// non-pose channel kinds resolved in one place, on either of a target's two homes.
     ///
-    /// The node menu addresses a node by `(layerIndex, parameterID, frame)` and cannot know which
+    /// The node menu addresses a node by `(target, parameterID, frame)` and cannot know which
     /// store the id names, so the three readers below asked `effectTracks` outright — which for a
     /// `TargetChannel` id answers nil, and every one of them then returns false in silence. That is
     /// Delete Keyframe doing nothing on a node the artist is looking at, which is the shape of a
-    /// control that appears not to work.
-    private func graphNodeCurve(layerIndex: Int, parameterID: String) -> AnimationCurve? {
-        guard layers.indices.contains(layerIndex) else { return nil }
+    /// control that appears not to work. `keyframeState(of:)` is the one reader of both stores on
+    /// both homes, so a folder's node is found by the same line a layer's is.
+    private func graphNodeCurve(target: KeyframeTarget, parameterID: String) -> AnimationCurve? {
+        guard targetExists(target) else { return nil }
+        let state = keyframeState(of: target)
         return TargetChannel.isTargetChannel(parameterID: parameterID)
-            ? layers[layerIndex].channelTracks[parameterID]
-            : layers[layerIndex].effectTracks[parameterID]
+            ? state.channelTracks[parameterID]
+            : state.tracks[parameterID]
     }
 
     /// `graphNodeCurve`'s write half, routed to the same store — so a node menu action reaches the
     /// funnel that applies §2.28's mark rule for that kind rather than the one that would refuse it.
     @discardableResult
-    private func writeGraphNodeCurve(layerIndex: Int, parameterID: String,
+    private func writeGraphNodeCurve(target: KeyframeTarget, parameterID: String,
                                      to curve: AnimationCurve?) -> Bool {
         guard TargetChannel.isTargetChannel(parameterID: parameterID) else {
-            return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+            return setEffectParameterTrack(target, parameterID: parameterID, to: curve)
         }
-        guard let target = keyframeTarget(layerIndex: layerIndex) else { return false }
         return setTargetChannelTrack(target, channelID: parameterID, to: curve)
+    }
+
+    /// **`setEffectParameterTrack` addressed by target** — the layer overload above or the folder
+    /// overload below, chosen by the case. The graph editor band writes through this since TODO
+    /// (21)'s folder band, so that one call site serves both homes and neither overload's rules
+    /// are restated. Every rule of the two overloads holds: a missing target, a non-grading one and
+    /// a non-scalar parameter all answer false at the door.
+    @discardableResult
+    func setEffectParameterTrack(_ target: KeyframeTarget, parameterID: String,
+                                 to curve: AnimationCurve?) -> Bool {
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }) else { return false }
+            return setEffectParameterTrack(layerIndex: index, parameterID: parameterID, to: curve)
+        case .folder(let id):
+            return setEffectParameterTrack(folderID: id, parameterID: parameterID, to: curve)
+        }
     }
 
     /// **Give one node its derived tangents back** — the node menu's Reset Curve, and the only way
@@ -2175,22 +2226,22 @@ final class CanvasManager: ObservableObject {
     /// - Returns: whether the document changed. False when the node is already on the default, which
     ///   is what lets the menu hide the item rather than offering an action that does nothing.
     @discardableResult
-    func resetEffectParameterKeyCurve(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard var curve = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID),
+    func resetEffectParameterKeyCurve(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+        guard var curve = graphNodeCurve(target: target, parameterID: parameterID),
               var key = curve.key(atFrame: frame)
         else { return false }
         key.tangentMode = .autoClamped
         key.inHandle = .zero
         key.outHandle = .zero
         curve.setKey(key)
-        return writeGraphNodeCurve(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+        return writeGraphNodeCurve(target: target, parameterID: parameterID, to: curve)
     }
 
     /// Whether that node has anything to reset — an authored tangent rather than a derived one. The
     /// menu reads this so Reset Curve appears only where it would do something, which is
     /// `Clear Loop Range`'s rule on the ruler menu beside it.
-    func effectParameterKeyIsAuthored(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
-        guard let key = graphNodeCurve(layerIndex: layerIndex, parameterID: parameterID)?
+    func effectParameterKeyIsAuthored(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+        guard let key = graphNodeCurve(target: target, parameterID: parameterID)?
                 .key(atFrame: frame)
         else { return false }
         return key.tangentMode != .autoClamped
@@ -3600,6 +3651,29 @@ final class CanvasManager: ObservableObject {
     func toggleFolderExpanded(_ folderID: UUID) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[idx].isExpanded.toggle()
+    }
+
+    /// **The artist picked a layer's row** — a tap on a cel, a slot, a panel row or a timeline
+    /// name, or a block lifted off it. Sets `currentLayerIndex` and, whether or not that changes,
+    /// drops any folder pick: `currentLayerIndex`'s own `didSet` clears it only on a change, for the
+    /// undo reason given there, so a tap that re-picks the layer the brush is already on has to say
+    /// so here or the band would stay on a folder the artist has just tapped away from.
+    ///
+    /// Refuses an index that names no layer rather than writing it, which every caller of the raw
+    /// property already guards against by hand.
+    func selectLayer(_ index: Int) {
+        guard layers.indices.contains(index) else { return }
+        if selectedFolderID != nil { selectedFolderID = nil }
+        currentLayerIndex = index
+    }
+
+    /// **The artist picked a folder's row in the timeline** — `selectedFolderID`'s one writer.
+    /// The graph editor band, if open, moves under the folder; if closed, it opens there on the
+    /// next press. The brush is not moved: `currentLayerIndex` is untouched, so ink keeps landing
+    /// where it did.
+    func selectFolderRow(_ folderID: UUID) {
+        guard folders.contains(where: { $0.id == folderID }) else { return }
+        selectedFolderID = folderID
     }
 
     /// The container the active layer sits in, or nil when it sits at the top level (or when there is

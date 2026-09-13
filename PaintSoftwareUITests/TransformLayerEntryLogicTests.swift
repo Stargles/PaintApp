@@ -574,9 +574,9 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         // write that follows a wrongly-taken guard is a no-op on the pose and a *real, empty* entry
         // on the undo stack, so only the returned Bool can tell the two apart. `PoseBandLogicTests`
         // pins the same refusal on the cel arm; this is the container's.
-        XCTAssertFalse(manager.removePoseChannelKey(layerIndex: at, parameterID: containerX, frame: 3),
+        XCTAssertFalse(manager.removePoseChannelKey(target: .layer(id: manager.layers[at].id), parameterID: containerX, frame: 3),
                        "Frame 3 carries no container key, so there is nothing to delete there")
-        XCTAssertTrue(manager.removePoseChannelKey(layerIndex: at, parameterID: containerX, frame: 8))
+        XCTAssertTrue(manager.removePoseChannelKey(target: .layer(id: manager.layers[at].id), parameterID: containerX, frame: 8))
         XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame), [0],
                        "The key at 8 is gone, the one at 0 is not")
 
@@ -611,7 +611,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[at].transform?.track.keys.map(\.frame), [0])
 
         let containerRotation = PoseChannelID.container.parameterID(.rotation)
-        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: at, parameterID: containerRotation,
+        XCTAssertTrue(manager.addPoseChannelKey(target: .layer(id: manager.layers[at].id), parameterID: containerRotation,
                                                 frame: 6, value: 30))
 
         let addedPose = try XCTUnwrap(manager.layers[at].transform?.track.key(atFrame: 6)?.pose)
@@ -653,7 +653,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
                           + "tell a held component from a reset one")
 
         let containerRotation = PoseChannelID.container.parameterID(.rotation)
-        XCTAssertTrue(manager.addPoseChannelKey(layerIndex: at, parameterID: containerRotation,
+        XCTAssertTrue(manager.addPoseChannelKey(target: .layer(id: manager.layers[at].id), parameterID: containerRotation,
                                                 frame: 4, value: 30))
 
         let added = try XCTUnwrap(PoseComponents.decompose(

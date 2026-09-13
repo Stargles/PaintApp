@@ -179,7 +179,7 @@ final class PoseNodeDragLogicTests: XCTestCase {
                       expecting: String?, ticks: Int = 2, cancelled: Bool = false,
                       file: StaticString = #filePath, line: UInt = #line) throws -> Bool {
         let content = try content(manager)
-        let baseline = manager.graphBandPoseSnapshot(layerIndex: content.layerIndex)
+        let baseline = manager.graphBandPoseSnapshot(of: content.target)
         let grab = TimelineGraphBand.grab(at: start, focused: nil, channels: content.channels,
                                           pixelsPerFrame: ppf, bandHeight: height)
         guard case .key(let hit) = grab else {
@@ -199,12 +199,12 @@ final class PoseNodeDragLogicTests: XCTestCase {
             let moves = TimelineGraphBand.moves(of: [hit], in: content.channels, translation: step,
                                                 pixelsPerFrame: ppf, bandHeight: height)
             if manager.writeGraphBandPoseEdits(TimelineGraphBand.poseEdits(moves, in: content.channels),
-                                               from: baseline, layerIndex: content.layerIndex) {
+                                               from: baseline, target: content.target) {
                 wrote = true
             }
         }
         if cancelled {
-            manager.restoreGraphBandPoses(baseline, layerIndex: content.layerIndex)
+            manager.restoreGraphBandPoses(baseline, target: content.target)
             manager.cancelStructureGesture()
         } else if wrote {
             manager.commitStructureGesture(label: .effectKeyframes)
@@ -259,7 +259,7 @@ final class PoseNodeDragLogicTests: XCTestCase {
         let (manager, layerID, celID) = celFixture()
         try animate(manager, layerID: layerID, celID: celID)
         let content = try content(manager)
-        let baseline = manager.graphBandPoseSnapshot(layerIndex: content.layerIndex)
+        let baseline = manager.graphBandPoseSnapshot(of: content.target)
 
         let caught = TimelineGraphBand.keys(in: CGRect(x: TimelineGraphBand.x(ofFrame: 8,
                                                                              pixelsPerFrame: ppf) - 6,
@@ -274,7 +274,7 @@ final class PoseNodeDragLogicTests: XCTestCase {
         let edits = TimelineGraphBand.poseEdits(moves, in: content.channels)
         XCTAssertEqual(edits[PoseChannelID.cel(.cel).groupID]?.retimes, [8: 10],
                        "Six rows fold into one retime of one key")
-        manager.writeGraphBandPoseEdits(edits, from: baseline, layerIndex: content.layerIndex)
+        manager.writeGraphBandPoseEdits(edits, from: baseline, target: content.target)
         XCTAssertEqual(try framesOfEachRow(manager), Array(repeating: [4, 10, 12], count: 6))
     }
 

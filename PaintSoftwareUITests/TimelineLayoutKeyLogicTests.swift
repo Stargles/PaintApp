@@ -469,9 +469,9 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
     /// The band follows the selection, so moving the selection moves what it draws.
     func testSelectingAnotherLayerMovesTheBand() {
         let m = bandManager()
-        XCTAssertEqual(key(m).graphBand?.layerIndex, 1)
+        XCTAssertEqual(key(m).graphBand?.target, .layer(id: m.layers[1].id))
         m.currentLayerIndex = 0
-        XCTAssertEqual(key(m).graphBand?.layerIndex, 0)
+        XCTAssertEqual(key(m).graphBand?.target, .layer(id: m.layers[0].id))
         XCTAssertEqual(key(m).graphBand?.channels, [], "The floor animates nothing")
     }
 

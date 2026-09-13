@@ -55,6 +55,19 @@ enum LayerStackRow: Identifiable, Equatable {
         if case .folder(_, _, let kind) = self { return kind }
         return nil
     }
+
+    /// **The row as a keyframe target** — what the graph editor band opens under.
+    ///
+    /// Every row is one: a layer is `.layer(id:)` and a folder is `.folder(id:)`, which is what lets
+    /// `TimelineRowLayout.make` resolve an expansion to a row without asking which kind it names.
+    /// By id rather than by `index`, because an id survives a restack and a folder collapsing above
+    /// it, and a folder has no index to be addressed by in the first place.
+    var keyframeTarget: KeyframeTarget {
+        switch self {
+        case .folder(let id, _, _):   return .folder(id: id)
+        case .layer(let id, _, _):    return .layer(id: id)
+        }
+    }
 }
 
 extension LayerStackRow.FolderKind {

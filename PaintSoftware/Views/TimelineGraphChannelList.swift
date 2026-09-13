@@ -429,9 +429,7 @@ extension CanvasManager {
     /// walk `Effect.parameters` from the same `TimelineGraphBand.channels(effect:tracks:)` call so
     /// they cannot disagree about what a channel is. This one is read only while the popup is up.
     var graphChannelGroups: [TimelineGraphChannelList.Group]? {
-        guard let expansion = graphBandExpansion,
-              let target = keyframeTarget(layerIndex: expansion.layerIndex)
-        else { return nil }
+        guard let target = graphBandExpansion?.target else { return nil }
         let channels = graphBandListing(of: target).channels
         // **Two name tables merged, which is the shape `groupNames(of:)`' doc predicted**: *"the day
         // a band lists a transform beside a grade, its names are two of these merged, and nothing
@@ -461,9 +459,7 @@ extension CanvasManager {
     /// **One row's box, or one group's, flipped on the band that is open.** No-op with the band
     /// closed, which is what stops a filter existing for a surface that is not on screen.
     func setGraphChannels(_ ids: [String], visible: Bool) {
-        guard let expansion = graphBandExpansion,
-              let target = keyframeTarget(layerIndex: expansion.layerIndex)
-        else { return }
+        guard let target = graphBandExpansion?.target else { return }
         let channels = graphBandListing(of: target).channels
         graphChannelFilter = graphChannelFilter.setting(
             ids, visible: visible, on: target, listed: channels.map(\.parameterID),
@@ -473,9 +469,7 @@ extension CanvasManager {
     /// **One group's chevron, flipped on the band that is open** — §11.7's fold, and
     /// `setGraphChannels`' twin down to the no-op with the band closed.
     func setGraphGroupCollapsed(_ id: String, collapsed: Bool) {
-        guard let expansion = graphBandExpansion,
-              let target = keyframeTarget(layerIndex: expansion.layerIndex)
-        else { return }
+        guard let target = graphBandExpansion?.target else { return }
         let listed = graphBandListing(of: target).channels
             .map { TimelineGraphChannelList.groupID(ofParameterID: $0.parameterID) }
         graphChannelFold = graphChannelFold.setting(id, collapsed: collapsed,

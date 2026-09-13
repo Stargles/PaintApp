@@ -589,8 +589,8 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
         // First tap selects the layer; tapping the already-selected one opens its options.
         if canvasManager.currentLayerIndex == row.layerIndex {
             onRequestOptions?(row.id)
-        } else if canvasManager.layers.indices.contains(row.layerIndex) {
-            canvasManager.currentLayerIndex = row.layerIndex
+        } else {
+            canvasManager.selectLayer(row.layerIndex)
         }
     }
 

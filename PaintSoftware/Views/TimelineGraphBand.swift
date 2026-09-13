@@ -182,7 +182,7 @@ enum TimelineGraphBand {
         /// **The repair was a second funnel, not a second selection rule, and delete and tap-to-add
         /// are the same repair reached a stage later.** `TimelineGraphBand.poseEdits(_:in:)` folds a
         /// drag's row-level moves into *key*-level ones and `CanvasManager.writeGraphBandPoseEdits\
-        /// (_:from:layerIndex:)` writes them onto the `TransformTrack.Key` itself — one frame, six
+        /// (_:from:target:)` writes them onto the `TransformTrack.Key` itself — one frame, six
         /// components — so the six cannot come apart however the gesture layer carries them (see
         /// `PoseEdit`). Delete and tap-to-add needed the identical shape of funnel and did not have
         /// one: the node menu's Delete used to reach only `removeEffectParameterKey`, a grade writer
@@ -271,9 +271,10 @@ enum TimelineGraphBand {
     /// field and the whole of §11.3's first silent failure is closed by construction: what the band
     /// draws *is* what the layout gate compares.
     struct Content: Equatable {
-        /// Which layer's row the band hangs under — `CanvasManager.currentLayerIndex` at the moment
-        /// the key was built. In the key because the row it expands is a row whose *height* changes.
-        let layerIndex: Int
+        /// Which row the band hangs under — `CanvasManager.graphBandTarget` at the moment the key
+        /// was built, a layer or a folder. In the key because the row it expands is a row whose
+        /// *height* changes.
+        let target: KeyframeTarget
         /// The expansion this band asked the row layout for. In the key for §11.2's reason: D2 is
         /// the first stage to derive a row height from something other than `(rows, rowHeight)`, and
         /// a height outside the key draws once and never moves again.
@@ -2026,17 +2027,35 @@ extension CanvasManager {
     ///
     /// **The band follows the selection rather than being toggled per layer** — the owner's ruling
     /// of 2026-08-29, offered per-layer toggles and an open-every-animated-layer mode. So the state
-    /// is one `Bool` and the row is `currentLayerIndex`, which is also the cheapest of the three to
+    /// is one `Bool` and the row is `graphBandTarget`, which is also the cheapest of the three to
     /// key correctly.
     ///
     /// **Except while a gesture owns the track**, when it is the row `pinGraphBand()` recorded.
     /// Selection is a *side effect* of half the timeline's gestures — picking a block up selects the
-    /// layer it came from — so following `currentLayerIndex` unconditionally reflows the whole track
-    /// by a band height in the middle of a drag. See `pinGraphBand()`.
+    /// layer it came from — so following the selection unconditionally reflows the whole track by a
+    /// band height in the middle of a drag. See `pinGraphBand()`.
     var graphBandExpansion: TimelineRowLayout.Expansion? {
-        let row = graphBandPinnedLayerIndex ?? currentLayerIndex
-        guard isGraphEditorOpen, layers.indices.contains(row) else { return nil }
-        return TimelineRowLayout.Expansion(layerIndex: row, height: TimelineGraphBand.height)
+        guard isGraphEditorOpen, let target = graphBandTarget else { return nil }
+        return TimelineRowLayout.Expansion(target: target, height: TimelineGraphBand.height)
+    }
+
+    /// **The row the band is on, or would open on** — TODO (21)'s folder band.
+    ///
+    /// Three answers in precedence: the row a gesture pinned (`pinGraphBand()`), else the folder
+    /// row the artist picked (`selectedFolderID`), else the current layer. The middle one is what
+    /// widened this from a layer index: a folder's channels are listed, drawn and written exactly as
+    /// a layer's (`graphBandListing(of:)` never knew the difference), so the only thing a folder
+    /// band needed was a row that could be named. Nil only when the document has no layer at all.
+    ///
+    /// A pinned or picked row that has since been deleted answers as if it were not there, so a
+    /// band never opens under a row the timeline does not draw — and an undo that brings the folder
+    /// back brings the band with it, since the pick is an id and not a position.
+    var graphBandTarget: KeyframeTarget? {
+        if let pinned = graphBandPinnedTarget, targetExists(pinned) { return pinned }
+        if let folderID = selectedFolderID, folders.contains(where: { $0.id == folderID }) {
+            return .folder(id: folderID)
+        }
+        return keyframeTarget(layerIndex: currentLayerIndex)
     }
 
     /// **Hold the band on the row it is on now, for the duration of a gesture that owns the track.**
@@ -2058,14 +2077,14 @@ extension CanvasManager {
     /// them to hold and a call in them would be a control that never fires. A gesture that starts
     /// selecting a layer mid-flight must take one.
     func pinGraphBand() {
-        graphBandPinnedLayerIndex = currentLayerIndex
+        graphBandPinnedTarget = graphBandTarget
     }
 
     /// Lets the band go where the selection has moved to. Safe to call with nothing pinned, which is
     /// what makes the release unconditional at the top of `endBlockDrag` rather than paired with the
     /// guard that decides whether there was a drag at all.
     func releaseGraphBand() {
-        graphBandPinnedLayerIndex = nil
+        graphBandPinnedTarget = nil
     }
 
     /// **What the open band draws**, or nil when it is closed.
@@ -2085,9 +2104,8 @@ extension CanvasManager {
     /// `channels` makes the key move for free and leaves the drawing code untouched, which is the
     /// same bargain `trackMarkers` takes: what is drawn *is* what is keyed on.
     var graphBandContent: TimelineGraphBand.Content? {
-        guard let expansion = graphBandExpansion,
-              let target = keyframeTarget(layerIndex: expansion.layerIndex)
-        else { return nil }
+        guard let expansion = graphBandExpansion else { return nil }
+        let target = expansion.target
         let listing = graphBandListing(of: target)
         // **The defaults are resolved here, from the listing, and not stored** — TODO (59). The
         // filter's own set is what the *artist* switched off; `defaultHidden` is what a band they
@@ -2098,7 +2116,7 @@ extension CanvasManager {
             hidden: graphChannelFilter.hidden(
                 on: target,
                 defaults: TimelineGraphChannelList.defaultHidden(in: listing.channels)))
-        return TimelineGraphBand.Content(layerIndex: expansion.layerIndex,
+        return TimelineGraphBand.Content(target: target,
                                          height: expansion.height,
                                          channels: shown,
                                          hiddenCount: listing.channels.count - shown.count,
@@ -2187,8 +2205,11 @@ extension CanvasManager {
         case .folder(let id):
             guard let folder = folders.first(where: { $0.id == id }),
                   let pose = folder.transform, !pose.track.isEmpty else { return [] }
+            // Named for what it is — the channel list's header over a folder band reads "Group
+            // Transform", the folder panel's own word for the toggle that made it, where
+            // `defaultName` would say "Layer Transform" about a row that is not a layer.
             sources.append(TimelineGraphBand.PoseSource(channel: .container, track: pose.track,
-                                                        frameOffset: 0))
+                                                        frameOffset: 0, name: "Group Transform"))
         }
         return sources
     }
@@ -2203,40 +2224,47 @@ extension CanvasManager {
     /// it is no longer there. Composing tick two onto tick one's document would look for a key that
     /// had moved and find either nothing or a neighbour.
     ///
-    /// It is also what makes a cancelled drag one call — `restoreGraphBandPoses(_:layerIndex:)` —
+    /// It is also what makes a cancelled drag one call — `restoreGraphBandPoses(_:target:)` —
     /// rather than an inverse edit somebody has to derive.
     ///
-    /// **Addressed by layer id, not by index**, `setEffectParameterTrack`'s rule: a restack between
-    /// the edit and the undo moves an index and cannot move an id.
+    /// **Addressed by `KeyframeTarget`, never by index**, `setEffectParameterTrack`'s rule: a
+    /// restack between the edit and the undo moves an index and cannot move an id — and a folder,
+    /// TODO (21)'s second band, has no index at all.
     struct GraphBandPoseSnapshot: Equatable {
         /// One cel's pose state, with the frame its band-absolute keys are offset by.
         struct Cel: Equatable {
             let startFrame: Int
             var state: CanvasManager.CelPoseState
         }
-        var layerID: UUID?
+        var target: KeyframeTarget?
+        /// Empty for a folder: a folder holds children rather than cels, so its band has no cel
+        /// channel to snapshot and this is one dictionary lookup that finds nothing.
         var cels: [UUID: Cel] = [:]
-        /// `Layer.transform`, raw. Nil is a real value here — a layer with no container pose — so a
-        /// restore writes it back unconditionally rather than skipping.
+        /// The container pose — `Layer.transform` or `LayerFolder.transform` — raw. Nil is a real
+        /// value here (a target with no container pose), so a restore writes it back
+        /// unconditionally rather than skipping.
         var container: LayerPose?
 
         var isEmpty: Bool { cels.isEmpty && container == nil }
     }
 
-    /// The snapshot for one layer. Costs a dictionary of value types per cel that carries a pose, and
-    /// nothing at all for the overwhelming majority of documents, which carry none.
-    func graphBandPoseSnapshot(layerIndex: Int) -> GraphBandPoseSnapshot {
-        guard layers.indices.contains(layerIndex) else { return GraphBandPoseSnapshot() }
-        var snapshot = GraphBandPoseSnapshot(layerID: layers[layerIndex].id)
-        for cel in layers[layerIndex].cels where !cel.transformTracks.isEmpty
-            || !cel.pendingPoseBaselines.isEmpty {
-            snapshot.cels[cel.id] = GraphBandPoseSnapshot.Cel(
-                startFrame: cel.startFrame,
-                state: CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines))
+    /// The snapshot for one target. Costs a dictionary of value types per cel that carries a pose,
+    /// and nothing at all for the overwhelming majority of documents, which carry none.
+    func graphBandPoseSnapshot(of target: KeyframeTarget) -> GraphBandPoseSnapshot {
+        guard targetExists(target) else { return GraphBandPoseSnapshot() }
+        var snapshot = GraphBandPoseSnapshot(target: target)
+        if case .layer(let id) = target, let layer = layers.first(where: { $0.id == id }) {
+            for cel in layer.cels where !cel.transformTracks.isEmpty
+                || !cel.pendingPoseBaselines.isEmpty {
+                snapshot.cels[cel.id] = GraphBandPoseSnapshot.Cel(
+                    startFrame: cel.startFrame,
+                    state: CelPoseState(tracks: cel.transformTracks,
+                                        baselines: cel.pendingPoseBaselines))
+            }
         }
         // The accessor, never the raw field — `poseSources`' rule: a pose left behind by a kind change
         // poses nothing, so it is not a channel the band drew and not one a drag may rewrite.
-        snapshot.container = layers[layerIndex].layerTransform
+        snapshot.container = containerPose(of: target)
         return snapshot
     }
 
@@ -2258,7 +2286,7 @@ extension CanvasManager {
     @discardableResult
     func writeGraphBandPoseEdits(_ edits: [String: TimelineGraphBand.PoseEdit],
                                  from snapshot: GraphBandPoseSnapshot,
-                                 layerIndex: Int) -> Bool {
+                                 target: KeyframeTarget) -> Bool {
         guard !edits.isEmpty, !snapshot.isEmpty else { return false }
         var after = snapshot
         // Sorted, so two channels edited in one drag are folded in a fixed order — the answer does not
@@ -2283,7 +2311,7 @@ extension CanvasManager {
                 after.container = pose
             }
         }
-        return commitGraphBandPoseSnapshot(after, from: snapshot, layerIndex: layerIndex)
+        return commitGraphBandPoseSnapshot(after, from: snapshot, target: target)
     }
 
     /// **Puts a cancelled drag's poses back**, and records nothing doing it.
@@ -2295,14 +2323,13 @@ extension CanvasManager {
     /// `endGraphBandDrag(cancelled:)` already makes for the grade curves, where "record nothing" and
     /// "change nothing" have to be arranged separately.
     @discardableResult
-    func restoreGraphBandPoses(_ snapshot: GraphBandPoseSnapshot, layerIndex: Int) -> Bool {
-        guard !snapshot.isEmpty,
-              let layerID = snapshot.layerID ?? layerID(atIndex: layerIndex),
-              let index = layers.firstIndex(where: { $0.id == layerID }),
-              graphBandPoseSnapshot(layerIndex: index) != snapshot
+    func restoreGraphBandPoses(_ snapshot: GraphBandPoseSnapshot, target: KeyframeTarget) -> Bool {
+        let target = snapshot.target ?? target
+        guard !snapshot.isEmpty, targetExists(target),
+              graphBandPoseSnapshot(of: target) != snapshot
         else { return false }
         beginCanvasEdit()
-        return applyGraphBandPoseSnapshot(snapshot, layerID: layerID)
+        return applyGraphBandPoseSnapshot(snapshot, target: target)
     }
 
     /// Applies a pose snapshot and records the one step that takes it back — `commitCelPoseState`'s
@@ -2316,50 +2343,52 @@ extension CanvasManager {
     @discardableResult
     private func commitGraphBandPoseSnapshot(_ state: GraphBandPoseSnapshot,
                                              from before: GraphBandPoseSnapshot,
-                                             layerIndex: Int) -> Bool {
-        guard let layerID = state.layerID ?? layerID(atIndex: layerIndex),
-              let index = layers.firstIndex(where: { $0.id == layerID }),
-              graphBandPoseSnapshot(layerIndex: index) != state
-        else { return false }
+                                             target: KeyframeTarget) -> Bool {
+        let target = state.target ?? target
+        guard targetExists(target), graphBandPoseSnapshot(of: target) != state else { return false }
         beginCanvasEdit()
-        guard applyGraphBandPoseSnapshot(state, layerID: layerID) else { return false }
+        guard applyGraphBandPoseSnapshot(state, target: target) else { return false }
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
         recordUndo(label: .effectKeyframes,
                    cost: Self.graphBandPoseUndoCost(before) + Self.graphBandPoseUndoCost(state),
                    undo: { [weak self] in
-                       _ = self?.applyGraphBandPoseSnapshot(before, layerID: layerID)
+                       _ = self?.applyGraphBandPoseSnapshot(before, target: target)
                    }, redo: { [weak self] in
-                       _ = self?.applyGraphBandPoseSnapshot(state, layerID: layerID)
+                       _ = self?.applyGraphBandPoseSnapshot(state, target: target)
                    })
         return true
     }
 
-    /// The one mutation every direction of the undo above goes through, re-resolving the layer by id
-    /// on every call — `applyCelPoseState`'s rule, one container up.
+    /// The one mutation every direction of the undo above goes through, re-resolving the target by
+    /// id on every call — `applyCelPoseState`'s rule, one container up.
     ///
     /// - Returns: whether anything actually moved, so a restore that had nothing to put back neither
     ///   invalidates a bake nor records a step.
     @discardableResult
     private func applyGraphBandPoseSnapshot(_ snapshot: GraphBandPoseSnapshot,
-                                            layerID: UUID) -> Bool {
-        guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return false }
+                                            target: KeyframeTarget) -> Bool {
+        guard targetExists(target) else { return false }
         var changed = false
-        for celIndex in layers[index].cels.indices {
-            let cel = layers[index].cels[celIndex]
-            guard let want = snapshot.cels[cel.id] else { continue }
-            guard cel.transformTracks != want.state.tracks
-                    || cel.pendingPoseBaselines != want.state.baselines else { continue }
-            layers[index].cels[celIndex].transformTracks = want.state.tracks
-            layers[index].cels[celIndex].pendingPoseBaselines = want.state.baselines
-            celContentChangedOutsideStroke(layerID: layerID, celID: cel.id)
-            changed = true
+        if case .layer(let layerID) = target,
+           let index = layers.firstIndex(where: { $0.id == layerID }) {
+            for celIndex in layers[index].cels.indices {
+                let cel = layers[index].cels[celIndex]
+                guard let want = snapshot.cels[cel.id] else { continue }
+                guard cel.transformTracks != want.state.tracks
+                        || cel.pendingPoseBaselines != want.state.baselines else { continue }
+                layers[index].cels[celIndex].transformTracks = want.state.tracks
+                layers[index].cels[celIndex].pendingPoseBaselines = want.state.baselines
+                celContentChangedOutsideStroke(layerID: layerID, celID: cel.id)
+                changed = true
+            }
         }
-        // The raw field, because nil is a real value here and a restore has to be able to write it —
-        // gated on the *accessor* so a pose left behind by a kind change is neither read nor written.
-        if layers[index].layerTransform != snapshot.container,
-           layers[index].layerTransform != nil || snapshot.container != nil {
-            layers[index].transform = snapshot.container
+        // The raw field, through `applyContainerPose`, because nil is a real value here and a restore
+        // has to be able to write it — gated on the *accessor* so a pose left behind by a kind change
+        // is neither read nor written. A folder's accessor is its field, so the gate is inert there.
+        let inForce = containerPose(of: target)
+        if inForce != snapshot.container, inForce != nil || snapshot.container != nil {
+            applyContainerPose(snapshot.container, target: target)
             changed = true
         }
         return changed
@@ -2375,12 +2404,6 @@ extension CanvasManager {
             cost += 160 * cel.state.baselines.count
         }
         return cost
-    }
-
-    /// The index-to-id conversion `keyframeTarget(layerIndex:)` makes, without minting a target — for
-    /// a snapshot taken before the layer was resolved, and for a stale index.
-    private func layerID(atIndex index: Int) -> UUID? {
-        layers.indices.contains(index) ? layers[index].id : nil
     }
 
     /// The words the artist picked a cel channel by — an animation group's own `displayName`, and

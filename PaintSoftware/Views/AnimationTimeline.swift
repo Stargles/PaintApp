@@ -437,13 +437,13 @@ struct AnimationTimeline: View {
         case .gap(let layerIndex, let frame):
             menuList {
                 menuButton("Add Drawing", icon: "plus.square") {
-                    canvasManager.currentLayerIndex = layerIndex
+                    canvasManager.selectLayer(layerIndex)
                     canvasManager.addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1)
                     canvasManager.goToFrame(frame)
                 }
                 if canvasManager.copiedCel != nil {
                     menuButton("Paste", icon: "doc.on.clipboard") {
-                        canvasManager.currentLayerIndex = layerIndex
+                        canvasManager.selectLayer(layerIndex)
                         canvasManager.pasteCel(layerIndex: layerIndex, startFrame: frame)
                         canvasManager.goToFrame(frame)
                     }
@@ -492,7 +492,7 @@ struct AnimationTimeline: View {
         // one dragged off its frame does. **A pose node's Delete takes the second funnel TODO (21)
         // added** — `removePoseChannelKey`, which drops the whole `TransformTrack.Key` the row's six
         // components share, since there is no per-component version of it to remove.
-        case .graphNode(let layerIndex, let parameterID, let frame):
+        case .graphNode(let target, let parameterID, let frame):
             let isPose = PoseChannelID.isPose(parameterID: parameterID)
             menuList {
                 // Offered only where there is something to reset — an authored tangent rather than a
@@ -505,20 +505,20 @@ struct AnimationTimeline: View {
                 // so it answers false and the row is absent for exactly the same reason it always was.
                 // A pose key's shared ease has its own reset story (§11.7's `.free` tangent mode) and
                 // TODO (21) is node delete and tap-to-add, not that one.
-                if canvasManager.effectParameterKeyIsAuthored(layerIndex: layerIndex,
+                if canvasManager.effectParameterKeyIsAuthored(target: target,
                                                               parameterID: parameterID, frame: frame) {
                     menuButton("Reset Curve", icon: "arrow.uturn.backward") {
-                        canvasManager.resetEffectParameterKeyCurve(layerIndex: layerIndex,
+                        canvasManager.resetEffectParameterKeyCurve(target: target,
                                                                    parameterID: parameterID,
                                                                    frame: frame)
                     }
                 }
                 menuButton("Delete Keyframe", icon: "trash", role: .destructive) {
                     if isPose {
-                        canvasManager.removePoseChannelKey(layerIndex: layerIndex,
+                        canvasManager.removePoseChannelKey(target: target,
                                                            parameterID: parameterID, frame: frame)
                     } else {
-                        canvasManager.removeEffectParameterKey(layerIndex: layerIndex,
+                        canvasManager.removeEffectParameterKey(target: target,
                                                                parameterID: parameterID, frame: frame)
                     }
                 }
@@ -1058,7 +1058,8 @@ struct AnimationTimeline: View {
                 if groups.isEmpty {
                     // The same answer the band gives, in words: a surface that came up holding
                     // nothing says so rather than being blank (LASSO_MOVE §5.24, read across).
-                    Text("This layer animates nothing")
+                    Text(canvasManager.graphBandExpansion?.target.isFolder == true
+                         ? "This group animates nothing" : "This layer animates nothing")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 14)
@@ -1386,6 +1387,14 @@ struct AnimationTimeline: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(liftedBackground(isLifted: isLifted))
                     .contentShape(Rectangle())
+                    // **A tap on a name picks its row** — TODO (21)'s folder band. A layer's row
+                    // was already pickable from its cels and from the layer panel; a folder's row
+                    // was pickable from nowhere, and a band cannot open under a row that cannot be
+                    // named. Both kinds take the tap so the column reads one way: the name is the
+                    // row, and tapping it is choosing it. The chevron's own tap (expand/collapse)
+                    // is inside this one and wins where they overlap; the reorder is a long press
+                    // and is unaffected by a tap that ends before it begins.
+                    .onTapGesture { pickRow(row) }
                     .scaleEffect(isLifted ? 1.06 : 1, anchor: .leading)
                     .shadow(color: .black.opacity(isLifted ? 0.6 : 0), radius: 6, y: 3)
                     .offset(y: rowOffset(at: position, liftedFrom: liftedFrom, in: layout))
@@ -1420,11 +1429,29 @@ struct AnimationTimeline: View {
         return layout.reorderOffset(ofRow: position, liftedFrom: liftedFrom, movedBy: dragOffsetRows)
     }
 
+    /// **What a tap on a name-column row does**: a layer's row becomes the current layer, exactly
+    /// as a tap on one of its cels does; a folder's row becomes the graph editor band's row
+    /// (`CanvasManager.selectFolderRow`), which is the only selection a folder has. Neither moves
+    /// the playhead — the column is names, not frames.
+    private func pickRow(_ row: LayerStackRow) {
+        switch row {
+        case .folder(let folderID, _, _):
+            canvasManager.selectFolderRow(folderID)
+        case .layer(_, let index, _):
+            canvasManager.selectLayer(index)
+        }
+    }
+
     @ViewBuilder
     private func nameRow(_ row: LayerStackRow) -> some View {
         switch row {
         case .folder(let folderID, let depth, let kind):
             if let folder = canvasManager.folders.first(where: { $0.id == folderID }) {
+                // Blue when it is the picked row, which is the layer name's own signal one case
+                // down — the folder is then the row the graph editor band is on, and the artist
+                // needs to see which row that is when the band is closed as well as when it is
+                // open. Exposed as the `selected` trait for the same reason the colour is drawn.
+                let isPicked = canvasManager.selectedFolderID == folderID
                 HStack(spacing: 3) {
                     Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9))
@@ -1437,9 +1464,10 @@ struct AnimationTimeline: View {
                         .foregroundColor(kind == .group ? .yellow : .teal)
                     Text(folder.name)
                         .font(.caption)
-                        .foregroundColor(folder.isVisible ? .white : .gray)
+                        .foregroundColor(isPicked ? .blue : (folder.isVisible ? .white : .gray))
                         .lineLimit(1)
                         .accessibilityIdentifier("timeline.folderName.\(folder.name)")
+                        .accessibilityAddTraits(isPicked ? .isSelected : [])
                 }
                 .padding(.leading, 6 + CGFloat(depth) * 10)
             }

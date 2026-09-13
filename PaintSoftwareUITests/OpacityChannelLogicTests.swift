@@ -509,7 +509,7 @@ final class OpacityChannelLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [0, 18],
                        "…and the node really moved")
 
-        XCTAssertTrue(manager.removeEffectParameterKey(layerIndex: 0, parameterID: opacityID, frame: 18),
+        XCTAssertTrue(manager.removeEffectParameterKey(target: .layer(id: manager.layers[0].id), parameterID: opacityID, frame: 18),
                       "The node menu's Delete Keyframe reaches this channel's store")
         XCTAssertEqual(manager.keyframeFrames(of: tgt), [0],
                        "…and the timeline loses the indicator with it")

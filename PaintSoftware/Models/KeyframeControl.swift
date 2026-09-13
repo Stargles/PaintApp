@@ -96,6 +96,11 @@ enum KeyframeControl {
 enum KeyframeTarget: Equatable, Hashable {
     case layer(id: UUID)
     case folder(id: UUID)
+
+    var isFolder: Bool {
+        if case .folder = self { return true }
+        return false
+    }
 }
 
 // MARK: - The model half
@@ -137,9 +142,11 @@ extension CanvasManager {
     /// cel to disambiguate and the playhead supplies the rest.
     ///
     /// **A folder is a perfectly good `KeyframeTarget` and still is not this one.** Its grade animates
-    /// (§2.21) and its sliders key like any layer's; what it does not have is a timeline row for the
-    /// control to be *next to*, so "the folder the strip means" has no answer. Reaching a folder's
-    /// channels from a list is the channel panel's job.
+    /// (§2.21) and its sliders key like any layer's, and since TODO (21)'s folder band its row can be
+    /// picked in the timeline (`selectedFolderID`) — but that pick is the *graph editor band's* row,
+    /// not the brush's, and the writers that default to this one are writing where a slider or a
+    /// take lands, which is a layer. The band asks `graphBandTarget` instead, which reads the pick
+    /// ahead of this.
     var keyframeTarget: KeyframeTarget? { keyframeTarget(layerIndex: currentLayerIndex) }
 
     /// The target for one layer index, or nil if the index is not one. The index-to-id conversion in

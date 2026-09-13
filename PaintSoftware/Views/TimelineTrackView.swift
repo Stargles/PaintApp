@@ -46,7 +46,10 @@ struct TimelineTrackView: UIViewRepresentable {
         case block(layerIndex: Int, celIndex: Int, frame: Int)
         case gap(layerIndex: Int, frame: Int)
         case loop(frame: Int)
-        case graphNode(layerIndex: Int, parameterID: String, frame: Int)
+        /// By `KeyframeTarget`, because the band a node sits on is a layer's or, since TODO (21)'s
+        /// folder band, a folder's — and `AnimationTimeline`'s menu writes through the target-addressed
+        /// funnels either way.
+        case graphNode(target: KeyframeTarget, parameterID: String, frame: Int)
     }
     /// Carries the on-screen rect of the thing that was tapped — the block, the empty slot, the
     /// ruler column — in window coordinates, so `AnimationTimeline` can hang its popover off that
@@ -502,8 +505,13 @@ struct TimelineTrackView: UIViewRepresentable {
 
                 for (slot, entry) in folderEntries.enumerated() {
                     let row = folderRowViews[slot]
+                    // **The block half, for the layer rows' reason above**: the folder's summary bar
+                    // and its marker band are both measured from this view's own `bounds.height`,
+                    // and since TODO (21)'s folder band a folder row can be the expanded one — the
+                    // full height would stretch the yellow bar down across the curves and slide the
+                    // diamonds to the bottom of the band.
                     row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth,
-                                       height: layout.height(ofRow: entry.position))
+                                       height: layout.blockHeight(ofRow: entry.position))
                     let childIndices = canvasManager.descendantLayerIndices(ofFolder: entry.folderID)
                     let cels = childIndices.flatMap { layers[$0].cels }
                     let span: ClosedRange<Int>? = cels.isEmpty
@@ -633,7 +641,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                      totalWidth: CGFloat) {
             guard let contentView else { return }
             guard let content,
-                  let position = stackRows.firstIndex(where: { $0.layerIndex == content.layerIndex }),
+                  let position = stackRows.firstIndex(where: { $0.keyframeTarget == content.target }),
                   layout.expansion(ofRow: position) > 0
             else {
                 graphBandView.isHidden = true
@@ -660,11 +668,11 @@ struct TimelineTrackView: UIViewRepresentable {
                                          y: layout.y(ofRow: position) + layout.blockHeight(ofRow: position),
                                          width: totalWidth,
                                          height: layout.expansion(ofRow: position))
-            // The selection belongs to one layer's channels, so it does not survive the band moving
+            // The selection belongs to one row's channels, so it does not survive the band moving
             // to another — the ids would collide (two Blur layers both key `blur.radius`) and the
             // rings would land on a curve the artist never picked.
-            if graphBandSelectionLayerIndex != content.layerIndex {
-                graphBandSelectionLayerIndex = content.layerIndex
+            if graphBandSelectionTarget != content.target {
+                graphBandSelectionTarget = content.target
                 graphBandSelection = []
                 graphBandFocus = nil
             }
@@ -724,7 +732,9 @@ struct TimelineTrackView: UIViewRepresentable {
         /// last tick's document would make the key accelerate away from the finger — the same reason
         /// `BlockDrag` records where its block started rather than where it currently is.
         private struct GraphBandDrag {
-            let layerIndex: Int
+            /// The row the band was on at touch-down — what every write of this drag is addressed
+            /// to, a layer or a folder.
+            let target: KeyframeTarget
             let start: CGPoint
             let channels: [TimelineGraphBand.Channel]
             /// Where the curves stop, captured with them — `Content.frameCount`. A tap past it adds
@@ -791,7 +801,7 @@ struct TimelineTrackView: UIViewRepresentable {
         /// The marquee's standing selection, surviving between gestures so a set picked up by one
         /// drag can be moved by the next.
         private var graphBandSelection: Set<TimelineGraphBand.KeyRef> = []
-        private var graphBandSelectionLayerIndex: Int?
+        private var graphBandSelectionTarget: KeyframeTarget?
 
         /// **The node whose bezier handles are drawn, and therefore the node whose next tap opens a
         /// menu rather than focusing it** — TODO (38)(b), the state that makes the tap two-stage.
@@ -894,7 +904,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // Taken only when the band actually draws a pose channel, so a grade-only band pays one
             // `contains` and never walks the layer's cels.
             let poseBaseline = content.channels.contains { PoseChannelID.isPose(parameterID: $0.parameterID) }
-                ? canvasManager.graphBandPoseSnapshot(layerIndex: content.layerIndex)
+                ? canvasManager.graphBandPoseSnapshot(of: content.target)
                 : CanvasManager.GraphBandPoseSnapshot()
             // **The axes are frozen for the life of the drag** — see `TimelineGraphBandView.frozenAxes`.
             // Taken from the same `content.channels` the drag itself captures, so the axis the value
@@ -904,7 +914,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // not.
             graphBandView.setFrozenAxes(Dictionary(content.channels.map { ($0.parameterID, $0.axis) },
                                                    uniquingKeysWith: { first, _ in first }))
-            graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
+            graphBandDrag = GraphBandDrag(target: content.target, start: point,
                                           channels: content.channels,
                                           frameCount: content.frameCount, bandHeight: height,
                                           carried: carried,
@@ -943,7 +953,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                                                         translation: translation,
                                                                         pixelsPerFrame: pixelsPerFrame,
                                                                         bandHeight: drag.bandHeight),
-                                        layerIndex: drag.layerIndex) {
+                                        target: drag.target) {
                     graphBandDrag?.didWrite = true
                 }
                 if canvasManager.writeGraphBandPoseEdits(
@@ -951,7 +961,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                                       translation: translation,
                                                       pixelsPerFrame: pixelsPerFrame,
                                                       bandHeight: drag.bandHeight),
-                    from: drag.poseBaseline, layerIndex: drag.layerIndex) {
+                    from: drag.poseBaseline, target: drag.target) {
                     graphBandDrag?.didWrite = true
                 }
                 relayout()
@@ -984,12 +994,12 @@ struct TimelineTrackView: UIViewRepresentable {
             // `TransformTrack.Key` and a curve-at-a-time writer has no way to say so. One marquee can
             // hold both kinds, which is why they are two calls over one `moves` rather than a branch.
             if writeGraphBandCurves(TimelineGraphBand.applying(moves, to: drag.channels),
-                                    layerIndex: drag.layerIndex) {
+                                    target: drag.target) {
                 graphBandDrag?.didWrite = true
             }
             if canvasManager.writeGraphBandPoseEdits(
                 TimelineGraphBand.poseEdits(moves, in: drag.channels),
-                from: drag.poseBaseline, layerIndex: drag.layerIndex) {
+                from: drag.poseBaseline, target: drag.target) {
                 graphBandDrag?.didWrite = true
             }
             // The rings follow the keys rather than staying on the frames they were picked up from,
@@ -1060,7 +1070,7 @@ struct TimelineTrackView: UIViewRepresentable {
             case .menu(let ref):
                 // The second stage — `handleTapOnCel`'s contract exactly, on a fourth surface. The
                 // popover is `AnimationTimeline`'s, anchored on the node's own column.
-                onRequestMenu?(.graphNode(layerIndex: drag.layerIndex,
+                onRequestMenu?(.graphNode(target: drag.target,
                                           parameterID: ref.parameterID, frame: ref.frame),
                                graphBandView.nodeRectInWindow(ref, pixelsPerFrame: pixelsPerFrame))
             case .add(let parameterID, let frame, let value):
@@ -1068,14 +1078,14 @@ struct TimelineTrackView: UIViewRepresentable {
                 // outright (see its own doc), because a `TransformTrack.Key` is six components sharing
                 // one frame and not a curve `setEffectParameterTrack` could ever accept.
                 if PoseChannelID.isPose(parameterID: parameterID) {
-                    _ = canvasManager.addPoseChannelKey(layerIndex: drag.layerIndex,
+                    _ = canvasManager.addPoseChannelKey(target: drag.target,
                                                         parameterID: parameterID, frame: frame,
                                                         value: value)
                 } else {
                     guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
                     else { return }
                     curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                    _ = writeGraphBandCurves([parameterID: curve], layerIndex: drag.layerIndex)
+                    _ = writeGraphBandCurves([parameterID: curve], target: drag.target)
                 }
                 relayout()
             case .nothing:
@@ -1130,10 +1140,10 @@ struct TimelineTrackView: UIViewRepresentable {
                 }) || drag.handle?.key.parameterID == channel.parameterID {
                     restored[channel.parameterID] = channel.curve
                 }
-                _ = writeGraphBandCurves(restored, layerIndex: drag.layerIndex)
+                _ = writeGraphBandCurves(restored, target: drag.target)
                 // The pose half of the same restore. One call, because the drag never edited the
                 // document in place: every tick rewrote `poseBaseline` and wrote the result.
-                canvasManager.restoreGraphBandPoses(drag.poseBaseline, layerIndex: drag.layerIndex)
+                canvasManager.restoreGraphBandPoses(drag.poseBaseline, target: drag.target)
                 canvasManager.cancelStructureGesture()
             } else if drag.didWrite {
                 canvasManager.commitStructureGesture(label: .effectKeyframes)
@@ -1144,7 +1154,8 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        /// Writes a set of whole-curve replacements onto the band's layer.
+        /// Writes a set of whole-curve replacements onto the band's row — a layer or, since TODO
+        /// (21)'s folder band, a folder; the target-addressed funnels choose the home.
         ///
         /// **`setEffectParameterTrack`, deliberately, and it is what makes the undo arithmetic work.**
         /// It refuses a parameter that is not `isScalarAnimatable` and removes the track outright for
@@ -1154,7 +1165,8 @@ struct TimelineTrackView: UIViewRepresentable {
         ///
         /// - Returns: whether anything changed, which is the input to that commit-or-cancel decision.
         @discardableResult
-        private func writeGraphBandCurves(_ curves: [String: AnimationCurve], layerIndex: Int) -> Bool {
+        private func writeGraphBandCurves(_ curves: [String: AnimationCurve],
+                                          target: KeyframeTarget) -> Bool {
             var changed = false
             for (parameterID, curve) in curves {
                 // **A pose id is skipped here rather than being dropped there**, which is the same
@@ -1170,12 +1182,11 @@ struct TimelineTrackView: UIViewRepresentable {
                 // `setEffectParameterTrack` would refuse it silently (no `EffectParameter` claims
                 // the id), so the node would move under the finger and spring back.
                 if TargetChannel.isTargetChannel(parameterID: parameterID) {
-                    guard let target = canvasManager.keyframeTarget(layerIndex: layerIndex) else { continue }
                     if canvasManager.setTargetChannelTrack(target, channelID: parameterID, to: curve) {
                         changed = true
                     }
-                } else if canvasManager.setEffectParameterTrack(layerIndex: layerIndex,
-                                                                parameterID: parameterID, to: curve) {
+                } else if canvasManager.setEffectParameterTrack(target, parameterID: parameterID,
+                                                                to: curve) {
                     changed = true
                 }
             }
@@ -1288,7 +1299,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // the band on the row it is on now until `endBlockDrag` lets it go — see its doc for
             // what the reflow costs, which is not only a detached ghost.
             canvasManager.pinGraphBand()
-            canvasManager.currentLayerIndex = layerIndex
+            canvasManager.selectLayer(layerIndex)
 
             if dragGhostView.superview == nil { contentView.addSubview(dragGhostView) }
             if dropIndicatorView.superview == nil { contentView.addSubview(dropIndicatorView) }
@@ -1458,7 +1469,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 // request rather than re-read later; see `MenuRequest`.
                 onRequestMenu?(.block(layerIndex: layerIndex, celIndex: celIndex, frame: clamped), anchor)
             } else {
-                canvasManager.currentLayerIndex = layerIndex
+                canvasManager.selectLayer(layerIndex)
                 canvasManager.goToFrame(clamped)
             }
         }
@@ -1478,7 +1489,7 @@ struct TimelineTrackView: UIViewRepresentable {
             if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
                 onRequestMenu?(.gap(layerIndex: layerIndex, frame: clamped), anchor)
             } else {
-                canvasManager.currentLayerIndex = layerIndex
+                canvasManager.selectLayer(layerIndex)
                 // No ceiling to guard against any more: `goToFrame` accepts wherever it's sent (see
                 // its own doc comment) rather than the caller having to keep a frame in bounds before
                 // calling it. The old `if clamped < sceneFrameCount`

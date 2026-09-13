@@ -518,12 +518,12 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                                         to: linear([(0, 1.0), (10, 2.0)]))
         manager.isGraphEditorOpen = true
 
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex)
+        XCTAssertEqual(manager.graphBandExpansion?.target, target(manager))
         XCTAssertEqual(manager.graphBandExpansion?.height, TimelineGraphBand.height)
         XCTAssertEqual(manager.graphBandContent?.channels.map(\.parameterID), [brightnessID])
 
         manager.currentLayerIndex = 0
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, 0, "It moved with the selection")
+        XCTAssertEqual(manager.graphBandExpansion?.target, .layer(id: manager.layers[0].id), "It moved with the selection")
         XCTAssertEqual(manager.graphBandContent?.channels, [],
                        "…and the floor animates nothing, so the band is open and empty")
     }
@@ -540,18 +540,18 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     func testAPinnedBandStaysUnderItsOwnRowWhileTheSelectionMoves() {
         let manager = gradedManager()
         manager.isGraphEditorOpen = true
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex,
+        XCTAssertEqual(manager.graphBandExpansion?.target, target(manager),
                        "PREMISE: open on the selected layer")
 
         manager.pinGraphBand()
         manager.currentLayerIndex = 0
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex,
+        XCTAssertEqual(manager.graphBandExpansion?.target, target(manager),
                        "The gesture selected another layer; the band is not allowed to follow yet")
-        XCTAssertEqual(manager.graphBandContent?.layerIndex, gradeIndex,
+        XCTAssertEqual(manager.graphBandContent?.target, target(manager),
                        "…and what it draws is held with it, so the curves do not change mid-gesture")
 
         manager.releaseGraphBand()
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, 0,
+        XCTAssertEqual(manager.graphBandExpansion?.target, .layer(id: manager.layers[0].id),
                        "The finger is off the track: the band goes where the selection went")
     }
 
@@ -595,7 +595,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let manager = gradedManager()
         manager.isGraphEditorOpen = true
         manager.releaseGraphBand()
-        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex)
+        XCTAssertEqual(manager.graphBandExpansion?.target, target(manager))
     }
 
     // MARK: - Stage D3: what a touch on the band means
@@ -1709,7 +1709,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "PREMISE: two keyframes, two nodes")
 
         let before = manager.history.undoStack.count
-        XCTAssertTrue(manager.removeEffectParameterKey(layerIndex: gradeIndex,
+        XCTAssertTrue(manager.removeEffectParameterKey(target: target,
                                                        parameterID: brightnessID, frame: 10))
         XCTAssertEqual(nodeFrames(manager), [0], "The node is gone")
         XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager),
@@ -1719,7 +1719,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.undo()
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "…and one press brings both back")
 
-        XCTAssertFalse(manager.removeEffectParameterKey(layerIndex: gradeIndex,
+        XCTAssertFalse(manager.removeEffectParameterKey(target: target,
                                                         parameterID: brightnessID, frame: 7),
                        "A frame the channel does not key is not an edit — a menu left up over an undo")
     }
@@ -1733,10 +1733,10 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     func testResetCurveGivesANodeItsDerivedTangentsBackAndOnlySaysSoWhenItCan() throws {
         let manager = rampedManager()
         let untouched = brightnessChannel(manager).curve
-        XCTAssertFalse(manager.effectParameterKeyIsAuthored(layerIndex: gradeIndex,
+        XCTAssertFalse(manager.effectParameterKeyIsAuthored(target: target(manager),
                                                             parameterID: brightnessID, frame: 10),
                        "PREMISE: nothing authored yet, so the menu offers no item")
-        XCTAssertFalse(manager.resetEffectParameterKeyCurve(layerIndex: gradeIndex,
+        XCTAssertFalse(manager.resetEffectParameterKeyCurve(target: target(manager),
                                                             parameterID: brightnessID, frame: 10),
                        "…and calling it anyway changes nothing")
 
@@ -1746,11 +1746,11 @@ final class TimelineGraphBandLogicTests: XCTestCase {
             pixelsPerFrame: base, bandHeight: band)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: try XCTUnwrap(written[brightnessID]))
-        XCTAssertTrue(manager.effectParameterKeyIsAuthored(layerIndex: gradeIndex,
+        XCTAssertTrue(manager.effectParameterKeyIsAuthored(target: target(manager),
                                                            parameterID: brightnessID, frame: 10),
                       "PREMISE: now there is something to reset, so the menu offers it")
 
-        XCTAssertTrue(manager.resetEffectParameterKeyCurve(layerIndex: gradeIndex,
+        XCTAssertTrue(manager.resetEffectParameterKeyCurve(target: target(manager),
                                                            parameterID: brightnessID, frame: 10))
         let reset = brightnessChannel(manager).curve
         XCTAssertEqual(reset.keys[1].tangentMode, .autoClamped)
