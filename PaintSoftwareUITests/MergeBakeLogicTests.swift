@@ -278,6 +278,13 @@ final class MergeBakeLogicTests: XCTestCase {
                              to: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                              tolerance: 0.2, softness: 0.5),
             ])),
+            // TODO (63): the owner's *"the same pinch to merge into ability for these like the HSV
+            // so I can bake them to the actual colors"*. Red is Oklab `L` ≈ 0.63 — a midtone with a
+            // little Highlights weight — so a Midtones push toward green with a Global lift reaches
+            // it through two wheels, and the row goes red if either is left out of the bake.
+            .colorWheels(Effect.ColorWheels(
+                midtones: Effect.ColorWheels.Wheel(hue: 142, saturation: 0.8, luminance: 0.1),
+                global: Effect.ColorWheels.Wheel(hue: 30, saturation: 0.3, luminance: 0.15, strength: 0.7))),
         ]
 
         for grade in grades {

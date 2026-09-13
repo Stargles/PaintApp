@@ -177,6 +177,7 @@ enum EffectReference {
     private static let kDuplicateResample: UInt32 = 15
     private static let kDuplicateCombine: UInt32 = 16
     private static let kGlareStreaks: UInt32 = 17
+    private static let kColorWheels: UInt32 = 18
 
     // MARK: - The per-pixel transforms
     //
@@ -247,9 +248,37 @@ enum EffectReference {
         case kRecolor:
             return recolorPixel(c, params: params, entries: recolor)
 
+        case kColorWheels:
+            return colorWheelsPixel(c, params: params)
+
         default:
             return c
         }
+    }
+
+    /// **Colour Wheels, one pixel** — `Effect.ColorWheels`' doc is the specification and this is its
+    /// transcription; `colorWheelsChannels` in `Composite.metal` is the other one.
+    ///
+    /// The pixel goes to Oklab **once**, in `Double` through `ColorMath` (the recolour's own reason:
+    /// this side is the reference the shader's float transcription is measured against). Its `L`
+    /// picks the three range weights through `Effect.ColorWheels.rangeWeights` — the one statement
+    /// of the shape — and the twelve resolved offsets in `params` are summed under them, Global at
+    /// weight 1. **A summed offset of exactly zero returns the pixel it was handed**, so a wheel at
+    /// rest, a wheel at strength 0 and a range whose weight is 0 at this lightness are each the
+    /// identity byte for byte rather than a Double round trip that happens to land; the same test is
+    /// in the shader, which is what makes "leaves a highlight alone" exact on both backends.
+    private static func colorWheelsPixel(_ c: SIMD3<Float>, params: EffectParams) -> SIMD3<Float> {
+        let lab = ColorMath.rgbToOklab(r: Double(c.x), g: Double(c.y), b: Double(c.z))
+        let w = Effect.ColorWheels.rangeWeights(L: lab.L)
+        let dL = w.shadows * Double(params.wheelShadowsL) + w.midtones * Double(params.wheelMidtonesL)
+            + w.highlights * Double(params.wheelHighlightsL) + Double(params.wheelGlobalL)
+        let dA = w.shadows * Double(params.wheelShadowsA) + w.midtones * Double(params.wheelMidtonesA)
+            + w.highlights * Double(params.wheelHighlightsA) + Double(params.wheelGlobalA)
+        let dB = w.shadows * Double(params.wheelShadowsB) + w.midtones * Double(params.wheelMidtonesB)
+            + w.highlights * Double(params.wheelHighlightsB) + Double(params.wheelGlobalB)
+        guard dL != 0 || dA != 0 || dB != 0 else { return c }
+        let rgb = ColorMath.oklabToRGB(L: min(max(lab.L + dL, 0), 1), a: lab.a + dA, b: lab.b + dB)
+        return SIMD3<Float>(Float(rgb.r), Float(rgb.g), Float(rgb.b))
     }
 
     /// **Recolour, one pixel** — `RecolorTableEntry`'s doc is the specification and this is its

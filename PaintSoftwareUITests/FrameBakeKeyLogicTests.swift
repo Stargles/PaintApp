@@ -569,6 +569,26 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("glare length", .glare(Effect.Glare(length: 50))),
             ("glare rotate45", .glare(Effect.Glare(type: .simpleStar, rotate45: true))),
             ("glare size", .glare(Effect.Glare(size: 8))),
+            // TODO (63)'s Colour Wheels: the identity, then each of the sixteen fields alone — every
+            // row differs from "wheels identity" in exactly one field, `glare`'s recipe, so a field
+            // the encoder skipped (or a wheel it wrote in another wheel's slot) collides here.
+            ("wheels identity", .colorWheels(Effect.ColorWheels())),
+            ("wheels shadows hue", .colorWheels(Effect.ColorWheels(shadows: .init(hue: 30)))),
+            ("wheels shadows saturation", .colorWheels(Effect.ColorWheels(shadows: .init(saturation: 0.5)))),
+            ("wheels shadows luminance", .colorWheels(Effect.ColorWheels(shadows: .init(luminance: 0.3)))),
+            ("wheels shadows strength", .colorWheels(Effect.ColorWheels(shadows: .init(strength: 0.5)))),
+            ("wheels midtones hue", .colorWheels(Effect.ColorWheels(midtones: .init(hue: 30)))),
+            ("wheels midtones saturation", .colorWheels(Effect.ColorWheels(midtones: .init(saturation: 0.5)))),
+            ("wheels midtones luminance", .colorWheels(Effect.ColorWheels(midtones: .init(luminance: 0.3)))),
+            ("wheels midtones strength", .colorWheels(Effect.ColorWheels(midtones: .init(strength: 0.5)))),
+            ("wheels highlights hue", .colorWheels(Effect.ColorWheels(highlights: .init(hue: 30)))),
+            ("wheels highlights saturation", .colorWheels(Effect.ColorWheels(highlights: .init(saturation: 0.5)))),
+            ("wheels highlights luminance", .colorWheels(Effect.ColorWheels(highlights: .init(luminance: 0.3)))),
+            ("wheels highlights strength", .colorWheels(Effect.ColorWheels(highlights: .init(strength: 0.5)))),
+            ("wheels global hue", .colorWheels(Effect.ColorWheels(global: .init(hue: 30)))),
+            ("wheels global saturation", .colorWheels(Effect.ColorWheels(global: .init(saturation: 0.5)))),
+            ("wheels global luminance", .colorWheels(Effect.ColorWheels(global: .init(luminance: 0.3)))),
+            ("wheels global strength", .colorWheels(Effect.ColorWheels(global: .init(strength: 0.5)))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

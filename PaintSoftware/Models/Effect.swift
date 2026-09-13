@@ -121,6 +121,12 @@ enum Effect: Equatable {
     /// **is** `Effect.bloom` at a derived radius, reached by literal delegation rather than a second
     /// copy of its passes. See `Glare` for the four rulings and why Ghosts did not ship.
     case glare(Glare)
+    /// **Colour Wheels — Lumetri's four-way corrector, TODO (63), designed 2026-09-13.** Shadows,
+    /// Midtones, Highlights and Global, each a hue-and-saturation offset applied in Oklab with a
+    /// luminance lift and a strength beside it; the three tonal ranges are smooth weights on the
+    /// pixel's own `L` that partition unity. One per-pixel pass, no neighbourhood. See `ColorWheels`
+    /// for the shape of the weights and for how a keyed hue tweens.
+    case colorWheels(ColorWheels)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -154,6 +160,7 @@ enum Effect: Equatable {
         case .crtScreen:           return "Computer Screen"
         case .duplicateOffset:     return "Duplicate Offset"
         case .glare:               return "Glare"
+        case .colorWheels:         return "Colour Wheels"
         }
     }
 
@@ -286,6 +293,11 @@ enum Effect: Equatable {
         // this later, so there is nothing for a document to drift out of step with.
         case .glare:
             return .ink
+        // **Colour Wheels read colour, so they take the backdrop like the other grades** (TODO (63)):
+        // a grade over white paper should be able to tint the paper, which is what an adjustment
+        // layer means, and every one of its sixteen knobs is about colour rather than shape.
+        case .colorWheels:
+            return .backdrop
         case .bloom(let params):
             return params.input
         }
@@ -919,6 +931,122 @@ extension Effect {
         }
     }
 
+    /// **Colour Wheels — the four-way corrector every grading program has** — TODO (63), the owner's
+    /// *"a color grading tool allowing the user to edit the luminance saturation and hue and strength
+    /// … 4 of these, one for global, highlights, midtones, and shadows"*, designed 2026-09-13. Lumetri's
+    /// set (Shadows / Midtones / Highlights / Global) rather than Resolve's Lift / Gamma / Gain /
+    /// Offset, because it is the set the owner listed.
+    ///
+    /// **A wheel is a hue-and-saturation offset, and it is applied in Oklab.** The dot on a wheel is
+    /// a point on a colour disc — `hue` is where round the disc it sits, `saturation` how far out —
+    /// and the grade pushes every pixel's `a`/`b` toward that direction by `saturation · rimChroma`.
+    /// An additive offset in Oklab rather than a multiply or an HSB rotation, for the reason the
+    /// gradient map (TODO (10a)) and Recolour (TODO (60)) already took the space: equal steps look
+    /// like equal steps there, so a wheel's rim means the same visible push whatever the pixel's own
+    /// hue. Beside each wheel a **luminance** slider adds `luminance · luminanceReach` to `L` and a
+    /// **strength** scales the whole wheel.
+    ///
+    /// **The three tonal ranges are weights on the pixel's own `L`, and they partition unity.**
+    /// `rangeWeights(L:)` is the one statement of the shape — Shadows falls from 1 at `L = 0` to 0 at
+    /// `L = 0.5`, Highlights rises from 0 at `0.5` to 1 at `1`, both by `smoothstep`, and Midtones is
+    /// **what is left**, a hump peaking at exactly 1 at `L = 0.5`. Summing to one by construction
+    /// rather than by tuning is what buys the property an artist can rely on: the same offset on all
+    /// three wheels is the same picture as that offset on Global alone, byte for byte
+    /// (`ColorWheelsEffectLogicTests` pins it). Global's weight is 1 everywhere. The weight is read
+    /// off the pixel's lightness *before* the push, as every grading tool does.
+    ///
+    /// **The kernels are handed twelve resolved floats, not sixteen knobs** — per wheel the `a` and
+    /// `b` offsets (`saturation · rimChroma · strength`, turned by `hue`) and the `L` offset, resolved
+    /// once in `Effect.params` in `Double` so neither backend evaluates a cosine of a slider's own
+    /// degrees (`Blur`'s step vector and the Duplicate Offset's box are the precedent). Both kernels
+    /// then do the same weighted sum, and both return the pixel **untouched, byte for byte**, when the
+    /// summed offset is exactly zero — so every wheel at rest is the identity on both backends without
+    /// depending on a float32 Oklab round trip, and a Shadows push leaves a highlight pixel alone
+    /// exactly rather than to within a channel step. A wheel at `strength` 0 is the identity for that
+    /// wheel by the same arithmetic.
+    ///
+    /// **Hue is a number on a line, not a point on a circle, and a keyed hue tweens on the line.**
+    /// `hue` is unbounded (`params` wraps it through `cos`/`sin`), so a key at 359° and one at 1°
+    /// tween the long way round through 180°, exactly as `hsvShift.hue` and
+    /// `duplicateOffset.rotation` do. What keeps that from being a trap in practice is
+    /// `continuedHue(from:toward:)`: a drag round the disc stores the representative of the new angle
+    /// nearest the value already stored, so crossing the top of the disc from 350° writes 370°, not
+    /// 10°, and keys made by dragging tween the short way. Pinned both ways in
+    /// `ColorWheelsEffectLogicTests`.
+    ///
+    /// Every field is a continuous `Double`, keyable through `Effect.parameters` like every other
+    /// grade; `input` is `.backdrop` like every grade that reads colour, `reshapesCoverage` false.
+    /// Merge-down bakes it through `EffectReference.apply` like HSV Shift — the owner's *"pinch to
+    /// merge … so I can bake them to the actual colors"* — and `MergeBakeLogicTests` carries the row.
+    struct ColorWheels: Equatable {
+
+        /// One wheel: where its dot sits, and the two sliders beside it. The type's default is the
+        /// identity — dot at the centre, no lift, full strength — so `ColorWheels()` grades nothing
+        /// and the catalogue hands the artist exactly that, as it does every grade.
+        struct Wheel: Equatable {
+            /// Degrees round the disc, OKLCh's hue (0° is Oklab's `+a`, a red-magenta; 90° its `+b`,
+            /// yellow; blue sits near 264°). Unbounded — see the type's note on tweening.
+            var hue: Double = 0
+            /// How far out the dot sits, 0…1. 0 is the centre and pushes nowhere whatever `hue` says.
+            var saturation: Double = 0
+            /// −1…1, added to `L` scaled by `luminanceReach` — +1 lifts a mid-grey to white, −1 sinks
+            /// it to black, at full strength and full weight.
+            var luminance: Double = 0
+            /// 0…1, a multiply on the whole wheel. 0 switches the wheel off without losing where its
+            /// dot was.
+            var strength: Double = 1
+
+            var isIdentity: Bool { (saturation == 0 && luminance == 0) || strength == 0 }
+        }
+
+        var shadows = Wheel()
+        var midtones = Wheel()
+        var highlights = Wheel()
+        var global = Wheel()
+
+        /// The Oklab chroma a wheel's rim pushes by, at full strength. Oklab's `a`/`b` run about
+        /// ±0.4 for in-gamut colours and sRGB's own primaries sit at chroma 0.21…0.31, so 0.15 at the
+        /// rim is a strong, clearly coloured shift on a grey and never an absurd one — and it is the
+        /// chroma the settings bar draws the disc at, so the colour under the dot *is* the push.
+        static let rimChroma = 0.15
+
+        /// How much of `L` the luminance slider's full travel moves. Half: `+1` takes a mid-grey to
+        /// white and `−1` to black, which is the whole useful range of a lift and no more.
+        static let luminanceReach = 0.5
+
+        /// **The three range weights at one lightness, summing to exactly one** — the one statement
+        /// of the shape, transcribed by `EffectReference.colorWheelsPixel` and `wheelRangeWeights` in
+        /// `Composite.metal`. Shadows is `1 − smoothstep(0, ½, L)`, Highlights `smoothstep(½, 1, L)`,
+        /// Midtones the remainder; `L` outside 0…1 clamps through the smoothstep rather than being
+        /// asked to mean anything.
+        static func rangeWeights(L: Double) -> (shadows: Double, midtones: Double, highlights: Double) {
+            func smoothstep(_ edge0: Double, _ edge1: Double, _ x: Double) -> Double {
+                let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
+                return t * t * (3 - 2 * t)
+            }
+            let shadows = 1 - smoothstep(0, 0.5, L)
+            let highlights = smoothstep(0.5, 1, L)
+            return (shadows, 1 - shadows - highlights, highlights)
+        }
+
+        /// **The representative of `new` (any angle, degrees) nearest to `old`** — what a drag writes,
+        /// so a dot carried round the disc stores a continuous number rather than one that jumps by
+        /// 360 at the seam. `continuedHue(from: 350, toward: 10) == 370`; `continuedHue(from: 10,
+        /// toward: 350) == −10`. A non-finite `old` is treated as 0.
+        static func continuedHue(from old: Double, toward new: Double) -> Double {
+            let base = old.isFinite ? old : 0
+            guard new.isFinite else { return base }
+            let turn = (new - base).truncatingRemainder(dividingBy: 360)
+            let shortest = turn > 180 ? turn - 360 : (turn < -180 ? turn + 360 : turn)
+            return base + shortest
+        }
+
+        /// Whether nothing here pushes anything — the four wheels each at rest.
+        var isIdentity: Bool {
+            shadows.isIdentity && midtones.isIdentity && highlights.isIdentity && global.isIdentity
+        }
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     ///
@@ -1184,6 +1312,24 @@ struct EffectParams: Equatable {
     var glareStreakCount: UInt32 = 0
     var glareAngle: Float = 0
     var glareAngleStep: Float = 0
+    /// **The Colour Wheels, resolved** (TODO (63)): per wheel the Oklab `a` and `b` offsets it pushes
+    /// by (`saturation · rimChroma · strength`, turned by `hue` — the cosine and sine taken in
+    /// Swift, `Blur`'s precedent) and the `L` offset (`luminance · luminanceReach · strength`).
+    /// Twelve floats for sixteen knobs, because the kernel never needs a knob, only what it resolves
+    /// to; the four range weights it multiplies these by are its own, from the pixel's `L`. Appended
+    /// at the end for the reason every field since the colour triple was.
+    var wheelShadowsA: Float = 0
+    var wheelShadowsB: Float = 0
+    var wheelShadowsL: Float = 0
+    var wheelMidtonesA: Float = 0
+    var wheelMidtonesB: Float = 0
+    var wheelMidtonesL: Float = 0
+    var wheelHighlightsA: Float = 0
+    var wheelHighlightsB: Float = 0
+    var wheelHighlightsL: Float = 0
+    var wheelGlobalA: Float = 0
+    var wheelGlobalB: Float = 0
+    var wheelGlobalL: Float = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -1250,6 +1396,7 @@ extension Effect {
         case .glare(let glare):
             if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).kindCode }
             return 8
+        case .colorWheels:         return 18
         }
     }
 
@@ -1391,6 +1538,27 @@ extension Effect {
             p.glareAngle = Float((s.angleOffset.isFinite ? s.angleOffset : 0) * .pi / 180)
             // No colour of its own — white is `bloomCombine`'s identity, the reused kind's own rule.
             p.colorR = 1; p.colorG = 1; p.colorB = 1
+        case .colorWheels(let wheels):
+            // Each wheel resolved once, in `Double`, to the three offsets the kernel adds —
+            // `ColorWheels`' doc. A non-finite knob is its identity; saturation and strength clamp
+            // to their sliders and luminance to ±1, so a key past the slider means the end of the
+            // slider rather than a push neither backend was written for. Hue is the one unbounded
+            // input, and `cos`/`sin` are what wrap it.
+            func unit(_ v: Double) -> Double { v.isFinite ? min(max(v, 0), 1) : 0 }
+            func resolve(_ w: ColorWheels.Wheel) -> (a: Float, b: Float, l: Float) {
+                let strength = unit(w.strength)
+                let chroma = unit(w.saturation) * ColorWheels.rimChroma * strength
+                let radians = (w.hue.isFinite ? w.hue : 0) * .pi / 180
+                let lift = (w.luminance.isFinite ? min(max(w.luminance, -1), 1) : 0)
+                    * ColorWheels.luminanceReach * strength
+                return (Float(chroma * cos(radians)), Float(chroma * sin(radians)), Float(lift))
+            }
+            let shadows = resolve(wheels.shadows), midtones = resolve(wheels.midtones)
+            let highlights = resolve(wheels.highlights), global = resolve(wheels.global)
+            p.wheelShadowsA = shadows.a; p.wheelShadowsB = shadows.b; p.wheelShadowsL = shadows.l
+            p.wheelMidtonesA = midtones.a; p.wheelMidtonesB = midtones.b; p.wheelMidtonesL = midtones.l
+            p.wheelHighlightsA = highlights.a; p.wheelHighlightsB = highlights.b; p.wheelHighlightsL = highlights.l
+            p.wheelGlobalA = global.a; p.wheelGlobalB = global.b; p.wheelGlobalL = global.l
         }
         return p
     }
@@ -1646,7 +1814,7 @@ extension Effect {
             for i in 0..<count { maxSine = max(maxSine, abs(sin(angle0 + Double(i) * step))) }
             return Int((Double(taps) * maxSine).rounded(.up)) + 1
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
-             .recolor:
+             .recolor, .colorWheels:
             return 0
         }
     }
@@ -1691,7 +1859,7 @@ extension Effect {
         // Glare's gather reaches sideways along an angle, like a directional blur, but never asks
         // where in the *frame* it is — no centre, no vignette, nothing keyed on absolute position.
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
-             .blur, .bloom, .sobel, .sharpen, .outline, .recolor, .glare:
+             .blur, .bloom, .sobel, .sharpen, .outline, .recolor, .glare, .colorWheels:
             return false
         }
     }
@@ -1985,7 +2153,7 @@ extension Effect: Codable {
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
              posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen,
-             duplicateOffset, glare
+             duplicateOffset, glare, colorWheels
     }
 
     private var kind: Kind {
@@ -2007,6 +2175,7 @@ extension Effect: Codable {
         case .crtScreen:           return .crtScreen
         case .duplicateOffset:     return .duplicateOffset
         case .glare:               return .glare
+        case .colorWheels:         return .colorWheels
         }
     }
 
@@ -2038,6 +2207,7 @@ extension Effect: Codable {
         case .crtScreen:           self = .crtScreen(try params(CRTScreen.self, CRTScreen()))
         case .duplicateOffset:     self = .duplicateOffset(try params(DuplicateOffset.self, DuplicateOffset()))
         case .glare:               self = .glare(try params(Glare.self, Glare()))
+        case .colorWheels:         self = .colorWheels(try params(ColorWheels.self, ColorWheels()))
         }
     }
 
@@ -2062,6 +2232,7 @@ extension Effect: Codable {
         case .crtScreen(let p):           try container.encode(p, forKey: .params)
         case .duplicateOffset(let p):     try container.encode(p, forKey: .params)
         case .glare(let p):               try container.encode(p, forKey: .params)
+        case .colorWheels(let p):         try container.encode(p, forKey: .params)
         }
     }
 }
@@ -2305,6 +2476,35 @@ extension Effect.Glare: Codable {
         length = try c.decodeIfPresent(Double.self, forKey: .length) ?? 32
         rotate45 = try c.decodeIfPresent(Bool.self, forKey: .rotate45) ?? false
         size = try c.decodeIfPresent(Double.self, forKey: .size) ?? 6
+    }
+}
+
+/// Every wheel defaulted, and every field of every wheel — `CRTScreen`'s recipe twice over: a
+/// document written before a wheel existed has that wheel at rest, one written before a field
+/// existed has the field's identity, and one written before the effect existed never names it at
+/// all. Encodes synthesized, as a nested `{"shadows":{"hue":…},…}`, which is the shape a reader of
+/// the file wants.
+extension Effect.ColorWheels: Codable {
+    private enum CodingKeys: String, CodingKey { case shadows, midtones, highlights, global }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        shadows = try c.decodeIfPresent(Wheel.self, forKey: .shadows) ?? Wheel()
+        midtones = try c.decodeIfPresent(Wheel.self, forKey: .midtones) ?? Wheel()
+        highlights = try c.decodeIfPresent(Wheel.self, forKey: .highlights) ?? Wheel()
+        global = try c.decodeIfPresent(Wheel.self, forKey: .global) ?? Wheel()
+    }
+}
+
+extension Effect.ColorWheels.Wheel: Codable {
+    private enum CodingKeys: String, CodingKey { case hue, saturation, luminance, strength }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hue = try c.decodeIfPresent(Double.self, forKey: .hue) ?? 0
+        saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
+        luminance = try c.decodeIfPresent(Double.self, forKey: .luminance) ?? 0
+        strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? 1
     }
 }
 
@@ -2611,7 +2811,8 @@ extension Effect {
     /// channels would silently not exist, and the first symptom would be an artist unable to
     /// animate a knob they can see.
     ///
-    /// **Fifteen cases, sixteen menu entries.** Gaussian and Directional Blur are one case split
+    /// **Eighteen cases, twenty-two menu entries** (the count `EffectParameterCharacterizationTests`
+    /// pins). Gaussian and Directional Blur are one case split
     /// by `Blur.isDirectional`, so they share one branch here and `blur.directional` is itself a
     /// parameter — which is the honest shape, since an artist can flip a Gaussian blur into a
     /// directional one without changing effect.
@@ -2914,6 +3115,41 @@ extension Effect {
                 l.double("glare.size", "Size", "size", \.size,
                          ui: 2...9, model: 2...9, format: "%.1f"),
             ]
+
+        case .colorWheels:
+            let l = EffectCaseLens<ColorWheels>(extract: { if case .colorWheels(let p) = $0 { return p }; return nil },
+                                                embed: { .colorWheels($0) })
+            // **Sixteen continuous doubles, four per wheel, in the bar's own order** — Shadows,
+            // Midtones, Highlights, Global, each hue / saturation / luminance / strength. The id
+            // carries the wheel as a second segment (`colorWheels.shadows.hue`); the first dot is
+            // still the only structural one (`TimelineGraphChannelList.groupID` splits there), and
+            // the name carries the wheel too, since the channel list shows names and four rows
+            // reading "Hue" would be four rows the artist could not tell apart. Hue is unbounded
+            // and wraps through `params`, like `hsvShift.hue`; the other three clamp to their
+            // sliders there, like `bloom.threshold`. The bar draws the dot from hue and saturation
+            // and a compact slider for each of the other two, so every one of the sixteen has a
+            // control and none is a `slider(...)` row of the bar's own.
+            func wheel(_ key: String, _ title: String,
+                       _ path: WritableKeyPath<ColorWheels, ColorWheels.Wheel>) -> [EffectParameter] {
+                [
+                    l.double("colorWheels.\(key).hue", "\(title) Hue", "colorWheels.\(key).hue",
+                             path.appending(path: \.hue),
+                             ui: 0...360, model: EffectParameter.unbounded, format: "%.0f°"),
+                    l.double("colorWheels.\(key).saturation", "\(title) Saturation",
+                             "colorWheels.\(key).saturation", path.appending(path: \.saturation),
+                             ui: 0...1, model: 0...1, format: "%.2f"),
+                    l.double("colorWheels.\(key).luminance", "\(title) Luminance",
+                             "colorWheels.\(key).luminance", path.appending(path: \.luminance),
+                             ui: -1...1, model: -1...1, format: "%.2f"),
+                    l.double("colorWheels.\(key).strength", "\(title) Strength",
+                             "colorWheels.\(key).strength", path.appending(path: \.strength),
+                             ui: 0...1, model: 0...1, format: "%.2f"),
+                ]
+            }
+            return wheel("shadows", "Shadows", \.shadows)
+                + wheel("midtones", "Midtones", \.midtones)
+                + wheel("highlights", "Highlights", \.highlights)
+                + wheel("global", "Global", \.global)
         }
     }
 }

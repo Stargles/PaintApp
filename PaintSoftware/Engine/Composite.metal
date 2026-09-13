@@ -380,6 +380,7 @@ constant uint kEffectCRTScreen           = 14;
 constant uint kEffectDuplicateResample   = 15;
 constant uint kEffectDuplicateCombine    = 16;
 constant uint kEffectGlareStreaks        = 17;
+constant uint kEffectColorWheels         = 18;
 
 /// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
 constant uint kDuplicateRegionRim          = 0;
@@ -453,6 +454,20 @@ struct EffectParams {
     uint  glareStreakCount;
     float glareAngle;
     float glareAngleStep;
+    // The Colour Wheels, resolved in Swift (TODO (63)): per wheel the Oklab a/b offset it pushes by
+    // and its L offset, strength and hue already folded in. See the Swift declaration this mirrors.
+    float wheelShadowsA;
+    float wheelShadowsB;
+    float wheelShadowsL;
+    float wheelMidtonesA;
+    float wheelMidtonesB;
+    float wheelMidtonesL;
+    float wheelHighlightsA;
+    float wheelHighlightsB;
+    float wheelHighlightsL;
+    float wheelGlobalA;
+    float wheelGlobalB;
+    float wheelGlobalL;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -635,6 +650,33 @@ static inline float3 recolorChannels(float3 c, constant EffectParams &params,
     return claimed + c * remaining;
 }
 
+/// `Effect.ColorWheels.rangeWeights(L:)` in Effect.swift, transcribed: Shadows falls from 1 at L = 0
+/// to 0 at L = ½, Highlights rises from 0 at ½ to 1 at 1, both by `smoothstep`, Midtones is what is
+/// left — so the three sum to exactly one at every L. `(shadows, midtones, highlights)`.
+static inline float3 wheelRangeWeights(float L) {
+    float shadows = 1.0f - smoothstep(0.0f, 0.5f, L);
+    float highlights = smoothstep(0.5f, 1.0f, L);
+    return float3(shadows, 1.0f - shadows - highlights, highlights);
+}
+
+/// Colour Wheels, one pixel — `EffectReference.colorWheelsPixel`'s twin, and `Effect.ColorWheels`'
+/// doc in Effect.swift is the sentence both transcribe. The pixel goes to Oklab once; its L picks the
+/// three range weights; the twelve resolved offsets are summed under them, Global at weight 1; and a
+/// summed offset of exactly zero returns the pixel untouched, so a wheel at rest is the identity
+/// byte for byte here as on the CPU.
+static inline float3 colorWheelsChannels(float3 c, constant EffectParams &params) {
+    float3 lab = rgbToOklab(c);
+    float3 w = wheelRangeWeights(lab.x);
+    float dL = w.x * params.wheelShadowsL + w.y * params.wheelMidtonesL
+             + w.z * params.wheelHighlightsL + params.wheelGlobalL;
+    float dA = w.x * params.wheelShadowsA + w.y * params.wheelMidtonesA
+             + w.z * params.wheelHighlightsA + params.wheelGlobalA;
+    float dB = w.x * params.wheelShadowsB + w.y * params.wheelMidtonesB
+             + w.z * params.wheelHighlightsB + params.wheelGlobalB;
+    if (dL == 0.0f && dA == 0.0f && dB == 0.0f) { return c; }
+    return oklabToRGB(float3(saturate(lab.x + dL), lab.y + dA, lab.z + dB));
+}
+
 /// The per-pixel colour transform, unpremultiplied in and out — the same contract `blendChannels` has,
 /// and the shape `EffectReference.transform` mirrors line for line.
 ///
@@ -702,6 +744,9 @@ static inline float3 effectChannels(uint kind, constant EffectParams &params, co
 
         case kEffectRecolor:
             return recolorChannels(c, params, recolor);
+
+        case kEffectColorWheels:
+            return colorWheelsChannels(c, params);
 
         default:
             return c;

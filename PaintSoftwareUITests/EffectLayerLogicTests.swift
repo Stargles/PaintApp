@@ -2047,8 +2047,8 @@ final class EffectLayerLogicTests: XCTestCase {
     // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
 
     /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an
-    /// exhaustive switch with no `default:`, so an eighteenth effect fails to compile until someone
-    /// has decided what it reads; this is the other half — that the seventeen we have answer what the
+    /// exhaustive switch with no `default:`, so a nineteenth effect fails to compile until someone
+    /// has decided what it reads; this is the other half — that the eighteen we have answer what the
     /// ruling says they answer, so a later edit that flips one has to come here and change the table
     /// on purpose.
     ///
@@ -2089,10 +2089,12 @@ final class EffectLayerLogicTests: XCTestCase {
             // reasoning for its `.ink` default, fixed here rather than stored, since Glare has no
             // control of its own to disagree with this later.
             ("Glare",                .glare(Effect.Glare()),                                     .ink),
+            // TODO (63): sixteen knobs, all about colour — a grade, reading the paper like the rest.
+            ("Colour Wheels",        .colorWheels(Effect.ColorWheels()),                         .backdrop),
         ]
 
-        XCTAssertEqual(expected.count, 17,
-                       "Seventeen effects exist; an eighteenth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 18,
+                       "Eighteen effects exist; a nineteenth has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {

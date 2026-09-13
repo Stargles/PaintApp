@@ -46,6 +46,9 @@ enum EffectCatalog {
             // Its identity: no pairs yet. The first one arrives by tapping Add in the settings bar
             // and picking its two ends off the canvas, which is the workflow TODO (60) asks for.
             .recolor(Effect.Recolor()),
+            // A grade, so its identity: every dot at the centre of its wheel. One entry for the four
+            // wheels — they are one corrector, not four effects. TODO (63).
+            .colorWheels(Effect.ColorWheels()),
             .posterize(Effect.Posterize()),
             .posterize(Effect.Posterize(screen: .ordered, screenStrength: 1)),
             .posterize(Effect.Posterize(screen: .halftone, screenStrength: 1)),
@@ -579,6 +582,20 @@ struct EffectSettingsBar: View {
             note(params.type == .fogGlow
                  ? "A wide, soft bloom — the same threshold and glow as Bloom, one dial for size."
                  : "Pixels brighter than the threshold cast a streak of light along each direction.")
+
+        case .colorWheels(let params):
+            // TODO (63). Four real wheels rather than sixteen slider rows — the owner asked for the
+            // UI. `ColorWheelsEditor` draws them and writes every edit back through the same
+            // `onParameterChange` a slider row uses, so the keyframe routing, the take intercept and
+            // the undo bracket are this bar's, unchanged.
+            ColorWheelsEditor(wheels: params,
+                              parameters: effect.parameters,
+                              animatedChannelIDs: animatedChannelIDs,
+                              onParameterChange: onParameterChange,
+                              onEditBegan: onEditBegan,
+                              onEditEnded: onEditEnded,
+                              onSliderTouchDown: onSliderTouchDown)
+            note("Drag a dot toward a colour to tint that range; double-tap it (or the arrow) to reset. Shadows, Midtones and Highlights overlap smoothly by lightness; Global reaches everything.")
         }
     }
 

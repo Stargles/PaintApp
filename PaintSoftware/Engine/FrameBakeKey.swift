@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Seventeen cases and their payload fields, by hand. Adding an eighteenth without touching this
+// Eighteen cases and their payload fields, by hand. Adding a nineteenth without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -499,6 +499,16 @@ private extension BakeKeyEncoder {
             double(p.threshold); double(p.intensity)
             int(p.streaks); double(p.angleOffset); double(p.fade); double(p.length)
             bool(p.rotate45); double(p.size)
+        case .colorWheels(let p):
+            // TODO (63): all sixteen, positionally — four wheels in a fixed order, four fields each.
+            // A wheel whose dot is at the centre still writes its hue, because a hue is a value the
+            // artist can key and the next frame may read it at a saturation that is not zero; this
+            // file's own header names the failure of leaving any field out.
+            tag(0x6B)
+            for wheel in [p.shadows, p.midtones, p.highlights, p.global] {
+                double(wheel.hue); double(wheel.saturation)
+                double(wheel.luminance); double(wheel.strength)
+            }
         }
     }
 

@@ -505,9 +505,13 @@ final class EffectParityLogicTests: XCTestCase {
     /// first one's angle and the turn between them — three at the end, the only scalars nothing
     /// existing could ride. `threshold`, `intensity` and `colorR/G/B` are Bloom's own fields, reused
     /// unchanged.
-    func testTheParameterBlockIsFortyTwoPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 168)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 168)
+    ///
+    /// **Fifty-four since the Colour Wheels (TODO (63), 2026-09-13)**: per wheel its Oklab `a`/`b`
+    /// push and its `L` lift, resolved — twelve at the end. Sixteen knobs, twelve scalars, because
+    /// strength and hue are folded in before the kernel sees anything.
+    func testTheParameterBlockIsFiftyFourPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 216)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 216)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract

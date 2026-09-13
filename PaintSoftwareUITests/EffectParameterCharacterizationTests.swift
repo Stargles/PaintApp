@@ -62,6 +62,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         // TODO (63). One entry for all three types — `CRTScreen`'s convention, not `Blur`'s: the
         // in-bar Type picker is a settings-bar concept and every type shares this one table.
         .glare(Effect.Glare()),
+        // TODO (63). One entry for four wheels — they are one corrector; every dot at the centre.
+        .colorWheels(Effect.ColorWheels()),
     ]
 
     /// One line per slider row: the four facts a `slider(...)` call site carried — its
@@ -212,17 +214,43 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "length|Length|0.0...64.0|%.1f px",
             "size|Size|2.0...9.0|%.1f",
         ])
+
+        // TODO (63). Sixteen, four per wheel, in the bar's order. Every one carries a range — hue
+        // and saturation are driven by the wheel's dot rather than a `Slider`, but the graph editor
+        // draws its Y axis over `uiRange` and a keyed dot needs one — and the control identifier
+        // carries the wheel, since `effectSettings.hue` would name four controls.
+        XCTAssertEqual(sliderRows(.colorWheels(Effect.ColorWheels())), [
+            "colorWheels.shadows.hue|Shadows Hue|0.0...360.0|%.0f°",
+            "colorWheels.shadows.saturation|Shadows Saturation|0.0...1.0|%.2f",
+            "colorWheels.shadows.luminance|Shadows Luminance|-1.0...1.0|%.2f",
+            "colorWheels.shadows.strength|Shadows Strength|0.0...1.0|%.2f",
+            "colorWheels.midtones.hue|Midtones Hue|0.0...360.0|%.0f°",
+            "colorWheels.midtones.saturation|Midtones Saturation|0.0...1.0|%.2f",
+            "colorWheels.midtones.luminance|Midtones Luminance|-1.0...1.0|%.2f",
+            "colorWheels.midtones.strength|Midtones Strength|0.0...1.0|%.2f",
+            "colorWheels.highlights.hue|Highlights Hue|0.0...360.0|%.0f°",
+            "colorWheels.highlights.saturation|Highlights Saturation|0.0...1.0|%.2f",
+            "colorWheels.highlights.luminance|Highlights Luminance|-1.0...1.0|%.2f",
+            "colorWheels.highlights.strength|Highlights Strength|0.0...1.0|%.2f",
+            "colorWheels.global.hue|Global Hue|0.0...360.0|%.0f°",
+            "colorWheels.global.saturation|Global Saturation|0.0...1.0|%.2f",
+            "colorWheels.global.luminance|Global Luminance|-1.0...1.0|%.2f",
+            "colorWheels.global.strength|Global Strength|0.0...1.0|%.2f",
+        ])
     }
 
-    /// 45 sliders across the whole catalogue — 25 was the count of `slider(...)` call sites in
-    /// `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour (whose
-    /// tolerance/softness are per entry, not a `slider(...)` row of their own — see above), 26 with
-    /// TODO (60)'s `sobel.gain` (`bloom.color` does not add one: a `.compound` value has no
+    /// 61 ranged parameters across the whole catalogue — 25 was the count of `slider(...)` call
+    /// sites in `EffectSettingsBar.rows` on the day the table was written, still 25 with Recolour
+    /// (whose tolerance/softness are per entry, not a `slider(...)` row of their own — see above), 26
+    /// with TODO (60)'s `sobel.gain` (`bloom.color` does not add one: a `.compound` value has no
     /// `uiRange`), 32 with the Computer Screen's six, 38 with the Duplicate Offset's six (five box
-    /// scalars and an opacity; its region, mode and colour are not sliders), and 45 with TODO (63)'s
+    /// scalars and an opacity; its region, mode and colour are not sliders), 45 with TODO (63)'s
     /// Glare's seven (threshold, intensity, streaks, angle, fade, length, size; `type` and
-    /// `rotate45` are not sliders).
-    func testThereAreFortyFiveSlidersInTheWholeCatalogue() {
+    /// `rotate45` are not sliders), and **61 with its Colour Wheels' sixteen** — the first ranged
+    /// parameters that are not all `Slider`s: each wheel's luminance and strength are compact
+    /// sliders in `ColorWheelsEditor`, and its hue and saturation are the dot, ranged for the graph
+    /// editor's axis rather than for a slider's travel.
+    func testThereAreSixtyOneRangedParametersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Blur, Posterize and HSV Shift each back more than one menu entry; count each case once,
             // through whichever entry is its "base" reading.
@@ -231,8 +259,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
             return true
         }
-        XCTAssertEqual(cases.count, 17, "Seventeen cases behind twenty-one menu entries")
-        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 45)
+        XCTAssertEqual(cases.count, 18, "Eighteen cases behind twenty-two menu entries")
+        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 61)
     }
 
     /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
@@ -246,7 +274,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// band would start reading a number differently from the settings bar.
     func testEveryAnimatableParameterCarriesAFormatForTheGraphEditorToRead() {
         // By id, because `everyMenuEntry` lists Gaussian and Directional Blur separately and they are
-        // one case sharing one table — the same dedup `testThereAreFortyFiveSlidersInTheWholeCatalogue`
+        // one case sharing one table — the same dedup `testThereAreSixtyOneRangedParametersInTheWholeCatalogue`
         // does by filtering the case, reached from the other side. Ids are unique across the
         // catalogue (`testIdsAreUniqueWithinAndAcrossEffects`), so a set of them is the true count.
         var animatable: Set<String> = []
@@ -256,8 +284,9 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                 animatable.insert(parameter.id)
             }
         }
-        // TODO (63): Glare's six continuous doubles (`glare.streaks` is `.stepped`, an `Int`).
-        XCTAssertEqual(animatable.count, 43,
+        // TODO (63): Glare's six continuous doubles (`glare.streaks` is `.stepped`, an `Int`), and
+        // the Colour Wheels' sixteen, every one a continuous `Double`.
+        XCTAssertEqual(animatable.count, 59,
                        "PREMISE: the animatable set — got \(animatable.sorted())")
         XCTAssertFalse(animatable.contains("posterize.levels"), """
             PREMISE: not among them — an `Int` field, so `.stepped` rather than `.continuous`, and no             scalar channel drives it. The graph editor cannot draw a curve for it, so the readout is             never asked about it.
@@ -277,13 +306,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **53 stored fields over 16 payload structs, and every one of them addressable.** 33 the day
+    /// **78 stored fields over 18 payload structs, and every one of them addressable.** 33 the day
     /// the table was written, plus Recolour's own 2 (its new payload struct), the same day's
     /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), the Computer Screen's 6 (its own
     /// new payload struct), TODO (60)'s `HSVShift.colorize` (1 more, the boolean mode switch
-    /// `Effect.displayName` and `EffectReference`'s colorize branch both key on), and TODO (61)'s
+    /// `Effect.displayName` and `EffectReference`'s colorize branch both key on), TODO (61)'s
     /// Duplicate Offset's 9 (its own payload struct: the box's five, region, blend mode, opacity,
-    /// colour). Dither and Halftone add no field of their own — `Posterize.screen` already existed.
+    /// colour), TODO (63)'s Glare's 9 and its Colour Wheels' 16 (four `Wheel` structs of four
+    /// fields, counted through the nesting — `storedFieldCount` below walks one level down for it).
+    /// Dither and Halftone add no field of their own — `Posterize.screen` already existed.
     /// The count is the point: a field added to a payload struct and not to the table is a knob no
     /// keyframe can reach, and nothing else in the app would say so.
     func testEveryStoredFieldOfEveryPayloadHasAnAddress() {
@@ -306,6 +337,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.duplicateOffset(Effect.DuplicateOffset()), 9),
             // TODO (63): type, threshold, intensity, streaks, angleOffset, fade, length, rotate45, size.
             (.glare(Effect.Glare()), 9),
+            // TODO (63): four wheels × (hue, saturation, luminance, strength).
+            (.colorWheels(Effect.ColorWheels()), 16),
         ]
         for (effect, count) in expected {
             XCTAssertEqual(effect.parameters.count, count,
@@ -315,11 +348,15 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 62)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 78)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
         switch effect {
+        // The one nested payload: each child is a `Wheel`, and the wheel's own fields are what the
+        // table addresses — so the count is the sum over the wheels, not the number of wheels.
+        case .colorWheels(let p):
+            return Mirror(reflecting: p).children.reduce(0) { $0 + Mirror(reflecting: $1.value).children.count }
         case .glare(let p):               return Mirror(reflecting: p).children.count
         case .levels(let p):              return Mirror(reflecting: p).children.count
         case .curves(let p):              return Mirror(reflecting: p).children.count
@@ -358,6 +395,14 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "blur.angle", "blur.directional", "blur.radius",
             "brightnessContrast.brightness", "brightnessContrast.contrast",
             "chromaticAberration.offsetX", "chromaticAberration.offsetY",
+            "colorWheels.global.hue", "colorWheels.global.luminance",
+            "colorWheels.global.saturation", "colorWheels.global.strength",
+            "colorWheels.highlights.hue", "colorWheels.highlights.luminance",
+            "colorWheels.highlights.saturation", "colorWheels.highlights.strength",
+            "colorWheels.midtones.hue", "colorWheels.midtones.luminance",
+            "colorWheels.midtones.saturation", "colorWheels.midtones.strength",
+            "colorWheels.shadows.hue", "colorWheels.shadows.luminance",
+            "colorWheels.shadows.saturation", "colorWheels.shadows.strength",
             "crtScreen.aberration", "crtScreen.apertureMask", "crtScreen.curvature",
             "crtScreen.scanlinePeriod", "crtScreen.scanlines", "crtScreen.vignette",
             "curves.points",
@@ -387,7 +432,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 62)
+        XCTAssertEqual(seen.count, 78)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -461,18 +506,20 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(Set(componentwise), ["curves.points", "gradientMap.stops"])
     }
 
-    /// 43 `Double`s plus three colours (`Bloom.color`, `Outline.color`, `DuplicateOffset.color`),
+    /// 59 `Double`s plus three colours (`Bloom.color`, `Outline.color`, `DuplicateOffset.color`),
     /// each of whose four channels tween as one value with a fixed count — which is why they are
     /// continuous rather than componentwise. 24 doubles and one colour the day the table was written;
     /// TODO (60) added `sobel.gain` (a double) and `bloom.color` (a colour); the Computer Screen's
     /// six, every one a continuous `Double`, brought the doubles to 31; TODO (61)'s Duplicate Offset
     /// added six more doubles (the box's five and an opacity) and a colour; TODO (63)'s Glare added
     /// six more (threshold, intensity, angle, fade, length, size — `streaks` is `.stepped`, an `Int`)
-    /// and no colour of its own, bringing the doubles to 43. Dither/Halftone/Hue Colorize add none of
+    /// and no colour of its own, bringing the doubles to 43; and its Colour Wheels sixteen more, four
+    /// per wheel, every one a `Double` — a hue is an angle but it is a number the wheel writes, and
+    /// `params` wraps it — bringing the doubles to 59. Dither/Halftone/Hue Colorize add none of
     /// their own — `hsvShift.colorize` is `.stepped`, not `.continuous` — so the same dedup this
     /// file's header comment names keeps the count from tripling what Posterize and HSV Shift each
     /// contribute.
-    func testFortySixParametersAreContinuous() {
+    func testSixtyTwoParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
             .filter {
                 if case .blur(let b) = $0 { return !b.isDirectional }
@@ -482,11 +529,11 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
-        XCTAssertEqual(continuous.count, 46)
+        XCTAssertEqual(continuous.count, 62)
         // Bloom precedes Outline precedes Duplicate Offset in `everyMenuEntry`.
         XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id),
                        ["bloom.color", "outline.color", "duplicateOffset.color"])
-        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 43)
+        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 59)
     }
 
     /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
