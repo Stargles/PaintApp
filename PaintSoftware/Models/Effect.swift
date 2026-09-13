@@ -113,6 +113,14 @@ enum Effect: Equatable {
     /// Two passes on both backends: the resample, then the combine. See `DuplicateOffset` for the
     /// coverage rule and the five scalars the box writes.
     case duplicateOffset(DuplicateOffset)
+    /// **Glare — Blender's compositor Glare node, TODO (63), designed 2026-09-12.** A `type` picker
+    /// over three looks (Streaks, Simple Star, Fog Glow) rather than a mode of Bloom, because the
+    /// parameters differ per type. Streaks and Simple Star share one kernel — a fused threshold +
+    /// N-direction gather + additive combine, three passes whatever `streaks` is, reusing Bloom's own
+    /// threshold and combine kinds (`Sharpen`'s precedent for sharing a code) — and Fog Glow
+    /// **is** `Effect.bloom` at a derived radius, reached by literal delegation rather than a second
+    /// copy of its passes. See `Glare` for the four rulings and why Ghosts did not ship.
+    case glare(Glare)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -145,6 +153,7 @@ enum Effect: Equatable {
         case .recolor:             return "Recolour"
         case .crtScreen:           return "Computer Screen"
         case .duplicateOffset:     return "Duplicate Offset"
+        case .glare:               return "Glare"
         }
     }
 
@@ -178,8 +187,10 @@ enum Effect: Equatable {
     /// which is what lets it sit anywhere in a tree, and what `testNoEffectChangesAlpha`'s sweep pins.
     var reshapesCoverage: Bool {
         switch self {
-        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen: return true
-        default:                                                    return false
+        // **Glare, for Bloom's reason.** A streak paints where there was no ink — the seventh
+        // effect that reshapes coverage rather than regrading what is there.
+        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen, .glare: return true
+        default:                                                           return false
         }
     }
 
@@ -268,6 +279,12 @@ enum Effect: Equatable {
         // nearly all of it, and the rim collapses to a sliver at the frame's edge. Fixed, not a
         // default — `.backdrop` would not be a mode, it would be an effect that draws nothing.
         case .duplicateOffset:
+            return .ink
+        // **Glare reads shape too, and is `.ink` fixed, not a stored choice like Bloom's** — a streak
+        // of white paper is the whole canvas glowing, which is not what the three types show off
+        // Blender's own reference pictures. Unlike Bloom, Glare has no `input` field to disagree with
+        // this later, so there is nothing for a document to drift out of step with.
+        case .glare:
             return .ink
         case .bloom(let params):
             return params.input
@@ -788,6 +805,120 @@ extension Effect {
         }
     }
 
+    /// **Blender's compositor Glare node** — TODO (63), the owner's *"Different types of glare, sort
+    /// of like bloom"*. Three of Blender's four types shipped; see the note on `GlareType` for why the
+    /// fourth (Ghosts) did not.
+    ///
+    /// 1. **Streaks and Simple Star share one kernel.** A streak is a directional gather of the
+    ///    thresholded bright pass — the same bright pass Bloom's own threshold produces — summed
+    ///    additively over `streaks` evenly-spaced directions spanning half a turn (a direction and its
+    ///    mirror are the same line, so `π / streaks` covers the full circle with no direction drawn
+    ///    twice) and faded tap by tap. Simple Star is not a second kernel: it is Streaks with
+    ///    `streaks` fixed at 2, so its two directions already produce the type's "four fixed
+    ///    directions" (each direction is drawn both ways) — `rotate45` turns the pair from 0°/90° to
+    ///    45°/135°. `resolvedAsStreaks` states the mapping in code and both are pinned byte-for-byte
+    ///    against it.
+    /// 2. **Fog Glow is not a third kernel either — it *is* `Effect.bloom`.** Blender's own
+    ///    description is "a wide, soft bloom", and `asBloom` builds the equivalent `Bloom` value
+    ///    (`radius = size · fogGlowRadiusPerSize`) that `kindCode`/`params`/`passes`/`weights` all
+    ///    delegate to literally, so the two are the same picture by construction rather than by
+    ///    coincidence of tuned numbers.
+    /// 3. **The multi-pass contract only hands a pass its predecessor's output and the effect's own
+    ///    unchanged original** — never a *named* earlier pass. `N` independent directional blurs of
+    ///    one shared bright pass cannot be chained as `N` separate blur-kind passes: pass 2 would
+    ///    blur pass 1's *streak*, not the bright pass, compounding the directions into a blob instead
+    ///    of summing them into a star. So Streaks is **three passes always** — Bloom's threshold, one
+    ///    new gather kind that loops over every direction internally (`streaksGather` in
+    ///    `EffectKernels.swift` and `Composite.metal`), then Bloom's own combine — never `N + 2`. See
+    ///    `GlareEffectLogicTests` for the measurement this settled.
+    /// 4. **No colour of its own.** Bloom's combine is reused unchanged, tinted white (its own
+    ///    identity), because nothing in TODO (63)'s ask or in Blender's node asks a streak to glow a
+    ///    colour other than the light it found.
+    ///
+    /// Every field is a continuous `Double` but `type` and `streaks`, keyable through
+    /// `Effect.parameters` like every other effect; `input` is `.ink` fixed (`Effect.input`'s Glare
+    /// case) and `reshapesCoverage` is true (`Effect.reshapesCoverage`'s Glare case).
+    struct Glare: Equatable {
+        /// **Three types shipped; Ghosts did not.** Blender's fourth type mirrors and scales copies of
+        /// the bright pass about the frame centre — a resample gather in `DuplicateOffset`'s own
+        /// shape, summed over `iterations`. It was left out of TODO (63)'s first pass: three types are
+        /// the feature the owner asked for effort on, a fourth is a nicety the brief itself named
+        /// optional, and each iteration is a full resample pass (unlike a streak direction, which
+        /// shares one dispatch with every other direction) — `2…5` iterations is 2…5 more passes on
+        /// top of the three below, a cost this pass did not spend budget measuring. Recorded here
+        /// rather than silently dropped, per CLAUDE.md's "remove cleanly" rule read the other way:
+        /// nothing named `ghosts` exists to be a half-built remnant of.
+        enum GlareType: String, Codable, Equatable, CaseIterable {
+            case streaks, simpleStar, fogGlow
+
+            var displayName: String {
+                switch self {
+                case .streaks:    return "Streaks"
+                case .simpleStar: return "Simple Star"
+                case .fogGlow:    return "Fog Glow"
+                }
+            }
+        }
+
+        var type: GlareType = .streaks
+
+        /// `Lum` above which a pixel starts to glow — `Bloom.threshold`'s own field and default,
+        /// shared by every type through the same threshold pass.
+        var threshold: Double = 0.75
+        /// How much of the gathered glow is added back. 0 is the identity, for every type.
+        var intensity: Double = 1
+
+        // MARK: Streaks (and, through `resolvedAsStreaks`, Simple Star)
+
+        /// How many directions the star has. Simple Star fixes this at 2 (`resolvedAsStreaks`); on
+        /// Streaks itself it is the artist's own knob, floored at 2 and capped at
+        /// `Effect.maxGlareStreaks` — a single direction is not a star, and the cap is `setBytes`'
+        /// reason `Effect.maxRecolorEntries` already states, sized generously since a direction costs
+        /// one inner loop iteration rather than a binding.
+        var streaks: Int = 4
+        /// Degrees. Turns every direction by the same amount — Blender's "Streaks Angle".
+        var angleOffset: Double = 0
+        /// Per-sample decay along one direction, 0…1. 1 never fades (a streak as long as `length`
+        /// allows); 0 is only the centre tap, which is Bloom's own bright pixel with nothing spread.
+        var fade: Double = 0.85
+        /// Pixels — the same radius unit `Blur.radius` and `Bloom.radius` are, resolved the same way
+        /// (`Effect.tapCount`), so a streak's reach is measured on the same ruler as every other
+        /// convolution in this file.
+        var length: Double = 32
+
+        // MARK: Simple Star only
+
+        /// Turns the two directions from 0°/90° to 45°/135° — Blender's own "Rotate 45°" checkbox on
+        /// this type. Read only through `resolvedAsStreaks`; Streaks ignores it.
+        var rotate45: Bool = false
+
+        // MARK: Fog Glow only
+
+        /// Blender's own "Size" scale, 2…9. Read only through `asBloom`; Streaks and Simple Star
+        /// ignore it.
+        var size: Double = 6
+
+        /// `size · fogGlowRadiusPerSize` — chosen so the slider's 2…9 lands at 16…72 px, comfortably
+        /// wider than Bloom's own 8 px default, since Fog Glow is described as *"a wide, soft bloom"*.
+        static let fogGlowRadiusPerSize = 8.0
+
+        /// The `Bloom` this type *is*, white and `.ink` like every Glare — `kindCode`, `params`,
+        /// `passes` and `weights` all reach it by literally evaluating `Effect.bloom(asBloom)` rather
+        /// than restating its four passes, which is what makes the two byte-identical by construction.
+        var asBloom: Bloom {
+            Bloom(threshold: threshold, radius: size * Self.fogGlowRadiusPerSize, intensity: intensity,
+                  input: .ink, color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1))
+        }
+
+        /// Simple Star, restated as the Streaks it is — two directions, 0°/90° or, `rotate45`,
+        /// 45°/135°. The identity on Streaks itself, so every caller can ask this unconditionally.
+        var resolvedAsStreaks: Glare {
+            guard type == .simpleStar else { return self }
+            return Glare(type: .streaks, threshold: threshold, intensity: intensity,
+                        streaks: 2, angleOffset: rotate45 ? 45 : 0, fade: fade, length: length)
+        }
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     ///
@@ -1045,6 +1176,14 @@ struct EffectParams: Equatable {
     var dupSin: Float = 0
     var dupRegion: UInt32 = 0
     var dupBlendMode: UInt32 = 0
+    /// **Glare's star, resolved** (TODO (63)). `threshold` and `intensity` above are shared with
+    /// Bloom's own fields; these three are what the gather pass needs and nothing else in this file
+    /// does — how many directions to walk, and the first one's angle and the turn between successive
+    /// ones, both in radians so the kernel evaluates no trigonometry on a slider's own degrees.
+    /// Appended at the end for the reason every field since the colour triple was.
+    var glareStreakCount: UInt32 = 0
+    var glareAngle: Float = 0
+    var glareAngleStep: Float = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -1105,6 +1244,12 @@ extension Effect {
         case .crtScreen:           return 14
         // Pass 0 of a duplicate offset is the resample; the combine's code is reached through `passes`.
         case .duplicateOffset:     return 15
+        // Fog Glow **is** a bloom (`Glare.asBloom`), reached by literal delegation rather than a
+        // second copy of code 8; Streaks and Simple Star's pass 0 is the same threshold kernel bloom's
+        // is, `Sharpen`'s precedent for sharing a code with no wasted pass.
+        case .glare(let glare):
+            if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).kindCode }
+            return 8
         }
     }
 
@@ -1234,6 +1379,18 @@ extension Effect {
             p.colorR = Float(min(max(dup.color.red, 0), 1))
             p.colorG = Float(min(max(dup.color.green, 0), 1))
             p.colorB = Float(min(max(dup.color.blue, 0), 1))
+        case .glare(let glare):
+            if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).params }
+            let s = glare.resolvedAsStreaks
+            p.threshold = Float(min(max(s.threshold, 0), 1))
+            p.intensity = Float(max(s.intensity, 0))
+            p.taps = UInt32(Self.tapCount(forRadius: s.length))
+            let count = Self.glareStreakCount(s)
+            p.glareStreakCount = UInt32(count)
+            p.glareAngleStep = count > 0 ? Float.pi / Float(count) : 0
+            p.glareAngle = Float((s.angleOffset.isFinite ? s.angleOffset : 0) * .pi / 180)
+            // No colour of its own — white is `bloomCombine`'s identity, the reused kind's own rule.
+            p.colorR = 1; p.colorG = 1; p.colorB = 1
         }
         return p
     }
@@ -1293,6 +1450,23 @@ extension Effect {
             combine.kind = Self.kDuplicateCombine
             return [first, combine]
 
+        case .glare(let glare):
+            // Fog Glow is a bloom, not three passes of its own — `Glare.asBloom`'s doc.
+            if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).passes }
+            // Streaks and Simple Star: `first` is already the threshold pass (`kindCode` is 8 for
+            // this branch), so it is reused exactly as bloom's own `first` is — the gather in between
+            // is the one new kind, and the combine is bloom's own, tinted white by `params` above.
+            // **Always three passes, never `N + 2`**: the gather loops over every direction inside one
+            // dispatch, because the contract hands a pass only its predecessor and the effect's
+            // unchanged original — never a *named* earlier pass — so `N` chained blur-kind passes
+            // would each blur the direction before it rather than the shared bright pass (`Glare`'s
+            // own doc, point 3).
+            var gather = first
+            gather.kind = Self.kGlareStreaks
+            var combine = first
+            combine.kind = Self.kBloomCombine
+            return [first, gather, combine]
+
         default:
             return [first]
         }
@@ -1336,9 +1510,35 @@ extension Effect {
         // `testSharpenSharesItsBlurKernelWithBlurAtTheSameRadius`, which is what would catch a copy
         // that quietly stopped being the same call.
         case .sharpen(let sharpen): return Self.gaussianHalfKernel(radius: sharpen.radius)
+        case .glare(let glare):
+            if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).weights }
+            let s = glare.resolvedAsStreaks
+            return Self.fadeHalfKernel(fade: s.fade, taps: Self.tapCount(forRadius: s.length))
         default: return [1]
         }
     }
+
+    /// A streak's per-tap weight, `weights[i] = fade^i` — 1 at the centre, decaying geometrically
+    /// outward, unnormalized (unlike a blur's Gaussian) because a streak is meant to carry real
+    /// brightness outward rather than average it away; `intensity` is the artist's control over how
+    /// much of the total reaches the combine. A zero radius, like a blur's, returns `[1]`.
+    private static func fadeHalfKernel(fade: Double, taps: Int) -> [Float] {
+        guard taps > 0 else { return [1] }
+        let clamped = fade.isFinite ? min(max(fade, 0), 1) : 0
+        return (0...taps).map { Float(pow(clamped, Double($0))) }
+    }
+
+    /// How many streak directions this Glare number-of-streaks resolves to: floored at 2 (one
+    /// direction is not a star) and capped at `maxGlareStreaks`, the same "a real limit, not a
+    /// defensive one" reasoning `maxRecolorEntries` states — a direction costs one inner-loop pass
+    /// over the frame, so an unbounded count is an unbounded cost per pixel.
+    private static func glareStreakCount(_ glare: Glare) -> Int {
+        min(max(glare.streaks, 2), maxGlareStreaks)
+    }
+
+    /// The most directions a Streaks glare walks. Sized to the artist-facing slider (2…16), which is
+    /// already generous next to `maxRecolorEntries`' 64 — a direction is an inner loop, not a binding.
+    static let maxGlareStreaks = 16
 
     /// **The recolour's entries, resolved for the kernels** — one `RecolorTableEntry` per entry, in
     /// list order, and **bound unconditionally**, one zeroed element long for every other effect, so
@@ -1431,6 +1631,20 @@ extension Effect {
             }
             guard reach.isFinite else { return Int(height.rounded(.up)) + 1 }
             return Int(reach.rounded(.up)) + 1
+        case .glare(let glare):
+            if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).verticalKernelRadius(frameSize: frameSize) }
+            // Every direction's own vertical reach, taken at its worst — `duplicateOffset`'s own
+            // "read it, don't guess it" reasoning, over `maxGlareStreaks` directions rather than four
+            // corners.
+            let s = glare.resolvedAsStreaks
+            let taps = Self.tapCount(forRadius: s.length)
+            guard taps > 0 else { return 0 }
+            let count = Self.glareStreakCount(s)
+            let step = Double.pi / Double(count)
+            let angle0 = (s.angleOffset.isFinite ? s.angleOffset : 0) * .pi / 180
+            var maxSine = 0.0
+            for i in 0..<count { maxSine = max(maxSine, abs(sin(angle0 + Double(i) * step))) }
+            return Int((Double(taps) * maxSine).rounded(.up)) + 1
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
              .recolor:
             return 0
@@ -1474,8 +1688,10 @@ extension Effect {
         // The fourth: the box is about the frame's centre, so the copy is gathered from a frame
         // coordinate, and a strip has to know where in the frame it sits to gather the right rows.
         case .duplicateOffset: return true
+        // Glare's gather reaches sideways along an angle, like a directional blur, but never asks
+        // where in the *frame* it is — no centre, no vignette, nothing keyed on absolute position.
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
-             .blur, .bloom, .sobel, .sharpen, .outline, .recolor:
+             .blur, .bloom, .sobel, .sharpen, .outline, .recolor, .glare:
             return false
         }
     }
@@ -1506,6 +1722,7 @@ extension Effect {
     private static let kBloomCombine: UInt32 = 9
     private static let kSharpenCombine: UInt32 = 11
     private static let kDuplicateCombine: UInt32 = 16
+    private static let kGlareStreaks: UInt32 = 17
 
     /// 256 RGBA entries, 1024 bytes — the resolved transfer table, and **the only form a curve reaches
     /// either backend in**.
@@ -1768,7 +1985,7 @@ extension Effect: Codable {
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
              posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen,
-             duplicateOffset
+             duplicateOffset, glare
     }
 
     private var kind: Kind {
@@ -1789,6 +2006,7 @@ extension Effect: Codable {
         case .recolor:             return .recolor
         case .crtScreen:           return .crtScreen
         case .duplicateOffset:     return .duplicateOffset
+        case .glare:               return .glare
         }
     }
 
@@ -1819,6 +2037,7 @@ extension Effect: Codable {
         case .recolor:             self = .recolor(try params(Recolor.self, Recolor()))
         case .crtScreen:           self = .crtScreen(try params(CRTScreen.self, CRTScreen()))
         case .duplicateOffset:     self = .duplicateOffset(try params(DuplicateOffset.self, DuplicateOffset()))
+        case .glare:               self = .glare(try params(Glare.self, Glare()))
         }
     }
 
@@ -1842,6 +2061,7 @@ extension Effect: Codable {
         case .recolor(let p):             try container.encode(p, forKey: .params)
         case .crtScreen(let p):           try container.encode(p, forKey: .params)
         case .duplicateOffset(let p):     try container.encode(p, forKey: .params)
+        case .glare(let p):               try container.encode(p, forKey: .params)
         }
     }
 }
@@ -2062,6 +2282,29 @@ extension Effect.DuplicateOffset: Codable {
         opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
         color = try c.decodeIfPresent(CodableColor.self, forKey: .color)
             ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
+    }
+}
+
+/// Every field defaulted, `CRTScreen`'s recipe: a document written before a knob existed has the
+/// knob's identity, and one written before the effect existed never names it at all. `type` decodes
+/// by its raw name, so a type this build does not know (a future Ghosts) reads as Streaks rather than
+/// as corrupt. Encodes synthesized.
+extension Effect.Glare: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case type, threshold, intensity, streaks, angleOffset, fade, length, rotate45, size
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(GlareType.self, forKey: .type) ?? .streaks
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
+        intensity = try c.decodeIfPresent(Double.self, forKey: .intensity) ?? 1
+        streaks = try c.decodeIfPresent(Int.self, forKey: .streaks) ?? 4
+        angleOffset = try c.decodeIfPresent(Double.self, forKey: .angleOffset) ?? 0
+        fade = try c.decodeIfPresent(Double.self, forKey: .fade) ?? 0.85
+        length = try c.decodeIfPresent(Double.self, forKey: .length) ?? 32
+        rotate45 = try c.decodeIfPresent(Bool.self, forKey: .rotate45) ?? false
+        size = try c.decodeIfPresent(Double.self, forKey: .size) ?? 6
     }
 }
 
@@ -2638,6 +2881,38 @@ extension Effect {
                 l.compound("duplicateOffset.color", "Colour", "color",
                            value: .colour, animation: .continuous,
                            componentDomain: 0...1, keyPath: \DuplicateOffset.color),
+            ]
+
+        case .glare:
+            let l = EffectCaseLens<Glare>(extract: { if case .glare(let p) = $0 { return p }; return nil },
+                                          embed: { .glare($0) })
+            // Every field, whatever `type` currently is — `parameters` depends only on the case,
+            // never on the values in it (this file's own rule, stated on the property itself): the
+            // settings bar hides the rows a type does not use, but the address exists on all three so
+            // a channel can be authored on a knob before the artist has switched to the type that
+            // shows it.
+            return [
+                l.option("glare.type", "Type", "type", \.type),
+                l.double("glare.threshold", "Threshold", "threshold", \.threshold,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("glare.intensity", "Intensity", "intensity", \.intensity,
+                         ui: 0...2, model: 0...(.infinity), format: "%.2f"),
+                // `Posterize.levels`' shape exactly: an `Int`, so `.stepped`, and still drawn as a
+                // slider — two streaks and three are different stars, nothing in between.
+                l.integer("glare.streaks", "Streaks", "streaks", \.streaks,
+                          ui: 2...16, model: 2...Double(Effect.maxGlareStreaks), format: "%.0f"),
+                l.double("glare.angleOffset", "Angle", "angleOffset", \.angleOffset,
+                         ui: 0...180, model: EffectParameter.unbounded, format: "%.0f°"),
+                l.double("glare.fade", "Fade", "fade", \.fade,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("glare.length", "Length", "length", \.length,
+                         ui: 0...64, model: 0...Double(Effect.maxBlurTaps), format: "%.1f px",
+                         quantisation: .roundedByTheRenderPath),
+                // Simple Star only — `Blur.isDirectional`'s shape: a toggle that changes which two
+                // fixed directions the star has, not a quantity `resolvedAsStreaks` could tween.
+                l.boolean("glare.rotate45", "Rotate 45°", "rotate45", \.rotate45),
+                l.double("glare.size", "Size", "size", \.size,
+                         ui: 2...9, model: 2...9, format: "%.1f"),
             ]
         }
     }

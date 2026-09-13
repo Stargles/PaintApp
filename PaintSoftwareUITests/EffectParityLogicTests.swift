@@ -500,9 +500,14 @@ final class EffectParityLogicTests: XCTestCase {
     /// **Thirty-nine since the Duplicate Offset (TODO (61) stage 6, same day)**: the box's reciprocal
     /// scales, its cosine and sine, the region and the blend mode — six at the end. Its offset,
     /// opacity and colour ride fields that already meant exactly those things.
-    func testTheParameterBlockIsThirtyNinePackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 156)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 156)
+    ///
+    /// **Forty-two since Glare (TODO (63), 2026-09-12)**: how many streak directions to walk and the
+    /// first one's angle and the turn between them — three at the end, the only scalars nothing
+    /// existing could ride. `threshold`, `intensity` and `colorR/G/B` are Bloom's own fields, reused
+    /// unchanged.
+    func testTheParameterBlockIsFortyTwoPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 168)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 168)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract

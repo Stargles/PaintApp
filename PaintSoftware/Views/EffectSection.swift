@@ -69,6 +69,11 @@ enum EffectCatalog {
             // A filter, so it arrives visible: the CRT preset, not the type's all-zero identity —
             // `Blur.radius`'s convention, argued above. TODO (60).
             .crtScreen(Effect.CRTScreen.preset(.crt)),
+            // A filter, so it arrives visible: `Effect.Glare`'s own defaults already are — four
+            // streaks, an 0.85 fade over 32 px, on a bright pass. TODO (63). One catalogue entry for
+            // all three types, `CRTScreen`'s convention: the in-bar Type picker is a settings-bar
+            // concept, not a menu identity, the way a preset is.
+            .glare(Effect.Glare()),
         ],
     ]
 
@@ -536,6 +541,44 @@ struct EffectSettingsBar: View {
             note(params.region == .rim
                  ? "A copy of the drawing beneath, moved by the box. Rim paints the colour where the drawing is and the copy has moved away — a rim light."
                  : "A copy of the drawing beneath, moved by the box. Intersection paints the colour where the drawing and the copy overlap — a cast shadow.")
+
+        case .glare(var params):
+            // TODO (63). The type first, `CRTScreen`'s preset row exactly — it decides which of the
+            // rows below are shown, so it has to be read before them.
+            pickerRow("Type", current: params.type.displayName, identifier: "glareType") {
+                ForEach(Effect.Glare.GlareType.allCases, id: \.self) { type in
+                    Button {
+                        onEditBegan(); params.type = type; onChange(.glare(params)); onEditEnded()
+                    } label: {
+                        if type == params.type {
+                            Label(type.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(type.displayName)
+                        }
+                    }
+                    .accessibilityIdentifier("effectSettings.glareType.\(type.rawValue)")
+                }
+            }
+            slider("glare.threshold")
+            slider("glare.intensity")
+            switch params.type {
+            case .streaks:
+                slider("glare.streaks")
+                slider("glare.angleOffset")
+                slider("glare.fade")
+                slider("glare.length")
+            case .simpleStar:
+                toggleRow("Rotate 45°", isOn: params.rotate45, identifier: "rotate45") {
+                    params.rotate45 = $0; onChange(.glare(params))
+                }
+                slider("glare.fade")
+                slider("glare.length")
+            case .fogGlow:
+                slider("glare.size")
+            }
+            note(params.type == .fogGlow
+                 ? "A wide, soft bloom — the same threshold and glow as Bloom, one dial for size."
+                 : "Pixels brighter than the threshold cast a streak of light along each direction.")
         }
     }
 

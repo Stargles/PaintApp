@@ -104,6 +104,8 @@ enum EffectReference {
             return duplicateResample(bytes, params: params, width: width, height: height)
         case kDuplicateCombine:
             return duplicateCombine(bytes, original: original, params: params, width: width, height: height)
+        case kGlareStreaks:
+            return glareStreaks(bytes, params: params, weights: weights, width: width, height: height)
         default:
             break
         }
@@ -174,6 +176,7 @@ enum EffectReference {
     private static let kCRTScreen: UInt32 = 14
     private static let kDuplicateResample: UInt32 = 15
     private static let kDuplicateCombine: UInt32 = 16
+    private static let kGlareStreaks: UInt32 = 17
 
     // MARK: - The per-pixel transforms
     //
@@ -559,6 +562,44 @@ enum EffectReference {
                 let mixed = cb + (blended - cb) * amount
                 for channel in 0..<3 { result[pixel + channel] = quantize(clamp(mixed)[channel] * oa) }
                 result[pixel + 3] = original[pixel + 3]
+            }
+        }
+        return result
+    }
+
+    // MARK: - Glare
+
+    /// **Every streak direction, gathered from the bright pass and summed** — TODO (63), `Effect.
+    /// Glare`'s point 3: the multi-pass contract hands a pass only its predecessor and the effect's
+    /// unchanged original, never a *named* earlier pass, so `N` directions cannot be `N` chained
+    /// blur-kind passes without each one blurring the direction before it instead of the shared bright
+    /// texture. One dispatch instead: the centre tap is read once, and each of `glareStreakCount`
+    /// directions contributes its own forward/backward taps, weighted by `weights` (the fade decay) —
+    /// `blur1D`'s own loop, run `count` times into one running sum rather than once into a fresh pass.
+    /// `duplicateCombine` in `Composite.metal` is this function's twin.
+    private static func glareStreaks(_ bytes: [UInt8], params: EffectParams, weights: [Float],
+                                     width: Int, height: Int) -> [UInt8] {
+        let taps = min(Int(params.taps), max(weights.count - 1, 0))
+        let count = Int(params.glareStreakCount)
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let position = SIMD2<Float>(Float(x), Float(y))
+                var sum = texel(bytes, x, y, width: width, height: height) * weights[0]
+                if taps > 0 && count > 0 {
+                    for i in 0..<count {
+                        let angle = Double(params.glareAngle) + Double(i) * Double(params.glareAngleStep)
+                        let step = SIMD2<Float>(Float(cos(angle)), Float(sin(angle)))
+                        for tap in 1...taps {
+                            let delta = step * Float(tap)
+                            let forward = sample(bytes, position + delta, width: width, height: height)
+                            let backward = sample(bytes, position - delta, width: width, height: height)
+                            sum += (forward + backward) * weights[tap]
+                        }
+                    }
+                }
+                let pixel = (x + y * width) * 4
+                for channel in 0..<4 { result[pixel + channel] = quantize(sum[channel]) }
             }
         }
         return result

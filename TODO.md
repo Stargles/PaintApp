@@ -181,12 +181,12 @@ against a transcript this audit does not have.
 
 ## (63) Glare and Colour Wheels — two more effects
 
-**Status** — not started, asked 2026-09-11. **Low priority — the owner: *"these are not high priority
-so they can be put anywhere in the queue."*** Both are new `Effect` cases; (60)'s six merges of
-2026-09-11 (`70f793e` Recolour and `47c2d6a` Computer Screen for a whole case, `5ac52f0` for a field) are
-the worked examples, and their two lessons apply unchanged: **`BakeKeyEncoder` must see every new field
-or the frame store serves stale pixels**, and a cold-start XCUITest that asserts what is *drawn* is what
-found both of that pass's defects.
+**Status** — Glare shipped 2026-09-12; Colour Wheels not started. **Low priority — the owner: *"these
+are not high priority so they can be put anywhere in the queue."*** Both are new `Effect` cases; (60)'s
+six merges of 2026-09-11 (`70f793e` Recolour and `47c2d6a` Computer Screen for a whole case, `5ac52f0`
+for a field) are the worked examples, and their two lessons apply unchanged: **`BakeKeyEncoder` must see
+every new field or the frame store serves stale pixels**, and a cold-start XCUITest that asserts what is
+*drawn* is what found both of that pass's defects.
 
 > *"glare, and color wheels. Glare operates like blender's compositor glare. Different types of glare,
 > sort of like bloom, etc. Color wheels are a color grading tool allowing the user to edit the luminance
@@ -195,13 +195,20 @@ found both of that pass's defects.
 > into making the UI for it nice. 4 color pickers, plus their respective sliders. Also the same pinch to
 > merge into ability for these like the HSV so I can bake them to the actual colors."*
 
-- [ ] **Glare.** Blender's compositor Glare node has four types — *Fog Glow* (a wide soft bloom),
-      *Streaks* (N directional streaks at an angle, fading), *Ghosts* (lens-flare ghost images mirrored
-      about the centre) and *Simple Star* (a four-armed star) — each with a threshold, a mix and a
-      size/iterations control. `Effect.bloom` already ships as four passes; Fog Glow is close to it, and
-      Streaks and Star are directional blurs of the thresholded pass, so the multi-pass contract
-      (`Effect.passes`) is the plumbing. A new `case glare(Glare)` with a `type` picker rather than a
-      mode of Bloom, because the parameters differ per type. Both backends, byte-for-byte parity.
+**Glare shipped 2026-09-12: Streaks, Simple Star and Fog Glow, one `case glare(Glare)` with an in-bar
+Type picker** (`EffectSection.swift`'s Computer Screen precedent — one catalogue entry, not a
+`displayName` split — rather than `Blur`'s). Streaks and Simple Star are three passes always, whatever
+`streaks` is: Bloom's own threshold kind, one new gather kind that loops over every direction inside a
+single dispatch, and Bloom's own combine kind — the multi-pass contract hands a pass only its
+predecessor and the effect's unchanged original, never a *named* earlier pass, so `N` independent
+directions cannot be `N` chained blur-kind passes without each one blurring the direction before it
+instead of the shared bright pass. Simple Star is Streaks at two directions (0°/90°, or 45°/135° with
+`rotate45`) and Fog Glow **is** `Effect.bloom` at a derived radius, both reached by literal delegation
+and pinned byte-for-byte in `GlareEffectLogicTests`. **Ghosts (the fourth type — mirrored, scaled
+copies of the bright pass about the frame centre) was not built**: three types were the ask the effort
+went into, a fourth is a nicety the brief itself named optional, and each iteration is a full resample
+pass of `DuplicateOffset`'s own shape rather than sharing one dispatch the way a streak direction does —
+see `Effect.Glare.GlareType`'s doc for the reasoning, not a half-built case anywhere in the code.
 - [ ] **Colour wheels.** The four-way corrector every grading program has — DaVinci Resolve's Lift /
       Gamma / Gain / Offset, Premiere Lumetri's Shadows / Midtones / Highlights / Global: each wheel is a
       hue-and-saturation offset (the wheel) with a luminance slider beside it and a strength; the three

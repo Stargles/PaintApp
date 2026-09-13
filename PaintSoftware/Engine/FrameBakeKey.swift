@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Sixteen cases and their payload fields, by hand. Adding a seventeenth without touching this
+// Seventeen cases and their payload fields, by hand. Adding an eighteenth without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -485,6 +485,20 @@ private extension BakeKeyEncoder {
             tag(p.blendMode.bakeKeyTag)
             double(p.opacity)
             encode(codableColor: p.color)
+        case .glare(let p):
+            // TODO (63): every field, whatever `type` is — a field a type does not read is still a
+            // field the artist can key, and this file's own header names the failure of leaving one
+            // out. `type` first, so two Glares differing only in type never collide even when every
+            // number happens to match.
+            tag(0x67)
+            switch p.type {
+            case .streaks:    tag(0x68)
+            case .simpleStar: tag(0x69)
+            case .fogGlow:    tag(0x6A)
+            }
+            double(p.threshold); double(p.intensity)
+            int(p.streaks); double(p.angleOffset); double(p.fade); double(p.length)
+            bool(p.rotate45); double(p.size)
         }
     }
 

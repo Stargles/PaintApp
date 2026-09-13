@@ -435,6 +435,49 @@ final class StripedCompositeLogicTests: XCTestCase {
         XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
+    /// **A Glare streak reaches the frame through the apron, not through the strip's own edge** —
+    /// TODO (63)'s strip-reach requirement, `testABlurAtAStripSeamReadsTheApronRatherThanTheEdge`'s
+    /// shape rather than the Computer Screen's or the Duplicate Offset's: Glare does not read absolute
+    /// position (`readsAbsolutePosition` is false — no centre, no vignette, nothing keyed on where in
+    /// the *frame* a pixel sits), so it needs only an apron, not an origin too. The default four
+    /// streaks span 0°/45°/90°/135°, so one direction is exactly vertical and its own `length` is the
+    /// whole of the vertical reach — `maxSine` is 1, not an approximation.
+    ///
+    /// MEASURED by mutation: with the `.glare` arm of `verticalKernelRadius` returning 0, the apron is
+    /// 0, the fixture's bars still cut into more than one strip, and the stripped frame differs from
+    /// the whole at the seam — the vertical streak's own light is missing a strip-height away from
+    /// where it was cast.
+    func testAGlareStreakReachesTheFrameThroughTheApronNotTheEdge() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        // A bright bar with dark bars above and below it, so a vertical streak cast from it into a
+        // dark band is a different number from "no streak reached here at all".
+        let bars = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64),
+                                           format: PixelOps.transparentFormat()).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+            context.cgContext.setFillColor(UIColor.white.cgColor)
+            context.cgContext.fill(CGRect(x: 24, y: 30, width: 16, height: 4))
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, bars)
+        let effect = Effect.glare(Effect.Glare(threshold: 0.3, intensity: 2, fade: 0.95, length: 26))
+        manager.addValueLayer(effect: effect)
+
+        guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: false) else {
+            return XCTFail("Fixture must mint")
+        }
+        let apron = StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks,
+                                            frameSize: (Int(recipe.canvasSize.width), Int(recipe.canvasSize.height)))
+        XCTAssertEqual(apron, effect.verticalKernelRadius(frameSize: (64, 64)),
+                       "Premise: the apron is the streak's own reach on this frame")
+        XCTAssertEqual(apron, 26 + 1, "Premise: the vertical direction's own length, plus the bilinear row")
+        XCTAssertFalse(effect.readsAbsolutePosition, "Premise: a streak reads a neighbourhood, not the frame's centre")
+
+        let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 20,
+                                                "A strip must gather a streak's light from the frame's "
+                                                + "rows, not stop it at its own edge")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
+    }
+
     /// The same mechanism through the other effect that reads it: a **screened posterize**, whose
     /// 4x4 Bayer cell is indexed by `gid.y & 3`. Deliberately at a strip height that is *not* a
     /// multiple of four — a height of 4, 8 or 12 would put every seam on a cell boundary and the

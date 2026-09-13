@@ -1263,6 +1263,13 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .crtScreen(Effect.CRTScreen.preset(.arcade)),
             // TODO (61) stage 6: two passes, the second reached through `passes` alone.
             .duplicateOffset(Effect.DuplicateOffset(offsetX: 6, scaleX: 1.2, rotationDegrees: 15)),
+            // TODO (63): three passes always, Streaks/Simple Star's kindCode 8 shared with Bloom's
+            // own threshold — `Sharpen`'s precedent for a shared code.
+            .glare(Effect.Glare(streaks: 6, angleOffset: 15)),
+            .glare(Effect.Glare(type: .simpleStar)),
+            // Fog Glow delegates its whole self to an equivalent Bloom, so its first pass is that
+            // Bloom's kind and parameters, not a literal restatement of them.
+            .glare(Effect.Glare(type: .fogGlow, size: 4)),
         ]
         for effect in everything {
             XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params),

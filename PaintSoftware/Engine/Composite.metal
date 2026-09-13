@@ -379,6 +379,7 @@ constant uint kEffectRecolor             = 13;
 constant uint kEffectCRTScreen           = 14;
 constant uint kEffectDuplicateResample   = 15;
 constant uint kEffectDuplicateCombine    = 16;
+constant uint kEffectGlareStreaks        = 17;
 
 /// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
 constant uint kDuplicateRegionRim          = 0;
@@ -447,6 +448,11 @@ struct EffectParams {
     float dupSin;
     uint  dupRegion;
     uint  dupBlendMode;
+    // Glare's star, resolved in Swift (TODO (63)): how many directions to walk, and the first one's
+    // angle and the turn between successive ones, both already in radians.
+    uint  glareStreakCount;
+    float glareAngle;
+    float glareAngleStep;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -1043,6 +1049,37 @@ static inline float4 outline(texture2d<float, access::read> source, constant Eff
     return float4(params.colorR, params.colorG, params.colorB, 1.0f);
 }
 
+// MARK: Glare
+
+/// **Every streak direction, gathered from the bright pass and summed** — `EffectReference.
+/// glareStreaks`'s twin, and `Effect.Glare`'s doc (point 3) is the sentence both transcribe: the
+/// contract hands a pass only its predecessor and the effect's unchanged original, never a *named*
+/// earlier pass, so this loops over every direction inside one dispatch rather than chaining `N`
+/// blur-kind passes, which would each blur the direction before it instead of the shared bright
+/// texture. The centre tap is read once; each of `glareStreakCount` directions adds its own
+/// forward/backward taps, weighted by the fade decay in `weights` — `blur1D`'s own loop, run `count`
+/// times into one running sum.
+static inline float4 glareStreaks(texture2d<float, access::read> source, constant EffectParams &params,
+                                  constant float *weights, uint2 gid) {
+    uint taps = params.taps;
+    uint count = params.glareStreakCount;
+    float4 sum = source.read(gid) * weights[0];
+    if (taps > 0u && count > 0u) {
+        float2 position = float2(gid);
+        for (uint i = 0u; i < count; ++i) {
+            float angle = params.glareAngle + float(i) * params.glareAngleStep;
+            float2 step = float2(cos(angle), sin(angle));
+            for (uint tap = 1u; tap <= taps; ++tap) {
+                float2 delta = step * float(tap);
+                float4 forward = sampleBilinear(source, position + delta);
+                float4 backward = sampleBilinear(source, position - delta);
+                sum += (forward + backward) * weights[tap];
+            }
+        }
+    }
+    return sum;
+}
+
 /// One pass of one effect over one texture — the kernel both §4.4 wrappers reach, and the only one they
 /// need whether the effect runs once or four times.
 ///
@@ -1104,6 +1141,10 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     }
     if (kind == kEffectDuplicateCombine) {
         result.write(duplicateCombine(source, original, params, gid), gid);
+        return;
+    }
+    if (kind == kEffectGlareStreaks) {
+        result.write(glareStreaks(source, params, weights, gid), gid);
         return;
     }
 

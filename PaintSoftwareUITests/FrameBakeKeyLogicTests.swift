@@ -555,6 +555,20 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("dup opacity", .duplicateOffset(Effect.DuplicateOffset(opacity: 0.5))),
             ("dup colour", .duplicateOffset(Effect.DuplicateOffset(
                 color: CodableColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1)))),
+            // TODO (63)'s Glare: the identity, the other two types, then each of its remaining seven
+            // fields alone — every row differs from "glare identity" in one field, so a field the
+            // encoder left out collides with the baseline rather than staying silent, `dup`'s recipe.
+            ("glare identity", .glare(Effect.Glare())),
+            ("glare simpleStar", .glare(Effect.Glare(type: .simpleStar))),
+            ("glare fogGlow", .glare(Effect.Glare(type: .fogGlow))),
+            ("glare threshold", .glare(Effect.Glare(threshold: 0.5))),
+            ("glare intensity", .glare(Effect.Glare(intensity: 0.4))),
+            ("glare streaks", .glare(Effect.Glare(streaks: 6))),
+            ("glare angleOffset", .glare(Effect.Glare(angleOffset: 30))),
+            ("glare fade", .glare(Effect.Glare(fade: 0.5))),
+            ("glare length", .glare(Effect.Glare(length: 50))),
+            ("glare rotate45", .glare(Effect.Glare(type: .simpleStar, rotate45: true))),
+            ("glare size", .glare(Effect.Glare(size: 8))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for
