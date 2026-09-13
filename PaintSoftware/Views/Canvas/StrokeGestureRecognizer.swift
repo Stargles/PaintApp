@@ -24,7 +24,36 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// used to dismiss an open top-bar dropdown the instant the canvas is touched at all. A finger tap
     /// while pencil-only mode is on fails that gate and never actually draws, but should still close
     /// whatever menu was open, same as a real stroke does (see `CanvasManager.interactionBegan`).
+    ///
+    /// **This is the touch-agnostic half only, as of TODO (67).** It still fires on a simultaneous
+    /// two-finger touch-down — the first half of a canvas pan/pinch/rotate is indistinguishable from
+    /// a drawing touch at this instant — so `CanvasView` wires it only to the parts of a canvas touch
+    /// that are safe to act on before that is known (ending a live take, dropping a presentation over
+    /// the canvas). Closing the bottom-docked settings panels (Effect Settings, Text, Select, …)
+    /// waits for `onSingleTouchBegan` below, which does not fire for that same two-finger touch-down.
     var onAnyTouchBegan: (() -> Void)?
+    /// Fires once per fresh touch sequence, the instant this recognizer knows the touch is not one of
+    /// two or more that arrived together in the same `touchesBegan` call — **before** the pencil-only
+    /// gate, same as `onAnyTouchBegan` above, so a finger tap under pencil-only mode still reports
+    /// here even though it goes on to fail and never draws.
+    ///
+    /// **The owner's report, TODO (67):** *"The effect settings menus cancels when you move the
+    /// canvas with two fingers. For example, color wheels. There is already an X at the top right
+    /// corner for that."* `onAnyTouchBegan` fires unconditionally, including on a simultaneous
+    /// two-finger touch-down (`touches.count == 2` in one `touchesBegan` call — `pinch`/`rotate`'s
+    /// own shape, `CanvasTransformFreezeUITests`' doc has the measurement), which is exactly the
+    /// first half of a canvas pan/pinch/rotate and indistinguishable at that instant from a drawing
+    /// touch. Routing the bottom-docked panels' dismissal through that signal closed the Effect
+    /// Settings bar (Colour Wheels included) out from under a two-finger gesture before the second
+    /// finger ever arrived to say this was never a stroke.
+    ///
+    /// **What this does not fix.** A two-finger touch-down staggered across two separate
+    /// `touchesBegan` calls still fires this for the first finger alone, the same way it would
+    /// briefly begin and then roll back a real stroke (`giveUpTrackedStroke(.handedOver)` below) —
+    /// fixing that residual case needs a grace timer this file does not have. `pinch`/`rotate`, the
+    /// only multi-touch gestures XCUITest can synthesise, always deliver both touches in one call, so
+    /// that residual case is real-device-only and untestable here.
+    var onSingleTouchBegan: (() -> Void)?
     /// When this answers true, a second touch arriving mid-stroke is ignored and the tracked touch
     /// keeps the recognizer, instead of failing it. Set while a smart shape is following the pen:
     /// that second finger means "snap this shape", not "start panning", and failing here would also
@@ -198,8 +227,16 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
             giveUpTrackedStroke(.handedOver)
             return
         }
-        guard touches.count == 1, let touch = touches.first,
-              !requiresPencilOnly || touch.type == .pencil else {
+        guard touches.count == 1, let touch = touches.first else {
+            transition(to: .failed)
+            return
+        }
+        // A fresh sequence, and it is not one of two-or-more touches that arrived in this same
+        // batch — see `onSingleTouchBegan`'s own doc for why that is the line TODO (67) needed.
+        // Before the pencil-only gate below, on purpose: a finger tap under pencil-only mode must
+        // still close a bottom-docked panel even though it goes on to fail and never draws.
+        onSingleTouchBegan?()
+        guard !requiresPencilOnly || touch.type == .pencil else {
             transition(to: .failed)
             return
         }

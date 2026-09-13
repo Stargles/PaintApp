@@ -1387,30 +1387,25 @@ final class CanvasManager: ObservableObject {
         return doomed
     }
 
-    /// The single entry point for "a touch has landed on the canvas": closes every presentation over
-    /// the live canvas, then tells the `activePanel` subscribers.
+    /// **The touch-agnostic half of a canvas touch, TODO (67).** Ends a take that should not
+    /// continue and drops every presentation over the live canvas — the part of "a touch has landed
+    /// on the canvas" that is safe to act on before the recognizer knows how many fingers are
+    /// involved, because a sheet or popover does not care how many fingers are under it and neither
+    /// does a running take.
     ///
-    /// Order is deliberate but not load-bearing — both halves are SwiftUI state writes that land in
-    /// the same transaction. What *is* load-bearing is that there is one function, called from all
-    /// **six** canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
-    /// separately-remembered dismissal somewhere else. Named rather than counted, because a number
-    /// on its own cannot be checked against anything:
-    ///
-    /// `strokeRecognizer.onAnyTouchBegan`, `handleMoveBoxCommit`, `handleTextPress`,
-    /// `handleCatchAllTap`, `handleFillPress`, `handleEyedropperPress`.
-    ///
-    /// **This said "four" until 2026-08-26, and the miscount was itself a live defect.** The commit
-    /// that wrote the contract above counted the sites on the base it was cut from, then rebased
-    /// onto a `main` that had meanwhile gained `handleTextPress` — a fifth site, with a bare
-    /// `.send()` of its own. It converted the four it knew about, git reported the merge clean
-    /// because the two changes touched different lines, and a canvas text press went on signalling
-    /// the top-bar dropdowns while closing no presentation for six days. Anyone auditing the sites
-    /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
-    /// sixth, added 2026-08-22 and correct from the start.
+    /// **Split out of what is now `canvasInteractionBegan` because `strokeRecognizer.onAnyTouchBegan`
+    /// fires on *every* touch, including the first half of a simultaneous two-finger canvas
+    /// pan/pinch/rotate** — indistinguishable, at that instant, from a drawing touch. Routing that
+    /// signal through the *whole* of what `canvasInteractionBegan` used to do closed the bottom-docked
+    /// settings panels (Effect Settings, Text, Select, …) out from under the gesture before the second
+    /// finger ever arrived to say this was never a stroke — the owner's report, naming Colour Wheels.
+    /// This function is that signal's whole contribution now; the panel-closing half waits for
+    /// `canvasInteractionBegan`, called only once `strokeRecognizer.onSingleTouchBegan` confirms the
+    /// touch is not one of a batch.
     ///
     /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
     ///   from — the drawing canvas (§7), or the Move box (§5). See the `stopPlayback` call below.
-    func canvasInteractionBegan(mayContinueTake: Bool = false) {
+    func canvasTouchLanded(mayContinueTake: Bool = false) {
         // A touch that is about to become an edit ends playback. The playhead moving under the
         // artist's hand is the whole hazard: a tick lands mid-gesture, `currentFrame`'s `didSet`
         // commits the float and clears the selection through `handleActiveContextChanged`, and the
@@ -1443,6 +1438,35 @@ final class CanvasManager: ObservableObject {
         // ends a take outright (see its own comment).
         if !(mayContinueTake && isRecording) { stopPlayback() }
         dismissPresentationsOverLiveCanvas()
+    }
+
+    /// The single entry point for "a touch has landed on the canvas **and it is not part of a
+    /// two-finger transform**": `canvasTouchLanded` above, then tells the `activePanel` subscribers.
+    ///
+    /// Order is deliberate but not load-bearing — both halves are SwiftUI state writes that land in
+    /// the same transaction. What *is* load-bearing is that there is one function, called from all
+    /// **six** canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
+    /// separately-remembered dismissal somewhere else. Named rather than counted, because a number
+    /// on its own cannot be checked against anything:
+    ///
+    /// `strokeRecognizer.onSingleTouchBegan`, `handleMoveBoxCommit`, `handleTextPress`,
+    /// `handleCatchAllTap`, `handleFillPress`, `handleEyedropperPress`.
+    ///
+    /// **This said "four" until 2026-08-26, and the miscount was itself a live defect.** The commit
+    /// that wrote the contract above counted the sites on the base it was cut from, then rebased
+    /// onto a `main` that had meanwhile gained `handleTextPress` — a fifth site, with a bare
+    /// `.send()` of its own. It converted the four it knew about, git reported the merge clean
+    /// because the two changes touched different lines, and a canvas text press went on signalling
+    /// the top-bar dropdowns while closing no presentation for six days. Anyone auditing the sites
+    /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
+    /// sixth, added 2026-08-22 and correct from the start. **The first was `strokeRecognizer
+    /// .onAnyTouchBegan` until TODO (67) split it into this and `canvasTouchLanded` above — see that
+    /// function's own doc for why.**
+    ///
+    /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
+    ///   from — the drawing canvas (§7), or the Move box (§5). See `canvasTouchLanded`.
+    func canvasInteractionBegan(mayContinueTake: Bool = false) {
+        canvasTouchLanded(mayContinueTake: mayContinueTake)
         interactionBegan.send()
     }
 

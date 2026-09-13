@@ -718,4 +718,66 @@ final class OptionsPanelUITests: PaintUITestCase {
             not reaching the render.
             """)
     }
+
+    // MARK: - TODO (67): a two-finger canvas transform must not close a bottom-docked panel
+
+    /// **The owner's report, driven exactly as they described it:** *"The effect settings menus
+    /// cancels when you move the canvas with two fingers. For example, color wheels. There is
+    /// already an X at the top right corner for that."*
+    ///
+    /// `StrokeGestureRecognizer.onAnyTouchBegan` used to fire on every touch, including the first
+    /// half of a simultaneous two-finger touch-down — indistinguishable, at that instant, from a
+    /// drawing touch — and routed straight through `canvasInteractionBegan`, which sends
+    /// `interactionBegan` and closes whatever `DrawingView.activePanel` has open. `onSingleTouchBegan`
+    /// is the fix: it does not fire for a batched multi-touch touch-down, so the Effect Settings bar
+    /// (Colour Wheels' own, the owner's example) survives a pinch or rotate the same way a real
+    /// two-finger pan would, while a genuine single-finger stroke still closes it exactly as before.
+    ///
+    /// `canvas.pinch(withScale:velocity:)` rather than a hand-built two-finger drag:
+    /// `CanvasTransformFreezeUITests`' own doc has the measurement — XCUITest has no two-finger drag
+    /// primitive, and `pinch`/`rotate` are the only multi-touch gestures it can synthesise, always
+    /// delivering both touches in one `touchesBegan` call. That is exactly the case
+    /// `onSingleTouchBegan` excludes, so a pinch here is a faithful stand-in for the owner's pan.
+    func testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let colorWheels = scrollMenuTo(app, identifier: "layerOptions.blendMode.colourwheels")
+        XCTAssertTrue(colorWheels.waitForExistence(timeout: 5), "The menu should list Colour Wheels")
+        colorWheels.tap()
+
+        let openKnobs = app.buttons["layerOptions.effectSettings"]
+        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
+        openKnobs.tap()
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "Colour Wheels' settings bar is up")
+        XCTAssertEqual(title.label, "Colour Wheels")
+        attach(app, "colourwheels-bar-open")
+
+        // THE FIX: a two-finger canvas transform must leave it standing.
+        canvas.pinch(withScale: 1.3, velocity: 1.0)
+        XCTAssertTrue(title.exists,
+                      "THE BUG: a two-finger canvas pinch/pan/rotate must not close the Effect Settings bar")
+        XCTAssertEqual(title.label, "Colour Wheels", "…and it must still be showing the same effect")
+        attach(app, "colourwheels-bar-survives-pinch")
+
+        // THE CONTROL: a genuine single-finger drawing touch must still close it, same as before —
+        // on the value layer itself, which has no drawing surface, so the touch reaches the canvas
+        // through `handleCatchAllTap` rather than `StrokeGestureRecognizer`; that recognizer's own
+        // `onSingleTouchBegan` is exercised by `BlendModesAndCompositorUITests`' new header test and
+        // by the fresh document's every other drawing test, none of which lost the ability to close
+        // a panel — this asserts the *other* single-touch path, which routes through the unmodified
+        // `canvasInteractionBegan` directly and was never at risk, is still wired.
+        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.5), to: CGVector(dx: 0.6, dy: 0.5))
+        XCTAssertFalse(title.exists,
+                       "A single-finger touch on the canvas must still close the Effect Settings bar")
+    }
 }

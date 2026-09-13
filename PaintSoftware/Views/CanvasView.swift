@@ -788,12 +788,22 @@ struct CanvasView: UIViewRepresentable {
                     self?.updateTimingInk(image: image, rect: rect, alpha: alpha)
                 }
                 host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
-                    // Touching the canvas at all dismisses whatever top-bar dropdown is open.
+                    // Touching the canvas at all — any finger count — ends a live take and drops
+                    // whatever sits over it. Closing the bottom-docked panels (Effect Settings
+                    // included) waits for `onSingleTouchBegan` below, so a two-finger pan/pinch/
+                    // rotate's first finger does not take them down before the second arrives to say
+                    // this was never a stroke — TODO (67), the owner's report naming Colour Wheels.
                     //
                     // **`mayContinueTake` is true here and nowhere else** — KEYFRAMES.md §7 stage 10.
                     // This is the one entry point that can become a timing stroke, so it is the one
                     // that must not end the take it is part of. A take is stopped by playback
                     // stopping, and every other caller of this method still stops it.
+                    self?.canvasManager.canvasTouchLanded(mayContinueTake: true)
+                }
+                host.strokeView.strokeRecognizer.onSingleTouchBegan = { [weak self] in
+                    // The panel-closing half — see `canvasInteractionBegan`'s own doc. Same
+                    // `mayContinueTake` reasoning as `onAnyTouchBegan` above: this can still be the
+                    // touch that becomes a timing stroke.
                     self?.canvasManager.canvasInteractionBegan(mayContinueTake: true)
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
@@ -1793,7 +1803,7 @@ struct CanvasView: UIViewRepresentable {
             // a pair of images nothing on screen was ever going to show: at rest the presentation is
             // `.rest` and `sandwichFull` is the only image displayed, and the one state that reads
             // `sandwichHalves` is entered from `onStrokeBegan`, whose `onAnyTouchBegan` calls
-            // `canvasInteractionBegan()` and stops playback before the first dab. PERFORMANCE.md §5
+            // `canvasTouchLanded()` and stops playback before the first dab. PERFORMANCE.md §5
             // filed this as "every playback tick still computes the two halves nobody sees"; it is
             // this line, and it is the third of the three costs RENDER.md §2.2 forbids on this path.
             //
@@ -3895,15 +3905,17 @@ struct CanvasView: UIViewRepresentable {
         /// The touch the canvas cannot act on: no layers, the active layer hidden, or the active layer
         /// holding no pixels. Two separate jobs, and they are deliberately gated differently.
         ///
-        /// **Dismissing the open menu is unconditional.** Touching the canvas at all closes whatever
-        /// top-bar dropdown is open — that is what `StrokeGestureRecognizer.onAnyTouchBegan` does on
-        /// every layer that *can* be drawn on, fired before its own pencil-only gate for exactly this
-        /// reason. On this path it did not happen at all: the notice states are precisely the states in
-        /// which `reconcileLayers` turns the active host's interaction off, so that host's recognizer
-        /// never sees the touch and `onAnyTouchBegan` never runs, and nothing here sent the signal
-        /// either. The result was that with the layer panel open, tapping the canvas to close it did
-        /// nothing except produce a modal alert — the owner's report. The `send()` below is new
-        /// behaviour, not a gate on existing behaviour.
+        /// **Dismissing the open menu is unconditional.** Touching the canvas with a single touch
+        /// closes whatever top-bar dropdown is open — that is what
+        /// `StrokeGestureRecognizer.onSingleTouchBegan` does on every layer that *can* be drawn on,
+        /// fired before its own pencil-only gate for exactly this reason (TODO (67) narrowed this
+        /// from `onAnyTouchBegan`, which fired on a two-finger touch-down too; see that property's
+        /// own doc). On this path it did not happen at all: the notice states are precisely the states
+        /// in which `reconcileLayers` turns the active host's interaction off, so that host's
+        /// recognizer never sees the touch and neither signal ever runs, and nothing here sent the
+        /// signal either. The result was that with the layer panel open, tapping the canvas to close
+        /// it did nothing except produce a modal alert — the owner's report. The `send()` below is
+        /// new behaviour, not a gate on existing behaviour.
         ///
         /// **Raising the notice is gated on the touch being one that could have drawn.** With
         /// pencil-only drawing on, a finger is not an input the canvas would have accepted anywhere,
