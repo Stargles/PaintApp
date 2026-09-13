@@ -864,10 +864,13 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
 /// what the artist can see whether or not the laptop has sent anything yet. The persisted twin is
 /// `VectorCanvasData.StreamRef`.
 ///
-/// **`isFrozen` and `lastFrameFileName` are persisted from the first build and unused by it.**
-/// STREAM.md §5.4 and §5.6 are stage 2; carrying the fields now means a document written by stage 1
-/// reads back unchanged under stage 2 rather than through a migration, and both are non-optional in
-/// the ref for the `VideoRef` argument — no older file exists to be compatible with.
+/// **`isFrozen` is STREAM.md §5.4's Freeze** — a viewing state persisted with the document and never
+/// an undo step, written through `VectorCanvas.setStreamFrozen(id:_:)`; the coordinator's tick skips
+/// a frozen element and the picture it holds is what Bake Frame bakes. **`lastFrameFileName` is
+/// §5.6's last picture**: the name of the JPEG the last *save* wrote beside the placed images, from
+/// which `displayFrame` is loaded on the next open so the layer looks as it last did before the
+/// laptop answers. Both were carried by stage 1 unused, so a document it wrote reads back without a
+/// migration.
 struct VectorStreamElement: Identifiable, PlacedRectangle {
     var id: UUID = UUID()
 
@@ -884,11 +887,14 @@ struct VectorStreamElement: Identifiable, PlacedRectangle {
     /// What the laptop said it is sending — the source's `name` from STATUS, for the stage-2 bar.
     var sourceLabel: String
 
-    /// STREAM.md §5.4 — stage 2. Persisted now, read by nothing in stage 1.
+    /// STREAM.md §5.4. See the type's header.
     var isFrozen: Bool = false
 
-    /// STREAM.md §5.6 — stage 2. The last picture written into the package, so a document opens
-    /// looking as it last did before the laptop answers. Persisted now, written by nothing in stage 1.
+    /// STREAM.md §5.6 — the JPEG the last save wrote for this element, or nil for one never saved
+    /// with a picture. **Written by the save alone**, never by a freeze, a bake or a disconnect:
+    /// `ProjectStore` stages a whole package on every save and swaps it in by rename, so a file
+    /// written outside a save is in no package the next load reads. The events those sections name
+    /// all leave the picture in `displayFrame`, which is what the save encodes.
     var lastFrameFileName: String? = nil
 
     var transform: LayerTransform
@@ -1410,6 +1416,23 @@ final class VectorCanvas {
         let footprint = Self.placedFootprint(of: stream, slack: 1)
         invalidateRenderOnly(footprint.isNull ? .everything : .region(footprint),
                              committed: false)
+        return true
+    }
+
+    /// **Sets one stream element's `isFrozen` and invalidates nothing** — STREAM.md §5.4. A freeze is
+    /// a viewing state, not an edit: the picture on the cel is exactly the picture that was there,
+    /// so no memo is stale and neither `version` nor `committedVersion` moves. The flag is persisted
+    /// with the document and read by `ScreenStreamCoordinator.tick`, which skips a frozen element.
+    ///
+    /// Returns whether the element was found and the flag actually changed.
+    @discardableResult
+    func setStreamFrozen(id: UUID, _ frozen: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = _elements.firstIndex(where: { $0.id == id }),
+              case .stream(var stream) = _elements[index], stream.isFrozen != frozen else { return false }
+        stream.isFrozen = frozen
+        _elements[index] = .stream(stream)
         return true
     }
 
@@ -7299,7 +7322,12 @@ struct VectorCanvasData: Codable {
     /// more (`setVectorTransform` went in stage 2, `resized(to:offset:)` bakes). It is kept because
     /// `VectorCanvas.init(size:elements:transform:)` still accepts one, so "the payload dropped a
     /// transform the canvas was carrying" would otherwise be a silent way to lose geometry.
-    init(from canvas: VectorCanvas, imageFileNames: [UUID: String]) {
+    ///
+    /// `streamFrameFileNames` is the save's own map of which stream elements it wrote a last-frame
+    /// JPEG for (STREAM.md §5.6) — the file name lands in `StreamRef.lastFrameFileName`, and an
+    /// element the save wrote nothing for keeps whatever name it was loaded with.
+    init(from canvas: VectorCanvas, imageFileNames: [UUID: String],
+         streamFrameFileNames: [UUID: String] = [:]) {
         let carried = canvas.transform
         let source = carried.isIdentity
             ? canvas.elements
@@ -7341,7 +7369,7 @@ struct VectorCanvasData: Codable {
                 // `displayFrame` is runtime-only.
                 return .stream(StreamRef(host: el.host, port: el.port, sourceLabel: el.sourceLabel,
                                          isFrozen: el.isFrozen,
-                                         lastFrameFileName: el.lastFrameFileName,
+                                         lastFrameFileName: streamFrameFileNames[el.id] ?? el.lastFrameFileName,
                                          width: Double(el.naturalSize.width),
                                          height: Double(el.naturalSize.height),
                                          x: el.transform.position.x, y: el.transform.position.y,
@@ -7436,10 +7464,19 @@ struct VectorCanvasData: Codable {
     /// reached it — the exact shape of failure this whole type was rebuilt to make impossible. A
     /// caller with no project directory to resolve against says so by passing `{ _ in nil }`, which
     /// is a decision on the page rather than an omission.
+    ///
+    /// **`resolvingStreamFrames` does have a default, and the asymmetry is deliberate.** A stream
+    /// element exists whether or not its last-frame JPEG does (STREAM.md §5.6) — a resolver that
+    /// answers nil leaves the element on its placeholder until the laptop answers, and drops
+    /// nothing. So a caller with no package directory loses no element by omitting it, which is not
+    /// true of the two above.
     func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
-                             resolvingVideos resolveVideo: (VideoRef) -> URL?) -> [VectorElement] {
+                             resolvingVideos resolveVideo: (VideoRef) -> URL?,
+                             resolvingStreamFrames resolveStreamFrame: (StreamRef) -> UIImage? = { _ in nil })
+        -> [VectorElement] {
         let stored = affineTransform
-        let rebuilt = localElements(resolvingImages: resolveImage, resolvingVideos: resolveVideo)
+        let rebuilt = localElements(resolvingImages: resolveImage, resolvingVideos: resolveVideo,
+                                    resolvingStreamFrames: resolveStreamFrame)
         guard !stored.isIdentity else { return rebuilt }
         return rebuilt.map { VectorCanvas.mapping($0, throughSimilarity: stored) }
     }
@@ -7447,7 +7484,8 @@ struct VectorCanvasData: Codable {
     /// The display list as the file literally holds it, before `affineTransform` is baked in. Private
     /// to the accessor above — nothing outside this type has any business with layer-local geometry.
     private func localElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
-                               resolvingVideos resolveVideo: (VideoRef) -> URL?) -> [VectorElement] {
+                               resolvingVideos resolveVideo: (VideoRef) -> URL?,
+                               resolvingStreamFrames resolveStreamFrame: (StreamRef) -> UIImage?) -> [VectorElement] {
         elements.compactMap { data in
             switch data {
             case .stroke(let stroke): return .stroke(stroke)
@@ -7477,17 +7515,21 @@ struct VectorCanvasData: Codable {
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
                     mirrored: ref.mirrored, animationGroupID: ref.animationGroupID))
             case .stream(let ref):
-                // No resolver: the element needs no file to exist. `displayFrame` is nil on every
-                // load, so the cel opens on the placeholder until the coordinator's client answers
-                // (stage 2's `lastFrameFileName` reload lands here).
-                return .stream(VectorStreamElement(
+                // The element needs no file to exist — a resolver answering nil drops nothing. What
+                // it answers is STREAM.md §5.6's last picture: the JPEG the last save wrote, so the
+                // cel opens looking as it last did rather than on the placeholder, and the
+                // coordinator's client reconnects behind it. `UIImage(contentsOfFile:)` decodes on
+                // first draw, so the load itself pays a file open and nothing else.
+                var element = VectorStreamElement(
                     naturalSize: CGSize(width: ref.width, height: ref.height),
                     host: ref.host, port: ref.port, sourceLabel: ref.sourceLabel,
                     isFrozen: ref.isFrozen, lastFrameFileName: ref.lastFrameFileName,
                     transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
-                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID))
+                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID)
+                if ref.lastFrameFileName != nil { element.displayFrame = resolveStreamFrame(ref) }
+                return .stream(element)
             }
         }
     }

@@ -14,6 +14,10 @@ struct StreamConnectSheet: View {
     @ObservedObject var canvasManager: CanvasManager
     @Environment(\.dismiss) private var dismiss
 
+    /// Non-nil when the bar's address row opened this sheet: the connect re-points that element
+    /// (`CanvasManager.retargetStream`) instead of inserting a new layer.
+    var retargeting: StreamRetarget? = nil
+
     /// `UserDefaults` keys for the prefill.
     static let lastHostKey = "streamScreen.lastHost"
     static let lastPortKey = "streamScreen.lastPort"
@@ -23,8 +27,9 @@ struct StreamConnectSheet: View {
     @State private var isConnecting = false
     @State private var failure: String?
 
-    init(canvasManager: CanvasManager) {
+    init(canvasManager: CanvasManager, retargeting: StreamRetarget? = nil) {
         self.canvasManager = canvasManager
+        self.retargeting = retargeting
         let defaults = UserDefaults.standard
         _host = State(initialValue: defaults.string(forKey: Self.lastHostKey) ?? "")
         let storedPort = defaults.integer(forKey: Self.lastPortKey)
@@ -72,7 +77,7 @@ struct StreamConnectSheet: View {
                     }
                 }
             }
-            .navigationTitle("Stream Screen")
+            .navigationTitle(retargeting == nil ? "Stream Screen" : "Change Computer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -110,7 +115,13 @@ struct StreamConnectSheet: View {
                 let status = try await canvasManager.streamCoordinator.connect(
                     to: StreamEndpoint(host: host, port: port))
                 isConnecting = false
-                if canvasManager.insertStream(host: host, port: port, status: status) != nil {
+                let placed: Bool
+                if let retargeting {
+                    placed = canvasManager.retargetStream(retargeting, host: host, port: port, status: status)
+                } else {
+                    placed = canvasManager.insertStream(host: host, port: port, status: status) != nil
+                }
+                if placed {
                     dismiss()
                 } else {
                     failure = "The computer answered, but reported no picture size — pick a "

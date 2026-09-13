@@ -62,6 +62,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case insertVideo
     /// Actions → Stream Screen — STREAM.md §5.7, its own vector layer like a video.
     case insertStream
+    /// Bake Frame on a stream cel — STREAM.md §2.4: the cel split at the frame and the stream on the
+    /// one-frame cel swapped for a placed image of what it was showing. One step, like the video bake.
+    case bakeStreamFrame
+    /// The stream bar's address row — STREAM.md §5.7: the element pointed at a different laptop.
+    case retargetStream
     /// Adjust Speed on a video block — VIDEO.md §2.5, which rewrites the block's length as well as
     /// the element's speed, so it is one step covering both.
     case adjustVideoSpeed
@@ -270,6 +275,8 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .insertImage: return "insert image"
         case .insertVideo: return "insert video"
         case .insertStream: return "stream screen"
+        case .bakeStreamFrame: return "bake stream frame"
+        case .retargetStream: return "change stream computer"
         case .adjustVideoSpeed: return "adjust video speed"
         case .bakeVideoToImages: return "bake to images"
         case .bakePoseToCels: return "bake animation to drawings"

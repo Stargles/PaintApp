@@ -536,6 +536,21 @@ struct DrawingView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // **The stream bar — STREAM.md §5.7, and the first bar that appears because of what
+            // layer the artist is standing on.** Keyed on the model's own answer
+            // (`activeStreamCel`: the active layer's cel at the current frame holds a stream) and
+            // not on an `ActivePanel` case, so `canvasInteractionBegan`'s `activePanel = .none` —
+            // TODO (67)'s defect, which would otherwise close it on a two-finger pan — cannot reach
+            // it. The Move bar wins while a piece floats, the Select panel's own rule.
+            if let streamCel = canvasManager.activeStreamCel, !canvasManager.isAnyPieceFloating {
+                StreamBar(canvasManager: canvasManager,
+                          coordinator: canvasManager.streamCoordinator,
+                          layerIndex: streamCel.layerIndex, celIndex: streamCel.celIndex,
+                          element: streamCel.element)
+                    .bottomDockCard(width: width)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // The Select tool's menu (Procreate reference) instead of a dropdown from the top toolbar,
             // so it never covers the upper canvas while lassoing.
             //
@@ -697,7 +712,8 @@ struct DrawingView: View {
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
              .nothingWhollyInside, .cannotMoveDerivedFrame, .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
-             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .poseBakeRefused, .recordingRefused,
+             .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .streamBakeRefused, .poseBakeRefused,
+             .recordingRefused,
              .recordingArmed, .animationGroupMembershipChanged, .animationGroupEditRefused,
              .keyframesCropped, .moveOutsideTransformBlock, .effectBoxOutsideBlock:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner

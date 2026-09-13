@@ -114,6 +114,9 @@ struct CanvasNoticeBanner: View {
         case .videoBakeRefused: return "exclamationmark.triangle"
         // And a fifth of the same shape: Bake on an animated block, refused.
         case .poseBakeRefused: return "exclamationmark.triangle"
+        // Not a warning: nothing went wrong, the laptop simply has not sent a picture yet. The
+        // screen glyph, which is what the artist is waiting on.
+        case .streamBakeRefused: return "display"
         // Not a warning: nothing went wrong, the take simply caught nothing. The record glyph,
         // because the message is about the thing the artist was just doing and the fix — arm again
         // and touch a control this time — is that same button.

@@ -190,6 +190,11 @@ struct CanvasNotice: Identifiable, Equatable {
         /// direct caller or a test does.
         case videoBakeRefused(CanvasManager.VideoBakeRefusal)
 
+        /// STREAM.md §5.5: Bake Frame on a stream cel refused. `.noFrameYet` is the one an artist
+        /// meets — the bar is up before the laptop has sent a picture; `.notOnStreamCel` is a direct
+        /// caller's or a test's, since the bar shows only on a cel that holds a stream.
+        case streamBakeRefused(CanvasManager.StreamBakeRefusal)
+
         /// KEYFRAMES.md §6: Bake on an animated block refused. The menu row shows only on a block
         /// that carries a pose channel, so an artist never meets `.notAnimated`; `.noDrawing` is a
         /// cel with channels and no vector tier, which nothing in the app writes today.
@@ -347,6 +352,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
+        case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .recordingRefused(let refusal): return refusal.message
         // **The canvas is named first and the slider second** — KEYFRAMES.md §7, stage 10. The order
@@ -462,6 +468,8 @@ struct CanvasNotice: Identifiable, Equatable {
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
         case .videoBakeRefused: return nil
+        // Nor this one: "no picture yet" is fixed by waiting for the laptop, which is not a button.
+        case .streamBakeRefused: return nil
         // Nor this one, for the same reason: neither of its cases names a thing a button could do.
         case .poseBakeRefused: return nil
         // Nor this one, and each of its six cases fails the button test for its own reason. Two
@@ -514,6 +522,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
         case .videoBakeRefused: return "videoBakeRefused"
+        case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"
         // One code for all four, matching `videoBakeRefused`'s precedent: a test asserting a take was
         // refused reads this, and a test that cares *which* refusal reads `RecordingRefusal` off the

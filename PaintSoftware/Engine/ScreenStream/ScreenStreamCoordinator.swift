@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import UIKit
 
@@ -40,11 +41,29 @@ import UIKit
 /// It never bumps `committedVersion`, so the frame bake, the dirty sweep and the sandwich key are
 /// blind to it by construction. The consequence is stated rather than hidden: a document whose
 /// canvas is on the sandwich at rest — a blend mode, a mask, an effect, a container pose — shows
-/// the stream at whatever picture the bake froze, until something else re-bakes that frame. Stage 2
-/// measures the tick and decides what the engaged sandwich should do; stage 1 keeps the flat row
-/// live and the disk quiet.
+/// the stream at whatever picture the bake froze, until something else re-bakes that frame.
+/// **Stage 2 measured the alternative and left it** — a per-tick in-memory composite of the frame
+/// is a canvas-sized composite of every layer, MEASURED at tens of milliseconds at 2048²
+/// (`StreamSandwichBench`), an order of magnitude over the ~4 ms the tick could carry — so the
+/// bar says so in words instead (`StreamBarState.sandwichNote`), and a stroke on the layer, which
+/// puts the sandwich mid-stroke, is the one time the live picture reaches an engaged canvas.
+///
+/// ## What the bar reads — STREAM.md §5.6, §5.7
+///
+/// `connectionStates` and `statuses` are `@Published`, so `StreamBar` observes this object and
+/// re-renders on a connection coming or going and on a STATUS — events, never frames. The word it
+/// shows is `barState(for:)`'s.
+///
+/// ## Freeze — STREAM.md §5.4
+///
+/// `elementFrozenStateChanged(endpoint:)` runs after `CanvasManager.setStreamFrozen` writes the
+/// flag: when every stream element on a connection is frozen the client sends CONTROL `pause`, and
+/// the first unfreeze sends `resume` (whose keyframe §3 guarantees); an unfreeze on a connection
+/// that was not paused asks for a keyframe. The same reconciliation (`syncPauseState`) runs on
+/// backgrounding, on foregrounding and on every `.connected` transition — a laptop that has just
+/// been reconnected to knows nothing about the pause the previous connection carried.
 @MainActor
-final class ScreenStreamCoordinator {
+final class ScreenStreamCoordinator: ObservableObject {
 
     /// The most often the tick runs — STREAM.md §5.3's 33 ms.
     static let tickInterval: TimeInterval = 1.0 / 30.0
@@ -54,14 +73,29 @@ final class ScreenStreamCoordinator {
     private(set) weak var manager: CanvasManager?
 
     private var clients: [StreamEndpoint: ScreenStreamClient] = [:]
-    /// The status each endpoint last reported, so a newly inserted element can be sized from it.
-    private var statuses: [StreamEndpoint: StreamStatus] = [:]
+    /// The status each endpoint last reported, so a newly inserted element can be sized from it and
+    /// the bar can say what the laptop is sending. Published: a STATUS is an event, not a frame.
+    @Published private(set) var statuses: [StreamEndpoint: StreamStatus] = [:]
+    /// Each live client's connection state as of its last transition. Published for the bar.
+    @Published private(set) var connectionStates: [StreamEndpoint: ScreenStreamClient.State] = [:]
+    /// The endpoints this coordinator has told to `pause` and not yet to `resume`.
+    private var pausedEndpoints: Set<StreamEndpoint> = []
     /// The connect sheet's pending question, one per endpoint: resolved by the first STATUS after
     /// HELLO, or by the first failure.
     private var pendingConnects: [StreamEndpoint: [CheckedContinuation<StreamStatus, Error>]] = [:]
 
     /// Which frame index each element last drew, so a tick on an unchanged slot costs nothing.
-    private var drawnFrameIndex: [UUID: Int] = [:]
+    ///
+    /// **Keyed by cel as well as by element**, because element ids are unique within a cel and not
+    /// within a document: a split (Bake Frame, Split Drawing) copies the stream element — id and
+    /// all — into the new cel, and a key on the element alone would let the cel at frame 3 skip the
+    /// frame the cel at frame 1 had already drawn, leaving it on the older picture it was copied
+    /// with until the next frame arrived.
+    private struct DrawnKey: Hashable {
+        let celID: UUID
+        let elementID: UUID
+    }
+    private var drawnFrameIndex: [DrawnKey: Int] = [:]
     private var tickScheduled = false
     private var lastTick: CFAbsoluteTime = 0
     private var lastPublish: CFAbsoluteTime = 0
@@ -147,7 +181,10 @@ final class ScreenStreamCoordinator {
         for (endpoint, client) in clients where !wanted.contains(endpoint) && pendingConnects[endpoint] == nil {
             client.stop()
             clients.removeValue(forKey: endpoint)
+            connectionStates.removeValue(forKey: endpoint)
+            pausedEndpoints.remove(endpoint)
         }
+        syncPauseState()
     }
 
     /// Stops every client and forgets every status. The document is closing.
@@ -155,6 +192,8 @@ final class ScreenStreamCoordinator {
         for client in clients.values { client.stop() }
         clients.removeAll()
         statuses.removeAll()
+        connectionStates.removeAll()
+        pausedEndpoints.removeAll()
         drawnFrameIndex.removeAll()
         for (endpoint, continuations) in pendingConnects {
             for continuation in continuations {
@@ -189,6 +228,10 @@ final class ScreenStreamCoordinator {
         guard startsClients else { return }
         let client = ScreenStreamClient(endpoint: endpoint)
         clients[endpoint] = client
+        connectionStates[endpoint] = .connecting
+        client.onStateChange = { [weak self] state in
+            self?.stateChanged(state, at: endpoint)
+        }
         client.onStatus = { [weak self] status in
             self?.statusArrived(status, from: endpoint)
         }
@@ -260,6 +303,119 @@ final class ScreenStreamCoordinator {
         }
     }
 
+    /// A client's transition. `.reconnecting` is STREAM.md §5.6's disconnect: the picture on the
+    /// element stays exactly where it is (nothing here touches `displayFrame`, and the next save
+    /// writes it), the bar changes its word, and the pause this end had asked for is forgotten
+    /// because the connection that carried it is gone — `.connected` re-derives it.
+    ///
+    /// Internal rather than private so a logic test can drive the bar's state with no socket.
+    func stateChanged(_ state: ScreenStreamClient.State, at endpoint: StreamEndpoint) {
+        guard clients[endpoint] != nil || state == .stopped else { return }
+        if state == .stopped {
+            connectionStates.removeValue(forKey: endpoint)
+        } else {
+            connectionStates[endpoint] = state
+        }
+        switch state {
+        case .connected:
+            syncPauseState()
+        case .reconnecting, .connecting, .stopped:
+            pausedEndpoints.remove(endpoint)
+        }
+    }
+
+    // MARK: - Freeze (STREAM.md §5.4)
+
+    /// Whether an endpoint has anything to send frames *for*: the app in the foreground and at
+    /// least one unfrozen stream element naming it. A hidden layer's element still counts — the tick
+    /// skips it, but the artist can show the layer again without a round trip to the laptop.
+    private func wantsFrames(from endpoint: StreamEndpoint) -> Bool {
+        guard let manager, !isInBackground else { return false }
+        for layer in manager.layers where layer.kind == .vector {
+            for cel in layer.cels {
+                guard let vector = cel.vector, vector.holdsStream else { continue }
+                for stream in vector.streams where !stream.isFrozen
+                    && stream.host == endpoint.host && stream.port == endpoint.port {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// **Sends `pause` to every connected laptop nothing wants frames from, and `resume` to every
+    /// one something wants them from again.** Idempotent: it compares against `pausedEndpoints`,
+    /// so calling it on every event that could change the answer costs nothing when nothing did.
+    /// `send` is a no-op on a client that is not connected, and `.connected` calls back in here, so
+    /// a pause a reconnect lost is re-sent the moment the laptop answers.
+    ///
+    /// The decoder is reset on `resume` rather than on `pause`: §3 has the laptop restart with a
+    /// keyframe, and a reset here makes that keyframe the first thing decoded — where a reset on
+    /// `pause` would turn any access unit still in flight into a keyframe *request*, which the
+    /// fake streamer answers by restarting the very pipeline the pause just stopped.
+    private func syncPauseState() {
+        for (endpoint, client) in clients {
+            let wanted = wantsFrames(from: endpoint)
+            let paused = pausedEndpoints.contains(endpoint)
+            if !wanted, !paused {
+                client.pause()
+                pausedEndpoints.insert(endpoint)
+                sentControlCommands.append((endpoint, .pause))
+            } else if wanted, paused {
+                client.decoder.reset()
+                client.resume()
+                pausedEndpoints.remove(endpoint)
+                sentControlCommands.append((endpoint, .resume))
+                // The laptop's STATUS after `resume` is on its way; until it lands the stored one
+                // still says "Paused by client", which is a pause this end has just lifted. Say so.
+                if var status = statuses[endpoint], !status.streaming {
+                    status.streaming = true
+                    status.reason = nil
+                    statuses[endpoint] = status
+                }
+            }
+        }
+    }
+
+    /// Runs after `CanvasManager.setStreamFrozen` has written the flag. `unfroze` is whether the
+    /// change was a Freeze → Unfreeze: §5.4 asks for a keyframe on unfreeze, and `resume` carries
+    /// one by §3, so the explicit request goes out only when the connection was not paused.
+    func elementFrozenStateChanged(endpoint: StreamEndpoint, unfroze: Bool) {
+        let wasPaused = pausedEndpoints.contains(endpoint)
+        syncPauseState()
+        if unfroze, !wasPaused, let client = clients[endpoint] {
+            client.requestKeyframe()
+            sentControlCommands.append((endpoint, .keyframe))
+        }
+        objectWillChange.send()
+    }
+
+    /// Every CONTROL this coordinator has asked a client to send, in order — for tests, which have
+    /// no socket to read the wire from. Bounded: the last 64.
+    private(set) var sentControlCommands: [(endpoint: StreamEndpoint, command: StreamControlCommand)] = [] {
+        didSet { if sentControlCommands.count > 64 { sentControlCommands.removeFirst() } }
+    }
+
+    // MARK: - The bar's word (STREAM.md §5.6, §5.7)
+
+    /// The state word `StreamBar` shows for one element — see `StreamBarState`.
+    ///
+    /// Frozen wins over everything: it is the artist's own doing and the picture is held whatever
+    /// the laptop does. Then the connection, then what the laptop said it is sending.
+    func barState(for element: VectorStreamElement) -> StreamBarState {
+        if element.isFrozen { return .frozen }
+        let endpoint = StreamEndpoint(host: element.host, port: element.port)
+        switch connectionStates[endpoint] {
+        case .none, .connecting?:
+            return .connecting
+        case .reconnecting?, .stopped?:
+            return .reconnecting
+        case .connected?:
+            guard let status = statuses[endpoint] else { return .connecting }
+            return status.streaming ? .live : .notStreaming(reason: status.reason ?? "no source is picked")
+        }
+    }
+
     // MARK: - The tick
 
     private func frameArrived() {
@@ -296,9 +452,10 @@ final class ScreenStreamCoordinator {
             var floatNeedsRepaint = false
             for stream in vector.streams where !stream.isFrozen {
                 let endpoint = StreamEndpoint(host: stream.host, port: stream.port)
+                let key = DrawnKey(celID: cel.id, elementID: stream.id)
                 guard let latest = latestFrame(for: endpoint),
-                      drawnFrameIndex[stream.id] != latest.index else { continue }
-                drawnFrameIndex[stream.id] = latest.index
+                      drawnFrameIndex[key] != latest.index else { continue }
+                drawnFrameIndex[key] = latest.index
                 vector.setStreamFrame(id: stream.id, image: UIImage(cgImage: latest.image))
                 if let float, float.layerID == layer.id, float.insideIDs.contains(stream.id) {
                     floatNeedsRepaint = true
@@ -328,14 +485,45 @@ final class ScreenStreamCoordinator {
 
     private func appDidEnterBackground() {
         isInBackground = true
-        for client in clients.values { client.pause() }
+        syncPauseState()
     }
 
     private func appWillEnterForeground() {
         isInBackground = false
-        for client in clients.values {
-            client.resume()
-            client.requestKeyframe()
+        // `resume` carries a keyframe by §3, so nothing here asks for a second one; an endpoint
+        // every element of which is frozen stays paused, which is what the artist left it as.
+        syncPauseState()
+    }
+}
+
+/// **The word the stream bar shows** — STREAM.md §5.6's four, plus the first connection's own.
+/// Computed by `ScreenStreamCoordinator.barState(for:)` and pinned by `StreamBarStateLogicTests`;
+/// in the test target so the bar's one decision is not made in a SwiftUI body.
+enum StreamBarState: Equatable {
+    /// Connected, and the laptop says it is sending.
+    case live
+    /// The element's own `isFrozen` — the picture is held whatever the laptop does.
+    case frozen
+    /// The first attempt, before any answer: a fresh insert, or a document just opened.
+    case connecting
+    /// The connection dropped and the client is retrying on §3's backoff. The last picture stays.
+    case reconnecting
+    /// Connected, but STATUS says `streaming:false` — nothing picked, paused, or the window closed.
+    case notStreaming(reason: String)
+
+    var word: String {
+        switch self {
+        case .live: return "Live"
+        case .frozen: return "Frozen"
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .notStreaming(let reason): return "Not streaming — \(reason)"
         }
     }
+
+    /// The sentence the bar adds while the layer sits in an engaged sandwich at rest — a blend
+    /// mode, a mask, an effect or a transformation layer anywhere in the document puts the whole
+    /// canvas on the baked composite, which `committedVersion` keeps blind to a live frame by
+    /// design (see `ScreenStreamCoordinator`'s header). Never silent staleness.
+    static let sandwichNote = "Live picture pauses while a blend mode, mask, effect or transformation layer is in the document"
 }

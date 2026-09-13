@@ -539,6 +539,9 @@ enum ProjectStore {
     /// into place while the other is stashing what it believes is the live one.
     private static let saveQueue = DispatchQueue(label: "com.paintapp.ProjectStore.save", qos: .userInitiated)
 
+    /// STREAM.md §6: a stream's last picture is saved as JPEG at this quality.
+    static let streamLastFrameJPEGQuality: CGFloat = 0.9
+
     /// What one `save(_:to:)` actually spent, split into the phases PERFORMANCE.md §2 item 3 names.
     ///
     /// **This exists because "leaving to the gallery takes ~3 s" had never been measured at any
@@ -1000,6 +1003,9 @@ enum ProjectStore {
                 if let vector = cel.vector, !vector.isEmpty {
                     roles.insert(.drawing)
                     if !vector.images.isEmpty { roles.insert(.placedImage) }
+                    // A stream's last picture lands beside the placed images (STREAM.md §5.6) —
+                    // only for an element that has one to write.
+                    if vector.streams.contains(where: { $0.displayFrame != nil }) { roles.insert(.placedImage) }
                     if !vector.videos.isEmpty { roles.insert(.video) }
                 }
             }
@@ -1208,6 +1214,16 @@ enum ProjectStore {
             encoded += 1
             return data
         }
+        /// A stream's last picture — STREAM.md §5.6's JPEG at quality 0.9, since a screen capture
+        /// has no alpha to lose and a 1080p PNG per stream per save would be the larger file in a
+        /// document of drawings.
+        func jpeg(_ image: UIImage) -> Data? {
+            let started = CFAbsoluteTimeGetCurrent()
+            let data = image.jpegData(compressionQuality: Self.streamLastFrameJPEGQuality)
+            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            encoded += 1
+            return data
+        }
         // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
         // from, and it is the one thing the encoder needs that the payload cannot work out for
         // itself. `PackedSampleRun` writes the origin it was given into the file, so a decoder needs
@@ -1339,7 +1355,21 @@ enum ProjectStore {
             for element in vector.videos {
                 copyAsset(named: element.assetFileName, from: element.assetURL)
             }
-            let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
+            // **A stream's last picture, written by the save and by nothing else** — STREAM.md §5.6.
+            // Whatever `displayFrame` holds at the snapshot: the live frame, the frozen one, or the
+            // last one received before the laptop went away, which is what §2.8 asks the next open
+            // to show. The name is minted per cel and per element rather than reused from the
+            // element, because a split (Bake Frame, Split Drawing) copies an element's id into a
+            // second cel, and two cels writing one name would leave whichever wrote last.
+            var streamFrameFileNames: [UUID: String] = [:]
+            for element in vector.streams {
+                guard let frame = element.displayFrame, let data = jpeg(frame) else { continue }
+                let name = "\(cel.id.uuidString)_stream_\(element.id.uuidString).jpg"
+                write(data, name, .placedImage)
+                streamFrameFileNames[element.id] = name
+            }
+            let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames,
+                                           streamFrameFileNames: streamFrameFileNames)
             if let data = json(payload) {
                 // `drawings/<celID>.json` since TODO (57) — recorded in the manifest as the
                 // package-relative path it is, which is the whole of the format version: a bare name
@@ -1791,6 +1821,20 @@ enum ProjectStore {
                             return nil
                         }
                         return url
+                    }, resolvingStreamFrames: { ref in
+                        // STREAM.md §5.6: the picture the last save wrote, so the layer opens looking
+                        // as it last did. Not damage when it is missing — the element is intact and
+                        // the laptop will answer; the artist sees the placeholder until then.
+                        guard let name = ref.lastFrameFileName else { return nil }
+                        let image = UIImage(contentsOfFile: fileURL(name, .placedImage).path)
+                        if image == nil {
+                            log.error("""
+                                Stream picture \(name, privacy: .public) for cel \
+                                \(celManifest.id.uuidString, privacy: .public) is missing from the package — \
+                                the stream opens on its placeholder until the computer answers
+                                """)
+                        }
+                        return image
                     })
                     // No `transform:`. The accessor above has already baked whatever the file carried
                     // into the geometry, so a cel loads in canvas coordinates and its own transform is
