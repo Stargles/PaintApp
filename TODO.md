@@ -50,9 +50,11 @@ rather than assuming it still holds.
 
 ## (27) Stream the computer's screen as a layer
 
-**Status** — briefed by the owner 2026-09-13; design conversation open; not started. Promoted from
-"Later" — it *"requires (26)"* and (26), video import, is merged. Spec to be written at
-[STREAM.md](STREAM.md) once the questions below are answered.
+**Status** — briefed 2026-09-13, designed the same day ([STREAM.md](STREAM.md)), and **built through
+stage 4 the same day**: the Windows streamer (`streamer/`, installed on the laptop as the `PaintStreamer`
+task), the iPad stream layer, the bar with Freeze / Bake Frame, files both ways. On the owner's iPad.
+What remains is stage 5 — proving it on the real link with the owner at the laptop — and the one
+device figure §5.3 asks for.
 
 **The owner's brief, 2026-09-13, verbatim in the numbered points:**
 
@@ -93,65 +95,16 @@ rather than assuming it still holds.
     `100.70.220.4`. SSH on the Windows box was **closed** on 2026-09-13 and needs the owner to enable
     OpenSSH Server before any Windows-side work can happen from this Mac.
 
-**What is left**
-- [ ] Design conversation → STREAM.md (wire protocol, capture source picker, freeze/bake semantics,
-      reconnect after the computer is off, the drop box and the reverse export).
-- [ ] Windows streamer app (capture core separable from the shell, per point 9).
-- [ ] iPad: stream layer kind/object, Actions entry, options bar (Freeze / Bake Frame), move-tool
-      support, persistence of the last frame so the layer survives the computer being off.
-- [ ] Drop box → import; iPad export → laptop.
-- [ ] Drive it end to end with the real Windows box before calling it done.
-
----
-
-## (64) Transform-layer settings go in the bottom menu
-
-**Status** — asked 2026-09-13, not started.
-
-*"the settings in the transform layer (example: shake x, shake y, etc. in shake mode) should be the
-bottom menu, like the effect settings for effects."*
-
-**What is left**
-- [ ] Move the per-mode parameters (shake x/y, parallax, rotate, repeat, duplicate offset) out of
-      wherever they live now into the same bottom panel the effect settings use.
-
----
-
-## (65) HSV Shift and Hue Colorize are one menu entry
-
-**Status** — asked 2026-09-13, not started. `Effect.Kind.hsvShift` already carries `colorize` as a
-mode (TODO (60)); the menu still lists it twice.
-
-*"I'm not sure why HSV Shift and Hue Colorize are two different options. Make them one with just a
-toggle (toggle is already implemented)."*
-
-**What is left**
-- [ ] One entry in the effect picker; the existing toggle selects colorize. Existing documents
-      with either variant must open unchanged.
-
----
-
-## (66) Organise the Effect / blend-mode menu with headers
-
-**Status** — asked 2026-09-13, not started.
-
-*"The Effect / blend mode option menu should be organized. Use headers to organize them into groups."*
-
-**What is left**
-- [ ] Group the 18 effects and 25 blend modes under section headers in the picker.
-
----
-
-## (67) Effect settings must not cancel on a two-finger canvas move
-
-**Status** — asked 2026-09-13, not started.
-
-*"The effect settings menus cancels when you move the canvas with two fingers. For example, color
-wheels. There is already an X at the top right corner for that."*
-
-**What is left**
-- [ ] The bottom effect-settings panel stays open through a two-finger pan/zoom; only the X closes it.
-      Check whether the transform-layer panel from (64) and the other bottom panels share the dismissal.
+**What is left** — STREAM.md §7 stage 5
+- [ ] The owner streams Blender from the laptop to the iPad and rotoscopes over it; source switch,
+      window close, laptop lock and reboot behave as STREAM.md §4.5 / §2.8 say.
+- [ ] End-to-end latency MEASURED on the real link (a clock on the laptop screen beside the iPad);
+      bitrate/GOP tuned if it needs it; numbers into PERFORMANCE.md.
+- [ ] The redraw tick's cost MEASURED on the iPad (STREAM.md §8 names the outlet: the
+      `ScreenStream` log line or the bar's `streamBar.tickSummary` marker).
+- [ ] Owner-verified: Ctrl+V of a bitmap into the drop box (not exercisable over SSH).
+- [ ] Known limitation to rule on: a stream layer under a blend mode or effect is not live (46–73 ms
+      a tick); the bar says so. Opacity is fine.
 
 ---
 
