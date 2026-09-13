@@ -729,9 +729,12 @@ source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJE
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
 xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -configuration Release \
   -destination "generic/platform=iOS" -allowProvisioningUpdates -derivedDataPath build/DerivedData
+EXP=$(security cms -D -i <path>.app/embedded.mobileprovision | plutil -extract ExpirationDate raw - -o -); [[ $(( $(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) - $(date +%s) )) -lt $((5*86400)) ]] && echo "REFUSE: profile expires $EXP — under 5 days, do not install" && exit 1
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
-The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
+Check the expiry before installing, not after: the build installed on 2026-09-12 embedded a profile
+with under a day of life left, which is exactly how "PaintApp is no longer available" recurred a
+fourth time. The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
 Release` above is what makes the shipped build the one that's actually optimised — Debug measured
 62x slower than Release on the alpha-mask render path. `~/PaintApp/deploy/deploy.sh` does this but
 **pulls `main` first**, so it never ships branch work — run the steps above from the worktree
@@ -747,7 +750,11 @@ identifier" — has two causes, and `devicectl list devices` tells them apart. A
 name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
 
 Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
-(daily 3:05 AM as root, resigns every 5 days). Log: `~/.config/paintapp/resign.log`.
+(hourly, as root; due when the last-installed profile is expired or within 1h of expiring, with an
+unconditional 5-day ceiling as a fallback if profile tracking itself ever breaks — not a fixed
+5-day timer as before, since that let a profile die mid-interval on 2026-09-12. Verifies each build
+actually advanced the profile's expiry before installing, and refuses if Xcode has no usable Apple
+ID session — see BUGS.md). Log: `~/.config/paintapp/resign.log`.
 
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.
