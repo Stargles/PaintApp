@@ -14,70 +14,84 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**No branches, no worktrees, stash empty, no simulator debris.** Session 42 closed at `94caa67`,
-19 commits past session 41's `8e2ffff` (87 past session 40's `aff11df`), everything merged and pushed.
+**No branches, no worktrees, stash empty, no simulator debris.** Session 43 closed with everything
+merged and pushed; `main` carries (64)–(67) and the whole of (27) through stage 4.
 
-**Fast tier at `103d540`: 4029 total / 4026 passed / 0 failed / 3 skipped**, Debug and Release,
+**Fast tier at close: 4119 total / 4116 passed / 0 failed / 3 skipped**, Debug and Release,
 reconciled against a static `func test` count at every merge (the constant 3-count gap is three
 `private static func testBrush()` helpers).
 
-**Full suite, twice this session, both on a fresh device on an idle machine.** At `8e2ffff`:
-**4270 / 4206 / 5 / 59, 48.6 min**, zero crash blocks, all five failures green serially — the eraser-cut
-trio CLAUDE.md attributes to clone contention, plus two more. At `103d540`, at close: **4332 / 4268 / 5 / 59, 46.2 min**, zero crash blocks, all five green on the first isolated run and none in both runs' failing sets. CLAUDE.md's class table is
-current as of the second run.
+**Full suite at close, fresh erased device, idle machine: 4428 / 4364 passed / 5 failed / 59 skipped, 52.7 min, zero crash blocks — two cut tests a state flake (fail warm at session 42's close too, pass after an erase), fill-adjust and Colour Wheels green warm in isolation, and one real one: (65)'s own test read a lazily-realised menu row without scrolling to it, fixed in the test.** CLAUDE.md's class table was
+not re-taken this pass — five UI classes gained tests (`OptionsPanelUITests`,
+`BlendModesAndCompositorUITests`, `TransformLayerModesUITests`, `TransformLayerSpanUITests`, and the
+new one-test `StreamScreenUITests`); pull the per-class table from the next full run's xcresult.
 
-**The owner's iPad has `94caa67` on it** (Release, installed 2026-09-13, profile valid to
-2026-09-20 04:15Z). The "PaintApp is no longer available" failures — four in two months — are diagnosed
-and closed: Xcode had silently dropped the free-account Apple ID session, so no CLI build could mint a
-profile and every build reused a downloaded one until it expired. The owner signed
-**fealle2000@gmail.com** back in (team `354YBUT74A` — not their personal team); the resign daemon
-(`~/PaintApp/deploy/resign.sh`, outside the repo, backed up beside itself) now judges due-ness from the
-**installed profile's expiry**, runs **hourly**, refuses a build whose profile did not advance, and
-posts a **macOS notification on any FAIL** — so a lapsed sign-in is a same-day click, not a dead app a
-week later. CLAUDE.md's deploy steps refuse a profile with under five days left.
+**The owner's iPad has the stream build** (Release, installed 2026-09-13 from the branch at `709c7ac`,
+before stage 4a merged — so **without** laptop→iPad file drop and Send to Computer; profile valid to
+2026-09-20 04:15Z). **Reinstall from `main` first thing** so they have file transfer too; CLAUDE.md's
+deploy steps.
+
+**The Windows laptop is set up and streaming.** `desktop-cbr0fl6`, `100.104.85.111` on the tailnet,
+SSH as `PC` with `~/.ssh/paintapp_windows`; the streamer runs as the `PaintStreamer` scheduled task in
+`kevin`'s desktop session, remembers `monitor:0`, and says "The laptop is locked" while it is.
+`tools/windows/streamer-remote.sh {start|stop|status|log|sources|deploy|test}` drives it from this
+Mac. CLAUDE.md has the section; STREAM.md §4 has everything else.
 
 ## What is left
 
-**The queue is empty of live items.** TODO.md holds only the three the owner deprioritised or dropped —
-(22) multi-cel select, (10) linear-light blend, (37) brush importers — and the "Later" features, each of
-which needs a design conversation before a line is written. **Ask the owner what to pick up**, with the
-iPad build in front of them; do not start (22)/(10)/(37) unprompted.
+**(27) is built through stage 4 and needs the owner** — STREAM.md §7 stage 5 and TODO.md's checklist:
+stream Blender to the iPad and rotoscope over it; measure end-to-end latency on the real link; take
+the device tick figure; try Ctrl+V into the drop box; rule on the blend-mode limitation. Nothing in
+it can be done from this Mac alone.
 
-## What shipped since session 41's close
+**Then the queue is empty again** — (22), (10) and (37) are deprioritised or dropped by the owner, and
+the "Later" features each need a design conversation. **Ask the owner what to pick up**, with the
+iPad build in front of them.
 
-- **Full suite re-taken** twice (above); the class table is current.
-- **(21) closed whole** — the folder graph band (`graphBandExpansion` keyed by `KeyframeTarget`; a
-  folder's channels open and edit like a layer's, entered from the timeline name or "Show in Graph
-  Editor") and **Bake Animation** (one animated block → one drawing per frame, byte-identical to the
-  animated render on both backends, holds kept as one block, one undo step, the confirmation quoting a
-  MEASURED 2.4 ms/drawing save cost). The bake's cold-start test found a latent undo display race
-  (`DeferredVectorRender.landing`) the fast tier could not see.
-- **(63) closed whole** — **Glare** (Streaks / Simple Star / Fog Glow as one entry with a Type picker;
-  a single gather pass walking every direction, because the multi-pass contract only hands a pass its
-  predecessor; Ghosts recorded as not built) and **Colour Wheels** (Shadows / Midtones / Highlights /
-  Global as four real discs on one row, Oklab offsets with partition-of-unity weights, sixteen keyable
-  parameters, parity delta 0). `Effect.Kind` is **18 cases**, kernel codes 0–18; the kernel-branch
-  coverage sweep now derives its upper bound from the constants.
-- **The resign daemon**, above.
+## What shipped since session 42's close
 
-**Owner rulings this pass**: Glare stays one entry; picking a folder for the curve editor does not
-change the drawing layer; the hourly resign plist installed by the owner.
+- **(27) — the stream layer, stages 0–4**, one day from brief to iPad. Design in STREAM.md (§2 is the
+  owner's twelve rulings; §3 the wire protocol both programs implement; §6 the defaults taken). The
+  Windows streamer (`streamer/`: `Streamer.Core` with no UI and no statics so a future Windows build
+  of the paint app can host it, `Streamer.Tray` in WPF, 103 xunit tests) captures a monitor or one
+  window through Windows.Graphics.Capture via GStreamer and encodes on the laptop's QuickSync. The
+  iPad side is a sixth `VectorElement` case in an ordinary vector layer, decoded by VideoToolbox off
+  the main thread, redrawn by a ≤30 Hz tick costing **0.2–0.5 ms** (simulator), with a bar that shows
+  Live / Frozen / Reconnecting… / Not streaming — <reason>, Freeze, and Bake Frame (`splitCel` twice
+  and a swap, one undo step). The last picture is saved with the document; files go both ways
+  (drop box or Ctrl+V on the laptop → a new layer; Export → Send to Computer → the laptop's folder).
+  **Five things only the build could find**: a per-tick version bump would have re-baked the frame to
+  disk 30×/s (`committedVersion` is the seam); Windows capture is damage-driven, so a still screen
+  sends nothing and the keyframe rule became "restart the capture"; the laptop's display sleeps in
+  60 s and capture goes black unless held awake; `OpenInputDesktop` reports a locked laptop as
+  unlocked (the `LogonUI` check is what works); and a stream under a blend mode or effect cannot be
+  live at 46–73 ms a tick, so the bar says so.
+- **(64)** the transform layer's per-mode settings open in the bottom dock (`TransformSettingsBar`,
+  the code moved not copied); **(65)** HSV Shift is one menu entry with Colorize as its toggle;
+  **(66)** the effect and blend menus have section headers (real `Section("…")` titles, confirmed
+  drawn); **(67)** bottom-docked panels survive a two-finger pan — `StrokeGestureRecognizer.
+  onSingleTouchBegan` fires only for a confirmed single touch, and `CanvasManager.canvasTouchLanded`
+  is split from `canvasInteractionBegan`.
+- **`tools/windows/`** — `enable-ssh.ps1` (OpenSSH Server + the Mac's key, one paste as admin),
+  `install-streamer.ps1`, `streamer.ps1`, `streamer-remote.sh`; **`tools/stream/`** — the Python
+  reference server and the conformance client both real ends are proved against.
+
+**Owner rulings this pass**: the four (27) answers above; the concurrency cap for workers, set per
+session and not recorded.
 
 ## Waiting on the owner
 
-- **What to pick up next** — the queue is empty.
-- **What they found on the iPad** (`94caa67`).
-- **Questions that took a default**, each reversible and recorded where the behaviour lives:
-  - Bake: a hold stays one block (or one per frame?); a block inside a folder bakes only its own
-    motion; the save cost quoted is this Mac's.
-  - Colour Wheels: a drag jumps the dot to the finger (Resolve nudges instead); a tap does nothing;
-    reset clears Lum and Strength too; rim chroma 0.15; Midtones peaks at ~99/255 (perceptual middle).
-  - Selection editing: Size over mixed widths sets one width (scale together?); Opacity likewise;
-    the band shows only once a loop exists.
-  - Duplicate Offset: white rim 8 px up-right default; box is the whole canvas; panel closes after
-    Adjust Box → Done; all 25 blend modes.
-  - Repeat: Move/lasso/text on a repeated frame still see an empty frame, silently.
-  - Recolour, Computer Screen, Shake: see TRANSFORM_LAYER §5 and EFFECT_BACKDROP §4 notes.
+- **Everything in (27)'s stage 5** — they are the only one who can sit at the laptop and the iPad.
+- **What they found on the iPad** with the stream build, and after the reinstall from `main`.
+- **Questions that took a default**, each reversible and recorded in STREAM.md §6 or the code:
+  - The stream cel runs from the current frame to the end of the scene; a dropped PNG joins the
+    *active* layer (which is the stream layer if that is what is selected) — `insertImage`'s rule.
+  - Freeze is not an undo step; Bake Frame is one; neighbours keep the stream id, the baked cel is
+    re-identified; undo of a bake made while frozen restores the frozen flag.
+  - One paused connection per document to the last-used laptop, even with no stream layer.
+  - Port 47301, admitted only from Tailscale addresses; ~6 Mbit/s, GOP 60, `qsvh264enc`.
+  - Console-disconnect is reported as "locked"; the outbox folder puts failed sends under `refused\`.
 - **BUGS.md** carries the stepped-split timing change, the simulator-only keyboard band, the five
-  `.popover`s, and `BrushEditorUITests`' 586 → 711 → 813 s growth on the same eleven tests.
+  `.popover`s, `BrushEditorUITests`' growth, and a `FileOutboxTests` race seen once in four runs on
+  the laptop (a chip was filed).
 - **XCUITest cannot synthesise a Pencil**; the owner has granted device build and deploy.

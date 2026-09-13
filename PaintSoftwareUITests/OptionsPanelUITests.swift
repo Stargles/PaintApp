@@ -689,8 +689,12 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.blendModeButton"].tap()
         XCTAssertFalse(app.buttons["layerOptions.blendMode.huecolorize"].exists,
                        "A colorized effect must not resurrect a second menu entry")
-        let hsvShiftRow = app.buttons["layerOptions.blendMode.hsvshift"]
-        XCTAssertTrue(hsvShiftRow.waitForExistence(timeout: 5))
+        // The same lazily-realised menu as above: a row past the blend-mode groups and their
+        // headers is not in the tree until the menu is scrolled to it, so a bare
+        // `waitForExistence` here read as "the entry vanished" when it was merely off-screen.
+        let hsvShiftRow = scrollMenuTo(app, identifier: "layerOptions.blendMode.hsvshift")
+        XCTAssertTrue(hsvShiftRow.waitForExistence(timeout: 5),
+                      "The merged HSV Shift entry must still be in the menu while colorized")
         hsvShiftRow.tap()
         app.buttons["layerOptions.effectSettings"].tap()
         XCTAssertEqual(colorizeToggle.value as? String, "1",

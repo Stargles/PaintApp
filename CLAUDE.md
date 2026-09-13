@@ -721,6 +721,29 @@ If a merge produces a "cannot find X in scope" for a symbol neither branch touch
 before suspecting the code. It is the same family as the `@discardableResult` merge in
 [BUGS.md](BUGS.md): two changes to different lines that compose into a defect neither had alone.
 
+## The Windows laptop — the streamer host for TODO (27)
+
+`desktop-cbr0fl6`, `100.104.85.111` on the tailnet (the iPad is `100.70.220.4`). Reach it with
+`ssh -i ~/.ssh/paintapp_windows -o BatchMode=yes PC@100.104.85.111 '<powershell>'` — PowerShell 5.1
+is the login shell, the account has a full admin token, no password ever crosses the wire.
+**Two accounts, and it matters**: `PC` is the admin SSH logs in as; **`kevin` is the person at the
+screen**, and only kevin's session can capture it — an SSH-spawned process sees a fake 1024×768
+"WinDisc" display and no windows. So the streamer runs as the `PaintStreamer` scheduled task with an
+Interactive principal for kevin, driven from here by:
+
+```bash
+tools/windows/streamer-remote.sh status|start|stop|log [n]|sources|deploy|test
+```
+
+`deploy` tars `streamer/` over (Windows has `tar.exe`; `COPYFILE_DISABLE=1` or macOS ships `._*`
+sidecars that `dotnet publish` tries to compile), builds with the .NET 8 SDK at `C:\dotnet`, publishes
+to `C:\Users\kevin\AppData\Local\PaintStreamer\app` and restarts the task. GStreamer 1.26.8 is at
+`C:\Program Files\gstreamer\1.0\msvc_x86_64` (the MSI series; 1.28 moved to an `.exe` with unknown
+silent flags). `winget` fails over SSH; use direct installers. A locked laptop cannot be captured and
+cannot be unlocked from here — the streamer says "The laptop is locked" and waits. Prove the laptop
+end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPad end against
+`tools/stream/fake-streamer.py --pattern`; STREAM.md §4 is the rest.
+
 ## Deploy to iPad
 
 ```bash
