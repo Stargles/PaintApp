@@ -84,11 +84,12 @@ final class ColorWheelsUITests: PaintUITestCase {
     /// 6. **Double-tap the dot**: the wheel resets and the dark pixel reads as it did before.
     /// 7. **Drag again, then one undo**: the dark pixel is back to before — the drag was one step.
     ///
-    /// MEASURED by mutation (run live — see the session report): with the editor's drag writing
-    /// the parameters through `onChange` without the bar's bracket, step 7 needs two undos and goes
-    /// red; with the disc's `.gesture` removed, step 4's value assertion goes red; with
-    /// `Effect.input` answering `.ink` for the wheels, the grey strokes still move and nothing here
-    /// notices — which is why `EffectLayerLogicTests`' input table carries the row instead.
+    /// MEASURED by mutation, each run live on 2026-09-13: with the drag's `onEditBegan`/`onEditEnded`
+    /// removed from `ColorWheelsEditor`, step 7 still reads blue after one undo (blueness 51 against
+    /// the 10 allowed) and goes red; with the disc's `.gesture` removed, step 4 reads `0.00|0.0000`;
+    /// with the double-tap's `reset` removed, step 6 reads `-90.00|1.0000`. Reasoned, not run:
+    /// `Effect.input` answering `.ink` for the wheels would leave every assertion here green — both
+    /// strokes are ink — which is why `EffectLayerLogicTests`' input table carries that row instead.
     func testAnArtistCanReachTheWheelsAndAShadowsPushMovesADarkStrokeAndLeavesALightOne() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
