@@ -158,6 +158,12 @@ nonisolated final class ScreenStreamClient {
     /// FILE_CHUNK's own cap, §3.
     static let fileChunkSize = 256 << 10
 
+    /// Whether `sendFile` requires a live, `.ready` connection before writing anything — true
+    /// always in the app. `StreamFileSendLogicTests` sets this false to drive the chunking
+    /// arithmetic and the FILE_RESULT plumbing with no socket, feeding the answer back itself
+    /// through `handle` and reading what would have gone out through `onFrameSent`.
+    var requiresLiveConnectionToSend = true
+
     private(set) var state: State = .stopped {
         didSet {
             guard state != oldValue else { return }
@@ -458,7 +464,7 @@ nonisolated final class ScreenStreamClient {
                   completion: @escaping (StreamFileReceiveOutcome) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
-            guard self.connection?.state == .ready else {
+            guard !self.requiresLiveConnectionToSend || self.connection?.state == .ready else {
                 DispatchQueue.main.async { completion(.refused("Not connected to a computer.")) }
                 return
             }
@@ -501,10 +507,16 @@ nonisolated final class ScreenStreamClient {
     }
 
     private func send(_ type: StreamMessageType, payload: Data = Data()) {
+        onFrameSent?(type, payload)
         guard let connection, connection.state == .ready else { return }
         connection.send(content: StreamFraming.encode(type, payload: payload),
                         completion: .contentProcessed { _ in })
     }
+
+    /// Every frame this client attempts to write, **whether or not a connection exists** —
+    /// queue-confined, for `StreamFileSendLogicTests`, which drives `sendFile` with no socket and
+    /// reads what it would have put on the wire from here instead.
+    var onFrameSent: ((StreamMessageType, Data) -> Void)?
 
     // MARK: - Keepalive (queue-confined)
 

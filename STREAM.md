@@ -499,6 +499,40 @@ iPad → laptop: `ExportSheet` gains **Send to Computer** beside the existing de
 while a client is connected; it sends the `.finished(url)` file and reports the laptop's FILE_RESULT
 in the sheet.
 
+**iPad half built, stage 4.** `ScreenStreamClient` owns both directions: FILE_BEGIN opens a temp file
+in a new `StreamTransferStore` directory (Application Support, beside `VideoImportStore` — never
+memory, so a hundred-plus-MB video never touches RAM in transit), FILE_CHUNK appends, and FILE_END
+checks the declared size against what actually arrived before handing the whole file to
+`ScreenStreamCoordinator.routeReceivedFile` on the main queue — `insertImage`/`insertVideo`, kind for
+kind, exactly the picker's own verbs including the Move-box lift, with the temp file deleted whichever
+way it went. One inbound transfer at a time; a second FILE_BEGIN is refused
+`"A transfer is already in progress"` without disturbing the one under way. `sendFile` is the reverse:
+BEGIN/CHUNK(≤256 KiB)/END on the client's own queue, resolved by the laptop's FILE_RESULT;
+`ExportSheet`'s new button (`export.sendToComputer`) reuses `ScreenStreamCoordinator.connectionStates`
+— the same `@Published` property `StreamBar` already watches — rather than adding a second notion of
+"connected," and reports the answer as a sentence (`export.sendResult`): the laptop's own HELLO name
+(`ScreenStreamClient.remoteName`) on success, its `reason` otherwise. `handle(_:)` is exposed rather
+than `private`, the same seam stage 1 gave `H264StreamDecoder.feed`, so `StreamFileTransferLogicTests`
+and `StreamFileSendLogicTests` drive both directions with no socket at all. Pinned: an image joining
+the active vector layer, a video always in its own new layer (both with the resulting pixels checked,
+not only the model), `other` and an unreadable file each refused with their sentence, a second BEGIN
+mid-transfer refused, a size mismatch at FILE_END refused with nothing inserted, no document open
+answering its sentence, the 700 KiB → three-chunk arithmetic, and the pause cycle below.
+
+**§6's new bullet — corrected, not merely implemented.** Stage 2's `b07984d` had already read "no
+element names this endpoint" as "leave the pause alone," to stop a pause/resume pair firing four
+milliseconds apart on every Stream Screen connect (between the sheet's own `connect()` and the
+element it is about to insert, nothing names the endpoint yet). Stage 4 needed the *opposite* answer
+for the ambient, document-level connection this bullet asks for — a connection that can sit with no
+element naming it for the rest of a session must read as **paused**, not "left alone," or a laptop the
+artist is not looking at keeps encoding for nobody. The two windows are distinguished by
+`pendingConnects`: populated only for the span `connect(to:)` opens and its own STATUS (or failure)
+closes, and never true of the ambient connection, which nothing ever calls `connect(to:)` for. So the
+stage-2 fix stays exactly where it was needed and stage 4's rule applies everywhere else — pinned by
+`StreamBarStateLogicTests.testAConnectionStillBeingConnectedIsNotPausedMidConnect` (the old case,
+narrowed) and `testAConnectionNoElementNamesIsNowPaused` (pause with nothing naming it, resume the
+moment an element does, pause again the moment it stops).
+
 ## 6. Defaults taken without a ruling — each reversible, each recorded where the behaviour lives
 
 - The stream cel runs **from the current frame to the end of the timeline** (a video is clipped to
@@ -532,7 +566,7 @@ only what is stored (CLAUDE.md, *"A feature is not finished because its model is
 | **1** ✓ | ~~iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box~~ **Built.** `Engine/ScreenStream/`, `Views/StreamConnectSheet.swift`, `CanvasManager.insertStream(host:port:status:)`; five suites (`StreamElementLogicTests`, `StreamFramingLogicTests`, `H264StreamDecoderLogicTests`, `StreamInsertLogicTests`, `StreamScreenUITests`). §5.3 carries what the build corrected | driven against `fake-streamer.py --pattern`: the pattern moves in the Move box and on the committed layer (two screenshots 2 s apart differ in 15–18% of the rect's sampled pixels); the cold-start XCUITest reaches the sheet |
 | **2** ✓ | ~~iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it)~~ **Built.** `Views/StreamBar.swift`, `CanvasManager+StreamBake.swift`, the coordinator's pause/resume and published state, the save's JPEG; four suites (`StreamBakeLogicTests`, `StreamBarStateLogicTests`, `StreamPersistenceLogicTests`, `StreamSandwichBench`). §5.3–5.7 carry what the build corrected | driven against `fake-streamer.py --pattern` on the simulator with a throwaway XCUITest: the pattern moves at rest (13% of the rect's pixels differ 2 s apart) and holds during playback (0.0%), resumes on stop; the streamer killed → **Reconnecting…** in 0.9 s with the last picture kept, restarted → **Live** in 1.0 s; Freeze holds (0.0%) and the server log shows `CONTROL pause`, Unfreeze shows `resume`; Bake Frame on a 12-frame cel gives three cels with the middle one still (0.0%) and no bar on it; a pinch leaves the bar up; six strokes on a layer above while live. The tick delivered ~28.5 frames/s at **0.2–0.5 ms mean, ≤2.5 ms typical max** on the main actor (simulator, Debug). **The device figure was not taken**: the iPad was reachable and the Release build (stage 2) installed, but XCUITest cannot start on a locked device and nothing on the Mac unlocks it — the outlet is in place (§5.3) for the run that can |
 | **3** ✓ | Windows: `Streamer.Core`, `Streamer.Tray` (WPF + WinForms tray icon), 44 xunit tests, `install-streamer.ps1`, `streamer.ps1`, `streamer-remote.sh`; installed on the laptop and running as the `PaintStreamer` task in kevin's session | proved from this Mac with `stream-client-check.py`: 602 frames / 11 keyframes / 0 violations with motion, a decoded frame is the laptop's real desktop, a window source shows only that window, a killed process reconnects with a keyframe in ~1.2 s. Six bugs found only on hardware are in `f17df26`'s message. The iPad-to-Blender drive is stage 5's |
-| **4** | Files both ways: drop box → insert, Ctrl+V bitmap, refusal reasons; Send to Computer | driven end to end |
+| **4** | ~~Files both ways: drop box → insert, Ctrl+V bitmap, refusal reasons; Send to Computer~~ **iPad half built** — `ScreenStreamClient`'s FILE_BEGIN/CHUNK/END both ways, `ScreenStreamCoordinator.routeReceivedFile`, `ExportSheet`'s Send to Computer, §6's document-level connection and its pause-rule correction; two suites (`StreamFileTransferLogicTests`, `StreamFileSendLogicTests`). §5.8 carries what the build corrected. Windows half (the drop box, Ctrl+V) is the sibling worktree's | driven against `fake-streamer.py --pattern --send <png> --send <mp4>` on the simulator: a PNG lands as an image layer and an mp4 as a video layer with no Stream Screen connection open first, deleting the resulting stream layer leaves the connection running, Export → Send to Computer round-trips a file into `--save-dir` byte-for-byte with the sheet reading "Saved on \<name\>", and killing the fake streamer and reopening the document raises no alert |
 | **5** | Latency and quality pass on the real link: end-to-end latency MEASURED (a clock on the laptop screen photographed beside the iPad), bitrate/GOP tuned, the dirty-screen idle cost | numbers in PERFORMANCE.md |
 
 Stages 1–2 (iPad, simulator) and 3 (Windows, SSH, no simulator) run in parallel lanes.

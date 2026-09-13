@@ -266,9 +266,24 @@ final class StreamBarStateLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)   // startsClients == false: no real socket
         let coordinator = manager.streamCoordinator
         let task = Task { try await coordinator.connect(to: Self.endpoint) }
-        // `connect(to:)` registers its continuation and makes the (unstarted, in this fixture)
-        // client synchronously, before the `withCheckedThrowingContinuation` suspends — so by the
-        // time this line runs the window `syncPauseState` must not flap during is already open.
+        // **`Task { }` only schedules its body — it runs none of it inline with this call**, unlike
+        // a synchronous closure. `connect(to:)`'s own continuation registers only once that body
+        // actually gets a turn on the main actor, so yield until it has: `client(for:)` becomes
+        // non-nil as part of the same synchronous burst that registers `pendingConnects` (both run
+        // before `withCheckedThrowingContinuation` suspends), so its arrival is the signal that the
+        // window this test is about has opened. Skipping this and calling `statusArrived` right
+        // away resolves nothing (`connect`'s continuation is not registered yet) and then hangs
+        // forever at `task.value`, because `connect`'s continuation registers *after* — the shape
+        // that cost a stuck simulator run once already.
+        var yields = 0
+        while coordinator.client(for: Self.endpoint) == nil {
+            await Task.yield()
+            yields += 1
+            if yields > 10_000 {
+                XCTFail("connect(to:) never registered its client")
+                return
+            }
+        }
         XCTAssertTrue(coordinator.referencedEndpoints.isEmpty, "Setup: no element names it yet")
 
         coordinator.stateChanged(.connected, at: Self.endpoint)
