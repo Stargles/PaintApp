@@ -127,12 +127,44 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     /// The rail is a toggle, and Done sometimes leaves it up and sometimes not — so this asks rather
     /// than taps blind, and every measurement below is taken with it down.
+    ///
+    /// **Not `list.exists` alone, since TODO (64).** A picked mode's settings now dock at the bottom
+    /// of the screen (`TransformSettingsBar`) and suppress the whole rail while they are up —
+    /// `EffectSettingsBar`'s own rule — so `layerPanel.list` is briefly absent even though
+    /// `toolbar.layersButton` is still what closes everything down: it toggles `activePanel`, and the
+    /// docked bar reads that through `DrawingView.transformBeingEdited` regardless of whether the
+    /// rail or the bar is what is actually on screen. `layerOptions.close` is on screen whenever any
+    /// options sub-panel is — the list, a sub-menu, or a docked bar — so checking for either keeps
+    /// this one call site correct under all three.
     private func closeRail(_ app: XCUIApplication) {
         let list = app.tables["layerPanel.list"]
-        if list.exists {
+        if list.exists || app.buttons["layerOptions.close"].exists {
             app.buttons["toolbar.layersButton"].tap()
             _ = list.waitForNonExistence(timeout: 5)
         }
+    }
+
+    /// **Opens the settings bar `pickMode` leaves a row for** — TODO (64): a picked mode's rows dock
+    /// at the bottom of the screen now, behind the "<Mode> Settings ▸" row, the way a grade's knobs
+    /// already dock behind "Effect Settings ▸". `layerOptions.subMenuTitle` is the bar's own signal
+    /// that it is actually up, `optionsSubMenuHeader`'s shared header.
+    private func openTransformSettings(_ app: XCUIApplication) {
+        let row = app.buttons["layerOptions.transformSettings"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The picked mode's settings row is on the panel")
+        row.tap()
+        XCTAssertTrue(app.staticTexts["layerOptions.subMenuTitle"].waitForExistence(timeout: 5),
+                     "the mode's settings dock at the bottom of the screen")
+    }
+
+    /// **Back, from the settings bar to the rail** — needed wherever a test has to reach a rail-only
+    /// row (`layerOptions.transformMove`) after reading the bar, since the bar stands the whole rail
+    /// down while it is up.
+    private func backFromTransformSettings(_ app: XCUIApplication) {
+        let back = app.buttons["layerOptions.subMenuBack"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "Back returns to the rail")
+        back.tap()
+        XCTAssertTrue(app.buttons["layerOptions.transformMove"].waitForExistence(timeout: 5),
+                     "…with the Move row there again")
     }
 
     /// A short vertical band of ink at `x`, `y` — seven passes so it is a band rather than a hairline
@@ -240,6 +272,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         addTransformLayerFromAddMenu(app)
         pickMode(app, layerIndex: 4, mode: "parallax")
 
+        // TODO (64): the item list is behind the settings row now, docked at the bottom of the screen.
+        openTransformSettings(app)
+
         // **What the panel exposes**: the four items at their positional defaults, nearest first,
         // each slider and field drawn at the share its row says.
         let list = app.descendants(matching: .any)["layerOptions.parallaxItems"]
@@ -253,6 +288,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(backSlider.value as? String, "25", "…drawn at the share the row says, not at the key path's 100")
         XCTAssertEqual(app.textFields["layerOptions.parallaxItem.3.field"].value as? String, "25")
         attach(app, "1-parallax-item-list")
+
+        // Back to the rail: the Move row lives there, not in the settings bar.
+        backFromTransformSettings(app)
 
         // The verb: the Move row raises the box, and the drag moves every band live. The rail is up
         // and the canvas has re-fitted beside it, so the drag is measured against the paper as it
@@ -322,6 +360,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         openLayerPanel(app)
         addTransformLayerFromAddMenu(app)
         pickMode(app, layerIndex: 1, mode: "rotate")
+
+        // TODO (64): the speed field is behind the settings row now, docked at the bottom of the screen.
+        openTransformSettings(app)
 
         // **The speed, typed** — the owner's "you input the rotation speed". 15°/frame is a quarter
         // turn in six frames and, at the document's fps, one turn every 24 frames.
@@ -437,6 +478,10 @@ final class TransformLayerModesUITests: PaintUITestCase {
         addTransformLayerFromAddMenu(app)
         pickMode(app, layerIndex: 1, mode: "shake")
 
+        // TODO (64): the amplitude fields are behind the settings row now, docked at the bottom of
+        // the screen.
+        openTransformSettings(app)
+
         // **What the panel exposes**: three amplitude fields, a speed slider and Re-roll.
         let field = app.textFields["layerOptions.shakeX.field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Shake puts the Shake X field on the panel")
@@ -468,13 +513,15 @@ final class TransformLayerModesUITests: PaintUITestCase {
             XCTAssertEqual(a, b, accuracy: 0.004, "the same frame draws the same picture on the way back: \(first) vs \(again)")
         }
 
-        // Re-roll: a new shake. The panel is reached through the layer's row again.
+        // Re-roll: a new shake. The panel is reached through the layer's row again, and the settings
+        // bar through its row again — a fresh options panel starts with it closed (TODO (64)).
         openLayerPanel(app)
         let row = app.staticTexts["layerPanel.row.1"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
+        openTransformSettings(app)
         let reroll = app.buttons["layerOptions.shakeReroll"]
-        XCTAssertTrue(reroll.waitForExistence(timeout: 5), "the options reopen on the shake rows")
+        XCTAssertTrue(reroll.waitForExistence(timeout: 5), "the settings bar reopens on the shake rows")
         reroll.tap()
         closeRail(app)
         guard let rerolled = bandColumns(app, canvas: canvas, frames: frames, total: total, "after re-roll") else { return }
@@ -585,6 +632,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         openLayerPanel(app)
         addTransformLayerFromAddMenu(app)
         pickMode(app, layerIndex: 1, mode: "repeat")
+
+        // TODO (64): the period field is behind the settings row now, docked at the bottom of the screen.
+        openTransformSettings(app)
         let field = app.textFields["layerOptions.repeatPeriod.field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Repeat puts the period field on the panel")
         XCTAssertEqual(field.value as? String, "12", "pre-filled from where the drawings beneath end")

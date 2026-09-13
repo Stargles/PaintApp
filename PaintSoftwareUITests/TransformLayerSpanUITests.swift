@@ -160,4 +160,74 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         attach(app, "4-bar-lengthened-move-works-key-still-gone")
         app.buttons["moveBar.doneButton"].tap()
     }
+
+    // MARK: - TODO (64): the mode's settings dock at the bottom of the screen
+
+    /// **Cold-start reachability: from a fresh document, add a transform layer, pick Shake, and reach
+    /// Shake X in the bottom-docked bar — with no fixture standing in for any of those steps.**
+    /// TRANSFORM_LAYER.md's own "Duplicate Offset is the precedent" read forward: a transform mode's
+    /// rows are no longer inline in the rail, so this is the same reachability CLAUDE.md's brief for
+    /// TODO (64) asked for — driven, not asserted from a hand-built model.
+    ///
+    /// **And a two-finger canvas transform must not close the bar** — TODO (67)'s fix
+    /// (`StrokeGestureRecognizer.onSingleTouchBegan`) already keeps `EffectSettingsBar` up through a
+    /// pinch (`OptionsPanelUITests.testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes`);
+    /// `TransformSettingsBar` shares `DrawingView.bottomDock`'s same `isAnyPieceFloating`/
+    /// `activePanel` wiring, so the fix should already cover it. One pinch, asserted, proves that
+    /// rather than assuming it.
+    func testShakeSettingsDockAtTheBottomReachableFromAColdStartAndSurviveAPinch() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Add, then Mode → Shake — the artist's own route, the `+` menu and the row it selects.
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The + menu's Transform Layer entry added a row")
+        row.tap()   // already selected after the add: opens its options
+
+        let modeButton = app.buttons["layerOptions.transformModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "A transform layer's options open on its mode picker")
+        modeButton.tap()
+        let shakeItem = app.buttons["layerOptions.transformMode.shake"]
+        XCTAssertTrue(shakeItem.waitForExistence(timeout: 5), "The picker lists Shake")
+        shakeItem.tap()
+
+        // **The row this whole feature is about**: "Shake Settings ▸", `effectSettingsRow`'s shape,
+        // in the rail — not the rows themselves, which is CLAUDE.md's case 1 (a correct value drawn,
+        // or here reached, in the wrong place) turned into an assertion rather than left to chance.
+        let settingsRow = app.buttons["layerOptions.transformSettings"]
+        XCTAssertTrue(settingsRow.waitForExistence(timeout: 5), "Picking Shake puts its settings row on the panel")
+        XCTAssertEqual(settingsRow.value as? String, "shake", "the row names the mode it will raise")
+        settingsRow.tap()
+
+        // The bar it raises, bottom-docked, `EffectSettingsBar`'s own header.
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The settings row raises the bottom-docked bar")
+        XCTAssertEqual(title.label, "Shake", "the bar's title is the mode's own name")
+        let shakeX = app.textFields["layerOptions.shakeX.field"]
+        let shakeY = app.textFields["layerOptions.shakeY.field"]
+        XCTAssertTrue(shakeX.waitForExistence(timeout: 5), "Shake X is reachable in the docked bar")
+        XCTAssertTrue(shakeY.exists, "…and Shake Y beside it")
+        XCTAssertFalse(app.tables["layerPanel.list"].exists,
+                       "the rail stands down while the bar is up — `EffectSettingsBar`'s own rule, TODO (64)'s twin")
+        attach(app, "5-shake-settings-bar-open")
+
+        // THE FIX PROVEN, NOT ASSUMED: a two-finger canvas pinch must not close the bar.
+        canvas.pinch(withScale: 1.3, velocity: 1.0)
+        XCTAssertTrue(title.exists,
+                      "A two-finger canvas pinch/pan/rotate must not close the transform settings bar")
+        XCTAssertEqual(title.label, "Shake", "…and it must still be showing the same mode")
+        attach(app, "6-shake-settings-bar-survives-pinch")
+
+        // The X closes the whole options menu, exactly as it does for the effect bar — back to the
+        // bare rail, nothing docked.
+        app.buttons["layerOptions.close"].tap()
+        XCTAssertFalse(title.exists, "The X closes the settings bar")
+        XCTAssertTrue(app.tables["layerPanel.list"].waitForExistence(timeout: 5),
+                     "…back to the plain rail, no options panel and no bar")
+        attach(app, "7-shake-settings-bar-closed-by-x")
+    }
 }
