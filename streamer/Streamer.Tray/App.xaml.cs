@@ -14,8 +14,18 @@ public partial class App : System.Windows.Application
     private StreamerSession? _session;
     private ProtocolServer? _server;
     private Settings? _settings;
+    private FileInbox? _fileInbox;
+    private FileOutbox? _fileOutbox;
+    private OutboxFolderWatcher? _outboxWatcher;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private MainWindow? _mainWindow;
+
+    /// <summary>STREAM.md §7 stage 4 deliverable 3: the CLI's remote hand, since a
+    /// second process (an SSH session) cannot reach the running app's own drop box.</summary>
+    public static string OutboxDir => Path.Combine(AppDataDir, "outbox");
+
+    /// <summary>Where a pasted bitmap is saved as PNG before being sent (§4.4).</summary>
+    public static string ClipboardDir => Path.Combine(AppDataDir, "clipboard");
 
     /// <summary>
     /// %LOCALAPPDATA%\PaintStreamer, resolved by the OS for whoever this PROCESS runs
@@ -84,13 +94,16 @@ public partial class App : System.Windows.Application
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
-        var fileInbox = new FileInbox();
-        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, fileInbox, Log);
+        _fileInbox = new FileInbox(_settings, Log);
+        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, _fileInbox, Log);
         _session.AddSink(_server);
         _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
         _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
         _server.ControlReceived += control => _ = _session.HandleControlAsync(control);
         await _server.StartAsync().ConfigureAwait(true);
+
+        _fileOutbox = new FileOutbox(_server, Log);
+        _outboxWatcher = new OutboxFolderWatcher(OutboxDir, _fileOutbox, Log);
 
         var lastSource = _settings.Load().LastSource;
         if (lastSource != null)
@@ -108,7 +121,15 @@ public partial class App : System.Windows.Application
         }
 
         SetUpTrayIcon(Log);
-        _mainWindow = new MainWindow(_session, _server, _settings, Log);
+        _fileInbox.FileReceived += (_, e) =>
+        {
+            // STREAM.md §7 stage 4 deliverable 2: a toast naming the file and the folder
+            // it landed in, whenever an export arrives from the iPad.
+            _trayIcon?.ShowBalloonTip(4000, AppName,
+                $"{e.Name} saved to {Path.GetDirectoryName(e.Path)}",
+                System.Windows.Forms.ToolTipIcon.Info);
+        };
+        _mainWindow = new MainWindow(_session, _server, _settings, _fileOutbox!, Log);
         _mainWindow.Closing += (_, args) =>
         {
             args.Cancel = true;
@@ -161,8 +182,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var fileInbox = new FileInbox();
-        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, fileInbox, log);
+        _fileInbox = new FileInbox(_settings!, log);
+        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, _fileInbox, log);
         _session.AddSink(_server);
         _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
         _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
@@ -224,6 +245,8 @@ public partial class App : System.Windows.Application
     protected override async void OnExit(ExitEventArgs e)
     {
         _trayIcon?.Dispose();
+        _outboxWatcher?.Dispose();
+        _fileOutbox?.Dispose();
         if (_server != null) await _server.StopAsync().ConfigureAwait(false);
         if (_session != null) await _session.DisposeAsync().ConfigureAwait(false);
         _logger?.Dispose();

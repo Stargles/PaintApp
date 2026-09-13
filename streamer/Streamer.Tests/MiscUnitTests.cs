@@ -1,5 +1,4 @@
 using Streamer.Core;
-using Streamer.Core.Protocol;
 using Xunit;
 
 namespace Streamer.Tests;
@@ -78,15 +77,6 @@ public class SettingsTests
     }
 }
 
-public class FileInboxStubTests
-{
-    [Fact]
-    public async Task AlwaysRefusesWithNotSupportedYet()
-    {
-        var inbox = new FileInbox();
-        var result = await inbox.BeginFileAsync(new FileBeginMessage { Id = 3, Name = "x.png", Size = 10, Kind = "image" });
-        Assert.Equal(3, result.Id);
-        Assert.False(result.Ok);
-        Assert.Equal("Not supported yet", result.Reason);
-    }
-}
+// FileInbox's real (stage 4) behaviour is covered by FileInboxTests.cs — it stopped
+// being a stub that always refuses "Not supported yet" once ProtocolServer got a real
+// save folder to write into.

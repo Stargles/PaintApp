@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
@@ -15,7 +16,7 @@ namespace Streamer.Core;
 /// Implements <see cref="IFrameSink"/>: the socket is the "real" sink STREAM.md §4.6
 /// describes, with an in-process sink as the future second implementation.
 /// </summary>
-public sealed class ProtocolServer : IFrameSink, IAsyncDisposable
+public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposable
 {
     private static readonly TimeSpan PingSilence = TimeSpan.FromSeconds(2);
     private const int PingMissedLimit = 3;
@@ -37,11 +38,24 @@ public sealed class ProtocolServer : IFrameSink, IAsyncDisposable
     public event Action<ControlMessage>? ControlReceived;
     public event Action? ClientConnected;
     public event Action? ClientDisconnected;
+    public event Action<FileResultMessage>? FileResultReceived;
 
     public bool HasClient
     {
         get { lock (_clientGate) { return _current != null; } }
     }
+
+    /// <summary>IFileTransport: enqueues a frame to the current client, or does nothing
+    /// and reports failure when there is none. FileOutbox is the caller.</summary>
+    public bool TrySend(Frame frame)
+    {
+        lock (_clientGate)
+        {
+            return _current?.TryEnqueue(frame.Encode()) ?? false;
+        }
+    }
+
+    internal void RaiseFileResultReceived(FileResultMessage result) => FileResultReceived?.Invoke(result);
 
     public ProtocolServer(int port, string appName, string version, string hostName,
         FileInbox fileInbox, Action<string>? log = null)
@@ -135,7 +149,15 @@ public sealed class ProtocolServer : IFrameSink, IAsyncDisposable
                 if (wasCurrent) _current = null;
             }
             await conn.DisposeAsync().ConfigureAwait(false);
-            if (wasCurrent) ClientDisconnected?.Invoke();
+            if (wasCurrent)
+            {
+                ClientDisconnected?.Invoke();
+                // A transfer mid-flight belongs to whichever connection was actually
+                // current — a stale, already-replaced connection's own cleanup running
+                // late must never abort a new connection's in-progress transfer, hence
+                // gating this on wasCurrent exactly like ClientDisconnected above.
+                _fileInbox.AbortActiveTransfer();
+            }
             _log($"ProtocolServer: disconnect {endpoint}");
         }
     }
@@ -254,18 +276,36 @@ public sealed class ProtocolServer : IFrameSink, IAsyncDisposable
                 case MessageType.FileBegin:
                 {
                     var begin = Json.Decode<FileBeginMessage>(frame.Payload);
-                    var result = await fileInbox.BeginFileAsync(begin).ConfigureAwait(false);
-                    EnqueueRaw(Frame.Of(MessageType.FileResult, Json.Encode(result)).Encode());
+                    // Accepted means no reply yet — §3: "the laptop answers after the
+                    // file is closed in the save folder" — so only a refusal writes back
+                    // here; the real answer comes from FileEnd below.
+                    var refusal = fileInbox.BeginFile(begin);
+                    if (refusal != null)
+                        EnqueueRaw(Frame.Of(MessageType.FileResult, Json.Encode(refusal)).Encode());
                     break;
                 }
                 case MessageType.FileChunk:
-                case MessageType.FileEnd:
-                    // No transfer is ever active per the FileInbox stub's immediate refusal,
-                    // so a chunk/end for an unknown id is exactly the "ignored" case
-                    // tools/stream/fake-streamer.py already treats as normal, not an error.
+                {
+                    if (frame.Payload.Length < 4)
+                    {
+                        _log($"ProtocolServer: FILE_CHUNK payload too short ({frame.Payload.Length} bytes), skipped");
+                        break;
+                    }
+                    uint id = BinaryPrimitives.ReadUInt32BigEndian(frame.Payload.Span[..4]);
+                    fileInbox.WriteChunk((int)id, frame.Payload[4..]);
                     break;
+                }
+                case MessageType.FileEnd:
+                {
+                    var end = Json.Decode<FileEndMessage>(frame.Payload);
+                    var result = fileInbox.EndFile(end);
+                    if (result != null)
+                        EnqueueRaw(Frame.Of(MessageType.FileResult, Json.Encode(result)).Encode());
+                    break;
+                }
                 case MessageType.FileResult:
-                    break; // outbound-transfer bookkeeping is stage 4's; nothing to correlate yet
+                    _owner.RaiseFileResultReceived(Json.Decode<FileResultMessage>(frame.Payload));
+                    break;
                 case MessageType.Hello:
                     _log("ProtocolServer: duplicate HELLO, ignored");
                     break;
@@ -318,6 +358,10 @@ public sealed class ProtocolServer : IFrameSink, IAsyncDisposable
         }
 
         private void EnqueueRaw(byte[] bytes) => _writeQueue.Writer.TryWrite(bytes);
+
+        /// <summary>Public seam for ProtocolServer.TrySend (IFileTransport) — everything
+        /// inside this class already reaches the same queue through EnqueueRaw.</summary>
+        public bool TryEnqueue(byte[] bytes) => _writeQueue.Writer.TryWrite(bytes);
 
         private async Task WriterLoopAsync(CancellationToken ct)
         {

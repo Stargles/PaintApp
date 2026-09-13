@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Streamer.Core;
@@ -16,23 +18,58 @@ public sealed class SourceItemViewModel
     public BitmapImage? Thumbnail { get; init; }
 }
 
+/// <summary>One row in the drop box's transfer list. The window updates StatusText in
+/// place as a file moves Queued -> Sending -> Inserted/Refused/Failed, rather than
+/// appending a new row per state (STREAM.md §7 stage 4 deliverable 2: "a list ... shows
+/// each file with its state").</summary>
+public sealed class TransferRowViewModel : System.ComponentModel.INotifyPropertyChanged
+{
+    public string Name { get; }
+    public bool Terminal { get; set; }
+
+    private string _statusText = "Queued";
+    public string StatusText
+    {
+        get => _statusText;
+        set
+        {
+            if (_statusText == value) return;
+            _statusText = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(StatusText)));
+        }
+    }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    public TransferRowViewModel(string name) => Name = name;
+}
+
 public partial class MainWindow : Window, IFrameSink
 {
     private readonly StreamerSession _session;
     private readonly ProtocolServer _server;
     private readonly Settings _settings;
+    private readonly FileOutbox _fileOutbox;
     private readonly Action<string> _log;
     private readonly DispatcherTimer _rateTimer;
 
-    public MainWindow(StreamerSession session, ProtocolServer server, Settings settings, Action<string> log)
+    private readonly System.Collections.ObjectModel.ObservableCollection<TransferRowViewModel> _transfers = new();
+    private readonly Dictionary<string, TransferRowViewModel> _rowsByPath = new();
+
+    public MainWindow(StreamerSession session, ProtocolServer server, Settings settings, FileOutbox fileOutbox,
+        Action<string> log)
     {
         InitializeComponent();
         _session = session;
         _server = server;
         _settings = settings;
+        _fileOutbox = fileOutbox;
         _log = log;
 
         _session.AddSink(this); // a second IFrameSink, purely for this window's own status/rate labels
+        _fileOutbox.TransferUpdated += FileOutbox_TransferUpdated;
+        TransferList.ItemsSource = _transfers;
+        OutboxPathText.Text = App.OutboxDir;
 
         var data = _settings.Load();
         SaveFolderText.Text = data.SaveFolder ?? DefaultSaveFolder();
@@ -52,8 +89,96 @@ public partial class MainWindow : Window, IFrameSink
         _rateTimer.Start();
     }
 
-    private static string DefaultSaveFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "PaintApp");
+    private static string DefaultSaveFolder() => Settings.DefaultSaveFolder();
+
+    // ---- Drop box: drag-and-drop, Ctrl+V, and the transfer list (STREAM.md §7 stage 4
+    // deliverable 2). All queueing logic lives in FileOutbox/ClipboardImageStore (Core,
+    // testable); this class only translates WPF events into calls on them. ----
+
+    private void DropBox_DragEnter(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void DropBox_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+        foreach (var path in paths)
+        {
+            if (File.Exists(path)) _fileOutbox.Enqueue(path);
+        }
+    }
+
+    private void Window_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control) return;
+
+        if (System.Windows.Clipboard.ContainsFileDropList())
+        {
+            var list = System.Windows.Clipboard.GetFileDropList();
+            foreach (string? path in list)
+            {
+                if (!string.IsNullOrEmpty(path) && File.Exists(path)) _fileOutbox.Enqueue(path);
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (System.Windows.Clipboard.ContainsImage())
+        {
+            BitmapSource? src = System.Windows.Clipboard.GetImage();
+            if (src == null) return;
+            var converted = new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+            int width = converted.PixelWidth, height = converted.PixelHeight;
+            if (width <= 0 || height <= 0) return;
+            int stride = width * 4;
+            var pixels = new byte[stride * height];
+            converted.CopyPixels(pixels, stride, 0);
+            string path = ClipboardImageStore.Save(App.ClipboardDir, pixels, width, height, stride);
+            _log($"Tray: pasted bitmap saved to {path}");
+            _fileOutbox.Enqueue(path);
+            e.Handled = true;
+        }
+    }
+
+    private void ClearTransfersButton_Click(object sender, RoutedEventArgs e)
+    {
+        _transfers.Clear();
+        _rowsByPath.Clear();
+    }
+
+    private void FileOutbox_TransferUpdated(object? sender, OutboundFileEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _rowsByPath.TryGetValue(e.Path, out var row);
+            bool startingOver = e.State == OutboundFileState.Queued && e.BytesSent == 0 && (row == null || row.Terminal);
+            if (startingOver)
+            {
+                row = new TransferRowViewModel(Path.GetFileName(e.Path));
+                _rowsByPath[e.Path] = row;
+                _transfers.Insert(0, row); // most recent first
+            }
+            if (row == null) return; // shouldn't happen — an update with no matching row and no fresh Queued
+            row.StatusText = DescribeState(e);
+            row.Terminal = e.State is OutboundFileState.Inserted or OutboundFileState.Refused or OutboundFileState.Failed;
+        });
+    }
+
+    private static string DescribeState(OutboundFileEventArgs e) => e.State switch
+    {
+        OutboundFileState.Queued => e.Reason ?? "Queued",
+        OutboundFileState.Sending => $"Sending… {FormatBytes(e.BytesSent)} / {FormatBytes(e.TotalBytes)}",
+        OutboundFileState.Inserted => "Inserted on the iPad",
+        OutboundFileState.Refused => $"Refused — {e.Reason}",
+        OutboundFileState.Failed => $"Failed — {e.Reason}",
+        _ => "",
+    };
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024 * 1024 ? $"{bytes / (1024.0 * 1024.0):0.#} MB" : $"{Math.Max(0, bytes) / 1024.0:0.#} KB";
 
     private static string LocalTailscaleHint()
     {

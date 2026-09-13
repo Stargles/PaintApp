@@ -57,4 +57,20 @@ public sealed class Settings
             File.Move(tmp, _path, overwrite: true);
         }
     }
+
+    /// <summary>%USERPROFILE%\Pictures\PaintApp (STREAM.md §4.4's default, chosen once).</summary>
+    public static string DefaultSaveFolder() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "PaintApp");
+
+    /// <summary>
+    /// The save folder to use right now — re-reads the settings file every call (Load()
+    /// does no caching), which is what makes "changing it takes effect without restart"
+    /// (STREAM.md §7 stage 4 deliverable 2) true for free: FileInbox calls this on every
+    /// FILE_BEGIN rather than capturing a folder path once at construction.
+    /// </summary>
+    public string ResolveSaveFolder()
+    {
+        var folder = Load().SaveFolder;
+        return string.IsNullOrWhiteSpace(folder) ? DefaultSaveFolder() : folder;
+    }
 }

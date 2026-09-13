@@ -1,7 +1,8 @@
 <Window x:Class="Streamer.Tray.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PaintStreamer" Height="620" Width="520">
+        Title="PaintStreamer" Height="760" Width="520"
+        KeyDown="Window_KeyDown">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="12">
 
@@ -36,10 +37,32 @@
                     Click="StreamButton_Click" Margin="0,0,0,12"/>
 
             <TextBlock Text="Drop box" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
-            <Border BorderBrush="#888" BorderThickness="1" Padding="16" Margin="0,0,0,12"
-                    Background="#f3f3f3">
-                <TextBlock Text="Files arrive in a later version." HorizontalAlignment="Center" Foreground="#666"/>
+            <Border x:Name="DropBoxBorder" BorderBrush="#888" BorderThickness="1" Padding="16" Margin="0,0,0,4"
+                    Background="#f3f3f3" AllowDrop="True"
+                    DragEnter="DropBox_DragEnter" DragOver="DropBox_DragEnter" Drop="DropBox_Drop">
+                <StackPanel>
+                    <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" Foreground="#666"
+                               Text="Drag files here, or focus this window and press Ctrl+V to send a copied file or a pasted image."/>
+                    <TextBlock Text="Scripting from SSH: drop a file into" HorizontalAlignment="Center"
+                               Foreground="#666" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="OutboxPathText" Text="" HorizontalAlignment="Center"
+                               FontFamily="Consolas" FontSize="11" Foreground="#666" TextWrapping="Wrap"/>
+                    <TextBlock Text="— it is queued exactly like a drop, then moved to sent\ or refused\."
+                               HorizontalAlignment="Center" Foreground="#666" FontSize="11" Margin="0,2,0,0"/>
+                </StackPanel>
             </Border>
+            <ListBox x:Name="TransferList" Height="130" Margin="0,0,0,4">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="2">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Width="200" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding StatusText}" Foreground="#444" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Button x:Name="ClearTransfersButton" Content="Clear" Width="70" HorizontalAlignment="Left"
+                    Click="ClearTransfersButton_Click" Margin="0,0,0,12"/>
 
             <TextBlock Text="Save folder for exports from the iPad" FontWeight="Bold" FontSize="16" Margin="0,0,0,4"/>
             <DockPanel Margin="0,0,0,12">
