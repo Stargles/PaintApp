@@ -94,10 +94,13 @@ final class ColorWheelsEffectLogicTests: XCTestCase {
     /// `saturation · rimChroma · strength` and `luminance · luminanceReach · strength` are each a
     /// product with a zero in it.
     ///
-    /// MEASURED by mutation: with the zero early-out removed from `colorWheelsPixel`, the CPU half
-    /// still passes (the Oklab round trip is byte-exact in `Double`, `ColorMath`'s own MEASURED
-    /// note) and the GPU half reports single-step deltas across the spectrum — which is exactly why
-    /// the early-out exists on both sides rather than on one.
+    /// MEASURED by mutation, and the result is the opposite of what was expected: with the zero
+    /// early-out removed from **both** kernels, every test in this file still passes — the shader's
+    /// float32 Oklab round trip is byte-exact on this spectrum too, not only `ColorMath`'s `Double`
+    /// one. So the early-out is a cost saving (an untouched wheel layer skips two conversions a
+    /// pixel) and a guarantee that does not rest on a fixture, but it is not something this file can
+    /// tell apart from the round trip. What this test does catch is a resolved offset that is not
+    /// exactly zero at rest — `params` folding a constant in, say — and that is what it is for.
     func testEveryWheelAtRestIsTheIdentityByteForByteOnBothBackends() throws {
         let bytes = spectrumBytes()
         let identity = Effect.colorWheels(Effect.ColorWheels())

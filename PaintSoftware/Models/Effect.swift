@@ -961,9 +961,11 @@ extension Effect {
     /// degrees (`Blur`'s step vector and the Duplicate Offset's box are the precedent). Both kernels
     /// then do the same weighted sum, and both return the pixel **untouched, byte for byte**, when the
     /// summed offset is exactly zero — so every wheel at rest is the identity on both backends without
-    /// depending on a float32 Oklab round trip, and a Shadows push leaves a highlight pixel alone
-    /// exactly rather than to within a channel step. A wheel at `strength` 0 is the identity for that
-    /// wheel by the same arithmetic.
+    /// depending on a float32 Oklab round trip, and an untouched wheel layer costs no conversion at
+    /// all. (MEASURED 2026-09-13: the shader's round trip is in fact byte-exact on the parity
+    /// spectrum with the early-out removed, so today it buys the cost saving and a guarantee that does
+    /// not rest on a fixture, not a visible difference.) A wheel at `strength` 0 is the identity for
+    /// that wheel by the same arithmetic.
     ///
     /// **Hue is a number on a line, not a point on a circle, and a keyed hue tweens on the line.**
     /// `hue` is unbounded (`params` wraps it through `cos`/`sin`), so a key at 359° and one at 1°
