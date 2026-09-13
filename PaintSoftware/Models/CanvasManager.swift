@@ -653,6 +653,80 @@ final class CanvasManager: ObservableObject {
         return true
     }
 
+    /// **Places a live screen stream** — STREAM.md §5.7, and the shape is `insertVideo`'s with one
+    /// span rule of its own.
+    ///
+    /// **Its own new vector layer, always** (§2.2, as VIDEO.md §2.1 rules for a video). **The cel
+    /// runs from the current frame to the end of the scene** — STREAM.md §6's default: a video is
+    /// clipped to its own length and a stream has none, so it takes the scene from where the
+    /// playhead stands. "End of the scene" is `contentEndFrame` *before* the layer is added, which
+    /// is the `N` the transport's "Frame n/N" shows; a playhead parked past it gets a one-frame cel
+    /// at the playhead, which is the only way to give the artist a stream on the frame they are
+    /// looking at without inventing a scene length. (`insertVideo`'s cel starts at frame 0, not at
+    /// the playhead — `VideoImportLogicTests` pins `startFrame == 0` — so the two verbs differ here
+    /// on purpose.)
+    ///
+    /// **Fitted as a video is**: the laptop's aspect from `status`, letterboxed to 80% of the canvas,
+    /// centred. **Then lifted into the Move box exactly as `insertImage` does**, so the first thing
+    /// the artist can do with the picture is put it where they want it.
+    ///
+    /// `status` is handed in rather than fetched, so the verb needs no socket: the sheet connects
+    /// through `ScreenStreamCoordinator.connect(to:)` and calls this with what the laptop answered.
+    /// Nil when the status carries no usable size or the document has no canvas.
+    @discardableResult
+    func insertStream(host: String, port: UInt16, status: StreamStatus) -> VectorStreamElement? {
+        guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
+              status.width > 0, status.height > 0 else { return nil }
+        let naturalSize = CGSize(width: status.width, height: status.height)
+        let sceneEnd = contentEndFrame
+        let start = max(currentFrame, 0)
+        let blockLength = max(sceneEnd - start, 1)
+
+        // §2.2. Its own undo step, for `insertVideo`'s reason: the element below is registered
+        // against the layer it lands on.
+        addVectorLayer()
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].cels.count == 1,
+              let vector = layers[currentLayerIndex].cels[0].vector else { return nil }
+
+        let fit = min(canvasSize.width / naturalSize.width,
+                      canvasSize.height / naturalSize.height) * 0.8
+        let element = VectorStreamElement(
+            naturalSize: naturalSize,
+            host: host, port: port,
+            sourceLabel: status.sourceLabel,
+            transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2,
+                                                        y: canvasSize.height / 2),
+                                      scale: fit, rotation: 0))
+
+        let layerIndex = currentLayerIndex
+        let before = vector.elements
+        layers[layerIndex].cels[0].startFrame = start
+        layers[layerIndex].cels[0].frameCount = blockLength
+        vector.elements = before + [.stream(element)]
+        vector.bumpVersion()
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: 0)
+        objectWillChange.send()
+
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[0].id
+        // `cost: 0` for `insertVideo`'s reason: an address and a label hold no pixels.
+        recordUndo(label: .insertStream, cost: 0, undo: { [weak self] in
+            vector.elements = before
+            vector.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
+            vector.elements = before + [.stream(element)]
+            vector.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        })
+        // The coordinator learns of the new element on the next canvas pass through `sync()`; the
+        // sheet's own connect already started the client, so nothing waits on that pass.
+        streamCoordinator.sync()
+        if !activeCelIsInBetween { beginVectorMove(ofElementIDs: [element.id]) }
+        return element
+    }
+
     /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`
     /// (not `bakedImage` — a raster-layer cel must hold its content in exactly one tier at rest, or
     /// the eraser can never reach it), `vector` is cleared, `kind` becomes `.raster`. No-op if the
@@ -2880,7 +2954,15 @@ final class CanvasManager: ObservableObject {
     @MainActor
     func closeFrameBaker() {
         frameBaker.reset()
+        // The document is leaving the screen, and its stream clients must not go on reconnecting
+        // to a laptop for a canvas nobody is looking at.
+        streamCoordinator.stopAll()
     }
+
+    /// **The live screen streams' coordinator** — STREAM.md §5.3, one per document. Lazy for
+    /// `frameBaker`'s reason: a manager whose canvas is never shown never registers for the
+    /// background notifications it observes.
+    @MainActor private(set) lazy var streamCoordinator = ScreenStreamCoordinator(manager: self)
 
     /// Where the playhead was the last time `syncFrameBake` ran, so a scrub can be given a direction.
     private var lastBakePlayhead = 0

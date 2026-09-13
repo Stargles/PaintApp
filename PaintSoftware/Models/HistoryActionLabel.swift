@@ -60,6 +60,8 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Importing a video — VIDEO.md §2.1, its own vector layer. Distinct from `.insertImage`
     /// because it is what the history row says and a video is not a photo to the artist.
     case insertVideo
+    /// Actions → Stream Screen — STREAM.md §5.7, its own vector layer like a video.
+    case insertStream
     /// Adjust Speed on a video block — VIDEO.md §2.5, which rewrites the block's length as well as
     /// the element's speed, so it is one step covering both.
     case adjustVideoSpeed
@@ -267,6 +269,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"
         case .insertVideo: return "insert video"
+        case .insertStream: return "stream screen"
         case .adjustVideoSpeed: return "adjust video speed"
         case .bakeVideoToImages: return "bake to images"
         case .bakePoseToCels: return "bake animation to drawings"

@@ -26,6 +26,10 @@ struct ActionsMenu: View {
     /// Whether the "Export" sheet is up. A sheet for `showingResize`'s reason and one more: §3.9's
     /// visible progress needs a place to be visible.
     @State private var showingExport = false
+    /// Whether the "Stream Screen" sheet is up — STREAM.md §5.7. A sheet for `showingExport`'s
+    /// reason: a connection attempt is a wait with an outcome, and the outcome needs a place to be
+    /// read when it is a refusal.
+    @State private var showingStreamConnect = false
 
     var body: some View {
         // Scrolled, not just stacked: the panel that hosts this is capped at a fixed height, and a
@@ -42,6 +46,9 @@ struct ActionsMenu: View {
         }
         .sheet(isPresented: $showingExport) {
             ExportSheet(canvasManager: canvasManager)
+        }
+        .sheet(isPresented: $showingStreamConnect) {
+            StreamConnectSheet(canvasManager: canvasManager)
         }
     }
 
@@ -70,6 +77,8 @@ struct ActionsMenu: View {
             .onChange(of: videoPickerItem) { _, newItem in
                 Task { await insertVideo(newItem) }
             }
+
+            streamScreenRow
 
             addTextRow
 
@@ -206,6 +215,34 @@ struct ActionsMenu: View {
                  ? "Nothing to bake — no stroke here is stored at full precision."
                  : "Snaps them back to the normal storage grid, which is smaller on disk. "
                    + "Shrinking and regrowing them after a save will lose a little accuracy again.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+                .padding(.leading, 24)   // clears the row's icon column, as "Add Text" does
+                .padding(.bottom, 6)
+        }
+    }
+
+    /// **STREAM.md §5.7 — Actions → Stream Screen.** After Insert Video because it is the same
+    /// verb with a different source: a picture of the computer's screen, live, in its own vector
+    /// layer, movable like a video. The sheet takes the laptop's address and connects; the layer
+    /// appears on the laptop's first answer.
+    ///
+    /// Disabled with no canvas, as Export is, since there is nothing to put the layer in.
+    private var streamScreenRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showingStreamConnect = true
+            } label: {
+                row(icon: "display", title: "Stream Screen (new layer)",
+                    enabled: canvasManager.canvasSize != nil)
+            }
+            .disabled(canvasManager.canvasSize == nil)
+            .accessibilityIdentifier("actions.streamScreenRow")
+
+            Text("Shows a computer's screen live, as a layer. Needs the PaintApp streamer running "
+                 + "on the computer and both on the same Tailscale network.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)

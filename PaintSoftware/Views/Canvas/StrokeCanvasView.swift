@@ -834,6 +834,16 @@ final class StrokeCanvasView: UIView {
         floatView.isHidden = image == nil
     }
 
+    /// **Swaps the latched piece's picture without moving it** — for a lifted stream element whose
+    /// frame just changed (`ScreenStreamCoordinator.onFloatNeedsRepaint`). The latch, the base and
+    /// the view's transform all stay; only the bitmap under them is new, so the box the artist is
+    /// dragging keeps showing the live picture at the pose they have dragged it to.
+    func replaceVectorFloatImage(_ image: UIImage?) {
+        guard vectorFloatBase != nil else { return }
+        floatView.image = image
+        floatView.isHidden = image == nil
+    }
+
     /// Shows the piece under a **projective** map without rasterizing anything — a lasso Distort's
     /// live drag. Costs one `CALayer.transform`.
     ///

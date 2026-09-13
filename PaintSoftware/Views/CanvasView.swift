@@ -881,6 +881,10 @@ struct CanvasView: UIViewRepresentable {
             // right clock. Before `updateSandwich`, so that a frame the baker already holds is asked
             // for after the sweep has had its say about whether it is still current.
             PlaybackTrace.span(.syncBake) { syncFrameBake() }
+            // STREAM.md §5.3, on the same clock and for the same reason: the pass is when the set
+            // of stream elements in the document may have changed. Nothing per tick goes through
+            // here — see `ScreenStreamCoordinator` for the direct repaint the tick takes instead.
+            syncStreamCoordinator()
 
             // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
             // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
@@ -1444,6 +1448,30 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// Called from `reconcileLayers` — see `CanvasManager.syncFrameBake` for why that is the
         /// cadence rather than a hook.
+        /// Installs the two per-tick repaint closures once, then reconciles the clients.
+        ///
+        /// **A host repaint and not a SwiftUI pass** is the whole point of the closures: the tick
+        /// runs thirty times a second while a laptop is streaming, and `objectWillChange` re-runs
+        /// every view body observing the manager. `refreshDisplayIfStale` rasterizes off the main
+        /// thread and coalesces — a tick that lands while a render is in flight answers `.wait`.
+        /// The float closure re-mints the Move box's latched bitmap for the lifted ids alone.
+        private func syncStreamCoordinator() {
+            let coordinator = canvasManager.streamCoordinator
+            if coordinator.onLayerNeedsRepaint == nil {
+                coordinator.onLayerNeedsRepaint = { [weak self] layerID in
+                    self?.layerHosts[layerID]?.strokeView.refreshDisplayIfStale()
+                }
+                coordinator.onFloatNeedsRepaint = { [weak self] layerID in
+                    guard let self, let float = self.canvasManager.vectorFloat, float.layerID == layerID,
+                          let host = self.layerHosts[layerID], host.strokeView.hasVectorFloat,
+                          let vector = self.canvasManager.vectorCanvas(ofFloat: float) else { return }
+                    host.strokeView.replaceVectorFloatImage(
+                        vector.renderIsolated(ids: float.insideIDs, posedBy: float.poses))
+                }
+            }
+            coordinator.sync()
+        }
+
         private func syncFrameBake() {
             canvasManager.syncFrameBake(suspended: isSandwichStrokeLive)
             let baker = canvasManager.frameBaker
