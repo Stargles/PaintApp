@@ -195,6 +195,30 @@ final class PoseBakeLogicTests: XCTestCase {
         }
     }
 
+    /// **A bezier pair bakes the frames it showed, not the frames its halves would show.** The
+    /// default key eases (`.bezier`, auto-clamped handles), and §3.1 says a split re-parameterises the
+    /// segment it cuts — so the *halves* of an eased pair draw different middle frames from the whole.
+    /// The bake reads every segment off the uncut track before cutting, and this is the test that
+    /// says so: the `.linear` fixtures above cannot, because a linear blend subdivides exactly.
+    ///
+    /// Watched failing with the maps re-read from each half after the cuts: nine of twelve frames
+    /// differ, the ones between the keys.
+    func testABezierPairBakesTheFramesItShowedNotTheFramesItsHalvesWouldShow() throws {
+        let (manager, _, _) = fixture()
+        manager.layers[1].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box)),
+                TransformTrack.Key(frame: 11, pose: moved(24, scale: 1.25))])
+        ]
+        let before = try (0..<12).map { try compositeBytes(manager, atFrame: $0) }
+        XCTAssertNotEqual(before[0], before[6], "premise — the animation moves")
+        XCTAssertEqual(bake(manager), 12)
+        for frame in 0..<12 {
+            assertSameBytes(try compositeBytes(manager, atFrame: frame), before[frame],
+                            "frame \(frame) after the bake is the eased frame the animation showed")
+        }
+    }
+
     // MARK: - The pin
 
     /// **Every baked frame is byte-identical to the animated frame, on both backends.** The fixture

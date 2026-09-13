@@ -56,10 +56,14 @@ extension CanvasManager {
     /// bake never mints two cels of the same picture: `PosedCelIdentity` already treats two frames
     /// whose maps resolve equal as one flatten, and the cels this writes follow the same reading.
     ///
-    /// **Resolved before the first `splitCel`, and that order is load-bearing.** `TransformTrack.split`
-    /// carries `step` unchanged onto the right half, whose frame 0 is the cut — so a track on twos
-    /// cut at an odd frame re-phases, and a bake that re-read the halves would bake a different
-    /// animation from the one on screen. Every segment's maps come from the uncut track.
+    /// **Resolved before the first `splitCel`, and that order is load-bearing.** §3.1 says a split
+    /// re-parameterises the segment it cuts on both sides — *"a single bezier cannot be two beziers"*
+    /// — so the halves show the frames between the keys differently from the whole, and a bake that
+    /// re-read each half after cutting would bake a picture the artist never saw (MEASURED by
+    /// mutation: on a bezier pair every middle frame changed; on a `.linear` pair none did, since a
+    /// linear blend subdivides exactly). `split` also re-anchors the right half's `step` at the cut,
+    /// which this bake's cuts happen to tolerate — they land on the grid — but the first reason is
+    /// enough. Every segment's maps come from the uncut track.
     ///
     /// `frameCount` is the span in frames; `tracks` the cel's own channels. Empty for a cel with no
     /// span.
