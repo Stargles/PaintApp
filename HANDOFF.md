@@ -26,10 +26,8 @@ not re-taken this pass — five UI classes gained tests (`OptionsPanelUITests`,
 `BlendModesAndCompositorUITests`, `TransformLayerModesUITests`, `TransformLayerSpanUITests`, and the
 new one-test `StreamScreenUITests`); pull the per-class table from the next full run's xcresult.
 
-**The owner's iPad has the stream build** (Release, installed 2026-09-13 from the branch at `709c7ac`,
-before stage 4a merged — so **without** laptop→iPad file drop and Send to Computer; profile valid to
-2026-09-20 04:15Z). **Reinstall from `main` first thing** so they have file transfer too; CLAUDE.md's
-deploy steps.
+**The owner's iPad has `d398588`** — `main` at session 43's close, Release, installed 2026-09-13,
+with the whole of (27) through stage 4 including file transfer; profile valid to 2026-09-20 04:15Z.
 
 **The Windows laptop is set up and streaming.** `desktop-cbr0fl6`, `100.104.85.111` on the tailnet,
 SSH as `PC` with `~/.ssh/paintapp_windows`; the streamer runs as the `PaintStreamer` scheduled task in
