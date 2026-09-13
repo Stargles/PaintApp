@@ -196,8 +196,9 @@ final class ColorWheelsEffectLogicTests: XCTestCase {
     /// The sum is one by construction (Midtones is `1 − shadows − highlights`), so the sum
     /// assertion alone could not go red for the construction that ships — what it guards is a
     /// rewrite of Midtones into a hump of its own, which is the obvious "improvement" and the one
-    /// that would break `testTheSameOffsetOnAllThreeRangesIsGlobal` below. The shape assertions are
-    /// the ones a change to the ramps would hit first.
+    /// that would break `testTheSameOffsetOnAllThreeRangesIsGlobal` below (MEASURED: a parabola
+    /// there reports sums up to 1.25 here). The shape assertions are the ones a change to the ramps
+    /// would hit first (MEASURED: weights fixed at `(1, 0, 0)` fail the ½ and 1 rows).
     func testTheRangeWeightsPartitionUnityWithTheStatedShape() {
         for step in 0...100 {
             let L = Double(step) / 100
