@@ -129,8 +129,15 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 - The laptop encodes only while a client is connected and not paused; STATUS `streaming:false` means
   the picture is stale on purpose (no source picked, paused, or the capture failed — `reason` field).
 - The laptop sends a keyframe on connect, on every source change, on `resume`, on `keyframe`, and at
-  least every 2 s. The iPad decodes nothing until it has seen SPS/PPS, then decodes every AU in order.
-  A decode error requests a keyframe and drops AUs until one arrives.
+  least every 60 encoded frames. **The capture is damage-driven** (stage 3 MEASURED it: a still
+  desktop produced one frame in 27 s, not a trickle of P-frames as this section first claimed), so a
+  still screen sends nothing, and there is no wall-clock keyframe interval — connect, `resume` and
+  `keyframe` each *restart the capture session*, and Windows delivers a first frame on every new
+  session, so a client that needs a picture always gets one within about a second. The iPad decodes
+  nothing until it has seen SPS/PPS, then decodes every AU in order. A decode error requests a
+  keyframe and drops AUs until one arrives. A VIDEO payload may begin with an AUD NAL before the
+  SPS (`qsvh264enc` always emits one); the rule is that SPS and PPS precede the IDR slice, not that
+  they are the first bytes.
 - **Reconnect is the client's job** (2.8): 1 s → 2 s → 5 s backoff, forever, while the open document
   holds at least one stream element. The laptop's listener is always up while the app runs. No
   session state survives a reconnect except the source selection, which lives on the laptop.
@@ -141,9 +148,10 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 - Version: HELLO's `proto` must match; a mismatch is reported in words on both screens, and the
   connection closes.
 
-**Bandwidth targets**: 1080p at up to 30 fps, ~6 Mbit/s CBR-ish, low-latency encoder mode, GOP 2 s.
-The iPad 9th gen on Tailscale (WireGuard on an A13) is comfortable there. The source's own change rate
-is the real cap — a still screen costs a P-frame of a few hundred bytes per tick.
+**Bandwidth targets**: 1080p at up to 30 fps, ~6 Mbit/s CBR-ish, low-latency encoder mode, GOP 60
+frames. The iPad 9th gen on Tailscale (WireGuard on an A13) is comfortable there. The source's own
+change rate is the real cap — a still screen costs **nothing** (above), and stage 3 MEASURED a moving
+desktop at ~3.6 Mbit/s and ~18 fps with `qsvh264enc` at 6.4% CPU for GStreamer and ~1.5% for the app.
 
 ## 4. The Windows streamer — `streamer/` in this repo
 
@@ -191,6 +199,13 @@ choice and the reason are in the log and in the window.
 Requirements: Windows 10 1903+ (WGC), GStreamer 1.22+ MSVC x86_64 runtime with all plugins.
 `GraphicsCaptureSession`'s yellow capture border may or may not be suppressible from an unpackaged
 app — §8.
+
+**Three things only the hardware taught (stage 3)**: the laptop's display sleeps after 60 s on AC and
+WGC keeps capturing a black desktop with a live cursor on it, so the streamer holds
+`SetThreadExecutionState(ES_DISPLAY_REQUIRED)` while a pipeline runs — without it the feature's own
+use case (walk away, rotoscope from the iPad) goes black in a minute; a window source produces frames
+only while that window is not fully occluded (z-order matters; inherent to WGC, so the picker should
+say so if the picture stops); and `show-border=false` works from an unpackaged exe (§8 closed).
 
 **On the owner's laptop, 2026-09-13**: Windows 11 Pro 25H2, Intel Iris Xe (13th-gen Core), one
 1920×1080 display. GStreamer **1.26.8** installed from the MSI (`msiexec … ADDLOCAL=ALL /qn`) to
@@ -381,7 +396,7 @@ only what is stored (CLAUDE.md, *"A feature is not finished because its model is
 | **0** ✓ | STREAM.md; `tools/stream/fake-streamer.py` — a Python `paintstream/1` server on this Mac (ffmpeg `avfoundation` screen or `testsrc -re` → `h264_videotoolbox` → Annex-B; also `--send <file>` and a save folder; `stream-client-check.py` is the conformance client both servers are proved against; `--screen` needs Screen Recording permission for the terminal, `--pattern` is the CI path); a ≤200 KB H.264 fixture of `testsrc` for logic tests | the protocol has a reference implementation the iPad is tested against before the laptop exists |
 | **1** ✓ | ~~iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box~~ **Built.** `Engine/ScreenStream/`, `Views/StreamConnectSheet.swift`, `CanvasManager.insertStream(host:port:status:)`; five suites (`StreamElementLogicTests`, `StreamFramingLogicTests`, `H264StreamDecoderLogicTests`, `StreamInsertLogicTests`, `StreamScreenUITests`). §5.3 carries what the build corrected | driven against `fake-streamer.py --pattern`: the pattern moves in the Move box and on the committed layer (two screenshots 2 s apart differ in 15–18% of the rect's sampled pixels); the cold-start XCUITest reaches the sheet |
 | **2** | iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it) | driven; the tick's main-thread cost MEASURED on the device |
-| **3** | Windows: `Streamer.Core`, `Streamer.Tray`, tests, `install-streamer.ps1`, `streamer.ps1`; installed on the laptop over SSH and started as the task | the iPad shows Blender from the laptop; source switch, window close, laptop reboot all behave as §4.5/2.8 |
+| **3** ✓ | Windows: `Streamer.Core`, `Streamer.Tray` (WPF + WinForms tray icon), 44 xunit tests, `install-streamer.ps1`, `streamer.ps1`, `streamer-remote.sh`; installed on the laptop and running as the `PaintStreamer` task in kevin's session | proved from this Mac with `stream-client-check.py`: 602 frames / 11 keyframes / 0 violations with motion, a decoded frame is the laptop's real desktop, a window source shows only that window, a killed process reconnects with a keyframe in ~1.2 s. Six bugs found only on hardware are in `f17df26`'s message. The iPad-to-Blender drive is stage 5's |
 | **4** | Files both ways: drop box → insert, Ctrl+V bitmap, refusal reasons; Send to Computer | driven end to end |
 | **5** | Latency and quality pass on the real link: end-to-end latency MEASURED (a clock on the laptop screen photographed beside the iPad), bitrate/GOP tuned, the dirty-screen idle cost | numbers in PERFORMANCE.md |
 
@@ -389,12 +404,11 @@ Stages 1–2 (iPad, simulator) and 3 (Windows, SSH, no simulator) run in paralle
 
 ## 8. Unconfirmed — verify at the stage that touches it
 
-- Whether an unpackaged app can turn off WGC's yellow capture border (`IsBorderRequired`) — stage 3.
-- Which encoder element the laptop actually has (GPU vendor unknown until SSH) — `EncoderProbe`.
+- ~~Which encoder element the laptop actually has~~ — `EncoderProbe` picks `qsvh264enc` there.
 - The exact main-thread cost of a 1080p tick and of `VTCreateCGImageFromCVPixelBuffer` on the iPad
   9th gen — stage 2, MEASURED; if it is over budget the draw moves to a `CVMetalTextureCache` path.
   Simulator figures are in §5.3 (0.3–0.5 ms and 0.04 ms); the CGImage is a wrap of the BGRA
   IOSurface, so on that count a texture path buys nothing — what a device run has to price is the
   off-main `.region` re-walk that draws the frame into the cel's memo.
-- Whether `tcpclientsink` on localhost or `fdsink` is the cleaner hand-off on Windows — stage 3.
+- ~~Whether `tcpclientsink` on localhost or `fdsink` is the cleaner hand-off~~ — loopback `tcpclientsink` is clean; `d3d11convert` alone negotiates with `qsvh264enc`, no `d3d11download`.
 - Tailscale MTU is 1280; irrelevant to TCP framing, noted in case UDP is ever tried.
