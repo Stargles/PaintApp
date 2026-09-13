@@ -190,10 +190,23 @@ Requirements: Windows 10 1903+ (WGC), GStreamer 1.22+ MSVC x86_64 runtime with a
 `GraphicsCaptureSession`'s yellow capture border may or may not be suppressible from an unpackaged
 app — §8.
 
+**On the owner's laptop, 2026-09-13**: Windows 11 Pro 25H2, Intel Iris Xe (13th-gen Core), one
+1920×1080 display. GStreamer **1.26.8** installed from the MSI (`msiexec … ADDLOCAL=ALL /qn`) to
+`C:\Program Files\gstreamer\1.0\msvc_x86_64` — 1.28 switched to an `.exe` installer whose silent
+flags are undocumented, so the MSI series is the one `install-streamer.ps1` pins. Present:
+`d3d11screencapturesrc` (`capture-api`, `monitor-index`, `window-handle`, `window-capture-mode`,
+`show-cursor`, `show-border`), **`qsvh264enc`** and **`mfh264enc`** (the latter is the Intel Quick Sync
+MFT, D3D11-aware, `low-latency`), `openh264enc`, `x264enc`. Absent: `nvh264enc`, `amfh264enc`. .NET
+SDK 8.0.425 at `C:\dotnet`.
+
 ### 4.3 Running it, and running it over SSH
 
 An SSH session on Windows is a non-interactive window station: nothing started from it can see the
-desktop, so neither the app nor `gst-launch-1.0` can capture from there. The app runs as a **Scheduled
+desktop, so neither the app nor `gst-launch-1.0` can capture from there — `EnumWindows` in that
+session sees one fake 1024×768 "WinDisc" display. **And the laptop has two accounts**: SSH (and "Run
+as administrator") is the admin `PC`; the person at the screen is the standard user **`kevin`**, whose
+session 1 is the only one that can capture. The task runs as `kevin` with an Interactive logon
+principal, registered by the admin with no password. The app runs as a **Scheduled
 Task** registered to run interactively in the logged-in user's session (`schtasks /create … /it`), and
 `tools/windows/streamer.ps1 start|stop|status|log` drives it from SSH. Double-clicking the exe on the
 laptop does the same thing by hand. Log: `%LOCALAPPDATA%\PaintStreamer\log.txt`.
@@ -338,7 +351,7 @@ only what is stored (CLAUDE.md, *"A feature is not finished because its model is
 
 | stage | what | proves |
 |---|---|---|
-| **0** | STREAM.md; `tools/stream/fake-streamer.py` — a Python `paintstream/1` server on this Mac (ffmpeg `avfoundation` screen or `testsrc` → `h264_videotoolbox` → Annex-B; also `--send <file>` and a save folder); a ≤200 KB H.264 fixture of `testsrc` for logic tests | the protocol has a reference implementation the iPad is tested against before the laptop exists |
+| **0** ✓ | STREAM.md; `tools/stream/fake-streamer.py` — a Python `paintstream/1` server on this Mac (ffmpeg `avfoundation` screen or `testsrc -re` → `h264_videotoolbox` → Annex-B; also `--send <file>` and a save folder; `stream-client-check.py` is the conformance client both servers are proved against; `--screen` needs Screen Recording permission for the terminal, `--pattern` is the CI path); a ≤200 KB H.264 fixture of `testsrc` for logic tests | the protocol has a reference implementation the iPad is tested against before the laptop exists |
 | **1** | iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box | a live picture of this Mac's screen moves in the simulator against the fake streamer; a cold-start XCUITest reaches the sheet from a new document |
 | **2** | iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it) | driven; the tick's main-thread cost MEASURED on the device |
 | **3** | Windows: `Streamer.Core`, `Streamer.Tray`, tests, `install-streamer.ps1`, `streamer.ps1`; installed on the laptop over SSH and started as the task | the iPad shows Blender from the laptop; source switch, window close, laptop reboot all behave as §4.5/2.8 |
