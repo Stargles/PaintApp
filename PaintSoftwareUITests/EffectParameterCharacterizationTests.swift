@@ -32,18 +32,24 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// nineteen with TODO (60)'s splits, twenty with TODO (61)'s Duplicate Offset. Gaussian
     /// and Directional Blur are one case split by `Blur.isDirectional`, and both are listed so the
     /// "same case, same table" claim is exercised rather than assumed; TODO (60)'s Dither and Halftone
-    /// (`Posterize.screen`) and Hue Colorize (`HSVShift.colorize`) are the same claim reached through
-    /// two more fields, so all three are listed here for the identical reason rather than covered only
-    /// by the smaller equivalence checks in `testTheSlidersMatchTheSettingsBarCallSitesTheyReplaced`.
-    /// None of the three adds a stored field or a slider — every sweep below that would otherwise
-    /// triple-count Posterize's or HSV Shift's own parameters across their split entries dedupes the
-    /// same way `testThereAreThirtyEightSlidersInTheWholeCatalogue` already deduped the two blurs.
+    /// (`Posterize.screen`) are the same claim reached through one more field, so both are listed here
+    /// for the identical reason rather than covered only by the smaller equivalence checks in
+    /// `testTheSlidersMatchTheSettingsBarCallSitesTheyReplaced`. Neither adds a stored field or a
+    /// slider — every sweep below that would otherwise double-count Posterize's own parameters
+    /// across its split entries dedupes the same way `testThereAreThirtyEightSlidersInTheWholeCatalogue`
+    /// already deduped the two blurs.
+    ///
+    /// **Hue Colorize (`HSVShift.colorize`) is the same claim, but is no longer one of the array's
+    /// own "menu entries" as of TODO (65)** — the merge folded its catalogue row into HSV Shift's, so
+    /// listing it here would count a state this array's own name says is a *menu entry* and is not
+    /// one any more. `HueColorizeEffectLogicTests` and `testTheColorizeBridgeRenamesTheEffect` still
+    /// pin the "same table, different reading" claim on their own; nothing here would notice if that
+    /// coverage went missing, so it is named rather than merely dropped.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
-        .hsvShift(Effect.HSVShift(hueDegrees: 210, saturation: 0.5, colorize: true)),
         .gradientMap(Effect.GradientMap()),
         .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),
@@ -252,14 +258,17 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// editor's axis rather than for a slider's travel.
     func testThereAreSixtyOneRangedParametersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
-            // Blur, Posterize and HSV Shift each back more than one menu entry; count each case once,
-            // through whichever entry is its "base" reading.
+            // Blur and Posterize each still back more than one menu entry; count each case once,
+            // through whichever entry is its "base" reading. `hsvShift` no longer needs this guard —
+            // TODO (65) removed its second entry from `everyMenuEntry` itself — but the check is
+            // left in as a no-op: a colorize-true literal reappearing here would silently pass
+            // without it, which is exactly the drift this table exists to catch.
             if case .blur(let blur) = $0 { return !blur.isDirectional }
             if case .posterize(let post) = $0 { return post.screen == .none }
             if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
             return true
         }
-        XCTAssertEqual(cases.count, 18, "Eighteen cases behind twenty-two menu entries")
+        XCTAssertEqual(cases.count, 18, "Eighteen cases behind twenty-one menu entries")
         XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 61)
     }
 

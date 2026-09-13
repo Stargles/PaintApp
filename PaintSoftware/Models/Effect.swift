@@ -134,10 +134,15 @@ enum Effect: Equatable {
         case .levels:              return "Levels"
         case .curves:              return "Curves"
         case .brightnessContrast:  return "Brightness / Contrast"
-        // TODO (60). The Blur precedent: one case, two names, split by a field rather than by a
-        // second `case`. `colorize` swaps what `hueDegrees`/`saturation` mean (an absolute target
-        // instead of a relative shift), which is a different enough effect to want its own row in
-        // the menu, and `EffectCatalog.isCurrent` already keys on `displayName` for exactly this.
+        // TODO (65), 2026-09-13: **no longer a menu-identity split.** `colorize` swaps what
+        // `hueDegrees`/`saturation` mean (an absolute target instead of a relative shift) and still
+        // earns its own name here — the layer row and the settings bar's own title both read better
+        // naming which mode is live — but the two readings are one catalogue entry now, reached by
+        // the `hsvShift.colorize` toggle rather than by picking a second row (the owner: *"I'm not
+        // sure why HSV Shift and Hue Colorize are two different options. Make them one with just a
+        // toggle."*). `EffectCatalog.isCurrent` special-cases `.hsvShift` for exactly this — the one
+        // case where two different `displayName`s must still tick the same row — rather than keying
+        // on this string, which is the Blur/Posterize precedent it can no longer share.
         case .hsvShift(let hsv):   return hsv.colorize ? "Hue Colorize" : "HSV Shift"
         case .gradientMap:         return "Gradient Map"
         case .chromaticAberration: return "Chromatic Aberration"
@@ -399,10 +404,12 @@ extension Effect {
         /// keeping its own light and dark, which a naive `hsbToRGB(hue, sat, v * value)` would not:
         /// at high saturation `v` alone cannot reach a mid pixel's `Lum` for every hue (a fully
         /// saturated blue's own ceiling is `Lum ≈ 0.11`), so the solve clamps there and only there —
-        /// a physical gamut limit, not a bug, and the reason the catalogue's own Hue Colorize prototype
-        /// picks a saturation that keeps the identity fixture in `HueColorizeEffectLogicTests` inside
-        /// the reachable range at every hue. Default `false` so every document saved before this field
-        /// existed decodes into the shift it always was — `HSVShift`'s own guarantee, extended.
+        /// a physical gamut limit, not a bug, and the reason `HueColorizeEffectLogicTests`'s own
+        /// fixtures pick a saturation (0.5, the same figure the catalogue's own prototype used to
+        /// carry before TODO (65) removed it as a separate entry) low enough to keep the identity
+        /// fixture inside the reachable range at every hue. Default `false` so every document saved
+        /// before this field existed decodes into the shift it always was — `HSVShift`'s own
+        /// guarantee, extended.
         var colorize: Bool = false
     }
 
@@ -2813,8 +2820,9 @@ extension Effect {
     /// channels would silently not exist, and the first symptom would be an artist unable to
     /// animate a knob they can see.
     ///
-    /// **Eighteen cases, twenty-two menu entries** (the count `EffectParameterCharacterizationTests`
-    /// pins). Gaussian and Directional Blur are one case split
+    /// **Eighteen cases, twenty-one menu entries** (the count `EffectParameterCharacterizationTests`
+    /// pins — twenty-two until TODO (65) folded Hue Colorize into HSV Shift's own entry). Gaussian
+    /// and Directional Blur are one case split
     /// by `Blur.isDirectional`, so they share one branch here and `blur.directional` is itself a
     /// parameter — which is the honest shape, since an artist can flip a Gaussian blur into a
     /// directional one without changing effect.

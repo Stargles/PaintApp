@@ -508,7 +508,8 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertEqual(stopSwatch.value as? String, "3366CC", "the pick reached the model")
     }
 
-    // MARK: - TODO (60): Dither and Hue Colorize, the two menu entries this item adds
+    // MARK: - TODO (60): Dither, the menu entry this item adds. (Hue Colorize was the other one,
+    // until TODO (65) folded it into HSV Shift's own entry — see this file's Hue Colorize test below.)
 
     /// The red-channel byte values over a small grid inside `dxRange`×`dyRange`, **excluding anything
     /// implausibly close to white paper** — a grey stroke's R, G and B bytes move together, so the red
@@ -615,13 +616,20 @@ final class OptionsPanelUITests: PaintUITestCase {
             """)
     }
 
-    /// **TODO (60), cold start: Hue Colorize is reachable from the menu, shows Hue/Saturation/the
-    /// Colorize toggle, and changing Hue actually changes the colour a grey stroke takes on.** Grey
-    /// rather than black or white so `EffectReference`'s colorize branch has a non-degenerate `Lum` to
-    /// preserve — `Effect.HSVShift.colorize`'s doc names why the two extremes are special cases.
-    /// −180° and 0° are chosen for maximum contrast on the "redness" readout `maxRedness` already uses
-    /// for Bloom above: −180°≡180° is cyan-ish (green+blue, low R−G) and 0° is red (high R−G).
-    func testReachingHueColorizeFromAFreshDocumentChangesTheStrokesHue() throws {
+    /// **TODO (65), cold start: Hue Colorize is a toggle on the single HSV Shift menu entry, not a
+    /// second row.** The owner: *"I'm not sure why HSV Shift and Hue Colorize are two different
+    /// options. Make them one with just a toggle (toggle is already implemented)."* — so this test
+    /// picks HSV Shift, flips the Colorize toggle that was already there, and pins the two claims
+    /// that make the merge real rather than cosmetic: the second menu row is gone, and a colorized
+    /// effect still ticks the one row that remains (`EffectCatalog.isCurrent`'s special case for
+    /// `.hsvShift` — see its own doc). The rest is `testReachingHueColorizeFromAFreshDocumentChanged
+    /// TheStrokesHue`'s original claim, unchanged: Hue/Saturation are reachable and dragging Hue
+    /// actually changes the colour a grey stroke takes on. Grey rather than black or white so
+    /// `EffectReference`'s colorize branch has a non-degenerate `Lum` to preserve —
+    /// `Effect.HSVShift.colorize`'s doc names why the two extremes are special cases. −180° and 0°
+    /// are chosen for maximum contrast on the "redness" readout `maxRedness` already uses for Bloom
+    /// above: −180°≡180° is cyan-ish (green+blue, low R−G) and 0° is red (high R−G).
+    func testHueColorizeIsAToggleOnTheSingleHSVShiftMenuEntryAndChangesTheStrokesHue() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -640,18 +648,53 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let colorizeItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.huecolorize")
-        XCTAssertTrue(colorizeItem.waitForExistence(timeout: 5), "The menu should list Hue Colorize")
-        colorizeItem.tap()
+        XCTAssertFalse(app.buttons["layerOptions.blendMode.huecolorize"].exists,
+                       "TODO (65): Hue Colorize must no longer be a separate menu entry")
+        let hsvShiftItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.hsvshift")
+        XCTAssertTrue(hsvShiftItem.waitForExistence(timeout: 5), "The menu should list HSV Shift")
+        hsvShiftItem.tap()
 
         app.buttons["layerOptions.effectSettings"].tap()
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up")
+        XCTAssertEqual(title.label, "HSV Shift", "Picking the merged entry must land on the shift, not the colorize, reading")
         let hueSlider = app.sliders["effectSettings.hue"]
         XCTAssertTrue(hueSlider.waitForExistence(timeout: 5),
-                      "Hue Colorize's Hue slider did not open — the artist cannot reach it")
+                      "HSV Shift's Hue slider did not open — the artist cannot reach it")
         XCTAssertTrue(app.sliders["effectSettings.saturation"].exists, "…nor Saturation")
         let colorizeToggle = app.switches["effectSettings.colorize"]
-        XCTAssertTrue(colorizeToggle.exists, "…nor the Colorize toggle that got the artist here")
-        XCTAssertEqual(colorizeToggle.value as? String, "1", "Picking Hue Colorize must leave it on")
+        XCTAssertTrue(colorizeToggle.exists, "…nor the Colorize toggle the owner said was already there")
+        XCTAssertEqual(colorizeToggle.value as? String, "0", "HSV Shift's own identity has Colorize off")
+
+        // The toggle, not the label — a SwiftUI `Toggle`'s label does not flip it (`LayerUITests`'
+        // own finding).
+        colorizeToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertEqual(colorizeToggle.value as? String, "1", "The toggle is what turns Colorize on now")
+        XCTAssertEqual(title.label, "Hue Colorize", "The settings bar's own title still says which mode is live")
+
+        // Back to the Blend Mode menu: re-picking the one HSV Shift row while colorized must be the
+        // no-op `EffectCatalog.resolve` promises, not a reset to the shift identity — which is the
+        // behavioural proof that `isCurrent` ticks that row for a colorized effect too (its doc
+        // argues this; nothing here reaches the checkmark glyph itself —
+        // `tools/check-ui-identifiers.py`'s rule). Were `isCurrent` still keyed on `displayName`
+        // alone, a colorized effect would read as *not* current, and re-picking the row would
+        // `resolve` to the bare prototype and silently turn Colorize back off.
+        // `toolbar.layersButton` toggles `activePanel`, and closing the settings bar leaves the
+        // layers panel itself open (`onClose: { layerOptionsID = nil }` never touches it) — so this
+        // is `close, then reopen`, the same two-call shape the reachability test below already uses.
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        XCTAssertFalse(app.buttons["layerOptions.blendMode.huecolorize"].exists,
+                       "A colorized effect must not resurrect a second menu entry")
+        let hsvShiftRow = app.buttons["layerOptions.blendMode.hsvshift"]
+        XCTAssertTrue(hsvShiftRow.waitForExistence(timeout: 5))
+        hsvShiftRow.tap()
+        app.buttons["layerOptions.effectSettings"].tap()
+        XCTAssertEqual(colorizeToggle.value as? String, "1",
+                       "Re-picking the one HSV Shift row while colorized must not reset Colorize off")
 
         hueSlider.adjust(toNormalizedSliderPosition: 0.0)   // −180°, cyan-ish
         app.buttons["layerOptions.close"].tap()

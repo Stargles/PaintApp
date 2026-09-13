@@ -67,16 +67,15 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// **Hand-typed for `EffectParameterCharacterizationTests`' reason**: `Effect` cannot be
-    /// `CaseIterable`, so nothing in this suite would notice a sixteenth effect. Nineteen entries
-    /// over fifteen cases — both blurs listed, and TODO (60)'s Dither/Halftone (`Posterize.screen`)
-    /// and Hue Colorize (`HSVShift.colorize`) for the identical reason, mirroring
-    /// `EffectParameterCharacterizationTests.everyMenuEntry`.
+    /// `CaseIterable`, so nothing in this suite would notice a sixteenth effect. Both blurs listed,
+    /// and TODO (60)'s Dither/Halftone (`Posterize.screen`) for the identical reason, mirroring
+    /// `EffectParameterCharacterizationTests.everyMenuEntry` — including TODO (65)'s removal of the
+    /// separate Hue Colorize entry, which stopped being a menu entry when it merged into HSV Shift's.
     private static let everyMenuEntry: [Effect] = [
         .brightnessContrast(Effect.BrightnessContrast()),
         .levels(Effect.Levels()),
         .curves(Effect.Curves()),
         .hsvShift(Effect.HSVShift()),
-        .hsvShift(Effect.HSVShift(hueDegrees: 210, saturation: 0.5, colorize: true)),
         .gradientMap(Effect.GradientMap()),
         .recolor(Effect.Recolor()),
         .posterize(Effect.Posterize()),

@@ -22,15 +22,18 @@ import SwiftUI
 ///   blur dialogs open at a nonzero radius for the same reason. `Effect.Blur`'s own default stays 0 —
 ///   that is the *type's* identity and two tests depend on it — and the difference between the two is
 ///   the whole reason these are prototypes here rather than `.init()` at the call site.
-/// * **Dither, Halftone and Hue Colorize (TODO (60)) are neither** — `Blur.isDirectional`'s shape:
-///   one payload struct, two catalogue entries split by a field, so a "grade starts at identity"
-///   prototype and a "filter starts visible" prototype can share `Effect.Posterize`/`Effect.HSVShift`
-///   without either lying about what picking it does. Dither and Halftone are `Posterize` with its
-///   `screen` set and full strength, so the screen is visible the moment it is picked rather than
-///   faded to nothing; Hue Colorize has no identity in the ordinary sense at all — turning `colorize`
-///   on with `hue: 0, saturation: 1` would slam every pixel to fully saturated red — so it takes the
-///   filter convention: a moderate saturation chosen low enough that `HueColorizeEffectLogicTests`'
-///   Lum-preservation claim holds at every hue (`Effect.HSVShift.colorize`'s doc has the arithmetic).
+/// * **Dither and Halftone (TODO (60)) are neither** — `Blur.isDirectional`'s shape: one payload
+///   struct, two catalogue entries split by a field, so a "grade starts at identity" prototype and
+///   a "filter starts visible" prototype can share `Effect.Posterize` without either lying about
+///   what picking it does. Dither and Halftone are `Posterize` with its `screen` set and full
+///   strength, so the screen is visible the moment it is picked rather than faded to nothing.
+/// * **Hue Colorize is not a catalogue entry at all, as of TODO (65).** It shared this same split
+///   with Dither/Halftone from 2026-09-11 until the owner asked why HSV Shift and Hue Colorize were
+///   two menu rows when the `colorize` toggle already existed to move between them — so now there
+///   is one `.hsvShift` entry, at its shift identity, and colorize is reached through the settings
+///   bar's own toggle rather than through a second pick. `isCurrent` below still has to tick that
+///   one row while a colorized effect is current, which plain `displayName` equality cannot do — a
+///   colorized effect answers "Hue Colorize", not "HSV Shift" — so it special-cases the one case.
 enum EffectCatalog {
 
     static let groups: [[Effect]] = [
@@ -38,10 +41,9 @@ enum EffectCatalog {
             .brightnessContrast(Effect.BrightnessContrast()),
             .levels(Effect.Levels()),
             .curves(Effect.Curves()),
+            // TODO (65): one entry for both readings — colorize is the settings bar's own toggle,
+            // not a second pick. See the header note above and `isCurrent` below.
             .hsvShift(Effect.HSVShift()),
-            // A warm sepia tint at a saturation moderate enough to reach every pixel's own lightness —
-            // see the header note above.
-            .hsvShift(Effect.HSVShift(hueDegrees: 35, saturation: 0.5, colorize: true)),
             .gradientMap(Effect.GradientMap()),
             // Its identity: no pairs yet. The first one arrives by tapping Add in the settings bar
             // and picking its two ends off the canvas, which is the workflow TODO (60) asks for.
@@ -86,8 +88,19 @@ enum EffectCatalog {
     /// **`displayName` is the identity of a kind here, not `kindCode`.** Gaussian and Directional Blur
     /// are one case carrying one code and are two entries in this menu (`Blur.isDirectional` is what
     /// separates them), so a code would make the menu unable to tell which of the two is ticked.
+    ///
+    /// **`.hsvShift` is the one exception, since TODO (65) folded its two entries into one.** A
+    /// colorized effect's own `displayName` is "Hue Colorize", not "HSV Shift" — that split still
+    /// earns the settings bar its title and the layer row its label — but there is only one menu row
+    /// for the case now, so both readings have to tick it. Matching by case rather than by
+    /// `displayName` is safe here specifically because `.hsvShift` is no longer split across two
+    /// catalogue entries the way `.blur` and `.posterize` still are; doing this generally would make
+    /// Directional Blur tick Gaussian Blur's row too.
     static func isCurrent(_ prototype: Effect, given current: Effect?) -> Bool {
-        current?.displayName == prototype.displayName
+        if case .hsvShift = prototype, case .hsvShift = current {
+            return true
+        }
+        return current?.displayName == prototype.displayName
     }
 
     /// What picking `prototype` should produce, given what is already there.
@@ -324,9 +337,11 @@ struct EffectSettingsBar: View {
             slider("hsvShift.hue")
             slider("hsvShift.saturation")
             slider("hsvShift.value")
-            // TODO (60). `Blur`'s `Directional` toggle exactly: swaps which of the two menu entries
-            // (HSV Shift / Hue Colorize) this payload renders and reads as, with no change to the
-            // three sliders above — see `Effect.displayName` and `Effect.HSVShift.colorize`.
+            // TODO (65): this is the whole toggle the owner asked for — one menu entry, this row
+            // swaps `displayName` (and so this bar's own title) between the two readings, with no
+            // change to the three sliders above. It predates TODO (65) by two days as `Blur`'s
+            // `Directional` toggle exactly, back when it also swapped which of two menu entries the
+            // payload rendered as — see `Effect.displayName` and `Effect.HSVShift.colorize`.
             toggleRow("Colorize", isOn: params.colorize, identifier: "colorize") {
                 params.colorize = $0; onChange(.hsvShift(params))
             }
