@@ -22,6 +22,13 @@ public sealed class StreamerSession : IAsyncDisposable
     private CaptureSource? _currentSource;
     private bool _pausedByClient;
     private bool _hasClient;
+    // STREAM.md §4.5: set by SetEnvironmentBlockedAsync (SessionLockMonitor, via the tray
+    // window's forwarded WM_WTSSESSION_CHANGE / WM_POWERBROADCAST). Distinct from
+    // _pausedByClient — this is never client-initiated, so BroadcastStatus never reports
+    // it as "Paused", and StartPipelineLockedAsync refuses to run while it is set
+    // regardless of which caller (connect, resume, source pick) reached it.
+    private bool _environmentBlocked;
+    private string? _environmentBlockedReason;
     private readonly RateTracker _rate = new();
     private bool? _downloadConvertWorks; // null = not yet measured on this box (STREAM.md §8)
     // Owns pts_us for the WHOLE connection lifetime, not per-pipeline-instance.
@@ -132,6 +139,12 @@ public sealed class StreamerSession : IAsyncDisposable
         lock (_gate)
         {
             if (_currentSource == null) return;
+            // The one choke point: every caller (OnClientConnectedAsync, HandleControlAsync's
+            // Resume, SetSourceAsync, SetEnvironmentBlockedAsync's own unblock branch) funnels
+            // through here, so a single guard covers all of them rather than repeating the
+            // check at each call site. SetEnvironmentBlockedAsync clears the flag before
+            // calling this on unblock, so that branch is unaffected.
+            if (_environmentBlocked) return;
             source = _currentSource;
         }
         await StopPipelineAsync().ConfigureAwait(false);
@@ -238,6 +251,48 @@ public sealed class StreamerSession : IAsyncDisposable
     private static string ShapeLabel(bool downloadAndConvert) =>
         downloadAndConvert ? "d3d11download+videoconvert" : "d3d11convert";
 
+    /// <summary>STREAM.md §4.5: called from SessionLockMonitor.Changed (forwarded through
+    /// App/MainWindow — never called directly from Win32 code, which is what keeps this
+    /// class ignorant of window handles). Blocking stops the pipeline outright — there is
+    /// no picture to encode from a secure desktop or a dark display, matching the "no
+    /// point encoding black" reasoning §4.2 already applies to the display-sleep case —
+    /// and reports `reason` in STATUS exactly like a source going away (§4.5's existing
+    /// "window was closed" / "monitor unplugged" cases). Unblocking restarts it exactly as
+    /// a fresh connect would, but only if a client is actually present and not itself
+    /// paused — an unattended laptop unlocking with nobody watching should not spin up an
+    /// encoder no one receives.</summary>
+    public async Task SetEnvironmentBlockedAsync(bool blocked, string? reason)
+    {
+        lock (_gate)
+        {
+            if (_environmentBlocked == blocked && _environmentBlockedReason == reason) return;
+            _environmentBlocked = blocked;
+            _environmentBlockedReason = reason;
+        }
+        if (blocked)
+        {
+            await StopPipelineAsync().ConfigureAwait(false);
+            BroadcastStatus(reason);
+        }
+        else
+        {
+            bool hasClient, pausedByClient;
+            CaptureSource? source;
+            lock (_gate) { hasClient = _hasClient; pausedByClient = _pausedByClient; source = _currentSource; }
+            // Mirrors OnClientConnectedAsync's own "only if a source is actually picked"
+            // guard — without it, unlocking with a client connected but no source chosen
+            // yet would call StartPipelineLockedAsync while Encoder might still be null
+            // (that method's very first line throws in that case; it is guarded by
+            // construction order everywhere else it's called from, and this is the one
+            // call site that did not, until it was checked here).
+            if (hasClient && !pausedByClient && source != null)
+            {
+                await StartPipelineLockedAsync().ConfigureAwait(false);
+            }
+            BroadcastStatus();
+        }
+    }
+
     private async Task StopPipelineAsync()
     {
         GstProcess? old;
@@ -253,9 +308,17 @@ public sealed class StreamerSession : IAsyncDisposable
     public void BroadcastStatus(string? reason = null)
     {
         CaptureSource? source;
-        bool paused, hasClient;
-        lock (_gate) { source = _currentSource; paused = _pausedByClient; hasClient = _hasClient; }
-        bool streaming = source != null && !paused && IsStreaming;
+        bool paused, hasClient, environmentBlocked;
+        string? environmentBlockedReason;
+        lock (_gate)
+        {
+            source = _currentSource;
+            paused = _pausedByClient;
+            hasClient = _hasClient;
+            environmentBlocked = _environmentBlocked;
+            environmentBlockedReason = _environmentBlockedReason;
+        }
+        bool streaming = source != null && !paused && !environmentBlocked && IsStreaming;
         var status = new StatusMessage
         {
             Source = source == null
@@ -273,7 +336,14 @@ public sealed class StreamerSession : IAsyncDisposable
             // reporting it as "Paused" would tell the iPad the user asked for this. Found by
             // watching a live STATUS say reason:"Paused" a full 20s into a fresh connection
             // while nothing had been paused by anyone.
-            Reason = streaming ? null : (reason ?? (source == null ? "No source selected" : (paused ? "Paused" : "Starting"))),
+            //
+            // environmentBlocked is checked ahead of the source/paused fallbacks so that a
+            // trailing BroadcastStatus() with no explicit reason (OnClientConnectedAsync's,
+            // for one) still reports the lock/display sentence rather than "No source
+            // selected" or "Starting" — SetEnvironmentBlockedAsync's own calls already pass
+            // `reason` explicitly and never reach this fallback at all.
+            Reason = streaming ? null : (reason ?? (environmentBlocked ? environmentBlockedReason :
+                (source == null ? "No source selected" : (paused ? "Paused" : "Starting")))),
         };
         lock (_gate)
         {

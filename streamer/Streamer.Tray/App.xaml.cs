@@ -19,6 +19,8 @@ public partial class App : System.Windows.Application
     private OutboxFolderWatcher? _outboxWatcher;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private MainWindow? _mainWindow;
+    private SessionLockMonitor? _lockMonitor;
+    private SessionLockPoller? _lockPoller;
 
     /// <summary>STREAM.md §7 stage 4 deliverable 3: the CLI's remote hand, since a
     /// second process (an SSH session) cannot reach the running app's own drop box.</summary>
@@ -57,11 +59,32 @@ public partial class App : System.Windows.Application
         _session = new StreamerSession(GstBinDir, Log);
 
         string? listSourcesArg = e.Args.FirstOrDefault(a => a == "--list-sources");
+        string? checkLockArg = e.Args.FirstOrDefault(a => a == "--check-lock");
         string? streamArg = e.Args.FirstOrDefault(a => a.StartsWith("--stream", StringComparison.OrdinalIgnoreCase));
 
         if (listSourcesArg != null)
         {
             RunListSources(Log);
+            Shutdown(0);
+            return;
+        }
+
+        if (checkLockArg != null)
+        {
+            // STREAM.md §4.5 diagnostic: prints the OpenInputDesktop poll's own verdict,
+            // independent of whichever WM_WTSSESSION_CHANGE/WM_POWERBROADCAST messages
+            // this same process's MainWindow may or may not have received (those go to
+            // log.txt with their own "MainWindow: WM_..." / "SessionLockMonitor: ..."
+            // lines; this is a one-shot answer from the poll path alone, since a session
+            // one-off task has no window of its own for the message path anyway).
+            var checkMonitor = new SessionLockMonitor();
+            using (var checkPoller = new SessionLockPoller(checkMonitor, interval: TimeSpan.Zero))
+            {
+                checkPoller.Poll();
+            }
+            string line = $"--check-lock: IsBlocked={checkMonitor.IsBlocked} Reason={checkMonitor.Reason ?? "(none)"}";
+            Console.WriteLine(line);
+            Log(line);
             Shutdown(0);
             return;
         }
@@ -102,6 +125,23 @@ public partial class App : System.Windows.Application
         _server.ControlReceived += control => _ = _session.HandleControlAsync(control);
         await _server.StartAsync().ConfigureAwait(true);
 
+        // STREAM.md §4.5: lock/display-off detection. The window-message half
+        // (WTSRegisterSessionNotification, RegisterPowerSettingNotification) is wired up
+        // in MainWindow.OnSourceInitialized once the HWND exists; the poller runs
+        // regardless, from the moment the session starts, as the belt-and-suspenders
+        // fallback for a process the Scheduled Task launched (§8 — the window message may
+        // never arrive there) and for the startup case a message-only design cannot cover
+        // (the laptop is very likely already locked when this process starts, and a
+        // message only fires on the next *transition*).
+        _lockMonitor = new SessionLockMonitor();
+        _lockMonitor.Changed += monitor =>
+        {
+            Log($"SessionLockMonitor: {(monitor.IsBlocked ? "blocked" : "unblocked")}" +
+                (monitor.Reason != null ? $" — {monitor.Reason}" : ""));
+            _ = _session.SetEnvironmentBlockedAsync(monitor.IsBlocked, monitor.Reason);
+        };
+        _lockPoller = new SessionLockPoller(_lockMonitor);
+
         _fileOutbox = new FileOutbox(_server, Log);
         _outboxWatcher = new OutboxFolderWatcher(OutboxDir, _fileOutbox, Log);
 
@@ -129,7 +169,7 @@ public partial class App : System.Windows.Application
                 $"{e.Name} saved to {Path.GetDirectoryName(e.Path)}",
                 System.Windows.Forms.ToolTipIcon.Info);
         };
-        _mainWindow = new MainWindow(_session, _server, _settings, _fileOutbox!, Log);
+        _mainWindow = new MainWindow(_session, _server, _settings, _fileOutbox!, _lockMonitor, Log);
         _mainWindow.Closing += (_, args) =>
         {
             args.Cancel = true;
@@ -245,6 +285,7 @@ public partial class App : System.Windows.Application
     protected override async void OnExit(ExitEventArgs e)
     {
         _trayIcon?.Dispose();
+        _lockPoller?.Dispose();
         _outboxWatcher?.Dispose();
         _fileOutbox?.Dispose();
         if (_server != null) await _server.StopAsync().ConfigureAwait(false);

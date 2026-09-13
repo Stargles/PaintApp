@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -49,20 +51,29 @@ public partial class MainWindow : Window, IFrameSink
     private readonly ProtocolServer _server;
     private readonly Settings _settings;
     private readonly FileOutbox _fileOutbox;
+    private readonly SessionLockMonitor _lockMonitor;
     private readonly Action<string> _log;
     private readonly DispatcherTimer _rateTimer;
 
     private readonly System.Collections.ObjectModel.ObservableCollection<TransferRowViewModel> _transfers = new();
     private readonly Dictionary<string, TransferRowViewModel> _rowsByPath = new();
 
+    // Set in OnSourceInitialized (the HWND does not exist before then) and torn down in
+    // OnClosed. STREAM.md §4.5: this class is the only place that touches a window handle
+    // for lock detection — SessionLockMonitor itself is plain state, forwarded into by
+    // WndProc below.
+    private HwndSource? _hwndSource;
+    private IntPtr _powerNotificationHandle = IntPtr.Zero;
+
     public MainWindow(StreamerSession session, ProtocolServer server, Settings settings, FileOutbox fileOutbox,
-        Action<string> log)
+        SessionLockMonitor lockMonitor, Action<string> log)
     {
         InitializeComponent();
         _session = session;
         _server = server;
         _settings = settings;
         _fileOutbox = fileOutbox;
+        _lockMonitor = lockMonitor;
         _log = log;
 
         _session.AddSink(this); // a second IFrameSink, purely for this window's own status/rate labels
@@ -305,5 +316,78 @@ public partial class MainWindow : Window, IFrameSink
         // only so the rate timer does not keep firing needlessly while hidden — it's
         // cheap either way, so left running is fine. No-op override kept for clarity.
         base.OnClosing(e);
+    }
+
+    // ---- STREAM.md §4.5: session-lock / display-power window messages. This is the
+    // entire "WPF layer only forwards the window message" half of the design — every
+    // decision about what a lock/unlock/display change MEANS lives in SessionLockMonitor
+    // (Core, unit-tested with no window at all); this class only translates two Win32
+    // notifications into calls on it, exactly as the rest of this file translates WPF
+    // drag/paste events into calls on FileOutbox/ClipboardImageStore. ----
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        _hwndSource = HwndSource.FromHwnd(hwnd);
+        _hwndSource?.AddHook(WndProc);
+
+        if (!NativeInterop.WTSRegisterSessionNotification(hwnd, NativeInterop.NOTIFY_FOR_THIS_SESSION))
+        {
+            _log($"MainWindow: WTSRegisterSessionNotification failed (0x{Marshal.GetLastWin32Error():x}) " +
+                 "— relying on SessionLockPoller alone for lock detection");
+        }
+
+        var displayStateGuid = NativeInterop.GUID_CONSOLE_DISPLAY_STATE;
+        _powerNotificationHandle = NativeInterop.RegisterPowerSettingNotification(
+            hwnd, ref displayStateGuid, NativeInterop.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (_powerNotificationHandle == IntPtr.Zero)
+        {
+            _log($"MainWindow: RegisterPowerSettingNotification failed (0x{Marshal.GetLastWin32Error():x}) " +
+                 "— display-off will not be reported (session lock still will be)");
+        }
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == NativeInterop.WM_WTSSESSION_CHANGE)
+        {
+            int code = wParam.ToInt32();
+            // Logged before touching the monitor so a run's log settles STREAM.md §4.5's
+            // open question on its own: if this line is present, the message reached a
+            // Scheduled-Task-launched process after all and SessionLockPoller's 2s poll is
+            // pure belt-and-suspenders; if only the poller's own log line ever appears, it
+            // was not and the poll is load-bearing.
+            _log($"MainWindow: WM_WTSSESSION_CHANGE code=0x{code:x}");
+            switch (code)
+            {
+                case NativeInterop.WTS_SESSION_LOCK: _lockMonitor.HandleSessionLock(); break;
+                case NativeInterop.WTS_SESSION_UNLOCK: _lockMonitor.HandleSessionUnlock(); break;
+                case NativeInterop.WTS_CONSOLE_DISCONNECT: _lockMonitor.HandleConsoleDisconnect(); break;
+                case NativeInterop.WTS_CONSOLE_CONNECT: _lockMonitor.HandleConsoleConnect(); break;
+            }
+            handled = true;
+        }
+        else if (msg == NativeInterop.WM_POWERBROADCAST && wParam.ToInt32() == NativeInterop.PBT_POWERSETTINGCHANGE)
+        {
+            var setting = Marshal.PtrToStructure<NativeInterop.POWERBROADCAST_SETTING>(lParam);
+            if (setting.PowerSetting == NativeInterop.GUID_CONSOLE_DISPLAY_STATE)
+            {
+                _log($"MainWindow: WM_POWERBROADCAST display state={setting.Data}");
+                if (setting.Data == 0) _lockMonitor.HandleDisplayOff();
+                else _lockMonitor.HandleDisplayOn(); // 1 = on, 2 = dimmed (still capturable)
+            }
+            handled = true;
+        }
+        return IntPtr.Zero;
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero) NativeInterop.WTSUnRegisterSessionNotification(hwnd);
+        if (_powerNotificationHandle != IntPtr.Zero) NativeInterop.UnregisterPowerSettingNotification(_powerNotificationHandle);
+        _hwndSource?.RemoveHook(WndProc);
+        base.OnClosed(e);
     }
 }

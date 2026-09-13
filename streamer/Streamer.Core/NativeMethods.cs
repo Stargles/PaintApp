@@ -110,4 +110,57 @@ internal static class NativeMethods
     public const uint ES_CONTINUOUS = 0x80000000;
     public const uint ES_SYSTEM_REQUIRED = 0x00000001;
     public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+
+    // ---- STREAM.md §4.5: session-lock detection (the poll fallback) ----
+    //
+    // WTSRegisterSessionNotification / WM_WTSSESSION_CHANGE and
+    // RegisterPowerSettingNotification / WM_POWERBROADCAST are declared in
+    // Streamer.Tray/NativeInterop.cs instead of here: both need an HWND and a WndProc
+    // hook, which only the WPF window has, so that plumbing belongs entirely on that side
+    // of the assembly boundary (SessionLockMonitor, the thing both sides call into, stays
+    // in Core and touches neither). The poll probe is different — SessionLockPoller, the
+    // process that calls it, is itself Core-testable logic, so it lives here beside it.
+
+    /// <summary>SessionLockPoller's fallback probe (STREAM.md §4.5 — "poll every 2s" for a
+    /// task-launched process WM_WTSSESSION_CHANGE might never reach). True when this
+    /// session's own interactive desktop is reachable, i.e. unlocked.
+    ///
+    /// MEASURED wrong on the laptop's real Windows 11 25H2 (2026-09-13): the commonly
+    /// cited OpenInputDesktop technique (open the input desktop, fail or find a name
+    /// other than "Default" means locked) reported <c>true</c> — accessible — while
+    /// LogonUI.exe was confirmed running in the same session and the session confirmed
+    /// locked over SSH (`query user` / `Get-Process LogonUI`), caught by
+    /// App.xaml.cs's <c>--check-lock</c> diagnostic. Replaced with checking for
+    /// LogonUI.exe in this process's own session instead: that is literally the process
+    /// Winlogon runs to render the secure desktop for a lock, a UAC elevation prompt, or
+    /// Ctrl+Alt+Del, so its presence is a direct signal rather than an inference from a
+    /// desktop handle's name — simpler (no P/Invoke, no struct to get wrong) and,
+    /// empirically, correct where the "official" API was not.</summary>
+    public static bool IsInputDesktopAccessible()
+    {
+        int sessionId;
+        try
+        {
+            sessionId = System.Diagnostics.Process.GetCurrentProcess().SessionId;
+        }
+        catch
+        {
+            return true; // can't tell -- default to accessible rather than block streaming on a read failure
+        }
+        foreach (var process in System.Diagnostics.Process.GetProcessesByName("LogonUI"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId == sessionId) return false;
+                }
+                catch
+                {
+                    // Exited between enumeration and the SessionId read -- not locked by it.
+                }
+            }
+        }
+        return true;
+    }
 }

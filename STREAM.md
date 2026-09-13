@@ -263,6 +263,46 @@ within a second. Closing the picked window stops the pipeline and sends `streami
 `reason:"The window was closed"`; the iPad holds the last frame. A monitor that is unplugged is the
 same.
 
+**Lock and display-off are the same shape (2026-09-13).** §3's stage 4 finding — locked, the encoder
+engaged cleanly but zero VIDEO frames ever arrived, so `streaming:true` sat on a frozen picture with
+no word said about it — is fixed by treating a lock exactly like a closed window: the pipeline stops
+outright (there is no picture to encode from a secure desktop) and STATUS reports `streaming:false`
+with `reason:"The laptop is locked"` or, for the rarer case the running-pipeline keep-awake (§4.2)
+should prevent, `reason:"The laptop's display is off"`. Detected two ways *at once*, not one as a
+fallback for the other: `WTSRegisterSessionNotification`/`WM_WTSSESSION_CHANGE` and
+`RegisterPowerSettingNotification`/`WM_POWERBROADCAST` on the tray window's HWND
+(`Streamer.Tray/MainWindow.xaml.cs`, forwarding into the Core-testable, window-free
+`Streamer.Core/SessionLockMonitor.cs`), plus a 2s poll (`SessionLockPoller.cs`) for the case a
+Scheduled-Task-launched process never receives the window message at all.
+
+**MEASURED against the real laptop, locked, 2026-09-13**: the poll turned out load-bearing rather
+than redundant. `WM_WTSSESSION_CHANGE` never fired in the deployed process — expected, since it only
+fires on a *transition* and the process started already locked — while the poll correctly reported
+`blocked — The laptop is locked` within milliseconds of startup, before `MainWindow` had even opened
+(a message-only design would have reported unblocked until some later lock/unlock that, on an
+already-locked laptop, may never come). The poll's first implementation was itself wrong, caught by
+the same run: `OpenInputDesktop` (the commonly cited technique — fails, or names a desktop other than
+"Default", when locked) reported the session *accessible* while `LogonUI.exe` was confirmed running
+in the session and the session confirmed locked over SSH (`query user` showed `kevin`'s console
+session "Active" — the known wrong-but-plausible reading — and `Get-Process LogonUI` found it).
+Caught with a one-shot `--check-lock` CLI diagnostic (`Streamer.Tray`, same one-off-Scheduled-Task
+trick `streamer.ps1 sources` already uses to reach kevin's interactive session) and replaced with
+checking for `LogonUI.exe` in this process's own session instead — the exact process Winlogon runs to
+render the secure desktop for a lock, a UAC prompt, or Ctrl+Alt+Del, so its presence is a direct
+signal rather than an inference from a desktop handle's name.
+
+Confirmed end-to-end with `stream-client-check.py --host 100.104.85.111 --seconds 15 -v` against the
+real, locked laptop: STATUS arrived `streaming: False, reason: 'The laptop is locked'` within ~20 ms
+of HELLO, zero VIDEO frames, zero violations, and the log shows no `GstProcess: launching` line for
+that connection at all — the pipeline is never started for a client connecting while locked, not
+started-then-stopped. Unlocking was not exercised live — the laptop was locked when this stage began
+and the rule is never to unlock it — so "unlock restarts the pipeline" is pinned instead by
+`StreamerSessionEnvironmentBlockTests.cs` and `SessionLockMonitorTests.cs`/`SessionLockPollerTests.cs`
+(Streamer.Tests), including a regression test for a bug the first version of the unblock path had: it
+could reach `StartPipelineLockedAsync` — whose first line throws if the encoder has not been probed
+yet — for a client that connected before any source was ever picked, a path every other caller of that
+method already guarded against and this one, until fixed, did not.
+
 ### 4.6 The future merge — brief point 9
 
 `Streamer.Core` is the whole streamer; `Streamer.Tray` only presents it. Core exposes
@@ -417,7 +457,11 @@ in the background, and nothing waits on it. A missing file is a log line, not da
 **Connecting…** for the first attempt, before any answer, which a document just opened is in for up
 to five seconds. Nothing modal, ever. `StreamPersistenceLogicTests` pins the JPEG in `images/`, the
 reloaded cel drawing it, a bake of it with the laptop off, and an open with the laptop unreachable
-that blocks nothing.
+that blocks nothing. **§4.5's lock/display-off detection needed no change here**: `"The laptop is
+locked"` and `"The laptop's display is off"` are just two more STATUS `reason` strings, and
+`StreamBarState.notStreaming(reason:)` (`Engine/ScreenStream/ScreenStreamCoordinator.swift:566,574`)
+already renders any `reason` verbatim as `"Not streaming — \(reason)"` — confirmed by reading it and
+`Views/StreamBar.swift` rather than assumed, 2026-09-13.
 
 ### 5.7 The bar and the Actions entry (2.2, 2.3)
 
