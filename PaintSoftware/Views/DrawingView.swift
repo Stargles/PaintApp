@@ -28,6 +28,12 @@ struct DrawingView: View {
     /// put the rail back with the same options panel still open, rather than dumping the artist at the
     /// bare stack.
     @State private var showingEffectSettings = false
+    /// `showingEffectSettings`'s twin, TODO (64): whether the picked transform mode's rows (Rotate's
+    /// speed, Parallax's shares, Shake's amplitudes, Repeat's period) are docked at the bottom of the
+    /// screen. Kept apart from it rather than folded in — a transform layer carries no effect in
+    /// practice, but nothing about either flag's type enforces that, and one flag doing both jobs
+    /// would let one bar's open state silently answer for the other's.
+    @State private var showingTransformSettings = false
     /// Whether the slider drag currently in flight wrote a **keyframe** rather than a value, so the
     /// undo step it closes can be named for what it did — KEYFRAMES stage 3a.
     ///
@@ -150,7 +156,7 @@ struct DrawingView: View {
                 // term in any of the fourteen gates anyway — `ActivePanel`'s doc records that only
                 // `.select` is load-bearing to that question — so this could not have moved it even by
                 // accident.)
-                if activePanel == .layers && effectBeingEdited == nil {
+                if activePanel == .layers && effectBeingEdited == nil && transformBeingEdited == nil {
                     layerPanelRail
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 } else if activePanel != .none && activePanel != .layers {
@@ -251,6 +257,8 @@ struct DrawingView: View {
         // Same argument again for the effect bar: the rail sliding out and the bar sliding up are one
         // transition, so they are keyed on the one value that drives both.
         .animation(.easeInOut(duration: 0.2), value: showingEffectSettings)
+        // TODO (64)'s twin of the line above, for the transform settings bar.
+        .animation(.easeInOut(duration: 0.2), value: showingTransformSettings)
         .animation(.easeInOut(duration: 0.2), value: brushEditing?.idPrefix)
         // Keyed on the whole notice, not on `notice != nil`: re-raising while one is already up
         // swaps the value rather than crossing nil, and only the full value is different enough for
@@ -308,6 +316,8 @@ struct DrawingView: View {
             // the options panel is on screen or standing down behind the bar; the panel's
             // `.onChange(of: layerID)` cannot see it while the panel is not being rendered.
             if showingEffectSettings { showingEffectSettings = false }
+            // TODO (64)'s twin of the line above, for the transform settings bar.
+            if showingTransformSettings { showingTransformSettings = false }
         }
         // **The dismissal timer, and why it is the view's.**
         //
@@ -480,6 +490,26 @@ struct DrawingView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // **The transform mode's knobs — TODO (64), the owner's ask read against the block just
+            // above.** Duplicate Offset is a transform *effect* and its knobs already dock here; this
+            // is the four transform *modes*' rows (Rotate, Parallax, Shake, Repeat) joining it, raised
+            // by the "<Mode> Settings ▸" row `LayerOptionsPanel`/`FolderOptionsPanel` now show instead
+            // of rendering the rows inline. Same stand-down while a piece floats, and for the identical
+            // reason: the Move row above `transformModeSection` in the rail raises the authored pose's
+            // own box through this exact mechanism (`beginContainerPoseMove` sets `floatingPiece`), so
+            // without this guard the two bars would stack once an artist tapped Move with the settings
+            // bar still open.
+            if let editing = transformBeingEdited, !canvasManager.isAnyPieceFloating {
+                TransformSettingsBar(
+                    mode: editing.mode,
+                    canvasManager: canvasManager,
+                    target: editing.target,
+                    onBack: { showingTransformSettings = false },
+                    onClose: { layerOptionsID = nil })
+                .bottomDockCard(width: width)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // Add Text's settings, the second half of the same ask — *"Same for the add text menu, make
             // it the same type of menu."* It is still `activePanel == .text` and still opened from the
             // Actions menu's Add Text row; only the slot changed, from a 300pt dropdown under the top
@@ -621,6 +651,25 @@ struct DrawingView: View {
         let onChange: (Effect) -> Void
     }
 
+    /// **The mode whose knobs are docked, and where they act** — `effectBeingEdited`'s twin, TODO
+    /// (64), one guard shorter: a transform mode has no "the grade was undone out from under the
+    /// bar" case to cover, since `setTransformLayerMode` never clears a pose out from under a mode
+    /// that was showing rows — only picking a *different* mode does, and that is this property
+    /// re-evaluating against the new one, not a case to special-case. So this only has to ask whether
+    /// the target has a pose at all, and whether that pose's mode is one with rows to show.
+    private var transformBeingEdited: TransformEditing? {
+        guard showingTransformSettings, let id = layerOptionsID else { return nil }
+        let target: KeyframeTarget = canvasManager.folders.contains { $0.id == id }
+            ? .folder(id: id) : .layer(id: id)
+        guard let mode = canvasManager.transformLayerMode(of: target), mode != .move else { return nil }
+        return TransformEditing(target: target, mode: mode)
+    }
+
+    private struct TransformEditing {
+        let target: KeyframeTarget
+        let mode: TransformLayerMode
+    }
+
     /// Runs a notice's one-tap fix. These are the actions the modal alerts carried, kept verbatim:
     /// the banner buys back the interruption the alerts cost, and it would be a poor trade if it also
     /// took away the button that fixed the problem.
@@ -671,7 +720,7 @@ struct DrawingView: View {
     /// Zero while the effect bar has the rail stood down, for the same reason it is zero when the rail
     /// is shut: the expression has to mirror what is actually on screen, not what `activePanel` says.
     private func layerRailClearance(canvasWidth: CGFloat) -> CGFloat {
-        guard activePanel == .layers, effectBeingEdited == nil else { return 0 }
+        guard activePanel == .layers, effectBeingEdited == nil, transformBeingEdited == nil else { return 0 }
         return min(canvasWidth * 0.46, 460)
     }
 
@@ -691,13 +740,15 @@ struct DrawingView: View {
                 if let layerOptionsID {
                     if canvasManager.folders.contains(where: { $0.id == layerOptionsID }) {
                         FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID,
-                                           showingEffectSettings: $showingEffectSettings) {
+                                           showingEffectSettings: $showingEffectSettings,
+                                           showingTransformSettings: $showingTransformSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID,
-                                          showingEffectSettings: $showingEffectSettings) {
+                                          showingEffectSettings: $showingEffectSettings,
+                                          showingTransformSettings: $showingTransformSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))

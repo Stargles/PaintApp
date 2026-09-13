@@ -252,6 +252,14 @@ struct LayerOptionsPanel: View {
     /// answers a different question: *which* node's options are open, and *whether* its grade is being
     /// tuned.
     @Binding var showingEffectSettings: Bool
+    /// **`showingEffectSettings`'s twin, TODO (64).** A picked transform mode's rows — Rotate's
+    /// speed, Parallax's shares, Shake's amplitudes, Repeat's period — dock at the bottom of the
+    /// screen the same way and for the same reason (Levels is five sliders in a 240pt rail; Parallax
+    /// is a whole list). Kept apart from `showingEffectSettings` rather than folded into it: a
+    /// transform layer carries no effect in practice, but nothing about either flag's type enforces
+    /// that, and one flag standing for two independent questions would make one bar's open state
+    /// silently answer for the other's.
+    @Binding var showingTransformSettings: Bool
     var onClose: () -> Void
 
     @State private var draftName: String = ""
@@ -407,7 +415,8 @@ struct LayerOptionsPanel: View {
                 leavingMaskEdit { canvasManager.beginContainerPoseMove() }
             }
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-            transformModeSection(canvasManager: canvasManager, target: target)
+            transformModeSection(canvasManager: canvasManager, target: target,
+                                 showingTransformSettings: $showingTransformSettings)
         } else {
             maskRow(mask: canvasManager.layers[index].alphaMask) { showingMaskMenu = true }
 
@@ -841,26 +850,108 @@ private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarg
     .accessibilityValue(current.rawValue)
 }
 
-/// **The rows the picked mode needs, and nothing for Move** — the speed for Rotate (§5.3), the item
-/// list for Parallax (§5.2), the three amplitudes with the speed and the Re-roll for Shake (§5.4).
-/// Each ends in its own divider so the rows beneath it sit as they did.
+/// **The one row the picked mode needs, and nothing for Move** — TODO (64). The mode's own rows
+/// (Rotate's speed, Parallax's shares, Shake's amplitudes and Re-roll, Repeat's period) no longer
+/// render here: they dock at the bottom of the screen now, in `TransformSettingsBar`, the way a
+/// grade's knobs already did — Duplicate Offset is the precedent read the other way round, since it
+/// is a transform *effect* and its knobs were docked from the start. This is `effectSettingsRow`'s
+/// shape applied to the mode picker's own output: a row with a chevron that raises the bar, not the
+/// rows themselves.
 @ViewBuilder
-private func transformModeSection(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
-    switch canvasManager.transformLayerMode(of: target) ?? .move {
-    case .move:
-        EmptyView()
-    case .rotate:
-        RotateSpeedRow(canvasManager: canvasManager, target: target)
+private func transformModeSection(canvasManager: CanvasManager, target: KeyframeTarget,
+                                  showingTransformSettings: Binding<Bool>) -> some View {
+    let mode = canvasManager.transformLayerMode(of: target) ?? .move
+    if mode != .move {
+        transformSettingsRow(mode: mode) {
+            showingTransformSettings.wrappedValue = true
+        }
         Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-    case .parallax:
-        ParallaxItemsSection(canvasManager: canvasManager, poser: target)
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-    case .shake:
-        ShakeRows(canvasManager: canvasManager, target: target)
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-    case .repeat:
-        RepeatRows(canvasManager: canvasManager, target: target)
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    }
+}
+
+/// The "<Mode> Settings ▸" row — `effectSettingsRow`'s shape and its reason, TODO (64): a picked
+/// transform mode's knobs sit behind a row now instead of inline, the same "the panel is 240pt wide
+/// and Parallax is a whole list" argument that put a grade's knobs behind one first. The value rides
+/// the mode's raw name, `transformModeButton`'s own convention, so a test can read which mode's rows
+/// this row will raise without opening it.
+private func transformSettingsRow(mode: TransformLayerMode, onOpen: @escaping () -> Void) -> some View {
+    Button(action: onOpen) {
+        HStack(spacing: 10) {
+            Image(systemName: "slider.horizontal.3").frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(mode.displayName) Settings").foregroundColor(.white)
+                Text(mode.caption)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("layerOptions.transformSettings")
+    .accessibilityValue(mode.rawValue)
+}
+
+/// **A transform layer's mode settings, docked at the bottom of the screen** — TODO (64), read
+/// against `EffectSettingsBar`'s own precedent: Duplicate Offset is a transform *effect* and its
+/// knobs already live here, so the four transform *modes*' rows are joining it rather than opening a
+/// new kind of surface. `optionsSubMenuHeader`'s Back/×, `ContentHeightCap`'s scroll ceiling and
+/// `bottomDockCard`'s chrome are all `EffectSettingsBar`'s own, reused rather than forked — this is
+/// its sibling, and that file is untouched by this feature.
+///
+/// **The rows are `LayerOptionsPanel`'s own, moved rather than duplicated.** `RotateSpeedRow`,
+/// `ParallaxItemsSection`, `ShakeRows` and `RepeatRows` are byte-identical to what rendered inline in
+/// the rail before this — their keying, their undo labels and their `KeyframeTarget` plumbing carry
+/// over unchanged; only their host moved, from the rail's own `VStack` to this bar's scroll region.
+/// **No `.move` row and no caller that could raise this bar in that mode**:
+/// `DrawingView.transformBeingEdited` never resolves while the target's mode is `.move`, and
+/// `transformSettingsRow` above renders nothing for it either, so the switch below has a `.move` case
+/// only to keep itself exhaustive against a `TransformLayerMode` that gains a sixth one day.
+struct TransformSettingsBar: View {
+    let mode: TransformLayerMode
+    @ObservedObject var canvasManager: CanvasManager
+    let target: KeyframeTarget
+    var onBack: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            optionsSubMenuHeader(title: mode.displayName, onBack: onBack, onClose: onClose)
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            // Bounded rather than free, `EffectSettingsBar`'s own reason: Parallax with many items
+            // is this bar's Curves/Gradient Map, and a bar that grew with its content would climb
+            // the canvas it was moved here to uncover.
+            ContentHeightCap(cap: BottomDock.maxScrollHeight) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        rows
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        switch mode {
+        case .move:
+            EmptyView()
+        case .rotate:
+            RotateSpeedRow(canvasManager: canvasManager, target: target)
+        case .parallax:
+            ParallaxItemsSection(canvasManager: canvasManager, poser: target)
+        case .shake:
+            ShakeRows(canvasManager: canvasManager, target: target)
+        case .repeat:
+            RepeatRows(canvasManager: canvasManager, target: target)
+        }
     }
 }
 
@@ -1387,6 +1478,9 @@ struct FolderOptionsPanel: View {
     /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same bar — and since
     /// that bar moved to the bottom of the screen, the same `DrawingView` state raises it.
     @Binding var showingEffectSettings: Bool
+    /// `LayerOptionsPanel.showingTransformSettings`'s twin, TODO (64): a posed folder takes the same
+    /// four modes a layer's does (§3.3) bar Repeat, so its rows dock at the bottom the same way.
+    @Binding var showingTransformSettings: Bool
     var onClose: () -> Void
 
     @State private var draftName: String = ""
@@ -1511,7 +1605,8 @@ struct FolderOptionsPanel: View {
                         onClose()
                     }
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                    transformModeSection(canvasManager: canvasManager, target: .folder(id: folderID))
+                    transformModeSection(canvasManager: canvasManager, target: .folder(id: folderID),
+                                        showingTransformSettings: $showingTransformSettings)
                 }
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
