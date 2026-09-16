@@ -1433,8 +1433,9 @@ final class ObjectTransformLogicTests: XCTestCase {
     /// the rectangle inscribed in it. So a release after any lateral drift is on no chrome at all —
     /// which `CanvasView.Coordinator.canvasChrome(at:)` reports as `.none`, which
     /// `CanvasTouchInputs.moveBoxCommitsThisTouch` reads as the artist tapping away, which settles
-    /// the float. The fix is that `handleMoveBoxCommit` asks about the touch's **first** location
-    /// (`TouchTypeTapGestureRecognizer.firstTouchLocationInWindow`) instead.
+    /// the float. That is why the tap-away cannot read the release point; the test below it is why
+    /// it cannot read the touch-down point at release either, and the fix is that the question is
+    /// asked at touch-down (`CanvasView.Coordinator.gestureRecognizer(_:shouldReceive:)`).
     ///
     /// **This pins the premise, not the fix, and the distinction is worth stating rather than
     /// blurring.** Reverting the fix leaves this green — it is a true fact about a *correct*
@@ -1442,8 +1443,7 @@ final class ObjectTransformLogicTests: XCTestCase {
     /// reasoning: if a later change makes a Uniform corner track the finger the way the Freeform arm
     /// does (`testAFreeformCornerArrivesUnderTheFinger`'s "the corner arrives under the finger"),
     /// this goes red and says that the argument written on the fix no longer describes the app.
-    /// The fix's own behaviour has **no automated guard** — see `MoveBoxCommitUITests`, which
-    /// records why XCUITest cannot synthesise the gesture that reproduces it.
+    /// The fix's own behaviour is guarded by `MoveBoxCommitUITests`.
     func testAUniformCornerDragLeavesTheFingerOffTheBoxOnceItsBearingTurns() {
         let frame = upright()
         let corner = frame.corners[0]
@@ -1470,5 +1470,35 @@ final class ObjectTransformLogicTests: XCTestCase {
         XCTAssertNil(after.target(at: release, reach: 22, rotationOffset: 36),
                      "the finger let go on no chrome at all: not the grip it grabbed, not the box "
                      + "it belongs to. That is why the release point cannot decide a tap-away.")
+    }
+
+    /// **A rotation drag leaves the touch-down point off the box once the box has turned** — the
+    /// owner's recordings of 2026-09-15, twice: a pencil on the rotation knob, 27 pt of travel, and
+    /// the float gone on release. The 2026-09-08 fix read the touch-down point instead of the
+    /// release point, but it still read it at `.ended`, against the chrome the drag had just moved:
+    /// the knob is on a circle about the box's centre and follows the finger round it, so after 27
+    /// pt of travel it is 27 pt from where it was grabbed — past its 22 pt reach — and the point
+    /// where it *was* is 36 pt clear of the body. Nothing claims it; the tap-away commits.
+    ///
+    /// Same discipline as the test above: this pins the premise. The fix moved the question to
+    /// touch-down, where `target(at:)` against the *un-turned* box answers `.rotation`.
+    func testARotationDragLeavesTheTouchDownPointOffTheBoxOnceTheBoxTurns() {
+        let frame = upright()
+        let knob = frame.rotationHandlePosition(offset: 36)
+        XCTAssertEqual(frame.target(at: knob, reach: 22, rotationOffset: 36), .rotation,
+                       "the touch goes down on the knob — the answer a touch-down decision reads")
+
+        let drag = ObjectTransformDrag(frame: frame, handle: .rotation, at: knob)
+        // Sideways along the knob's arc, the owner's gesture: 27 pt of travel at a radius of
+        // 150 + 36, which turns the box by about eight degrees and carries the knob with it.
+        let release = CGPoint(x: knob.x + 27, y: knob.y)
+        let pose = drag.pose(draggedTo: release)
+        let after = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize,
+                                         aspect: pose.aspect)
+
+        XCTAssertNotEqual(pose.transform.rotation, frame.transform.rotation, "the box turned")
+        XCTAssertNil(after.target(at: knob, reach: 22, rotationOffset: 36),
+                     "measured against the turned box, the point the finger landed on is on no "
+                     + "chrome at all — which is why the touch-down point cannot be read at release.")
     }
 }

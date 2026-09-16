@@ -5,7 +5,7 @@ import UIKit
 /// top edge — rather than multi-touch gestures. Lives in `CanvasView`'s `container` above
 /// `SelectionOverlayView`, so its coordinate space matches canvas points exactly (same placement and
 /// handle-drag technique as the object-layer work's `ObjectTransformOverlayView`).
-final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTesting {
+final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTesting, UIGestureRecognizerDelegate {
     /// **One callback carrying both halves of the pose**, not two — see
     /// `CanvasManager.updateFloatingPose(transform:distortQuad:)`. The quad is nil from every arm
     /// that does not distort, which is how "this gesture left the corners alone" is said.
@@ -110,8 +110,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
         rotateHandle.addGestureRecognizer(reportingPan(#selector(handleRotatePan(_:))))
 
         // `TouchTypeTapGestureRecognizer`, not a plain `UITapGestureRecognizer` — see
-        // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47).
+        // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47). Its delegate is what
+        // decides, at touch-down, whether a touch is outside the piece at all — see
+        // `gestureRecognizer(_:shouldReceive:)`.
         let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTapOutside(_:)))
+        tap.delegate = self
         addGestureRecognizer(tap)
     }
 
@@ -382,18 +385,27 @@ final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTe
     /// whatever a finger does outside a Move (nothing, here — the piece stays exactly as adjustable as
     /// it was), not commit.
     @objc private func handleTapOutside(_ recognizer: TouchTypeTapGestureRecognizer) {
-        guard let piece else { return }
+        guard piece != nil else { return }
         guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-        // **Where the touch began, never `recognizer.location(in:)`** — the raster twin of the vector
-        // Move box's unwanted bake, fixed with it on 2026-09-07 and identical in shape: a handle drag
-        // arrives here as a tap (a tap recognizer does not fail on movement) whose release point is
-        // outside `transformedBounds`, so the box the artist was still adjusting settles under them.
-        // `TouchTypeTapGestureRecognizer.firstTouchLocationInWindow` carries the argument.
-        guard let beganInWindow = recognizer.firstTouchLocationInWindow else { return }
-        let location = convert(beganInWindow, from: nil)
-        if !piece.transformedBounds.insetBy(dx: -8, dy: -8).contains(location) {
-            onRequestCommit?()
-        }
+        // Whether the touch was outside the piece was settled at touch-down, in
+        // `gestureRecognizer(_:shouldReceive:)`; a touch that reaches here was.
+        onRequestCommit?()
+    }
+
+    /// **The tap-outside is offered only a touch that lands outside the piece, decided at touch-down
+    /// against the piece as it stands at that instant** — the raster twin of
+    /// `CanvasView.Coordinator.gestureRecognizer(_:shouldReceive:)`, and the same defect: a handle
+    /// drag arrives at a tap recognizer as a tap (it does not fail on movement), and by `.ended` the
+    /// drag has moved the piece, so any point measured then — the release point, or the touch-down
+    /// point against the moved bounds — can read as "outside" for a touch that began on a grip.
+    ///
+    /// Two tests, both about where the finger landed: on one of the box's own views — a grip, the
+    /// outline, the rotate knob, which UIKit's hit test has already given the touch to — or inside
+    /// the piece's bounds with the 8 pt slack the edge grabs have always had. Either is a drag's
+    /// touch, and the tap never sees it.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let piece, touch.view === self else { return false }
+        return !piece.transformedBounds.insetBy(dx: -8, dy: -8).contains(touch.location(in: self))
     }
 
     /// **The one funnel every arm writes through**, so no gesture can update the model and the layout

@@ -1,39 +1,33 @@
 import XCTest
 
-/// **The Move box's tap-away commit, and the one half of it a test here can hold.** The owner,
-/// 2026-09-07:
+/// **The Move box's tap-away commit, from both sides.** The owner, 2026-09-07:
 ///
 /// > *"Sometimes I am using the move tool and I click a node on the box to resize. When I let go of
 /// > the node after I am done, the move unexpectedly bakes. This is not intended behaviour, it is
 /// > not supposed to bake when the pen is lifted."*
 ///
-/// The fix is that a tap's identity is decided where it **began** —
-/// `TouchTypeTapGestureRecognizer.firstTouchLocationInWindow`, which carries the whole argument.
+/// And again on 2026-09-15, recorded twice: a pencil on the rotation knob, 27 pt of travel, the
+/// float gone on release (`recording-20260915-040910`, `recording-20260915-215123`).
 ///
-/// **The defect itself is not reachable from XCUITest, and this file exists partly to record that
-/// so the next session does not spend the runs again.** Several runs were spent trying, each
-/// mutating the fix back out and expecting red; all of them stayed green. The reproducing gesture is
-/// squeezed from both sides and neither bound is knowable from the source:
+/// The tap-away is a `UITapGestureRecognizer`, which does not fail on movement, so a grip drag
+/// arrives at it as a tap. The 2026-09-08 fix read the touch-down point instead of the release
+/// point — and still read it at `.ended`, against chrome the drag had just moved. The fix is that
+/// whether a touch is a tap *away* is decided at touch-down, in
+/// `CanvasView.Coordinator.gestureRecognizer(_:shouldReceive:)`, and a touch that lands on the box's
+/// chrome is never offered to the recognizer at all.
 ///
-///  * travel far enough and `UITapGestureRecognizer`'s undocumented movement slop fails the
-///    sequence, so nothing reaches `handleMoveBoxCommit` at all and the mutation survives;
-///  * travel little enough and XCUITest's own drag undershoot — `PaintUITestCase.performDrag`
-///    records that synthetic drags *"undershoot their intended distance by a timing-dependent
-///    amount"* — lands the release back inside the grip's 22 pt reach
-///    (`ObjectTransformOverlayView.handleScreenReach`), which is also not a commit.
+/// **`testDraggingTheRotationKnobLeavesTheBoxUp` is the defect.** The knob sits 36 pt clear of the
+/// body on a circle about the box's centre and follows the finger round it, so a sideways drag
+/// leaves the touch-down point past the grip's 22 pt reach and on no chrome — the one grip whose
+/// drag cannot be mistaken for a tap that stayed on the box. The 2026-09-08 pass concluded the
+/// defect was unreachable from XCUITest after sweeping *corner* drags, which grow the box over the
+/// touch-down point and so never commit; the knob is what makes it reachable, and this goes red
+/// with the touch-down decision removed.
 ///
-/// A sweep of 30 / 45 / 60 / 75 / 90 pt found no travel in between that commits, and a screenshot
-/// attachment confirmed the flick grabs the intended grip on the intended box — so this is a
-/// property of the harness, not of the fixture. The owner's own gesture is 25.2 pt over 230 ms with
-/// a **pencil**, and CLAUDE.md already records that XCUITest cannot synthesise a pencil at all.
-/// **So the fix is verified on the device and pinned nowhere.** The premise underneath it is pinned
-/// headlessly by
-/// `ObjectTransformLogicTests.testAUniformCornerDragLeavesTheFingerOffTheBoxOnceItsBearingTurns`.
-///
-/// What *is* held here is the other direction, which is the risk the fix itself introduces: reading
-/// the begin point instead of the release point could have stopped the tap-away working at all, and
-/// that would be the worse bug — the artist would have no way to put a move down but the Move
-/// button.
+/// **`testAFlickThatBeginsOnBarePaperStillSettlesTheBox` is the other direction**, which is the
+/// risk the fix itself carries: deciding at touch-down could have stopped the tap-away working at
+/// all, and that would be the worse bug — the artist would have no way to put a move down but the
+/// Move button.
 ///
 /// A small class on purpose — CLAUDE.md's cost model distributes per test *class*, and the file is
 /// named for the class so a triage selector built from either name resolves.
@@ -81,5 +75,37 @@ final class MoveBoxCommitUITests: PaintUITestCase {
         wait(for: [expectation(for: NSPredicate(format: "exists == false"),
                                evaluatedWith: app.buttons["moveBar.doneButton"])],
              timeout: 5)
+    }
+
+    /// THE DEFECT. Grab the green rotation knob, drag it sideways a little, let go: the box stays up.
+    func testDraggingTheRotationKnobLeavesTheBoxUp() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A stroke straight down the middle: its box is tall and narrow, and its rotation knob
+        // sits `ObjectTransformOverlayView.rotationHandleScreenOffset` (36 pt) above the box's
+        // top edge, on the stroke's own x. The box's top is the stroke's top plus half a brush
+        // width, so landing a few points below the knob's nominal place keeps the touch inside
+        // the knob's 22 pt reach and well clear of the top-middle grip 36 pt below it.
+        let strokeTop: CGFloat = 0.30
+        dragOnCanvas(app, from: CGVector(dx: 0.5, dy: strokeTop), to: CGVector(dx: 0.5, dy: 0.70))
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                      "Move raised no box, so there is no knob to drag")
+
+        let host = canvas.frame
+        let knob = CGVector(dx: 0.5, dy: strokeTop - 32 / host.height)
+        flickOnCanvas(app, from: knob, to: CGVector(dx: knob.dx + 40 / host.width, dy: knob.dy))
+
+        // The commit's own animation stands the bar down inside a fraction of a second; a bar that
+        // is still there after a whole one was never committed.
+        let stillUp = expectation(for: NSPredicate(format: "exists == false"),
+                                  evaluatedWith: app.buttons["moveBar.doneButton"])
+        stillUp.isInverted = true
+        wait(for: [stillUp], timeout: 1.5)
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
+                      "THE DEFECT: letting go of the rotation knob baked the move")
     }
 }

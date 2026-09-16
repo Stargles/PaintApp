@@ -3556,31 +3556,57 @@ struct CanvasView: UIViewRepresentable {
         /// transform with `isVectorTransforming = false`; TODO item (12) stage 2 deleted it, because
         /// Move with no selection lifts a float now and takes the first branch.
         ///
+        /// **Whether the touch was a tap *away* is not asked here.** It is answered at touch-down, in
+        /// `gestureRecognizer(_:shouldReceive:)`, and a touch that landed on the box's chrome never
+        /// reaches this recognizer at all — see there for the two reports that put the question
+        /// where it belongs.
+        ///
         /// **Gated on pencil-only drawing since TODO (47)** — owner: *"when you are moving an object
         /// with pen only draw on and then tap somewhere else on the canvas with your hand, it bakes
         /// the move... it should only do that when the pen is tapped."* Read straight off
         /// `recognizer.lastTouchType`, the same `TouchTypeTapGestureRecognizer` spelling
         /// `SelectionOverlayView` uses, rather than a third copy of the flag.
         @objc func handleMoveBoxCommit(_ recognizer: TouchTypeTapGestureRecognizer) {
-            guard recognizer.state == .ended, let container = containerView else { return }
+            guard recognizer.state == .ended else { return }
             // Before the pencil-only guard, as every canvas touch is: a tap that this handler declines
             // still closes an open top-bar dropdown.
             canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-            // **Where the touch began, never `recognizer.location(in:)`** — see
-            // `TouchTypeTapGestureRecognizer.firstTouchLocationInWindow`, which carries the fact and
-            // the whole argument. At `.ended` a tap reports where the finger *left*, and a tap
-            // recognizer does not fail on movement, so a corner drag on the Move box arrives here as
-            // an ordinary tap whose release point is off the box — which reads as the artist tapping
-            // away, which bakes the move they were still adjusting. The owner's report of 2026-09-07.
-            //
-            // A missing latch declines rather than commits: an unwanted bake is the defect, and a
-            // commit the artist can still reach through the Move button is the cheaper failure.
-            guard let beganInWindow = recognizer.firstTouchLocationInWindow else { return }
-            let canvasPoint = container.convert(beganInWindow, from: nil)
-            let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
-            guard CanvasTouchOwner.owner(in: touch) == .moveBoxCommit else { return }
             canvasManager.commitVectorFloatIfNeeded()
+        }
+
+        /// **Whether the Move box's tap-away is offered this touch at all — decided where the touch
+        /// lands, against the chrome as it stands at that instant.**
+        ///
+        /// The owner, 2026-09-07: *"I click a node on the box to resize. When I let go of the node
+        /// after I am done, the move unexpectedly bakes."* And again on 2026-09-15, twice recorded:
+        /// a pencil goes down on `ObjectTransformOverlayView`, travels 27 pt, lifts —
+        /// `canvas.moveBoxCommit` fires and the float is gone. The tap-away is a
+        /// `UITapGestureRecognizer`, which does not fail on movement, so a grip drag arrives at it as
+        /// a tap; and its handler used to ask *"was this touch on the box?"* at `.ended`, first of
+        /// the release point and then — after the first report — of the touch-down point. Both are
+        /// the wrong instant: by `.ended` the drag has **moved the chrome**, so the touch-down point
+        /// is measured against a box that is no longer where the finger found it. A rotation knob
+        /// dragged 27 pt along its arc is 27 pt from where it was grabbed, past the grip's 22 pt
+        /// reach and 36 pt clear of the box's body, and `canvasChrome(at:)` answers `.none` — which
+        /// this app spells "the artist tapped away".
+        ///
+        /// So the question is asked once, at touch-down, and asked of the one function that answers
+        /// it for every container recognizer: `CanvasTouchOwner.owner(in:)`, fed the chrome at the
+        /// point the touch landed. A touch the owner model gives to anyone else — the transform
+        /// overlay for a grip or the body, a text handle, a guide grip — is refused, and UIKit never
+        /// binds it to the tap, so no amount of travel can turn a grab into a tap-away. The handler
+        /// keeps only what is still its own to decide at release: the pencil-only gate.
+        ///
+        /// Every other recognizer receives every touch, as before; this is the one whose meaning is
+        /// position-dependent and whose position is stale by the time it recognizes.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard gestureRecognizer === moveBoxCommitRecognizer, let container = containerView else {
+                return true
+            }
+            let canvasPoint = touch.location(in: container)
+            let inputs = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
+            return CanvasTouchOwner.owner(in: inputs) == .moveBoxCommit
         }
 
         /// The text tool's placement tap: put a box where the artist tapped and raise the keyboard.
