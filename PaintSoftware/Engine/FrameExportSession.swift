@@ -397,7 +397,8 @@ final class FrameExportSession: ObservableObject {
         let timeout = bakeTimeout
         return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             pendingWait = continuation
-            baker.observeFrameFinished(self) { [weak self] _ in
+            baker.observeFrameFinished(self) { [weak self] _, readiness in
+                guard readiness == .baked else { return }
                 self?.resumeWait(generation: generation, finished: true)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in

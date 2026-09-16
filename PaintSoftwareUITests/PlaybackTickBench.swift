@@ -160,7 +160,9 @@ final class PlaybackTickBench: XCTestCase {
         var order: [Int] = []
         var settled = false
         let idle = expectation(description: "the bake queue drains and the loop stops")
-        baker.observeFrameFinished(self) { order.append($0) }
+        baker.observeFrameFinished(self) { frame, readiness in
+            if readiness == .baked { order.append(frame) }
+        }
         baker.onIdle = {
             guard !settled else { return }
             settled = true

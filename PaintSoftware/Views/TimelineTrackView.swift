@@ -589,8 +589,10 @@ struct TimelineTrackView: UIViewRepresentable {
             guard observedFrameBaker !== baker else { return }
             observedFrameBaker = baker
             // The frame number is not used: a bake landing anywhere changes the bar, and the bar is
-            // recomputed whole. What the callback carries that matters is *when*.
-            baker.observeFrameFinished(self) { [weak self] _ in
+            // recomputed whole. What the callback carries that matters is *when* — and only a bake,
+            // since a frame becoming resident in the ring changes nothing the bar draws.
+            baker.observeFrameFinished(self) { [weak self] _, readiness in
+                guard readiness == .baked else { return }
                 self?.setNeedsBakeIndication()
             }
         }

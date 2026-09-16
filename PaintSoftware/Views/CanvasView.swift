@@ -1504,7 +1504,7 @@ struct CanvasView: UIViewRepresentable {
             let baker = canvasManager.frameBaker
             guard observedFrameBaker !== baker else { return }
             observedFrameBaker = baker
-            baker.observeFrameFinished(self) { [weak self] frame in
+            baker.observeFrameFinished(self) { [weak self] frame, _ in
                 self?.bakerDidFinish(frame: frame)
             }
         }
@@ -1836,6 +1836,10 @@ struct CanvasView: UIViewRepresentable {
         /// while nothing else is happening sits on disk until some unrelated pass comes along, which
         /// is the "a control that visibly does nothing" failure in its rendering costume: at rest
         /// there is no next pass, because a canvas nobody is touching publishes nothing.
+        ///
+        /// Both readinesses, deliberately: during playback `FrameBaker.image(for:)` declines to
+        /// decode on the display thread, so a flip that misses the ring shows the previous picture
+        /// until the top-up reports the frame `.resident` — and this is the pass that shows it.
         private func bakerDidFinish(frame: Int) {
             guard frame == canvasManager.currentFrame else { return }
             applySandwichPresentationNow()

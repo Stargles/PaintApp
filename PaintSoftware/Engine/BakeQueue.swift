@@ -192,8 +192,12 @@ struct BakeQueue {
     /// on the near side (frame 2 with a 5...9 range steps 3, 4, 5, …, exactly as `advancePlayback`
     /// does) and snaps to the far side on the other (frame 11 wraps to 5). That is what playback
     /// does today, and matching it is the whole point of this function.
-    private static func step(from frame: Int, low: Int, high: Int,
-                             direction: Direction, looping: Bool) -> Int? {
+    ///
+    /// Internal rather than private so `FrameBaker.fillRingAhead` walks the ring's lookahead with
+    /// this same rule — the frames the ring holds are the frames band 2 bakes, in the order play
+    /// will ask for them, wrap included.
+    static func step(from frame: Int, low: Int, high: Int,
+                     direction: Direction, looping: Bool) -> Int? {
         switch direction {
         case .forward:
             if frame < high { return frame + 1 }

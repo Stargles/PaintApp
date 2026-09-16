@@ -64,7 +64,9 @@ final class FrameBakerLogicTests: XCTestCase {
         var order: [Int] = []
         var settled = false
         let idle = expectation(description: "the bake queue drains and the loop stops")
-        baker.observeFrameFinished(self) { order.append($0) }
+        baker.observeFrameFinished(self) { frame, readiness in
+            if readiness == .baked { order.append(frame) }
+        }
         baker.onIdle = {
             guard !settled else { return }
             settled = true
@@ -981,6 +983,84 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(baker.ring.byteCount, Int(composited.width * composited.height) * 4)
     }
 
+    /// **A ring that holds two frames plays a three-frame loop from memory on every flip** — the
+    /// owner's 2026-09-16 playback recording, reduced to its arithmetic.
+    ///
+    /// Recording #4 is a 3-frame scene at 4096², where `CanvasManager.frameRingByteBudget` holds
+    /// exactly two frames, and it reads `ringHit:6 ringMiss:10`, `storeDecode … n=20 main=10`: half
+    /// the flips decoded on the display thread. The top-up walked out to distance 2 and inserted
+    /// that frame LRU-first, which evicted the frame at distance 1 — the one the next flip needed —
+    /// and the walk never wrapped at the end of the loop, so the first frame of every lap missed as
+    /// well. The same fixture on the simulator's probe read 149 display-thread decodes in 187 flips.
+    ///
+    /// Each flip below does what a tick does — read the playhead's frame, then let the loop settle —
+    /// and asserts the *next* flip's frame is already resident before that flip reads it. The first
+    /// read is a rest read, which is allowed to decode; every one after it must be a hit.
+    func testARingTwoFramesWideServesAThreeFrameLoopFromMemoryOnEveryFlip() {
+        let manager = perFrameDocument(frames: 3)
+        manager.isLoopEnabled = true
+        let composited = manager.liveCompositeSize(of: manager.renderTree(atFrame: 0),
+                                                   canvasSize: CanvasFixture.canvasSize)
+        let frameBytes = Int(composited.width * composited.height) * 4
+        let baker = makeBaker(manager, ringBytes: 2 * frameBytes)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(baker.ring.count, 2, "PREMISE: the ring holds exactly two of the three frames.")
+
+        var flips = 0
+        for playhead in [0, 1, 2, 0, 1, 2, 0, 1, 2] {
+            manager.currentFrame = playhead
+            guard let key = baker.keyByFrame[playhead] else { return XCTFail("Frame \(playhead) must be baked.") }
+            if flips > 0 {
+                XCTAssertTrue(baker.ring.contains(key.fileName),
+                              "Flip \(flips) to frame \(playhead) missed the ring — play would decode on the display thread.")
+            }
+            XCTAssertNotNil(baker.image(atFrame: playhead))
+            drain(baker)
+            flips += 1
+        }
+    }
+
+    /// **Play never decodes on the display thread** (§3.5), taken literally: while the animation
+    /// plays, a frame the ring does not hold is a miss — §2.10's previous picture — and the top-up
+    /// that lands it announces it through the frame-finished observers, the way a baked frame is
+    /// announced. At rest the same read decodes synchronously, because a scrub that lands on a frame
+    /// wants that frame and not the one before it.
+    func testPlayNeverDecodesOnTheDisplayThreadAndTheTopUpAnnouncesTheFrame() {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        guard let key = baker.keyByFrame[1] else { return XCTFail("Frame 1 must be baked.") }
+
+        // A clock that never advances: playback is on and the playhead stays where `play()` put it.
+        manager.playbackNow = { 0 }
+        manager.play()
+        defer { manager.stopPlayback() }
+        manager.currentFrame = 1
+        baker.ring.removeAll()
+
+        XCTAssertNil(baker.image(atFrame: 1),
+                     "A miss during playback is a miss; nothing is decoded on the display thread.")
+        XCTAssertFalse(baker.ring.contains(key.fileName), "Nothing was decoded on the read's behalf.")
+
+        let listener = NSObject()
+        var resident: [Int] = []
+        baker.observeFrameFinished(listener) { frame, readiness in
+            if readiness == .resident { resident.append(frame) }
+        }
+        drain(baker)
+        XCTAssertTrue(baker.ring.contains(key.fileName), "The top-up decoded it off the main thread.")
+        XCTAssertTrue(resident.contains(1),
+                      "The canvas showing the previous picture is told the moment this frame is resident.")
+        XCTAssertNotNil(baker.image(atFrame: 1), "And the next read is a hit.")
+
+        manager.stopPlayback()
+        baker.ring.removeAll()
+        XCTAssertNotNil(baker.image(atFrame: 1), "At rest a scrub decodes the frame it landed on.")
+        XCTAssertTrue(baker.ring.contains(key.fileName), "And rings it on the way past.")
+    }
+
     // MARK: - Bookkeeping
 
     /// The digest→frames map is the baker's alone, and it must stay in step in **both** directions —
@@ -1165,8 +1245,8 @@ final class FrameBakerLogicTests: XCTestCase {
         let timeline = NSObject()
         var heardByCanvas: [Int] = []
         var heardByTimeline: [Int] = []
-        baker.observeFrameFinished(canvas) { heardByCanvas.append($0) }
-        baker.observeFrameFinished(timeline) { heardByTimeline.append($0) }
+        baker.observeFrameFinished(canvas) { frame, _ in heardByCanvas.append(frame) }
+        baker.observeFrameFinished(timeline) { frame, _ in heardByTimeline.append(frame) }
 
         baker.noteDocumentChanged()
         let visited = drain(baker)
@@ -1185,14 +1265,14 @@ final class FrameBakerLogicTests: XCTestCase {
         let owner = NSObject()
         var first = 0
         var second = 0
-        baker.observeFrameFinished(owner) { _ in first += 1 }
-        baker.observeFrameFinished(owner) { _ in second += 1 }
+        baker.observeFrameFinished(owner) { _, _ in first += 1 }
+        baker.observeFrameFinished(owner) { _, _ in second += 1 }
 
         var ghostCalls = 0
         // Released explicitly rather than by scope, so the test does not rest on where the optimiser
         // chooses to end a `let`'s lifetime.
         var transient: NSObject? = NSObject()
-        baker.observeFrameFinished(transient!) { _ in ghostCalls += 1 }
+        baker.observeFrameFinished(transient!) { _, _ in ghostCalls += 1 }
         transient = nil
 
         baker.noteDocumentChanged()

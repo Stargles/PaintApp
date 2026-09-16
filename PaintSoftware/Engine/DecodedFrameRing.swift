@@ -85,13 +85,21 @@ struct DecodedFrame {
 /// a resident entry can never be served for a frame whose key has changed. There is no invalidation
 /// path in this type because there is nothing to invalidate — that is the property, not an omission.
 ///
-/// ## Eviction is LRU by last access
+/// ## Eviction is LRU by last access, with a kept set the caller names
 ///
-/// Which is exactly "drop the frame furthest behind the playhead" without this type knowing what a
-/// playhead is: the scheduler decodes ahead in playhead order and the tick reads in playhead order,
-/// so recency of access *is* proximity to the playhead. A scrub reversal re-reads the frames behind
-/// and they become recent again on their own. That is why there is no policy argument here and no
-/// frame numbers at all.
+/// LRU is "drop the frame furthest behind the playhead" without this type knowing what a playhead
+/// is — the scheduler decodes ahead in playhead order and the tick reads in playhead order, so
+/// recency of access *is* proximity to the playhead — **for as long as the ring is wider than the
+/// window being walked.** It is the wrong answer the moment it is not: filling the frame two ahead
+/// of the playhead into a ring that holds two evicts the frame *one* ahead, because that one was
+/// inserted earlier, and the next flip then misses on the very frame the top-up was for. MEASURED
+/// on the owner's iPad 9 and on the simulator alike, a 3-frame loop at 4096² (the ring holds two
+/// such frames) decoded on the display thread on 80% of its flips that way.
+///
+/// So `insert(_:for:keeping:)` takes the digests the caller knows are nearer than the one it is
+/// inserting, and evicts LRU only among the rest — refusing, rather than displacing a kept entry,
+/// when the frame would not otherwise fit. The ring still knows nothing about frames or playheads;
+/// it knows which of its entries the caller would rather keep than the one arriving.
 ///
 /// ## Thread safety
 ///
@@ -152,24 +160,37 @@ final class DecodedFrameRing {
         return frames.count
     }
 
-    /// Takes `frame` in under `digest`, evicting least-recently-used entries to stay under budget.
+    /// Takes `frame` in under `digest`, evicting least-recently-used entries — other than `kept` —
+    /// to stay under budget.
     ///
-    /// - Returns: false when the frame was **not** stored, which happens for exactly one reason:
-    ///   it is larger than the whole budget. It is refused rather than admitted over the ceiling,
-    ///   because the ring is an optimisation and the store is the truth — a frame too big to cache
-    ///   is decoded per display instead, which is slow, where blowing the ceiling is a crash on the
-    ///   device this feature exists to fit inside. A frame that merely does not fit *right now*
-    ///   is stored and something older leaves.
+    /// - Parameter kept: digests that must survive this insert: the frames the caller knows play
+    ///   will want *before* the one arriving. When the frame cannot fit without displacing one of
+    ///   them, nothing is stored and nothing is evicted.
+    /// - Returns: false when the frame was **not** stored, which happens for two reasons: it is
+    ///   larger than the whole budget, or it would have displaced a kept entry. The first is refused
+    ///   rather than admitted over the ceiling, because the ring is an optimisation and the store is
+    ///   the truth — a frame too big to cache is decoded per display instead, which is slow, where
+    ///   blowing the ceiling is a crash on the device this feature exists to fit inside. The second
+    ///   is what keeps a top-up from evicting the frame the next flip needs. A frame that merely
+    ///   does not fit *right now* is stored and something older leaves.
     @discardableResult
-    func insert(_ frame: DecodedFrame, for digest: String) -> Bool {
+    func insert(_ frame: DecodedFrame, for digest: String, keeping kept: Set<String> = []) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard frame.byteCount <= budget else { return false }
+        let alreadyResident = frames[digest]?.byteCount ?? 0
+        var shortfall = residentBytes - alreadyResident + frame.byteCount - budget
+        var evicting: [String] = []
+        for candidate in recency where shortfall > 0 && candidate != digest && !kept.contains(candidate) {
+            evicting.append(candidate)
+            shortfall -= frames[candidate]?.byteCount ?? 0
+        }
+        guard shortfall <= 0 else { return false }
+        for candidate in evicting { removeLocked(candidate) }
         removeLocked(digest)
         frames[digest] = frame
         recency.append(digest)
         residentBytes += frame.byteCount
-        evictLocked()
         return true
     }
 

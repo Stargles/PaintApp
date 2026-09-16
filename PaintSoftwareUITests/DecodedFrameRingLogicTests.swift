@@ -5,7 +5,8 @@ import CoreGraphics
 /// from (RENDER §3.5), and the BGRA premultiplied-first frame it holds.
 ///
 /// The claims worth pinning are the ones that are not obvious from the signatures: eviction is LRU
-/// **by last access** and not by insertion, a frame bigger than the whole budget is refused rather
+/// **by last access** and not by insertion, an insert evicts *around* the entries its caller keeps
+/// and is refused rather than displacing one, a frame bigger than the whole budget is refused rather
 /// than admitted over the ceiling, lowering the budget evicts *now*, the pixel layout is the one
 /// Core Animation wants rather than the one that merely round-trips, and every operation is safe to
 /// call from two threads at once.
@@ -105,6 +106,47 @@ final class DecodedFrameRingLogicTests: XCTestCase {
         XCTAssertEqual(ring.byteCount, 350)
         XCTAssertEqual(ring.count, 1, "three of the four had to go, and the fourth as well")
         XCTAssertNotNil(ring.frame(for: "big"))
+    }
+
+    // MARK: - A kept set is evicted around, never through
+
+    /// The top-up's own rule: the frame two ahead of the playhead arrives keeping the frame one
+    /// ahead, so the eviction takes the oldest of the *rest* — here "a", the frame behind — and the
+    /// next flip's frame is still resident.
+    func testAKeptEntryIsEvictedAroundEvenWhenItIsTheOldest() {
+        let ring = DecodedFrameRing(byteBudget: 200)
+        ring.insert(frame(bytes: 100), for: "a")
+        ring.insert(frame(bytes: 100), for: "b")
+        XCTAssertNotNil(ring.frame(for: "a"))          // "a" is now the newest and "b" the oldest
+        XCTAssertTrue(ring.insert(frame(bytes: 100), for: "c", keeping: ["b"]))
+        XCTAssertNotNil(ring.frame(for: "b"), "kept, so the older unkept entry went instead")
+        XCTAssertNil(ring.frame(for: "a"))
+        XCTAssertNotNil(ring.frame(for: "c"))
+        XCTAssertEqual(ring.byteCount, 200)
+    }
+
+    /// And when nothing but kept entries could make room, the insert is refused and touches
+    /// nothing — which is what ends the walk at the near end of the window rather than the far one.
+    func testAnInsertThatCouldOnlyDisplaceAKeptEntryIsRefusedAndEvictsNothing() {
+        let ring = DecodedFrameRing(byteBudget: 200)
+        ring.insert(frame(bytes: 100), for: "a")
+        ring.insert(frame(bytes: 100), for: "b")
+        XCTAssertFalse(ring.insert(frame(bytes: 100), for: "c", keeping: ["a", "b"]))
+        XCTAssertNil(ring.frame(for: "c"))
+        XCTAssertNotNil(ring.frame(for: "a"))
+        XCTAssertNotNil(ring.frame(for: "b"))
+        XCTAssertEqual(ring.byteCount, 200)
+    }
+
+    /// Re-inserting a digest never counts itself as a victim, kept or not.
+    func testReinsertingADigestReplacesItInPlaceWhateverIsKept() {
+        let ring = DecodedFrameRing(byteBudget: 200)
+        ring.insert(frame(bytes: 100), for: "a")
+        ring.insert(frame(bytes: 100), for: "b")
+        XCTAssertTrue(ring.insert(frame(bytes: 100, fill: 0x01), for: "a", keeping: ["a", "b"]))
+        XCTAssertEqual(ring.count, 2)
+        XCTAssertEqual(ring.byteCount, 200)
+        XCTAssertEqual(ring.frame(for: "a")?.pixels.first, 0x01)
     }
 
     // MARK: - The ceiling is never exceeded
