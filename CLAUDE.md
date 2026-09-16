@@ -371,6 +371,15 @@ So, in addition to the two-operands rule above, for any change with a visible su
 4. **Answer "what does the artist do next?"** at each step, in the report. If any step's answer is "read the
    source", the feature is unfinished.
 
+**And "drive it" means the app, not the feature — the 2026-09-13 build regressed everything but the
+thing that was driven.** Five workers each drove their own feature to a screenshot; the build carried an
+always-on network client, a repaint closure on the layer host, a touch-path split and a new bottom-dock
+block, and the owner's first minute with it found playback stutter, the canvas freeze back, a pan that
+would not start outside the canvas and the Move box baking on a node release — none of them near the
+features driven, none reachable by any test in the suite. **Before a device install, drive the old
+things: play a scene, pan from the grey, drag and release a Move node, draw a stroke — on the device,
+and say in the report that you did.** A green full suite says nothing about feel.
+
 **The bar is the orchestrator's to set, and this one was set wrong.** The briefs for all three asked for
 round trips, cache keys, mutation tests and refutations, and got them. None asked whether a person could
 use the result. Put these four in the brief, not in the reviewer's head.

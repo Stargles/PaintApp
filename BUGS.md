@@ -3,6 +3,46 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The 2026-09-13 iPad build (`d398588`) shipped broad regressions the owner felt in a minute (2026-09-16)
+
+The owner, on the build that carries (27) stages 0–4 and (64)–(67): *"FPS is no longer smooth in
+playback, the canvas freeze is back, you cant move canvas when touching outside the canvas, the move
+node baking the move bug is back, among many other things."* The previous build, `94caa67`, had none of
+these. **Fast tier 4119/0 failed and a full suite 4428/5 (all triaged) both said nothing** — there is no
+test for playback smoothness, for a pan that starts *outside* the canvas, or for the feel of a node
+release, and the only thing driven on the device was the new feature. **This is the top item for the
+next session**; HANDOFF.md carries the plan. What changed between the two builds, by suspect:
+
+- **(67)**, `e5b2876`: the canvas touch path was split — `StrokeGestureRecognizer.onSingleTouchBegan`
+  and `CanvasManager.canvasTouchLanded` vs `canvasInteractionBegan`, and **`canvasTouchLanded` now runs
+  twice per single touch** (once from `onAnyTouchBegan`, once inside `canvasInteractionBegan`). Prime
+  suspect for "can't move the canvas from outside it" and for the node-release bake, which is exactly
+  the touch-classification shape session 39 fixed in `handleMoveBoxCommit` /
+  `FloatingPieceOverlayView.handleTapOutside`.
+- **Stream stage 1**, `c91ac2d`/`2544530`: `CanvasView` installs a repaint closure on the layer host and
+  `StrokeCanvasView` re-mints the Move box's float bitmap off the main thread while a stream floats —
+  second suspect for the Move box, first for a "freeze" if the re-mint or the repaint closure runs when
+  no stream exists.
+- **Stream stage 4a**, `ed1cf80`: a document opens a background connection to the last-used laptop
+  (`ScreenStreamCoordinator.documentEndpoint`) and retries forever while it is asleep; every state
+  change publishes `connectionStates`, a SwiftUI pass. Cheap to rule in or out: delete the last-used
+  address (the `StreamConnectSheet` `UserDefaults` key) or turn Tailscale off, and see whether playback
+  smooths.
+- **(64)**, `4ef3b6e`: `DrawingView.bottomDock` gained a block and the rail-suppression clause; a
+  full-width SwiftUI view that hit-tests over the grey around the canvas would eat exactly the touches
+  the owner cannot pan with.
+- `sync()` is **not** per canvas pass (it runs on insert and bake only), so the coordinator is not a
+  render loop — checked 2026-09-16, do not re-suspect it first.
+
+## `FileOutboxTests.NoClientQueuesWithAWaitingReasonThenSendsOnceOneConnects` races its own events list (2026-09-13)
+
+`streamer/Streamer.Tests/FileOutboxTests.cs`: `events` is a `List<OutboundFileEventArgs>` appended
+under `lock (events)` by the outbox's `TransferUpdated` handler on the pump thread, but the polling
+predicate in `WaitUntil(() => events.Any(...))` enumerates it with no lock on the test thread every
+10 ms — `Collection was modified; enumeration operation may not execute`. Seen once in four
+`dotnet test` runs on the laptop, passed in isolation. Fix: take the same lock inside the predicate (or
+snapshot `events.ToArray()` under it). A chip was filed for it.
+
 ## Xcode has no Apple ID signed in at all, so the CLI build fails even with a still-valid cached profile on disk (2026-09-13)
 
 `deploy/resign.sh` (outside this repo, at `~/PaintApp/deploy/resign.sh`) now tracks the installed

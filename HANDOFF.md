@@ -37,6 +37,34 @@ Mac. CLAUDE.md has the section; STREAM.md §4 has everything else.
 
 ## What is left
 
+**FIRST: the `d398588` build regressed the iPad, and the owner felt it in a minute** (2026-09-16):
+*"FPS is no longer smooth in playback, the canvas freeze is back, you cant move canvas when touching
+outside the canvas, the move node baking the move bug is back, among many other things."* `94caa67`
+was fine. BUGS.md's newest entry lists the four suspects by commit with what each would explain, and
+one non-suspect already checked. **Do this before reading code:**
+
+1. **Bisect by feel, not by test — the owner's minute is the instrument and nothing in the suite is.**
+   Four Release device builds (~5 min each, CLAUDE.md's deploy steps): `94caa67` (good), `fc8ed57`
+   (`main` with (64)–(67), no stream), `709c7ac` (stream before stage 4a's ambient connection),
+   `d398588`. Ask the owner the same four questions at each — playback smooth? pan from outside the
+   canvas? node release bakes? canvas freezes? That splits the asks from the stream in one step.
+2. **Turn the ambient connection off first** if the stream half is implicated: clear the last-used
+   laptop address (`StreamConnectSheet`'s `UserDefaults` key) or switch Tailscale off on the iPad, then
+   re-feel. A sleeping laptop means a retry loop publishing `connectionStates` for as long as the
+   document is open.
+3. **Record the gestures.** Actions → Record My Actions, then the two broken gestures (a two-finger pan
+   started on the grey outside the canvas; a Move-box node dragged and released), and read the trace —
+   `shouldRequireFailureOf` answers and who they named are in it. This is the tool session 39 fixed the
+   node-release bake with, and (67) rewired exactly those recognizers.
+4. **Measure main-thread-busy on the device**, not a bench: the runloop-observer pair from session 39
+   (PERFORMANCE.md §17.1) — a SwiftUI pass per second from a published property looks like nothing in
+   any logic test and like a stutter to a hand.
+
+**The lesson, for the brief of whoever fixes it**: every worker drove the *new* feature and none drove
+the old ones on a build that added an always-on subsystem (a network client, a repaint closure, a
+touch-path split). "Drive it before you call it done" has to mean *the app*, not the feature — playback,
+a pan, the Move box — on the device, before the install. CLAUDE.md now says so.
+
 **(27) is built through stage 4 and needs the owner** — STREAM.md §7 stage 5 and TODO.md's checklist:
 stream Blender to the iPad and rotoscope over it; measure end-to-end latency on the real link; take
 the device tick figure; try Ctrl+V into the drop box; rule on the blend-mode limitation. Nothing in
