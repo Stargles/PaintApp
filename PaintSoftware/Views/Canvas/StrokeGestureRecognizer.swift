@@ -66,7 +66,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// holding the pen.
     ///
     /// **This is a second, independent source for a fact `TouchCountRecognizer` also reports, and the
-    /// duplication is the point.** That one lives on the canvas *container*, several views up from
+    /// duplication is the point.** That one lives on the canvas *host*, several views up from
     /// wherever the touch actually lands, so it depends on the whole hit-test path staying open. This
     /// one is on the view that is already receiving the pen's own samples, and the touch it counts is
     /// the very touch `shouldIgnoreAdditionalTouches` is being consulted about — if the pen is

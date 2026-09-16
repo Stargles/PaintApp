@@ -16,7 +16,9 @@ protocol OffCanvasHandleHitTesting: UIView {
 }
 
 /// `CanvasView`'s zoom/pan container: the view every layer host and every overlay is pinned to, and
-/// the view all of the canvas's own gesture recognizers live on.
+/// the view the recognizers that act on a *point of the artwork* live on — the fill press, the
+/// catch-all, the eyedropper, the text placement, the Move box's tap-away. The navigation transform
+/// lives one view up, on `CanvasHostView`, so a two-finger pan can begin on the surround.
 ///
 /// **Its bounds are exactly the document** — `CanvasView.Coordinator.hostBoundsDidChange` sets
 /// `bounds` to `canvasSize` and `applyTransform` puts the zoom on `transform` — so everything
@@ -32,10 +34,9 @@ protocol OffCanvasHandleHitTesting: UIView {
 /// (*"the move handle right now goes off the canvas, thats fine. I just want to be able to adjust
 /// it"*). Only the reach changes.
 ///
-/// **Nothing is taken away by this.** Every canvas recognizer — pan, pinch, rotation, the taps, the
-/// fill press, the catch-all — is added to this view, so a point outside these bounds hit-tested to
-/// the *host* and reached no recognizer whatsoever before this override existed. The off-canvas
-/// surround was dead to touch, and now a grip out there is the one thing in it.
+/// **Nothing is taken away by this.** A point outside these bounds hit-tests to the *host*, which
+/// carries the navigation transform and nothing that acts on artwork, so the only thing this
+/// override adds to the surround is a grip drawn out there.
 final class CanvasContainerView: UIView {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let hit = super.hitTest(point, with: event) { return hit }

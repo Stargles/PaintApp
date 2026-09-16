@@ -13,7 +13,7 @@ import UIKit
 /// held down, then drop a finger" and a bare total cannot say that. A total of 2 means "two contacts
 /// of any kind", which is a different gesture: it is reached by two fingers panning the canvas, and
 /// it is *not* reached by pen-plus-one-finger in whichever direction UIKit happens to deliver the
-/// pencil to a container-level recognizer. The recognizer already holds each `UITouch`, so the type
+/// pencil to a host-level recognizer. The recognizer already holds each `UITouch`, so the type
 /// was free all along — it was only being thrown away at the callback boundary.
 final class TouchCountRecognizer: UIGestureRecognizer {
     var onTouchesChanged: ((_ total: Int, _ fingers: Int) -> Void)?
