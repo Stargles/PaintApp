@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Twenty cases and their payload fields, by hand. Adding a twenty-first without touching this
+// Twenty-one cases and their payload fields, by hand. Adding a twenty-second without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -515,6 +515,21 @@ private extension BakeKeyEncoder {
             tag(0x6C)
             double(p.radius); int(p.blades); double(p.threshold); double(p.boost)
             encode(effectInput: p.input)
+        case .guide(let p):
+            // TODO (88): every field, whatever `mode` is — `glare`'s rule. The mode first, so two
+            // guides differing only in mode never collide even when every number matches.
+            tag(0x6D)
+            switch p.mode {
+            case .grid:        tag(0x6E)
+            case .isometric:   tag(0x6F)
+            case .perspective: tag(0x70)
+            }
+            double(p.spacing); int(p.subdivisions); double(p.angleDegrees); double(p.lineWidth)
+            encode(codableColor: p.color)
+            double(p.opacity); int(p.density); double(p.horizon)
+            double(p.vanishingPoint1X); double(p.vanishingPoint1Y)
+            double(p.vanishingPoint2X); double(p.vanishingPoint2Y)
+            bool(p.twoPoint)
         }
     }
 

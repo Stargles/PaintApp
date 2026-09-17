@@ -293,6 +293,9 @@ final class MergeBakeLogicTests: XCTestCase {
             // TODO (74): a gather that reads `.ink`, like Glare, reached through the same seam —
             // a threshold low enough that the red rectangle's own brightness weights its samples.
             .lensBlur(Effect.LensBlur(radius: 4, blades: 6, threshold: 0.2, boost: 3)),
+            // TODO (88): a grade of position, reached through the same seam; a grid dense enough
+            // to cross the red rectangle.
+            .guide(Effect.Guide(spacing: 8, lineWidth: 1, opacity: 0.7)),
         ]
 
         for grade in grades {

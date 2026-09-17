@@ -181,6 +181,12 @@ enum EffectReference {
     private static let kGlareStreaks: UInt32 = 17
     private static let kColorWheels: UInt32 = 18
     private static let kLensBlur: UInt32 = 19
+    private static let kGuide: UInt32 = 20
+
+    /// `Effect.Guide.Mode.code`, restated — the codes the kernel switches on.
+    private static let kGuideGrid: UInt32 = 0
+    private static let kGuideIsometric: UInt32 = 1
+    private static let kGuidePerspective: UInt32 = 2
 
     // MARK: - The per-pixel transforms
     //
@@ -254,9 +260,67 @@ enum EffectReference {
         case kColorWheels:
             return colorWheelsPixel(c, params: params)
 
+        case kGuide:
+            return guidePixel(c, params: params, x: x, y: y)
+
         default:
             return c
         }
+    }
+
+    /// **The Guide, one pixel** — TODO (88), `Effect.Guide`'s doc is the specification and this its
+    /// transcription; `guideChannels` in `Composite.metal` is the other one. `x, y` is the pixel's
+    /// index in the *frame* (the wrapper adds the strip's origin), and every family below is laid
+    /// out on that index: a line's coverage is the tent `saturate(lineWidth/2 + ½ − d)` on the
+    /// distance `d` to the family's nearest line, the families combine by `max`, and the line's
+    /// colour is mixed into the pixel's own by `opacity · coverage`. Alpha is the wrapper's, untouched.
+    private static func guidePixel(_ c: SIMD3<Float>, params: EffectParams, x: Int, y: Int) -> SIMD3<Float> {
+        let q = SIMD2<Float>(Float(x), Float(y))
+        let half = params.guideLineWidth / 2 + 0.5
+        func coverage(_ distance: Float) -> Float {
+            params.guideLineWidth > 0 ? min(max(half - distance, 0), 1) : 0
+        }
+        // The distance from `v` to the nearest multiple of `spacing`, folded — `v − ⌊v/s⌋·s` and
+        // then the shorter way round, written the same way on both backends so a negative `v`
+        // (a slanted family's dot product) folds identically.
+        func nearest(_ v: Float, _ spacing: Float) -> Float {
+            let m = v - (v / spacing).rounded(.down) * spacing
+            return min(m, spacing - m)
+        }
+        var cover: Float = 0
+        switch params.guideMode {
+        case kGuideGrid:
+            let s = params.guideSpacing
+            cover = max(coverage(nearest(q.x, s)), coverage(nearest(q.y, s)))
+            if params.guideSubdivisions > 0 {
+                let minor = s / Float(params.guideSubdivisions + 1)
+                cover = max(cover, 0.5 * max(coverage(nearest(q.x, minor)), coverage(nearest(q.y, minor))))
+            }
+        case kGuideIsometric:
+            let s = params.guideSpacing
+            let a = params.guideAngle
+            let rising = SIMD2<Float>(-sin(a), cos(a)), falling = SIMD2<Float>(sin(a), cos(a))
+            cover = max(coverage(nearest(q.x, s)),
+                        max(coverage(nearest(rising.x * q.x + rising.y * q.y, s)),
+                            coverage(nearest(falling.x * q.x + falling.y * q.y, s))))
+        case kGuidePerspective:
+            let frame = SIMD2<Float>(Float(params.frameWidth), Float(params.frameHeight))
+            cover = coverage(abs(q.y - params.guideHorizon * frame.y))
+            let points = [SIMD2<Float>(params.guideVanishing1X, params.guideVanishing1Y),
+                          SIMD2<Float>(params.guideVanishing2X, params.guideVanishing2Y)]
+            for point in points.prefix(Int(params.guideVanishingCount)) {
+                let d = q - point * frame
+                let r = (d.x * d.x + d.y * d.y).squareRoot()
+                guard r > 0 else { cover = 1; continue }
+                let turn = nearest(atan2(d.y, d.x), params.guidePitch)
+                cover = max(cover, coverage(r * sin(turn)))
+            }
+        default:
+            break
+        }
+        let amount = params.mix * cover
+        let colour = SIMD3<Float>(params.colorR, params.colorG, params.colorB)
+        return c + (colour - c) * amount
     }
 
     /// **Colour Wheels, one pixel** — `Effect.ColorWheels`' doc is the specification and this is its

@@ -1302,6 +1302,8 @@ final class EffectMultiPassLogicTests: XCTestCase {
             // The Colour Wheels are a per-pixel grade with twelve resolved scalars in the block and
             // nothing bound beside it (TODO (63)).
             .colorWheels(Effect.ColorWheels(shadows: .init(hue: 264, saturation: 0.6))),
+            // The Guide is a per-pixel grade of the pixel's position — the grain's shape (TODO (88)).
+            .guide(Effect.Guide(mode: .perspective, twoPoint: true)),
         ]
         for effect in cheap {
             XCTAssertEqual(effect.passes.count, 1, "\(effect.displayName) must still be a single dispatch")
@@ -1315,8 +1317,8 @@ final class EffectMultiPassLogicTests: XCTestCase {
     /// ceiling from 9 to 12, TODO (60)'s recolour to 13 and its Computer Screen to 14, TODO (61)'s
     /// Duplicate Offset to 16 (its resample and its combine, the combine reached through `passes`
     /// alone), TODO (63)'s Glare to 17 (one gather kind of its own; its threshold and combine are
-    /// Bloom's 8 and 9), its Colour Wheels to 18, and TODO (74)'s Lens Blur to 19 (one gather kind
-    /// of its own). Each gather is also a gather kind, so a missing entry in either backend's
+    /// Bloom's 8 and 9), its Colour Wheels to 18, TODO (74)'s Lens Blur to 19 (one gather kind
+    /// of its own) and TODO (88)'s Guide to 20. Each gather is also a gather kind, so a missing entry in either backend's
     /// early-out list (Composite.metal, EffectKernels.swift) renders as the identity rather than
     /// failing here — this test only proves the kind is *reachable*, and the effect-specific tests
     /// above are what would notice a silent identity.
@@ -1339,6 +1341,7 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .glare(Effect.Glare()),
             .colorWheels(Effect.ColorWheels()),
             .lensBlur(Effect.LensBlur(radius: 1)),
+            .guide(Effect.Guide()),
         ]
         let reached = Set(everything.flatMap { $0.passes.map(\.kind) })
         let expected = Set(0...Self.highestKernelCode)
@@ -1348,12 +1351,12 @@ final class EffectMultiPassLogicTests: XCTestCase {
             """)
     }
 
-    /// **The highest kind code either backend switches on** — `kEffectLensBlur` in
-    /// `Composite.metal`, `kLensBlur` in `EffectKernels.swift` and `Effect.kindCode`'s
-    /// `.lensBlur` arm, all 19. The constants are private to their files, so the number is
+    /// **The highest kind code either backend switches on** — `kEffectGuide` in
+    /// `Composite.metal`, `kGuide` in `EffectKernels.swift` and `Effect.kindCode`'s
+    /// `.guide` arm, all 20. The constants are private to their files, so the number is
     /// restated here once; a new case with a kind of its own raises it, and the sweep above then
     /// demands an effect that reaches the new code.
-    private static let highestKernelCode: UInt32 = 19
+    private static let highestKernelCode: UInt32 = 20
 
     // MARK: - Persistence
 

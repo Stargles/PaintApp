@@ -84,6 +84,11 @@ enum EffectCatalog {
             // concept, not a menu identity, the way a preset is.
             .glare(Effect.Glare()),
         ],
+        [
+            // A guide is neither a grade nor a stylisation, so it heads a group of its own. Arrives
+            // visible: the type's own defaults are a 64 px grid at half opacity. TODO (88).
+            .guide(Effect.Guide()),
+        ],
     ]
 
     /// **One title per `groups` entry, same index, TODO (66)** — the owner: *"The Effect / blend
@@ -92,9 +97,10 @@ enum EffectCatalog {
     /// (Brightness/Contrast through Colour Wheels) plus the Posterize family, which quantizes rather
     /// than convolves; **Blur & Light** is the three blurs, Sharpen and Bloom; **Stylise** is
     /// everything that reshapes the drawing into a new one — Sobel, Outline, Duplicate Offset,
-    /// Chromatic Aberration, Noise, Computer Screen and Glare. British spelling throughout, matching
-    /// `Effect.displayName`'s own "Colour Wheels"/"Recolour".
-    static let groupTitles = ["Colour", "Blur & Light", "Stylise"]
+    /// Chromatic Aberration, Noise, Computer Screen and Glare; **Guides** is the drawing guide
+    /// (TODO (88)), which draws over the picture rather than changing it. British spelling
+    /// throughout, matching `Effect.displayName`'s own "Colour Wheels"/"Recolour".
+    static let groupTitles = ["Colour", "Blur & Light", "Stylise", "Guides"]
 
     /// Every prototype, flattened — used to resolve a pick back to its group-ordered entry.
     static var all: [Effect] { groups.flatMap { $0 } }
@@ -624,6 +630,57 @@ struct EffectSettingsBar: View {
             note(params.type == .fogGlow
                  ? "A wide, soft bloom — the same threshold and glow as Bloom, one dial for size."
                  : "Pixels brighter than the threshold cast a streak of light along each direction.")
+
+        case .guide(var params):
+            // TODO (88). The mode first — `Glare`'s type row exactly — since it decides which of
+            // the rows below are shown; then the mode's own knobs, then what every mode shares.
+            pickerRow("Mode", current: params.mode.displayName, identifier: "guideMode") {
+                ForEach(Effect.Guide.Mode.allCases, id: \.self) { mode in
+                    Button {
+                        onEditBegan(); params.mode = mode; onChange(.guide(params)); onEditEnded()
+                    } label: {
+                        if mode == params.mode {
+                            Label(mode.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(mode.displayName)
+                        }
+                    }
+                    .accessibilityIdentifier("effectSettings.guideMode.\(mode.rawValue)")
+                }
+            }
+            switch params.mode {
+            case .grid:
+                slider("guide.spacing")
+                slider("guide.subdivisions")
+            case .isometric:
+                slider("guide.spacing")
+                slider("guide.angle")
+            case .perspective:
+                slider("guide.density")
+                slider("guide.horizon")
+                slider("guide.vanishingPoint1X")
+                slider("guide.vanishingPoint1Y")
+                toggleRow("Two Points", isOn: params.twoPoint, identifier: "twoPoint") {
+                    params.twoPoint = $0; onChange(.guide(params))
+                }
+                if params.twoPoint {
+                    slider("guide.vanishingPoint2X")
+                    slider("guide.vanishingPoint2Y")
+                }
+            }
+            slider("guide.lineWidth")
+            slider("guide.opacity")
+            colorRow("Colour", color: params.color, identifier: "color", presentation: .effectGuideColour) { picked in
+                params.color = picked; onChange(.guide(params))
+            }
+            switch params.mode {
+            case .grid:
+                note("Lines every Spacing pixels from the top-left corner; Subdivisions adds fainter lines between them.")
+            case .isometric:
+                note("Two families slanted Angle above and below the horizontal, plus verticals. 30° is the isometric pair.")
+            case .perspective:
+                note("A horizon and rays from each vanishing point. The points are shares of the canvas (0…1 across and down) — past the ends is off the canvas. Hide this layer before you export.")
+            }
 
         case .colorWheels(let params):
             // TODO (63). Four real wheels rather than sixteen slider rows — the owner asked for the

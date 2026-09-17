@@ -147,6 +147,8 @@
 		90E1794A2F69DD2DFB92522F /* GlareUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701079B8A0F17C2F80579451 /* GlareUITests.swift */; };
 		D40F0F1B4A53CCFAB8A3CFAF /* ColorWheelsEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */; };
 		7F0746FFA4C1F781844464A1 /* ColorWheelsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */; };
+		54584DF7D28E24C20FACC976 /* GuideUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */; };
+		7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */; };
 		0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */; };
 		A587AE13E245F7124189EFA0 /* LensBlurEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */; };
 		C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A266D16C60715591E6F9256 /* ToolLogicTests.swift */; };
@@ -631,6 +633,8 @@
 		701079B8A0F17C2F80579451 /* GlareUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GlareUITests.swift; sourceTree = "<group>"; };
 		3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorWheelsEffectLogicTests.swift; sourceTree = "<group>"; };
 		208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorWheelsUITests.swift; sourceTree = "<group>"; };
+		F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideUITests.swift; sourceTree = "<group>"; };
+		97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideEffectLogicTests.swift; sourceTree = "<group>"; };
 		0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurUITests.swift; sourceTree = "<group>"; };
 		936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurEffectLogicTests.swift; sourceTree = "<group>"; };
 		0A266D16C60715591E6F9256 /* ToolLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolLogicTests.swift; sourceTree = "<group>"; };
@@ -1195,6 +1199,8 @@
 				701079B8A0F17C2F80579451 /* GlareUITests.swift */,
 				3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */,
 				208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */,
+				F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */,
+				97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */,
 				0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */,
 				936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
@@ -1798,6 +1804,8 @@
 				90E1794A2F69DD2DFB92522F /* GlareUITests.swift in Sources */,
 				D40F0F1B4A53CCFAB8A3CFAF /* ColorWheelsEffectLogicTests.swift in Sources */,
 				7F0746FFA4C1F781844464A1 /* ColorWheelsUITests.swift in Sources */,
+				54584DF7D28E24C20FACC976 /* GuideUITests.swift in Sources */,
+				7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */,
 				0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */,
 				A587AE13E245F7124189EFA0 /* LensBlurEffectLogicTests.swift in Sources */,
 				C60715591E6F9256B720B7F3 /* ToolLogicTests.swift in Sources */,

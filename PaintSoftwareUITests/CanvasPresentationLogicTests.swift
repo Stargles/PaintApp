@@ -53,6 +53,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
         "effectRecolorColour": true,
         "effectBloomColour": true,         // ditto — TODO (60)
         "effectDuplicateOffsetColour": true, // ditto — TODO (61) stage 6
+        "effectGuideColour": true,         // ditto — TODO (88)
         "selectionColour": true,           // ditto — TODO (42); closes a selection edit on the way out
         "onionPreviousTintColour": true,   // the red end of the onion panel's gradient bar — TODO (72)
         "onionNextTintColour": true,       // the green end — TODO (72)

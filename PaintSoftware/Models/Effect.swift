@@ -134,6 +134,14 @@ enum Effect: Equatable {
     /// on what they land on. One pass, no intermediate. See `LensBlur` for the four knobs and the
     /// weighting, and `lensBlurSampleOffsets` for the sample set both backends are handed.
     case lensBlur(LensBlur)
+    /// **Guide — a drawing guide drawn over the picture, TODO (88), designed 2026-09-17.** Grid,
+    /// isometric or perspective lines in frame coordinates at full resolution, composited over
+    /// whatever the layer sits on at a colour and opacity of the artist's. A per-pixel grade in the
+    /// strict sense — alpha untouched, nothing drawn where nothing is — reached through the same
+    /// unpremultiply/regrade/re-premultiply wrapper Noise and the dither are, since like them it is a
+    /// function of the pixel's *position*. It replaced the Actions menu's "Drawing Guide" stub. See
+    /// `Guide` for the three modes and what each reads.
+    case guide(Guide)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -174,6 +182,7 @@ enum Effect: Equatable {
         case .glare:               return "Glare"
         case .colorWheels:         return "Colour Wheels"
         case .lensBlur:            return "Lens Blur"
+        case .guide:               return "Guide"
         }
     }
 
@@ -321,6 +330,11 @@ enum Effect: Equatable {
         // paper and wants the bokeh across all of it.
         case .lensBlur(let params):
             return params.input
+        // **A guide draws over everything the layer sits on, paper included** (TODO (88)) — it
+        // reads no colour and no shape, only where a pixel is, so there is nothing for an ink-only
+        // re-walk to change and `.backdrop` costs nothing.
+        case .guide:
+            return .backdrop
         }
     }
 }
@@ -1126,6 +1140,81 @@ extension Effect {
         var input: Effect.Input = .ink
     }
 
+    /// **A drawing guide over the picture** — TODO (88)'s *"make it as an effect in value layer.
+    /// Include grid, isometric, perspective modes"*, designed 2026-09-17. One `mode` picker over
+    /// three sets of lines, every one drawn in **frame pixels at full resolution** and composited
+    /// over the composite the layer sits on at `color` and `opacity`:
+    ///
+    /// - **Grid**: verticals and horizontals every `spacing` pixels from the frame's top-left, with
+    ///   `subdivisions` minor lines between each pair at half the opacity (0 is none).
+    /// - **Isometric**: two families slanted `angleDegrees` above and below the horizontal (30° is
+    ///   the isometric pair), plus verticals, each family `spacing` pixels apart measured across
+    ///   the lines.
+    /// - **Perspective**: a horizon at `horizon` of the frame's height, and `density` rays through
+    ///   the half-turn from each vanishing point — one, or two when `twoPoint` — placed by
+    ///   normalised frame coordinates (`0…1` across and down) typed into the settings bar. **No
+    ///   on-canvas handles this pass**: the numbers are the whole interface, and a handle over a
+    ///   value layer that holds no pixels is a Move-box question this pass did not open.
+    ///
+    /// **A line is a pixel-centred tent `lineWidth` wide**: a pixel's coverage is
+    /// `saturate(lineWidth/2 + ½ − d)` for `d` its distance to the nearest line of the family, so a
+    /// 1 px line on an integer spacing is exactly one column and a fractional spacing anti-aliases.
+    /// Every family is computed in pixel-index coordinates (`gid + origin`), the same frame
+    /// coordinate the dither and the grain read, so a strip (RENDER.md §3.8) draws the same lines
+    /// the whole frame would. The families combine by `max`, and the line's alpha is
+    /// `opacity · coverage` mixed into the pixel's own colour — a grade, so the pixel's alpha is
+    /// untouched and the paper's margin, which is transparent, stays bare.
+    ///
+    /// A guide layer is normally hidden before export; nothing in export changes.
+    struct Guide: Equatable {
+        enum Mode: String, Codable, Equatable, CaseIterable {
+            case grid, isometric, perspective
+
+            var displayName: String {
+                switch self {
+                case .grid:        return "Grid"
+                case .isometric:   return "Isometric"
+                case .perspective: return "Perspective"
+                }
+            }
+
+            /// **Must match `kGuide…` in `Composite.metal` and `EffectReference`.**
+            var code: UInt32 {
+                switch self {
+                case .grid:        return 0
+                case .isometric:   return 1
+                case .perspective: return 2
+                }
+            }
+        }
+
+        var mode: Mode = .grid
+        /// Pixels between lines of one family — Grid and Isometric. Floored at 2 by `params`.
+        var spacing: Double = 64
+        /// Grid only: minor lines between two majors, at half the opacity. 0 is none.
+        var subdivisions: Int = 0
+        /// Isometric only: the slant of the two families above and below the horizontal, degrees.
+        var angleDegrees: Double = 30
+        /// Pixels. 1 is one column or row on an integer spacing.
+        var lineWidth: Double = 1.5
+        var color: CodableColor = CodableColor(red: 0.2, green: 0.55, blue: 1, alpha: 1)
+        /// 0…1 — how strongly a line covers the picture. The colour's own alpha is ignored.
+        var opacity: Double = 0.5
+        // MARK: Perspective only
+        /// Rays through the half-turn from each vanishing point — a pitch of `180° / density`.
+        var density: Int = 24
+        /// The horizon's row, as a share of the frame's height (0 top, 1 bottom).
+        var horizon: Double = 0.5
+        /// Normalised frame coordinates, 0…1 across and down; a point outside the frame is legal
+        /// and is what a distant vanishing point is.
+        var vanishingPoint1X: Double = 0.3
+        var vanishingPoint1Y: Double = 0.5
+        var vanishingPoint2X: Double = 0.7
+        var vanishingPoint2Y: Double = 0.5
+        /// Whether the second vanishing point draws.
+        var twoPoint: Bool = false
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     ///
@@ -1415,6 +1504,25 @@ struct EffectParams: Equatable {
     /// kernel reads a different slice. Appended at the end for the reason every field since the
     /// colour triple was.
     var sampleBase: UInt32 = 0
+    /// **The Guide, resolved** (TODO (88)): the mode's code, the spacing floored, the slant in
+    /// radians, the width in pixels, the ray pitch in radians, the horizon and the two vanishing
+    /// points still **normalised** — the kernel scales them by `frameWidth/frameHeight`, which
+    /// `params` does not know and the stamp does — and how many points draw. Colour rides the
+    /// trailing triple and opacity `mix`, the reuse `duplicateOffset` already makes. Named fields
+    /// rather than aliases, for the reader of the kernel; appended at the end for the reason every
+    /// field since the colour triple was.
+    var guideMode: UInt32 = 0
+    var guideSpacing: Float = 1
+    var guideSubdivisions: UInt32 = 0
+    var guideAngle: Float = 0
+    var guideLineWidth: Float = 1
+    var guidePitch: Float = 0
+    var guideHorizon: Float = 0
+    var guideVanishing1X: Float = 0
+    var guideVanishing1Y: Float = 0
+    var guideVanishing2X: Float = 0
+    var guideVanishing2Y: Float = 0
+    var guideVanishingCount: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -1483,6 +1591,7 @@ extension Effect {
             return 8
         case .colorWheels:         return 18
         case .lensBlur:            return 19
+        case .guide:               return 20
         }
     }
 
@@ -1656,6 +1765,27 @@ extension Effect {
             p.sampleBase = 0
             p.threshold = Float(lens.threshold.isFinite ? min(max(lens.threshold, 0), 1) : 1)
             p.amount = Float(lens.boost.isFinite ? max(lens.boost, 0) : 0)
+        case .guide(let guide):
+            // Resolved once, `Effect.swift`'s own rule: a non-finite knob is its identity, the
+            // spacing is floored at 2 so a line has a gap beside it, the density at 1, and the
+            // width at 0 — a zero width draws nothing, which is how a family is switched off.
+            func finite(_ v: Double, _ fallback: Double) -> Double { v.isFinite ? v : fallback }
+            p.guideMode = guide.mode.code
+            p.guideSpacing = Float(max(finite(guide.spacing, 64), 2))
+            p.guideSubdivisions = UInt32(max(guide.subdivisions, 0))
+            p.guideAngle = Float(finite(guide.angleDegrees, 30) * .pi / 180)
+            p.guideLineWidth = Float(max(finite(guide.lineWidth, 1), 0))
+            p.guidePitch = Float(Double.pi / Double(max(guide.density, 1)))
+            p.guideHorizon = Float(finite(guide.horizon, 0.5))
+            p.guideVanishing1X = Float(finite(guide.vanishingPoint1X, 0.5))
+            p.guideVanishing1Y = Float(finite(guide.vanishingPoint1Y, 0.5))
+            p.guideVanishing2X = Float(finite(guide.vanishingPoint2X, 0.5))
+            p.guideVanishing2Y = Float(finite(guide.vanishingPoint2Y, 0.5))
+            p.guideVanishingCount = guide.twoPoint ? 2 : 1
+            p.mix = Float(min(max(finite(guide.opacity, 0.5), 0), 1))
+            p.colorR = Float(min(max(guide.color.red, 0), 1))
+            p.colorG = Float(min(max(guide.color.green, 0), 1))
+            p.colorB = Float(min(max(guide.color.blue, 0), 1))
         }
         return p
     }
@@ -1986,7 +2116,7 @@ extension Effect {
         case .lensBlur(let lens):
             return Int(Self.lensBlurRadius(lens.radius).rounded(.up)) + 2
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
-             .recolor, .colorWheels:
+             .recolor, .colorWheels, .guide:
             return 0
         }
     }
@@ -2028,6 +2158,9 @@ extension Effect {
         // The fourth: the box is about the frame's centre, so the copy is gathered from a frame
         // coordinate, and a strip has to know where in the frame it sits to gather the right rows.
         case .duplicateOffset: return true
+        // The fifth, and the purest: a guide is nothing *but* position — its lines are laid out on
+        // the frame, and its horizon and vanishing points are shares of the frame's size.
+        case .guide: return true
         // Glare's gather reaches sideways along an angle, like a directional blur, but never asks
         // where in the *frame* it is — no centre, no vignette, nothing keyed on absolute position.
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
@@ -2325,7 +2458,7 @@ extension Effect: Codable {
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
              posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen,
-             duplicateOffset, glare, colorWheels, lensBlur
+             duplicateOffset, glare, colorWheels, lensBlur, guide
     }
 
     private var kind: Kind {
@@ -2349,6 +2482,7 @@ extension Effect: Codable {
         case .glare:               return .glare
         case .colorWheels:         return .colorWheels
         case .lensBlur:            return .lensBlur
+        case .guide:               return .guide
         }
     }
 
@@ -2382,6 +2516,7 @@ extension Effect: Codable {
         case .glare:               self = .glare(try params(Glare.self, Glare()))
         case .colorWheels:         self = .colorWheels(try params(ColorWheels.self, ColorWheels()))
         case .lensBlur:            self = .lensBlur(try params(LensBlur.self, LensBlur()))
+        case .guide:               self = .guide(try params(Guide.self, Guide()))
         }
     }
 
@@ -2408,6 +2543,7 @@ extension Effect: Codable {
         case .glare(let p):               try container.encode(p, forKey: .params)
         case .colorWheels(let p):         try container.encode(p, forKey: .params)
         case .lensBlur(let p):            try container.encode(p, forKey: .params)
+        case .guide(let p):               try container.encode(p, forKey: .params)
         }
     }
 }
@@ -2693,6 +2829,32 @@ extension Effect.LensBlur: Codable {
         threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
         boost = try c.decodeIfPresent(Double.self, forKey: .boost) ?? 2
         input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .ink
+    }
+}
+
+extension Effect.Guide: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case mode, spacing, subdivisions, angleDegrees, lineWidth, color, opacity,
+             density, horizon, vanishingPoint1X, vanishingPoint1Y, vanishingPoint2X, vanishingPoint2Y, twoPoint
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = Effect.Guide()
+        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? defaults.mode
+        spacing = try c.decodeIfPresent(Double.self, forKey: .spacing) ?? defaults.spacing
+        subdivisions = try c.decodeIfPresent(Int.self, forKey: .subdivisions) ?? defaults.subdivisions
+        angleDegrees = try c.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? defaults.angleDegrees
+        lineWidth = try c.decodeIfPresent(Double.self, forKey: .lineWidth) ?? defaults.lineWidth
+        color = try c.decodeIfPresent(CodableColor.self, forKey: .color) ?? defaults.color
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? defaults.opacity
+        density = try c.decodeIfPresent(Int.self, forKey: .density) ?? defaults.density
+        horizon = try c.decodeIfPresent(Double.self, forKey: .horizon) ?? defaults.horizon
+        vanishingPoint1X = try c.decodeIfPresent(Double.self, forKey: .vanishingPoint1X) ?? defaults.vanishingPoint1X
+        vanishingPoint1Y = try c.decodeIfPresent(Double.self, forKey: .vanishingPoint1Y) ?? defaults.vanishingPoint1Y
+        vanishingPoint2X = try c.decodeIfPresent(Double.self, forKey: .vanishingPoint2X) ?? defaults.vanishingPoint2X
+        vanishingPoint2Y = try c.decodeIfPresent(Double.self, forKey: .vanishingPoint2Y) ?? defaults.vanishingPoint2Y
+        twoPoint = try c.decodeIfPresent(Bool.self, forKey: .twoPoint) ?? defaults.twoPoint
     }
 }
 
@@ -3357,6 +3519,43 @@ extension Effect {
                          ui: 0...8, model: 0...(.infinity), format: "%.2f"),
                 // `bloom.input`'s row: the bar shows it as an inverted "Include Canvas Color" toggle.
                 l.option("lensBlur.input", "Input", "includeCanvasColor", \.input),
+            ]
+
+        case .guide:
+            let l = EffectCaseLens<Guide>(extract: { if case .guide(let p) = $0 { return p }; return nil },
+                                          embed: { .guide($0) })
+            // Every field, whatever `mode` is — `glare`'s rule: the bar hides the rows a mode does
+            // not read, but the address exists on all three. The vanishing points and the horizon
+            // are shares of the frame, so their sliders and domains are 0…1 with a little past
+            // each end for a point off the canvas.
+            return [
+                l.option("guide.mode", "Mode", "guideMode", \.mode),
+                l.double("guide.spacing", "Spacing", "spacing", \.spacing,
+                         ui: 8...256, model: 2...(.infinity), format: "%.0f px"),
+                l.integer("guide.subdivisions", "Subdivisions", "subdivisions", \.subdivisions,
+                          ui: 0...8, model: 0...(.infinity), format: "%.0f"),
+                l.double("guide.angle", "Angle", "angle", \.angleDegrees,
+                         ui: 5...85, model: EffectParameter.unbounded, format: "%.0f°"),
+                l.double("guide.lineWidth", "Line Width", "lineWidth", \.lineWidth,
+                         ui: 0.5...8, model: 0...(.infinity), format: "%.1f px"),
+                l.compound("guide.color", "Colour", "color",
+                           value: .colour, animation: .continuous,
+                           componentDomain: 0...1, keyPath: \Guide.color),
+                l.double("guide.opacity", "Opacity", "opacity", \.opacity,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.integer("guide.density", "Line Density", "density", \.density,
+                          ui: 2...72, model: 1...(.infinity), format: "%.0f"),
+                l.double("guide.horizon", "Horizon", "horizon", \.horizon,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("guide.vanishingPoint1X", "Point 1 X", "vanishingPoint1X", \.vanishingPoint1X,
+                         ui: -0.5...1.5, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("guide.vanishingPoint1Y", "Point 1 Y", "vanishingPoint1Y", \.vanishingPoint1Y,
+                         ui: -0.5...1.5, model: EffectParameter.unbounded, format: "%.2f"),
+                l.boolean("guide.twoPoint", "Two Points", "twoPoint", \.twoPoint),
+                l.double("guide.vanishingPoint2X", "Point 2 X", "vanishingPoint2X", \.vanishingPoint2X,
+                         ui: -0.5...1.5, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("guide.vanishingPoint2Y", "Point 2 Y", "vanishingPoint2Y", \.vanishingPoint2Y,
+                         ui: -0.5...1.5, model: EffectParameter.unbounded, format: "%.2f"),
             ]
         }
     }

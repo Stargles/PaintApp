@@ -597,6 +597,24 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("lens threshold", .lensBlur(Effect.LensBlur(threshold: 0.5))),
             ("lens boost", .lensBlur(Effect.LensBlur(boost: 4))),
             ("lens input", .lensBlur(Effect.LensBlur(input: .backdrop))),
+            // TODO (88)'s Guide: the identity, the other two modes, then each of its remaining
+            // twelve fields alone — `glare`'s recipe.
+            ("guide identity", .guide(Effect.Guide())),
+            ("guide isometric", .guide(Effect.Guide(mode: .isometric))),
+            ("guide perspective", .guide(Effect.Guide(mode: .perspective))),
+            ("guide spacing", .guide(Effect.Guide(spacing: 32))),
+            ("guide subdivisions", .guide(Effect.Guide(subdivisions: 2))),
+            ("guide angle", .guide(Effect.Guide(angleDegrees: 45))),
+            ("guide lineWidth", .guide(Effect.Guide(lineWidth: 3))),
+            ("guide colour", .guide(Effect.Guide(color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))),
+            ("guide opacity", .guide(Effect.Guide(opacity: 0.8))),
+            ("guide density", .guide(Effect.Guide(density: 12))),
+            ("guide horizon", .guide(Effect.Guide(horizon: 0.3))),
+            ("guide vp1X", .guide(Effect.Guide(vanishingPoint1X: 0.1))),
+            ("guide vp1Y", .guide(Effect.Guide(vanishingPoint1Y: 0.1))),
+            ("guide vp2X", .guide(Effect.Guide(vanishingPoint2X: 0.9))),
+            ("guide vp2Y", .guide(Effect.Guide(vanishingPoint2Y: 0.9))),
+            ("guide twoPoint", .guide(Effect.Guide(twoPoint: true))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

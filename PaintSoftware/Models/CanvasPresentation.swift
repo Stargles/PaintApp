@@ -119,6 +119,9 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// own for `effectBloomColour`'s reason: the raw value is what a capture says was open.
     case effectDuplicateOffsetColour
 
+    /// A guide's line-colour swatch, in `EffectSettingsBar` — TODO (88). The same reason again.
+    case effectGuideColour
+
     // MARK: - Onion skin
 
     /// The previous-drawings tint swatch, the red end of `OnionSkinPanel`'s gradient bar — TODO (72).
@@ -184,9 +187,9 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
              .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour, .selectionColour,
+             .effectDuplicateOffsetColour, .effectGuideColour, .selectionColour,
              .onionPreviousTintColour, .onionNextTintColour:
-            // All sixteen are raised from chrome that sits over a mounted, touchable `CanvasView` —
+            // All seventeen are raised from chrome that sits over a mounted, touchable `CanvasView` —
             // the two tint swatches are `.popover`s hung off `OnionSkinPanel`, itself one of the
             // timeline's `AnchoredMenu`s — nested exactly as `EffectSection`'s swatches sit inside a
             // rail panel that is not itself a `.popover`.

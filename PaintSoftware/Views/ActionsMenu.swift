@@ -133,9 +133,6 @@ struct ActionsMenu: View {
             Button { notice = "Paste isn't available yet" } label: {
                 row(icon: "doc.on.clipboard", title: "Paste")
             }
-            Button { notice = "Drawing guides aren't available yet" } label: {
-                row(icon: "grid", title: "Drawing Guide")
-            }
 
             if let notice {
                 Text(notice)

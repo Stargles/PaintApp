@@ -382,6 +382,12 @@ constant uint kEffectDuplicateCombine    = 16;
 constant uint kEffectGlareStreaks        = 17;
 constant uint kEffectColorWheels         = 18;
 constant uint kEffectLensBlur            = 19;
+constant uint kEffectGuide               = 20;
+
+/// `Effect.Guide.Mode.code`, restated — the codes `guideChannels` switches on.
+constant uint kGuideGrid        = 0;
+constant uint kGuideIsometric   = 1;
+constant uint kGuidePerspective = 2;
 
 /// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
 constant uint kDuplicateRegionRim          = 0;
@@ -471,6 +477,19 @@ struct EffectParams {
     float wheelGlobalL;
     // Where a lens-blur pass's sample set begins in the float table (TODO (74)).
     uint  sampleBase;
+    // The Guide, resolved (TODO (88)) — `EffectParams`' doc in Effect.swift names each.
+    uint  guideMode;
+    float guideSpacing;
+    uint  guideSubdivisions;
+    float guideAngle;
+    float guideLineWidth;
+    float guidePitch;
+    float guideHorizon;
+    float guideVanishing1X;
+    float guideVanishing1Y;
+    float guideVanishing2X;
+    float guideVanishing2Y;
+    uint  guideVanishingCount;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -688,6 +707,70 @@ static inline float3 colorWheelsChannels(float3 c, constant EffectParams &params
 /// top-left under RENDER.md §3.8. Only the two branches below that index by absolute position read
 /// it; a neighbourhood kernel is passed the local `gid` and must keep being, or its taps would run
 /// off the texture.
+// MARK: The guide
+
+/// A pixel's coverage by a line `params.guideLineWidth` wide at distance `d` — the tent
+/// `Effect.Guide`'s doc states, `EffectReference.guidePixel`'s `coverage` transcribed.
+static inline float guideCoverage(float d, constant EffectParams &params) {
+    return params.guideLineWidth > 0.0f ? saturate(params.guideLineWidth * 0.5f + 0.5f - d) : 0.0f;
+}
+
+/// The distance from `v` to the nearest multiple of `spacing` — `v − ⌊v/s⌋·s`, then the shorter way
+/// round, written the same way on both backends so a negative `v` folds identically.
+static inline float guideNearest(float v, float spacing) {
+    float m = v - floor(v / spacing) * spacing;
+    return min(m, spacing - m);
+}
+
+/// **The Guide, one pixel** — `EffectReference.guidePixel`'s twin; `Effect.Guide`'s doc is the
+/// sentence both transcribe. `position` is the pixel's index in the frame (the caller adds the
+/// strip's origin); each family's coverage is the tent on its nearest line, the families combine by
+/// `max`, and the colour is mixed in by `opacity · coverage`. Alpha is the caller's, untouched.
+static inline float3 guideChannels(float3 c, constant EffectParams &params, uint2 position) {
+    float2 q = float2(position);
+    float cover = 0.0f;
+    switch (params.guideMode) {
+        case kGuideGrid: {
+            float s = params.guideSpacing;
+            cover = max(guideCoverage(guideNearest(q.x, s), params), guideCoverage(guideNearest(q.y, s), params));
+            if (params.guideSubdivisions > 0u) {
+                float minor = s / float(params.guideSubdivisions + 1u);
+                cover = max(cover, 0.5f * max(guideCoverage(guideNearest(q.x, minor), params),
+                                              guideCoverage(guideNearest(q.y, minor), params)));
+            }
+            break;
+        }
+        case kGuideIsometric: {
+            float s = params.guideSpacing;
+            float a = params.guideAngle;
+            float2 rising = float2(-sin(a), cos(a)), falling = float2(sin(a), cos(a));
+            cover = max(guideCoverage(guideNearest(q.x, s), params),
+                        max(guideCoverage(guideNearest(dot(rising, q), s), params),
+                            guideCoverage(guideNearest(dot(falling, q), s), params)));
+            break;
+        }
+        case kGuidePerspective: {
+            float2 frame = float2(float(params.frameWidth), float(params.frameHeight));
+            cover = guideCoverage(fabs(q.y - params.guideHorizon * frame.y), params);
+            float2 points[2] = { float2(params.guideVanishing1X, params.guideVanishing1Y),
+                                 float2(params.guideVanishing2X, params.guideVanishing2Y) };
+            for (uint i = 0u; i < params.guideVanishingCount && i < 2u; ++i) {
+                float2 d = q - points[i] * frame;
+                float r = length(d);
+                if (!(r > 0.0f)) { cover = 1.0f; continue; }
+                float turn = guideNearest(atan2(d.y, d.x), params.guidePitch);
+                cover = max(cover, guideCoverage(r * sin(turn), params));
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    float amount = params.mix * cover;
+    float3 colour = float3(params.colorR, params.colorG, params.colorB);
+    return c + (colour - c) * amount;
+}
+
 static inline float3 effectChannels(uint kind, constant EffectParams &params, constant uchar4 *lut,
                                     constant RecolorTableEntry *recolor,
                                     float3 c, uint2 position) {
@@ -750,6 +833,9 @@ static inline float3 effectChannels(uint kind, constant EffectParams &params, co
 
         case kEffectColorWheels:
             return colorWheelsChannels(c, params);
+
+        case kEffectGuide:
+            return guideChannels(c, params, position);
 
         default:
             return c;

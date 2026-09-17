@@ -509,9 +509,18 @@ final class EffectParityLogicTests: XCTestCase {
     /// **Fifty-four since the Colour Wheels (TODO (63), 2026-09-13)**: per wheel its Oklab `a`/`b`
     /// push and its `L` lift, resolved — twelve at the end. Sixteen knobs, twelve scalars, because
     /// strength and hue are folded in before the kernel sees anything.
-    func testTheParameterBlockIsFiftyFourPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 216)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 216)
+    ///
+    /// **Fifty-five since the Lens Blur (TODO (74), 2026-09-17)**: `sampleBase`, where a pass's
+    /// sample set starts in the float table — the one scalar its two passes differ by that nothing
+    /// existing could carry; `taps`, `threshold` and `amount` are reused unchanged.
+    ///
+    /// **Sixty-seven since the Guide (TODO (88), same day)**: the mode, the spacing, the
+    /// subdivisions, the slant, the width, the ray pitch, the horizon, two vanishing points and
+    /// how many of them draw — twelve at the end, named rather than aliased so the kernel reads as
+    /// itself. Its colour and opacity ride the trailing triple and `mix`.
+    func testTheParameterBlockIsSixtySevenPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 268)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 268)
     }
 
     /// The recolour table's element is twelve packed floats — the Swift half of the layout contract

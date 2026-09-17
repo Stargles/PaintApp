@@ -2094,10 +2094,13 @@ final class EffectLayerLogicTests: XCTestCase {
             // TODO (74): Bloom's own stored choice and default — its highlight boost thresholds
             // brightness, and white paper is Lum 1.0.
             ("Lens Blur",            .lensBlur(Effect.LensBlur(radius: 4)),                      .ink),
+            // TODO (88): reads nothing but position, and draws over the paper — an ink-only re-walk
+            // would change nothing about it.
+            ("Guide",                .guide(Effect.Guide()),                                     .backdrop),
         ]
 
-        XCTAssertEqual(expected.count, 19,
-                       "Nineteen effects exist; a twentieth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 20,
+                       "Twenty effects exist; a twenty-first has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {
