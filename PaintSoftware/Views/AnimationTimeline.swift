@@ -56,9 +56,9 @@ struct AnimationTimeline: View {
     // button (the first tap enters the mode).
     @State private var showInterpolateOptions = false
 
-    // Onion skin's panel, opened by a second tap on the onion-skin button — the same two-stage
-    // behaviour as interpolate above, for the same reason: the button is the switch, so a panel that
-    // opened on the first tap would put a mode change behind an extra step.
+    // Onion skin's panel, opened by a ~0.4s hold on the onion-skin button — TODO (69). Unlike
+    // interpolate above, a plain tap on this one always toggles the mode; the hold is a second,
+    // independent gesture on the same button rather than a second stage of the same tap.
     @State private var showOnionSkinOptions = false
 
     /// The frame-rate panel, opened by tapping the fps readout — KEYFRAMES.md §2.7. `@State` rather
@@ -781,28 +781,40 @@ struct AnimationTimeline: View {
         }
     }
 
-    /// Two-stage, like `interpolateButton` and like the paint tools: the first tap turns onion skin
-    /// on, and a tap once it is already on opens `OnionSkinPanel`. That is why the panel carries no
-    /// on/off switch of its own — the button is the switch, and the panel is only reachable from the
-    /// on state.
+    /// **Tap toggles, hold opens the menu** — TODO (69), the owner's own words: *"tapping the onion
+    /// skin icon toggles it, and the menu is opened by holding the icon for a short time."* That
+    /// replaced the old two-stage tap (`interpolateButton` still uses it, unchanged) once the owner
+    /// singled onion skin out; a plain quick tap now flips `isOnionSkinEnabled` whatever state it is
+    /// in, and a ~0.4 s hold opens `OnionSkinPanel` whatever state it is in — the two are independent,
+    /// so the panel is reachable to configure the feature before ever turning it on. That is also why
+    /// the panel carries no on/off switch of its own (`OnionSkinPanel`'s header comment): the tap
+    /// already is the switch, on or off, with the panel open or closed.
+    ///
+    /// **No existing long-press-on-a-toolbar-button precedent to reuse.** `LayerStackListView`'s and
+    /// `TimelineTrackView`'s `UILongPressGestureRecognizer`s all start a *drag* (reorder, block move),
+    /// not a tap/hold fork on a single control, and nothing else in the app forks a SwiftUI toolbar
+    /// button's gesture this way — so this is `LongPressGesture(minimumDuration:).exclusively(before:
+    /// TapGesture())`, the stock SwiftUI idiom, on a plain `Image` rather than a `Button`: a `Button`
+    /// recognizes its own tap ahead of an attached gesture, which would fire the toggle underneath a
+    /// long press exactly like the old two-stage design did not want. `.accessibilityAddTraits(.isButton)`
+    /// is what keeps `app.buttons["timeline.onionSkinToggle"]` finding it, since only a real `Button`
+    /// gets that trait for free.
     ///
     /// The panel is a popover here rather than an `ActivePanel` case in the top toolbar because
     /// onion skin's subject is the timeline, which is the same argument `interpolateButton` records
     /// from the owner (2026-08-01).
     private var onionSkinButton: some View {
-        Button(action: {
-            if canvasManager.isOnionSkinEnabled {
-                showOnionSkinOptions.toggle()
-            } else {
-                canvasManager.isOnionSkinEnabled = true
-            }
-        }) {
-            Image(systemName: canvasManager.isOnionSkinEnabled
-                  ? "square.stack.3d.forward.dottedline.fill"
-                  : "square.stack.3d.forward.dottedline")
-        }
+        Image(systemName: canvasManager.isOnionSkinEnabled
+              ? "square.stack.3d.forward.dottedline.fill"
+              : "square.stack.3d.forward.dottedline")
         .foregroundColor(canvasManager.isOnionSkinEnabled ? .blue : .white)
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("timeline.onionSkinToggle")
+        // `loopToggle` and `linkOpacityToggle` in `OnionSkinPanel` expose their state the same way —
+        // this is what lets a cold-start XCUITest tell "toggled" from "opened the menu" without a
+        // pixel probe.
+        .accessibilityValue(canvasManager.isOnionSkinEnabled ? "on" : "off")
         // The panel itself is drawn by `anchoredMenuLayer`, over the canvas above this bar; this
         // button contributes the anchor it hangs from and the registration that keeps every rule a
         // `.popover` here used to carry. **The near-black card `AnchoredMenu` draws is what replaces
@@ -811,11 +823,21 @@ struct AnimationTimeline: View {
         .anchoredMenuAnchor(.onionSkinOptions)
         .canvasPresentationRegistration(.onionSkinOptions, isPresented: $showOnionSkinOptions,
                                         canvasManager: canvasManager)
-        // "Turn Off Onion Skin" lives inside the panel, so the panel has to close itself when it is
-        // used — otherwise it stays up describing something that is no longer drawing.
+        // A quick tap while the panel is up can turn onion skin off — the panel then describes
+        // something that is no longer drawing, so it closes with it.
         .onChange(of: canvasManager.isOnionSkinEnabled) { _, on in
             if !on { showOnionSkinOptions = false }
         }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.4)
+                .onEnded { _ in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showOnionSkinOptions = true
+                }
+                .exclusively(before: TapGesture().onEnded {
+                    canvasManager.isOnionSkinEnabled.toggle()
+                })
+        )
     }
 
     private var loopButton: some View {

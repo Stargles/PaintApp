@@ -244,11 +244,14 @@ final class MenuInterruptionUITests: PaintUITestCase {
         spot.tap()
         assertAnchored(app, "timelineSlotMenu", opener: "a second tap on a cel block")
 
-        // 2, 3 — the two-stage buttons. The first tap turns the mode on; the tap that follows opens
-        // the panel, and `openTwoStage` does not assume which state the button started in.
-        openTwoStage(app, button: "timeline.onionSkinToggle", menu: "onionSkinOptions")
+        // 2 — the onion-skin button, since TODO (69): a tap toggles on/off and a hold opens the
+        // panel, independent of each other, so opening it needs only the hold.
+        app.buttons["timeline.onionSkinToggle"].press(forDuration: 0.6)
         assertAnchored(app, "onionSkinOptions", opener: "the onion-skin button")
 
+        // 3 — the interpolate button, still the older two-stage button `openTwoStage` was written
+        // for: the first tap turns the mode on, the tap that follows opens the panel, and the helper
+        // does not assume which state the button started in.
         openTwoStage(app, button: "timeline.interpolateButton", menu: "interpolateOptions")
         assertAnchored(app, "interpolateOptions", opener: "the interpolate button")
 

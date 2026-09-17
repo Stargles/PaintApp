@@ -73,15 +73,11 @@ final class TimingRecorderUITests: PaintUITestCase {
         // wanted paper, which is the red ghost of the very arc the test had just proved was on the
         // other cel.
         //
-        // **Two taps, not one.** The button is two-stage — on by default, so the first tap opens the
-        // panel and the off switch is inside it (`AnimationTimeline.onionSkinButton`).
+        // **One tap.** The button is a plain toggle since TODO (69) — on by default, so this turns it
+        // straight off, with no panel stage in between (`AnimationTimeline.onionSkinButton`).
         let onionSkin = app.buttons["timeline.onionSkinToggle"]
         XCTAssertTrue(onionSkin.waitForExistence(timeout: 5), "Setup: the onion-skin toggle is there")
         onionSkin.tap()
-        let turnOff = app.buttons["onionPanel.turnOff"]
-        XCTAssertTrue(turnOff.waitForExistence(timeout: 5),
-                      "Setup: the second stage is the panel that holds the off switch")
-        turnOff.tap()
 
         let forward = app.buttons["timeline.stepForwardButton"]
         XCTAssertTrue(forward.waitForExistence(timeout: 5), "Setup: the transport can step")
