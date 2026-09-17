@@ -82,6 +82,11 @@ class PaintUITestCase: XCTestCase {
     /// comes back, `waitForExistence` below times out and the test fails.
     @discardableResult
     func launchIntoEditor(_ app: XCUIApplication) -> Bool {
+        // The artist's tools outlive a launch since TODO (77); a test that opens a new document
+        // and reads the default brush wants the defaults, not the last test's slider position.
+        if !app.launchArguments.contains("-resetEditorPreferences") {
+            app.launchArguments.append("-resetEditorPreferences")
+        }
         app.launch()
 
         let newCanvas = app.buttons["gallery.newCanvasButton"]

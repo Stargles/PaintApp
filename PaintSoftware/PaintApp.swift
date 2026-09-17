@@ -21,6 +21,7 @@ struct PaintApp: App {
         // maintenance pass in particular would otherwise snapshot and repair inside the app
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
+        EditorPreferences.forgetIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,
         // purge expired trash. The gallery re-lists when it finishes.

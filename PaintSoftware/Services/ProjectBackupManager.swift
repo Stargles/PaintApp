@@ -199,7 +199,9 @@ nonisolated enum ProjectBackupManager {
         let args = ProcessInfo.processInfo.arguments
 
         // Launch-arg test hooks (never present in normal runs):
-        //   -resetGallery               wipe Projects/Backups/Trash and the update signature
+        //   -resetGallery               wipe Projects/Backups/Trash and the update signature (and,
+        //                               synchronously in `PaintApp.init`, the artist's tool
+        //                               preferences — see `EditorPreferences.forgetIfRequested`)
         //   -simulateProjectCorruption  overwrite the newest project's manifest.json with garbage,
         //                               simulating an update/crash-damaged package, so the repair
         //                               pass below can be observed fixing it end-to-end.

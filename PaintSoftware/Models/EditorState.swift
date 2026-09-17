@@ -96,6 +96,18 @@ struct EditorPreferences: Codable, Equatable {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.defaultsKey)
     }
+
+    /// The launch-argument test hook: `-resetEditorPreferences` forgets the stored tools, and so
+    /// does `-resetGallery`, whose whole purpose is a launch that looks like a fresh install. The
+    /// brush size, opacity, colour and tool outlive a launch now, so a UI test that opens a new
+    /// document and reads the default brush has to ask for the defaults
+    /// (`PaintUITestCase.launchIntoEditor` does) or it inherits whatever the previous test left.
+    /// Synchronous, in `PaintApp.init`, because the next tap can read the record.
+    static func forgetIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
+                                  defaults: UserDefaults = .standard) {
+        guard arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") else { return }
+        defaults.removeObject(forKey: defaultsKey)
+    }
 }
 
 extension Tool {
