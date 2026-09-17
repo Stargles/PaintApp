@@ -138,20 +138,6 @@ final class PaletteStore: ObservableObject {
         return palette
     }
 
-    /// Duplicates a palette (as an editable, non-built-in copy) directly after it and selects it.
-    @discardableResult
-    func duplicatePalette(_ palette: Palette) -> Palette {
-        var copy = palette
-        copy.id = UUID()
-        copy.name = uniqueName(from: palette.name + " Copy")
-        copy.isBuiltIn = false
-        copy.colors = palette.colors.map { PaletteColor(hex: $0.hex) }
-        let insertAt = (palettes.firstIndex { $0.id == palette.id }).map { $0 + 1 } ?? palettes.count
-        palettes.insert(copy, at: insertAt)
-        selectedPaletteID = copy.id
-        return copy
-    }
-
     func renamePalette(_ palette: Palette, to newName: String) {
         guard let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -245,4 +245,164 @@ enum ColorMath {
         }
         return (r, g, b, a)
     }
+
+    // MARK: - HSL (TODO (73)'s Triangle picker)
+
+    /// RGB (each 0...1) -> HSL. Standard conversion, achromatic input (r == g == b) always comes back
+    /// hue 0 — same convention as `rgbToHSB` above, for the same reason: hue is genuinely undefined
+    /// there, never NaN or a garbage value from a zero delta.
+    static func rgbToHSL(r: Double, g: Double, b: Double) -> (h: Double, s: Double, l: Double) {
+        let maxC = max(r, max(g, b))
+        let minC = min(r, min(g, b))
+        let delta = maxC - minC
+        let l = (maxC + minC) / 2
+        guard delta > 0 else { return (0, 0, l) }
+
+        let s = delta / (1 - abs(2 * l - 1))
+
+        var h: Double
+        if maxC == r {
+            h = ((g - b) / delta).truncatingRemainder(dividingBy: 6)
+        } else if maxC == g {
+            h = (b - r) / delta + 2
+        } else {
+            h = (r - g) / delta + 4
+        }
+        h /= 6
+        if h < 0 { h += 1 }
+        return (h, s, l)
+    }
+
+    /// HSL (each 0...1; hue wraps) -> RGB. Inverse of `rgbToHSL`.
+    static func hslToRGB(h: Double, s: Double, l: Double) -> (r: Double, g: Double, b: Double) {
+        guard s > 0 else { return (l, l, l) }
+        let c = (1 - abs(2 * l - 1)) * s
+        let wrapped = (h.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
+        let hh = wrapped * 6
+        let x = c * (1 - abs(hh.truncatingRemainder(dividingBy: 2) - 1))
+        let m = l - c / 2
+        let (r1, g1, b1): (Double, Double, Double)
+        switch Int(hh) {
+        case 0: (r1, g1, b1) = (c, x, 0)
+        case 1: (r1, g1, b1) = (x, c, 0)
+        case 2: (r1, g1, b1) = (0, c, x)
+        case 3: (r1, g1, b1) = (0, x, c)
+        case 4: (r1, g1, b1) = (x, 0, c)
+        default: (r1, g1, b1) = (c, 0, x)
+        }
+        return (r1 + m, g1 + m, b1 + m)
+    }
+
+    // MARK: - The colour picker's hue ring (Disc/Triangle/Square tabs)
+
+    /// Where a hue sits on the ring, as radians **clockwise from the top** — the convention
+    /// `AngularGradient`'s default start/direction already use, so the ring drawn with
+    /// `hueRail`'s colours and the marker placed by this function agree with no extra rotation
+    /// fudge either has to apply. `hue == 0` is straight up; `hue` increases clockwise.
+    static func hueRingAngle(forHue hue: Double) -> Double {
+        let wrapped = (hue.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
+        return wrapped * 2 * .pi
+    }
+
+    /// Inverse of `hueRingAngle`: the hue (0...1) for a touch at `(dx, dy)` relative to the ring's
+    /// centre, in the same y-down screen coordinates every gesture here already uses. The centre
+    /// itself (`dx == dy == 0`) reads as hue 0 rather than NaN — an arbitrary but harmless answer,
+    /// since a touch exactly on the centre point has no well-defined angle anyway.
+    static func hueForRingTouch(dx: Double, dy: Double) -> Double {
+        guard dx != 0 || dy != 0 else { return 0 }
+        let angle = atan2(dx, -dy)
+        let normalized = angle < 0 ? angle + 2 * .pi : angle
+        return normalized / (2 * .pi)
+    }
+
+    // MARK: - Square <-> disc (the Disc tab's saturation/brightness area)
+
+    /// Maps a point in the square `[-1, 1] x [-1, 1]` onto the unit disc, preserving the angle from
+    /// the origin and rescaling the radius so the square's edge lands on the disc's edge — the
+    /// "radial"/Chebyshev square-to-disc map. Closed-form and exactly invertible by `discToSquare`
+    /// (down to floating-point error), unlike the elliptical-grid mapping, which needs a
+    /// difference-of-square-roots that is fussier near the edges. `(0, 0)` maps to `(0, 0)`.
+    static func squareToDisc(u: Double, v: Double) -> (x: Double, y: Double) {
+        let m = max(abs(u), abs(v))
+        guard m > 0 else { return (0, 0) }
+        let r = (u * u + v * v).squareRoot()
+        let scale = m / r
+        return (u * scale, v * scale)
+    }
+
+    /// Inverse of `squareToDisc`: a point in the unit disc back to the square `[-1, 1] x [-1, 1]`.
+    static func discToSquare(x: Double, y: Double) -> (u: Double, v: Double) {
+        let m = max(abs(x), abs(y))
+        guard m > 0 else { return (0, 0) }
+        let r = (x * x + y * y).squareRoot()
+        let scale = r / m
+        return (x * scale, y * scale)
+    }
+
+    // MARK: - The HSL triangle (the Triangle tab's saturation/lightness area)
+
+    /// The triangle's three corners in its own local, unrotated frame: hue at the top, black and
+    /// white at the base — an equilateral triangle inscribed in the unit circle, so it fits the same
+    /// bounding box the ring/disc already use. The view layer is free to rotate this whole frame so
+    /// the hue corner tracks the ring's marker; none of the maths below depends on that rotation.
+    static let trianglePureHueVertex = (x: 0.0, y: -1.0)
+    static let triangleBlackVertex = (x: -0.8660254037844387, y: 0.5)
+    static let triangleWhiteVertex = (x: 0.8660254037844387, y: 0.5)
+
+    /// Saturation/lightness (each 0...1) -> a point in the triangle's local frame. Derived from the
+    /// standard HSL-to-RGB identity restricted to one hue: writing the corner blend as
+    /// `wK*black + wW*white + wP*pureHue`, the barycentric weights that reproduce HSL's own `(s, l)`
+    /// are `wP = chroma = (1 - |2l-1|) * s`, `wW = l - wP/2`, `wK = 1 - wW - wP`. That is what lets a
+    /// point *in* the triangle mean an HSL colour at all, rather than the triangle being decoration
+    /// around a separately-computed dot.
+    static func trianglePosition(saturation s: Double, lightness l: Double) -> (x: Double, y: Double) {
+        let chroma = (1 - abs(2 * l - 1)) * s
+        let wP = chroma
+        let wW = l - chroma / 2
+        let wK = 1 - wW - wP
+        let p = trianglePureHueVertex, w = triangleWhiteVertex, k = triangleBlackVertex
+        return (wK * k.x + wW * w.x + wP * p.x, wK * k.y + wW * w.y + wP * p.y)
+    }
+
+    /// The raw (unclamped) barycentric weights of `(x, y)` against the triangle `(k, w, p)` —
+    /// negative outside it. Split out from `triangleSaturationLightness` so rendering can ask "is
+    /// this cell actually inside the triangle" (`triangleContains`) with the same arithmetic the
+    /// gesture uses, rather than the clamped, always-in-range version below.
+    private static func triangleBarycentricWeights(x: Double, y: Double) -> (wK: Double, wW: Double, wP: Double) {
+        let p = trianglePureHueVertex, w = triangleWhiteVertex, k = triangleBlackVertex
+        // Standard barycentric solve for a point against a triangle (k, w, p).
+        let denom = (w.y - p.y) * (k.x - p.x) + (p.x - w.x) * (k.y - p.y)
+        let wK = ((w.y - p.y) * (x - p.x) + (p.x - w.x) * (y - p.y)) / denom
+        let wW = ((p.y - k.y) * (x - p.x) + (k.x - p.x) * (y - p.y)) / denom
+        return (wK, wW, 1 - wK - wW)
+    }
+
+    /// Whether `(x, y)` (in the triangle's local frame) falls inside it — for rendering only, so a
+    /// fill loop can leave the area outside the triangle blank instead of painting it with an edge
+    /// colour it never actually is.
+    static func triangleContains(x: Double, y: Double) -> Bool {
+        let weights = triangleBarycentricWeights(x: x, y: y)
+        let epsilon = -0.001
+        return weights.wK >= epsilon && weights.wW >= epsilon && weights.wP >= epsilon
+    }
+
+    /// Inverse of `trianglePosition`: a point in the triangle's local frame -> saturation/lightness.
+    /// A point outside the triangle (an in-progress drag can easily overshoot it) is **clamped by its
+    /// barycentric weights** — any negative weight is raised to 0 and the three renormalized to sum
+    /// to 1 — rather than rejected, so a drag that leaves the triangle still tracks its nearest edge
+    /// instead of freezing the marker.
+    static func triangleSaturationLightness(x: Double, y: Double) -> (s: Double, l: Double) {
+        var (wK, wW, wP) = triangleBarycentricWeights(x: x, y: y)
+
+        if wK < 0 || wW < 0 || wP < 0 {
+            wK = max(wK, 0); wW = max(wW, 0); wP = max(wP, 0)
+            let sum = wK + wW + wP
+            if sum > 0 { wK /= sum; wW /= sum; wP /= sum }
+        }
+
+        let l = wW + wP / 2
+        let denomS = 1 - abs(2 * l - 1)
+        let s = denomS > 0.0001 ? min(max(wP / denomS, 0), 1) : 0
+        return (s, min(max(l, 0), 1))
+    }
 }

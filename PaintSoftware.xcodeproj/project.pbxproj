@@ -156,6 +156,8 @@
 		E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */; };
 		784DE625260FC51433D7100A /* CanvasSizePickerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */; };
 		7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */; };
+		02FE34D73AF061377D7A2881 /* ColorPickerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5230B311496C20C0BD62EE70 /* ColorPickerLogicTests.swift */; };
+		21C08F7A40DD4FBA12FCA96B /* ColorPickerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310524B7CF74F69409010E1D /* ColorPickerUITests.swift */; };
 		82E47F862983C82F3033DD4A /* VectorCutPreviewLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BED9770C82E47F862983C82F /* VectorCutPreviewLogicTests.swift */; };
 		B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */; };
 		8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */; };
@@ -245,6 +247,7 @@
 		DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */; };
 		DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */; };
 		DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */; };
+		47ED15C93D1363241D6317E4 /* PaintSoftware/Models/ColorHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E7BF1A8E3D185B054326BA /* PaintSoftware/Models/ColorHistory.swift */; };
 		DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */; };
 		1ADF9CECF56087DDFB27552A /* PaintSoftware/Models/EditorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 741E9B4F2468C7A10D8DE705 /* PaintSoftware/Models/EditorState.swift */; };
 		DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */; };
@@ -635,6 +638,8 @@
 		56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasResizeLogicTests.swift; sourceTree = "<group>"; };
 		81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasSizePickerUITests.swift; sourceTree = "<group>"; };
 		7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorMathOklabLogicTests.swift; sourceTree = "<group>"; };
+		5230B311496C20C0BD62EE70 /* ColorPickerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorPickerLogicTests.swift; sourceTree = "<group>"; };
+		310524B7CF74F69409010E1D /* ColorPickerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorPickerUITests.swift; sourceTree = "<group>"; };
 		BED9770C82E47F862983C82F /* VectorCutPreviewLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorCutPreviewLogicTests.swift; sourceTree = "<group>"; };
 		5845D753A6FB66DA9B737977 /* PinchMergeGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PinchMergeGateLogicTests.swift; sourceTree = "<group>"; };
 		710D54502AAAEEA75240D24E /* SelectionOverlayLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionOverlayLogicTests.swift; sourceTree = "<group>"; };
@@ -724,6 +729,7 @@
 		DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MaskParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; path = "PaintSoftware/Engine/Composite.metal"; sourceTree = "<group>"; };
 		DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Palette.swift; sourceTree = "<group>"; };
+		B8E7BF1A8E3D185B054326BA /* PaintSoftware/Models/ColorHistory.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ColorHistory.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ProjectManifest.swift; sourceTree = "<group>"; };
 		741E9B4F2468C7A10D8DE705 /* PaintSoftware/Models/EditorState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/EditorState.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/SelectionModels.swift; sourceTree = "<group>"; };
@@ -1192,6 +1198,8 @@
 				56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */,
 				81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */,
 				7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */,
+				5230B311496C20C0BD62EE70 /* ColorPickerLogicTests.swift */,
+				310524B7CF74F69409010E1D /* ColorPickerUITests.swift */,
 				BED9770C82E47F862983C82F /* VectorCutPreviewLogicTests.swift */,
 				79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */,
 				59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */,
@@ -1448,6 +1456,7 @@
 				A628458EBF2F2ED83884D70B /* PaintSoftware/Models/ObjectTransformFrame.swift */,
 				1CABB9539860AA8C57A6EADE /* PaintSoftware/Models/SizePreview.swift */,
 				DEC0DE000000000000000017 /* PaintSoftware/Models/Palette.swift */,
+				B8E7BF1A8E3D185B054326BA /* PaintSoftware/Models/ColorHistory.swift */,
 				DEC0DE000000000000000019 /* PaintSoftware/Models/ProjectManifest.swift */,
 				741E9B4F2468C7A10D8DE705 /* PaintSoftware/Models/EditorState.swift */,
 				DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */,
@@ -1792,6 +1801,8 @@
 				E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */,
 				784DE625260FC51433D7100A /* CanvasSizePickerUITests.swift in Sources */,
 				7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */,
+				02FE34D73AF061377D7A2881 /* ColorPickerLogicTests.swift in Sources */,
+				21C08F7A40DD4FBA12FCA96B /* ColorPickerUITests.swift in Sources */,
 				82E47F862983C82F3033DD4A /* VectorCutPreviewLogicTests.swift in Sources */,
 				72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */,
 				5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */,
@@ -1978,6 +1989,7 @@
 				6BE64D8ECF9CA7BB2B01663E /* PaintSoftware/Models/ObjectTransformFrame.swift in Sources */,
 				77EAB523A0F6B088DE539419 /* PaintSoftware/Models/SizePreview.swift in Sources */,
 				DEC0DE000000000000000018 /* PaintSoftware/Models/Palette.swift in Sources */,
+				47ED15C93D1363241D6317E4 /* PaintSoftware/Models/ColorHistory.swift in Sources */,
 				DEC0DE00000000000000001A /* PaintSoftware/Models/ProjectManifest.swift in Sources */,
 				1ADF9CECF56087DDFB27552A /* PaintSoftware/Models/EditorState.swift in Sources */,
 				DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */,

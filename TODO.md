@@ -48,22 +48,21 @@ rather than assuming it still holds.
 
 ---
 
-## (73) Colour picker overhaul
+## (87) Exiting a canvas returns to its folder in the gallery
 
-**Status** — filed 2026-09-16. The owner: *"the color picker should be overhauled. There should be many
-types, such as the one shown in image 2 with the triangle in the center and one with a square in the
-center, etc. The procreate color picker is Image 3, and in it is the color history and selected palette
-in the same tab which I would like you to have. In image 4 is the palette menu where you can modify the
-palletes."* Image 2: a hue ring with an HSL triangle inside, HSL1–4 / IMG tabs, Hue/Saturation/Lightness
-fields and a hex readout. Image 3 (Procreate): a hue ring with a saturation/brightness disc inside,
-current + previous swatches top right, then **History** with a Clear button, then the selected palette's
-name and swatch grid, and a bottom tab bar Disc / Classic / Harmony / Value / Palettes. Image 4
-(Procreate Palettes tab): a list of named palettes, each a swatch grid with a Set Default button, and a
-"New palette" action.
+**Status** — filed 2026-09-16. The owner: *"exiting a canvas should exit to the folder that the canvas
+is in in the gallery."*
 
-- [ ] Picker types: ring + triangle, ring + square, ring + disc (Procreate's), at least; a tab bar to switch.
-- [ ] History and the selected palette on the picker tab itself.
-- [ ] A palettes tab: create, rename, delete, set default, edit swatches.
+- [ ] The gallery opens on the document's folder, not the root.
+
+---
+
+## (78) Layer thumbnails show the cel on the current frame
+
+**Status** — filed 2026-09-16. The owner: *"The thumbnails in the layers menu don't accurately reflect
+the layers on that frame. Sometimes they show the cel of a different frame. Make them do so."*
+
+- [ ] A thumbnail is the current frame's cel for that layer, on every frame change.
 
 ---
 

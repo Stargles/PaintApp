@@ -3175,6 +3175,14 @@ final class CanvasManager: ObservableObject {
     func strokeEnded(layerIndex: Int, celIndex: Int) {
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
         objectWillChange.send()
+
+        // TODO (73)'s picker history: "the last N colours actually used to paint" — every
+        // `paintsOnCanvas` tool reaches this method on a lift, but the eraser is one of them and
+        // paints nothing with `brushColor` (`.destinationOut`/a punch, not ink), so it is excluded
+        // here rather than left to flood the list with whatever colour happened to be selected.
+        if selectedTool != .eraser {
+            ColorHistoryStore.shared.record(brushColor)
+        }
     }
 
     func scheduleThumbnailRegen(layerIndex: Int, celIndex: Int) {

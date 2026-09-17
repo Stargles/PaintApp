@@ -221,13 +221,17 @@ final class VectorLayerContentUITests: PaintUITestCase {
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1, "Undo should restore the vector stroke, not just the kind")
     }
 
-    /// Exercises the custom palette builder end to end: sets a known color (blue) via the hex field
-    /// on the Color tab, switches to the Palettes tab and taps "add current color" to append it to
-    /// the seeded "Spectrum" preset, taps a different existing swatch to move the picker off blue,
-    /// then taps the newly-added swatch and — back on the Color tab — confirms the hex field snapped
-    /// back to blue. That round-trip proves both "add current color" and swatch selection actually
-    /// drive the picker. Launches with `-resetPalettes` so Spectrum (20 swatches, indices 0–19) is
-    /// present and the appended swatch lands at a known index (20).
+    /// Exercises the custom palette builder end to end: sets a known color (blue) via the hex field,
+    /// taps "add current color" to append it to the seeded "Spectrum" preset, taps a different
+    /// existing swatch to move the picker off blue, then taps the newly-added swatch and confirms
+    /// the hex field snapped back to blue. That round-trip proves both "add current color" and
+    /// swatch selection actually drive the picker. Launches with `-resetPalettes` so Spectrum (20
+    /// swatches, indices 0–19) is present and the appended swatch lands at a known index (20).
+    ///
+    /// **TODO (73)** moved the selected palette's grid onto the picker's default (Square) tab
+    /// itself, alongside the hex field — there is no longer a separate tab to switch to for this;
+    /// the dedicated Palettes tab is now the multi-palette library (create/rename/delete/set
+    /// default), a different screen than this one.
     func testPaletteBuilderAddAndSelectSwatch() throws {
         let app = XCUIApplication()
         app.launchArguments.append("-resetPalettes")
@@ -237,15 +241,13 @@ final class VectorLayerContentUITests: PaintUITestCase {
         XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
         colorButton.tap()
 
-        // Set a known color (pure blue) via the hex field on the Color tab.
+        // Set a known color (pure blue) via the hex field.
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5))
         setHexField(app, hexField, to: "0000FF")
 
-        // Switch to the Palettes tab and append the current color. The seeded "Spectrum" preset has
-        // 20 colors, so the new swatch lands at index 20.
-        app.buttons["colorPanel.tab.palettes"].tap()
-
+        // Append the current color. The seeded "Spectrum" preset has 20 colors, so the new swatch
+        // lands at index 20.
         let addButton = app.buttons["colorPanel.addSwatchButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
         addButton.tap()
@@ -260,8 +262,6 @@ final class VectorLayerContentUITests: PaintUITestCase {
         // Tap the saved swatch; the picker should snap back to the stored blue.
         addedSwatch.tap()
 
-        // Confirm on the Color tab that the hex field reflects the restored blue.
-        app.buttons["colorPanel.tab.color"].tap()
         let hexAfterSelect = hexField.value as? String
         XCTAssertEqual(hexAfterSelect?.uppercased(), "0000FF", "Tapping the saved swatch should reload it into the picker, got \(String(describing: hexAfterSelect))")
     }

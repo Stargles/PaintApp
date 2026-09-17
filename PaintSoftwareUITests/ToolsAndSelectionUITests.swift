@@ -966,23 +966,30 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
         colorButton.tap()
 
-        // Hue bar: drag to the far left (hue 0 == red).
+        // Hue ring: drag to the bottom of its bounding box (hue 0.5 == cyan — TODO (73) replaced the
+        // old linear hue bar with a ring, hue 0 straight up and clockwise from there, same
+        // identifier). Deliberately *not* red (the panel's default hue): the ring's hit area is only
+        // its own band (`RingHitArea`), not the whole disc behind it, so the drag must *start* on
+        // that band — well inside the 0.373...0.5 normalized-radius ring, here straight up from
+        // centre — or the touch-down lands on the SV square instead and the whole gesture belongs to
+        // it, never moving the hue; picking a target hue that differs from the default is what makes
+        // that failure mode show up as a wrong colour instead of silently matching by coincidence.
         let hueSlider = app.otherElements["colorPanel.hueSlider"]
         XCTAssertTrue(hueSlider.waitForExistence(timeout: 5))
-        dragWithinElement(hueSlider, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 0.5))
+        dragWithinElement(hueSlider, from: CGVector(dx: 0.5, dy: 0.08), to: CGVector(dx: 0.5, dy: 1.0))
 
         // SV square: drag to the top-right corner (saturation 1, brightness 1) so the result is
-        // pure, fully-saturated red rather than some in-between shade.
+        // pure, fully-saturated cyan rather than some in-between shade.
         let svSquare = app.otherElements["colorPanel.svSquare"]
         XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
         dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 1.0, dy: 0.0))
 
-        // The hex field should reactively reflect that as pure red, confirming the hue bar/SV
+        // The hex field should reactively reflect that as pure cyan, confirming the hue ring/SV
         // square drags actually updated brushColor (not just their own local indicator).
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5))
         let hexAfterDrag = hexField.value as? String
-        XCTAssertEqual(hexAfterDrag?.uppercased(), "FF0000", "Dragging hue to red and SV to full saturation/brightness should show FF0000 in the hex field, got \(String(describing: hexAfterDrag))")
+        XCTAssertEqual(hexAfterDrag?.uppercased(), "00FFFF", "Dragging hue to cyan and SV to full saturation/brightness should show 00FFFF in the hex field, got \(String(describing: hexAfterDrag))")
 
         // Now drive the color from the hex field directly, to a distinct color (pure green).
         hexField.tap()
