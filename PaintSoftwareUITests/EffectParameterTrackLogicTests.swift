@@ -93,6 +93,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         .crtScreen(Effect.CRTScreen.preset(.crt)),
         .glare(Effect.Glare()),
         .colorWheels(Effect.ColorWheels()),
+        .lensBlur(Effect.LensBlur(radius: 8)),
     ]
 
     private func brightness(_ manager: CanvasManager, atFrame frame: Int) -> Double? {
@@ -269,12 +270,14 @@ final class EffectParameterTrackLogicTests: XCTestCase {
             "glare.type",                // .stepped — TODO (63), three different pass lists
             "glare.streaks",             // .stepped — an `Int`, two streaks and three have nothing between
             "glare.rotate45",            // .stepped — a boolean, Simple Star only
+            "lensBlur.blades",           // .stepped — TODO (74), an `Int`: a hexagon and a heptagon have nothing between
+            "lensBlur.input",            // .stepped — `bloom.input`'s twin, it decides the sub-walk
         ].sorted(), "The refusals are a decision, and each one is refused for its own reason")
 
-        XCTAssertEqual(animatable.count, 59,
-                       "59 of the 78 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
+        XCTAssertEqual(animatable.count, 62,
+                       "62 of the 83 descriptors are continuous Doubles — `EffectCaseLens.double`'s own count")
         XCTAssertTrue(animatable.isDisjoint(with: refused), "A parameter is in exactly one of the two")
-        XCTAssertEqual(animatable.count + refused.count, 78, "And every descriptor is in one of them")
+        XCTAssertEqual(animatable.count + refused.count, 83, "And every descriptor is in one of them")
     }
 
     /// **The refusal is at the writer, not only at the resolver**, so a track that would render as

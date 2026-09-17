@@ -58,6 +58,10 @@ enum EffectCatalog {
         [
             .blur(Effect.Blur(radius: 8)),
             .blur(Effect.Blur(radius: 12, angleDegrees: 0, isDirectional: true)),
+            // A filter, so it arrives visible: a radius the eye can see, the type's own highlight
+            // boost, and a round aperture. `Effect.LensBlur`'s own radius stays 0 — the identity —
+            // for `Blur.radius`'s reason. TODO (74).
+            .lensBlur(Effect.LensBlur(radius: 8)),
             .sharpen(Effect.Sharpen(radius: 3, amount: 1)),
             .bloom(Effect.Bloom()),
         ],
@@ -86,7 +90,7 @@ enum EffectCatalog {
     /// mode option menu should be organized. Use headers to organize them into groups."* Named for
     /// what each group actually holds rather than for how it was built: **Colour** is every grade
     /// (Brightness/Contrast through Colour Wheels) plus the Posterize family, which quantizes rather
-    /// than convolves; **Blur & Light** is the two blurs, Sharpen and Bloom; **Stylise** is
+    /// than convolves; **Blur & Light** is the three blurs, Sharpen and Bloom; **Stylise** is
     /// everything that reshapes the drawing into a new one — Sobel, Outline, Duplicate Offset,
     /// Chromatic Aberration, Noise, Computer Screen and Glare. British spelling throughout, matching
     /// `Effect.displayName`'s own "Colour Wheels"/"Recolour".
@@ -417,6 +421,18 @@ struct EffectSettingsBar: View {
             toggleRow("Directional", isOn: params.isDirectional, identifier: "directional") {
                 params.isDirectional = $0; onChange(.blur(params))
             }
+
+        case .lensBlur(var params):
+            // TODO (74). Radius and aperture first, then the bokeh's two knobs, then Bloom's own
+            // canvas toggle — the same inverted reading of `Effect.Input` Bloom's row below argues.
+            slider("lensBlur.radius")
+            slider("lensBlur.blades")
+            slider("lensBlur.threshold")
+            slider("lensBlur.boost")
+            toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
+                params.input = $0 ? .backdrop : .ink; onChange(.lensBlur(params))
+            }
+            note("A defocused lens: every pixel spreads into a disc, or a polygon with this many blades (0 is round). Highlights brighter than the threshold are weighted up so they bloom into bright discs.")
 
         case .bloom(var params):
             slider("bloom.threshold")

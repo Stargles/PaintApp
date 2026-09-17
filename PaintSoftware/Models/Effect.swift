@@ -127,6 +127,13 @@ enum Effect: Equatable {
     /// pixel's own `L` that partition unity. One per-pixel pass, no neighbourhood. See `ColorWheels`
     /// for the shape of the weights and for how a keyed hue tweens.
     case colorWheels(ColorWheels)
+    /// **Lens Blur — a defocused lens, TODO (74), designed 2026-09-17.** One gather over a fixed
+    /// disc of `lensBlurSampleCount` samples (a Vogel spiral, shaped into a polygon by `blades`),
+    /// each sample weighted up by how far its brightness sits above a threshold so highlights bloom
+    /// into bright discs — the bokeh a Gaussian cannot make, since a Gaussian's weights never depend
+    /// on what they land on. One pass, no intermediate. See `LensBlur` for the four knobs and the
+    /// weighting, and `lensBlurSampleOffsets` for the sample set both backends are handed.
+    case lensBlur(LensBlur)
 
     /// The label an effect picker shows, written out for the reason `BlendMode.displayName` is.
     var displayName: String {
@@ -166,6 +173,7 @@ enum Effect: Equatable {
         case .duplicateOffset:     return "Duplicate Offset"
         case .glare:               return "Glare"
         case .colorWheels:         return "Colour Wheels"
+        case .lensBlur:            return "Lens Blur"
         }
     }
 
@@ -200,9 +208,10 @@ enum Effect: Equatable {
     var reshapesCoverage: Bool {
         switch self {
         // **Glare, for Bloom's reason.** A streak paints where there was no ink — the seventh
-        // effect that reshapes coverage rather than regrading what is there.
-        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen, .glare: return true
-        default:                                                           return false
+        // effect that reshapes coverage rather than regrading what is there. **Lens Blur for
+        // Blur's**: a defocus that left the silhouette sharp would not be a defocus.
+        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen, .glare, .lensBlur: return true
+        default:                                                                      return false
         }
     }
 
@@ -304,6 +313,13 @@ enum Effect: Equatable {
         case .colorWheels:
             return .backdrop
         case .bloom(let params):
+            return params.input
+        // **Lens Blur is the second stored choice, for Bloom's reason exactly** (TODO (74)): its
+        // highlight boost thresholds brightness, and white paper is Lum 1.0, so a paper-inclusive
+        // lens blur weights the whole canvas up and bleeds it over the ink. Defaulting to `.ink`
+        // keeps the defocus on the drawing; the toggle is there for a painting that covers its
+        // paper and wants the bokeh across all of it.
+        case .lensBlur(let params):
             return params.input
         }
     }
@@ -1056,6 +1072,51 @@ extension Effect {
         }
     }
 
+    /// **A defocused lens** — TODO (74)'s *"simulates the type of blur an actual defocused lens
+    /// would produce like bokeh"*, designed 2026-09-17. Four rulings, taken for the owner:
+    ///
+    /// 1. **One gather over a fixed disc of samples, not a separable pair.** A lens blur's kernel is
+    ///    the aperture's shape — a disc, or the polygon the iris blades make — and a disc does not
+    ///    separate into two 1D passes the way a Gaussian does. So every pixel gathers
+    ///    `Effect.lensBlurSampleCount` bilinear taps at the offsets `lensBlurSampleOffsets` resolves
+    ///    once in Swift: a Vogel spiral (`r = √((i + ½)/N)`, `θ = i · golden angle`), which fills a
+    ///    disc evenly with no rings, mapped onto the `blades`-gon by scaling each point out to the
+    ///    polygon's radius in its own direction. Both backends read the same offsets off the same
+    ///    float table (`weights`, which for this effect carries offsets rather than kernel weights),
+    ///    so neither evaluates the spiral itself — `Blur`'s Gaussian precedent, for the same parity
+    ///    reason. **64 samples is the count**, fixed whatever the radius: the cost is 256 texel reads
+    ///    per pixel at every radius, the same order as a radius-64 Gaussian's two passes, and the
+    ///    number is a named constant rather than a function of the radius so that a keyed radius
+    ///    tweens smoothly instead of changing the sample pattern mid-ramp.
+    /// 2. **The bokeh is a weight on the samples, not a pre-pass.** The textbook boost multiplies
+    ///    bright pixels *before* the gather, which needs an HDR intermediate — an 8-bit one clips
+    ///    white at 1.0 and the boost does nothing. Weighting instead: each sample's weight is
+    ///    `1 + boost · saturate((Lum − threshold) / (1 − threshold))` and the result is the weighted
+    ///    mean, so a highlight outweighs the dark pixels round it and a bright point comes out as a
+    ///    bright disc rather than a faint smear. `boost` 0 is a plain disc average, and a convex
+    ///    combination of premultiplied texels keeps `rgb ≤ a` with nothing to re-impose.
+    /// 3. **`radius` is continuous**, unlike `Blur.radius` — the offsets are fractional and every
+    ///    tap is bilinear, so a keyed ramp renders as a ramp. Capped at `Effect.maxBlurTaps` for
+    ///    the apron's sake, not the cost's: the gather is the same 64 taps at any radius, but a
+    ///    strip's apron is the radius itself (`verticalKernelRadius`), so an unbounded one would be
+    ///    an unbounded band. 0 is the identity, exactly — the pass returns its input texel.
+    /// 4. **`input` is the artist's stored choice, seeded `.ink`** — `Bloom.input`'s field and
+    ///    reason (`Effect.input`'s Lens Blur bullet).
+    struct LensBlur: Equatable {
+        /// Pixels — the aperture's radius. 0 is the identity.
+        var radius: Double = 0
+        /// How many sides the aperture polygon has. **0 is a circle**; below 3 there is no polygon
+        /// to make, so 1 and 2 are circles too; 5…9 are what real irises have.
+        var blades: Int = 0
+        /// `Lum` above which a sample starts to count for more. 1 boosts nothing.
+        var threshold: Double = 0.75
+        /// How much extra weight a fully bright sample carries — a sample at `Lum` 1 weighs
+        /// `1 + boost`. 0 is a plain disc blur.
+        var boost: Double = 2
+        /// What the blur sees — EFFECT_BACKDROP.md §4, `Bloom.input`'s shape and default.
+        var input: Effect.Input = .ink
+    }
+
     /// Which screen `Posterize` offsets its quantizer with. **Codes must match `kScreen…` in
     /// `Composite.metal`.**
     ///
@@ -1406,6 +1467,7 @@ extension Effect {
             if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).kindCode }
             return 8
         case .colorWheels:         return 18
+        case .lensBlur:            return 19
         }
     }
 
@@ -1568,6 +1630,14 @@ extension Effect {
             p.wheelMidtonesA = midtones.a; p.wheelMidtonesB = midtones.b; p.wheelMidtonesL = midtones.l
             p.wheelHighlightsA = highlights.a; p.wheelHighlightsB = highlights.b; p.wheelHighlightsL = highlights.l
             p.wheelGlobalA = global.a; p.wheelGlobalB = global.b; p.wheelGlobalL = global.l
+        case .lensBlur(let lens):
+            // `taps` is the sample count — every sample, or none at all when the radius is 0 and
+            // the pass is the identity. The radius itself is already in the offsets (`weights`),
+            // so the kernel never sees it; `threshold` is Bloom's own field and `amount` carries
+            // the boost, the same trailing-scalar reuse `sharpen.amount` and `outline.width` make.
+            p.taps = Self.lensBlurRadius(lens.radius) > 0 ? UInt32(Self.lensBlurSampleCount) : 0
+            p.threshold = Float(lens.threshold.isFinite ? min(max(lens.threshold, 0), 1) : 1)
+            p.amount = Float(lens.boost.isFinite ? max(lens.boost, 0) : 0)
         }
         return p
     }
@@ -1691,8 +1761,53 @@ extension Effect {
             if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).weights }
             let s = glare.resolvedAsStreaks
             return Self.fadeHalfKernel(fade: s.fade, taps: Self.tapCount(forRadius: s.length))
+        // Offsets, not weights — `LensBlur`'s ruling 1. The one effect whose float table is a
+        // sample set, read as `(weights[2i], weights[2i + 1])` pairs by both kernels.
+        case .lensBlur(let lens):
+            return Self.lensBlurSampleOffsets(radius: lens.radius, blades: lens.blades)
         default: return [1]
         }
+    }
+
+    /// **The lens blur's sample set, in pixels** — `lensBlurSampleCount` `(dx, dy)` pairs flattened,
+    /// or `[0, 0]` at a zero radius (the kernels never read it then; `taps` is 0).
+    ///
+    /// A Vogel spiral: point `i` sits at radius `√((i + ½) / N)` and angle `i · 2.39996…` (the golden
+    /// angle), which tiles a disc with even density and no concentric rings. For `blades ≥ 3` each
+    /// point is scaled out to the regular `blades`-gon's radius in its own direction —
+    /// `cos(π/n) / cos(φ)`, `φ` the angle to the nearest apothem, one vertex on +x — so the disc
+    /// becomes the polygon with its density kept. Resolved in `Double` and narrowed once, `Blur`'s
+    /// Gaussian precedent: neither backend evaluates a sine of a sample index.
+    static func lensBlurSampleOffsets(radius: Double, blades: Int) -> [Float] {
+        let r = lensBlurRadius(radius)
+        guard r > 0 else { return [0, 0] }
+        let count = lensBlurSampleCount
+        let goldenAngle = Double.pi * (3 - 5.0.squareRoot())
+        var offsets: [Float] = []
+        offsets.reserveCapacity(count * 2)
+        for i in 0..<count {
+            let rho = ((Double(i) + 0.5) / Double(count)).squareRoot()
+            let theta = Double(i) * goldenAngle
+            var scale = rho * r
+            if blades >= 3 {
+                let sector = 2 * Double.pi / Double(blades)
+                let phi = theta.truncatingRemainder(dividingBy: sector) - sector / 2
+                scale *= cos(Double.pi / Double(blades)) / cos(phi)
+            }
+            offsets.append(Float(scale * cos(theta)))
+            offsets.append(Float(scale * sin(theta)))
+        }
+        return offsets
+    }
+
+    /// The samples one lens-blur gather takes — `LensBlur`'s ruling 1, and the cost the effect has
+    /// at every radius: `4 · lensBlurSampleCount` texel reads per pixel, bilinear.
+    static let lensBlurSampleCount = 64
+
+    /// `LensBlur.radius`, clamped to the model's domain: non-negative, finite, and no further than
+    /// `maxBlurTaps` for the apron's sake (ruling 3).
+    private static func lensBlurRadius(_ radius: Double) -> Double {
+        radius.isFinite ? min(max(radius, 0), Double(maxBlurTaps)) : 0
     }
 
     /// A streak's per-tap weight, `weights[i] = fade^i` — 1 at the centre, decaying geometrically
@@ -1822,6 +1937,10 @@ extension Effect {
             var maxSine = 0.0
             for i in 0..<count { maxSine = max(maxSine, abs(sin(angle0 + Double(i) * step))) }
             return Int((Double(taps) * maxSine).rounded(.up)) + 1
+        // The reach is the radius — every offset lies within it (`lensBlurSampleOffsets` scales
+        // the unit disc, and a polygon's radius never exceeds 1) — plus one for the bilinear tap.
+        case .lensBlur(let lens):
+            return Int(Self.lensBlurRadius(lens.radius).rounded(.up)) + 1
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
              .recolor, .colorWheels:
             return 0
@@ -1868,7 +1987,7 @@ extension Effect {
         // Glare's gather reaches sideways along an angle, like a directional blur, but never asks
         // where in the *frame* it is — no centre, no vignette, nothing keyed on absolute position.
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
-             .blur, .bloom, .sobel, .sharpen, .outline, .recolor, .glare, .colorWheels:
+             .blur, .bloom, .sobel, .sharpen, .outline, .recolor, .glare, .colorWheels, .lensBlur:
             return false
         }
     }
@@ -2162,7 +2281,7 @@ extension Effect: Codable {
     private enum Kind: String, Codable {
         case levels, curves, brightnessContrast, hsvShift, gradientMap, chromaticAberration,
              posterize, noise, blur, bloom, sobel, sharpen, outline, recolor, crtScreen,
-             duplicateOffset, glare, colorWheels
+             duplicateOffset, glare, colorWheels, lensBlur
     }
 
     private var kind: Kind {
@@ -2185,6 +2304,7 @@ extension Effect: Codable {
         case .duplicateOffset:     return .duplicateOffset
         case .glare:               return .glare
         case .colorWheels:         return .colorWheels
+        case .lensBlur:            return .lensBlur
         }
     }
 
@@ -2217,6 +2337,7 @@ extension Effect: Codable {
         case .duplicateOffset:     self = .duplicateOffset(try params(DuplicateOffset.self, DuplicateOffset()))
         case .glare:               self = .glare(try params(Glare.self, Glare()))
         case .colorWheels:         self = .colorWheels(try params(ColorWheels.self, ColorWheels()))
+        case .lensBlur:            self = .lensBlur(try params(LensBlur.self, LensBlur()))
         }
     }
 
@@ -2242,6 +2363,7 @@ extension Effect: Codable {
         case .duplicateOffset(let p):     try container.encode(p, forKey: .params)
         case .glare(let p):               try container.encode(p, forKey: .params)
         case .colorWheels(let p):         try container.encode(p, forKey: .params)
+        case .lensBlur(let p):            try container.encode(p, forKey: .params)
         }
     }
 }
@@ -2514,6 +2636,19 @@ extension Effect.ColorWheels.Wheel: Codable {
         saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
         luminance = try c.decodeIfPresent(Double.self, forKey: .luminance) ?? 0
         strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? 1
+    }
+}
+
+extension Effect.LensBlur: Codable {
+    private enum CodingKeys: String, CodingKey { case radius, blades, threshold, boost, input }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0
+        blades = try c.decodeIfPresent(Int.self, forKey: .blades) ?? 0
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.75
+        boost = try c.decodeIfPresent(Double.self, forKey: .boost) ?? 2
+        input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .ink
     }
 }
 
@@ -3160,6 +3295,25 @@ extension Effect {
                 + wheel("midtones", "Midtones", \.midtones)
                 + wheel("highlights", "Highlights", \.highlights)
                 + wheel("global", "Global", \.global)
+
+        case .lensBlur:
+            let l = EffectCaseLens<LensBlur>(extract: { if case .lensBlur(let p) = $0 { return p }; return nil },
+                                             embed: { .lensBlur($0) })
+            return [
+                // Continuous, not `.roundedByTheRenderPath`: the offsets are fractional and every
+                // tap bilinear (`LensBlur`'s ruling 3), so radius 8.4 and 8.0 are different pictures.
+                l.double("lensBlur.radius", "Radius", "radius", \.radius,
+                         ui: 0...64, model: 0...Double(Effect.maxBlurTaps), format: "%.1f px"),
+                // `glare.streaks`' shape: an `Int`, `.stepped`, drawn as a slider. 0 is a circle.
+                l.integer("lensBlur.blades", "Blades", "blades", \.blades,
+                          ui: 0...9, model: 0...9, format: "%.0f"),
+                l.double("lensBlur.threshold", "Highlight Threshold", "threshold", \.threshold,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("lensBlur.boost", "Highlight Boost", "boost", \.boost,
+                         ui: 0...8, model: 0...(.infinity), format: "%.2f"),
+                // `bloom.input`'s row: the bar shows it as an inverted "Include Canvas Color" toggle.
+                l.option("lensBlur.input", "Input", "includeCanvasColor", \.input),
+            ]
         }
     }
 }

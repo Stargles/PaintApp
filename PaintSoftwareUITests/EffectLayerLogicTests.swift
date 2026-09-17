@@ -2091,10 +2091,13 @@ final class EffectLayerLogicTests: XCTestCase {
             ("Glare",                .glare(Effect.Glare()),                                     .ink),
             // TODO (63): sixteen knobs, all about colour — a grade, reading the paper like the rest.
             ("Colour Wheels",        .colorWheels(Effect.ColorWheels()),                         .backdrop),
+            // TODO (74): Bloom's own stored choice and default — its highlight boost thresholds
+            // brightness, and white paper is Lum 1.0.
+            ("Lens Blur",            .lensBlur(Effect.LensBlur(radius: 4)),                      .ink),
         ]
 
-        XCTAssertEqual(expected.count, 18,
-                       "Eighteen effects exist; a nineteenth has to be given a row here as well as a "
+        XCTAssertEqual(expected.count, 19,
+                       "Nineteen effects exist; a twentieth has to be given a row here as well as a "
                        + "case in `Effect.input`, or the table stops being the table")
 
         for (name, effect, want) in expected {
@@ -2108,9 +2111,10 @@ final class EffectLayerLogicTests: XCTestCase {
         // the effects that read alpha as *shape* rather than colour can want the ink alone, and
         // an effect that reads colour asking for `.ink` would be asking for a re-walk it has no use
         // for. Sobel reads shape too and still defaults to `.backdrop`, which is the ruling; the
-        // Duplicate Offset (TODO (61)) is the third ink reader, for Outline's reason.
+        // Duplicate Offset (TODO (61)) is the third ink reader, for Outline's reason; the Lens Blur
+        // (TODO (74)) reads brightness like Bloom and takes Bloom's stored default.
         let inkReaders = expected.filter { $0.2 == .ink }.map(\.0)
-        XCTAssertEqual(inkReaders, ["Outline", "Bloom", "Duplicate Offset", "Glare"],
+        XCTAssertEqual(inkReaders, ["Outline", "Bloom", "Duplicate Offset", "Glare", "Lens Blur"],
                        "Only the shape-reading effects take the ink-only input, and Sobel is ruled out "
                        + "of that set by its own default rather than by its kernel")
     }

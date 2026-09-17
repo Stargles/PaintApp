@@ -381,6 +381,7 @@ constant uint kEffectDuplicateResample   = 15;
 constant uint kEffectDuplicateCombine    = 16;
 constant uint kEffectGlareStreaks        = 17;
 constant uint kEffectColorWheels         = 18;
+constant uint kEffectLensBlur            = 19;
 
 /// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
 constant uint kDuplicateRegionRim          = 0;
@@ -1125,6 +1126,33 @@ static inline float4 glareStreaks(texture2d<float, access::read> source, constan
     return sum;
 }
 
+// MARK: Lens blur
+
+/// **The lens blur's gather** — `EffectReference.lensBlur`'s twin; `Effect.LensBlur`'s rulings 1 and 2
+/// are the sentences both transcribe. `offsets` is the sample set resolved in Swift (`(dx, dy)` pairs,
+/// pixels, riding the `weights` binding) and `taps` how many are live — 0 at a zero radius, which is
+/// the identity exactly. Each sample is a bilinear clamp-to-edge tap, weighted `1 + boost ·
+/// saturate((Lum − threshold) / (1 − threshold))` on its own premultiplied brightness, and the pixel is
+/// the weighted mean: a highlight outweighs the dark round it, which is what makes a bright point a
+/// bright disc. A convex combination, so `rgb ≤ a` survives with nothing to re-impose.
+static inline float4 lensBlur(texture2d<float, access::read> source, constant EffectParams &params,
+                              constant float *offsets, uint2 gid) {
+    uint samples = params.taps;
+    if (samples == 0u) { return source.read(gid); }
+    float span = max(1.0f - params.threshold, 1e-4f);
+    float2 position = float2(gid);
+    float4 sum = float4(0.0f);
+    float total = 0.0f;
+    for (uint i = 0u; i < samples; ++i) {
+        float2 offset = float2(offsets[2u * i], offsets[2u * i + 1u]);
+        float4 s = sampleBilinear(source, position + offset);
+        float w = 1.0f + params.amount * saturate((lum(s.rgb) - params.threshold) / span);
+        sum += s * w;
+        total += w;
+    }
+    return sum / total;
+}
+
 /// One pass of one effect over one texture — the kernel both §4.4 wrappers reach, and the only one they
 /// need whether the effect runs once or four times.
 ///
@@ -1190,6 +1218,10 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     }
     if (kind == kEffectGlareStreaks) {
         result.write(glareStreaks(source, params, weights, gid), gid);
+        return;
+    }
+    if (kind == kEffectLensBlur) {
+        result.write(lensBlur(source, params, weights, gid), gid);
         return;
     }
 

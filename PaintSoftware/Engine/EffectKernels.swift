@@ -106,6 +106,8 @@ enum EffectReference {
             return duplicateCombine(bytes, original: original, params: params, width: width, height: height)
         case kGlareStreaks:
             return glareStreaks(bytes, params: params, weights: weights, width: width, height: height)
+        case kLensBlur:
+            return lensBlur(bytes, params: params, offsets: weights, width: width, height: height)
         default:
             break
         }
@@ -178,6 +180,7 @@ enum EffectReference {
     private static let kDuplicateCombine: UInt32 = 16
     private static let kGlareStreaks: UInt32 = 17
     private static let kColorWheels: UInt32 = 18
+    private static let kLensBlur: UInt32 = 19
 
     // MARK: - The per-pixel transforms
     //
@@ -629,6 +632,41 @@ enum EffectReference {
                 }
                 let pixel = (x + y * width) * 4
                 for channel in 0..<4 { result[pixel + channel] = quantize(sum[channel]) }
+            }
+        }
+        return result
+    }
+
+    /// **The lens blur's gather** — TODO (74), `Effect.LensBlur`'s rulings 1 and 2 transcribed, and
+    /// `lensBlur` in `Composite.metal` is this function's twin. `offsets` is the sample set
+    /// `Effect.lensBlurSampleOffsets` resolved (`(dx, dy)` pairs, pixels) and `taps` how many of them
+    /// are live — 0 at a zero radius, which is the identity exactly. Each sample is a bilinear
+    /// clamp-to-edge tap on the premultiplied texel, weighted `1 + boost · saturate((Lum − threshold)
+    /// / (1 − threshold))` on its own premultiplied brightness — so a transparent sample weighs 1
+    /// and contributes nothing, and a highlight outweighs the dark round it — and the pixel is the
+    /// weighted mean. A convex combination, so `rgb ≤ a` survives with nothing to re-impose.
+    private static func lensBlur(_ bytes: [UInt8], params: EffectParams, offsets: [Float],
+                                 width: Int, height: Int) -> [UInt8] {
+        let samples = min(Int(params.taps), offsets.count / 2)
+        guard samples > 0 else { return bytes }
+        let span = max(1 - params.threshold, 1e-4)
+        var result = bytes
+        for y in 0..<height {
+            for x in 0..<width {
+                let position = SIMD2<Float>(Float(x), Float(y))
+                var sum = SIMD4<Float>(repeating: 0)
+                var total: Float = 0
+                for i in 0..<samples {
+                    let offset = SIMD2<Float>(offsets[2 * i], offsets[2 * i + 1])
+                    let s = sample(bytes, position + offset, width: width, height: height)
+                    let brightness = luminance(SIMD3<Float>(s.x, s.y, s.z))
+                    let w = 1 + params.amount * min(max((brightness - params.threshold) / span, 0), 1)
+                    sum += s * w
+                    total += w
+                }
+                let mean = sum / total
+                let pixel = (x + y * width) * 4
+                for channel in 0..<4 { result[pixel + channel] = quantize(mean[channel]) }
             }
         }
         return result

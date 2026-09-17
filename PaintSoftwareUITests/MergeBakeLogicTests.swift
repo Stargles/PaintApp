@@ -290,6 +290,9 @@ final class MergeBakeLogicTests: XCTestCase {
             // composited onto transparency the ink and the backdrop are the same buffer, so the merge
             // and the composite agree here too; a threshold low enough that red (Lum 0.3) glows.
             .glare(Effect.Glare(type: .streaks, threshold: 0.2, intensity: 1, streaks: 2, length: 12)),
+            // TODO (74): a gather that reads `.ink`, like Glare, reached through the same seam —
+            // a threshold low enough that the red rectangle's own brightness weights its samples.
+            .lensBlur(Effect.LensBlur(radius: 4, blades: 6, threshold: 0.2, boost: 3)),
         ]
 
         for grade in grades {

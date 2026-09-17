@@ -589,6 +589,14 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("wheels global saturation", .colorWheels(Effect.ColorWheels(global: .init(saturation: 0.5)))),
             ("wheels global luminance", .colorWheels(Effect.ColorWheels(global: .init(luminance: 0.3)))),
             ("wheels global strength", .colorWheels(Effect.ColorWheels(global: .init(strength: 0.5)))),
+            // TODO (74)'s Lens Blur: the identity, then each of its five fields alone — `dup`'s
+            // recipe, so a field the encoder left out collides with the baseline.
+            ("lens identity", .lensBlur(Effect.LensBlur())),
+            ("lens radius", .lensBlur(Effect.LensBlur(radius: 6))),
+            ("lens blades", .lensBlur(Effect.LensBlur(blades: 6))),
+            ("lens threshold", .lensBlur(Effect.LensBlur(threshold: 0.5))),
+            ("lens boost", .lensBlur(Effect.LensBlur(boost: 4))),
+            ("lens input", .lensBlur(Effect.LensBlur(input: .backdrop))),
         ]
 
         // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for

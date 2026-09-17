@@ -381,7 +381,7 @@ private extension BakeKeyEncoder {
 
 // MARK: - Effects
 //
-// Eighteen cases and their payload fields, by hand. Adding a nineteenth without touching this
+// Twenty cases and their payload fields, by hand. Adding a twenty-first without touching this
 // switch does not compile, which is the point.
 
 private extension BakeKeyEncoder {
@@ -509,11 +509,17 @@ private extension BakeKeyEncoder {
                 double(wheel.hue); double(wheel.saturation)
                 double(wheel.luminance); double(wheel.strength)
             }
+        case .lensBlur(let p):
+            // TODO (74): every field. `blades` reshapes the sample set and `input` decides the
+            // sub-walk, so two frames differing in either are two pictures with every number equal.
+            tag(0x6C)
+            double(p.radius); int(p.blades); double(p.threshold); double(p.boost)
+            encode(effectInput: p.input)
         }
     }
 
-    /// EFFECT_BACKDROP §4 — what Bloom sees. Outline's is fixed and never stored, so this reaches
-    /// only Bloom today.
+    /// EFFECT_BACKDROP §4 — what Bloom and the Lens Blur see. Outline's is fixed and never stored,
+    /// so this reaches only the two stored choices.
     mutating func encode(effectInput: Effect.Input) {
         switch effectInput {
         case .backdrop: tag(0x63)

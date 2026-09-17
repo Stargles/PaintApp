@@ -70,6 +70,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         .glare(Effect.Glare()),
         // TODO (63). One entry for four wheels — they are one corrector; every dot at the centre.
         .colorWheels(Effect.ColorWheels()),
+        // TODO (74). A filter, so it arrives visible — the catalogue's radius 8 on a round aperture.
+        .lensBlur(Effect.LensBlur(radius: 8)),
     ]
 
     /// One line per slider row: the four facts a `slider(...)` call site carried — its
@@ -256,7 +258,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// parameters that are not all `Slider`s: each wheel's luminance and strength are compact
     /// sliders in `ColorWheelsEditor`, and its hue and saturation are the dot, ranged for the graph
     /// editor's axis rather than for a slider's travel.
-    func testThereAreSixtyOneRangedParametersInTheWholeCatalogue() {
+    func testThereAreSixtyFiveRangedParametersInTheWholeCatalogue() {
         let cases = Self.everyMenuEntry.filter {
             // Blur and Posterize each still back more than one menu entry; count each case once,
             // through whichever entry is its "base" reading. `hsvShift` no longer needs this guard —
@@ -268,8 +270,9 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             if case .hsvShift(let hsv) = $0 { return !hsv.colorize }
             return true
         }
-        XCTAssertEqual(cases.count, 18, "Eighteen cases behind twenty-one menu entries")
-        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 61)
+        XCTAssertEqual(cases.count, 19, "Nineteen cases behind twenty-two menu entries")
+        // TODO (74)'s Lens Blur: radius, blades, threshold and boost are ranged; `input` is not.
+        XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 65)
     }
 
     /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
@@ -294,8 +297,9 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             }
         }
         // TODO (63): Glare's six continuous doubles (`glare.streaks` is `.stepped`, an `Int`), and
-        // the Colour Wheels' sixteen, every one a continuous `Double`.
-        XCTAssertEqual(animatable.count, 59,
+        // the Colour Wheels' sixteen, every one a continuous `Double`. TODO (74): the Lens Blur's
+        // radius, threshold and boost (`lensBlur.blades` is an `Int`, `lensBlur.input` an option).
+        XCTAssertEqual(animatable.count, 62,
                        "PREMISE: the animatable set — got \(animatable.sorted())")
         XCTAssertFalse(animatable.contains("posterize.levels"), """
             PREMISE: not among them — an `Int` field, so `.stepped` rather than `.continuous`, and no             scalar channel drives it. The graph editor cannot draw a curve for it, so the readout is             never asked about it.
@@ -315,7 +319,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
 
     // MARK: - Coverage of the payload structs
 
-    /// **78 stored fields over 18 payload structs, and every one of them addressable.** 33 the day
+    /// **83 stored fields over 19 payload structs, and every one of them addressable.** 33 the day
     /// the table was written, plus Recolour's own 2 (its new payload struct), the same day's
     /// `Bloom.color` and `Sobel.gain` (2 more on existing payloads), the Computer Screen's 6 (its own
     /// new payload struct), TODO (60)'s `HSVShift.colorize` (1 more, the boolean mode switch
@@ -348,6 +352,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             (.glare(Effect.Glare()), 9),
             // TODO (63): four wheels × (hue, saturation, luminance, strength).
             (.colorWheels(Effect.ColorWheels()), 16),
+            // TODO (74): radius, blades, threshold, boost, input.
+            (.lensBlur(Effect.LensBlur()), 5),
         ]
         for (effect, count) in expected {
             XCTAssertEqual(effect.parameters.count, count,
@@ -357,7 +363,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             XCTAssertEqual(Self.storedFieldCount(effect), count,
                            "\(effect.displayName)'s payload no longer has \(count) stored fields")
         }
-        XCTAssertEqual(expected.map(\.1).reduce(0, +), 78)
+        XCTAssertEqual(expected.map(\.1).reduce(0, +), 83)
     }
 
     private static func storedFieldCount(_ effect: Effect) -> Int {
@@ -383,6 +389,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         case .recolor(let p):             return Mirror(reflecting: p).children.count
         case .crtScreen(let p):           return Mirror(reflecting: p).children.count
         case .duplicateOffset(let p):     return Mirror(reflecting: p).children.count
+        case .lensBlur(let p):            return Mirror(reflecting: p).children.count
         }
     }
 
@@ -423,6 +430,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "glare.rotate45", "glare.size", "glare.streaks", "glare.threshold", "glare.type",
             "gradientMap.mix", "gradientMap.stops",
             "hsvShift.colorize", "hsvShift.hue", "hsvShift.saturation", "hsvShift.value",
+            "lensBlur.blades", "lensBlur.boost", "lensBlur.input", "lensBlur.radius",
+            "lensBlur.threshold",
             "levels.gamma", "levels.inputBlack", "levels.inputWhite",
             "levels.outputBlack", "levels.outputWhite",
             "noise.amount", "noise.monochrome", "noise.seed",
@@ -441,7 +450,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
                            "\(effect.displayName) repeats an id")
             for id in ids(effect) where !seen.contains(id) { seen.insert(id) }
         }
-        XCTAssertEqual(seen.count, 78)
+        XCTAssertEqual(seen.count, 83)
     }
 
     /// **The id is not the field name, deliberately.** Two already differ, and a Swift rename must
@@ -490,7 +499,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// same shape as `blur.directional`, reached through `HSVShift` instead of `Blur`) — so none of
     /// the three could be tweened even in principle. `recolor.preserveShading` is a `Bool` like
     /// `noise.monochrome`.
-    func testTheThirteenSteppedParametersAreTheStructuralOnes() {
+    func testTheFifteenSteppedParametersAreTheStructuralOnes() {
         let stepped = Self.everyMenuEntry
             .flatMap { $0.parameters }
             .filter { $0.animation == .stepped }
@@ -502,6 +511,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "recolor.preserveShading", "hsvShift.colorize",
             "duplicateOffset.region", "duplicateOffset.blendMode",
             "glare.type", "glare.streaks", "glare.rotate45",
+            // TODO (74): an `Int` (blades) and an `Effect.Input`, `bloom.input`'s own shape.
+            "lensBlur.blades", "lensBlur.input",
         ])
     }
 
@@ -528,7 +539,7 @@ final class EffectParameterCharacterizationTests: XCTestCase {
     /// their own — `hsvShift.colorize` is `.stepped`, not `.continuous` — so the same dedup this
     /// file's header comment names keeps the count from tripling what Posterize and HSV Shift each
     /// contribute.
-    func testSixtyTwoParametersAreContinuous() {
+    func testSixtyFiveParametersAreContinuous() {
         let continuous = Self.everyMenuEntry
             .filter {
                 if case .blur(let b) = $0 { return !b.isDirectional }
@@ -538,11 +549,12 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             }
             .flatMap { $0.parameters }
             .filter { $0.animation == .continuous }
-        XCTAssertEqual(continuous.count, 62)
+        // TODO (74)'s Lens Blur: three more doubles (radius, threshold, boost), no colour.
+        XCTAssertEqual(continuous.count, 65)
         // Bloom precedes Outline precedes Duplicate Offset in `everyMenuEntry`.
         XCTAssertEqual(continuous.filter { $0.value == .colour }.map(\.id),
                        ["bloom.color", "outline.color", "duplicateOffset.color"])
-        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 59)
+        XCTAssertEqual(continuous.filter { $0.value == .double }.count, 62)
     }
 
     /// **`recolor.entries` is the one un-animatable parameter** — TODO (60)'s ruling that the
@@ -694,6 +706,8 @@ final class EffectParameterCharacterizationTests: XCTestCase {
             "duplicateOffset.region", "duplicateOffset.blendMode",
             // TODO (63): an enum, an `Int` and a `Bool`.
             "glare.type", "glare.streaks", "glare.rotate45",
+            // TODO (74): an `Int` and an enum.
+            "lensBlur.blades", "lensBlur.input",
         ])
     }
 
