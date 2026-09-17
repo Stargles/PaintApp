@@ -21,48 +21,9 @@ import XCTest
 /// A small class on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
 final class AnimatedDistortUITests: PaintUITestCase {
 
-    /// One screenshot of the canvas, as an "is there dark ink at this normalized point" probe.
-    /// `DistortUITests.inkProbe`'s twin — dark rather than not-white, because the canvas is
-    /// letterboxed inside a black host and a not-white test answers `true` for the whole margin.
-    private func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
-        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
-        let width = image.width, height = image.height
-        var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
-                                              bitsPerComponent: 8, bytesPerRow: width * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(),
-                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return { dx, dy in
-            let x = min(max(Int(dx * Double(width)), 0), width - 1)
-            let y = min(max(Int(dy * Double(height)), 0), height - 1)
-            let offset = y * width * 4 + x * 4
-            return buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100
-        }
-    }
-
-    /// A probe taken once the canvas has stopped changing — two consecutive fingerprints that agree,
-    /// or the last one at the deadline. The resting canvas is served from a baked frame that arrives
-    /// *after* the gesture, so a screenshot on the next line can catch the frame before the commit.
-    private func settledProbe(_ canvas: XCUIElement,
-                              timeout: TimeInterval = 6) throws -> (Double, Double) -> Bool {
-        func fingerprint(_ probe: (Double, Double) -> Bool) -> [Bool] {
-            (0..<24).flatMap { yi in (0..<24).map { xi in
-                probe(0.15 + 0.75 * Double(xi) / 24, 0.10 + 0.40 * Double(yi) / 24)
-            } }
-        }
-        var probe = try inkProbe(canvas)
-        var previous = fingerprint(probe)
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let next = try inkProbe(canvas)
-            let current = fingerprint(next)
-            probe = next
-            if current == previous { return probe }
-            previous = current
-        }
-        return probe
-    }
+    /// The part of the host the fingerprint samples while waiting for the canvas to settle — the
+    /// whole width of the paper's upper half, where every drawing this file makes lives.
+    private let inkWindow = CGRect(x: 0.15, y: 0.10, width: 0.75, height: 0.40)
 
     /// **Every inked row of the canvas, as `(y, leftmost x, width)`** — one scan, and the only
     /// geometry this file measures.
@@ -182,7 +143,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
         // screenshot's height, which is four samples to measure a change in.)
         dragOnCanvas(app, from: CGVector(dx: 0.20, dy: 0.20), to: CGVector(dx: 0.85, dy: 0.20))
         dragOnCanvas(app, from: CGVector(dx: 0.20, dy: 0.42), to: CGVector(dx: 0.85, dy: 0.42))
-        let drawn = try settledProbe(canvas)
+        let drawn = try settledProbe(canvas, window: inkWindow)
         let flat = try XCTUnwrap(inkLines(drawn), "setup: there is ink on the canvas")
         attach(canvas, "1-two-flat-lines-at-frame-0")
         XCTAssertGreaterThan(flat.top.width, 0.30, "setup: the top line is most of the way across")
@@ -210,7 +171,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
 
         // Pull the box's top-left grip inward along the top edge. The top line shortens and the
         // bottom one does not, which is a keystone and not any affine of two parallel lines.
-        let top = try XCTUnwrap(inkLines(try settledProbe(canvas))?.top,
+        let top = try XCTUnwrap(inkLines(try settledProbe(canvas, window: inkWindow))?.top,
                                 "the box hugs the ink, so its top grips are on the top line's own "
                                 + "ends — measured, because a synthetic drag undershoots and the "
                                 + "grip is under ten screen points across")
@@ -232,7 +193,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
                       "a pulled corner is a change Reset has to be able to put back")
         app.buttons["moveBar.doneButton"].tap()
 
-        let keyed = try XCTUnwrap(inkLines(try settledProbe(canvas)))
+        let keyed = try XCTUnwrap(inkLines(try settledProbe(canvas, window: inkWindow)))
         let atB = (top: keyed.top.width, bottom: keyed.bottom.width)
         attach(canvas, "2-keystone-at-keyframe-B")
         XCTAssertLessThan(atB.top, atB.bottom - 0.05, String(format: """
@@ -245,7 +206,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
         // …and the frame halfway between them is a *partial* keystone: the top line is shorter than
         // the bottom one, and by less than at B.
         scrub(app, toCelFraction: 0.5)
-        let between = try XCTUnwrap(inkLines(try settledProbe(canvas)))
+        let between = try XCTUnwrap(inkLines(try settledProbe(canvas, window: inkWindow)))
         let mid = (top: between.top.width, bottom: between.bottom.width)
         attach(canvas, "3-in-between-at-the-midpoint")
 

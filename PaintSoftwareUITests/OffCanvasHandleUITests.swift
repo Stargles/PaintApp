@@ -27,28 +27,6 @@ final class OffCanvasHandleUITests: PaintUITestCase {
                         CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
     }
 
-    /// A dark-pixel probe over the host, as a fraction of the host in both axes.
-    ///
-    /// Dark rather than not-white, for `DistortUITests.inkProbe`'s stated reason — and here it cuts
-    /// the other way too: the surround **is** black, so every reading below is taken strictly inside
-    /// the paper.
-    private func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
-        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
-        let width = image.width, height = image.height
-        var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
-                                              bitsPerComponent: 8, bytesPerRow: width * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(),
-                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return { dx, dy in
-            let x = min(max(Int(dx * Double(width)), 0), width - 1)
-            let y = min(max(Int(dy * Double(height)), 0), height - 1)
-            let offset = y * width * 4 + x * 4
-            return buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100
-        }
-    }
-
     /// The topmost row of the paper carrying ink, as a fraction of the paper's own height — 1 when
     /// the paper is blank.
     ///

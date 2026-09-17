@@ -808,6 +808,121 @@ class PaintUITestCase: XCTestCase {
         return item
     }
 
+    // MARK: - Reading ink off the canvas
+
+    /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
+    ///
+    /// **Ink is *dark*, not merely "not white", and that distinction cost `DistortUITests` two runs.** The
+    /// canvas is letterboxed inside a black `canvas.host`, so a not-white test answers `true` for
+    /// every pixel of the margin — which made `inkTopLeft` return the search window's own corner, put
+    /// every subsequent gesture off the paper entirely, and read exactly like an overlay that was
+    /// ignoring touches. Both operands of a probe have to be the two things you meant to compare.
+    ///
+    /// One screenshot for the whole scan: `PaintUITestCase.rgbaPixel` takes a fresh one per call, and
+    /// the readings below are hundreds of points each.
+    func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
+        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
+        let width = image.width, height = image.height
+        var buffer = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
+                                              bitsPerComponent: 8, bytesPerRow: width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        // No flip, for `rgbaPixel`'s reason: the screenshot's cgImage is top-down, so buffer row 0 is
+        // the row the artist sees at the top.
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return { dx, dy in
+            let x = min(max(Int(dx * Double(width)), 0), width - 1)
+            let y = min(max(Int(dy * Double(height)), 0), height - 1)
+            let offset = y * width * 4 + x * 4
+            return buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100
+        }
+    }
+
+    /// A probe taken once the canvas has stopped changing — **two consecutive readings that agree**,
+    /// or the last one at the deadline.
+    ///
+    /// **"The canvas at rest" is becoming an *eventual* state rather than an immediate one.** The
+    /// bake-wiring work serves the resting canvas from a baked frame that arrives after the gesture
+    /// (MEASURED 0.40 s after a stroke, 0.024 s after a frame step), so a screenshot taken on the
+    /// line after `Done` can catch the frame before the commit landed. Waiting for *stability* rather
+    /// than for the answer is what keeps that from turning into a test that passes by retrying until
+    /// it likes what it sees: the assertions below still run once, against whatever settled.
+    ///
+    /// `window` is the region of the host, in normalized units, that the fingerprint samples — the
+    /// part of the picture the caller is about to measure. The default is `DistortUITests`' right
+    /// half; a test whose ink lives elsewhere names its own.
+    func settledProbe(_ canvas: XCUIElement,
+                      window: CGRect = CGRect(x: 0.45, y: 0.15, width: 0.45, height: 0.40),
+                      timeout: TimeInterval = 6) throws -> (Double, Double) -> Bool {
+        // A coarse fingerprint of the region the piece lives in — cheap to compare, and it changes
+        // whenever the artwork under it does.
+        func fingerprint(_ probe: (Double, Double) -> Bool) -> [Bool] {
+            (0..<24).flatMap { yi in (0..<24).map { xi in
+                probe(window.minX + window.width * Double(xi) / 24,
+                      window.minY + window.height * Double(yi) / 24)
+            } }
+        }
+        var probe = try inkProbe(canvas)
+        var previous = fingerprint(probe)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let next = try inkProbe(canvas)
+            let current = fingerprint(next)
+            probe = next
+            if current == previous { return probe }
+            previous = current
+        }
+        return probe
+    }
+
+    /// How wide the ink is along one row, in normalized units, over a window known to contain it.
+    func inkedWidth(_ probe: (Double, Double) -> Bool, row dy: Double,
+                            from x0: Double = 0.50, to x1: Double = 0.90) -> Double {
+        let steps = 300
+        let hits = (0...steps).filter { probe(x0 + (x1 - x0) * Double($0) / Double(steps), dy) }.count
+        return (x1 - x0) * Double(hits) / Double(steps)
+    }
+
+    /// The top-left corner of the inked block, measured rather than assumed.
+    ///
+    /// **XCUITest's synthetic drags undershoot by a timing-dependent amount** (`performDrag`'s own
+    /// note), so the selection rectangle a test asks for is not the one it gets — and the corner grip
+    /// is `TransformHandleView`'s fixed 24×24 in *canvas* points inside a container scaled to the
+    /// screen, i.e. under ten screen points across at the default canvas size. That is BUGS.md's
+    /// shrink-with-zoom entry arriving on a second tool, exactly as LASSO_MOVE.md §6 predicts, and it
+    /// leaves no margin for aiming at a coordinate the drag never reached. Measuring the block that
+    /// actually landed removes the whole class of miss, and needs no accessibility affordance —
+    /// `canvas.host` is an accessibility element in its own right, which hides every descendant, so a
+    /// grip inside it cannot be addressed by identifier at all (`Coordinator.publishCanvasState`'s
+    /// own note records the same wall for the text editor).
+    func inkTopLeft(_ probe: (Double, Double) -> Bool,
+                            in window: CGRect) throws -> CGPoint {
+        var minX = 1.0, minY = 1.0
+        let steps = 300
+        for xi in 0...steps {
+            for yi in 0...steps where yi % 3 == 0 {
+                let x = window.minX + window.width * Double(xi) / Double(steps)
+                let y = window.minY + window.height * Double(yi) / Double(steps)
+                guard probe(x, y) else { continue }
+                minX = min(minX, x)
+                minY = min(minY, y)
+            }
+        }
+        guard minX < 1, minY < 1 else { throw XCTSkip("no ink found in \(window)") }
+        return CGPoint(x: minX, y: minY)
+    }
+
+
+    /// How tall the ink is down one column, in normalized units — `inkedWidth`'s transpose, and the
+    /// measurement a horizontal line's *thickness* needs.
+    func inkedHeight(_ probe: (Double, Double) -> Bool, column dx: Double,
+                             from y0: Double = 0.05, to y1: Double = 0.55) -> Double {
+        let steps = 500
+        let hits = (0...steps).filter { probe(dx, y0 + (y1 - y0) * Double($0) / Double(steps)) }.count
+        return (y1 - y0) * Double(hits) / Double(steps)
+    }
+
     /// Unfolds the Select panel's edit band — Colour, Brush, Size, Opacity — which since TODO (90)
     /// sits behind the action row's Edit icon rather than taking a row of its own. A selection must
     /// already be up: the icon is disabled without one, like every other tab in that row.

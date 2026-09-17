@@ -49,26 +49,6 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
 
     // MARK: - Reading the canvas
 
-    /// One screenshot of the canvas, as an "is there dark ink at this host-normalized point" probe.
-    /// `AnimatedDistortUITests.inkProbe`'s twin — dark rather than not-white, because the canvas is
-    /// letterboxed inside a black host and a not-white test answers `true` for the whole margin.
-    private func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
-        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
-        let width = image.width, height = image.height
-        var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
-                                              bitsPerComponent: 8, bytesPerRow: width * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(),
-                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return { dx, dy in
-            let x = min(max(Int(dx * Double(width)), 0), width - 1)
-            let y = min(max(Int(dy * Double(height)), 0), height - 1)
-            let offset = y * width * 4 + x * 4
-            return buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100
-        }
-    }
-
     /// A probe taken once the canvas has stopped changing — two consecutive fingerprints that agree,
     /// or the last one at the deadline. `AnimatedDistortUITests.settledProbe`'s reason verbatim: the
     /// resting canvas is served from a baked frame that arrives *after* the gesture, so a screenshot

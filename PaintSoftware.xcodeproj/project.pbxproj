@@ -43,6 +43,15 @@
 		FF466AEDECA36CFBAEFE6D28 /* VectorDuplicateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CEC6D629BD9D5AF81BDE8CB /* VectorDuplicateLogicTests.swift */; };
 		40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */; };
 		A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */; };
+		63F4193D7A45743246F5B01A /* MoveToNewLayerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8759A61C058C667D599A301A /* MoveToNewLayerUITests.swift */; };
+		B0AAEA1576E0DD0E9466EBD6 /* KeepStrokeWidthUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F801036478EFE153A7A51D60 /* KeepStrokeWidthUITests.swift */; };
+		F54CBF899B188F5FE35EFAC6 /* SelectPanelEditDisclosureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */; };
+		AE67687B22ADB002BE5EE5BB /* SelectionCompositionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */; };
+		D54E424E0EF7225465B42F15 /* SelectToolTapOffUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */; };
+		573E552848FFF445EFE40DBE /* FolderMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */; };
+		5B9C4BCFAE6E2384340E55DF /* MoveToNewLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */; };
+		710858C356E81C7D84481C0E /* KeepStrokeWidthLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53BC94234A4CDF746E5119D /* KeepStrokeWidthLogicTests.swift */; };
+		C3A8F6B838C6875C17DADFCA /* SelectionCompositionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92985438E620B0001EB06096 /* SelectionCompositionLogicTests.swift */; };
 		CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */; };
 		73BFF7457F61F47AB159E23C /* AnimationGroupMembershipLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */; };
 		2AABA690B3AC8120CFB1A9D1 /* AnimationGroupMembershipUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */; };
@@ -498,6 +507,15 @@
 		4CEC6D629BD9D5AF81BDE8CB /* VectorDuplicateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorDuplicateLogicTests.swift; sourceTree = "<group>"; };
 		BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImportedImageMoveBoxLogicTests.swift; sourceTree = "<group>"; };
 		DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PosedLassoMoveLogicTests.swift; sourceTree = "<group>"; };
+		8759A61C058C667D599A301A /* MoveToNewLayerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoveToNewLayerUITests.swift; sourceTree = "<group>"; };
+		F801036478EFE153A7A51D60 /* KeepStrokeWidthUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeepStrokeWidthUITests.swift; sourceTree = "<group>"; };
+		F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectPanelEditDisclosureUITests.swift; sourceTree = "<group>"; };
+		D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionCompositionUITests.swift; sourceTree = "<group>"; };
+		1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectToolTapOffUITests.swift; sourceTree = "<group>"; };
+		9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderMoveLogicTests.swift; sourceTree = "<group>"; };
+		A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoveToNewLayerLogicTests.swift; sourceTree = "<group>"; };
+		F53BC94234A4CDF746E5119D /* KeepStrokeWidthLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeepStrokeWidthLogicTests.swift; sourceTree = "<group>"; };
+		92985438E620B0001EB06096 /* SelectionCompositionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionCompositionLogicTests.swift; sourceTree = "<group>"; };
 		B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartialAnimationGroupMoveLogicTests.swift; sourceTree = "<group>"; };
 		9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationGroupMembershipLogicTests.swift; sourceTree = "<group>"; };
 		7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationGroupMembershipUITests.swift; sourceTree = "<group>"; };
@@ -1041,6 +1059,15 @@
 				4CEC6D629BD9D5AF81BDE8CB /* VectorDuplicateLogicTests.swift */,
 				BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */,
 				DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */,
+				8759A61C058C667D599A301A /* MoveToNewLayerUITests.swift */,
+				F801036478EFE153A7A51D60 /* KeepStrokeWidthUITests.swift */,
+				F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */,
+				D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */,
+				1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */,
+				9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */,
+				A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */,
+				F53BC94234A4CDF746E5119D /* KeepStrokeWidthLogicTests.swift */,
+				92985438E620B0001EB06096 /* SelectionCompositionLogicTests.swift */,
 				B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */,
 				9C64768287961DA5122C0078 /* AnimationGroupMembershipLogicTests.swift */,
 				7089A8752339B395FE39AC31 /* AnimationGroupMembershipUITests.swift */,
@@ -1624,6 +1651,15 @@
 				FF466AEDECA36CFBAEFE6D28 /* VectorDuplicateLogicTests.swift in Sources */,
 				40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */,
 				A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */,
+				63F4193D7A45743246F5B01A /* MoveToNewLayerUITests.swift in Sources */,
+				B0AAEA1576E0DD0E9466EBD6 /* KeepStrokeWidthUITests.swift in Sources */,
+				F54CBF899B188F5FE35EFAC6 /* SelectPanelEditDisclosureUITests.swift in Sources */,
+				AE67687B22ADB002BE5EE5BB /* SelectionCompositionUITests.swift in Sources */,
+				D54E424E0EF7225465B42F15 /* SelectToolTapOffUITests.swift in Sources */,
+				573E552848FFF445EFE40DBE /* FolderMoveLogicTests.swift in Sources */,
+				5B9C4BCFAE6E2384340E55DF /* MoveToNewLayerLogicTests.swift in Sources */,
+				710858C356E81C7D84481C0E /* KeepStrokeWidthLogicTests.swift in Sources */,
+				C3A8F6B838C6875C17DADFCA /* SelectionCompositionLogicTests.swift in Sources */,
 				CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */,
 				73BFF7457F61F47AB159E23C /* AnimationGroupMembershipLogicTests.swift in Sources */,
 				2AABA690B3AC8120CFB1A9D1 /* AnimationGroupMembershipUITests.swift in Sources */,
