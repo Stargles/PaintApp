@@ -48,6 +48,15 @@ enum MemoryPressure {
         case warning
         /// Off screen — give back everything.
         case background
+        /// **The host has just refused an allocation outright** — a canvas-sized bitmap CoreGraphics
+        /// would not make (`VectorCanvas.renderLocalContent`, TODO (86)). Every cache answers it as a
+        /// `.warning`, since nothing says "short of memory" more plainly; `CanvasManager` answers it
+        /// by telling the artist, which is the one thing a warning does not do. The picture that was
+        /// being made was not made, so a message is owed.
+        case allocationRefused
+
+        /// How much to give back: a refusal is as short as a warning.
+        var trims: Level { self == .background ? .background : .warning }
     }
 
     /// A registration's handle. Dropping it unregisters, so a responder's lifetime is its owner's and
@@ -155,8 +164,8 @@ enum MemoryPressurePolicy {
     /// survives backgrounding while a cache halves and does not — the two rules differ in exactly one
     /// place and that place is here.
     static func budget(_ level: MemoryPressure.Level, normalBytes: Int) -> Int {
-        switch level {
-        case .warning: return max(0, normalBytes / 2)
+        switch level.trims {
+        case .warning, .allocationRefused: return max(0, normalBytes / 2)
         case .background: return 0
         }
     }

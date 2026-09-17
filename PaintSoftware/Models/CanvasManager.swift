@@ -1962,12 +1962,17 @@ final class CanvasManager: ObservableObject {
         // recomputation and dropping history costs the artist work they cannot get back, so a
         // backgrounded app keeps every step it has room for while every cache gives everything back.
         // Registered on this object rather than statically, because a history belongs to a document.
+        //
+        // **A refused allocation trims like a warning and, unlike one, is told to the artist**: it
+        // means a canvas-sized picture was not drawn (`VectorCanvas.renderLocalContent`), and a
+        // frame silently skipped is CLAUDE.md's refusal with no notice.
         MemoryPressure.startObservingSystemEvents()
         memoryPressureToken = MemoryPressure.register("UndoHistory") { [weak self] level in
-            guard case .warning = level else { return }
+            guard level.trims == .warning else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
                 if self.history.trimUnderMemoryPressure() > 0 { self.refreshUndoRedoState() }
+                if level == .allocationRefused { self.raise(.outOfMemoryToDraw) }
             }
         }
     }

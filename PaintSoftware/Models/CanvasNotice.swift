@@ -188,6 +188,14 @@ struct CanvasNotice: Identifiable, Equatable {
         /// tells a debugger whether it was the valve or Metal itself.
         case fillNeedsMoreMemory
 
+        /// **A canvas-sized picture could not be drawn because the host refused the memory for it** —
+        /// `MemoryPressure.Level.allocationRefused`, raised by `VectorCanvas.renderLocalContent` when
+        /// CoreGraphics will not make a bitmap the size of the canvas. Before TODO (86) this trapped
+        /// (`EXC_BREAKPOINT` under `VectorCanvas.rasterize`, four times in the owner's iPad logs at
+        /// 6000²); now the frame is skipped and this says so. The artist's next act is to work
+        /// smaller or close something else, which the message names.
+        case outOfMemoryToDraw
+
         /// VIDEO.md §8 stage 8: "Bake to Images" refused. In practice this is always an unreadable
         /// asset or a crop with nothing decodable in it — the menu row itself hides `.noVideo`, the
         /// third `VideoBakeRefusal` case, so a real artist never sees that one's sentence, only a
@@ -356,6 +364,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill right now — close other apps and try again."
+        case .outOfMemoryToDraw:   return "This iPad ran out of memory drawing a canvas this large — some of the picture was skipped. Work at a smaller size, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
@@ -471,6 +480,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // decision about the document the artist has to make with it in front of them, and "close
         // other apps" is not this app's to do.
         case .fillNeedsMoreMemory: return nil
+        case .outOfMemoryToDraw: return nil
         // Nor this one. An unreadable file has no fix this app can offer, and a crop with nothing
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
@@ -529,6 +539,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeResampled:  return "resizeResampled"
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
+        case .outOfMemoryToDraw: return "outOfMemoryToDraw"
         case .videoBakeRefused: return "videoBakeRefused"
         case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"

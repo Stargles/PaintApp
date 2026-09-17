@@ -3257,7 +3257,9 @@ final class VectorCanvas {
 
         // `known` is deliberately not passed: with no clip the walk never reads it (both tests that
         // consult it are guarded on the clip), so this is the same walk it always was.
-        let walked = Self.renderLocalContent(size: size, elements: visible)
+        // A refused bitmap is "no visible content" this once, memoized nowhere — the same answer an
+        // empty cel gives, and the Move box sizes to the canvas rather than to nothing.
+        guard let walked = Self.renderLocalContent(size: size, elements: visible) else { return nil }
         let bounds = PixelOps.opaqueContentBounds(walked.image)
 
         lock.lock()
@@ -5638,8 +5640,9 @@ final class VectorCanvas {
     /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. The isolation rules
     /// that make an eraser correct are identical for both.
     func render(quality: RenderQuality = .full) -> UIImage {
-        // `rasterize` answers nil for one reason — a version that has moved — and there is no version
-        // to have moved here, so this `guard` is unreachable rather than a fallback.
+        // `rasterize` answers nil for a version that has moved — and there is no version to have
+        // moved here — or for a bitmap the host refused (`renderLocalContent`). The blank is for the
+        // second: nothing is memoized, the picture is drawn empty this once, and the seam has been told.
         guard let image = rasterize(quality: quality) else { return Self.transparentPixel }
         // **After the unlock, never inside it.** `VectorRenderCache` may evict *other* canvases,
         // which takes their locks; doing that while holding this one is the only way this pair could
@@ -5708,8 +5711,8 @@ final class VectorCanvas {
         // `install` cannot come to disagree about whether a request is native. A `resolution` of 1 or
         // more arrives at exactly what `render(quality:)` does.
         //
-        // `rasterize` answers nil only for a version that has moved, and there is none to have moved
-        // here — the same unreachable guard `render(quality:)` documents.
+        // `rasterize` answers nil for a version that has moved, and there is none to have moved here,
+        // or for a bitmap the host refused — the same guard `render(quality:)` documents.
         guard let image = rasterize(quality: quality, requestedResolution: resolution) else {
             return Self.transparentPixel
         }
@@ -6016,7 +6019,8 @@ final class VectorCanvas {
 
     /// Step 2 of a render: **the pixels, with no lock held.** Pure — every input is a value or an
     /// immutable `UIImage`, and everything it learns comes back in the return value.
-    private static func walk(_ plan: RenderPlan) -> RenderResult {
+    /// Nil when the host refused a bitmap the walk needed — see `renderLocalContent`.
+    private static func walk(_ plan: RenderPlan) -> RenderResult? {
         let quality = plan.quality
         let content: LocalContent
         var repairedRegion = CGRect.null
@@ -6028,8 +6032,9 @@ final class VectorCanvas {
         let resolution = plan.resolution
         switch plan.work {
         case .append(let base, let tail):
-            content = renderLocalContent(size: plan.size, resolution: resolution, elements: tail,
-                                         quality: quality, over: base, known: plan.known)
+            guard let appended = renderLocalContent(size: plan.size, resolution: resolution, elements: tail,
+                                                    quality: quality, over: base, known: plan.known) else { return nil }
+            content = appended
             measured = content.measured
         case .repair(let base, let region, let visible):
             repairs = 1
@@ -6038,9 +6043,9 @@ final class VectorCanvas {
             // stroke whichever walk took it, and a clipped walk measures a set the next one can
             // legitimately skip. Keeping only the final walk's would quietly forget those, which
             // costs a redraw later rather than a wrong picture, but is not what this path did.
-            var repaired = renderLocalContent(size: plan.size, resolution: resolution,
-                                              elements: visible, quality: quality,
-                                              over: base, clippedTo: clip, known: plan.known)
+            guard var repaired = renderLocalContent(size: plan.size, resolution: resolution,
+                                                    elements: visible, quality: quality,
+                                                    over: base, clippedTo: clip, known: plan.known) else { return nil }
             measured.merge(repaired.measured) { _, new in new }
             if !repaired.escaped.isNull, let wider = Self.repairClip(clip.union(repaired.escaped),
                                                                      in: plan.size,
@@ -6060,10 +6065,12 @@ final class VectorCanvas {
                 // ink and nothing else.
                 widened = 1
                 clip = wider
-                repaired = renderLocalContent(size: plan.size, resolution: resolution,
-                                              elements: visible, quality: quality,
-                                              over: base, clippedTo: clip,
-                                              known: plan.known.merging(measured) { _, new in new })
+                guard let widenedRepair = renderLocalContent(size: plan.size, resolution: resolution,
+                                                             elements: visible, quality: quality,
+                                                             over: base, clippedTo: clip,
+                                                             known: plan.known.merging(measured) { _, new in new })
+                else { return nil }
+                repaired = widenedRepair
                 measured.merge(repaired.measured) { _, new in new }
             }
             repairedRegion = clip
@@ -6071,16 +6078,20 @@ final class VectorCanvas {
                 abandoned = 1
                 // Slow-and-correct. `Damage.region` names this as the failure it is shaped to have:
                 // a site that under-declares costs a re-walk rather than an artifact.
-                content = renderLocalContent(size: plan.size, resolution: resolution,
-                                             elements: visible, quality: quality,
-                                             known: plan.known.merging(measured) { _, new in new })
+                guard let whole = renderLocalContent(size: plan.size, resolution: resolution,
+                                                     elements: visible, quality: quality,
+                                                     known: plan.known.merging(measured) { _, new in new })
+                else { return nil }
+                content = whole
                 measured.merge(content.measured) { _, new in new }
             } else {
                 content = repaired
             }
         case .full(let visible):
-            content = renderLocalContent(size: plan.size, resolution: resolution,
-                                         elements: visible, quality: quality, known: plan.known)
+            guard let whole = renderLocalContent(size: plan.size, resolution: resolution,
+                                                 elements: visible, quality: quality, known: plan.known)
+            else { return nil }
+            content = whole
             measured = content.measured
         }
 
@@ -6097,6 +6108,11 @@ final class VectorCanvas {
                     ctx.cgContext.concatenate(plan.transform)
                     content.image.draw(in: CGRect(origin: .zero, size: plan.size))
                 }
+            // The second canvas-sized bitmap of this walk, refused the same way — see `renderLocalContent`.
+            guard final.cgImage != nil else {
+                MemoryPressure.signal(.allocationRefused)
+                return nil
+            }
         }
         return RenderResult(image: final, measured: measured,
                             dabCount: content.dabCount, repairedRegion: repairedRegion,
@@ -6246,7 +6262,9 @@ final class VectorCanvas {
         case .superseded: return nil
         case .memo(let image): return image
         case .walk(let plan):
-            let result = Self.walk(plan)
+            // A refused bitmap installs nothing and answers nil — the next ask walks again, which is
+            // the right answer for a process that has just been told it is out of memory.
+            guard let result = Self.walk(plan) else { return nil }
             lock.lock()
             install(result, from: plan)
             lock.unlock()
@@ -6489,7 +6507,7 @@ final class VectorCanvas {
         let contentVersionAtPlan = contentVersion
         lock.unlock()
 
-        let walked = Self.renderLocalContent(size: size, elements: isolated)
+        guard let walked = Self.renderLocalContent(size: size, elements: isolated) else { return nil }
         lock.lock()
         lastRenderDabCount = walked.dabCount
         // **A footprint measured through a pose is not a footprint of the stored geometry**, so only
@@ -6673,11 +6691,19 @@ final class VectorCanvas {
     /// 255** on the owner's document shape and **65 of 255** on a dense small canvas, over 0.2–11% of
     /// the tile's pixels (PERFORMANCE.md §11.11c). It reads as very slightly bolder ink, because
     /// repeated partial coverage composites darker than its own average.
+    /// **Nil when the host would not give this walk its bitmap** — TODO (86)'s trap. On a 3 GB iPad
+    /// a canvas-sized `UIGraphicsImageRenderer` can fail to get its context, and UIKit then does not
+    /// run the drawing block at all (MEASURED on the simulator with a row CoreGraphics refuses:
+    /// `ran=false`, an empty image, `cgImage == nil`); `walked` stayed an implicitly unwrapped nil
+    /// and this function trapped in `walk`, which is the `EXC_BREAKPOINT` the owner's iPad logged
+    /// four times at 6000² under `VectorCanvas.rasterize`. A refused bitmap is now a refused render:
+    /// nothing is installed, the caller draws nothing this once, and `MemoryPressure` is told so the
+    /// caches trim and the artist is shown why (`CanvasNotice.Kind.outOfMemoryToDraw`).
     private static func renderLocalContent(size: CGSize, resolution: CGFloat = 1,
                                            elements: [VectorElement], quality: RenderQuality = .full,
                                            over base: UIImage? = nil,
                                            clippedTo clip: CGRect? = nil,
-                                           known knownBounds: [UUID: CGRect] = [:]) -> LocalContent {
+                                           known knownBounds: [UUID: CGRect] = [:]) -> LocalContent? {
         // `render()` has already returned by the time an empty canvas would reach here, so this
         // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
         // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
@@ -6693,8 +6719,8 @@ final class VectorCanvas {
         let format = PixelOps.transparentFormat(scale: resolution)
         format.preferredRange = .standard
         // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
-        // has finished drawing.
-        var walked: Walk!
+        // has finished drawing — and nil afterwards exactly when it never ran.
+        var walked: Walk?
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
@@ -6716,6 +6742,10 @@ final class VectorCanvas {
             }
             walked = drawLocalContent(into: cg, elements: elements, quality: quality,
                                       clippedTo: clip, known: knownBounds)
+        }
+        guard let walked, image.cgImage != nil else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
         }
         return LocalContent(image: image, escaped: walked.escaped, measured: walked.measured,
                             dabCount: walked.dabCount)

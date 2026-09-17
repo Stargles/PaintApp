@@ -687,6 +687,55 @@ final class MemoryBudgetLogicTests: XCTestCase {
         withExtendedLifetime(canvases) {}
     }
 
+    /// **A bitmap the host refuses is a refused render, not a trap — TODO (86).**
+    ///
+    /// The owner's iPad logged `EXC_BREAKPOINT` in `VectorCanvas.walk` four times at 6000²: CoreGraphics
+    /// would not make the canvas-sized context, UIKit then does not run the renderer's drawing block
+    /// at all, and the walk's findings stayed an implicitly unwrapped nil. A row CoreGraphics refuses
+    /// on any host — 2³¹ pixels wide — reproduces the refusal without needing the memory to run out.
+    ///
+    /// Three things have to be true of the refusal: the render answers (blank, and installs no memo),
+    /// the seam is signalled as a refusal so every cache trims, and the artist is told.
+    @MainActor
+    func testARefusedBitmapIsARefusedRenderThatTrimsAndTellsTheArtist() {
+        defer { VectorRenderCache.removeAll() }
+        let manager = CanvasFixture.manager(layerCount: 1)   // registers the notice's responder
+        let refusedSize = CGSize(width: 2_147_483_648, height: 1)
+        let canvas = VectorCanvas(size: refusedSize,
+                                  strokes: [VectorStroke(brush: manager.selectedBrush,
+                                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                                         size: 4, opacity: 1,
+                                                         samples: [VectorSample(x: 2, y: 0, pressure: 1),
+                                                                   VectorSample(x: 8, y: 0, pressure: 1)])])
+        let signalsBefore = MemoryPressure.signalsDelivered
+        manager.notice = nil
+
+        let picture = canvas.render()
+
+        XCTAssertEqual(picture.size, CGSize(width: 1, height: 1), "a refused render is the blank pixel, drawn this once")
+        XCTAssertFalse(canvas.hasCachedImage, "…and nothing is memoized under it")
+        XCTAssertEqual(MemoryPressure.signalsDelivered, signalsBefore + 1, "the seam was told")
+        XCTAssertNil(canvas.render(quality: .full, ifStillAtVersion: canvas.version),
+                     "the version-checked entry answers nil for the refusal, as it does for a moved version")
+
+        let settled = expectation(description: "the responder's hop to main")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+        XCTAssertEqual(manager.notice?.code, "outOfMemoryToDraw",
+                       "a picture that was not drawn is said — got \(manager.notice?.code ?? "nothing")")
+        withExtendedLifetime(manager) {}
+    }
+
+    /// The refusal trims exactly as a warning does, and is the one level a cache must not mistake
+    /// for a background.
+    func testARefusedAllocationTrimsLikeAWarning() {
+        XCTAssertEqual(MemoryPressurePolicy.budget(.allocationRefused, normalBytes: 100), 50)
+        XCTAssertEqual(MemoryPressurePolicy.budget(.warning, normalBytes: 100), 50)
+        XCTAssertEqual(MemoryPressurePolicy.budget(.background, normalBytes: 100), 0)
+        XCTAssertEqual(MemoryPressure.Level.allocationRefused.trims, .warning)
+        XCTAssertEqual(MemoryPressure.Level.background.trims, .background)
+    }
+
     /// **Undo is charged what a step retains, and the old constant was wrong in both directions.**
     ///
     /// MEASURED (RENDER.md §5 stage 7): `(from.count + to.count) * 512` charged **0.98 MB** for one
