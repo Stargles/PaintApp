@@ -41,6 +41,12 @@ import UIKit
 ///     -probeStrokes <n>              strokes already on each cel before the run (default 1)
 ///     -probeSeconds <n>              how long to play (default 10)
 ///     -probeBakeTimeout <n>          give up waiting for the bake after this (default 180)
+///     -probeBudgetBytes <n>          `CompositorBudget.budgetOverrideBytes` for the run — the owner's
+///                                    iPad 9 is 201326592 (192 MiB), so a simulator run can make the
+///                                    ring, the memos and the strips decide as the device would
+///     -probeGraded                   give the second layer a Multiply blend mode, so the document
+///                                    is one the sandwich composites — the graded working set is
+///                                    the one PERFORMANCE.md §15.5 could only estimate
 ///     -probeLabel <s>                goes in the filename and the report
 ///
 /// The report lands in `Documents/Probe/` and the process exits when it is written, so the caller
@@ -95,12 +101,19 @@ enum PlaybackProbe {
         let seconds = max(1, intArgument("-probeSeconds", default: 10))
         let bakeTimeout = max(1, intArgument("-probeBakeTimeout", default: 180))
         let mode = Mode(rawValue: stringArgument("-probeMode", default: "playback")) ?? .playback
+        let budgetOverride = intArgument("-probeBudgetBytes", default: 0)
+        if budgetOverride > 0 { CompositorBudget.budgetOverrideBytes = budgetOverride }
 
+        // The process with no document at all — the baseline every other footprint sample is read
+        // against, since what a document costs is the question and the host's own overhead is not.
+        let atRest = footprintBytes()
         let size = CGSize(width: width, height: height)
         canvasManager.canvasSize = size
         canvasManager.addVectorLayer()
         seed(into: canvasManager, layers: layerCount, frames: frameCount,
              strokesPerCel: strokesPerCel, size: size)
+        let graded = ProcessInfo.processInfo.arguments.contains("-probeGraded")
+        if graded, canvasManager.layers.count > 1 { canvasManager.layers[1].blendMode = .multiply }
         showEditor()
 
         // One turn for the editor to build its views and run the first reconciliation pass, which is
@@ -108,9 +121,15 @@ enum PlaybackProbe {
         // out against a baker that has never been kicked.
         try? await Task.sleep(nanoseconds: 500_000_000)
 
+        // Sampled through the bake as well as the play, because the bake is where a 6000² document
+        // died (BUGS.md, 2026-09-09) and a peak taken after it would have missed the death.
+        var footprint = FootprintTrack()
+        footprint.sample()
         let bakeStart = CACurrentMediaTime()
-        let baked = await waitForBake(canvasManager, frames: frameCount, timeout: Double(bakeTimeout))
+        let baked = await waitForBake(canvasManager, frames: frameCount, timeout: Double(bakeTimeout),
+                                      sampling: { footprint.sample() })
         let bakeSeconds = CACurrentMediaTime() - bakeStart
+        let bakePeak = footprint.peak
 
         let rasterizesBefore = VectorCanvas.totalRasterizations
         let engagedBeforePlay = canvasManager.sandwichEngagesOnCanvas(
@@ -118,7 +137,6 @@ enum PlaybackProbe {
 
         var engagedWhilePlaying = false
         var operations: [String] = []
-        var footprint = FootprintTrack()
         footprint.sample()
 
         PlaybackTrace.shared.start()
@@ -131,7 +149,11 @@ enum PlaybackProbe {
             try? await Task.sleep(nanoseconds: 200_000_000)
             engagedWhilePlaying = canvasManager.sandwichEngagesOnCanvas(
                 tree: canvasManager.renderTree(atFrame: canvasManager.currentFrame))
-            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            let playEnd = CACurrentMediaTime() + Double(seconds)
+            while CACurrentMediaTime() < playEnd {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                footprint.sample()
+            }
             canvasManager.stopPlayback()
         case .edit:
             operations = await runEdits(canvasManager, size: size,
@@ -153,6 +175,7 @@ enum PlaybackProbe {
             "canvasWidth": width,
             "canvasHeight": height,
             "layers": layerCount,
+            "graded": graded,
             "frames": frameCount,
             "strokesPerCel": strokesPerCel,
             "fps": canvasManager.fps,
@@ -182,8 +205,10 @@ enum PlaybackProbe {
             // as the whole sample list as well as the summary, so a reader can see the shape rather
             // than trust three numbers off a curve nobody plotted.
             "footprintBytes": [
+                "atRest": atRest,
                 "atStart": footprint.first,
                 "peak": footprint.peak,
+                "bakePeak": bakePeak,
                 "atEnd": footprint.last,
                 "growth": footprint.growth,
                 "samples": footprint.samples
@@ -389,12 +414,13 @@ enum PlaybackProbe {
     /// baked" — `onFrameFinished` reports one frame at a time and says nothing about the queue.
     @MainActor
     private static func waitForBake(_ canvasManager: CanvasManager, frames: Int,
-                                    timeout: Double) async -> Bool {
+                                    timeout: Double, sampling: () -> Void) async -> Bool {
         let deadline = CACurrentMediaTime() + timeout
         while CACurrentMediaTime() < deadline {
             let baker = canvasManager.frameBaker
             if (0..<frames).allSatisfy({ baker.isBaked(atFrame: $0) }) { return true }
             try? await Task.sleep(nanoseconds: 50_000_000)
+            sampling()
         }
         return false
     }

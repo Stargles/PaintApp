@@ -726,6 +726,17 @@ final class MemoryBudgetLogicTests: XCTestCase {
         withExtendedLifetime(manager) {}
     }
 
+    /// **The bake queue's own trap, the same way.** `FrameBakeStore.decompress` held a decoded frame
+    /// in `Data(count:)`, which is a `fatalError` when `malloc` answers nil — the owner's iPad logged
+    /// it under `loadDecoded` on 2026-09-08. A frame the host will not give the bytes for is a miss.
+    func testAFrameTheHostRefusesTheBytesForIsAMissNotATrap() {
+        let signalsBefore = MemoryPressure.signalsDelivered
+        // More than any host will hand out, and a size `malloc` refuses rather than kills for.
+        let refused = FrameBakeStore.decompress(Data([1, 2, 3, 4]), to: Int.max / 4)
+        XCTAssertNil(refused, "a refused allocation is a nil frame")
+        XCTAssertEqual(MemoryPressure.signalsDelivered, signalsBefore + 1, "…and the seam was told")
+    }
+
     /// The refusal trims exactly as a warning does, and is the one level a cache must not mistake
     /// for a background.
     func testARefusedAllocationTrimsLikeAWarning() {

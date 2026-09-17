@@ -383,9 +383,20 @@ final class FrameBakeStore {
     /// same allocation straight to a `CGDataProvider`; returning an array here would put an
     /// `Array` → `Data` copy of the whole frame between the decoder and the ring, which at 2048² is
     /// 16.8 MB moved per frame at 24 fps for no reason at all.
+    ///
+    /// **`Data(count:)` traps when the host refuses the bytes** — Foundation's initialiser is a
+    /// `fatalError` on a nil `malloc`, and that is the trap the owner's iPad logged on the bake queue
+    /// (`Data.init(count:)` under `loadDecoded`, 2026-09-08) while a canvas-sized frame was being
+    /// decoded with no memory left. So the frame's bytes come from `malloc` directly and a refusal
+    /// is a nil answer: the caller treats it as a miss, and `MemoryPressure` is told
+    /// (`.allocationRefused`) so the caches trim and the artist hears why.
     static func decompress(_ payload: Data, to expected: Int) -> Data? {
         guard expected > 0, !payload.isEmpty else { return nil }
-        var out = Data(count: expected)
+        guard let bytes = malloc(expected) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
+        var out = Data(bytesNoCopy: bytes, count: expected, deallocator: .free)
         let written = out.withUnsafeMutableBytes { dst -> Int in
             guard let destination = dst.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return payload.withUnsafeBytes { src -> Int in
