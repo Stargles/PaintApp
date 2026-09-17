@@ -37,7 +37,8 @@ struct ContentView: View {
 
             switch screen {
             case .gallery:
-                GalleryView(onOpenProject: openProject, onCreateNew: startNewProject)
+                GalleryView(onOpenProject: openProject, onCreateNew: startNewProject,
+                           initialPath: galleryReturnPath)
             case .sizePicker:
                 CanvasSizePickerView(canvasManager: canvasManager, onCreated: { screen = .editor })
             case .editor:
@@ -125,6 +126,24 @@ struct ContentView: View {
     /// lands there rather than at the top of the tree. Nil once the document has a URL of its own —
     /// `saveIfNeeded` only mints a URL on the very first save.
     @State private var newProjectFolder: URL?
+
+    /// **TODO (87): where the gallery reopens when this document is left.** Derived from
+    /// `canvasManager`'s own URL rather than tracked separately — there is then nothing to keep in
+    /// sync, and `returnToGallery` always sets `screen` after its save has landed a URL, so the
+    /// document just closed is still the one this reads.
+    ///
+    /// `GalleryView`'s `path` is already root-first folder *names*, not URLs, precisely so a storage
+    /// relocation re-roots instead of pointing at a stale absolute path — `folderComponents(of:under:)`
+    /// is the existing inverse of the reduce that turns such a path back into a directory
+    /// (`ProjectBackupManager.trashFolder` uses the same call for the same reason, mirroring a
+    /// project's path under `Trash/`). Nil answers `[]`, the top of the tree, same as a project outside
+    /// `Projects/` altogether. If the folder was since deleted or moved, `GalleryView.refresh()`'s own
+    /// walk back to the nearest surviving ancestor handles it — no second mechanism needed here.
+    private var galleryReturnPath: [String] {
+        guard let url = canvasManager.projectURL else { return [] }
+        return ProjectBackupManager.folderComponents(of: url.deletingLastPathComponent(),
+                                                      under: ProjectStore.projectsDirectory) ?? []
+    }
 
     private func startNewProject(in folder: URL) {
         canvasManager = CanvasManager()

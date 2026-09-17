@@ -176,9 +176,10 @@ struct LayerStackListView: UIViewRepresentable {
         /// **How the rail hears about a tile now that installing one raises no SwiftUI pass.**
         ///
         /// PERFORMANCE.md §18.6. `LayerRowModel.thumbnail` is the picture this list draws and it
-        /// comes off `Layer.thumbnail`, which is a `ThumbnailTile` reference cell — so the write that
-        /// fills it republishes nothing, `updateUIView` does not run, and without this the row would
-        /// keep drawing the tile it had at the last unrelated pass.
+        /// comes off the displayed cel's own `Cel.thumbnail` (TODO (78)), which is a `ThumbnailTile`
+        /// reference cell — so the write that fills it republishes nothing, `updateUIView` does not
+        /// run, and without this the row would keep drawing the tile it had at the last unrelated
+        /// pass.
         private func observeThumbnailInstalls() {
             thumbnailSubscription = canvasManager.thumbnailInstalled
                 .sink { [weak self] _ in self?.setNeedsReload() }
@@ -1232,12 +1233,18 @@ struct LayerRowModel: Equatable {
             effect = layer?.layerEffect
             isTransform = layer?.layerTransform != nil
             isFillReference = layer?.isFillReference ?? false
-            thumbnail = layer?.thumbnail
             folderName = manager.folders.first { $0.id == layer?.parentFolderID }?.name
             nodeInputIndex = layer.flatMap { LayerRowModel.inputIndex(of: $0.id, parent: $0.parentFolderID, manager: manager) }
 
-            let celIndex = manager.activeCelIndex(inLayer: index, atFrame: manager.currentFrame)
+            // **TODO (78): the picture drawn here is the *displayed* cel's own tile, read fresh on
+            // every rebuild — never a cached "whichever cel was live last time something rendered"
+            // side channel.** `displayedCelIndex`, not `activeCelIndex(atFrame:)`, for the reason
+            // `installThumbnail` already asks it: a Repeat transform layer above this one
+            // (TRANSFORM_LAYER.md §5.5) can make it show an earlier frame's cel, and the thumbnail has
+            // to agree with what the canvas is actually showing.
+            let celIndex = manager.displayedCelIndex(inLayer: index, atFrame: manager.currentFrame)
             let cel = celIndex.flatMap { layer?.cels.indices.contains($0) == true ? layer?.cels[$0] : nil }
+            thumbnail = cel?.thumbnail
             strokeCount = cel?.raster.strokeCount ?? 0
             hasBakedImage = cel?.bakedImage != nil
             let vectorStrokes = cel?.vector?.strokes ?? []

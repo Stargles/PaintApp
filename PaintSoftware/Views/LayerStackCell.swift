@@ -129,6 +129,12 @@ final class LayerStackCell: UITableViewCell {
         thumbnailView.layer.borderWidth = 1
         thumbnailView.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
         thumbnailView.backgroundColor = .white
+        // Made queryable — TODO (78)'s own pin needs the actual pixels, not merely whether a tile
+        // arrived. The timeline block's own tile (`CelBlockView`) answers that lesser question
+        // through an `accessibilityValue` flag instead of a pixel read; this row's picture is what a
+        // test has to compare frame to frame, so it needs the image itself.
+        thumbnailView.isAccessibilityElement = true
+        thumbnailView.accessibilityTraits = .image
 
         // Image and tint are set per row in `configure` — a node and a slot take this same slot with
         // their own glyph, which is most of what makes them read as something other than a folder.
@@ -418,6 +424,7 @@ final class LayerStackCell: UITableViewCell {
         nameLabel.accessibilityValue = "\(model.depth)"
         folderOptionsButton.accessibilityIdentifier = "layerPanel.folder.\(model.name).options"
 
+        thumbnailView.accessibilityIdentifier = nil
         bakedMarker.accessibilityIdentifier = nil
         vectorMarker.accessibilityIdentifier = nil
         folderMarker.accessibilityIdentifier = nil
@@ -504,6 +511,7 @@ final class LayerStackCell: UITableViewCell {
         }
         // Overwrites whatever a recycled cell's last row left here — including a folder row's
         // `.opacity` identifier, which would otherwise linger on a reused cell.
+        thumbnailView.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).thumbnail"
         opacitySlider.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacity"
         opacityReadoutLabel.accessibilityIdentifier = "layerPanel.row.\(model.layerIndex).opacityReadout"
         refreshOpacityReadout()

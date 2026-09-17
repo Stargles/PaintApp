@@ -7,12 +7,29 @@ struct GalleryView: View {
     /// landed at the top level would make folders useless for the work they are actually doing.
     var onCreateNew: (URL) -> Void
 
+    /// Where `path` starts — TODO (87), the folder the document just left lives in. Every other
+    /// `@State` property keeps its own default; this is the one the caller gets to seed, exactly
+    /// once, at the moment this view is created.
+    init(onOpenProject: @escaping (CanvasManager) -> Void,
+         onCreateNew: @escaping (URL) -> Void,
+         initialPath: [String] = []) {
+        self.onOpenProject = onOpenProject
+        self.onCreateNew = onCreateNew
+        _path = State(initialValue: initialPath)
+    }
+
     @State private var projects: [ProjectSummary] = []
     @State private var folders: [ProjectStore.ProjectFolder] = []
     /// Where in the tree we are, root first. Empty means `Projects/` itself. Held as names rather
     /// than URLs so that a storage relocation under the artist's feet re-roots the same path instead
     /// of leaving a stale absolute URL pointing into the old library.
-    @State private var path: [String] = []
+    ///
+    /// **Seeded from `initialPath`, not always empty** — TODO (87): leaving a document reopens the
+    /// gallery inside the folder it lives in rather than at the top of the tree. This is the gallery's
+    /// own navigation state and nothing else touches it once the view exists; if the seeded folder has
+    /// since been deleted or moved, `refresh()`'s own walk back to the nearest surviving ancestor
+    /// (below) runs on the first `.onAppear` exactly as it would for any other vanished folder.
+    @State private var path: [String]
     @State private var projectPendingDeletion: ProjectSummary?
     @State private var folderPendingDeletion: ProjectStore.ProjectFolder?
     @State private var projectForVersions: ProjectSummary?

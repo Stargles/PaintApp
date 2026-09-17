@@ -3332,22 +3332,27 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Puts a rendered thumbnail on its cel, and on the layer too when that cel is the one the
-    /// playhead is over. The single writer, so the deferred backfill cannot install one differently
-    /// from the synchronous path.
+    /// Puts a rendered thumbnail on its cel. The single writer, so the deferred backfill cannot
+    /// install one differently from the synchronous path.
     ///
-    /// **The two writes below reach `ThumbnailTile`, not `@Published layers`** — PERFORMANCE.md
-    /// §18.6, and `Cel.thumbnail` carries the argument. `layers` is *read* on the way to the cell,
-    /// so no publisher fires and no SwiftUI pass is raised; what tells the views instead is the
+    /// **The write below reaches `ThumbnailTile`, not `@Published layers`** — PERFORMANCE.md §18.6,
+    /// and `Cel.thumbnail` carries the argument. `layers` is *read* on the way to the cell, so no
+    /// publisher fires and no SwiftUI pass is raised; what tells the views instead is the
     /// `thumbnailInstalled` send on the last line, which they answer with a repaint of the one block
     /// that changed rather than with a rebuild of the editor.
+    ///
+    /// **There used to be a second write here, mirroring the image onto the layer itself when the
+    /// cel installing was the one at the playhead** — TODO (78). That was a second opinion nothing
+    /// kept in step: `currentFrame` moving on its own never re-ran this function, so a scrub onto a
+    /// cel that was rendered while a *different* frame was showing (a hold's boundary, an in-between,
+    /// a load-time backfill landing off-screen) left the layer's own copy showing whichever cel was
+    /// live last time this function's condition happened to be true. `LayerRowModel` now reads the
+    /// displayed cel's own `Cel.thumbnail` fresh on every rebuild instead, which cannot go stale this
+    /// way because there is nothing left to keep in step.
     func installThumbnail(_ image: UIImage, layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].thumbnail = image
-        if displayedCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
-            layers[layerIndex].thumbnail = image
-        }
         thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,
                                             celID: layers[layerIndex].cels[celIndex].id))
     }
@@ -3364,9 +3369,6 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(layerIndex),
               layers[layerIndex].cels.indices.contains(celIndex) else { return }
         layers[layerIndex].cels[celIndex].thumbnail = nil
-        if displayedCelIndex(inLayer: layerIndex, atFrame: currentFrame) == celIndex {
-            layers[layerIndex].thumbnail = nil
-        }
         thumbnailInstalled.send(CelLocation(layerID: layers[layerIndex].id,
                                             celID: layers[layerIndex].cels[celIndex].id))
     }

@@ -62,9 +62,12 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 10))
     }
 
-    /// **The tree, drawn.** Make a folder, see its tile, open it, see the breadcrumb, make a canvas
-    /// inside it, come back out, and find the project is *not* at the top level and *is* inside the
-    /// folder. That last pair is what separates a tree from a flat list with a decorative folder.
+    /// **The tree, drawn — and TODO (87): leaving a document lands back in the folder it lives in.**
+    /// Make a folder, see its tile, open it, see the breadcrumb, make a canvas inside it, leave, and
+    /// land right back inside the folder — not at the top of the tree — with the project that was
+    /// just left right there. Then walk out by the breadcrumb's own control and confirm the project is
+    /// *not* at the top level either, which is what separates a tree from a flat list with a
+    /// decorative folder.
     func testAFolderIsMadeBrowsedAndSavedIntoFromTheGallery() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-resetGallery"]
@@ -93,23 +96,25 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
         returnToGallery(app)
 
-        // Back at the top of the tree: the folder is there and the project is not.
-        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 1"].waitForExistence(timeout: 15),
-                      "the gallery reopens at the top of the tree")
-        XCTAssertFalse(app.buttons["gallery.tileMenu.Untitled"].exists,
-                       "the project made inside the folder is not sitting at the top level — "
-                       + "which is what it would do if the folder were decoration")
-
-        app.buttons["gallery.folderTile.Scene 1"].tap()
+        // TODO (87): leaving lands back in the folder the document lives in, with that folder open
+        // — not at the top of the tree, and not a second navigation the artist has to redo by hand.
+        XCTAssertTrue(app.staticTexts["gallery.breadcrumbPath"].waitForExistence(timeout: 15),
+                      "the gallery reopens inside the folder, not at the top of the tree")
+        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label, "Projects / Scene 1")
         XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 10),
-                      "and it is drawn inside the folder it was made in")
+                      "and the project just left is right there, inside the folder it was made in")
         shot(app, "04-project-inside-the-folder")
 
-        // Out again, by the breadcrumb's own control.
+        // Out again, by the breadcrumb's own control — the folder is at the top level and the
+        // project inside it is not, which is what separates a tree from decoration.
         app.buttons["gallery.breadcrumbBack"].tap()
-        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 1"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 1"].waitForExistence(timeout: 10),
+                      "the top of the tree still shows the folder")
         XCTAssertFalse(app.staticTexts["gallery.breadcrumbPath"].exists,
                        "the back control returns to the top, not to a folder above the top")
+        XCTAssertFalse(app.buttons["gallery.tileMenu.Untitled"].exists,
+                       "and the project made inside the folder is not sitting at the top level — "
+                       + "which is what it would do if the folder were decoration")
     }
 
     /// Renaming a folder is on the tile, and the tile redraws under the new name. Asserted through
@@ -255,7 +260,8 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
         returnToGallery(app)
 
-        app.buttons["gallery.folderTile.Scene 7"].tap()
+        // TODO (87): leaving lands back inside Scene 7 itself — no tile left to tap back into,
+        // the artist is already looking at what they just left.
         let tileMenu = app.buttons["gallery.tileMenu.Untitled"]
         XCTAssertTrue(tileMenu.waitForExistence(timeout: 15),
                       "PREMISE: the project is inside Scene 7 before anything is deleted")
@@ -296,6 +302,13 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25),
                       "the restored project opens from the folder it was restored into")
         returnToGallery(app)
+
+        // TODO (87): back inside Scene 7 again — step out to the top of the tree, where the
+        // folder's own menu (and the delete Act two needs) lives.
+        XCTAssertTrue(app.staticTexts["gallery.breadcrumbPath"].waitForExistence(timeout: 15),
+                      "the gallery reopens inside the folder the reopened project lives in")
+        app.buttons["gallery.breadcrumbBack"].tap()
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 7"].waitForExistence(timeout: 10))
 
         // ── Act two: the folder is gone by the time the restore happens.
         app.buttons["gallery.folderMenu.Scene 7"].tap()

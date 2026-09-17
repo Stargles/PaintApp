@@ -937,8 +937,6 @@ extension CanvasManager {
         // door. A copy with the curves and no marks is a layer whose animation exists and whose
         // keyframes are invisible: the timeline shows none, and the next keyframe press has no
         // neighbour to seed the held value onto.
-        // `let`, not `var`: since §18.6 the only line below that touches `copy` is the tile
-        // assignment, and that setter is `nonmutating` because the tile is a reference cell.
         let copy = Layer(id: UUID(), name: source.name + " copy", hasCustomName: source.hasCustomName,
                          opacity: source.opacity,
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
@@ -968,10 +966,6 @@ extension CanvasManager {
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
-        // Into the duplicate's **own** `ThumbnailTile`, which `Layer(...)` just minted — the same
-        // point the cel loop above makes: a duplicate is a new layer, so it gets a copy of the
-        // picture rather than a share of the original's cell.
-        copy.thumbnail = source.thumbnail
         withStructureUndo(label: .duplicateLayer) {
             layers.insert(copy, at: index + 1)
             currentLayerIndex = index + 1

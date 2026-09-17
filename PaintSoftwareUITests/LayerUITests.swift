@@ -1241,6 +1241,134 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertEqual(canvasSwatch.value as? String, "336699",
                        "The pick reached canvasBackgroundColor — the row's own binding, not the brush's")
     }
+
+    /// **TODO (78): the layer panel's thumbnail belongs to the frame it is drawn for.** Two frames,
+    /// two drawings — a stroke through the middle of the first, nothing at all on the second — and
+    /// the row's own picture has to tell them apart at every scrub, not settle on whichever cel was
+    /// rendered last.
+    ///
+    /// **Cold start, and the two operands are pixels, not presence.** A thumbnail exists on screen
+    /// the whole time this test runs; what would go red under the bug this pins is its *content* —
+    /// the second frame's cel is never the one on screen when its (blank) tile is installed, so the
+    /// old layer-level cache (`CanvasManager.installThumbnail`'s second write, removed by this item)
+    /// could go on showing the first frame's ink after the scrub with nothing to tell it otherwise.
+    func testEachFramesLayerPanelThumbnailShowsThatFramesOwnDrawing() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        // Off, because onion skin is on by default and its ghost of frame 0's stroke would still
+        // show through on the new blank frame's *canvas* — see `testABehindGhostIsCutAwayWhere...`
+        // for the same ghost used deliberately. `Cel.thumbnail` is rendered from the cel's own stored
+        // tiers and never composites a ghost, so the panel picture this test is actually about is
+        // unaffected either way; this is only for the canvas-level PREMISE checks below.
+        let onionToggle = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onionToggle.waitForExistence(timeout: 5), "PREMISE: the onion skin toggle exists")
+        onionToggle.tap()
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "PREMISE: the canvas is up")
+
+        // Frame 0 — a stroke through the middle, drawn *before* the layer panel opens: a touch on
+        // the canvas closes whatever panel is up (`DrawingView`'s `canvasManager.interactionBegan`
+        // sink, `activePanel = .none`), so opening it first would only have it close again here.
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                       "PREMISE: the stroke crosses the canvas centre")
+
+        openLayerPanel(app)
+        let thumbnail = app.images["layerPanel.row.0.thumbnail"]
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 5), "PREMISE: the layer row draws a thumbnail")
+        XCTAssertTrue(waitForThumbnail(app, layerIndex: 0, whitish: false),
+                      "the layer panel never shows frame 0's own ink")
+        let inkedPixel = try XCTUnwrap(rgbaPixel(of: thumbnail, dx: 0.5, dy: 0.5))
+        shot(app, "78-01-frame0-inked-thumbnail")
+
+        // Everything from here on is a timeline gesture, not a canvas touch, so the panel opened
+        // above stays up throughout — `AnimationTimeline` deliberately has no
+        // `interactionBegan` sink of its own (see its own doc comment on that).
+        //
+        // Shrink the block so there is a gap, and add an empty drawing into it — frame 0's cel keeps
+        // its ink; the new cel starts blank. `AnimationTimeline`'s "Add Drawing" moves the playhead
+        // onto the new cel as part of the same tap (`goToFrame`), so nothing here scrubs separately.
+        performDrag(app, identifier: "timeline.cel.0.0.rightHandle", totalDelta: -260)
+        let firstBlock = app.otherElements["timeline.cel.0.0"]
+        let shrunk = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0),
+                                   "Could not read the block after shrinking it")
+        XCTAssertLessThan(shrunk.length, 12, "Setup: the drag has to leave a gap for a second drawing")
+        let gapSlot = firstBlock.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5))
+        gapSlot.tap()
+        gapSlot.tap()
+        let addDrawing = app.buttons["Add Drawing"]
+        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5),
+                      "a second tap on the empty slot opens its menu")
+        addDrawing.tap()
+
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+                     "PREMISE: the new cel starts blank")
+        // Not a wait for "whitish": `ThumbnailRenderer` draws into a *transparent* format
+        // (`PixelOps.transparentFormat()`), so a blank cel's own tile is not painted white — it
+        // shows whatever is behind the row once `configureLayerRow` drops the nil-thumbnail's
+        // `.white` fallback background. What must not happen, regardless of what colour a blank
+        // tile settles on, is the row going on showing frame 0's own ink — so this waits for the
+        // pixel to move off that ink and reports whatever it moved to.
+        let blankPixel = try XCTUnwrap(
+            waitForThumbnailChange(app, layerIndex: 0, awayFrom: inkedPixel),
+            "the layer panel is still showing frame 0's own ink on a cel that has none of its own "
+            + "— the stale-cache bug TODO (78) exists to fix")
+        shot(app, "78-02-new-frame-blank-thumbnail")
+
+        XCTAssertNotEqual([inkedPixel.r, inkedPixel.g, inkedPixel.b],
+                          [blankPixel.r, blankPixel.g, blankPixel.b],
+                          "the two frames' thumbnails read the same pixel at their centre, which is "
+                          + "not what two differently-inked frames should draw")
+    }
+
+    /// Polls the layer row's thumbnail at its centre until it reads `whitish` (or fails to) or
+    /// `timeout` elapses. The picture arrives through `CanvasManager`'s 400 ms debounce and an
+    /// off-main-thread render — `PaintUITestCase.waitForTile` documents the same race for the
+    /// timeline's own tiles — so an instant read is a race, not a bug.
+    private func waitForThumbnail(_ app: XCUIApplication, layerIndex: Int, whitish: Bool,
+                                  timeout: TimeInterval = 15) -> Bool {
+        let thumbnail = app.images["layerPanel.row.\(layerIndex).thumbnail"]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if isWhitish(rgbaPixel(of: thumbnail, dx: 0.5, dy: 0.5)) == whitish { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
+    /// Polls the layer row's thumbnail at its centre until its pixel no longer matches `pixel`
+    /// (comparing colour only — an installed tile's alpha can differ from a background fallback's
+    /// without the *picture* having changed), returning whatever it changed to. Nil on timeout.
+    /// Deliberately does not assume a destination colour — see the caller for why "blank" is not
+    /// "white" here — only that the row must not go on showing a colour that belongs to a different
+    /// frame.
+    private func waitForThumbnailChange(_ app: XCUIApplication, layerIndex: Int,
+                                        awayFrom pixel: (r: UInt8, g: UInt8, b: UInt8, a: UInt8),
+                                        timeout: TimeInterval = 15)
+        -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
+        let thumbnail = app.images["layerPanel.row.\(layerIndex).thumbnail"]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let current = rgbaPixel(of: thumbnail, dx: 0.5, dy: 0.5),
+               [current.r, current.g, current.b] != [pixel.r, pixel.g, pixel.b] {
+                return current
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return nil
+    }
+
+    /// Keeps a screenshot in the result bundle so a person — or an agent reading it back — can look
+    /// at what the test drove, per CLAUDE.md's *"drive it in the simulator and look at it"*.
+    private func shot(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 }
 
 

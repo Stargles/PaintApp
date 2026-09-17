@@ -1,7 +1,7 @@
 import UIKit
 
 /// **One rendered thumbnail, held by reference so that installing it is not a mutation of the
-/// `@Published` array the cel or layer lives in.** PERFORMANCE.md §18.6.
+/// `@Published` array the cel lives in.** PERFORMANCE.md §18.6.
 ///
 /// The problem it solves is not the tile's own cost — §18 had already taken the render off the main
 /// thread, leaving `installThumbnail` at a fraction of a millisecond. It is that the *write*
@@ -10,14 +10,21 @@ import UIKit
 /// MEASURED at ~43 ms of main-thread busy on the owner's iPad 9 — two orders of magnitude more than
 /// the thing it delivered.
 ///
-/// **It is one storage location, not a shadow of one.** `Cel.thumbnail` and `Layer.thumbnail` are
-/// accessors over this and there is no other place a tile is kept, which is the difference between
-/// this and a side-channel cache keyed by cel id: nothing can hold a second opinion, because there
-/// is nothing else to hold it in. What the arrangement does change is *semantics* — two `Cel` values
-/// with the same `id` share one cell, so a copy taken for an undo snapshot or an off-thread render
-/// batch reads the tile the live cel has now rather than the one it had when the copy was taken.
-/// For a picture that is *derived* from the cel's content that is the answer you want; a copy
-/// carrying a stale tile is exactly the failure this cannot have.
+/// **It is one storage location, not a shadow of one.** `Cel.thumbnail` is an accessor over this and
+/// there is no other place a tile is kept, which is the difference between this and a side-channel
+/// cache keyed by cel id: nothing can hold a second opinion, because there is nothing else to hold it
+/// in. What the arrangement does change is *semantics* — two `Cel` values with the same `id` share
+/// one cell, so a copy taken for an undo snapshot or an off-thread render batch reads the tile the
+/// live cel has now rather than the one it had when the copy was taken. For a picture that is
+/// *derived* from the cel's content that is the answer you want; a copy carrying a stale tile is
+/// exactly the failure this cannot have.
+///
+/// **`Layer` held a second `ThumbnailTile` of its own once, mirroring whichever cel was at the
+/// playhead — and that second opinion is exactly what TODO (78) found stale.** Nothing re-mirrored it
+/// when `currentFrame` alone moved, so a scrub onto an already-rendered cel could keep showing
+/// whichever cel had been live the last time something else happened to install one. The layer panel
+/// now reads the displayed cel's own tile directly (`LayerRowModel.init`), which is what "one storage
+/// location" above was always meant to guarantee.
 ///
 /// **Nothing here notifies.** A cell has no back-reference to the document and giving it one would
 /// be the duplicate-truth spaghetti this exists to avoid, so telling the views is

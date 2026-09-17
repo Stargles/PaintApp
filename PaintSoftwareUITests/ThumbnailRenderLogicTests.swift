@@ -818,9 +818,6 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[0].cels[0].thumbnail === image,
                       "the cel is not carrying the image that was installed on it, so the write "
                       + "went somewhere the readers do not look")
-        XCTAssertTrue(manager.layers[0].thumbnail === image,
-                      "the layer rail's tile did not follow the cel under the playhead, which is "
-                      + "the second of `installThumbnail`'s two writes")
     }
 
     /// **The send is the replacement for the SwiftUI pass, so it is pinned by the same test that
@@ -860,14 +857,63 @@ final class ThumbnailRenderLogicTests: XCTestCase {
 
         XCTAssertNil(manager.layers[0].cels[0].thumbnail,
                      "the cel still carries a tile after `clearThumbnail`")
-        XCTAssertNil(manager.layers[0].thumbnail,
-                     "the layer rail still carries the tile of a cel that has none")
         XCTAssertEqual(announced,
                        [CanvasManager.CelLocation(layerID: manager.layers[0].id,
                                                   celID: manager.layers[0].cels[0].id)],
                        "clearing a tile announced \(announced.count) location(s) rather than one, so "
                        + "the timeline block would keep drawing a picture the document has thrown "
                        + "away")
+    }
+
+    // MARK: - TODO (78): the layer panel's picture follows the displayed cel, never a cache of one
+
+    /// **The bug, reproduced at the model.** Two installs land while frame 0 is on screen — exactly
+    /// what a load-time backfill or an earlier debounced regen does, off to the side of whatever the
+    /// playhead happens to be showing — and only *afterwards* does the playhead cross the boundary
+    /// onto the cel that was rendered off-screen. The old second write inside `installThumbnail` only
+    /// mirrored a tile onto `Layer.thumbnail` when its own cel was the one displayed *at that
+    /// instant*, so the mirror never caught up once the frame moved on its own; reading the displayed
+    /// cel's own `Cel.thumbnail` fresh (what `LayerRowModel` and `displayedCelIndex` do together) has
+    /// nothing to catch up, because it was never behind.
+    ///
+    /// Three cels stand in for the two shapes TODO (78) named: an ordinary hold (0..<4), an
+    /// in-between (4..<8, carrying an `interpolation` recipe), and a second hold (8..<12) — a hold
+    /// boundary at frame 4 and another at frame 8, crossed in either direction by nothing but `currentFrame`.
+    func testTheDisplayedThumbnailFollowsTheActiveCelAcrossAHoldBoundaryAndAnInBetween() throws {
+        let manager = deferredManager()
+        manager.layers[0].cels[0].frameCount = 4
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 4, frameCount: 4),
+                      "PREMISE: room for the in-between cel")
+        manager.layers[0].cels[1].interpolation = InterpolationRecipe()
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 8, frameCount: 4),
+                      "PREMISE: room for the second hold")
+        XCTAssertEqual(manager.layers[0].cels.count, 3,
+                       "PREMISE: three distinct cels now cover the scene, not one twelve-frame hold")
+
+        // Each cel gets its own picture while frame 0 is on screen — none of these installs is for
+        // the cel the playhead is showing except the first.
+        let holdA = tile(manager, cel: 0)
+        let inBetween = tile(manager, cel: 1)
+        let holdB = tile(manager, cel: 2)
+        manager.installThumbnail(holdA, layerIndex: 0, celIndex: 0)
+        manager.installThumbnail(inBetween, layerIndex: 0, celIndex: 1)
+        manager.installThumbnail(holdB, layerIndex: 0, celIndex: 2)
+
+        // Three scrubs, each crossing into a cel whose tile was installed while a different frame was
+        // showing — nothing here re-installs anything, which is the whole point: a frame change alone
+        // must be enough.
+        let scrubs: [(frame: Int, expected: UIImage, label: String)] =
+            [(2, holdA, "the first hold"), (5, inBetween, "the in-between"), (10, holdB, "the second hold")]
+        for scrub in scrubs {
+            manager.currentFrame = scrub.frame
+            let celIndex = try XCTUnwrap(manager.displayedCelIndex(inLayer: 0, atFrame: manager.currentFrame),
+                                         "no cel is active at frame \(scrub.frame)")
+            let shown = manager.layers[0].cels[celIndex].thumbnail
+            XCTAssertTrue(shown === scrub.expected,
+                          "frame \(scrub.frame) is showing \(scrub.label)'s cel, but the thumbnail a "
+                          + "reader would land on is not the picture installed for that cel — a scrub "
+                          + "landed on a cel whose picture is not its own")
+        }
     }
 
     /// **A canvas resize is the operation that made `clearThumbnail` necessary**, because it moves
