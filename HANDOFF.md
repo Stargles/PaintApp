@@ -34,14 +34,16 @@ Release-iphoneos/PaintSoftware.app` (same profile) and was refused by the device
 `unavailable` — asleep or off the network; install it as soon as `devicectl list devices` says
 `available`. It adds the colour picker, effects, the stream fixes and the bounded fill.
 
-**The Windows laptop was offline the whole session** (`tailscale status`: last seen 10+ h). (98)
-and (99) merged C# that has never been compiled — `AdmissionPolicy.cs`, `MdnsAdvertiser.cs`,
-`DnsWireFormat.cs`, `SingleInstanceGuard.cs` and their three test files under `streamer/`. The first
-thing to do when it is up: `tools/windows/streamer-remote.sh deploy`, `dotnet test` over SSH, fix
-what does not compile, `tools/stream/stream-client-check.py --host 100.104.85.111`. The install
-script now makes Start-menu and desktop shortcuts and a **triggerless** `PaintStreamer` task that
-exists only so `streamer-remote.sh start` can reach kevin's session; the laptop's current install
-still has the logon trigger until `deploy` runs.
+**The Windows laptop is deployed and proved.** It woke at the end of the session: the (98)/(99) C#
+compiled clean, `dotnet test` 131/131 (the `FileOutboxTests` race fixed and its BUGS entry gone),
+`install-streamer.ps1` ran — Start-menu and desktop shortcuts, a **triggerless** `PaintStreamer` task
+kept only so `streamer-remote.sh start` can reach kevin's session, and **program-scoped firewall
+rules** (TCP 47301, UDP 5353 for mDNS, Private+Public). Those rules are the fix for the owner's "cannot
+connect": Windows Firewall silently mints a per-program *Block* rule the first time a headless app
+listens and nobody answers its prompt, and it re-triggers on every redeploy; docs/STREAM.md §4 has
+it. `stream-client-check.py --host 100.104.85.111` PASSes (24.6 fps, 0 violations) and a second
+launch exits silently. The laptop's own Windows Hello PIN is broken (`0x80090011`) — the owner's
+problem, not ours, and nothing we deploy needs elevation from kevin.
 
 ## What is left
 
@@ -111,7 +113,7 @@ the spec it touched.
 
 ## Waiting on the owner
 
-- The four device checks above, and the laptop's first `deploy`.
+- The four device checks above, and a real streaming session from the laptop on `f42052c`+.
 - **(79)** log or linear; **(92)**'s rule; the colour picker's opening tab.
 - **BUGS.md** carries the watchdog, the `FileOutboxTests` race, the stepped-split timing change, the
   simulator-only keyboard band, and the five `.popover`s.
