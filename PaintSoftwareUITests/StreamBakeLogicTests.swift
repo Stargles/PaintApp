@@ -69,7 +69,6 @@ final class StreamBakeLogicTests: XCTestCase {
     /// Parks the frame source on `color` at `index` and runs one tick.
     private func feed(_ fixture: Fixture, color: UIColor, index: Int) {
         let image = solidImage(color)
-        fixture.manager.streamCoordinator.onLayerNeedsRepaint = { _ in }
         fixture.manager.streamCoordinator.frameSourceOverride = { endpoint in
             endpoint == Self.endpoint ? (index, image) : nil
         }
@@ -358,11 +357,15 @@ final class StreamBakeLogicTests: XCTestCase {
     // MARK: - The snapshot's size
 
     /// A decoded frame whose pixel size disagrees with the STATUS-reported size is resampled to the
-    /// reported size, so the placed image's rect is the rect the stream drew into.
-    func testASnapshotIsResampledToTheStreamsOwnSizeWhenTheyDisagree() {
+    /// reported size, so the placed image's rect is the rect the stream drew into — and one whose
+    /// size agrees is **copied, not kept**: `displayFrame` wraps the decoder's pool buffer, and a
+    /// bake that held the wrapper pinned that buffer for the life of the document (TODO (97)).
+    func testASnapshotIsACopyAtTheStreamsOwnSize() {
         let frame = UIImage(cgImage: solidImage(.green, size: CGSize(width: 16, height: 8)))
         let same = CanvasManager.streamSnapshot(frame, fitting: CGSize(width: 16, height: 8))
-        XCTAssertTrue(same === frame, "the same object when nothing needs doing")
+        XCTAssertFalse(same === frame, "a copy, so the decoder's buffer is not pinned")
+        XCTAssertFalse(same.cgImage === frame.cgImage, "down to the pixels")
+        XCTAssertEqual(same.size, CGSize(width: 16, height: 8))
         let fitted = CanvasManager.streamSnapshot(frame, fitting: CGSize(width: 8, height: 4))
         XCTAssertEqual(fitted.size, CGSize(width: 8, height: 4))
         XCTAssertEqual(fitted.scale, 1)

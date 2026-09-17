@@ -236,6 +236,9 @@ final class StrokeCanvasView: UIView {
                 unlandedInk.removeAll()
                 // The ordering guard for an intermediate frame is about *this* canvas's counter.
                 shownVectorVersion = StrokeCanvasView.nothingDisplayed
+                // A stream surface shows a window of the canvas it was drawn from, at that
+                // canvas's element's rectangle; the next tick presents the new cel's own.
+                removeStreamSurfaces()
             }
             refreshDisplay()
         }
@@ -293,7 +296,14 @@ final class StrokeCanvasView: UIView {
     func hostBlankingChanged(to blanked: Bool) {
         guard hostIsBlanked != blanked else { return }
         hostIsBlanked = blanked
-        if !blanked { refreshDisplayIfStale() }
+        if blanked {
+            // A surface nobody can see is not worth a window draw per frame, and a base under one
+            // is not refreshed for stream frames — so the surfaces go, and the edge that comes back
+            // repaints the base with the element's newest frame in it.
+            removeStreamSurfaces()
+        } else {
+            refreshDisplayIfStale()
+        }
     }
 
     /// The `VectorCanvas.version` a background rasterize is running for, or nil. The other half of
@@ -550,10 +560,74 @@ final class StrokeCanvasView: UIView {
     /// `displayedRasterVersion`.
     func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) {
         if let vectorCanvas {
-            if displayedVectorVersion != vectorCanvas.version { refreshDisplay(waitingForTheRender: wait) }
+            guard displayedVectorVersion != vectorCanvas.version else { return }
+            // **A stream frame moves `version` and not `committedVersion`** (`VectorCanvas.setStreamFrame`),
+            // and while a surface is presenting the element the base underneath need not be redrawn
+            // for it: the surface covers exactly the pixels that changed. Redrawing it anyway is what
+            // TODO (97) was — a canvas-sized rasterize and upload per frame. The base catches up on
+            // the next committed change, or when the surfaces go (a cel switch, a blanked host).
+            if !streamSurfaces.isEmpty, baseCommittedVersion == vectorCanvas.committedVersion { return }
+            refreshDisplay(waitingForTheRender: wait)
         } else if let raster, displayedRasterVersion != raster.version {
             refreshDisplay()
         }
+    }
+
+    // MARK: - A live stream's window
+
+    /// One `StreamSurfaceView` per stream element this host is presenting live, keyed by element
+    /// id — see that class. Removed whenever the picture they cover changes shape under them: a
+    /// cel switch, a blanked host, a derived base, the Move box lifting or landing.
+    private var streamSurfaces: [UUID: StreamSurfaceView] = [:]
+
+    /// `VectorCanvas.committedVersion` when the base slot was last refreshed — what
+    /// `refreshDisplayIfStale` compares to tell a stream frame's `version` move from an edit's.
+    private var baseCommittedVersion = StrokeCanvasView.nothingDisplayed
+
+    /// **Presents one stream element's newest frame** — `ScreenStreamCoordinator.onStreamFrame`'s
+    /// half of the tick, and `refreshDisplay`'s way of keeping a surface current when the ink
+    /// around the element changes. Draws the element's window (`VectorCanvas.drawStreamWindow`)
+    /// into the element's surface off the main thread and shows it over the base; nothing
+    /// canvas-sized is allocated, rasterized or uploaded.
+    ///
+    /// `isolating`/`posedBy` are the Move box's case: the surface goes inside `floatView`, so it
+    /// rides the box's transform, and the window is the lifted ids alone as the float shows them.
+    /// Refused — and any surface dropped — while nothing this view draws reaches the screen, or
+    /// while a derived picture owns the base slot (a posed frame shows the stream where the pose
+    /// puts it, which the memo's own coordinates cannot say; that frame is stale by design and the
+    /// bar says so — `StreamBarState.sandwichNote`).
+    func presentStreamFrame(elementID: UUID, isolating ids: Set<UUID>? = nil,
+                            posedBy: [UUID: PoseMap] = [:]) {
+        guard let vectorCanvas, !hostIsBlanked, interpolationImage == nil,
+              (ids != nil) == (vectorFloatBase != nil),
+              let window = vectorCanvas.streamWindow(id: elementID, posedBy: posedBy[elementID]) else {
+            removeStreamSurface(elementID)
+            return
+        }
+        let surface: StreamSurfaceView
+        if let existing = streamSurfaces[elementID] {
+            surface = existing
+        } else {
+            surface = StreamSurfaceView()
+            if ids != nil {
+                floatView.addSubview(surface)
+            } else {
+                insertSubview(surface, aboveSubview: imageView)
+            }
+            streamSurfaces[elementID] = surface
+        }
+        surface.present(window: window, placement: vectorCanvas.transform, on: Self.renderQueue) { cg in
+            vectorCanvas.drawStreamWindow(id: elementID, into: cg, isolating: ids, posedBy: posedBy)
+        }
+    }
+
+    private func removeStreamSurface(_ elementID: UUID) {
+        streamSurfaces.removeValue(forKey: elementID)?.removeFromSuperview()
+    }
+
+    private func removeStreamSurfaces() {
+        for surface in streamSurfaces.values { surface.removeFromSuperview() }
+        streamSurfaces.removeAll()
     }
 
     /// A derived interpolated frame to show in place of this cel's own content. Non-nil exactly
@@ -607,6 +681,11 @@ final class StrokeCanvasView: UIView {
         // Move with no selection lifts a float now, so there is one latch for both.
         guard vectorFloatBase == nil else { return }
         displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
+        baseCommittedVersion = vectorCanvas?.committedVersion ?? Self.nothingDisplayed
+        // A committed change under a live stream — ink drawn over it, an undo — is in the surface's
+        // window too, and the surface is what the artist sees there. Redrawn from the same list the
+        // base is about to be, so the two agree; dropped where `presentStreamFrame` refuses.
+        for elementID in streamSurfaces.keys { presentStreamFrame(elementID: elementID) }
         guard let vectorCanvas else {
             // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
@@ -825,16 +904,9 @@ final class StrokeCanvasView: UIView {
         // `VectorCanvas.renderIsolated(ids:)`. The view is still latched: the piece is real geometry
         // and it lands when the move bakes.
         floatView.isHidden = image == nil
-    }
-
-    /// **Swaps the latched piece's picture without moving it** — for a lifted stream element whose
-    /// frame just changed (`ScreenStreamCoordinator.onFloatNeedsRepaint`). The latch, the base and
-    /// the view's transform all stay; only the bitmap under them is new, so the box the artist is
-    /// dragging keeps showing the live picture at the pose they have dragged it to.
-    func replaceVectorFloatImage(_ image: UIImage?) {
-        guard vectorFloatBase != nil else { return }
-        floatView.image = image
-        floatView.isHidden = image == nil
+        // A lifted stream is presented inside `floatView` from the next tick; a surface over the
+        // base would show it at the rest position under a box that has moved on.
+        removeStreamSurfaces()
     }
 
     /// Shows the piece under a **projective** map without rasterizing anything — a lasso Distort's
@@ -880,6 +952,9 @@ final class StrokeCanvasView: UIView {
         floatView.transform = .identity
         floatView.image = nil
         floatView.isHidden = true
+        // The surfaces inside the float went with its picture; the base is about to be rasterized
+        // with the element landed, and the next tick presents it over that.
+        removeStreamSurfaces()
         refreshDisplay()
     }
 

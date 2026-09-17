@@ -148,23 +148,22 @@ nonisolated final class H264StreamDecoder {
 
     /// The newest decoded picture as a `CGImage`, or nil before the first frame. Converted with
     /// `VTCreateCGImageFromCVPixelBuffer` and memoized per frame index. Safe from any thread.
-    func latestCGImage() -> CGImage? {
+    func latestCGImage() -> CGImage? { latestImage()?.image }
+
+    /// The newest decoded picture together with its frame index, read under one lock so the index
+    /// a caller records is the index of the picture it was handed — a second acquisition would let
+    /// a frame land between the two and pair the older picture with the newer number. **One
+    /// `CGImage` per frame index**: two reads of one frame hand back the same object, which is what
+    /// lets a consumer tell "the frame I already hold" from a new one by identity.
+    func latestImage() -> (index: Int, image: CGImage)? {
         slotLock.lock()
         defer { slotLock.unlock() }
         guard let buffer = latestBuffer else { return nil }
-        if let cached = cachedImage, cached.index == latestIndex { return cached.image }
+        if let cached = cachedImage, cached.index == latestIndex { return cached }
         var image: CGImage?
         let status = VTCreateCGImageFromCVPixelBuffer(buffer, options: nil, imageOut: &image)
         guard status == noErr, let image else { return nil }
         cachedImage = (latestIndex, image)
-        return image
-    }
-
-    /// `latestCGImage()` together with its frame index, in one lock, so a caller can record which
-    /// frame it drew without a second acquisition racing a new frame in.
-    func latestImage() -> (index: Int, image: CGImage)? {
-        guard let image = latestCGImage() else { return nil }
-        slotLock.lock(); defer { slotLock.unlock() }
         return (latestIndex, image)
     }
 

@@ -1454,56 +1454,29 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// Called from `reconcileLayers` — see `CanvasManager.syncFrameBake` for why that is the
         /// cadence rather than a hook.
-        /// Installs the two per-tick repaint closures once, then reconciles the clients.
+        /// Installs the per-tick present closure once, then reconciles the clients.
         ///
-        /// **A host repaint and not a SwiftUI pass** is the whole point of the closures: the tick
+        /// **A host present and not a SwiftUI pass** is the whole point of the closure: the tick
         /// runs thirty times a second while a laptop is streaming, and `objectWillChange` re-runs
-        /// every view body observing the manager. `refreshDisplayIfStale` rasterizes off the main
-        /// thread and coalesces — a tick that lands while a render is in flight answers `.wait`.
-        /// The float closure re-mints the Move box's latched bitmap for the lifted ids alone.
+        /// every view body observing the manager. `presentStreamFrame` draws the element's window
+        /// off the main thread into a surface of its own and coalesces on its own — a frame that
+        /// lands while one is drawing is dropped, and the next draw shows the newest picture.
+        /// While the Move box holds the element the surface rides inside the float, drawn from the
+        /// lifted ids alone as the float shows them.
         private func syncStreamCoordinator() {
             let coordinator = canvasManager.streamCoordinator
-            if coordinator.onLayerNeedsRepaint == nil {
-                coordinator.onLayerNeedsRepaint = { [weak self] layerID in
-                    self?.layerHosts[layerID]?.strokeView.refreshDisplayIfStale()
-                }
-                coordinator.onFloatNeedsRepaint = { [weak self] layerID in
-                    self?.refreshStreamFloat(layerID: layerID)
+            if coordinator.onStreamFrame == nil {
+                coordinator.onStreamFrame = { [weak self] layerID, elementID in
+                    guard let self, let host = self.layerHosts[layerID] else { return }
+                    if let part = self.canvasManager.vectorFloat?.part(carrying: elementID, onLayer: layerID) {
+                        host.strokeView.presentStreamFrame(elementID: elementID, isolating: part.insideIDs,
+                                                           posedBy: part.poses)
+                    } else {
+                        host.strokeView.presentStreamFrame(elementID: elementID)
+                    }
                 }
             }
             coordinator.sync()
-        }
-
-        /// Whether a float re-mint for a streaming element is already rendering. One at a time and
-        /// the rest dropped — the next tick asks again with a newer frame anyway.
-        private var streamFloatRenderInFlight = false
-
-        /// **Re-mints the Move box's latched bitmap off the main thread.** `renderIsolated` is a
-        /// canvas-sized walk — MEASURED at ~15 ms a tick on the simulator at 2048² with a 1080p
-        /// frame, against ~0.6 ms for the whole tick once the element is committed — so on the
-        /// main actor it would be the very cost STREAM.md §5.3 forbids. It takes the canvas's own
-        /// locks like every other off-main render, and the image lands on the next main turn,
-        /// guarded against the float having ended meanwhile.
-        private func refreshStreamFloat(layerID: UUID) {
-            guard !streamFloatRenderInFlight, let float = canvasManager.vectorFloat,
-                  let part = float.parts.first(where: { $0.layerID == layerID }),
-                  let host = layerHosts[layerID], host.strokeView.hasVectorFloat,
-                  let vector = canvasManager.vectorCanvas(of: part) else { return }
-            streamFloatRenderInFlight = true
-            let ids = part.insideIDs
-            let poses = part.poses
-            DispatchQueue.global(qos: .userInteractive).async {
-                let image = vector.renderIsolated(ids: ids, posedBy: poses)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.streamFloatRenderInFlight = false
-                    guard let current = self.canvasManager.vectorFloat,
-                          current.parts.contains(where: { $0.layerID == layerID && $0.insideIDs == ids }),
-                          let host = self.layerHosts[layerID],
-                          host.strokeView.hasVectorFloat else { return }
-                    host.strokeView.replaceVectorFloatImage(image)
-                }
-            }
         }
 
         private func syncFrameBake() {

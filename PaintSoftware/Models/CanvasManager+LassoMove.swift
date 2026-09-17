@@ -403,10 +403,10 @@ struct VectorFloat {
         parts.contains { $0.layerID == layerID && (celID == nil || $0.celID == celID) }
     }
 
-    /// Whether `elementID` is travelling from `layerID` — what a stream tick asks to know whether a
-    /// fresh frame belongs on the layer's own host or on the float's bitmap.
-    func carries(elementID: UUID, onLayer layerID: UUID) -> Bool {
-        parts.contains { $0.layerID == layerID && $0.insideIDs.contains(elementID) }
+    /// The part carrying `elementID` from `layerID`, if it is travelling — what a stream frame asks
+    /// to know whether it is presented over the layer's own host or inside the float, and as what.
+    func part(carrying elementID: UUID, onLayer layerID: UUID) -> VectorFloatPart? {
+        parts.first { $0.layerID == layerID && $0.insideIDs.contains(elementID) }
     }
 
     /// Whether the layer should currently be showing the float through Core Animation. False between

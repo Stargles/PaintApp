@@ -8,6 +8,8 @@ import UIKit
 /// headlessly; the tick is driven through `ScreenStreamCoordinator.frameSourceOverride`, a
 /// per-endpoint image source standing in for a decoder's slot, and asserted on what is *drawn*
 /// rather than on a flag — a tick that wrote nothing to the picture would fail the pixel read.
+/// TODO (96)'s two sentences are the "not on screen" section: a cel the artist is not looking at
+/// is written all the same, so coming back to it finds the newest picture without another frame.
 @MainActor
 final class StreamInsertLogicTests: XCTestCase {
 
@@ -174,29 +176,38 @@ final class StreamInsertLogicTests: XCTestCase {
     // MARK: - The tick
 
     /// A manager with a committed stream on frame 0..12, a frame source that answers `image` at
-    /// `index`, and the two repaint closures counting.
+    /// `index`, and the present closure counting.
     private func tickFixture(image: CGImage, index: Int = 1)
         -> (manager: CanvasManager, vector: VectorCanvas, stream: VectorStreamElement,
-            repaints: () -> Int, floatRepaints: () -> Int) {
+            presents: () -> Int, slot: (Int, CGImage) -> Void) {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.currentFrame = 0
         _ = manager.insertStream(host: "laptop", port: 47301, status: status(width: 8, height: 4))
         manager.commitVectorFloatIfNeeded()
         let (_, vector, stream) = streamCel(manager)!
-        var repaints = 0
-        var floatRepaints = 0
+        var presents = 0
+        var slot = (index, image)
         let coordinator = manager.streamCoordinator
-        coordinator.onLayerNeedsRepaint = { _ in repaints += 1 }
-        coordinator.onFloatNeedsRepaint = { _ in floatRepaints += 1 }
+        coordinator.onStreamFrame = { _, _ in presents += 1 }
         coordinator.frameSourceOverride = { endpoint in
-            endpoint.host == "laptop" ? (index, image) : nil
+            endpoint.host == "laptop" ? slot : nil
         }
-        return (manager, vector, stream, { repaints }, { floatRepaints })
+        return (manager, vector, stream, { presents }, { slot = ($0, $1) })
     }
 
-    /// **A tick puts the frame on the element and the picture changes.** Rendered and sampled: the
-    /// stream's rect is centred at (32, 32); before the tick it is the grey placeholder, after it is
-    /// solid green.
+    /// Whether a render of `vector` is `color` at the stream's centre (32, 32).
+    private func centreIs(_ color: UIColor, _ vector: VectorCanvas) -> Bool {
+        let p = pixel(vector.render(), 32, 32)
+        switch color {
+        case .green: return Int(p.g) > Int(p.r) + 100 && p.a == 255
+        case .red: return Int(p.r) > Int(p.g) + 100 && p.a == 255
+        default: return false
+        }
+    }
+
+    /// **A tick puts the frame on the element, the picture changes, and the element is presented.**
+    /// Rendered and sampled: the stream's rect is centred at (32, 32); before the tick it is the
+    /// grey placeholder, after it is solid green.
     func testATickDeliversTheFrameAndThePictureChanges() throws {
         let fixture = tickFixture(image: solidImage(.green))
         let before = pixel(fixture.vector.render(), 32, 32)
@@ -204,22 +215,19 @@ final class StreamInsertLogicTests: XCTestCase {
 
         fixture.manager.streamCoordinator.tick()
 
-        XCTAssertEqual(fixture.repaints(), 1, "the layer host is asked to repaint once")
-        XCTAssertEqual(fixture.floatRepaints(), 0)
+        XCTAssertEqual(fixture.presents(), 1, "the displayed element is presented once")
         XCTAssertNotNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame)
-        let after = pixel(fixture.vector.render(), 32, 32)
-        XCTAssertEqual(after.a, 255)
-        XCTAssertGreaterThan(Int(after.g), Int(after.r) + 100, "the green frame reached the canvas")
+        XCTAssertTrue(centreIs(.green, fixture.vector), "the green frame reached the canvas")
         XCTAssertEqual(pixel(fixture.vector.render(), 2, 2).a, 0, "and nothing outside the rect")
     }
 
-    /// A second tick on the same frame index does nothing: no write, no repaint.
+    /// A second tick on the same frame index does nothing: no write, no present.
     func testATickOnAnUnchangedFrameIsFree() {
         let fixture = tickFixture(image: solidImage(.green))
         fixture.manager.streamCoordinator.tick()
         let version = fixture.vector.version
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 1, "the second tick found nothing new")
+        XCTAssertEqual(fixture.presents(), 1, "the second tick found nothing new")
         XCTAssertEqual(fixture.vector.version, version)
     }
 
@@ -233,37 +241,112 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertNotNil(fixture.vector.streams.first?.displayFrame, "the frame did land")
     }
 
+    /// **Sixty frames cost no canvas-sized render and hold no more memo than one** — TODO (97)'s
+    /// engine half. The tick writes the element and damages the memo's region; nothing here walks
+    /// the canvas, and the damaged memo is held as one base for the repair, not one per frame.
+    /// Each iteration in its own pool, so the count is of what a frame leaves behind, not of what
+    /// the loop has not released yet (CLAUDE.md's growth-measurement rule).
+    func testSixtyFramesRasterizeNothingAndHoldOneMemo() {
+        let fixture = tickFixture(image: solidImage(.green))
+        _ = fixture.vector.render()
+        let rasterizations = fixture.vector.rasterizations
+        let bytes = fixture.vector.cachedImageBytes
+        for index in 2...61 {
+            autoreleasepool {
+                fixture.slot(index, solidImage(index.isMultiple(of: 2) ? .red : .green))
+                fixture.manager.streamCoordinator.tick()
+            }
+        }
+        XCTAssertEqual(fixture.presents(), 60, "every new frame was presented")
+        XCTAssertEqual(fixture.vector.rasterizations, rasterizations, "and none was rasterized")
+        XCTAssertEqual(fixture.vector.cachedImageBytes, bytes, "the memo held for the repair is one picture")
+    }
+
     /// **No tick while playing** — STREAM.md §2.9.
     func testNoTickWhilePlaying() {
         let fixture = tickFixture(image: solidImage(.green))
         fixture.manager.play()
         XCTAssertTrue(fixture.manager.isPlaying, "Setup")
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 0)
+        XCTAssertEqual(fixture.presents(), 0)
         XCTAssertNil(fixture.vector.streams.first?.displayFrame)
         fixture.manager.stopPlayback()
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 1, "and it resumes on stop")
+        XCTAssertEqual(fixture.presents(), 1, "and it resumes on stop")
     }
 
-    /// A hidden layer is not fed; showing it again is.
-    func testAHiddenLayerIsNotFed() throws {
+    // MARK: - TODO (96): a cel that is not on screen still gets the frame
+
+    /// **A hidden layer's element is written and not presented, so showing the layer shows the
+    /// newest picture.** The owner: *"Same with hidden streams made visible."* Before the fix the
+    /// tick skipped a hidden layer outright, and the layer came back showing whatever it showed
+    /// when it was hidden until a frame arrived *after* — which a laptop whose screen is not
+    /// changing never sends. The picture is what the host draws when the layer comes back, and
+    /// `version` moving is what makes it draw at all.
+    func testAHiddenLayerIsFedAndNotPresented() throws {
         let fixture = tickFixture(image: solidImage(.green))
         let index = try XCTUnwrap(fixture.manager.layers.indices.last)
         fixture.manager.layers[index].isVisible = false
+        let version = fixture.vector.version
+
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 0)
+
+        XCTAssertEqual(fixture.presents(), 0, "nothing on screen to present")
+        XCTAssertGreaterThan(fixture.vector.version, version, "the host will repaint when the layer shows")
+        XCTAssertTrue(centreIs(.green, fixture.vector), "the picture is already the newest frame")
         fixture.manager.layers[index].isVisible = true
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 1)
+        XCTAssertEqual(fixture.presents(), 0, "no new frame, so nothing to present — the repaint drew it")
+        XCTAssertTrue(centreIs(.green, fixture.vector))
     }
 
-    /// A cel that is not the one at the current frame is not fed.
-    func testACelNotAtTheCurrentFrameIsNotFed() {
+    /// **A cel on another frame is written and not presented, and the frame change onto it finds
+    /// the newest picture.** The owner's first sentence: *"The stream does not reload when the
+    /// computer updated while on a different frame, and then the frame changes onto the one with
+    /// the stream."* Green lands on screen; the artist leaves; the laptop moves to red; the artist
+    /// comes back to a red cel without a further frame having to arrive.
+    func testTheFrameChangeOntoAStreamCelFindsTheNewestPicture() {
         let fixture = tickFixture(image: solidImage(.green))
-        fixture.manager.currentFrame = 20   // past the cel's [0, 12)
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 0)
+        XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: green on screen")
+
+        fixture.manager.currentFrame = 20   // past the cel's [0, 12)
+        fixture.slot(2, solidImage(.red))
+        let version = fixture.vector.version
+        fixture.manager.streamCoordinator.tick()
+
+        XCTAssertEqual(fixture.presents(), 1, "the away tick presented nothing")
+        XCTAssertGreaterThan(fixture.vector.version, version, "but the cel's picture is stale and says so")
+        XCTAssertTrue(centreIs(.red, fixture.vector), "and it holds red")
+
+        fixture.manager.currentFrame = 0
+        XCTAssertTrue(centreIs(.red, fixture.vector), "the frame change finds red with no tick at all")
+        fixture.manager.streamCoordinator.tick()
+        XCTAssertEqual(fixture.presents(), 1, "the same frame is not presented again")
+    }
+
+    /// **After Bake Frame the cels either side share one picture**, so a frame written while the
+    /// artist is on one side is what they find on the other — the split copies the element and the
+    /// copy's `StreamPicture` is the same box. Both canvases' memos are told, or the far cel would
+    /// hold the newest picture in its element and an old one in its memo.
+    func testTheCelsEitherSideOfABakeShareThePicture() throws {
+        let fixture = tickFixture(image: solidImage(.green))
+        fixture.manager.streamCoordinator.tick()
+        let layerIndex = try XCTUnwrap(fixture.manager.layers.indices.last)
+        XCTAssertEqual(fixture.manager.bakeStreamFrame(layerIndex: layerIndex, celIndex: 0, atFrame: 5), .baked)
+        let cels = fixture.manager.layers[layerIndex].cels
+        XCTAssertEqual(cels.count, 3, "Setup: [0–4] [5] [6–11]")
+        let far = try XCTUnwrap(cels[2].vector)
+        _ = far.render()
+        let farVersion = far.version
+
+        fixture.slot(2, solidImage(.red))
+        fixture.manager.streamCoordinator.tick()
+
+        XCTAssertTrue(try XCTUnwrap(far.streams.first).displayFrame === fixture.vector.streams.first?.displayFrame,
+                      "one picture between the two cels")
+        XCTAssertGreaterThan(far.version, farVersion, "the far cel's memo was told")
+        XCTAssertTrue(centreIs(.red, far), "and draws red when the artist gets there")
     }
 
     /// A frozen element is not fed — stage 2's Freeze reads this flag; the tick honours it now.
@@ -276,24 +359,22 @@ final class StreamInsertLogicTests: XCTestCase {
         }
         fixture.vector.bumpVersion()
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.repaints(), 0)
+        XCTAssertEqual(fixture.presents(), 0)
         XCTAssertNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame)
     }
 
-    /// **While the Move box holds the element, the tick refreshes the float and not the host** —
-    /// the frame is written for the commit, the layer's memo is left alone.
-    func testATickWhileTheElementFloatsRefreshesTheFloatNotTheHost() throws {
+    /// **While the Move box holds the element, the tick presents it and leaves the layer's memo
+    /// alone** — the frame is written for the commit, the float's surface shows it meanwhile.
+    func testATickWhileTheElementFloatsPresentsItAndNotTheMemo() throws {
         let fixture = tickFixture(image: solidImage(.green))
         XCTAssertTrue(fixture.manager.beginVectorMove(ofElementIDs: [fixture.stream.id]))
         let version = fixture.vector.version
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.floatRepaints(), 1)
-        XCTAssertEqual(fixture.repaints(), 0)
+        XCTAssertEqual(fixture.presents(), 1)
         XCTAssertEqual(fixture.vector.version, version, "the layer's own picture did not change")
         XCTAssertNotNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame, "held for the commit")
         fixture.manager.commitVectorFloatIfNeeded()
-        let after = pixel(fixture.vector.render(), 32, 32)
-        XCTAssertGreaterThan(Int(after.g), Int(after.r) + 100, "the commit draws the newest frame")
+        XCTAssertTrue(centreIs(.green, fixture.vector), "the commit draws the newest frame")
     }
 
     // MARK: - STATUS

@@ -128,7 +128,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         manager.layers[layerIndex].cels[0].frameCount = 4
         let image = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 4),
                                              size: CGSize(width: 8, height: 4))
-        XCTAssertTrue(manager.layers[layerIndex].cels[0].vector!.setStreamFrame(id: element.id, image: image))
+        XCTAssertTrue(manager.layers[layerIndex].cels[0].vector!.setStreamFrame(id: element.id, image: image, index: 1))
         XCTAssertEqual(manager.bakeStreamFrame(layerIndex: layerIndex, celIndex: 0, atFrame: 1), .baked)
 
         manager.currentFrame = 0
@@ -193,7 +193,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
         let image = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 4),
                                              size: CGSize(width: 8, height: 4))
-        XCTAssertTrue(vector.setStreamFrame(id: element.id, image: image))
+        XCTAssertTrue(vector.setStreamFrame(id: element.id, image: image, index: 1))
         coordinator.stateChanged(.connected, at: Self.endpoint)
         coordinator.statusArrived(status(), from: Self.endpoint)
         let version = vector.version
@@ -378,7 +378,6 @@ final class StreamBarStateLogicTests: XCTestCase {
                                      size: CGSize(width: 1920, height: 1080))
         }
         let coordinator = manager.streamCoordinator
-        coordinator.onLayerNeedsRepaint = { _ in }
         var slot: (Int, UIImage) = (1, frame(.green))
         coordinator.frameSourceOverride = { endpoint in
             endpoint == Self.endpoint ? (slot.0, slot.1.cgImage!) : nil
@@ -408,7 +407,7 @@ final class StreamBarStateLogicTests: XCTestCase {
                              "the rest picture is still green: that is what the note tells the artist")
 
         // An ordinary edit re-keys the frame, and the next rest picture is the red one.
-        vector.setStreamFrame(id: element.id, image: frame(.red))
+        vector.setStreamFrame(id: element.id, image: frame(.red), index: 3)
         vector.bumpVersion()
         manager.celContentChangedOutsideStroke(layerID: manager.layers[layerIndex].id,
                                                celID: manager.layers[layerIndex].cels[0].id)

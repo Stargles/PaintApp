@@ -95,7 +95,7 @@ final class StreamSandwichBench: XCTestCase {
                     let t0 = CFAbsoluteTimeGetCurrent()
                     // A correct per-tick path cannot leave `committedVersion` still — every memo the
                     // composite reads is keyed on it — so the frame is set through the edit seam here.
-                    vector.setStreamFrame(id: streamID, image: image)
+                    vector.setStreamFrame(id: streamID, image: image, index: index + 1)
                     vector.bumpVersion()
                     _ = vector.render()
                     let t1 = CFAbsoluteTimeGetCurrent()

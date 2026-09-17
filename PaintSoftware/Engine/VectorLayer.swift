@@ -838,7 +838,7 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
 /// arm in this file treat it exactly as they treat a placed photo or a video. What it adds is a
 /// **source that is a network address rather than a file**, and a picture that changes without any
 /// edit having been made — which is the whole of what makes it different, and the reason
-/// `VectorCanvas.setStreamFrame(id:image:)` exists beside the ordinary mutation seams.
+/// `VectorCanvas.setStreamFrame(id:image:index:)` exists beside the ordinary mutation seams.
 ///
 /// **`displayFrame` is runtime-only and never persisted**, in `VectorVideoElement.displayFrame`'s
 /// exact sense: the newest decoded frame the coordinator has handed this element, drawn by
@@ -890,9 +890,59 @@ struct VectorStreamElement: Identifiable, PlacedRectangle {
 
     /// **The newest frame the coordinator has delivered**, or nil before the first one arrives and
     /// on every load. Never encoded, never compared, and written through
-    /// `VectorCanvas.setStreamFrame(id:image:)` rather than through `elements =`, because a frame
-    /// arriving is not an edit — see that method for what it does and does not invalidate.
-    var displayFrame: UIImage? = nil
+    /// `VectorCanvas.setStreamFrame(id:image:index:)` rather than through `elements =`, because a
+    /// frame arriving is not an edit — see that method for what it does and does not invalidate.
+    /// **Shared by every copy of this element** — see `StreamPicture` for why a picture stored in
+    /// the value itself was a leak.
+    var picture = StreamPicture()
+    var displayFrame: UIImage? { picture.frame }
+}
+
+/// **The picture a stream shows, held by reference so every copy of the element shows the one
+/// newest frame.**
+///
+/// `VectorStreamElement` is a value, copied into every undo step that snapshots its list, into the
+/// neighbours a split makes, into a lasso move's float. A frame stored *in* the value went with
+/// each copy — and the frame is a wrap of one of VideoToolbox's pool buffers
+/// (`H264StreamDecoder.latestImage`), not a copy of its pixels, so every undo step recorded while
+/// the laptop streamed pinned one 1080p buffer for the life of the stack, unbudgeted
+/// (`VectorElement.byteCost` counts a stream as an address, correctly: the stack does not own the
+/// picture). Through a shared box every copy pins one buffer between them, an undo puts back a list
+/// whose stream shows the newest picture rather than the one from before the edit, and a split's
+/// two halves cannot disagree about what the laptop is showing. **A freeze detaches the box**
+/// (`VectorCanvas.setStreamFrozen`), so a frozen element's picture stops while its neighbours' go
+/// on; Bake Frame copies the pixels (`CanvasManager.streamSnapshot`), so a placed image pins
+/// nothing either.
+///
+/// `index` is the decoder's frame index the picture came with — 0 for a picture the load put back
+/// — and is what `VectorCanvas.setStreamFrame` compares to tell a new frame from one it has already
+/// been told about. Locked, because the walk reads `frame` off the main thread while the tick
+/// writes it on the main actor.
+final class StreamPicture {
+    private let lock = NSLock()
+    private var _frame: UIImage?
+    private var _index = 0
+
+    init(frame: UIImage? = nil, index: Int = 0) {
+        _frame = frame
+        _index = index
+    }
+
+    var frame: UIImage? {
+        lock.lock(); defer { lock.unlock() }
+        return _frame
+    }
+
+    var index: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _index
+    }
+
+    func set(_ frame: UIImage?, index: Int) {
+        lock.lock(); defer { lock.unlock() }
+        _frame = frame
+        _index = index
+    }
 }
 
 /// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
@@ -1349,7 +1399,7 @@ final class VectorCanvas {
     }
 
     /// The layer's stream elements, back to front. Read-only for `videos`' reason: the one verb that
-    /// changes a stream in place is `setStreamFrame(id:image:)`, which is not a splice.
+    /// changes a stream in place is `setStreamFrame(id:image:index:)`, which is not a splice.
     var streams: [VectorStreamElement] {
         lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.stream)
     }
@@ -1367,44 +1417,63 @@ final class VectorCanvas {
         return value
     }
 
-    /// **Replaces one stream element's `displayFrame` and invalidates the picture — and only the
+    /// **Puts a decoded frame on one stream element and invalidates the picture — and only the
     /// picture.** STREAM.md §5.3's tick comes through here rather than through `elements =`, because
     /// a frame arriving is not an edit and must not be charged as one.
     ///
     /// Three things are distinct about it, and each is a decision:
     ///
     /// - **`version` moves; `committedVersion` does not.** `version` is the display's staleness key
-    ///   and the render memo's, and the picture really is stale, so the layer host repaints and the
-    ///   memo re-walks. `committedVersion` is what `LayerContentVersion` reads, and it stays put so
+    ///   and the render memo's, and the picture really is stale, so the memo re-walks on its next
+    ///   read. `committedVersion` is what `LayerContentVersion` reads, and it stays put so
     ///   `FrameBaker.syncDirty` sees no change — a tick that moved it would dirty every frame the
     ///   stream cel spans and re-bake them to disk thirty times a second. See `committedVersion`.
+    ///   (The layer host tells the two apart too, and does not redraw its base for a frame while a
+    ///   `StreamSurfaceView` presents the element — TODO (97).)
     /// - **The damage is the element's own rectangle**, declared as `.region`, so the re-walk is
     ///   TODO (41)'s bounded repair rather than a whole-cel walk: everything under and over the
     ///   stream inside its footprint is redrawn in z-order, and nothing outside it is touched.
     /// - **A suppressed element invalidates nothing.** While the Move box floats it, the walk skips
     ///   it, so the memo's picture is still exactly right; the frame is written so the commit draws
-    ///   the newest one, and the caller refreshes the float's own bitmap.
+    ///   the newest one, and the float's own surface presents it meanwhile.
     ///
-    /// Returns whether the element was found; false for an id that is not a stream on this canvas.
+    /// `index` is the decoder's frame index: the element's shared `StreamPicture` is written when
+    /// the frame is not the one it holds (a split's two cels share one box, and the second to be
+    /// told finds it written), and **this canvas** invalidates only when it has not been told about
+    /// that index before — a box another canvas already moved still leaves *this* memo stale, which
+    /// is TODO (96) reached through the box. Returns whether this canvas's picture changed; false
+    /// for an id that is not a stream here or a frame it already had.
     @discardableResult
-    func setStreamFrame(id: UUID, image: UIImage?) -> Bool {
+    func setStreamFrame(id: UUID, image: UIImage, index: Int) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard let index = _elements.firstIndex(where: { $0.id == id }),
-              case .stream(var stream) = _elements[index] else { return false }
-        stream.displayFrame = image
-        _elements[index] = .stream(stream)
+        guard let element = _elements.first(where: { $0.id == id }), let stream = element.stream,
+              streamFrameIndexes[id] != index else { return false }
+        streamFrameIndexes[id] = index
+        if stream.picture.frame !== image { stream.picture.set(image, index: index) }
         guard !_suppressedElementIDs.contains(id) else { return true }
         let footprint = Self.placedFootprint(of: stream, slack: 1)
-        invalidateRenderOnly(footprint.isNull ? .everything : .region(footprint),
-                             committed: false)
+        // An element entirely off the canvas paints no pixel, and a null region is the claim that
+        // says so (`invalidateRenderOnly`): `version` moves, every memo stays.
+        let damage: Damage = footprint.isNull ? .everything
+            : .region(footprint.intersection(CGRect(origin: .zero, size: size)))
+        invalidateRenderOnly(damage, committed: false)
         return true
     }
+
+    /// The decoder frame index each stream element on this canvas was last invalidated for — the
+    /// memo's own knowledge, distinct from the shared box's. Never persisted; a reopened or split
+    /// canvas starts empty and is told again on the next tick, which costs one region bookkeeping.
+    private var streamFrameIndexes: [UUID: Int] = [:]
 
     /// **Sets one stream element's `isFrozen` and invalidates nothing** — STREAM.md §5.4. A freeze is
     /// a viewing state, not an edit: the picture on the cel is exactly the picture that was there,
     /// so no memo is stale and neither `version` nor `committedVersion` moves. The flag is persisted
     /// with the document and read by `ScreenStreamCoordinator.tick`, which skips a frozen element.
+    ///
+    /// **A freeze gives the element a `StreamPicture` of its own**, holding the frame it froze on:
+    /// the box is shared with every other copy of the element — the cel on the far side of a Bake
+    /// Frame, most often — and those go on receiving frames, which a frozen picture must not.
     ///
     /// Returns whether the element was found and the flag actually changed.
     @discardableResult
@@ -1414,6 +1483,7 @@ final class VectorCanvas {
         guard let index = _elements.firstIndex(where: { $0.id == id }),
               case .stream(var stream) = _elements[index], stream.isFrozen != frozen else { return false }
         stream.isFrozen = frozen
+        if frozen { stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index) }
         _elements[index] = .stream(stream)
         return true
     }
@@ -1474,7 +1544,7 @@ final class VectorCanvas {
     private(set) var version: Int = 0
 
     /// **`version` minus the live stream frames** — bumped by every invalidation `version` is, except
-    /// a stream frame arriving through `setStreamFrame(id:image:)`.
+    /// a stream frame arriving through `setStreamFrame(id:image:index:)`.
     ///
     /// `LayerContentVersion` reads this rather than `version`, and so do the two derived identities
     /// a vector cel can mint (`PosedCelIdentity`, `VideoCelIdentity`). That is what keeps the frame
@@ -1757,6 +1827,10 @@ final class VectorCanvas {
     /// on this machine and nothing at all on the owner's, which is `localContentBoundsRasterizations`'
     /// argument reached through a different door.
     private(set) var reducedRasterizations: Int = 0
+
+    /// How many stream windows `drawStreamWindow` has drawn — the count a live stream is charged
+    /// per frame, and the one that must move *instead of* `rasterizations` while frames flow.
+    private(set) var streamWindowDraws: Int = 0
 
     /// Broad phase for every geometric query against this canvas's strokes, rebuilt lazily — see
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
@@ -6437,6 +6511,90 @@ final class VectorCanvas {
         }
     }
 
+    // MARK: - A live stream's window (STREAM.md §5.3, TODO (97))
+
+    /// **The rectangle a live stream frame is presented in** — the element's footprint on this
+    /// canvas, integral and clamped to the canvas, in the canvas's own content space (before
+    /// `transform`, which the presenting view applies). Through `posedBy` when the Move box shows
+    /// the element posed rather than where it is stored. Nil for an id that is not a stream on this
+    /// canvas, or one whose rectangle is entirely off the canvas.
+    func streamWindow(id: UUID, posedBy: PoseMap? = nil) -> CGRect? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let element = _elements.first(where: { $0.id == id }),
+              let stream = Self.posed(element, by: posedBy)?.stream else { return nil }
+        return Self.window(of: stream, in: size)
+    }
+
+    /// **Draws one stream element's window into `cg`, the caller's own context** — the pixels
+    /// `render()` would put in `streamWindow(id:)`, produced by the same walk with the same rules
+    /// (z-order, erasers, blend runs) and *without* a canvas-sized renderer. That is the whole of
+    /// TODO (97)'s fix at the engine: a frame used to be presented by invalidating the memo and
+    /// re-rasterizing the canvas, so every frame was a canvas-sized allocation, a canvas-sized blit
+    /// and a canvas-sized image handed to the render server, thirty times a second.
+    ///
+    /// The walk is clipped to the element's **quad**, not its bounding box, so the surface this
+    /// lands on composites over the layer's own picture without drawing any ink twice: inside the
+    /// quad the frame is opaque and covers the base; outside it the surface stays transparent and
+    /// the base shows through. The memo is not touched — the window is a *display* of the element's
+    /// current `displayFrame` and the ink around it, not a picture the canvas keeps.
+    ///
+    /// `cg` is a UIKit context (flipped, current) whose origin is the window's own top-left corner;
+    /// `StreamSurfaceView` makes one over an `IOSurface`. `isolating` is the Move box's case — the
+    /// lifted ids alone, posed as the float shows them — and takes the float's list exactly as
+    /// `renderIsolated` does. Returns the window drawn, so the caller can tell a surface sized for a
+    /// different rectangle to try again, or nil when the id is not a stream here.
+    @discardableResult
+    func drawStreamWindow(id: UUID, into cg: CGContext, isolating ids: Set<UUID>? = nil,
+                          posedBy: [UUID: PoseMap] = [:]) -> CGRect? {
+        rasterizeLock.lock()
+        defer { rasterizeLock.unlock() }
+        lock.lock()
+        let listed: [VectorElement]
+        let known: [UUID: CGRect]
+        if let ids {
+            listed = _elements.filter { ids.contains($0.id) }.compactMap { Self.posed($0, by: posedBy[$0.id]) }
+            // A footprint measured on the stored geometry says nothing about a posed one — the same
+            // refusal `renderIsolated` makes, and the list is the lifted ids alone anyway.
+            known = [:]
+        } else {
+            listed = _elements.filter { !_suppressedElementIDs.contains($0.id) }
+            known = paintedBounds
+        }
+        guard let stream = listed.first(where: { $0.id == id })?.stream,
+              let window = Self.window(of: stream, in: size) else { lock.unlock(); return nil }
+        streamWindowDraws += 1
+        lock.unlock()
+
+        cg.saveGState()
+        cg.translateBy(x: -window.minX, y: -window.minY)
+        cg.clip(to: window)
+        cg.addPath(Self.quad(of: stream))
+        cg.clip()
+        cg.clear(window)
+        _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+                                  clippedTo: window, known: known)
+        cg.restoreGState()
+        return window
+    }
+
+    /// `element` as `pose` shows it, or as stored when there is no pose to apply. Nil where
+    /// `posing` is — a placed rectangle under a projective map — so a Distort float of a stream has
+    /// no window and keeps the picture it was lifted with, rather than a live one at the wrong place.
+    private static func posed(_ element: VectorElement, by pose: PoseMap?) -> VectorElement? {
+        guard let pose, !pose.isIdentity else { return element }
+        return posing(element, through: pose)
+    }
+
+    /// The integral, canvas-clamped footprint a stream is presented in. Nil when nothing of it is
+    /// on the canvas.
+    private static func window(of stream: VectorStreamElement, in size: CGSize) -> CGRect? {
+        let footprint = placedFootprint(of: stream, slack: 1)
+        guard !footprint.isNull else { return nil }
+        let window = footprint.integral.intersection(CGRect(origin: .zero, size: size))
+        return window.isEmpty ? nil : window
+    }
+
     /// Step 1 of `render()`: the layer's own content stamped at native resolution, before the overall
     /// `transform` is applied. Not cached — only called from `render()` and `localContentBounds()`.
     /// Strokes stamp straight into this renderer's own context via `CGContextDabTarget` rather than a
@@ -6534,14 +6692,9 @@ final class VectorCanvas {
         // is lost — every raster tier already renders and persists as 8-bit deviceRGB.
         let format = PixelOps.transparentFormat(scale: resolution)
         format.preferredRange = .standard
-        // Hoisted so the dab count can be read off it once the (synchronous) renderer closure below
+        // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
         // has finished drawing.
-        var target: CGContextDabTarget!
-        // Measured footprints from this walk, handed back for the caller to apply to `paintedBounds`
-        // — never during, because the skip test below reads the *previous* walk's answer (`known`)
-        // and must not see this one's.
-        var measured: [UUID: CGRect] = [:]
-        var escaped = CGRect.null
+        var walked: Walk!
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
@@ -6561,80 +6714,111 @@ final class VectorCanvas {
                 cg.clip(to: clip)
                 cg.clear(clip)
             }
-            // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
-            // throw away the cache's hit rate at every fill or eraser.
-            target = CGContextDabTarget(cg)
+            walked = drawLocalContent(into: cg, elements: elements, quality: quality,
+                                      clippedTo: clip, known: knownBounds)
+        }
+        return LocalContent(image: image, escaped: walked.escaped, measured: walked.measured,
+                            dabCount: walked.dabCount)
+    }
 
-            /// One stroke, stamped or skipped, with its footprint measured either way.
-            ///
-            /// The three rules, in order: an element the previous walk measured as unable to reach
-            /// the clip is skipped; anything else is drawn; and anything drawn that the previous
-            /// walk had *no* measurement for is new-or-changed, so the base cannot be trusted where
-            /// it paints and its footprint has to be inside the clip.
-            func drawStroke(_ stroke: VectorStroke, isEraser: Bool) {
-                let known = quality == .full ? knownBounds[stroke.id] : nil
-                if let clip, let known, !known.intersects(clip) { return }
-                Self.draw(stroke: stroke, into: cg, target: target, isEraser: isEraser,
-                          quality: quality)
-                guard quality == .full else { return }
-                let painted = target.lastGroupBounds
-                guard !painted.isNull else { return }
-                measured[stroke.id] = painted
-                if let clip, known == nil, !clip.contains(painted) { escaped = escaped.union(painted) }
-            }
+    /// What one walk learned — the footprints it measured, where it painted outside its clip
+    /// (`.null` when it did not), and the dabs it stamped. `LocalContent` is this plus the picture.
+    private struct Walk {
+        let escaped: CGRect
+        let measured: [UUID: CGRect]
+        let dabCount: Int
+    }
 
-            var index = 0
-            while index < elements.count {
-                switch elements[index] {
-                case .fill(let fill):
-                    // Fills, images, video and text are always drawn: they carry no measured
-                    // footprint, they are a handful per cel where strokes are thousands, and under
-                    // the clip each is one bounded draw. Adding a bound for them would buy a few
-                    // microseconds and cost a second thing that can be wrong.
-                    Self.draw(fill: fill, into: cg)
-                    index += 1
-                case .image(let element):
-                    Self.draw(image: element, into: cg)
-                    index += 1
-                case .video(let element):
-                    // Ends a paint run exactly as an image does (rule 1 above).
-                    Self.draw(video: element, into: cg)
-                    index += 1
-                case .stream(let element):
-                    Self.draw(stream: element, into: cg)
-                    index += 1
-                case .text(let element):
-                    // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
-                    // before it and a stroke after it must not blend against each other through it.
-                    Self.draw(text: element, into: cg, quality: quality)
-                    index += 1
-                case .stroke(let stroke) where stroke.composite == .erase:
-                    // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
-                    drawStroke(stroke, isEraser: true)
-                    index += 1
-                case .stroke:
-                    // Scan the maximal run of consecutive `.paint` strokes, deciding up front whether
-                    // it needs isolating (rules 1 and 2). **The scan is over the whole run whether or
-                    // not its members will be stamped**, so a clipped walk isolates exactly what an
-                    // unclipped one would.
-                    var end = index
-                    var needsIsolation = false
-                    while let stroke = Self.paintStroke(at: end, in: elements) {
-                        if stroke.brush.stroke.blendMode != .normal { needsIsolation = true }
-                        end += 1
-                    }
-                    if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
-                    for i in index..<end {
-                        guard let stroke = Self.paintStroke(at: i, in: elements) else { continue }
-                        drawStroke(stroke, isEraser: false)
-                    }
-                    if needsIsolation { cg.endTransparencyLayer() }
-                    index = end
+    /// **The walk itself, into a context the caller owns** — `renderLocalContent`'s body, so that a
+    /// picture of part of the list can be drawn somewhere other than a fresh canvas-sized renderer.
+    /// `drawStreamWindow` is the second caller: a live stream frame is presented by redrawing the
+    /// element's own window into a persistent surface, and a walk that could only ever produce a
+    /// new canvas-sized image is what made every frame a canvas-sized allocation and a canvas-sized
+    /// upload to the render server (TODO (97)).
+    ///
+    /// The context is expected to be a UIKit one — flipped, and current (`UIGraphicsPushContext`)
+    /// — because the placed-picture arms draw with `UIImage.draw(in:)`. `UIGraphicsImageRenderer`
+    /// gives that for free; a raw `CGContext` has to be set up that way first.
+    private static func drawLocalContent(into cg: CGContext, elements: [VectorElement],
+                                         quality: RenderQuality, clippedTo clip: CGRect?,
+                                         known knownBounds: [UUID: CGRect]) -> Walk {
+        // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
+        // throw away the cache's hit rate at every fill or eraser.
+        let target = CGContextDabTarget(cg)
+        // Measured footprints from this walk, handed back for the caller to apply to `paintedBounds`
+        // — never during, because the skip test below reads the *previous* walk's answer (`known`)
+        // and must not see this one's.
+        var measured: [UUID: CGRect] = [:]
+        var escaped = CGRect.null
+
+        /// One stroke, stamped or skipped, with its footprint measured either way.
+        ///
+        /// The three rules, in order: an element the previous walk measured as unable to reach
+        /// the clip is skipped; anything else is drawn; and anything drawn that the previous
+        /// walk had *no* measurement for is new-or-changed, so the base cannot be trusted where
+        /// it paints and its footprint has to be inside the clip.
+        func drawStroke(_ stroke: VectorStroke, isEraser: Bool) {
+            let known = quality == .full ? knownBounds[stroke.id] : nil
+            if let clip, let known, !known.intersects(clip) { return }
+            Self.draw(stroke: stroke, into: cg, target: target, isEraser: isEraser,
+                      quality: quality)
+            guard quality == .full else { return }
+            let painted = target.lastGroupBounds
+            guard !painted.isNull else { return }
+            measured[stroke.id] = painted
+            if let clip, known == nil, !clip.contains(painted) { escaped = escaped.union(painted) }
+        }
+
+        var index = 0
+        while index < elements.count {
+            switch elements[index] {
+            case .fill(let fill):
+                // Fills, images, video and text are always drawn: they carry no measured
+                // footprint, they are a handful per cel where strokes are thousands, and under
+                // the clip each is one bounded draw. Adding a bound for them would buy a few
+                // microseconds and cost a second thing that can be wrong.
+                Self.draw(fill: fill, into: cg)
+                index += 1
+            case .image(let element):
+                Self.draw(image: element, into: cg)
+                index += 1
+            case .video(let element):
+                // Ends a paint run exactly as an image does (rule 1 above).
+                Self.draw(video: element, into: cg)
+                index += 1
+            case .stream(let element):
+                Self.draw(stream: element, into: cg)
+                index += 1
+            case .text(let element):
+                // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
+                // before it and a stroke after it must not blend against each other through it.
+                Self.draw(text: element, into: cg, quality: quality)
+                index += 1
+            case .stroke(let stroke) where stroke.composite == .erase:
+                // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
+                drawStroke(stroke, isEraser: true)
+                index += 1
+            case .stroke:
+                // Scan the maximal run of consecutive `.paint` strokes, deciding up front whether
+                // it needs isolating (rules 1 and 2). **The scan is over the whole run whether or
+                // not its members will be stamped**, so a clipped walk isolates exactly what an
+                // unclipped one would.
+                var end = index
+                var needsIsolation = false
+                while let stroke = Self.paintStroke(at: end, in: elements) {
+                    if stroke.brush.stroke.blendMode != .normal { needsIsolation = true }
+                    end += 1
                 }
+                if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
+                for i in index..<end {
+                    guard let stroke = Self.paintStroke(at: i, in: elements) else { continue }
+                    drawStroke(stroke, isEraser: false)
+                }
+                if needsIsolation { cg.endTransparencyLayer() }
+                index = end
             }
         }
-        return LocalContent(image: image, escaped: escaped, measured: measured,
-                            dabCount: target.dabCount)
+        return Walk(escaped: escaped, measured: measured, dabCount: target.dabCount)
     }
 
     /// One walk's output: the picture, **where it went outside its clip** (`.null` when it did not),
@@ -7493,7 +7677,7 @@ struct VectorCanvasData: Codable {
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
                     mirrored: ref.mirrored, animationGroupID: ref.animationGroupID)
-                if ref.lastFrameFileName != nil { element.displayFrame = resolveStreamFrame(ref) }
+                if ref.lastFrameFileName != nil { element.picture = StreamPicture(frame: resolveStreamFrame(ref)) }
                 return .stream(element)
             }
         }

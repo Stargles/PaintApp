@@ -103,22 +103,22 @@ a folder since most of them are archived."*
 
 ---
 
-## (96) A stream does not reload when its frame becomes current or its layer visible
-
-**Status** — filed 2026-09-16. The owner: *"The stream does not reload when the computer updated
-while on a different frame, and then the frame changes onto the one with the steam. Same with hidden
-streams made visible, etc."*
-
-- [ ] A stream cel that becomes visible (frame change, layer shown) redraws with the latest picture.
-
----
-
 ## (97) The iPad crashed while the stream was on
 
 **Status** — filed 2026-09-16. The owner: *"I have experienced multiple times the ipad crashed while
-the stream was on."*
+the stream was on."* **The crash is named and its mechanism removed** (2026-09-17): the iPad's own
+logs show the render server, `backboardd`, jetsammed at its 1850 MB limit four times in two days
+while a stream was decoding, and the tick was presenting every frame by re-rasterizing the canvas and
+handing Core Animation a fresh canvas-sized image thirty times a second — PERFORMANCE.md §21,
+STREAM.md §5.3, `StreamSurfaceView`. The simulator cannot stand in for the device's render server,
+so the proof is the next streaming session on the iPad going without a respring. What is left is
+one report of a different kind:
 
-- [ ] Pull the crash logs from the iPad; fix the cause.
+- [ ] `PaintSoftware-2026-09-16-133830.ips` is a `0x8BADF00D` scene-update watchdog inside a
+  `LazyVStack` layout whose shape matches `BrushEditorScreen.outputColumn` — a static catalog of 13
+  entries, and no `ForEach` in the app iterates anything that grows with the scene (BUGS.md, the
+  2026-09-16 entry, has the trace's shape). Not reproduced; if a second report lands in the same
+  view, that is the signal to follow.
 
 ---
 

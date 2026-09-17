@@ -353,58 +353,63 @@ one buffer; a slow consumer sees the newest frame, never a queue). The slot hand
 
 `ScreenStreamCoordinator` (main actor, owned by `CanvasManager`) subscribes to each client's
 frame-arrived signal and runs a **tick at most every 33 ms** (coalesced, `CADisplayLink`-free — a
-`DispatchQueue.main.asyncAfter` armed on arrival) that, for each unfrozen stream element **whose
-layer is visible and whose cel is the one at the current frame**, sets `displayFrame` from the slot.
-The tick does nothing while `isPlaying` (2.9) or while the app is backgrounded. MEASURE the tick on
-the device before merging stage 2 — the aim is that a live 1080p stream costs the main thread under
-2 ms per tick.
+`DispatchQueue.main.asyncAfter` armed on arrival). The tick does two things, and the split between
+them is TODO (96) and TODO (97) respectively:
 
-**Stage 1 built it, and three sentences this section used to carry were wrong against the code:**
+1. **It writes the newest frame into every unfrozen stream element naming the endpoint — on every
+   cel, displayed or not** — through `VectorCanvas.setStreamFrame(id:image:index:)`. The picture
+   lives in a `StreamPicture` box the element holds by reference, so every copy of the element (an
+   undo step's list, a split's neighbour, a float) shows the one newest frame and pins one decoder
+   buffer between them; the canvas records the decoder index it was last told, so a tick on an
+   unchanged slot writes nothing and a split's far cel is still told about a frame its shared box
+   already holds. `version` moves (the memo re-walks on its next read, the host knows the picture
+   is stale) and a new `committedVersion` — which `LayerContentVersion` and the posed/video
+   identities read — does not, so the bake, the dirty sweep and the sandwich key are blind to a
+   live frame by construction. **A cel the artist is not looking at is written all the same**; when
+   they change frame onto it, or show its layer, the host's ordinary repaint draws the newest
+   picture, and no further frame has to arrive — which matters because a laptop whose screen is not
+   changing sends nothing that would.
+2. **For the elements on a visible layer whose cel is the one at the current frame, it presents the
+   frame** through a closure `CanvasView` installs (`onStreamFrame`, the shape of
+   `StrokeCanvasView.guideOverlayNeedsUpdate` — never `objectWillChange`, which is a whole SwiftUI
+   pass thirty times a second). The host answers with `presentStreamFrame`: the element's *window*
+   — its footprint, clipped to its quad, in true z-order with the ink under and over it — is drawn
+   off the main thread by the memo's own walk (`VectorCanvas.drawStreamWindow`) into one of two
+   `IOSurface`s the host owns per stream element (`StreamSurfaceView`), frame-positioned over the
+   base the way the scratch is positioned at a stroke's window. **Nothing canvas-sized is allocated,
+   rasterized or uploaded per frame, and the render server maps two objects once.** The base under
+   the surface is not redrawn for a `version` move that left `committedVersion` still while a
+   surface is up (`refreshDisplayIfStale`); it catches up on the next committed change, or when the
+   surfaces go — a cel switch, a blanked host, a derived (posed) base, the Move box lifting or
+   landing. While the Move box holds the element the surface rides inside the float, drawn from the
+   lifted ids alone as the float shows them; a Distort float has no window and keeps the picture it
+   was lifted with.
 
-- *"One version bump per tick, then the compositor's usual path."* A `bumpVersion()` moves
-  `LayerContentVersion.vectorVersion`, which is the leaf half of `FrameBakeKey` and of
-  `FrameBaker.syncDirty`'s cel stamps — so one tick would dirty the stream cel's whole span (the
-  current frame to the end of the scene, §6) and re-composite it to disk at the tick rate. The frame
-  goes through `VectorCanvas.setStreamFrame(id:image:)` instead: `version` moves (the host repaints,
-  the memo repairs the element's own `.region`), and a new `committedVersion` — which
-  `LayerContentVersion` and the posed/video identities now read — does not. The bake, the dirty
-  sweep and the sandwich key are blind to a live frame by construction. The consequence: a canvas on
-  the engaged sandwich at rest (a blend mode, a mask, an effect, a container pose) shows the stream
-  at whatever the bake froze. **Stage 2 measured the alternative and kept the staleness, in words.**
-  A per-tick in-memory composite of the current frame — the cel's own re-walk with `committedVersion`
-  moved (every memo the composite reads is keyed on it), the request's flattens, one composite —
-  MEASURED on the simulator (Debug, 2048², three layers, a 1920×1080 frame, the stream layer on
-  Multiply; `StreamSandwichBench`): **45.8 ms a tick on CoreGraphics (20.2 + 7.0 + 18.6) and 72.7 ms
-  on Metal**, an order of magnitude over the ~4 ms a 30 Hz tick could carry, and PERFORMANCE.md's
-  device figure for the composite alone (~18 ms of a 54.8 ms six-layer rebuild) says the iPad is not
-  going to close that gap. So the bar says it instead — `StreamBarState.sandwichNote`, *"Live
-  picture pauses while a blend mode, mask, effect or transformation layer is in the document"*, shown
-  while `CanvasManager.streamPictureIsHeldByTheSandwich` (the tree's `needsCompositorOnCanvas` or a
-  container pose, the same clauses as `sandwichEngagesOnCanvas` minus playback and a float). A
-  *dimmed* reference is a layer opacity, which stays on the flat row and stays live; it is a
-  *multiplied* one that pauses. Never silent staleness. The tick's drawn-frame memo is keyed by
-  **cel and element**, because a split (Bake Frame, Split Drawing) copies the stream element's id into
-  the new cel and a memo on the id alone left the copy on its older picture until the next frame.
-- *"…and calls `celContentChangedOutsideStroke`."* That is `objectWillChange`, a whole SwiftUI pass
-  thirty times a second. The tick repaints the layer host directly through a closure `CanvasView`
-  installs (`StrokeCanvasView.guideOverlayNeedsUpdate`'s shape) and publishes once a second for the
-  thumbnail, whose 400 ms debounce a per-tick call would reset forever.
-- *"…while a Move box floats over that element (the box's own redraw covers it)."* The float is a
-  bitmap latched at the lift (`StrokeCanvasView.beginVectorFloat`) and nothing re-renders it per
-  nudge, so without a tick the artist would connect and see the placeholder in the box until they
-  committed it. The tick re-mints the float's bitmap off the main thread instead, one render in
-  flight at a time.
+   The path this replaced re-rasterized the canvas per frame and handed Core Animation a fresh
+   canvas-sized `CGImage` thirty times a second; on the owner's iPad the render server reached its
+   1850 MB limit and was killed four times in two days. PERFORMANCE.md §21 is the measurement.
 
-MEASURED on the simulator (Debug, 2048² canvas, a 1920×1080 `testsrc` from the fake streamer): the
-tick costs **~0.3–0.5 ms** of main thread whether the element floats or is committed, and
-`latestCGImage()` (`VTCreateCGImageFromCVPixelBuffer` on the BGRA IOSurface) **~0.04 ms**. The
-float re-mint was **~15 ms** a tick while it ran on the main actor, which is why it does not.
-**Stage 2 gave the measurement an outlet**: every tick is an `OSSignposter` interval
-(`PaintSoftware` / `ScreenStream`) and once a second the coordinator logs the ticks since the last
-line with their mean and worst main-actor cost — `log stream --predicate 'subsystem ==
-"PaintSoftware" && category == "ScreenStream"'` on a device, `xcrun simctl spawn <udid> log stream …`
-on the simulator. There were no signposts before this; stage 1's figure came from
-`lastTickDuration` read in a harness.
+Once a second — not per tick — the coordinator also publishes (`celContentChangedOutsideStroke`)
+for the displayed cel, so the layer-panel thumbnail catches up through its 400 ms debounce. The tick
+does nothing while `isPlaying` (2.9) or while the app is backgrounded.
+
+**A canvas on the engaged sandwich at rest shows the stream at whatever the bake froze** — a blend
+mode, a mask, an effect, a container pose. Stage 2 measured the alternative and kept the staleness,
+in words: a per-tick in-memory composite of the current frame MEASURED **45.8 ms a tick on
+CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080 frame, the stream
+layer on Multiply; `StreamSandwichBench`), an order of magnitude over the ~4 ms a 30 Hz tick could
+carry. So the bar says it instead — `StreamBarState.sandwichNote`, *"Live picture pauses while a
+blend mode, mask, effect or transformation layer is in the document"*, shown while
+`CanvasManager.streamPictureIsHeldByTheSandwich`. A *dimmed* reference is a layer opacity, which
+stays on the flat row and stays live; it is a *multiplied* one that pauses. Never silent staleness.
+
+MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
+2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main
+actor. Every tick is an `OSSignposter` interval (`PaintSoftware` / `ScreenStream`) and once a second
+the coordinator logs the ticks since the last line with their mean and worst main-actor cost —
+`log stream --predicate 'subsystem == "PaintSoftware" && category == "ScreenStream"'` on a device,
+`xcrun simctl spawn <udid> log stream …` on the simulator; `StreamBar` puts the same line on the
+hidden `streamBar.tickSummary` marker for an XCUITest.
 
 ### 5.4 Freeze
 
@@ -421,7 +426,9 @@ a file written into the live package outside a save is in no package the next lo
 picture a freeze holds is `displayFrame`, which the next save encodes (§5.6). And the verb is
 addressed by cel — `CanvasManager.setStreamFrozen(layerIndex:celIndex:elementID:_:)` — because a
 split copies an element's id into a second cel, so after a Bake Frame the cels either side hold two
-streams with one id and the artist freezes the one they are standing on. The pause is reconciled by
+streams with one id and the artist freezes the one they are standing on; **the freeze gives that
+element a `StreamPicture` of its own**, since the copies otherwise share one box and the far cel goes
+on receiving frames a frozen picture must not (§5.3). The pause is reconciled by
 one function (`ScreenStreamCoordinator.syncPauseState`) on freeze, on backgrounding, on foregrounding
 and on every `.connected` transition, since a laptop just reconnected to knows nothing of the pause
 the old connection carried; the decoder is reset on `resume` rather than on `pause`, so the resume's
@@ -443,12 +450,14 @@ yet"*), `.notOnStreamCel`. The playhead stays. A bake on a one-frame cel is the 
 **Built (stage 2), `CanvasManager+StreamBake.swift`.** Which ids move: the image is minted fresh and
 every other element on the baked cel is `reidentified()` as the video bake does; **the cels either
 side keep their ids verbatim, the stream's included** — they are `splitCel`'s own copies, which is
-what Split Drawing does to every cel it cuts, and nothing keys on a stream id across cels (the
-coordinator's memo is per cel for exactly this). The picture is `displayFrame` — live, frozen, or
+what Split Drawing does to every cel it cuts, and the two copies share one `StreamPicture` (§5.3),
+so nothing keys on a stream id across cels. The picture is `displayFrame` — live, frozen, or
 the one the last save wrote and the load put back — so a bake with the laptop off bakes the last
-picture it sent. A decoded frame whose pixel size disagrees with the STATUS-reported `naturalSize` is
-resampled to `naturalSize` (`streamSnapshot`), because the stream drew its frame *into* that rect and
-a placed image's rect is its own pixel size. A pose channel on the cel is baked into the geometry
+picture it sent. **The placed image is a copy of the frame's pixels** (`streamSnapshot`), never the
+decoder's own `CGImage`, which wraps a VideoToolbox pool buffer and pinned one per bake for the
+life of the document (PERFORMANCE.md §21); a decoded frame whose pixel size disagrees with the
+STATUS-reported `naturalSize` is resampled to `naturalSize` on the way, because the stream drew its
+frame *into* that rect and a placed image's rect is its own pixel size. A pose channel on the cel is baked into the geometry
 and dropped, the video bake's rule. `StreamBakeLogicTests` pins [1] [2] [3–4], [1] [2–4], [1–3]
 [4], the one-frame swap, four cels after a second bake, undo to one ticking stream cel, and the baked
 frame green through the real compositor while both neighbours follow the stream to red.
@@ -620,14 +629,15 @@ Stages 1–2 (iPad, simulator) and 3 (Windows, SSH, no simulator) run in paralle
 
 - ~~Which encoder element the laptop actually has~~ — `EncoderProbe` picks `qsvh264enc` there.
 - The exact main-thread cost of a 1080p tick and of `VTCreateCGImageFromCVPixelBuffer` on the iPad
-  9th gen — **still open after stage 2**: the iPad was locked when the run was attempted (2026-09-13),
-  and XCUITest cannot start on a locked device. The stage-2 Release build is installed on it, and
-  the number is one unlocked run away: connect to the fake streamer on this Mac's Tailscale address
-  (`100.70.148.78`, `fake-streamer.py --pattern`, the firewall is off) and read either
-  `log stream --predicate 'subsystem == "PaintSoftware" && category == "ScreenStream"'` or the bar's
-  `streamBar.tickSummary` marker. Simulator figures are in §5.3 (0.2–0.5 ms mean per tick, 0.04 ms
-  for the CGImage); the CGImage is a wrap of the BGRA IOSurface, so on that count a texture path
-  buys nothing — what a device run has to price is the off-main `.region` re-walk that draws the
-  frame into the cel's memo.
+  9th gen — **still open**: the iPad was locked when the run was attempted (2026-09-13), and
+  XCUITest cannot start on a locked device. The number is one unlocked run away: connect to the fake
+  streamer on this Mac's Tailscale address (`100.70.148.78`, `fake-streamer.py --pattern`, the
+  firewall is off) and read either `log stream --predicate 'subsystem == "PaintSoftware" && category
+  == "ScreenStream"'` or the bar's `streamBar.tickSummary` marker. Simulator figures are in §5.3.
+  What that run has to price now is the off-main window draw (`VectorCanvas.drawStreamWindow`) —
+  the frame resampled into its rect plus whatever ink crosses it — and the render server's
+  memory, which the simulator cannot stand in for (PERFORMANCE.md §21): `backboardd` must be flat
+  over minutes of streaming, and a device has no `footprint`, so read it off the next jetsam report
+  or its absence.
 - ~~Whether `tcpclientsink` on localhost or `fdsink` is the cleaner hand-off~~ — loopback `tcpclientsink` is clean; `d3d11convert` alone negotiates with `qsvh264enc`, no `d3d11download`.
 - Tailscale MTU is 1280; irrelevant to TCP framing, noted in case UDP is ever tried.

@@ -8,34 +8,47 @@ import UIKit
 ///
 /// Owned by `CanvasManager`, one per document. It keeps one `ScreenStreamClient` per endpoint the
 /// open document's stream elements name, and turns the decoder's frame-arrived signal into a
-/// **coalesced tick at most every `tickInterval`** on the main actor. The tick does exactly this,
-/// for each stream element on a visible vector layer whose cel is the one at the current frame and
-/// which is not frozen:
+/// **coalesced tick at most every `tickInterval`** on the main actor. The tick does exactly this:
 ///
-/// 1. read the client's latest frame index; skip the element if it has drawn that frame already;
-/// 2. `VectorCanvas.setStreamFrame(id:image:)` — the element's `displayFrame`, a `.region`
-///    invalidation of the element's own footprint, `version` moved and `committedVersion` not;
-/// 3. **repaint the layer host directly** through `onLayerNeedsRepaint`, which `CanvasView`
-///    installs — the same shape as `StrokeCanvasView.guideOverlayNeedsUpdate`: a per-tick signal
-///    that must not go through `objectWillChange`, because a SwiftUI pass re-runs every view body
-///    observing the manager and the tick is thirty a second. The host answers with
-///    `refreshDisplayIfStale`, whose rasterize is off the main thread and coalesces on its own.
+/// 1. for each endpoint with a decoded frame, **write it into every unfrozen stream element that
+///    names the endpoint — on every cel, displayed or not** — through
+///    `VectorCanvas.setStreamFrame(id:image:index:)`: the element's picture, a `.region`
+///    invalidation of the element's own footprint, `version` moved and `committedVersion` not. A
+///    canvas already told about that frame index answers false, so a tick on an unchanged slot
+///    writes nothing;
+/// 2. for each of those elements on a visible layer whose cel is the one at the current frame,
+///    **present it** through `onStreamFrame`, which `CanvasView` installs — the same shape as
+///    `StrokeCanvasView.guideOverlayNeedsUpdate`: a per-tick signal that must not go through
+///    `objectWillChange`, because a SwiftUI pass re-runs every view body observing the manager and
+///    the tick is thirty a second. The host answers with `presentStreamFrame`, which draws the
+///    element's window into a surface of its own off the main thread and coalesces on its own.
 ///
-/// Once a second — not per tick — it also calls `celContentChangedOutsideStroke`, which is the
-/// ordinary publish: the layer-panel thumbnail catches up through its 400 ms debounce (which a
-/// per-tick call would reset forever), and anything else observing the document sees the frame.
+/// **Writing every cel is what TODO (96) needed.** The tick used to feed only the displayed cel, so
+/// a stream cel on another frame, or on a hidden layer, kept the picture it last showed until a
+/// frame arrived *after* it was shown again — and a laptop whose screen is not changing sends
+/// nothing to arrive. Now the element holds the newest frame wherever it is, its `version` has
+/// moved, and the host's ordinary repaint on a frame change or a layer coming back draws it.
+///
+/// **Presenting into a surface rather than repainting the host is what TODO (97) needed** — see
+/// `StreamSurfaceView`. The old tick asked the host to `refreshDisplayIfStale`, which rasterized
+/// the canvas and handed Core Animation a fresh canvas-sized image per frame; the render server on
+/// the owner's iPad grew to its limit and was killed.
+///
+/// Once a second — not per tick — it also calls `celContentChangedOutsideStroke` for the displayed
+/// cel, which is the ordinary publish: the layer-panel thumbnail catches up through its 400 ms
+/// debounce (which a per-tick call would reset forever), and anything else observing the document
+/// sees the frame.
 ///
 /// ## When it does not tick
 ///
 /// - while `isPlaying` — STREAM.md §2.9: a stream layer that is actively moving need not be
 ///   rendered, and playback reads the bake, which `committedVersion` keeps blind to the stream;
 /// - while the app is in the background — the connection is paused from this end too, so the
-///   laptop stops encoding for nobody;
-/// - for an element the Move box holds: the host's float is a latched bitmap (`beginVectorFloat`),
-///   so the tick re-mints that bitmap instead through `onFloatNeedsRepaint`, which is a render of
-///   the lifted ids alone. STREAM.md's *"the box's own redraw covers it"* was wrong — nothing
-///   re-rendered the float per nudge, and without this the artist would connect and see the
-///   placeholder in the box until they committed it.
+///   laptop stops encoding for nobody.
+///
+/// An element the Move box holds is written like any other (`setStreamFrame` invalidates nothing
+/// for a suppressed element) and presented inside the float: `CanvasView`'s closure hands the host
+/// the lifted ids and their poses, and the surface rides the box.
 ///
 /// ## What it does not do
 ///
@@ -85,29 +98,15 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// HELLO, or by the first failure.
     private var pendingConnects: [StreamEndpoint: [CheckedContinuation<StreamStatus, Error>]] = [:]
 
-    /// Which frame index each element last drew, so a tick on an unchanged slot costs nothing.
-    ///
-    /// **Keyed by cel as well as by element**, because element ids are unique within a cel and not
-    /// within a document: a split (Bake Frame, Split Drawing) copies the stream element — id and
-    /// all — into the new cel, and a key on the element alone would let the cel at frame 3 skip the
-    /// frame the cel at frame 1 had already drawn, leaving it on the older picture it was copied
-    /// with until the next frame arrived.
-    private struct DrawnKey: Hashable {
-        let celID: UUID
-        let elementID: UUID
-    }
-    private var drawnFrameIndex: [DrawnKey: Int] = [:]
     private var tickScheduled = false
     private var lastTick: CFAbsoluteTime = 0
     private var lastPublish: CFAbsoluteTime = 0
     private var isInBackground = false
     private var observers: [NSObjectProtocol] = []
 
-    /// Installed by `CanvasView.Coordinator`: repaint the host of this layer from its canvas.
-    var onLayerNeedsRepaint: ((_ layerID: UUID) -> Void)?
-    /// Installed by `CanvasView.Coordinator`: re-mint the Move box's latched bitmap for this layer,
-    /// because the element it holds has a new frame.
-    var onFloatNeedsRepaint: ((_ layerID: UUID) -> Void)?
+    /// Installed by `CanvasView.Coordinator`: this element on this layer holds a new frame and is
+    /// on screen — present it (`StrokeCanvasView.presentStreamFrame`).
+    var onStreamFrame: ((_ layerID: UUID, _ elementID: UUID) -> Void)?
 
     /// How many ticks have run — for tests and the device measurement, nothing else reads it.
     private(set) var tickCount = 0
@@ -236,7 +235,6 @@ final class ScreenStreamCoordinator: ObservableObject {
         statuses.removeAll()
         connectionStates.removeAll()
         pausedEndpoints.removeAll()
-        drawnFrameIndex.removeAll()
         for (endpoint, continuations) in pendingConnects {
             for continuation in continuations {
                 continuation.resume(throwing: ConnectFailure(sentence: "The document was closed."))
@@ -438,8 +436,8 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// it is the moment between the sheet's connect and its insert (or the moment before `sync()`
     /// stops a client nothing needs), and a pause there restarted the laptop's pipeline on every
     /// connect — MEASURED in the stage-2 drive as a `pause`/`resume` pair four milliseconds apart.
-    /// A hidden layer's element still counts as wanting frames: the tick skips it, but the artist
-    /// can show the layer again without a round trip to the laptop.
+    /// A hidden layer's element still counts as wanting frames: the tick writes them into it, so the
+    /// artist can show the layer again and see the newest picture without a round trip to the laptop.
     private func everyElementIsFrozen(at endpoint: StreamEndpoint) -> Bool? {
         guard let manager else { return nil }
         var sawOne = false
@@ -565,8 +563,9 @@ final class ScreenStreamCoordinator: ObservableObject {
         }
     }
 
-    /// One pass over the stream elements at the current frame. Public so a logic test can drive it
-    /// with `frameSourceOverride` and no socket; the app reaches it only through `frameArrived`.
+    /// One pass over the document's stream elements — the header's two steps. Public so a logic
+    /// test can drive it with `frameSourceOverride` and no socket; the app reaches it only through
+    /// `frameArrived`.
     func tick() {
         let started = CFAbsoluteTimeGetCurrent()
         lastTick = started
@@ -575,40 +574,40 @@ final class ScreenStreamCoordinator: ObservableObject {
         let signpost = Self.signposter.beginInterval("tick")
         defer { Self.signposter.endInterval("tick", signpost) }
         let shownFrames = manager.displayedFrames(atFrame: manager.currentFrame)
-        let float = manager.vectorFloat
         let publishDue = started - lastPublish >= Self.publishInterval
         var published = false
+        // One `UIImage` per endpoint per tick, shared by every element it lands on: the wrapper is
+        // what a split's shared `StreamPicture` compares, and a wrapper per cel would defeat that.
+        var frames: [StreamEndpoint: (index: Int, image: UIImage)?] = [:]
 
         for (layerIndex, layer) in manager.layers.enumerated() where layer.kind == .vector {
-            guard manager.isLayerEffectivelyVisible(layerIndex) else { continue }
-            let frame = shownFrames[layerIndex] ?? manager.currentFrame
-            guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: frame) else { continue }
-            let cel = layer.cels[celIndex]
-            guard let vector = cel.vector, vector.holdsStream else { continue }
-
-            var hostNeedsRepaint = false
-            var floatNeedsRepaint = false
-            for stream in vector.streams where !stream.isFrozen {
-                let endpoint = StreamEndpoint(host: stream.host, port: stream.port)
-                let key = DrawnKey(celID: cel.id, elementID: stream.id)
-                guard let latest = latestFrame(for: endpoint),
-                      drawnFrameIndex[key] != latest.index else { continue }
-                drawnFrameIndex[key] = latest.index
-                vector.setStreamFrame(id: stream.id, image: UIImage(cgImage: latest.image))
-                if let float, float.carries(elementID: stream.id, onLayer: layer.id) {
-                    floatNeedsRepaint = true
-                } else {
-                    hostNeedsRepaint = true
+            let displayedCel = manager.isLayerEffectivelyVisible(layerIndex)
+                ? manager.activeCelIndex(inLayer: layerIndex,
+                                         atFrame: shownFrames[layerIndex] ?? manager.currentFrame)
+                : nil
+            for (celIndex, cel) in layer.cels.enumerated() {
+                guard let vector = cel.vector, vector.holdsStream else { continue }
+                var presented = false
+                for stream in vector.streams where !stream.isFrozen {
+                    let endpoint = StreamEndpoint(host: stream.host, port: stream.port)
+                    let frame: (index: Int, image: UIImage)?
+                    if let known = frames[endpoint] {
+                        frame = known
+                    } else {
+                        frame = latestFrame(for: endpoint).map { ($0.index, UIImage(cgImage: $0.image)) }
+                        frames[endpoint] = frame
+                    }
+                    guard let frame,
+                          vector.setStreamFrame(id: stream.id, image: frame.image, index: frame.index),
+                          celIndex == displayedCel else { continue }
+                    onStreamFrame?(layer.id, stream.id)
+                    presented = true
                 }
-            }
-            if hostNeedsRepaint {
-                onLayerNeedsRepaint?(layer.id)
-                if publishDue {
+                if presented, publishDue {
                     manager.celContentChangedOutsideStroke(layerID: layer.id, celID: cel.id)
                     published = true
                 }
             }
-            if floatNeedsRepaint { onFloatNeedsRepaint?(layer.id) }
         }
         lastTickDuration = CFAbsoluteTimeGetCurrent() - started
         tickDurationsSincePublish.append(lastTickDuration)

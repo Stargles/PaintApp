@@ -63,7 +63,7 @@ final class StreamPersistenceLogicTests: XCTestCase {
         let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
         let frame = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 4),
                                              size: CGSize(width: 8, height: 4))
-        XCTAssertTrue(vector.setStreamFrame(id: element.id, image: frame))
+        XCTAssertTrue(vector.setStreamFrame(id: element.id, image: frame, index: 1))
         return (manager, element, vector)
     }
 

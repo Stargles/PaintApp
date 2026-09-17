@@ -3,6 +3,27 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
+
+`PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main
+thread past its 10 s scene-update budget under `_UIHostingView.layoutSubviews`, 129 SwiftUI frames
+and only `main` from the app (the build is stripped). The shape is precise enough to name the view
+and not the cause: `LazyVStackLayout.sizeThatFits` → `LazyStack.measureEstimates` →
+`_LazyLayout_Subviews.apply` → **a `ForEachList` inside a `_ViewList_Group` inside a `ForEachList`**
+— a `LazyVStack` whose `ForEach` body is a group holding a header and a nested `ForEach` — under a
+`ScrollView` in a `.frame(maxWidth: .infinity)` in two `ZStack`s, with the top frame a `memmove` in
+`_ArrayBuffer._consumeAndCreateNew` under `_ViewList_ID.bind`. The app has four lazy stacks and
+exactly one of that shape: `BrushEditorScreen.outputColumn`
+(`ForEach(BrushEditorCatalog.groups) { Text; ForEach(group.entries) }`). Its source is a static
+catalog of **13 entries in a handful of groups**; `StrokeSettingsPanel.brushColumn` is the other
+`LazyVStack` in a scroll view and iterates one brush group. Every other `ForEach` in `Views/` was
+read: none is over frames, cels, or anything a stream cel's span multiplies (the timeline's rows and
+graph channels are plain `VStack`s, the colour history is capped at 20). So the collection that
+would make this a size problem does not exist, and the report reads instead as a main thread that
+was already stalled — the same session's `backboardd` was at its jetsam limit — sampled inside a
+layout pass. Not reproduced; nothing to cap. Left open with the trace's shape here so a second
+report can be compared against it: if it fires in the same view again, that is the signal.
+
 ## `FileOutboxTests.NoClientQueuesWithAWaitingReasonThenSendsOnceOneConnects` races its own events list (2026-09-13)
 
 `streamer/Streamer.Tests/FileOutboxTests.cs`: `events` is a `List<OutboundFileEventArgs>` appended

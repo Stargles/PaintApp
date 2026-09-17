@@ -9,7 +9,7 @@ import UIKit
 /// rectangle once one arrives — is asserted on pixels rather than on stored fields, because CLAUDE.md
 /// has three cases of a correct model behind an unusable feature.
 ///
-/// The frame path is the interesting one. `VectorCanvas.setStreamFrame(id:image:)` is the one seam a
+/// The frame path is the interesting one. `VectorCanvas.setStreamFrame(id:image:index:)` is the one seam a
 /// live frame comes through, and it makes two claims a test can check without a network: the render
 /// changes (the tick must repaint) and `committedVersion` does not (the bake must not). Both are
 /// pinned here, the second by mutation — the version is compared before and after, and a
@@ -133,7 +133,7 @@ final class StreamElementLogicTests: XCTestCase {
     /// come back with none — a stream opens on the placeholder until the laptop answers.
     func testTheDisplayFrameIsNotPersisted() throws {
         var element = defaultElement()
-        element.displayFrame = solidImage(.red, size: CGSize(width: 4, height: 4))
+        element.picture = StreamPicture(frame: solidImage(.red, size: CGSize(width: 4, height: 4)))
         let (decoded, data) = try roundTrip(element)
         XCTAssertNil(decoded.displayFrame, "A decoded stream must start with no frame")
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
@@ -204,7 +204,7 @@ final class StreamElementLogicTests: XCTestCase {
         XCTAssertEqual(placeholder.g, placeholder.r, accuracy: 8, "the placeholder is grey, not green")
 
         let green = solidImage(.green, size: CGSize(width: 20, height: 10))
-        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green), "the element must be found")
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1), "the element must be found")
 
         let after = try XCTUnwrap(pixels(canvas.render()))
         let frame = after(20, 20)
@@ -219,7 +219,7 @@ final class StreamElementLogicTests: XCTestCase {
     func testAFrameForAnUnknownIdIsRefused() {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(defaultElement())])
         let version = canvas.version
-        XCTAssertFalse(canvas.setStreamFrame(id: UUID(), image: solidImage(.red, size: CGSize(width: 2, height: 2))))
+        XCTAssertFalse(canvas.setStreamFrame(id: UUID(), image: solidImage(.red, size: CGSize(width: 2, height: 2)), index: 1))
         XCTAssertEqual(canvas.version, version, "A refused write moves nothing")
     }
 
@@ -236,7 +236,7 @@ final class StreamElementLogicTests: XCTestCase {
         let version = canvas.version
         let committed = canvas.committedVersion
 
-        canvas.setStreamFrame(id: stream.id, image: solidImage(.red, size: CGSize(width: 2, height: 2)))
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.red, size: CGSize(width: 2, height: 2)), index: 1)
 
         XCTAssertGreaterThan(canvas.version, version, "the display is stale and must say so")
         XCTAssertEqual(canvas.committedVersion, committed, "the bake must not see a live frame")
@@ -262,7 +262,7 @@ final class StreamElementLogicTests: XCTestCase {
                       raster: .empty(size: Self.canvasSize), vector: canvas)
         let before = LayerContentVersion(cel: cel)
 
-        canvas.setStreamFrame(id: stream.id, image: solidImage(.red, size: CGSize(width: 2, height: 2)))
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.red, size: CGSize(width: 2, height: 2)), index: 1)
         XCTAssertEqual(LayerContentVersion(cel: cel), before, "a frame is not a bake-visible change")
 
         canvas.bumpVersion()
@@ -272,8 +272,8 @@ final class StreamElementLogicTests: XCTestCase {
     // MARK: - A suppressed element
 
     /// While the Move box holds the element, the walk skips it, so the memo's picture is right and
-    /// a frame must not invalidate it — the coordinator refreshes the float's bitmap instead. The
-    /// frame is still written, so the commit draws the newest one.
+    /// a frame must not invalidate it — the float's own surface presents it instead. The frame is
+    /// still written, so the commit draws the newest one.
     func testAFrameForASuppressedElementIsStoredWithoutInvalidating() throws {
         let stream = defaultElement()
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
@@ -281,11 +281,175 @@ final class StreamElementLogicTests: XCTestCase {
         let version = canvas.version
 
         let green = solidImage(.green, size: CGSize(width: 2, height: 2))
-        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green))
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1))
 
         XCTAssertEqual(canvas.version, version, "nothing in the picture changed")
         XCTAssertTrue(try XCTUnwrap(canvas.streams.first).displayFrame === green,
                       "the frame is held for the commit")
+    }
+
+    // MARK: - The window a live frame is presented in (TODO (97))
+
+    /// A bitmap context of `window`'s size set up the way `StreamSurfaceView` sets its surface up —
+    /// UIKit-flipped, current, origin at the window's corner — and a reader of its pixels after
+    /// `draw` has run in it.
+    private func drawWindow(_ window: CGRect, _ draw: (CGContext) -> Void)
+        -> (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        let width = Int(window.width), height = Int(window.height)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        bytes.withUnsafeMutableBytes { buffer in
+            let cg = CGContext(data: buffer.baseAddress, width: width, height: height,
+                               bitsPerComponent: 8, bytesPerRow: width * 4,
+                               space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            cg.translateBy(x: 0, y: CGFloat(height))
+            cg.scaleBy(x: 1, y: -1)
+            UIGraphicsPushContext(cg)
+            draw(cg)
+            UIGraphicsPopContext()
+        }
+        return { x, y in
+            let i = (y * width + x) * 4
+            return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
+        }
+    }
+
+    /// **The window is the frame's pixels and the ink over them, at the window's own origin, and
+    /// drawing it rasterizes nothing canvas-sized.** A green frame under a red fill: the window's
+    /// centre is red (z-order), a corner inside the frame is green, `rasterizations` stands still
+    /// and `streamWindowDraws` moves — the count a live stream is charged per frame.
+    func testTheWindowDrawsTheFrameAndTheInkOverItWithoutACanvasSizedRender() throws {
+        var stream = defaultElement()
+        stream.naturalSize = CGSize(width: 20, height: 10)
+        stream.transform = LayerTransform(position: CGPoint(x: 30, y: 30), scale: 1, rotation: 0)
+        let over = VectorFillElement(path: CGPath(rect: CGRect(x: 27, y: 27, width: 6, height: 6),
+                                                  transform: nil),
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), opacity: 1)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream), .fill(over)])
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.green, size: CGSize(width: 20, height: 10)),
+                              index: 1)
+        _ = canvas.render()
+        let rasterizations = canvas.rasterizations
+        let version = canvas.version
+
+        let window = try XCTUnwrap(canvas.streamWindow(id: stream.id))
+        XCTAssertEqual(window, CGRect(x: 18, y: 23, width: 24, height: 14), "the footprint, integral")
+        let px = drawWindow(window) { cg in
+            XCTAssertEqual(canvas.drawStreamWindow(id: stream.id, into: cg), window)
+        }
+
+        let centre = px(12, 7)
+        XCTAssertGreaterThan(Int(centre.r), Int(centre.g) + 100, "the fill is over the frame")
+        let corner = px(3, 3)
+        XCTAssertGreaterThan(Int(corner.g), Int(corner.r) + 100, "the frame is where nothing covers it")
+        XCTAssertEqual(corner.a, 255)
+        XCTAssertEqual(canvas.rasterizations, rasterizations, "no canvas-sized render")
+        XCTAssertEqual(canvas.streamWindowDraws, 1)
+        XCTAssertEqual(canvas.version, version, "a display, not an invalidation")
+    }
+
+    /// **Clipped to the quad, not the box**: a turned stream's window is its bounding box, and the
+    /// corners of that box outside the turned rectangle stay transparent — so the surface composites
+    /// over the layer's own picture there without drawing any ink twice.
+    func testATurnedStreamsWindowIsTransparentOutsideItsQuad() throws {
+        var stream = defaultElement()
+        stream.naturalSize = CGSize(width: 24, height: 8)
+        stream.transform = LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: .pi / 4)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.green, size: CGSize(width: 24, height: 8)),
+                              index: 1)
+        let window = try XCTUnwrap(canvas.streamWindow(id: stream.id))
+        let px = drawWindow(window) { cg in
+            XCTAssertEqual(canvas.drawStreamWindow(id: stream.id, into: cg), window)
+        }
+        let mid = px(Int(window.width / 2), Int(window.height / 2))
+        XCTAssertEqual(mid.a, 255, "the frame at the centre")
+        XCTAssertEqual(px(1, 1).a, 0, "a corner of the box is outside the turned rectangle")
+        XCTAssertEqual(px(Int(window.width) - 2, 1).a, 0)
+    }
+
+    /// The Move box's case: the lifted ids alone, as the float shows them. A second element that is
+    /// not lifted is not in the window even where it overlaps.
+    func testAnIsolatedWindowDrawsTheLiftedIdsAlone() throws {
+        var stream = defaultElement()
+        stream.naturalSize = CGSize(width: 20, height: 10)
+        stream.transform = LayerTransform(position: CGPoint(x: 30, y: 30), scale: 1, rotation: 0)
+        let other = VectorFillElement(path: CGPath(rect: CGRect(x: 27, y: 27, width: 6, height: 6),
+                                                   transform: nil),
+                                      color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), opacity: 1)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream), .fill(other)])
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.green, size: CGSize(width: 20, height: 10)),
+                              index: 1)
+        canvas.suppressedElementIDs = [stream.id]
+        let window = try XCTUnwrap(canvas.streamWindow(id: stream.id))
+        let px = drawWindow(window) { cg in
+            XCTAssertEqual(canvas.drawStreamWindow(id: stream.id, into: cg, isolating: [stream.id]), window)
+        }
+        let centre = px(12, 7)
+        XCTAssertGreaterThan(Int(centre.g), Int(centre.r) + 100, "the frame, with the unlifted fill left out")
+    }
+
+    /// An id that is not a stream here has no window and draws nothing.
+    func testAnUnknownIdHasNoWindow() {
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(defaultElement())])
+        XCTAssertNil(canvas.streamWindow(id: UUID()))
+        _ = drawWindow(CGRect(x: 0, y: 0, width: 4, height: 4)) { cg in
+            XCTAssertNil(canvas.drawStreamWindow(id: UUID(), into: cg))
+        }
+        XCTAssertEqual(canvas.streamWindowDraws, 0)
+    }
+
+    // MARK: - The picture is shared by every copy of the element
+
+    /// **An undo step's copy of the list pins no frame of its own.** A stream element copied into a
+    /// snapshot shares the live element's `StreamPicture`, so a frame written after the copy is the
+    /// copy's frame too — and the decoder's pool buffer the frame wraps is held once, not once per
+    /// step. Without the box every `[VectorElement]` an undo step held while the laptop streamed
+    /// kept a 1080p buffer alive for the life of the stack.
+    func testACopiedElementSharesThePictureRatherThanPinningItsOwn() throws {
+        let stream = defaultElement()
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
+        let snapshot = canvas.elements
+        let green = solidImage(.green, size: CGSize(width: 2, height: 2))
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1))
+        XCTAssertTrue(try XCTUnwrap(snapshot.first?.stream).displayFrame === green,
+                      "the copy shows what the element shows")
+        canvas.elements = snapshot
+        canvas.bumpVersion()
+        XCTAssertTrue(try XCTUnwrap(canvas.streams.first).displayFrame === green,
+                      "and an undo puts back the newest picture, not the one from before the edit")
+    }
+
+    /// **A freeze detaches the picture**: the frozen element keeps the frame it froze on while a
+    /// copy that shares nothing with it any more — the far cel of a bake — goes on receiving.
+    func testAFreezeGivesTheElementAPictureOfItsOwn() throws {
+        let stream = defaultElement()
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
+        let far = VectorCanvas(size: Self.canvasSize, elements: canvas.elements)
+        let green = solidImage(.green, size: CGSize(width: 2, height: 2))
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1))
+        XCTAssertTrue(canvas.setStreamFrozen(id: stream.id, true))
+        let red = solidImage(.red, size: CGSize(width: 2, height: 2))
+        XCTAssertTrue(far.setStreamFrame(id: stream.id, image: red, index: 2))
+        XCTAssertTrue(try XCTUnwrap(canvas.streams.first).displayFrame === green, "frozen on green")
+        XCTAssertTrue(try XCTUnwrap(far.streams.first).displayFrame === red, "the far cel moved on")
+    }
+
+    /// A canvas told about a frame index answers false to the same index again, and nothing moves —
+    /// the tick's "unchanged slot costs nothing"; a canvas that shares the box but has not been told
+    /// still answers true, so its own memo is invalidated (TODO (96) through the box).
+    func testACanvasIsToldAboutAFrameOnce() throws {
+        let stream = defaultElement()
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
+        let far = VectorCanvas(size: Self.canvasSize, elements: canvas.elements)
+        let green = solidImage(.green, size: CGSize(width: 2, height: 2))
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1))
+        let version = canvas.version
+        XCTAssertFalse(canvas.setStreamFrame(id: stream.id, image: green, index: 1))
+        XCTAssertEqual(canvas.version, version)
+        let farVersion = far.version
+        XCTAssertTrue(far.setStreamFrame(id: stream.id, image: green, index: 1), "the box was written; this memo was not told")
+        XCTAssertGreaterThan(far.version, farVersion)
     }
 
     // MARK: - The placed-rectangle arms

@@ -5154,3 +5154,50 @@ sixty-four dots — its samples are `0.22 r` apart, wider than the highlight —
 times the cost for a spacing still seven pixels wide. The fill pass turns each dot into sixteen at a
 quarter of the aperture's cost, an effective 1,024-sample kernel; the disc is continuous to the eye at
 the slider's end (`LensBlurUITests`' screenshot). Device figure INFERRED at §1's ~1.3×.
+
+## 21. A live stream frame was a canvas-sized upload to the render server, thirty times a second (2026-09-17)
+
+**The finding is the iPad's, from its own crash logs, and it is about `backboardd` rather than the app.**
+Four `JetsamEvent` reports (2026-09-14 20:35, 22:49; 2026-09-15 04:24, 04:25) kill **`backboardd` for
+`per-process-limit` at 1940 MB resident** — the render server, whose death is a black screen and a
+respring, which is what the owner felt as *"the iPad crashed while the stream was on"* (TODO (97)).
+In every one of them `videocodecd` (VideoToolbox's decoder process) is alive at 135–292 MB, i.e. a
+stream was being decoded; PaintSoftware itself stood at 576–926 MB and was never the process killed;
+system wired memory was 1.4–1.9 GB of the iPad's 3 GB. Two earlier `vm-pageshortage` events
+(09-13 23:07, 09-14 18:20) show `backboardd` already at 1940 MB.
+
+**What the tick handed Core Animation.** `ScreenStreamCoordinator.tick` invalidated the stream
+cel's memo (`setStreamFrame`, `.region`) and asked the layer host to `refreshDisplayIfStale`, and the
+host answered as it does for any edit: a region repair in a **fresh canvas-sized
+`UIGraphicsImageRenderer`** (`renderLocalContent`, the base blitted whole), and the result assigned to
+`imageView.image` — **a new canvas-sized `CGImage` as layer contents, per frame, at up to 30 Hz**,
+for Core Animation to copy to the render server. The simulator does not reproduce the growth (its
+render server is the host's, not the guest's), so the device figure is INFERRED from the reports and
+the mechanism; what was MEASURED is that the churn is gone.
+
+| sim, 2048², 1280×720 pattern, 150 s | render server (guest `backboardd`) | app |
+|---|---|---|
+| before, 30 Hz canvas-sized contents | 69–101 MB footprint, **154–187 MB RSS, oscillating** | 152–214 MB |
+| after, `StreamSurfaceView` | 69 MB footprint, **126,592 KB RSS, constant** to the byte | 200–204 MB |
+
+(`SimRenderServer` on the host: 375–396 MB before, 363–388 after — noise.) The tick's own
+main-actor cost is unchanged: MEASURED **23–29 ticks/s, mean 0.38–0.48 ms, max ≤1.5 ms** from the
+coordinator's log line, against stage 2's 0.2–0.5 ms.
+
+**The fix is the shape of the scratch, applied to the stream.** A frame is presented by drawing the
+element's *window* — its footprint, quad-clipped, in true z-order — into one of two `IOSurface`s the
+host owns per stream element (`StreamSurfaceView`), off the main thread, through the same walk the
+memo uses (`VectorCanvas.drawStreamWindow`, `renderLocalContent`'s body factored out as
+`drawLocalContent`). The surfaces are the layer's contents for the life of the window: nothing
+canvas-sized is allocated, rasterized or uploaded per frame, and the render server maps two objects
+once. The memo is still region-damaged per frame (a thumbnail or a composite that reads it repairs
+it), but the host no longer redraws its base for a `version` move that left `committedVersion`
+still while a surface is up. `StreamSurfaceViewLogicTests` pins the count: a hundred frames are two
+contents objects, both `IOSurface`s.
+
+**Two smaller pins on the same path**, found reading the reports rather than measuring: Bake Frame
+stored the decoder's own `CGImage` — a wrap of a VideoToolbox pool buffer — as the placed image, so
+every bake grew the pool by a 1080p frame for the life of the document (`videocodecd`'s 135–301 MB
+lifetime maximum is ~16–36 such buffers); it copies now. And every undo step recorded while the
+laptop streamed held a copy of the element with that frame in it, unbudgeted — `StreamPicture`
+holds the frame by reference so every copy of the element shares one.

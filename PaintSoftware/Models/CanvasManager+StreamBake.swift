@@ -151,11 +151,11 @@ extension CanvasManager {
     /// `reidentified()` as the video bake does — the baked cel is a new drawing. The cels either
     /// side are `splitCel`'s own copies and keep their ids verbatim, the stream's included: that is
     /// what Split Drawing does to every cel it cuts, the two neighbours *are* the same drawing shown
-    /// on either side of the bake, and nothing keys on a stream id across cels —
-    /// `ScreenStreamCoordinator` keys its drawn-frame memo on the cel *and* the element for exactly
-    /// this case. `StreamBakeLogicTests` pins both halves.
+    /// on either side of the bake, and nothing keys on a stream id across cels — the two copies
+    /// share one `StreamPicture`, and each canvas records for itself which frame it was told about
+    /// (`VectorCanvas.setStreamFrame`). `StreamBakeLogicTests` pins both halves.
     ///
-    /// **The snapshot is the frame's own pixels at the laptop's size** (§6), unless the decoded
+    /// **The snapshot is a copy of the frame's pixels at the laptop's size** (§6), unless the decoded
     /// frame and the STATUS-reported `naturalSize` disagree — then it is resampled to `naturalSize`,
     /// because the stream drew its frame *into* that rect and a placed image's rect is its own
     /// pixel size, so any other choice moves the picture on canvas by the ratio of the two.
@@ -223,17 +223,23 @@ extension CanvasManager {
         return .baked
     }
 
-    /// The frame as the image element will carry it: its own pixels when they are the size the
-    /// stream drew them at, and a resample to that size when they are not. A `UIImage` from a
-    /// `CGImage` is at scale 1, so `size` is pixels.
+    /// The frame as the image element will carry it: **a copy of its pixels**, at the size the stream
+    /// drew them at — its own size when that is the STATUS-reported one, a resample to the reported
+    /// size when it is not. A `UIImage` from a `CGImage` is at scale 1, so `size` is pixels.
+    ///
+    /// **A copy even when the sizes agree.** `displayFrame` wraps the decoder's own pixel buffer —
+    /// `VTCreateCGImageFromCVPixelBuffer` is a wrap, not a copy — and a placed image holds its
+    /// picture for the life of the document and of every undo step that snapshots it. Baking the
+    /// wrapper itself pinned one buffer of VideoToolbox's pool per bake, and the pool grew by one
+    /// 1080p frame each time; `videocodecd` stood at 135–300 MB in every one of TODO (97)'s jetsam
+    /// reports. A copy costs the bake one frame-sized draw and the pool nothing.
     static func streamSnapshot(_ frame: UIImage, fitting naturalSize: CGSize) -> UIImage {
-        guard naturalSize.width > 0, naturalSize.height > 0,
-              frame.size != naturalSize || frame.scale != 1 else { return frame }
+        let size = naturalSize.width > 0 && naturalSize.height > 0 ? naturalSize : frame.size
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
         format.opaque = false
-        return UIGraphicsImageRenderer(size: naturalSize, format: format).image { _ in
-            frame.draw(in: CGRect(origin: .zero, size: naturalSize))
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            frame.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }
