@@ -1177,7 +1177,7 @@ final class PerfBaselineTests: XCTestCase {
         var samplesThatFoundInk = 0
         var piecesPunched = 0
         var previous: CGPoint?
-        var accumulated: [UUID: [ClosedRange<CGFloat>]] = [:]
+        var accumulated: [UUID: VectorCanvas.CutPreviewProgress] = [:]
         for point in points {
             autoreleasepool {
                 let increment = StrokeSamples([previous, point].compactMap { $0 }

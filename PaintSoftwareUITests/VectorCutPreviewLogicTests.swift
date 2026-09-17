@@ -61,7 +61,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
                            brush: Brush, size: CGFloat) -> RasterLayerTexture {
         let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
         var previous: VectorSample?
-        var accumulated: [UUID: [ClosedRange<CGFloat>]] = [:]
+        var accumulated: [UUID: VectorCanvas.CutPreviewProgress] = [:]
         for sample in gesture {
             let increment: StrokeSamples = previous.map { [$0, sample] } ?? [sample]
             previous = sample
@@ -291,7 +291,9 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let vertical = stroke(StrokeSamples((0..<17).map { VectorSample(x: 128, y: 40 + CGFloat($0) * 11, pressure: 1) },
                                             channels: .pressureOnly), size: 20)
         // The nib travels along y = 128 well to the left of x = 128, so it reaches the horizontal
-        // line's centreline and never the vertical one's: only the horizontal stroke is cut.
+        // line's centreline and never the vertical one's: only the horizontal stroke is cut. The
+        // 5 pt of it left of the nib's reach is a stub — every dab of it under a 15 pt nib's
+        // touch — and goes with the cut (TODO (83)), so the line comes out as one piece.
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [horizontal, vertical]) }
         let gesture = StrokeSamples((0..<12).map { VectorSample(x: 60 + CGFloat($0) * 3, y: 128, pressure: 1) },
                                     channels: .pressureOnly)
@@ -299,7 +301,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 30, mode: .cutPoints))
-        XCTAssertEqual(cut.strokes.count, 3, "Setup: the horizontal line cut in two, the vertical intact")
+        XCTAssertEqual(cut.strokes.count, 2, "Setup: the horizontal line's stub gone, its right piece and the vertical intact")
         let afterLift = cut.render()
         let preview = previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage()
 

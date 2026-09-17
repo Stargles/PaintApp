@@ -65,6 +65,20 @@ enum VectorEraser {
             for capsule in capsules where capsule.contains(point) { return true }
             return false
         }
+
+        /// Whether the footprint comes within `reach` of `point` — `contains` on the footprint
+        /// dilated by `reach`, which for a tapered capsule is exactly the capsule with both radii
+        /// grown by it. Asked with a stroke's own half-width, it says whether the dab drawn at
+        /// `point` touches the eraser at all.
+        func reaches(_ point: CGPoint, within reach: CGFloat) -> Bool {
+            guard bounds.insetBy(dx: -reach, dy: -reach).contains(point) else { return false }
+            for capsule in capsules {
+                let grown = StrokeGeometry.Capsule(a: capsule.a, b: capsule.b,
+                                                   ra: capsule.ra + reach, rb: capsule.rb + reach)
+                if grown.contains(point) { return true }
+            }
+            return false
+        }
     }
 
     // MARK: - Modes 1 and 2 — cut what the footprint covers
@@ -100,6 +114,47 @@ enum VectorEraser {
                 return false
             }
             return sweep.contains(point)
+        }
+    }
+
+    /// The parametric spans of `samples` along which the stroke's **ink** meets the eraser — every
+    /// parameter whose dab, at its own pressure's radius, overlaps the footprint. `cutRanges` asks
+    /// where the centreline is under the eraser; this asks where the ink is against it, which is
+    /// wider by the stroke's half-width on every side. Merged before returning.
+    ///
+    /// What Mode 2 reads off it is the *complement*: a surviving piece with no parameter outside
+    /// these spans has no dab the eraser missed, and `isTouchedThroughout` names that piece a stub.
+    ///
+    /// The clip rect is grown by the stroke's widest half-width for the reason `cleanCutRanges`
+    /// grows its own: a centreline outside the sweep's box can still have ink inside it. Pressure 1
+    /// is taken as the widest, which is the convention every reach in `VectorCanvas` already uses.
+    static func touchedSpans(in samples: some SampleRun, brush: Brush, size: CGFloat,
+                             sweep: Sweep) -> [ClosedRange<CGFloat>] {
+        guard !samples.isEmpty else { return [] }
+        let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: size)
+        let spans = coveredSpans(in: samples, clipTo: sweep.bounds.insetBy(dx: -reach, dy: -reach),
+                                 probeStep: sweep.probeStep) { parameter in
+            guard let dab = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
+            return sweep.reaches(dab.point, within: StrokeGeometry.stampRadius(forPressure: dab.pressure,
+                                                                              brush: brush, size: size))
+        }
+        return StrokeGeometry.mergedCuts(spans, clampedTo: 0...CGFloat(samples.count - 1))
+    }
+
+    /// Whether a piece spanning `parameters` (ascending, in the domain `touched` was measured in)
+    /// lies wholly inside one touched span — i.e. the eraser touched every dab it would draw.
+    ///
+    /// **This is Mode 2's stub rule, and it is geometry rather than a length.** A cut lands where
+    /// the centreline leaves the footprint, and the piece beyond it regrows a round cap of its own
+    /// half-width back into the gap; when that piece is shorter than its own half-width — a stroke
+    /// whose end pokes past the eraser's edge by a point, the tail of a thick line crossed near its
+    /// end — the regrown cap *is* the piece, a full-width blob standing where the artist just swept.
+    /// Such a piece has no ink the eraser missed, and it goes. A piece that runs on past the
+    /// eraser's reach keeps ink it never touched and survives whatever its length.
+    static func isTouchedThroughout(_ parameters: [CGFloat], touched: [ClosedRange<CGFloat>]) -> Bool {
+        guard let first = parameters.first, let last = parameters.last else { return false }
+        return touched.contains {
+            $0.lowerBound <= first + StrokeGeometry.epsilon && $0.upperBound >= last - StrokeGeometry.epsilon
         }
     }
 

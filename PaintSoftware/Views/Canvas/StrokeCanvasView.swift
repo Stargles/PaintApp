@@ -216,8 +216,8 @@ final class StrokeCanvasView: UIView {
     /// increments (consecutive capsules share their endpoints), so punching increment by increment
     /// covers the same ink the lift's single whole-gesture sweep will.
     private var lastPreviewSample: VectorSample?
-    /// Mode 2's preview, per cut stroke: every span of it the gesture has taken so far, in that
-    /// stroke's own parametric domain. Empty except mid-drag.
+    /// Mode 2's preview, per stroke the gesture has reached: every span of it the gesture has cut,
+    /// and every span it has touched, in that stroke's own parametric domain. Empty except mid-drag.
     ///
     /// **The preview needs the whole gesture's cut even though it is applied one increment at a
     /// time.** A cut piece is drawn with a round end cap at the boundary, and the boundary walks
@@ -225,7 +225,7 @@ final class StrokeCanvasView: UIView {
     /// finished cut does not leave, and unless they are accounted for they fill the gap back in
     /// behind the finger. `VectorCanvas.cutPreviewEdits` merges into this and reads the caps off the
     /// merged result. It is a few ranges per stroke touched, not per sample.
-    private var previewCuts: [UUID: [ClosedRange<CGFloat>]] = [:]
+    private var previewCuts: [UUID: VectorCanvas.CutPreviewProgress] = [:]
     /// Smooths raw touch positions into a trailing "follow" point before `stampPath`. Reset to the
     /// raw touch-down position at the start of every stroke so the first stamp lands under the
     /// touch rather than smoothing in from an earlier stroke's trailing point.

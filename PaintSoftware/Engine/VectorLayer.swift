@@ -3763,10 +3763,16 @@ final class VectorCanvas {
             guard !cuts.isEmpty else { result.append(element); continue }
             changed = true
             replaced.append(stroke)
+            // TODO (83): a piece the eraser touched along its whole length is a stub and is not kept
+            // — `VectorEraser.isTouchedThroughout` carries the rule. Measured once per stroke, over
+            // the whole stroke, so every piece reads the same spans.
+            let touched = VectorEraser.touchedSpans(in: stroke.samples, brush: stroke.brush,
+                                                    size: stroke.size, sweep: sweep)
             // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
             // inheriting the parent's lattice, which would keep drawing dabs just cut away. Its
             // randomness stays where it was regardless — see `detachedPiece`.
-            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts) {
+            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts)
+            where !VectorEraser.isTouchedThroughout(run.parameters, touched: touched) {
                 result.append(.stroke(Self.detachedPiece(of: stroke, samples: run.samples,
                                                          startParameter: run.parameters.first ?? 0)))
             }
@@ -5159,8 +5165,21 @@ final class VectorCanvas {
     ///
     /// A footprint punch is wrong in the same direction in both: it shows a nib-shaped bite that the
     /// lift has to hand back. This returns the actual difference instead.
+    /// What a Mode 2 drag has established about one stroke so far, carried by the caller across
+    /// touch samples and merged into by `cutPreviewEdits` — both halves in the stroke's own domain.
+    ///
+    /// **Two lists rather than one**, because the stub rule reads a different span from the cut.
+    /// `cuts` is where the gesture has crossed the centreline; `touched` is where it has met the
+    /// ink at all, which is wider by the stroke's half-width and grows on samples that cut nothing.
+    /// A piece the cut leaves is a stub when `touched` covers it whole (`VectorEraser.isTouchedThroughout`),
+    /// and a graze that cut nothing can be what closes that cover.
+    struct CutPreviewProgress: Equatable {
+        var cuts: [ClosedRange<CGFloat>] = []
+        var touched: [ClosedRange<CGFloat>] = []
+    }
+
     func cutPreviewEdits(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
-                         accumulating accumulated: inout [UUID: [ClosedRange<CGFloat>]]) -> [CutPreviewEdit] {
+                         accumulating accumulated: inout [UUID: CutPreviewProgress]) -> [CutPreviewEdit] {
         lock.lock()
         defer { lock.unlock() }
         guard !canvasSpaceSamples.isEmpty else { return [] }
@@ -5182,17 +5201,23 @@ final class VectorCanvas {
             guard let stroke = _elements[index].stroke, stroke.composite == .paint else { continue }
             let increment = Self.effectiveCuts(VectorEraser.cutRanges(in: stroke.samples, sweep: sweep),
                                                in: stroke.samples)
-            guard !increment.isEmpty else { continue }
             let domainEnd = CGFloat(Swift.max(stroke.samples.count - 1, 0))
             // **The caps have to be drawn against the whole gesture's cut, not this increment's.**
             // A piece's cap sits at the cut boundary, and the boundary moves outward with every touch
             // sample; caps drawn at the boundaries the gesture passed through are ink the finished cut
             // does not leave, and left alone they fill the gap in completely behind the eraser. So the
-            // caller carries the accumulated cut per stroke across the drag and it is merged here.
-            let previous = accumulated[stroke.id] ?? []
-            let merged = StrokeGeometry.mergedCuts(previous + increment, clampedTo: 0...domainEnd)
-            guard merged != previous else { continue }
-            accumulated[stroke.id] = merged
+            // caller carries the accumulated cut per stroke across the drag and it is merged here —
+            // and the touched spans with it, since a sample that cuts nothing can still be the one
+            // that makes a piece a stub.
+            let previous = accumulated[stroke.id] ?? CutPreviewProgress()
+            var progress = previous
+            progress.cuts = StrokeGeometry.mergedCuts(previous.cuts + increment, clampedTo: 0...domainEnd)
+            progress.touched = StrokeGeometry.mergedCuts(
+                previous.touched + VectorEraser.touchedSpans(in: stroke.samples, brush: stroke.brush,
+                                                             size: stroke.size, sweep: sweep),
+                clampedTo: 0...domainEnd)
+            accumulated[stroke.id] = progress
+            guard progress != previous, !progress.cuts.isEmpty else { continue }
 
             // The same fallback `stamp(stroke:into:isEraser:)` makes: a lattice with no usable range
             // would replay the *parent* whole, which is worse than ignoring it.
@@ -5202,39 +5227,42 @@ final class VectorCanvas {
             let strokeRadius = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
                                                           size: canvasSize)
 
-            var eraseRanges: [ClosedRange<CGFloat>] = []
-            for cut in increment {
-                // Widened by the stroke's own radius before anything else: the cap drawn at the
-                // *previous* boundary lies within one radius of it, on the gap side, and this is the
-                // pass that clears it. On the other side the widening reaches into ink that survives,
-                // which the restamp below puts back — its window is `strokeRadius + nibRadius`, so it
-                // always covers what this took.
-                let widened = Self.extend(cut, in: stroke.samples, by: strokeRadius / scale,
+            /// A span of the stroke's own domain, widened by the stroke's radius and moved into the
+            /// domain of the walk being replayed. Widening first: the cap drawn at a *previous*
+            /// boundary lies within one radius of it, on the gap side, and the erase is what clears
+            /// it; on the other side the widening reaches into ink that survives, which the restamp
+            /// below puts back — its window is `strokeRadius + nibRadius`, so it always covers what
+            /// this took. A span is expressed in the stroke's own domain and the walk is the
+            /// parent's, so the two ends move across with `DabLattice.parentParameter(of:)` —
+            /// exactly how the piece's own `visibleRange` was derived when it was cut.
+            func walkSpan(_ span: ClosedRange<CGFloat>) -> ClosedRange<CGFloat>? {
+                let widened = Self.extend(span, in: stroke.samples, by: strokeRadius / scale,
                                           clampedTo: 0...domainEnd)
-                // A cut is expressed in the stroke's own domain; the walk being replayed is the
-                // parent's, so the two ends move across with `DabLattice.parentParameter(of:)` —
-                // exactly how the piece's own `visibleRange` was derived when it was cut.
-                var span = lattice.map { $0.parentParameter(of: widened.lowerBound)
-                                             ... $0.parentParameter(of: widened.upperBound) } ?? widened
-                if let whole = lattice?.range {
-                    let low = Swift.max(span.lowerBound, whole.lowerBound)
-                    let high = Swift.min(span.upperBound, whole.upperBound)
-                    guard high >= low else { continue }
-                    span = low...high
-                }
-                eraseRanges.append(span)
+                let moved = lattice.map { $0.parentParameter(of: widened.lowerBound)
+                                              ... $0.parentParameter(of: widened.upperBound) } ?? widened
+                guard let whole = lattice?.range else { return moved }
+                let low = Swift.max(moved.lowerBound, whole.lowerBound)
+                let high = Swift.min(moved.upperBound, whole.upperBound)
+                return high >= low ? low...high : nil
             }
-            guard !eraseRanges.isEmpty else { continue }
+            var eraseRanges = increment.compactMap(walkSpan)
 
             // How far back into the erased gap a surviving cap can reach: its own radius, plus the
             // nib's, because the erase is a capsule of the nib's radius around the doomed centreline
             // and the cap has to be restored everywhere that capsule took it.
             let reach = strokeRadius + nibRadius
             var restamps: [CutPreviewEdit.Restamp] = []
-            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: merged) {
+            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: progress.cuts) {
+                guard let first = run.parameters.first, let last = run.parameters.last else { continue }
+                // A stub is erased whole, caps included, and nothing of it is drawn back — the same
+                // verdict `cutAlongFootprint` reaches at the lift. Erased again on every rebuild of
+                // this stroke's edit, because an earlier frame may have restamped it as a survivor.
+                if VectorEraser.isTouchedThroughout(run.parameters, touched: progress.touched) {
+                    if let span = walkSpan(first...last) { eraseRanges.append(span) }
+                    continue
+                }
                 let canvasRun = Self.canvasSamples(stroke.samples.replacingSamples(run.samples),
                                                    through: _transform)
-                guard let first = run.parameters.first, let last = run.parameters.last else { continue }
                 let startAbutsACut = first > StrokeGeometry.epsilon
                 let endAbutsACut = last < domainEnd - StrokeGeometry.epsilon
                 guard startAbutsACut || endAbutsACut else { continue }
@@ -5247,6 +5275,7 @@ final class VectorCanvas {
                 }
             }
 
+            guard !eraseRanges.isEmpty else { continue }
             edits.append(CutPreviewEdit(eraseWalk: Self.canvasSamples(source, through: _transform),
                                         eraseRandom: stroke.dabRandom,
                                         eraseRanges: eraseRanges,

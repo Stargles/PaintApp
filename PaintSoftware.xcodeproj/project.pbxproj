@@ -161,6 +161,7 @@
 		6F838734B0EDB31E7FA46F61 /* PaintSoftware/Engine/Eyedropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C93E8FC56941726182476A82 /* PaintSoftware/Engine/Eyedropper.swift */; };
 		A7365B48F299C4A32B5EF8F9 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */; };
 		7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */; };
+		2D121EFB1A8EDB89E3C7EFEC /* VectorEraserCommitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */; };
 		7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */; };
 		7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */; };
 		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
@@ -628,6 +629,7 @@
 		C93E8FC56941726182476A82 /* PaintSoftware/Engine/Eyedropper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Eyedropper.swift; sourceTree = "<group>"; };
 		059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Eyedropper.swift"; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterVectorParityLogicTests.swift; sourceTree = "<group>"; };
+		9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserCommitLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserHybridLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserUITests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
@@ -1194,6 +1196,7 @@
 				DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */,
 				DEC0DE400000000000000001 /* InterpolationWorkflowLogicTests.swift */,
 				7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */,
+				9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */,
 				7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */,
 				7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */,
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
@@ -1811,6 +1814,7 @@
 				8B61CD83DA977B72607F6E62 /* SelectionOverlayLogicTests.swift in Sources */,
 				907157FC16C95E9DDF3A5477 /* SelectionPencilOnlyUITests.swift in Sources */,
 				7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */,
+				2D121EFB1A8EDB89E3C7EFEC /* VectorEraserCommitLogicTests.swift in Sources */,
 				7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 				601037081B1ADF05E27131D9 /* PaintSoftware/Services/ProjectLibraryMigration.swift in Sources */,
