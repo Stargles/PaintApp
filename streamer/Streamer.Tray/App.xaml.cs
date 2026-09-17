@@ -119,10 +119,9 @@ public partial class App : System.Windows.Application
         _singleInstance = new SingleInstanceGuard(SingleInstanceGuard.AppMutexName);
         if (!_singleInstance.TryAcquire())
         {
+            // Silently, as a tray program does: a modal here would sit unanswered for ever when
+            // the second launch is headless (the on-demand task while the shortcut's instance runs).
             Log("Another PaintStreamer instance is already running — exiting without starting a second one.");
-            System.Windows.MessageBox.Show(
-                "PaintStreamer is already running. Look for its icon in the system tray.",
-                AppName, MessageBoxButton.OK, MessageBoxImage.Information);
             _singleInstance.Dispose();
             _singleInstance = null;
             Shutdown(0);
