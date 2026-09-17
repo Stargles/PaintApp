@@ -3,6 +3,24 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A second `Streamer.Tray` instance launched with nobody at the keyboard never exits (2026-09-17)
+
+`App.xaml.cs`'s `OnStartup`, the `SingleInstanceGuard` branch: when the mutex is already held, it
+calls `System.Windows.MessageBox.Show(...)` — a modal, blocking call — and only reaches
+`Shutdown(0)` after that dialog is dismissed. Reproduced live on the laptop: `streamer-remote.sh
+start` while the scheduled task's own instance was already running launched a second process that
+logged "Another PaintStreamer instance is already running — exiting without starting a second one"
+and then did not exit — `Get-Process` still showed it minutes later, `Responding=True`, 0% CPU,
+`MainWindowTitle` empty (the modal apparently doesn't register as the process's main window). Killed
+by hand (`Stop-Process`) to clean up; the primary instance was unaffected throughout since it never
+contended for the mutex. TODO (99)'s own rationale names both ends of this collision — the shortcut
+while the task's instance is running, and `streamer-remote.sh start` while the shortcut's instance is
+running — so it is not a synthetic scenario: whenever the second launch is unattended, the log's
+"exiting" is not true, and a dialog with no one to click it will eventually surface on kevin's screen
+from a launch he doesn't know happened. A fix needs an owner call on the shape (skip the dialog
+entirely when launched by the Scheduled Task versus the shortcut, replace it with a non-blocking tray
+balloon, or something else) rather than being picked here.
+
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main

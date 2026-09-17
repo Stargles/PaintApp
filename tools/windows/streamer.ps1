@@ -54,10 +54,36 @@ function Show-Status {
     }
 }
 
+# Found live 2026-09-17 (the (98)/(99) bring-up): the FIRST time a given build of the exe
+# opens its listening socket, Windows Firewall auto-creates a paired "TCP/UDP Query
+# User{GUID}<exe path>" rule pair with Action=Block, scoped to that exact program path -
+# the interactive "Windows Defender Firewall has blocked some features of this app"
+# prompt's answer, or its default with nobody at the keyboard (both the scheduled task and
+# streamer-remote.sh run headlessly). A per-program Block rule wins over
+# install-streamer.ps1's port-scoped Allow rule regardless of remote address, so every
+# connection is silently dropped - logged DROP in pfirewall.log against this exe's PID,
+# with the Allow rule and `netstat` both looking completely correct, since the blocking
+# rule is filed under the program, not the port. And it is NOT a one-time thing: a plain
+# `dotnet publish` embeds a fresh MVID into the PE file every build even with no source
+# change, so Windows treats each republish as a new, unvetted binary and can re-create the
+# block the next time it first listens - install-streamer.ps1's own cleanup (which runs
+# before the freshly published exe has ever started) cannot catch that one. Call this
+# after every launch, not just after install.
+function Remove-StaleFirewallBlock {
+    Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $ExePath } | ForEach-Object {
+        $rule = $_ | Get-NetFirewallRule
+        if ($rule.Action -eq "Block") {
+            Write-Host "== Removing Windows Firewall's auto-created Block rule '$($rule.DisplayName)' for $ExePath =="
+            $rule | Remove-NetFirewallRule
+        }
+    }
+}
+
 switch ($Command) {
     "start" {
         Start-ScheduledTask -TaskName $TaskName
         Start-Sleep -Seconds 2
+        Remove-StaleFirewallBlock
         Show-Status
     }
     "stop" {
@@ -126,6 +152,11 @@ switch ($Command) {
         & (Join-Path $PSScriptRoot "install-streamer.ps1") -SourceDir $SourceDir -AppDir $AppDir -Port $Port
         Start-ScheduledTask -TaskName $TaskName
         Start-Sleep -Seconds 2
+        # The just-published exe is a new binary (fresh MVID every build - see
+        # Remove-StaleFirewallBlock's comment), so this is its first-ever listen and
+        # Windows Firewall may only now decide to auto-block it, even though
+        # install-streamer.ps1 already cleaned up whatever block rule predated this build.
+        Remove-StaleFirewallBlock
         Show-Status
     }
 }

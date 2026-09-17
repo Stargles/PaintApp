@@ -87,22 +87,65 @@ $exePath = Join-Path $publishDir "Streamer.Tray.exe"
 if (-not (Test-Path $exePath)) { Fail "Publish succeeded but $exePath does not exist - check the publish output above" }
 Write-Host "  Published: $exePath"
 
-# ---- 3. Firewall rule (idempotent; Tailscale + RFC1918 LAN per STREAM.md section 4.3/TODO (98)) ----
+# ---- 3. Firewall rules (idempotent; Tailscale + RFC1918 LAN per STREAM.md section 4.3/TODO (98)) ----
 # A static, coarse allow-list: it cannot know which of these subnets the laptop's NIC is
 # actually on right now (or whether it moves to a different one mid-session), so
 # AdmissionPolicy.cs re-checks every connection against the laptop's LIVE NIC data - this
 # rule only has to be at least as permissive as that check ever needs.
-$ruleName = "PaintStreamer-In-TCP"
-$remoteAddresses = @("100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-$existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-if (-not $existingRule) {
-    Write-Host "== Creating firewall rule $ruleName (TCP $Port, remote $($remoteAddresses -join ', ')) =="
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP `
-        -LocalPort $Port -RemoteAddress $remoteAddresses -Action Allow | Out-Null
-} else {
-    Write-Host "== Updating firewall rule $ruleName remote scope (idempotent - re-applies every run) =="
-    Set-NetFirewallRule -DisplayName $ruleName -RemoteAddress $remoteAddresses | Out-Null
+#
+# Found live on the laptop 2026-09-17: a PORT-scoped rule alone (Program left as "Any") is
+# not enough. Windows Firewall's own "app wants to communicate" prompt gates on whether a
+# rule already exists for the PROGRAM, not just the port - with none, every first listen
+# asks "Windows Defender Firewall has blocked some features of this app" on Private AND
+# Public networks (Windows treats a freshly `dotnet publish`ed exe as new even at the same
+# path, since a plain publish embeds a fresh MVID into the PE every build). Answered by
+# nobody - both the scheduled task and streamer-remote.sh run headlessly - it silently
+# auto-creates a paired "TCP/UDP Query User{GUID}<exe path>" rule pair with Action=Block
+# that overrides any port-scoped Allow rule regardless of remote address; `netstat` and
+# `Get-NetFirewallRule` on the port-scoped rule alone give no hint of this, since the block
+# is filed under the program. It happened live on kevin's screen 2026-09-17 for BOTH
+# protocols this app listens on: the TCP video/control channel and Discovery/MdnsAdvertiser.cs's
+# UDP 5353 (mDNS multicast, 224.0.0.251:5353, TODO (98)'s Nearby discovery) - each got its
+# own copy of the prompt. The fix is to make each rule PROGRAM-scoped (plus port, plus the
+# same remote-address restriction) so Windows already has an Allow answer on file before
+# the exe ever asks, every run, since republishing the same path doesn't carry the answer
+# forward on its own.
+Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $exePath } | ForEach-Object {
+    $blockRule = $_ | Get-NetFirewallRule
+    if ($blockRule.Action -eq "Block") {
+        Write-Host "== Removing stale auto-created Block rule '$($blockRule.DisplayName)' for $exePath =="
+        $blockRule | Remove-NetFirewallRule
+    }
 }
+
+# Superseded by PaintStreamer-In-TCP below (TODO (98) widened Tailscale-only to also admit
+# the LAN) - still present as a leftover from the original stage-3 install on laptops set
+# up before that change; remove it so there are not two overlapping Allow rules for the
+# same port.
+Get-NetFirewallRule -DisplayName "PaintApp Streamer (47301, Tailscale only)" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        Write-Host "== Removing superseded rule '$($_.DisplayName)' =="
+        $_ | Remove-NetFirewallRule
+    }
+
+$remoteAddresses = @("100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+function Set-ProgramFirewallRule([string]$RuleName, [string]$Protocol, [int]$LocalPort) {
+    $existing = Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        Write-Host "== Creating firewall rule $RuleName ($Protocol $LocalPort, program $exePath) =="
+        New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -Protocol $Protocol -LocalPort $LocalPort `
+            -Program $exePath -Profile Private, Public -RemoteAddress $remoteAddresses `
+            -Action Allow -EdgeTraversalPolicy Allow -Enabled True | Out-Null
+    } else {
+        Write-Host "== Updating firewall rule $RuleName (idempotent - re-applies every run, in case the publish path or scope changed) =="
+        Set-NetFirewallRule -DisplayName $RuleName -Program $exePath -Profile Private, Public `
+            -RemoteAddress $remoteAddresses -EdgeTraversalPolicy Allow -Enabled True | Out-Null
+    }
+}
+
+Set-ProgramFirewallRule -RuleName "PaintStreamer-In-TCP" -Protocol "TCP" -LocalPort $Port
+Set-ProgramFirewallRule -RuleName "PaintStreamer-Mdns-UDP" -Protocol "UDP" -LocalPort 5353
 
 # ---- 4. Start Menu + desktop shortcuts (TODO (99): "just like any normal computer program") ----
 # $env:ProgramData is machine-wide (not per-user, unlike $env:LOCALAPPDATA above), so it

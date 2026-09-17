@@ -254,10 +254,29 @@ identical exe with no arguments, so `Streamer.Tray`'s own named-mutex guard
 while the task's is already running, rather than the two mechanisms being kept apart by convention.
 Log either way: `%LOCALAPPDATA%\PaintStreamer\log.txt`.
 
-`tools/windows/install-streamer.ps1` (run once as Administrator, over SSH): .NET 8 SDK via winget,
-GStreamer MSI silently with all features, the firewall rule for 47301 (§6's admission rule), the Start
-Menu and desktop shortcuts, the triggerless scheduled task, and a `dotnet publish` of the tray app to
-`%LOCALAPPDATA%\PaintStreamer\app`.
+`tools/windows/install-streamer.ps1` (run as `PC` over SSH, idempotent — `streamer-remote.sh deploy`
+re-runs it on every publish): checks the .NET 8 SDK and GStreamer are present rather than installing
+them (a machine missing either gets a clear message, not a half-attempted `winget` install that needs
+an interactive session anyway), publishes the tray app to `C:\Users\kevin\AppData\Local\PaintStreamer\app`,
+the Start Menu and desktop shortcuts, the triggerless scheduled task, and the firewall rules for 47301
+and mDNS's UDP 5353 (§6's admission rule).
+
+**Found live on the laptop 2026-09-17: the firewall rule must be scoped to the exact program path, not
+just the port.** A port-only Allow rule (`Program` left as "Any") does not stop Windows Firewall's own
+"app wants to communicate" prompt — it gates on whether a rule already exists *for the program*, and
+with none, the first `bind`/`listen` after every fresh `dotnet publish` (which embeds a new MVID into
+the PE, so Windows treats it as a new binary even at the same path) re-asks "Windows Defender Firewall
+has blocked some features of this app" on Private *and* Public networks, once per protocol (TCP video/
+control and Discovery's UDP 5353 mDNS each triggered their own copy). Answered by nobody — the
+scheduled task and `streamer-remote.sh` both run headlessly, and kevin cannot always get to the laptop
+to click it — Windows silently auto-creates a paired "TCP/UDP Query User{GUID}&lt;exe path&gt;" rule
+pair with `Action=Block` that overrides any port-scoped Allow rule regardless of remote address; the
+block is filed under the program, so `netstat` and `Get-NetFirewallRule` on the port-scoped rule alone
+give no hint of it. `install-streamer.ps1` now creates `PaintStreamer-In-TCP` and `PaintStreamer-Mdns-UDP`
+scoped to `-Program $exePath` (plus the same Tailscale/RFC1918 `-RemoteAddress` restriction) so Windows
+already has an Allow answer on file before the exe ever asks, and removes any stale auto-created Block
+rule for the same path as a second-line cleanup. If the prompt is already on kevin's screen when this
+runs, it can simply be dismissed — the rules it would have created already exist.
 
 ### 4.4 The window
 
