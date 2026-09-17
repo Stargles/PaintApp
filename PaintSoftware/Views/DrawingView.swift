@@ -217,11 +217,6 @@ struct DrawingView: View {
                     .allowsHitTesting(false)
             }
         }
-        // **The live selection catches up with the library here, once per document** — see
-        // `CanvasManager.adoptLibrarySelections`. This view is the editor screen's root and appears
-        // before anything can be drawn, so it is the last moment at which "the brush the artist
-        // edited last session" can still be made the brush the first stroke uses.
-        .onAppear { canvasManager.adoptLibrarySelections() }
         // The dock's anchor. It arrives from `AnimationTimeline`, two ZStack layers away, which is
         // why it travels as a preference rather than as a binding: the timeline is a sibling of the
         // dock, not its parent, and neither owns the other.

@@ -48,27 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (76) Autosave
-
-**Status** — filed 2026-09-16. The owner: *"Right now I think the app saves too infrequently, or it
-only saves when you exit to gallery. Make an autosave feature that saves whenever the system can afford
-it or on intervals, or some other system, you decide. The one thing is that it must not lag out the main
-thread or operations. User experience should remain unchanged, the autosave should practically be
-unnoticeable that it happened."*
-
-- [ ] Off the main thread, incremental where the store allows, MEASURED not to touch a stroke or playback.
-
----
-
-## (77) Leaving to the gallery and coming back resets editor state
-
-**Status** — filed 2026-09-16. The owner: *"Right now going out of the canvas to gallery then back
-resets a bunch of things, like your brush size and opacity, the frame you are on, etc."*
-
-- [ ] Brush size, opacity, current frame, and whatever else resets today survive the round trip.
-
----
-
 ## (87) Exiting a canvas returns to its folder in the gallery
 
 **Status** — filed 2026-09-16. The owner: *"exiting a canvas should exit to the folder that the canvas

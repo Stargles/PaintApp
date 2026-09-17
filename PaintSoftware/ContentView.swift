@@ -147,10 +147,16 @@ struct ContentView: View {
         screen = .editor
     }
 
-    /// The app half of TODO (77): whatever manager is about to be edited gets the brush size, opacity,
-    /// colour, tool and eraser the artist last had in hand. Stored by `saveIfNeeded`, so every save
-    /// — the autosave included — keeps the record current.
+    /// The brush in hand as a document enters the editor, in two steps whose order is the point.
+    /// First the live selection catches up with the library — `CanvasManager.adoptLibrarySelections`,
+    /// the preset the artist edited last session becoming the preset the first stroke uses — and
+    /// then TODO (77)'s app half lays the artist's own nudges over it: the size, opacity, colour,
+    /// tool and eraser they last had in hand, stored by `saveIfNeeded` so every save keeps the record
+    /// current. The other order would let a preset edited weeks ago overwrite the size set an hour
+    /// ago. Here, before the editor appears, rather than in an `onAppear`, so the first stroke and
+    /// the first frame both see the finished state.
     private func handToolsToArtist() {
+        canvasManager.adoptLibrarySelections()
         if let preferences = EditorPreferences.stored() {
             canvasManager.applyEditorPreferences(preferences)
         }

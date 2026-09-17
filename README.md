@@ -65,6 +65,12 @@ toolset, and a frame-by-frame animation timeline.
   side rail: select it, tap the canvas, and the colour under the tap becomes the brush colour. It
   samples the composite (what is on screen, paper included) and reverts to the previous tool
 - **Gallery**: a project browser with thumbnails, backed by on-disk project packages
+- **Saving**: automatic — a few seconds after you stop editing, and every half minute while you
+  do not stop — as well as when you leave to the gallery or the app goes to the background. Each
+  save is atomic (staged, validated, then swapped in), writes only the cels that changed, and keeps
+  the artist's thread out of it. Coming back from the gallery lands where you left: same frame,
+  layer, zoom, onion skin and loop range are the document's; brush size, opacity, colour, tool and
+  eraser follow you between documents
 - **Gestures**: two-finger zoom, rotate, and pan
 
 ## Project Structure

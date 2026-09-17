@@ -727,17 +727,14 @@ pins it by giving every cel a dot at a position derived from its own index. Noth
 before: every other round-trip test in that file reads `cels[0]`, and one cel per layer cannot show
 an ordering.
 
-**What was deliberately not built: the memo.** §5's entry on this path stands. Skipping the encode
-for a cel whose pixels have not moved is worth far more than 4× on a document where the artist
-touched three cels — but it is the data-loss class of risk, it belongs beside
-`RasterLayerTexture`'s existing version-keyed `renderToUIImage()` cache rather than in a second
-identity scheme in `ProjectStore`, and `SaveProfile.pngsReused` exists as the counter it would move.
+**The memo this item declined was built for the autosave on 2026-09-17** — §19 and §5's entry.
+Skipping the encode for a cel whose pixels have not moved is the data-loss class of risk, and the
+owner's *"leaving the gallery is instant"* (Release build `38e22c6`, iPad 9, 2026-08-21) meant one
+save per exit did not need it; a save every thirty seconds did. `SaveProfile.pngsReused` is the
+counter it moves, and the second pass of `testWhatLeavingToTheGalleryCosts` is where it moves.
 *Verified*: `testWhatLeavingToTheGalleryCosts`, `testSavePngEncodeFanOutIsWorthIt`
 (`PerfBaselineTests.swift`), `testEveryCelsPixelsAndOrderSurviveTheParallelWrite`
 (`ProjectSaveLogicTests.swift`).
-**And it stays unbuilt for good.** The handoff after this item shipped said exactly what would settle
-it: *"if it feels instant, §5's dirty-tracking memo stays unbuilt for good."* Owner, 2026-08-21,
-Release build `38e22c6`, iPad 9: *"leaving the gallery is instant."* It does; retire the memo.
 
 ### Tier C — real, recorded, not urgent
 
@@ -1444,21 +1441,16 @@ listing, and startup. `runStartupMaintenance` is already `Task.detached` off-mai
 COW clones; `validateProject` reads an 8-byte PNG magic, not a decode; backup rotation uses
 same-volume renames. None is a multi-second stall at any realistic scale.
 
-**Do not build a dirty-tracking save — settled for good, 2026-08-21.** *(Both preconditions this entry
-named are now met — item 1 landed 2026-08-18 and item 9's instrumentation landed 2026-08-20 — so what
-follows was the whole of the argument rather than a wait. **Item 15 then measured this path and took
-the safe 4× off it without touching what gets written**, which lowered the pressure on this entry
-rather than raising it: the encode is now spread over cores, so the memo below was worth a further
-~3.7 ms a cel on the cels that did not change, not the whole 15. **The question §6 asked before
-building anything further here came back "instant"** — the owner, Release build `38e22c6`, iPad 9:
-*"leaving the gallery is instant."* The memo stays unbuilt for good.)*
-Skipping unchanged PNGs is the right eventual answer to the gallery-exit wait, but it is the
-data-loss class of risk: a dirty check that is wrong once silently drops artwork, which is worse than
-any stall — and this repo already carries `ProjectBackupManager` and `validateProject` precisely
-because that failure mode is unacceptable. Item 1 removes two thirds of the cost for one line and zero
-correctness exposure. A cheaper intermediate exists: memoize `pngData()` alongside the existing
-version-keyed `renderToUIImage()` cache, which gets most of the win without changing *what* gets
-written. If the full version is ever built, it must fail closed — re-encode when unsure.
+**The dirty-tracking save — declined for the gallery exit on 2026-08-21, built for the autosave on
+2026-09-17.** The 2026-08-21 argument was that skipping unchanged PNGs is the data-loss class of
+risk — a dirty check that is wrong once silently drops artwork — and that one save per gallery exit
+was already instant, so the risk bought nothing. TODO (76) changed the second half: a save every
+thirty seconds cannot re-encode fifty PNGs each time. The first half stands and shaped what was
+built (§19): `ProjectStore.PackageLedger` matches a cel by a **weak** reference to its texture and
+its version counter, never by an address; it clones the file the previous save wrote rather than
+memoizing bytes in memory; every mismatch, missing file or failed clone falls through to the encode;
+and a save that does not land empties the ledger. What it must never do is write different bytes for
+a cel nobody touched, and `AutosaveLogicTests` compares the cloned file with the one it replaced.
 
 ---
 
@@ -1509,9 +1501,8 @@ and it is the headline result of the whole performance programme.
 
 **Does leaving to the gallery still feel like ~3 s? — ANSWERED 2026-08-21: no, it is instant.** Item
 15 measured the wait for the first time and made it 4× shorter on the simulator; the owner's own
-words on the same Release build: *"leaving the gallery is instant."* **§5's dirty-tracking memo stays
-unbuilt for good** — the handoff that carried this question said exactly that would follow if the
-answer came back this way.
+words on the same Release build: *"leaving the gallery is instant."* That retired §5's dirty-tracking
+memo for the gallery exit; the autosave (§19) later needed it and built it.
 
 **Is opening a project any better, and does the timeline's cel-blocks-arriving-blank behaviour read
 as loading rather than broken? — ANSWERED 2026-08-21: "no issues."** Item 9(c)'s deliberate behaviour
@@ -5092,3 +5083,42 @@ seam publishes; the brush's does not; the difference is invisible in every numbe
 `ThumbnailRenderLogicTests.testAStrokeLiftRepublishesTheDocumentEvenThoughTheInkItselfDidNot` is the
 pin, and its two operands are the emissions across the ink (0) and across the lift (1) — the first is
 what stops the second being true of any implementation whatever.
+
+## 19. The autosave, and what one costs the artist's thread (2026-09-17)
+
+TODO (76) asked for a save that *"must not lag out the main thread or operations"*. The whole of a
+save's main-thread share is `SaveSnapshot.init` — pointer reads over the cel tree plus one
+`FrameRecipe` mint for the gallery tile — and `SaveProfile.snapshotSeconds` clocks it. Everything
+else, the tile's composite now included, runs on `saveQueue`.
+
+**MEASURED 2026-09-17**, Debug, the `persist` iOS 26.5 simulator (iPad Pro 13-inch M4) on the
+8-core MacBook, `PerfBaselineTests.testWhatOneAutosaveCostsTheMainThread`: the owner's 2048×1024
+canvas, **50 inked raster cels**, one cel touched since the previous save — the ordinary autosave.
+
+| one autosave, 50 cels at 2048×1024, one cel touched | |
+|---|---|
+| **on the main thread** (`snapshotSeconds`, best of three; the three read 0.3 / 0.3 / 0.3) | **0.3 ms** |
+| per-cel walk, on `saveQueue` | 19.8 ms |
+| validate + stash + rename + refresh, on `saveQueue` | 19.7 ms |
+| total, on `saveQueue` | 45.7 ms |
+| PNGs encoded / cloned | 1 / 49 |
+
+The budget the test carries is **2 ms**, opt-in through `PAINTAPP_AUTOSAVE_BUDGET` for the reason
+`DabCostBench`'s cap is; the counts are asserted on every run. The device figure is INFERRED at
+§1's ~1.3×, i.e. well under a millisecond — a snapshot that reads pointers does not scale with the
+machine the way an encode does.
+
+**The incremental write is what makes the number the number.** Item 15 retired the dirty-tracking
+memo because one save per gallery exit was already instant; a save every thirty seconds could not
+re-encode fifty PNGs each time, so `ProjectStore.PackageLedger` builds it, fail-closed — an
+unchanged cel is `clonefile(2)`'d out of the live package into the stage, byte for byte what the
+last save wrote, and anything that does not line up is re-encoded. The same run's
+`testWhatLeavingToTheGalleryCosts` now reads the gallery exit of an untouched 32-cel document at
+**18.6 ms** against item 15's 117.1 ms, with `pngsEncoded` 0 and `pngsReused` 32. §5's entry on this
+memo is struck below in place.
+
+What this section does not claim: that a hitch is impossible. A snapshot mid-stroke would share the
+cel's bitmap copy-on-write and hand the *next dab* a canvas-sized copy, so the autosave holds while
+a stroke is live, while playback runs, during a resize, and while anything interactive is pending —
+`ContentView.autosaveIsHeld` is the list. The clock is `AutosaveClock`: 2.5 s after the last edit,
+30 s after the first unsaved one, whichever is sooner.
