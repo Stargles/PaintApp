@@ -269,8 +269,8 @@ is mutated. A per-field table built that way — one manager per row, digests co
 **passed with the field under test deleted from the encoder it was written to pin.** Mutate one fixture
 cumulatively, so a row's difference is attributable to the row.
 
-**`Layer.layerEffect` is `kind == .value ? effect : nil`, and the render path reads the accessor, not the
-field.** So `layers[0].effect = …` on a raster layer reaches neither the tree nor the content version:
+**`Layer.layerEffect` is `kind.carriesEffect ? effect : nil` — value and vector layers since TODO (92),
+and no other kind — and the render path reads the accessor, not the field.** So `layers[0].effect = …` on a raster layer reaches neither the tree nor the content version:
 forty rows of an effect table were setting nothing. `Layer.valueFill` is `kind == .value && effect == nil
 ? fill : nil` and is inert the same way for a layer already in effect mode. Setting a field the shipped
 code does not read is the commonest way a fixture measures nothing.

@@ -66,36 +66,6 @@ the layers on that frame. Sometimes they show the cel of a different frame. Make
 
 ---
 
-## (74) Lens blur effect
-
-**Status** — filed 2026-09-16. The owner: *"new lens blur effect. Simulates the type of blur an actual
-defocused lens would produce like bokeh, etc."*
-
-- [ ] A disc/polygon-kernel blur with highlight bloom in `Effect`, Metal and CoreGraphics backends at parity.
-
----
-
-## (88) The drawing guide becomes a value-layer effect
-
-**Status** — filed 2026-09-16. The owner: *"right now the drawing guide in actions does nothing. I
-think it is best to remove it from actions and instead make it as an effect in value layer. Include grid,
-isometric, perspective modes."*
-
-- [ ] Remove the Actions entry and whatever it reached; a Guide effect with grid / isometric / perspective.
-
----
-
-## (92) Effects apply to vector layers, masked by the layer's opacity
-
-**Status** — filed 2026-09-16. The owner: *"effects should apply for vector layers too, not just value
-layers. The rule is that it uses the layer's opacity as a mask for the effect. In the future I may have a
-more complex assigner, such as being able to assign different values to different properties, but thats
-for the future."*
-
-- [ ] An effect on a vector layer grades the composite below, masked by that layer's own alpha.
-
----
-
 ## (79) Brush size and opacity sliders read in %, size possibly logarithmic
 
 **Status** — filed 2026-09-16. The owner: *"Make the brush size slider on the left bar measured in %

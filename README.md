@@ -38,10 +38,14 @@ toolset, and a frame-by-frame animation timeline.
   the size that was asked for. The canvas at rest and playback are not composited on demand at all;
   they are read from a background bake on disk. See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md) and
   [RENDER.md](RENDER.md)
-- **Effects**: 13, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
-  shift, gradient map, chromatic aberration, posterize, noise, gaussian/directional blur, bloom,
-  sobel, sharpen and outline — with a curve editor and a gradient-stop editor for the two that need
-  them. One shader per effect, used by both wrappers (value layer and node)
+- **Effects**: 20, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
+  shift, gradient map, recolour, colour wheels, posterize (with dither and halftone screens), noise,
+  gaussian/directional blur, lens blur (a disc or blade-polygon defocus with a highlight boost for
+  bokeh), sharpen, bloom, sobel, outline, duplicate offset, chromatic aberration, computer screen,
+  glare and a drawing guide (grid, isometric or perspective lines drawn over the picture) — with a
+  curve editor, a gradient-stop editor, a colour-pair list and four colour wheels for the ones that
+  need them. One shader per effect on both backends, used by every wrapper (value layer, node, and a
+  vector layer's own ink)
 - **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets, and a
   **render resolution** setting (Full / 75% / 50%) that trades live-canvas sharpness for speed on
   heavily layered artwork — it reaches only what is on screen, never the saved file or the export
@@ -217,18 +221,27 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 ### Value layers and effects
 1. Add a value layer from the "+" menu. Out of the box it is a flat colour, Normal blend — pick the
    colour from the row's colour swatch.
-2. Its options menu opens on **Blend Mode**, one merged menu listing every blend mode plus the 13
-   effects below them. Pick a blend mode and the layer is a flat colour composited that way; pick an
-   effect and it becomes an adjustment layer instead, grading everything beneath it inside its own
-   container. The two are answers to the same question, so picking one always clears the other. The
-   row itself is never hidden — it shows the effect's name in place of the blend mode's while one is
-   set, and the colour swatch below it is replaced by **Effect Settings ▸** for the same reason.
+2. Its options menu opens on **Blend Mode**, one merged menu listing every blend mode plus the 20
+   effects below them, grouped under Colour, Blur & Light, Stylise and Guides. Pick a blend mode and
+   the layer is a flat colour composited that way; pick an effect and it becomes an adjustment layer
+   instead, grading everything beneath it inside its own container. The two are answers to the same
+   question, so picking one always clears the other. The row itself is never hidden — it shows the
+   effect's name in place of the blend mode's while one is set, and the colour swatch below it is
+   replaced by **Effect Settings ▸** for the same reason.
 3. **Effect Settings ▸** opens the knobs for whichever effect is set, including a curve editor
    (Curves) and a gradient-stop editor (Gradient Map).
 4. A compositor node's operation dropdown offers the same effects beneath the blend ops. A blend op
    takes two inputs; an effect op takes one, so it grades that input's composite as a unit.
 5. A value layer or node renames itself to follow the effect you pick, unless you have renamed it by
    hand — after which it keeps your name.
+6. **A vector layer takes an effect too**, from the same merged menu, and its own ink is the mask:
+   paint a blob on a vector layer, pick Gaussian Blur, and what is under the blob blurs — the blob's
+   colour is not drawn, the blob is the stencil, and the layer's opacity scales how strongly the
+   effect reaches through it. A raster layer does not; a vector layer keeps its name.
+7. **A drawing guide is the Guide effect on a value layer**: grid (spacing, subdivisions), isometric
+   (angle, spacing) or perspective (a horizon and one or two vanishing points typed in as shares of the
+   canvas — no on-canvas handles yet), each with a line width, colour and opacity, drawn in canvas
+   pixels over everything beneath the layer. Hide the layer before you export.
 
 ### Animation
 1. Expand the timeline at the bottom to manage cels/frames.
@@ -280,7 +293,7 @@ See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinc
 dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
 Distort works on a raster floating piece, a text box and lassoed vector ink, but not yet on a floating
 placed image or video — six numbers and a mirror bit have nowhere to keep a projective residue; and
-Cut/Copy/Paste and Drawing Guide are still stubs with an "isn't available yet" notice.
+Cut/Copy/Paste are still stubs with an "isn't available yet" notice.
 
 ## License
 

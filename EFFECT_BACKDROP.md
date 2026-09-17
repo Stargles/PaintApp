@@ -35,11 +35,13 @@ Every line here was opened by two agents independently, at commit `500a53e`/`f51
   only caller in the app that passes a background today is the eyedropper**
   (`CanvasManager+Eyedropper.swift:52`) — which is why README can say the eyedropper samples the
   composite "paper included" while nothing else does.
-- **An effect grades the accumulator, not its own layer.** `Layer.layerEffect` is
-  `kind == .value ? effect : nil` (`Layer.swift:120`) and a value layer holds no pixels. Metal grades
-  `front` (`MetalCompositor.swift:648-668`), CoreGraphics grades `context.currentImage`
-  (`Compositor.swift:853-880`). Both dispatch over the full canvas — there is no scissor, no
-  content-bounds rect, and `mix()` never uses the layer's alpha as a mask.
+- **An effect grades the accumulator, not its own layer.** `Layer.layerEffect` was
+  `kind == .value ? effect : nil` (`Layer.swift:120`) when this was written and a value layer holds no
+  pixels. Metal grades `front` (`MetalCompositor.swift:648-668`), CoreGraphics grades
+  `context.currentImage` (`Compositor.swift:853-880`). Both dispatch over the full canvas — there is
+  no scissor, no content-bounds rect, and `mix()` never used the layer's alpha as a mask. **§2.4
+  (2026-09-17) is the one change to that sentence**: a vector layer's grade is mixed back through
+  its own ink, and the accessor's kind test is `LayerKind.carriesEffect` now.
 - **The background is filled into the accumulator *before* the walk**, premultiplied, with a nil
   background meaning a transparent clear rather than a skipped step (`MetalCompositor.swift:597-605`;
   `Compositor.swift:675-677` via `UIRectFill`).
@@ -273,6 +275,31 @@ one. The whole reason an ink-only input is needed is that the accumulator holds 
 has stopped meaning coverage (§2.2). A merge's backdrop is one layer on transparency, so `.ink` and
 `.backdrop` are the same image — the same `paperInBackdrop: false` arm the walk itself takes inside
 every buffered scope.
+
+### 2.4 A vector layer's effect grades what is beneath it through the layer's own ink
+
+**RULED 2026-09-17, reversible** — TODO (92), the owner's *"effects should apply for vector layers
+too, not just value layers. The rule is that it uses the layer's opacity as a mask for the effect"*:
+**a vector layer carrying an effect grades the composite below it, and the layer's own rendered
+alpha times its opacity is the mask the grade is mixed back through; the ink's colour is never
+composited.** Paint a blob on a Blur layer and what is under the blob blurs; the blob is the stencil.
+
+The owner foresees *"a more complex assigner, such as being able to assign different values to
+different properties"* later; this is the whole assignment for now, and it is reversible because
+nothing in a document changed shape for it — `Layer.effect` was already a field on every layer, and
+the only persisted change is that a vector layer's value of it is read.
+
+What it is built from, so a reversal knows what to take out: `LayerKind.carriesEffect` admits
+`.vector` to `Layer.layerEffect`; `RenderTree.renderNodes` mints a `MaskSource.ink` mask on the
+grading leaf, first among its masks, so a declared clip on the same layer multiplies in as the
+intersection two masks already are; `MaskResolver` reads an ink source as an **amount** — the alpha
+as it is, no §6.3 threshold, so a soft brush grades softly — and `RenderRequest.maskSourceStacks`
+composites the leaf without its grade to produce it; `leafSnapshots` no longer elides a grading leaf
+that holds pixels. From there both backends' existing `mix` (`opacity × coverage`) does the work with
+no new branch, which is why the layer's opacity is *not* in the ink leaf: it reaches the grade once,
+through the mix. A merge bakes the grade through the cel's alpha the same way, and the frame store's
+key digests the source. A raster layer stays as it was — the owner asked for vector layers, and a
+raster layer that once carried a grade and was changed back must not start grading.
 
 ## §3 — Options for the ink-only input, with costs
 
