@@ -670,8 +670,11 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     }
 
     /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
-    /// ones from its own "+", and each saved view swipes left to reveal a delete button.
-    func testViewSelectorDropdownAddsSelectsAndDeletesViews() throws {
+    /// ones from its own "+", and — TODO item (91) — each saved view carries a visible pencil
+    /// (rename) and trash (delete) button. It used to be a swipe-to-reveal delete with no rename at
+    /// all; the swipe is gone because nothing on screen said it was there, which is exactly the
+    /// owner's complaint that opened (91).
+    func testViewSelectorDropdownAddsRenamesAndDeletesViews() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
@@ -688,10 +691,37 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         let firstView = app.buttons["viewMenu.row.0"]
         XCTAssertTrue(firstView.waitForExistence(timeout: 5), "Adding a view should list it in the dropdown")
         XCTAssertEqual(firstView.value as? String, "1", "The newly added view should be the active one")
+        XCTAssertEqual(firstView.label, "View 1", "PREMISE: the default name before it is renamed")
 
-        firstView.swipeLeft()
-        let deleteButton = app.buttons["Delete"]
-        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5), "Views should slide to reveal a delete button, like layer rows do")
+        let renameButton = app.buttons["viewMenu.row.0.rename"]
+        XCTAssertTrue(renameButton.waitForExistence(timeout: 5), "Rename is a row of its own, not a swipe or a menu")
+        renameButton.tap()
+        // **Scoped to `app.alerts`, not `app.textFields`/`app.buttons` at the app level.** SwiftUI's
+        // `.alert(_:isPresented:actions:)` bridges its content to a native `UIAlertController`, and
+        // this repo has no prior test of a rename alert's field to have already found this: a custom
+        // `.accessibilityIdentifier` on the `TextField` inside that closure does not reach the field
+        // XCUITest sees (confirmed by a screenshot showing the alert on screen, correctly titled and
+        // pre-filled, while `app.textFields["viewMenu.renameField"]` still reported no such element).
+        // The alert's own title and its buttons' visible labels are what XCUITest can actually find.
+        let alert = app.alerts["Rename View"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "Rename opens the app's own text-entry alert")
+        let field = alert.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "…with one text field, pre-filled with the current name")
+        XCTAssertEqual(field.value as? String, "View 1")
+        field.tap()
+        field.typeText(" (rough)")
+        alert.buttons["Save"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["viewMenu.row.0"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["viewMenu.row.0"].label, "View 1 (rough)",
+                       "Save commits the typed name onto the same row")
+
+        let renamedShot = XCTAttachment(screenshot: app.screenshot())
+        renamedShot.name = "1-view-renamed-with-visible-pencil-and-trash"
+        renamedShot.lifetime = .keepAlways
+        add(renamedShot)
+
+        let deleteButton = app.buttons["viewMenu.row.0.delete"]
+        XCTAssertTrue(deleteButton.exists, "Delete is a visible row control too, not a hidden swipe")
         deleteButton.tap()
 
         XCTAssertTrue(app.buttons["viewMenu.row.0"].waitForNonExistence(timeout: 5), "Deleting a view should remove it from the dropdown")

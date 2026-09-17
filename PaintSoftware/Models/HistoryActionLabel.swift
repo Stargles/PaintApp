@@ -230,6 +230,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case addView
     case switchView
     case deleteView
+    case renameView
 
     // MARK: Interpolation (motion groups, guides, in-betweens)
 
@@ -352,6 +353,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addView: return "add view"
         case .switchView: return "switch view"
         case .deleteView: return "delete view"
+        case .renameView: return "rename view"
 
         case .addMotionGroup: return "add motion group"
         case .changeGroupMode: return "change group mode"

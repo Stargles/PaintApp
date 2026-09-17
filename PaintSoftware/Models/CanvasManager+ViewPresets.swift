@@ -42,6 +42,17 @@ extension CanvasManager {
         }
     }
 
+    /// Renames a view preset — TODO item (91). Same shape as `renameLayer`/`renameFolder`: a plain
+    /// field write under its own undo label, no `hasCustomName` flag because a view preset has no
+    /// generated name to distinguish itself from (every preset is artist-named from the moment
+    /// `addViewPreset` mints its default "View N").
+    func renameViewPreset(at index: Int, to name: String) {
+        guard viewPresets.indices.contains(index) else { return }
+        withStructureUndo(label: .renameView) {
+            viewPresets[index].name = name
+        }
+    }
+
     /// Deletes a view preset, keeping `activeViewPresetIndex` pointed at the same preset it was on
     /// (or dropping to "no view" when the active one is the one being deleted).
     func deleteViewPreset(at index: Int) {
@@ -54,16 +65,6 @@ extension CanvasManager {
                 activeViewPresetIndex -= 1
             }
         }
-    }
-
-    /// Cycles to the next view preset. After the last preset, returns to "no view" mode
-    /// where all layers are visible.
-    func cycleViewPreset() {
-        if viewPresets.isEmpty {
-            addViewPreset()
-            return
-        }
-        selectViewPreset(at: activeViewPresetIndex + 1 >= viewPresets.count ? -1 : activeViewPresetIndex + 1)
     }
 
     /// Applies a view preset's visibility snapshot to all layers and folders.

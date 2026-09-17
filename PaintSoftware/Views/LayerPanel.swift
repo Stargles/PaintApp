@@ -76,7 +76,7 @@ struct LayerPanel: View {
             Spacer()
 
             // View selector: a dropdown listing every saved view, with its own add button and
-            // swipe-to-delete (see ViewSelectorMenu).
+            // always-visible rename/delete controls on each row (see ViewSelectorMenu).
             Button {
                 showViewSelector = true
             } label: {
@@ -1908,11 +1908,26 @@ struct FolderOptionsPanel: View {
 // MARK: - View Selector
 
 /// Dropdown list of saved views. Picking one applies its visibility snapshot; the "+" captures the
-/// current visibility as a new view; each saved view swipes left to reveal a delete button, the
-/// same interaction the layer rows use.
+/// current visibility as a new view.
+///
+/// **TODO item (91).** Every saved view now carries an explicit pencil (rename) and trash (delete)
+/// button, the same always-visible shape `LayerOptionsPanel`'s rows use, rather than the swipe gesture
+/// this struct used to hide delete behind. That swipe was the whole of the owner's complaint —
+/// *"you cant delete any views"* — even though `deleteViewPreset` had worked the entire time: a
+/// `List` row's `.swipeActions` has no visible affordance at all in this 260pt-wide popover, so
+/// the control was there and undiscoverable, which this app's own "hidden is unfinished" rule (see
+/// CLAUDE.md) treats as not reachable. This doc comment used to claim the swipe was "the same
+/// interaction the layer rows use"; it was not — `LayerOptionsPanel.editRows` reaches Delete through
+/// a visible row in its options menu, never a swipe — so that sentence was wrong about the one thing
+/// it was there to justify, which is the second bug TODO (91) asked this file to be checked for.
 struct ViewSelectorMenu: View {
     @ObservedObject var canvasManager: CanvasManager
     @Binding var isPresented: Bool
+    /// The preset being renamed, or nil. An index rather than an id: `renameViewPreset` and every
+    /// other mutator here already take one, and re-resolving an id to an index on Save would be a
+    /// second lookup this view has no other reason to need.
+    @State private var renamingIndex: Int?
+    @State private var draftName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1950,21 +1965,8 @@ struct ViewSelectorMenu: View {
                 .listRowBackground(Color.clear)
 
                 ForEach(Array(canvasManager.viewPresets.enumerated()), id: \.element.id) { index, preset in
-                    row(name: preset.name,
-                        isActive: index == canvasManager.activeViewPresetIndex,
-                        identifier: "viewMenu.row.\(index)") {
-                        canvasManager.selectViewPreset(at: index)
-                        isPresented = false
-                    }
-                    .listRowBackground(Color.clear)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            canvasManager.deleteViewPreset(at: index)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .accessibilityIdentifier("viewMenu.row.\(index).delete")
-                    }
+                    presetRow(index: index, preset: preset)
+                        .listRowBackground(Color.clear)
                 }
             }
             .listStyle(.plain)
@@ -1973,6 +1975,61 @@ struct ViewSelectorMenu: View {
         .background(Color.black.opacity(0.95))
         .frame(width: 260, height: 300)
         .presentationCompactAdaptation(.popover)
+        // The layer/folder rename alert verbatim — same title shape, same field identifier suffix,
+        // same Cancel/Save pair — so a view's rename looks like every other rename in the app rather
+        // than inventing a fourth spelling of "type a new name".
+        .alert("Rename View", isPresented: Binding(get: { renamingIndex != nil },
+                                                    set: { if !$0 { renamingIndex = nil } })) {
+            TextField("Name", text: $draftName)
+                .accessibilityIdentifier("viewMenu.renameField")
+            Button("Cancel", role: .cancel) { renamingIndex = nil }
+            Button("Save") {
+                if let index = renamingIndex {
+                    let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { canvasManager.renameViewPreset(at: index, to: trimmed) }
+                }
+                renamingIndex = nil
+            }
+            .accessibilityIdentifier("viewMenu.renameConfirm")
+        }
+    }
+
+    /// A saved view's row: the name/checkmark button `row` already drew, plus the rename and delete
+    /// buttons `row` never had a case that needed. Not folded into `row` itself because the "All"
+    /// row above has neither — "All" is the absence of a preset, not one, so there is nothing on it
+    /// to rename or delete.
+    private func presetRow(index: Int, preset: ViewPreset) -> some View {
+        HStack(spacing: 4) {
+            row(name: preset.name,
+                isActive: index == canvasManager.activeViewPresetIndex,
+                identifier: "viewMenu.row.\(index)") {
+                canvasManager.selectViewPreset(at: index)
+                isPresented = false
+            }
+
+            Button {
+                draftName = preset.name
+                renamingIndex = index
+            } label: {
+                Image(systemName: "pencil")
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("viewMenu.row.\(index).rename")
+
+            Button {
+                canvasManager.deleteViewPreset(at: index)
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundColor(.red.opacity(0.85))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("viewMenu.row.\(index).delete")
+        }
     }
 
     private func row(name: String, isActive: Bool, identifier: String, action: @escaping () -> Void) -> some View {

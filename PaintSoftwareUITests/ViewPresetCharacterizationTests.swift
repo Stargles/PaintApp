@@ -2,7 +2,7 @@ import XCTest
 import UIKit
 
 /// Characterization tests for `CanvasManager`'s view presets — `addViewPreset`,
-/// `selectViewPreset`, `deleteViewPreset`, `cycleViewPreset`, plus the auto-save into the active
+/// `selectViewPreset`, `deleteViewPreset`, plus the auto-save into the active
 /// preset that `toggleLayerVisibility` / `toggleFolderVisibility` perform.
 ///
 /// A view preset is a named snapshot of which layers and folders are visible. The parts that are
@@ -300,46 +300,6 @@ final class ViewPresetCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.viewPresets.count, 1, "One undo brings the view back…")
         XCTAssertEqual(manager.activeViewPresetIndex, 0, "…still active…")
         XCTAssertEqual(visibility(manager), [false, true], "…with the visibility it was hiding")
-    }
-
-    // MARK: - Cycling
-
-    func testCyclingWithNoViewsCreatesTheFirstOne() {
-        let manager = CanvasFixture.manager(layerCount: 2)
-        XCTAssertTrue(manager.viewPresets.isEmpty)
-
-        manager.cycleViewPreset()
-
-        XCTAssertEqual(manager.viewPresets.count, 1)
-        XCTAssertEqual(manager.activeViewPresetIndex, 0)
-    }
-
-    func testCyclingWrapsThroughNoViewAfterTheLastPreset() {
-        let manager = CanvasFixture.manager(layerCount: 2)
-        manager.addViewPreset()   // View 1
-        manager.addViewPreset()   // View 2
-        manager.selectViewPreset(at: 0)
-
-        manager.cycleViewPreset()
-        XCTAssertEqual(manager.activeViewPresetIndex, 1, "View 1 -> View 2")
-
-        manager.cycleViewPreset()
-        XCTAssertEqual(manager.activeViewPresetIndex, -1, "View 2 -> no view (not straight back to View 1)")
-        XCTAssertEqual(manager.activeViewName, "All")
-
-        manager.cycleViewPreset()
-        XCTAssertEqual(manager.activeViewPresetIndex, 0, "no view -> View 1")
-    }
-
-    func testCyclingFromNoViewWithExistingPresetsSelectsTheFirstRatherThanAddingOne() {
-        let manager = CanvasFixture.manager(layerCount: 2)
-        manager.addViewPreset()
-        manager.selectViewPreset(at: -1)
-
-        manager.cycleViewPreset()
-
-        XCTAssertEqual(manager.viewPresets.count, 1, "Cycling only creates a preset when there are none at all")
-        XCTAssertEqual(manager.activeViewPresetIndex, 0)
     }
 
     // MARK: - Interaction with layer deletion
