@@ -292,8 +292,9 @@ smaller brushes, though I probably have to experience it to decide if I like it 
 The % should be displayed on top of the size logo so you know what it is. Same for opacity, though
 opacity is just a linear 0 to 100."*
 
-- [ ] Size in % of canvas, a log curve on the slider; opacity linear 0–100; the % drawn over each icon.
-- [ ] The owner feels the log curve on the iPad and rules log or linear.
+- [ ] The owner feels the log curve on the iPad and rules log or linear — shipped as the default
+      (`BrushSizeCurve.swift`), size in % of canvas with opacity linear 0–100 and both drawn over
+      their icons; only this sub-point, the owner's own hands-on call, is left.
 
 ---
 
@@ -308,15 +309,6 @@ with virtual memory caching like the renderer already does with layers."*
 - [ ] Fill at a resolution independent of the canvas extent (a bounded scan, or fill at a working
       resolution and vectorise), with the figure MEASURED.
 - [ ] The 6k ban lifted where the strip compositor and the frame store already make it affordable.
-
----
-
-## (91) The Views menu in Layers: delete and rename
-
-**Status** — filed 2026-09-16. The owner: *"The views menu in layers may need a second look. For one,
-you cant delete any views or rename them."*
-
-- [ ] Delete and rename a view; a second look at the rest of the menu.
 
 ---
 
@@ -365,15 +357,6 @@ and there is no app. Make it just like any normal computer program, clicking the
 program, and it shouldn't start up every time the computer is started."*
 
 - [ ] No scheduled task at logon; a Start-menu/desktop app the owner double-clicks; the tray stays.
-
----
-
-## (100) Actions menu: an "Add" entry holding Insert Photo, Insert Video, Stream Screen, Add Text
-
-**Status** — filed 2026-09-16. The owner: *"the actions menu right now has a bunch of stuff thrown
-into it. Add an "add" icon, and in it move insert photo, insert video, stream screen, add text."*
-
-- [ ] The four entries move under one Add submenu.
 
 ---
 
