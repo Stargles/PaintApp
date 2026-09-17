@@ -949,7 +949,7 @@ final class PerfBaselineTests: XCTestCase {
     ///
     /// `eraseHybrid` calls `invalidate()` between the two passes, which bumps `version` and so throws
     /// away `VectorCanvas`'s cached `StrokeSpatialIndex`; the split pass then rebuilds it over every
-    /// segment on the layer, and `hasResidue`'s backdrop probe rebuilds it a third time after the
+    /// segment on the layer, and `inkTouched`'s stroke query rebuilds it a third time after the
     /// split's own `invalidate()`. That rebuild is the cost a merge removes. The clean-cut probe walk
     /// is the cost it does *not* remove, because `isEntirelyCovered` short-circuits on two cheap cap
     /// tests before it ever reaches `cleanCutRanges` — so for a stroke being **split** rather than

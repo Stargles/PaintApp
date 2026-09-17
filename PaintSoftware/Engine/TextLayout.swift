@@ -534,7 +534,7 @@ enum TextLayout {
 ///
 /// Split out from `TextLayout` under its own name because the distinction is the point rather than
 /// tidiness: this is what the display list's *geometry* queries call, from inside
-/// `VectorCanvas`'s non-reentrant lock, on paths (`collectResidueGarbage`, `hasContentBeneath`) that
+/// `VectorCanvas`'s non-reentrant lock, on paths (`collectResidueGarbage`, `inkTouched`) that
 /// run per eraser commit. A helper that quietly reached for `renderBox` there would put a bitmap
 /// allocation inside a lock on the eraser's path, which is the shape of the 53.8 ms trap `BUGS.md`
 /// records. Everything here is CoreText measurement — one framesetter pass, no context, no image.

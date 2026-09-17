@@ -79,6 +79,64 @@ enum VectorEraser {
             }
             return false
         }
+
+        /// Whether the footprint comes within `reach` of any point of the segment `a`→`b` — the
+        /// exact test `touchesInk` is built on, as against the probe walk behind `touchedSpans`,
+        /// which can step over a graze shorter than its own stride.
+        ///
+        /// Each capsule is taken at its larger radius, so a tapered one over-reports by its taper —
+        /// the gesture's pressure change across one stored knot. That errs toward "touched", which
+        /// is the safe direction for every caller: a punch retained over ink it grazed, a stroke
+        /// deleted that the eraser came within a taper of.
+        func reaches(segment a: CGPoint, _ b: CGPoint, within reach: CGFloat) -> Bool {
+            let box = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+            guard bounds.insetBy(dx: -reach, dy: -reach).intersects(box) else { return false }
+            for capsule in capsules {
+                let limit = max(capsule.ra, capsule.rb) + reach
+                let gap = StrokeGeometry.closestApproach(betweenSegment: a, b,
+                                                         andSegment: capsule.a, capsule.b).distanceSquared
+                if gap <= limit * limit { return true }
+            }
+            return false
+        }
+
+        /// Whether the footprint touches the region `path` encloses — a fill, a placed rectangle's
+        /// quad, a text box's ink bounds. True when a capsule's end sits inside the region or the
+        /// region's outline passes through a capsule; between them those cover a region inside the
+        /// footprint, a footprint inside the region, and the two crossing. Curves are flattened
+        /// first, so the outline tested is a polygon within the flatten's own tolerance.
+        func touches(region path: CGPath, evenOdd: Bool = false) -> Bool {
+            let box = path.boundingBoxOfPath
+            guard !box.isNull, bounds.intersects(box) else { return false }
+            let rule: CGPathFillRule = evenOdd ? .evenOdd : .winding
+            for capsule in capsules where path.contains(capsule.a, using: rule) { return true }
+            guard let flattened = StrokeGeometry.flattened(path) else { return false }
+            var previous: CGPoint?
+            var start: CGPoint?
+            var hit = false
+            flattened.applyWithBlock { raw in
+                guard !hit else { return }
+                let element = raw.pointee
+                switch element.type {
+                case .moveToPoint:
+                    previous = element.points[0]
+                    start = previous
+                case .addLineToPoint:
+                    let point = element.points[0]
+                    if let from = previous, reaches(segment: from, point, within: 0) { hit = true }
+                    previous = point
+                case .closeSubpath:
+                    if let from = previous, let to = start, reaches(segment: from, to, within: 0) { hit = true }
+                    previous = start
+                case .addQuadCurveToPoint, .addCurveToPoint:
+                    // `flattened` leaves none of these behind.
+                    break
+                @unknown default:
+                    break
+                }
+            }
+            return hit
+        }
     }
 
     // MARK: - Modes 1 and 2 — cut what the footprint covers
@@ -115,6 +173,32 @@ enum VectorEraser {
             }
             return sweep.contains(point)
         }
+    }
+
+    /// Whether the eraser's footprint touches the stroke's **ink** anywhere — TODO (81)'s question,
+    /// asked of one stroke. Exact, segment by segment: a segment's ink is its capsule at the larger
+    /// of its two ends' radii, and `Sweep.reaches(segment:_:within:)` measures the gap to it.
+    ///
+    /// The radius a segment is given is the larger of its two endpoints', which is the ink's own
+    /// bound wherever the brush's size answers pressure monotonically — every shipped brush — and a
+    /// bound the shape of the ramp between them otherwise. Pressure 1 throughout would be a bound
+    /// too, and is what every reach in `VectorCanvas` takes; it is not taken here because this
+    /// predicate decides whether a whole stroke is *deleted* (`VectorEraserMode.wholeStroke`), and a
+    /// light line should not go for an eraser that passed within the width it would have had at a
+    /// full press.
+    static func touchesInk(of samples: some SampleRun, brush: Brush, size: CGFloat, sweep: Sweep) -> Bool {
+        guard !samples.isEmpty else { return false }
+        var previousRadius = StrokeGeometry.stampRadius(forPressure: samples[0].pressure, brush: brush, size: size)
+        guard samples.count > 1 else {
+            return sweep.reaches(samples[0].point, within: previousRadius)
+        }
+        for index in 1..<samples.count {
+            let radius = StrokeGeometry.stampRadius(forPressure: samples[index].pressure, brush: brush, size: size)
+            defer { previousRadius = radius }
+            if sweep.reaches(segment: samples[index - 1].point, samples[index].point,
+                             within: max(previousRadius, radius)) { return true }
+        }
+        return false
     }
 
     /// The parametric spans of `samples` along which the stroke's **ink** meets the eraser — every
@@ -267,7 +351,7 @@ enum VectorEraser {
     // parent's pressure everywhere.
     //
     // - **Display-list growth is bounded by retain-or-drop plus GC, not by trimming spans.** An element
-    //   is kept only when some part of the gesture still has something beneath it (`hasResidue`), and
+    //   is kept only when the gesture touches the ink of something beneath it (`VectorCanvas.inkTouched`), and
     //   `VectorCanvas` collects it once nothing does — so scribbling a stroke out completely costs
     //   nothing, the stroke is deleted outright. The decision is a *bit*, not a set of spans: keeping
     //   only the stretches that had a backdrop moves every dab after the first retained one onto a
@@ -521,33 +605,6 @@ enum VectorEraser {
         let pressure = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.pressure
             ?? SampleChannel.pressure.neutral
         return StrokeGeometry.stampRadius(forPressure: pressure, brush: brush, size: size)
-    }
-
-    /// Whether *any* of the eraser's gesture still has something under it, given `hasBackdrop` —
-    /// reduced to the one bit `VectorCanvas` is allowed to act on.
-    ///
-    /// This is what keeps Mode 1 from growing the display list on every stroke. A drag that passed over
-    /// nothing at all, or over ink the split has since removed entirely, has nothing left to punch and
-    /// no element is kept; an erase that resolved completely retains nothing.
-    ///
-    /// **It reports a bit rather than the spans, and the punch keeps the whole gesture — trimming to a
-    /// sub-run is measurably wrong.** `BrushStamper.stampStroke` lays its dabs on a lattice anchored at
-    /// `samples[0]`, stepping one `stampSpacing` at a time with the remainder carried across segments.
-    /// Starting the run somewhere else moves *every* dab after that point, including ones over the ink
-    /// that justified retaining the punch. That is invisible where full-alpha dabs overlap, but not at
-    /// an anti-aliased edge or any eraser opacity below 1 — measured against the raster tier, trimming
-    /// cost several pixels of visible delta at multiple opacities, and the parity tests assert zero
-    /// tolerance. The cost of keeping the whole gesture instead is dabs that punch nothing — render
-    /// time, no pixels — and it can even shrink the display list versus trimming, which would split one
-    /// gesture crossing two separated strokes into two retained elements instead of one.
-    ///
-    /// `hasBackdrop` is asked at a parametric position along the gesture and answers "is there anything
-    /// beneath the dab there" — it needs the display list, so `VectorCanvas` supplies it.
-    static func hasResidue(in samples: some SampleRun, sweep: Sweep,
-                           hasBackdrop: (CGFloat) -> Bool) -> Bool {
-        guard !samples.isEmpty else { return false }
-        return !coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep,
-                             predicate: hasBackdrop).isEmpty
     }
 
     // MARK: - Mode 3 — cut to intersection

@@ -142,4 +142,61 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         XCTAssertEqual(canvas.strokes.count, 2)
         XCTAssertTrue(stubs(in: canvas, gesture: drag, nibRadius: 4).isEmpty)
     }
+
+    // MARK: - (81) An eraser that erases nothing lands nowhere
+
+    /// A cel with a stroke along the top and a triangular fill whose *bounding box* covers the middle
+    /// of the canvas while its region keeps to the lower-left half.
+    private static func inkAroundTheMiddle() -> [VectorElement] {
+        let triangle = CGMutablePath()
+        triangle.move(to: CGPoint(x: 8, y: 248))
+        triangle.addLine(to: CGPoint(x: 248, y: 248))
+        triangle.addLine(to: CGPoint(x: 8, y: 8))
+        triangle.closeSubpath()
+        let fill = VectorFillElement(path: triangle, color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let top = stroke([CGPoint(x: 40, y: 30), CGPoint(x: 216, y: 30)], size: 6)
+        return [.fill(fill), .stroke(top)]
+    }
+
+    /// The footprint sits over the fill's box and under the stroke's, and touches neither's ink: the
+    /// gesture leaves the display list exactly as it was and reports that nothing changed, which is
+    /// what keeps the undo step from being recorded.
+    func testAnEraserWhoseFootprintTouchesNoInkIsDroppedAtCommit() {
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.inkAroundTheMiddle())
+        let nib = Self.brush(size: 20)
+        // Above the triangle's hypotenuse (x + y == 256) by more than the nib's radius, and 30 pt
+        // below the stroke's ink (y ≤ 33).
+        let miss = Self.gesture([CGPoint(x: 150, y: 60), CGPoint(x: 200, y: 60)])
+        XCTAssertFalse(canvas.eraserTouchesInk(alongPath: miss, brush: nib, size: 20))
+        XCTAssertFalse(canvas.erase(alongPath: miss, brush: nib, size: 20, mode: .erase),
+                       "an eraser over nothing must report that nothing changed")
+        XCTAssertEqual(canvas.elements.count, 2, "nothing lands")
+        XCTAssertTrue(canvas.strokes.allSatisfy { $0.composite == .paint }, "no punch is retained")
+    }
+
+    /// The same gesture nudged until its footprint reaches the stroke's ink — not its centreline,
+    /// which stays 7 pt outside the footprint — lands as one `.erase` element.
+    func testAnEraserWhoseFootprintGrazesInkLandsAsAPunch() {
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.inkAroundTheMiddle())
+        let nib = Self.brush(size: 20)
+        // Radius 10 at y == 42 reaches down to y == 32; the stroke's ink reaches up to y == 33.
+        let graze = Self.gesture([CGPoint(x: 150, y: 42), CGPoint(x: 200, y: 42)])
+        XCTAssertTrue(canvas.eraserTouchesInk(alongPath: graze, brush: nib, size: 20))
+        XCTAssertTrue(canvas.erase(alongPath: graze, brush: nib, size: 20, mode: .erase))
+        XCTAssertEqual(canvas.strokes.filter { $0.composite == .erase }.count, 1, "the gesture is retained as a punch")
+        XCTAssertEqual(canvas.elements.count, 3)
+    }
+
+    /// The fill half of the predicate is the region, not the box: a footprint inside the triangle's
+    /// bounding box but outside the triangle touches nothing, and one across its hypotenuse does.
+    func testAFillIsTouchedByItsRegionAndNotByItsBoundingBox() {
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.inkAroundTheMiddle())
+        let nib = Self.brush(size: 20)
+        XCTAssertFalse(canvas.eraserTouchesInk(alongPath: Self.gesture([CGPoint(x: 200, y: 80)]), brush: nib, size: 20),
+                       "inside the box, 24 pt clear of the hypotenuse")
+        XCTAssertTrue(canvas.eraserTouchesInk(alongPath: Self.gesture([CGPoint(x: 132, y: 132)]), brush: nib, size: 20),
+                      "across the hypotenuse")
+        XCTAssertTrue(canvas.eraserTouchesInk(alongPath: Self.gesture([CGPoint(x: 40, y: 200)]), brush: nib, size: 20),
+                      "wholly inside the region, touching no edge")
+    }
 }

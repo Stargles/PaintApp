@@ -1037,6 +1037,81 @@ enum StrokeGeometry {
         return merged
     }
 
+    // MARK: - Paths
+
+    /// `path` with every curved segment replaced by a chain of chords.
+    ///
+    /// The step is chosen per segment from its control polygon's length, which bounds a cubic's arc
+    /// length from above, so a long curve gets more chords than a short one and a straight segment
+    /// costs nothing at all. **Measured in the path's own space**, before any magnification: the
+    /// caller's map can blow a source point up, so the honest bound is stated where the geometry is
+    /// and the cap is what keeps a pathological path finite.
+    static func flattened(_ path: CGPath) -> CGPath? {
+        let out = CGMutablePath()
+        var current = CGPoint.zero
+        var start = CGPoint.zero
+        var malformed = false
+        path.applyWithBlock { raw in
+            let element = raw.pointee
+            switch element.type {
+            case .moveToPoint:
+                current = element.points[0]; start = current
+                out.move(to: current)
+            case .addLineToPoint:
+                current = element.points[0]
+                out.addLine(to: current)
+            case .addQuadCurveToPoint:
+                let control = element.points[0], end = element.points[1]
+                let steps = flatteningSteps([current, control, end])
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    out.addLine(to: quadPoint(current, control, end, t))
+                }
+                current = end
+            case .addCurveToPoint:
+                let c1 = element.points[0], c2 = element.points[1], end = element.points[2]
+                let steps = flatteningSteps([current, c1, c2, end])
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    out.addLine(to: cubicPoint(current, c1, c2, end, t))
+                }
+                current = end
+            case .closeSubpath:
+                out.closeSubpath()
+                current = start
+            @unknown default:
+                malformed = true
+            }
+        }
+        return malformed ? nil : out
+    }
+
+    /// One chord per point of control-polygon length, floored at 4 and capped at 64. The floor keeps
+    /// a tiny curve from becoming a single chord that visibly cuts its corner; the cap is what stops
+    /// a path with a thousand-point curve from minting a hundred thousand segments.
+    private static func flatteningSteps(_ polygon: [CGPoint]) -> Int {
+        var length: CGFloat = 0
+        for index in 1..<polygon.count {
+            length += hypot(polygon[index].x - polygon[index - 1].x,
+                            polygon[index].y - polygon[index - 1].y)
+        }
+        return min(64, max(4, Int(length.rounded(.up))))
+    }
+
+    private static func quadPoint(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        return CGPoint(x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x,
+                       y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y)
+    }
+
+    private static func cubicPoint(_ p0: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ p1: CGPoint,
+                                   _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        let a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
+        return CGPoint(x: a * p0.x + b * c1.x + c * c2.x + d * p1.x,
+                       y: a * p0.y + b * c1.y + c * c2.y + d * p1.y)
+    }
+
     // MARK: - Small helpers
 
     /// Linear blend of two samples — position **and** pressure.

@@ -3388,10 +3388,11 @@ final class VectorCanvas {
             }
         }
 
-        let hasResidue = VectorEraser.hasResidue(in: localSamples, sweep: sweep) { parameter in
-            hasContentBeneath(atParameter: parameter, in: localSamples, brush: brush, size: size)
-        }
-        if hasResidue {
+        // TODO (81): a gesture whose footprint touches no ink of anything beneath it is not kept —
+        // nothing lands and, since `changed` stays false, no undo step is recorded. Asked *after*
+        // the two passes above, of what they left: the stroke they deleted is not beneath the punch
+        // any more.
+        if inkTouched(by: sweep) {
             // The eraser *is* a stroke, composited `.destinationOut` at render. Appended last, so it
             // punches everything already in the list and nothing drawn after it. Colour is arbitrary —
             // `.destinationOut` reads only the stamp's alpha coverage.
@@ -3598,50 +3599,61 @@ final class VectorCanvas {
         return result.isEmpty ? nil : result
     }
 
-    /// Whether the eraser's dab at a parametric position along the gesture still has anything under it
-    /// — the predicate behind residue trimming. Caller must hold `lock`.
-    private func hasContentBeneath(atParameter parameter: CGFloat, in samples: some SampleRun,
-                                   brush: Brush, size: CGFloat) -> Bool {
-        guard let dab = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
-        let radius = StrokeGeometry.stampRadius(forPressure: dab.pressure, brush: brush, size: size)
-        let box = CGRect(x: dab.x - radius, y: dab.y - radius, width: radius * 2, height: radius * 2)
+    /// **Whether an eraser gesture's footprint touches the ink of anything in this cel** — TODO
+    /// (81)'s predicate, the one place "the eraser erased nothing" is decided. Mode 1 asks it before
+    /// retaining a punch, and the universal eraser (TODO (82)) asks each layer's `erase` — whose
+    /// answer for Mode 1 is this — before counting that layer as one the gesture landed on.
+    ///
+    /// Read-only: no element changes and `version` does not move. Canvas-space input, exactly as
+    /// `erase(alongPath:)` takes it.
+    func eraserTouchesInk(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
+        let scale = Self.scale(of: _transform)
+        let localSize = scale > 0 ? size / scale : size
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize) else { return false }
+        return inkTouched(by: sweep)
+    }
 
-        // Fills and images have no geometry the split could have removed, so any overlap means the
-        // punch is still doing work. Bounding boxes rather than exact paths: conservative in the safe
-        // direction, and cheaper than a fill's exact containment test per probe.
+    /// `eraserTouchesInk` in local space, against the display list as it stands. Caller must hold
+    /// `lock`.
+    ///
+    /// Every content kind is tested against the ink it actually draws, not a bounding box: a stroke
+    /// by its capsule chain at its own pressures (`VectorEraser.touchesInk`), a fill by the region
+    /// its path encloses under its own fill rule, a placed image, video or stream by the quad its
+    /// placement maps its rectangle to, and a text object by its ink bounds — the one box left, and
+    /// it is the glyph outlines' rather than the frame's. A punch grazing the empty corner of a
+    /// diagonal fill's box used to be retained on the strength of that box. `.erase` elements are
+    /// not content: a punch is not a backdrop for another.
+    private func inkTouched(by sweep: VectorEraser.Sweep) -> Bool {
         for element in _elements {
             switch element {
-            case .fill(let fill):
-                if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
-            case .image(let image):
-                if Self.bounds(of: image).intersects(box) { return true }
-            case .video(let video):
-                // A video is content a punch can be hiding for exactly the reason a photo is: the
-                // vector eraser never split it, so any overlap means the punch is still doing work.
-                if Self.bounds(of: video).intersects(box) { return true }
-            case .stream(let stream):
-                // The video arm's reason, on the same numbers.
-                if Self.bounds(of: stream).intersects(box) { return true }
-            case .text(let text):
-                // Text is content the punch can be hiding, and geometry the split could never have
-                // removed — the vector eraser does not bite letterforms (`ADD_TEXT.md` §1, §5.4), so
-                // any overlap means the punch is still doing work.
-                if let ink = TextMeasure.inkBounds(of: text), ink.intersects(box) { return true }
             case .stroke:
                 continue
+            case .fill(let fill):
+                if let path = fill.cgPath, sweep.touches(region: path, evenOdd: fill.evenOddFill) { return true }
+            case .image(let image):
+                if sweep.touches(region: Self.quad(of: image)) { return true }
+            case .video(let video):
+                if sweep.touches(region: Self.quad(of: video)) { return true }
+            case .stream(let stream):
+                if sweep.touches(region: Self.quad(of: stream)) { return true }
+            case .text(let text):
+                if let ink = TextMeasure.inkBounds(of: text), sweep.touches(region: CGPath(rect: ink, transform: nil)) {
+                    return true
+                }
             }
         }
-
+        // The index holds centrelines, so the query is grown by the widest half-width on the layer
+        // — a stroke whose centreline sits outside the sweep's box can still have ink inside it.
         let reach = maxPaintReach()
         guard reach > 0 else { return false }
-        for ref in strokeIndex().segments(near: box.insetBy(dx: -reach, dy: -reach)) {
-            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
-                  stroke.samples.indices.contains(ref.sampleIndex) else { continue }
-            let a = stroke.samples[ref.sampleIndex].point
-            let b = stroke.samples[min(ref.sampleIndex + 1, stroke.samples.count - 1)].point
-            let limit = radius + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
-                                                            size: stroke.size)
-            if StrokeGeometry.distanceSquared(from: dab.point, toSegment: a, b) <= limit * limit {
+        var seen: Set<Int> = []
+        for ref in strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
+        where seen.insert(ref.elementIndex).inserted {
+            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint else { continue }
+            if VectorEraser.touchesInk(of: stroke.samples, brush: stroke.brush, size: stroke.size, sweep: sweep) {
                 return true
             }
         }
@@ -4825,7 +4837,7 @@ final class VectorCanvas {
     /// measured in source-space points before any magnification.
     private static func distorted(_ fill: VectorFillElement, through map: Homography) -> VectorFillElement? {
         guard let path = fill.cgPath,
-              let flattened = Self.flattened(path),
+              let flattened = StrokeGeometry.flattened(path),
               let moved = map.mapped(flattened) else { return nil }
         var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
                                        evenOddFill: fill.evenOddFill)
@@ -4861,79 +4873,6 @@ final class VectorCanvas {
         moved.frame.mode = .projective
         moved.frame.autoSize = false
         return moved
-    }
-
-    /// `path` with every curved segment replaced by a chain of chords.
-    ///
-    /// The step is chosen per segment from its control polygon's length, which bounds a cubic's arc
-    /// length from above, so a long curve gets more chords than a short one and a straight segment
-    /// costs nothing at all. **Measured in the path's own space**, before any magnification: the
-    /// caller's map can blow a source point up, so the honest bound is stated where the geometry is
-    /// and the cap is what keeps a pathological path finite.
-    private static func flattened(_ path: CGPath) -> CGPath? {
-        let out = CGMutablePath()
-        var current = CGPoint.zero
-        var start = CGPoint.zero
-        var malformed = false
-        path.applyWithBlock { raw in
-            let element = raw.pointee
-            switch element.type {
-            case .moveToPoint:
-                current = element.points[0]; start = current
-                out.move(to: current)
-            case .addLineToPoint:
-                current = element.points[0]
-                out.addLine(to: current)
-            case .addQuadCurveToPoint:
-                let control = element.points[0], end = element.points[1]
-                let steps = Self.flatteningSteps([current, control, end])
-                for step in 1...steps {
-                    let t = CGFloat(step) / CGFloat(steps)
-                    out.addLine(to: Self.quadPoint(current, control, end, t))
-                }
-                current = end
-            case .addCurveToPoint:
-                let c1 = element.points[0], c2 = element.points[1], end = element.points[2]
-                let steps = Self.flatteningSteps([current, c1, c2, end])
-                for step in 1...steps {
-                    let t = CGFloat(step) / CGFloat(steps)
-                    out.addLine(to: Self.cubicPoint(current, c1, c2, end, t))
-                }
-                current = end
-            case .closeSubpath:
-                out.closeSubpath()
-                current = start
-            @unknown default:
-                malformed = true
-            }
-        }
-        return malformed ? nil : out
-    }
-
-    /// One chord per point of control-polygon length, floored at 4 and capped at 64. The floor keeps
-    /// a tiny curve from becoming a single chord that visibly cuts its corner; the cap is what stops
-    /// a path with a thousand-point curve from minting a hundred thousand segments.
-    private static func flatteningSteps(_ polygon: [CGPoint]) -> Int {
-        var length: CGFloat = 0
-        for index in 1..<polygon.count {
-            length += hypot(polygon[index].x - polygon[index - 1].x,
-                            polygon[index].y - polygon[index - 1].y)
-        }
-        return min(64, max(4, Int(length.rounded(.up))))
-    }
-
-    private static func quadPoint(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
-        let u = 1 - t
-        return CGPoint(x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x,
-                       y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y)
-    }
-
-    private static func cubicPoint(_ p0: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ p1: CGPoint,
-                                   _ t: CGFloat) -> CGPoint {
-        let u = 1 - t
-        let a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
-        return CGPoint(x: a * p0.x + b * c1.x + c * c2.x + d * p1.x,
-                       y: a * p0.y + b * c1.y + c * c2.y + d * p1.y)
     }
 
     /// **A placed image moved by any invertible affine** — the arm both public mappings hand their

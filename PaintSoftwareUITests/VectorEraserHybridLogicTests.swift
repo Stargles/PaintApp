@@ -697,7 +697,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// `erase` early-returns for Modes 2 and 3 on a layer with no strokes, but Mode 1 must not: a
     /// punch over a bare fill is its whole job. This is the guard in `erase`'s `mode == .erase ||` and
-    /// the `maxPaintReach() == 0` path in `hasContentBeneath`, which is correct only because the fill
+    /// the `maxPaintReach() == 0` path in `inkTouched`, which is correct only because the fill
     /// check runs before it.
     func testModeOneErasesAFillOnALayerWithNoStrokesAtAll() {
         let rect = CGRect(x: 8, y: 40, width: 112, height: 48)
@@ -732,7 +732,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// What re-erasing the same place actually costs, pinned rather than wished away.
     ///
-    /// `hasContentBeneath` asks about stroke *geometry*, not about ink still visible after earlier
+    /// `inkTouched` asks about stroke *geometry*, not about ink still visible after earlier
     /// punches, so a second gesture over a stroke the eraser does not wholly cover retains a second punch. That is the
     /// design being consistent rather than leaking: an eraser **is** a stroke, and N eraser gestures
     /// cost N elements exactly as N paint gestures do. What
