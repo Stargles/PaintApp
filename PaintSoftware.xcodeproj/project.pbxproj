@@ -185,6 +185,7 @@
 		DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */; };
 		67017AB6AA57EEAE281476EE /* BrushSizePercentLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B864E3125A94C2B3EA90E56 /* BrushSizePercentLogicTests.swift */; };
 		D04E01B3D6B35C3F87C1C94E /* BrushSizeSliderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */; };
+		31739EE1A7A376DD95CA00AB /* AutosaveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */; };
 		DCC20B0EA3AFE8B4DA09D2E6 /* EditorStateRoundTripUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */; };
 		8F6EB3B8DB73A5D8D4C5ED42 /* AddSubmenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F8E83F7DE4279A20882C1 /* AddSubmenuUITests.swift */; };
 		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
@@ -661,6 +662,7 @@
 		DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewPresetCharacterizationTests.swift; sourceTree = "<group>"; };
 		7B864E3125A94C2B3EA90E56 /* BrushSizePercentLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushSizePercentLogicTests.swift; sourceTree = "<group>"; };
 		C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushSizeSliderUITests.swift; sourceTree = "<group>"; };
+		7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutosaveUITests.swift; sourceTree = "<group>"; };
 		ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditorStateRoundTripUITests.swift; sourceTree = "<group>"; };
 		443F8E83F7DE4279A20882C1 /* AddSubmenuUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AddSubmenuUITests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
@@ -1265,6 +1267,7 @@
 				443F8E83F7DE4279A20882C1 /* AddSubmenuUITests.swift */,
 				7B864E3125A94C2B3EA90E56 /* BrushSizePercentLogicTests.swift */,
 				C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */,
+				7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */,
 				ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */,
 			);
 			path = PaintSoftwareUITests;
@@ -1866,6 +1869,7 @@
 				8F6EB3B8DB73A5D8D4C5ED42 /* AddSubmenuUITests.swift in Sources */,
 				67017AB6AA57EEAE281476EE /* BrushSizePercentLogicTests.swift in Sources */,
 				D04E01B3D6B35C3F87C1C94E /* BrushSizeSliderUITests.swift in Sources */,
+				31739EE1A7A376DD95CA00AB /* AutosaveUITests.swift in Sources */,
 				DCC20B0EA3AFE8B4DA09D2E6 /* EditorStateRoundTripUITests.swift in Sources */,
 				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,
 				65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */,
