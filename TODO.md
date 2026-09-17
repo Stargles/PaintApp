@@ -204,37 +204,6 @@ the layers on that frame. Sometimes they show the cel of a different frame. Make
 
 ---
 
-## (69) Onion skin: tap toggles, hold opens the menu
-
-**Status** — filed 2026-09-16. The owner: *"lets make it so tapping the onion skin icon toggles it,
-and the menu is opened by holding the icon for a short time."*
-
-- [ ] Tap = toggle; a short hold = the menu.
-
----
-
-## (70) Onion skin UI redesign
-
-**Status** — filed 2026-09-16. The owner: *"I dont like the current onion skin UI. Try to make it look
-better, like the image I linked. More compact and clean."* The reference is a compact dark panel:
-Drawings/Frames mode row; Behind / In Front tabs; Previous Drawings and Next Drawings count sliders with
-a link toggle between; Tinted / Original Colors with a red→green tint bar; per-drawing Opacity sliders
-with a link.
-
-- [ ] The panel rebuilt to that layout, on the app's existing controls.
-
----
-
-## (72) One colour picker — the onion skin's is a second one
-
-**Status** — filed 2026-09-16. The owner: *"the color picker in onion skin isnt the same color picker
-as the color picker used in everything else, which means that we have 2 color pickers, bloating the
-code. Make it the same as the normal color picker and cleanly delete all the bloat."*
-
-- [ ] Onion skin uses the app's picker; the second picker and everything only it used is deleted.
-
----
-
 ## (73) Colour picker overhaul
 
 **Status** — filed 2026-09-16. The owner: *"the color picker should be overhauled. There should be many

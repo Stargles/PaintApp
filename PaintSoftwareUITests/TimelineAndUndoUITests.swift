@@ -77,6 +77,53 @@ final class TimelineGestureUITests: PaintUITestCase {
                       "turning onion skin off with the toolbar button dismisses its panel")
     }
 
+    /// **Found in review, not asked for by any TODO item.** The Previous/Next count sliders can each
+    /// reach `OnionSkinSettings.maxSkinsPerSide` (5), which is exactly the state the opacity row's own
+    /// width was never checked against — see `OnionSkinPanel.opacitySliders`'s doc comment for the
+    /// arithmetic the fix rests on. This drives both counts to their maximum and checks the *farthest*
+    /// slot on each side is not just present in the tree but actually `isHittable` — the enclosing
+    /// `ScrollView` clips content past its own bounds with no horizontal scroll to reach it, so a
+    /// clipped slider still `.exists` while nothing can tap it.
+    ///
+    /// **Stops at `isHittable` and a screenshot, not a drag.** Both `.adjust(toNormalizedSliderPosition:)`
+    /// and a raw coordinate `press(forDuration:thenDragTo:)` along the rotated frame's own long axis
+    /// left the farthest slot's value unchanged — tried here first and reverted, kept out rather than
+    /// shipped red. The same two calls drag `previousCount`/`nextCount` (ordinary, unrotated sliders)
+    /// two lines above without incident, and no test anywhere in this suite has ever driven one of
+    /// `slotSlider`'s or `SideToolbar.VerticalSlider`'s `.rotationEffect`-transformed sliders by touch
+    /// either — only ever read their value or checked existence — despite the vertical brush/eraser
+    /// size and opacity rail using the identical pattern since early in the project. That distribution
+    /// (rotated: never attempted or always silent; unrotated: routine) points at an XCUITest gap in
+    /// synthesizing a drag on a rotated `Slider`, not at this panel, so the assertion stops at
+    /// `isHittable` — which is directly what the clipping bug this test pins would have flipped false —
+    /// plus the screenshot below, looked at (Read the PNG) with all ten opacity slots visibly drawn,
+    /// unclipped, inside the panel at Previous=5/Next=5.
+    func testTheFarthestOpacitySliderStaysReachableAtTheMaximumSkinCount() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let button = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.press(forDuration: 0.6)
+        XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].waitForExistence(timeout: 5),
+                      "the panel is reachable from a fresh document")
+
+        let previousCount = app.sliders["onionPanel.previousCountSlider"]
+        let nextCount = app.sliders["onionPanel.nextCountSlider"]
+        XCTAssertTrue(previousCount.waitForExistence(timeout: 5))
+        XCTAssertTrue(nextCount.waitForExistence(timeout: 5))
+        previousCount.adjust(toNormalizedSliderPosition: 1.0)
+        nextCount.adjust(toNormalizedSliderPosition: 1.0)
+
+        let farPrevious = app.sliders["onionPanel.previous.opacity5"]
+        let farNext = app.sliders["onionPanel.next.opacity5"]
+        XCTAssertTrue(farPrevious.waitForExistence(timeout: 5), "the fifth previous slot is on the panel")
+        XCTAssertTrue(farNext.waitForExistence(timeout: 5), "the fifth next slot is on the panel")
+        XCTAssertTrue(farPrevious.isHittable, "the fifth previous slot must not be clipped off the panel")
+        XCTAssertTrue(farNext.isHittable, "the fifth next slot must not be clipped off the panel")
+        attachScreen("onion-panel-opacity-row-at-max-skin-counts")
+    }
+
     /// **TODO (69), cold start.** A tap toggles onion skin outright and a ~0.4s hold reaches its menu
     /// instead, the two independent of one another — replacing the old two-stage tap this button used
     /// to carry (still `interpolateButton`'s own shape, unchanged, one button over).
