@@ -211,6 +211,10 @@ final class OptionsPanelUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Add Text moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
+        addRow.tap()
         let addText = app.buttons["actions.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         addText.tap()

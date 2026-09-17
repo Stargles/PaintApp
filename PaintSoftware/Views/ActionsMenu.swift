@@ -4,12 +4,12 @@ import UniformTypeIdentifiers
 
 struct ActionsMenu: View {
     @ObservedObject var canvasManager: CanvasManager
-    /// **The one panel that can open another panel.** Every other row here is a direct action, a
-    /// `PhotosPicker` or an inert stub, so this view needed nothing but the manager until "Add Text"
-    /// arrived — text is a *mode*, and entering it means swapping this menu for the text tool's own
-    /// settings panel. `ADD_TEXT.md` §1 calls threading this binding through the change that "lands
-    /// first and alone", because `ActionsMenu` is shared by every panel in the app and a change here
-    /// wants to be bisectable on its own.
+    /// **The one panel that can open another panel.** Every row below the "Add" submenu is a direct
+    /// action, a `PhotosPicker` or an inert stub, so this view needed nothing but the manager until
+    /// "Add Text" arrived — text is a *mode*, and entering it means swapping this menu for the text
+    /// tool's own settings panel. `ADD_TEXT.md` §1 calls threading this binding through the change
+    /// that "lands first and alone", because `ActionsMenu` is shared by every panel in the app and a
+    /// change here wants to be bisectable on its own.
     @Binding var activePanel: ActivePanel
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var videoPickerItem: PhotosPickerItem?
@@ -30,6 +30,12 @@ struct ActionsMenu: View {
     /// reason: a connection attempt is a wait with an outcome, and the outcome needs a place to be
     /// read when it is a refusal.
     @State private var showingStreamConnect = false
+    /// TODO item (100) — whether the "Add" submenu has replaced the top-level row list. The same
+    /// shape as `LayerPanel`'s `showingMaskMenu`: one bool, the row list or the submenu, never both.
+    /// A submenu rather than a `Menu`/popover because every other nested screen in this app (the mask
+    /// menu, the effect settings bar) already is one, reached by `optionsSubMenuHeader`'s Back/×, and
+    /// a second navigation idiom for the same shape of problem would be one more thing to learn.
+    @State private var showingAddMenu = false
 
     var body: some View {
         // Scrolled, not just stacked: the panel that hosts this is capped at a fixed height, and a
@@ -54,33 +60,26 @@ struct ActionsMenu: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if showingAddMenu {
+                addMenu
+            } else {
+                mainMenu
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The top-level row list — everything `content` showed before TODO (100), minus the four rows
+    /// that moved under `addMenu`, plus the one row (`addRow`) that opens it.
+    private var mainMenu: some View {
+        Group {
             Text("Actions")
                 .font(.headline)
                 .foregroundColor(.white)
                 .padding([.horizontal, .top])
                 .padding(.bottom, 4)
 
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                row(icon: "photo.on.rectangle", title: canvasManager.activeLayerIsVector ? "Insert Photo (onto vector layer)" : "Insert Photo")
-            }
-            .onChange(of: photoPickerItem) { _, newItem in
-                Task { await insertPhoto(newItem) }
-            }
-
-            // **VIDEO.md stage 4, and it is deliberately the picker beside the photo one rather than
-            // a row inside it.** §2.1 gives a video its own vector layer whatever the active layer
-            // is, so the two verbs differ in more than the file they take — the photo row's title
-            // even changes to say which layer it will land on, and this one never can.
-            PhotosPicker(selection: $videoPickerItem, matching: .videos) {
-                row(icon: "film", title: "Insert Video (new layer)")
-            }
-            .onChange(of: videoPickerItem) { _, newItem in
-                Task { await insertVideo(newItem) }
-            }
-
-            streamScreenRow
-
-            addTextRow
+            addRow
 
             Button {
                 canvasManager.flipCanvas(horizontal: true)
@@ -146,11 +145,64 @@ struct ActionsMenu: View {
                     .padding(.top, 4)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// TODO item (100) — the "Add" submenu: Insert Photo, Insert Video, Stream Screen and Add Text,
+    /// moved under one entry rather than sitting loose at the top of the row list. Same four rows,
+    /// same identifiers, same behaviour — only the path to them grew one tap.
+    private var addMenu: some View {
+        Group {
+            optionsSubMenuHeader(title: "Add",
+                                 backIdentifier: "actions.addMenu.back",
+                                 titleIdentifier: "actions.addMenu.title",
+                                 onBack: { showingAddMenu = false },
+                                 onClose: { activePanel = .none })
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 1)
+                .padding(.bottom, 4)
+
+            PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                row(icon: "photo.on.rectangle", title: canvasManager.activeLayerIsVector ? "Insert Photo (onto vector layer)" : "Insert Photo")
+            }
+            .accessibilityIdentifier("actions.insertPhotoRow")
+            .onChange(of: photoPickerItem) { _, newItem in
+                Task { await insertPhoto(newItem) }
+            }
+
+            // **VIDEO.md stage 4, and it is deliberately the picker beside the photo one rather than
+            // a row inside it.** §2.1 gives a video its own vector layer whatever the active layer
+            // is, so the two verbs differ in more than the file they take — the photo row's title
+            // even changes to say which layer it will land on, and this one never can.
+            PhotosPicker(selection: $videoPickerItem, matching: .videos) {
+                row(icon: "film", title: "Insert Video (new layer)")
+            }
+            .accessibilityIdentifier("actions.insertVideoRow")
+            .onChange(of: videoPickerItem) { _, newItem in
+                Task { await insertVideo(newItem) }
+            }
+
+            streamScreenRow
+
+            addTextRow
+        }
+    }
+
+    /// Opens `addMenu` — TODO item (100), the owner's *"Add an 'add' icon, and in it move insert
+    /// photo, insert video, stream screen, add text."* An SF Symbol plus, since that is the system's
+    /// own spelling of "add" and every other row here already names its action with a stock glyph.
+    private var addRow: some View {
+        Button {
+            showingAddMenu = true
+        } label: {
+            row(icon: "plus", title: "Add")
+        }
+        .accessibilityIdentifier("actions.addRow")
     }
 
     /// Enters the text tool and swaps this menu for the text tool's settings panel — the only way
-    /// into `Tool.text`, since the top toolbar has no text icon.
+    /// into `Tool.text`, since the top toolbar has no text icon. Reached via Actions → Add → Add Text
+    /// since TODO (100); the row, its identifier and its behaviour are unchanged by the move.
     ///
     /// **Disabled rather than hidden where text cannot go, with the reason underneath it.** The row
     /// is the feature's only signpost: hidden, "can this app do text" has no answer on the layer the
@@ -224,10 +276,11 @@ struct ActionsMenu: View {
         }
     }
 
-    /// **STREAM.md §5.7 — Actions → Stream Screen.** After Insert Video because it is the same
-    /// verb with a different source: a picture of the computer's screen, live, in its own vector
-    /// layer, movable like a video. The sheet takes the laptop's address and connects; the layer
-    /// appears on the laptop's first answer.
+    /// **STREAM.md §5.7 — Actions → Add → Stream Screen.** TODO (100) moved this row (and its three
+    /// siblings) under the "Add" submenu; the row itself, its identifier and what it does are
+    /// unchanged. After Insert Video because it is the same verb with a different source: a picture
+    /// of the computer's screen, live, in its own vector layer, movable like a video. The sheet takes
+    /// the laptop's address and connects; the layer appears on the laptop's first answer.
     ///
     /// Disabled with no canvas, as Export is, since there is nothing to put the layer in.
     private var streamScreenRow: some View {

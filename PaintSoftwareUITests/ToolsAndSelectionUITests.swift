@@ -26,6 +26,10 @@ final class ToolPanelsUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Add Text moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
+        addRow.tap()
         let addText = app.buttons["actions.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         addText.tap()
@@ -82,10 +86,11 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // Default tool is the brush.
+        // Default tool is the brush. TODO (79) replaced the plain "Size"/"Opacity" captions with
+        // percentage badges, so this checks for those instead — same rows, same tool.
         XCTAssertTrue(app.sliders["sideToolbar.brushSizeSlider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Size"].exists)
-        XCTAssertTrue(app.staticTexts["Opacity"].exists)
+        XCTAssertTrue(app.otherElements["sideToolbar.brushSizeReadout"].exists)
+        XCTAssertTrue(app.otherElements["sideToolbar.brushOpacityReadout"].exists)
         XCTAssertFalse(app.sliders["sideToolbar.gapClosingSlider"].exists)
 
         app.buttons["toolbar.fillButton"].tap() // select fill
@@ -860,6 +865,10 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         lassoMode.tap()
 
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Add Text moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
+        addRow.tap()
         let addText = app.buttons["actions.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         XCTAssertTrue(addText.isEnabled, "Sanity: Add Text is available on the default vector layer")

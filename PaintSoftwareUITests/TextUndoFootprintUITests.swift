@@ -232,8 +232,12 @@ final class TextUndoFootprintUITests: PaintUITestCase {
 
     private func openAddText(_ app: XCUIApplication) {
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Add Text moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5), "PREMISE: Actions lists Add")
+        addRow.tap()
         let addText = app.buttons["actions.addTextRow"]
-        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: Actions lists Add Text")
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add submenu lists Add Text")
         XCTAssertTrue(addText.isEnabled, "PREMISE: Add Text is available on the default layer")
         addText.tap()
         XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),

@@ -5,9 +5,10 @@ import XCTest
 /// only entry point cannot be reached from a fresh document is not finished whatever its model
 /// says.
 ///
-/// From the gallery: New Canvas → Create → Actions → the Stream Screen row → the sheet with an
-/// address field, a port field prefilled with 47301 and a Connect button. **It does not connect** —
-/// there is no laptop in the suite, and `StreamInsertLogicTests` covers everything past the sheet
+/// From the gallery: New Canvas → Create → Actions → Add → the Stream Screen row → the sheet with an
+/// address field, a port field prefilled with 47301 and a Connect button (TODO (100) moved Stream
+/// Screen under the "Add" submenu; the row and the sheet it opens are unchanged). **It does not
+/// connect** — there is no laptop in the suite, and `StreamInsertLogicTests` covers everything past the sheet
 /// with a status built by hand. What it also pins: Connect is disabled while the address is empty,
 /// and enabled once one is typed, so the artist is never looking at a button that does nothing.
 ///
@@ -20,8 +21,12 @@ final class StreamScreenUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor")
 
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Stream Screen moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5), "Add is a row in the Actions menu")
+        addRow.tap()
         let row = app.buttons["actions.streamScreenRow"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "Stream Screen is a row in the Actions menu")
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Stream Screen is a row in the Add submenu")
         XCTAssertTrue(row.isEnabled, "…and a document with a canvas can host a stream")
         row.tap()
 

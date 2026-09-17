@@ -273,6 +273,10 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// `ToolsAndSelectionUITests.testEnteringTextModeClosesTheSelectPanel…`).
     private func placeATextBox(_ app: XCUIApplication, on canvas: XCUIElement) {
         app.buttons["toolbar.actionsButton"].tap()
+        // TODO (100): Add Text moved under the "Add" submenu.
+        let addRow = app.buttons["actions.addRow"]
+        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
+        addRow.tap()
         let addText = app.buttons["actions.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         XCTAssertTrue(addText.isEnabled, "PREMISE: Add Text is available on the default layer")
