@@ -10,11 +10,21 @@
      of a half-attempted winget install that needs an interactive session anyway).
   2. Publishes Streamer.Tray (framework-dependent, win-x64) from -SourceDir into
      $AppDir\app.
-  3. Ensures the Tailscale-only firewall rule for port 47301 exists.
-  4. Registers (or re-registers) the "PaintStreamer" Scheduled Task to run the
-     published exe AS KEVIN, interactively, at logon - so it can actually see the
-     desktop (STREAM.md section 4.3: an SSH session is a non-interactive window station and
-     neither the app nor gst-launch-1.0 can capture from there).
+  3. Ensures the firewall rule for port 47301 admits Tailscale AND any RFC1918 LAN
+     (TODO (98)) - a coarse, static superset; AdmissionPolicy.cs is the precise,
+     live per-connection gate, which a firewall rule cannot be since it can't know
+     which subnet this laptop's NIC is actually on at any given moment.
+  4. TODO (99): a Start Menu shortcut and a desktop shortcut to Streamer.Tray.exe -
+     "just like any normal computer program, clicking the app launches the program."
+  5. Registers (or re-registers) the "PaintStreamer" Scheduled Task to run the
+     published exe AS KEVIN, interactively, WITH NO TRIGGER (TODO (99): "it shouldn't
+     start up every time the computer is started") - it exists purely as the
+     mechanism `tools/windows/streamer-remote.sh start` uses to launch the app inside
+     kevin's interactive session from a non-interactive SSH connection (STREAM.md
+     section 4.3: an SSH session is a non-interactive window station and neither the
+     app nor gst-launch-1.0 can capture from there); the shortcut and the task launch
+     the identical exe with no arguments, and Streamer.Tray's own named-mutex guard
+     (SingleInstanceGuard) is what stops the two from ever running at once.
 
 .NOTES
   AppDir is an EXPLICIT path, not %LOCALAPPDATA%. Reason: this script runs as PC over
@@ -77,18 +87,47 @@ $exePath = Join-Path $publishDir "Streamer.Tray.exe"
 if (-not (Test-Path $exePath)) { Fail "Publish succeeded but $exePath does not exist - check the publish output above" }
 Write-Host "  Published: $exePath"
 
-# ---- 3. Firewall rule (idempotent; Tailscale range only per STREAM.md section 4.3) ----
+# ---- 3. Firewall rule (idempotent; Tailscale + RFC1918 LAN per STREAM.md section 4.3/TODO (98)) ----
+# A static, coarse allow-list: it cannot know which of these subnets the laptop's NIC is
+# actually on right now (or whether it moves to a different one mid-session), so
+# AdmissionPolicy.cs re-checks every connection against the laptop's LIVE NIC data - this
+# rule only has to be at least as permissive as that check ever needs.
 $ruleName = "PaintStreamer-In-TCP"
+$remoteAddresses = @("100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
 if (-not $existingRule) {
-    Write-Host "== Creating firewall rule $ruleName (TCP $Port, remote 100.64.0.0/10) =="
+    Write-Host "== Creating firewall rule $ruleName (TCP $Port, remote $($remoteAddresses -join ', ')) =="
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP `
-        -LocalPort $Port -RemoteAddress 100.64.0.0/10 -Action Allow | Out-Null
+        -LocalPort $Port -RemoteAddress $remoteAddresses -Action Allow | Out-Null
 } else {
-    Write-Host "  Firewall rule $ruleName already exists - left as is."
+    Write-Host "== Updating firewall rule $ruleName remote scope (idempotent - re-applies every run) =="
+    Set-NetFirewallRule -DisplayName $ruleName -RemoteAddress $remoteAddresses | Out-Null
 }
 
-# ---- 4. Scheduled Task, running AS KEVIN, interactively, at logon ----
+# ---- 4. Start Menu + desktop shortcuts (TODO (99): "just like any normal computer program") ----
+# $env:ProgramData is machine-wide (not per-user, unlike $env:LOCALAPPDATA above), so it
+# resolves the same regardless of which account this script runs as - no explicit-path trap
+# here. kevin's own Desktop still needs the explicit path, same reason as $AppDir.
+Write-Host "== Creating shortcuts to $exePath =="
+$shell = New-Object -ComObject WScript.Shell
+$shortcutTargets = @(
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\PaintStreamer.lnk",  # all users' Start Menu
+    "C:\Users\kevin\Desktop\PaintStreamer.lnk"                                    # kevin's own desktop
+)
+foreach ($lnkPath in $shortcutTargets) {
+    $shortcut = $shell.CreateShortcut($lnkPath)
+    $shortcut.TargetPath = $exePath
+    $shortcut.WorkingDirectory = Split-Path $exePath
+    $shortcut.Description = "PaintStreamer - stream this computer's screen to PaintApp"
+    $shortcut.Save()
+    Write-Host "  $lnkPath"
+}
+
+# ---- 5. Scheduled Task, running AS KEVIN, interactively, WITH NO TRIGGER (TODO (99)) ----
+# On-demand only: nothing fires it automatically at logon or any other time. It exists
+# solely so `streamer-remote.sh start` can reach into kevin's interactive session from a
+# non-interactive SSH connection (Start-ScheduledTask), exactly as the shortcut's own
+# double-click does by hand - see streamer.ps1's "start" doc comment.
 $taskName = "PaintStreamer"
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -96,16 +135,14 @@ if ($existingTask) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
 }
 
-Write-Host "== Registering Scheduled Task '$taskName' (User=kevin, LogonType=Interactive) =="
+Write-Host "== Registering Scheduled Task '$taskName' (User=kevin, LogonType=Interactive, no trigger) =="
 $action = New-ScheduledTaskAction -Execute $exePath
 $principal = New-ScheduledTaskPrincipal -UserId "kevin" -LogonType Interactive -RunLevel Limited
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User "kevin"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Trigger $trigger -Settings $settings | Out-Null
+Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings | Out-Null
 
 Write-Host "== Verifying =="
 Get-ScheduledTask -TaskName $taskName | Format-List TaskName, State
 Write-Host ""
-Write-Host "Install complete. Start it now with: tools/windows/streamer.ps1 start"
-Write-Host "(the AtLogOn trigger only fires on the NEXT logon - 'start' runs it immediately"
-Write-Host " against kevin's already-open session 1, which is the same mechanism.)"
+Write-Host "Install complete. The artist starts it by double-clicking the Start Menu or desktop"
+Write-Host "shortcut. To start it remotely (SSH, no one at the keyboard): tools/windows/streamer.ps1 start"

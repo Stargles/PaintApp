@@ -182,10 +182,15 @@ streamer/
     GstProcess       spawns gst-launch-1.0, reads Annex-B H.264 from a localhost TCP socket
                      (tcpclientsink into Core's listener — not stdout, which Windows may text-mode),
                      splits access units, restarts the pipeline on exit
-    ProtocolServer   TcpListener 0.0.0.0:47301, framing (§3), HELLO/STATUS/VIDEO/CONTROL/PING
+    ProtocolServer   TcpListener 0.0.0.0:47301, framing (§3), HELLO/STATUS/VIDEO/CONTROL/PING,
+                     AdmissionPolicy-gated (§4.3)
     FileInbox        FILE_* in both directions; incoming saved to the chosen folder
     StreamerSession  glue: current source, pipeline lifecycle, pause when no client
-  Streamer.Tray/     WPF — tray icon and one window (4.4)
+    AdmissionPolicy  TODO (98): Tailscale, or the laptop's own live RFC1918 subnets — the one
+                     place the LAN admission rule is spelled out (§4.3)
+    Discovery/       TODO (98): MdnsAdvertiser — a hand-rolled `_paintstream._tcp` responder, no
+                     NuGet dependency (§4.3)
+  Streamer.Tray/     WPF — tray icon and one window (4.4); SingleInstanceGuard (TODO (99))
   Streamer.Tests/    xunit — framing round trips, AU splitting, pipeline strings, file transfer
 ```
 
@@ -229,22 +234,30 @@ flags are undocumented, so the MSI series is the one `install-streamer.ps1` pins
 MFT, D3D11-aware, `low-latency`), `openh264enc`, `x264enc`. Absent: `nvh264enc`, `amfh264enc`. .NET
 SDK 8.0.425 at `C:\dotnet`.
 
-### 4.3 Running it, and running it over SSH
+### 4.3 Running it, and running it over SSH — and as a normal program (TODO (99))
 
 An SSH session on Windows is a non-interactive window station: nothing started from it can see the
 desktop, so neither the app nor `gst-launch-1.0` can capture from there — `EnumWindows` in that
 session sees one fake 1024×768 "WinDisc" display. **And the laptop has two accounts**: SSH (and "Run
 as administrator") is the admin `PC`; the person at the screen is the standard user **`kevin`**, whose
-session 1 is the only one that can capture. The task runs as `kevin` with an Interactive logon
-principal, registered by the admin with no password. The app runs as a **Scheduled
-Task** registered to run interactively in the logged-in user's session (`schtasks /create … /it`), and
-`tools/windows/streamer.ps1 start|stop|status|log` drives it from SSH. Double-clicking the exe on the
-laptop does the same thing by hand. Log: `%LOCALAPPDATA%\PaintStreamer\log.txt`.
+session 1 is the only one that can capture.
+
+**The artist's own way in is a Start Menu shortcut and a desktop shortcut**, both pointing at
+`Streamer.Tray.exe` — "just like any normal computer program, clicking the app launches the
+program" (TODO (99)). The Scheduled Task from stage 3's build is still there, registered as `kevin`
+with an Interactive logon principal, but **carries no trigger**: nothing starts it at logon or on any
+schedule. It exists purely as `tools/windows/streamer.ps1 start|stop|status|log`'s remote-start
+mechanism — `Start-ScheduledTask` is how a non-interactive SSH connection reaches into kevin's
+already-open session 1, the same reason the task existed at all. The shortcut and the task launch the
+identical exe with no arguments, so `Streamer.Tray`'s own named-mutex guard
+(`SingleInstanceGuard`, `App.xaml.cs`) is what stops a double-click from starting a second instance
+while the task's is already running, rather than the two mechanisms being kept apart by convention.
+Log either way: `%LOCALAPPDATA%\PaintStreamer\log.txt`.
 
 `tools/windows/install-streamer.ps1` (run once as Administrator, over SSH): .NET 8 SDK via winget,
-GStreamer MSI silently with all features, the firewall rule for 47301 **scoped to 100.64.0.0/10** (the
-Tailscale range — nothing on the LAN or the internet reaches it), the scheduled task, and a
-`dotnet publish` of the tray app to `%LOCALAPPDATA%\PaintStreamer\app`.
+GStreamer MSI silently with all features, the firewall rule for 47301 (§6's admission rule), the Start
+Menu and desktop shortcuts, the triggerless scheduled task, and a `dotnet publish` of the tray app to
+`%LOCALAPPDATA%\PaintStreamer\app`.
 
 ### 4.4 The window
 
@@ -465,12 +478,27 @@ already renders any `reason` verbatim as `"Not streaming — \(reason)"` — con
 
 ### 5.7 The bar and the Actions entry (2.2, 2.3)
 
-**Actions → Stream Screen** (a row after Insert Video, `addTextRow`'s shape): a sheet with the laptop's
-address (MagicDNS name or Tailscale IP; last used prefilled; port 47301 shown, editable) and Connect.
-On HELLO it makes a new vector layer with one stream element in one cel **from the current frame to
-the end of the timeline** (§6), fitted to the canvas the way `insertVideo` fits (the laptop's aspect,
-letterboxed), then lifts it into the Move box as `insertImage` does. If the connection fails the
-sheet says so in words and stays open. A second Stream Screen makes a second layer sharing the client.
+**Actions → Stream Screen** (a row after Insert Video, `addTextRow`'s shape): a sheet with a
+**Nearby** section (TODO (98)) above the address field, then the laptop's address (MagicDNS name or
+Tailscale IP; last used prefilled; port 47301 shown, editable) and Connect. On HELLO it makes a new
+vector layer with one stream element in one cel **from the current frame to the end of the
+timeline** (§6), fitted to the canvas the way `insertVideo` fits (the laptop's aspect, letterboxed),
+then lifts it into the Move box as `insertImage` does. If the connection fails the sheet says so in
+words and stays open. A second Stream Screen makes a second layer sharing the client.
+
+**Nearby (TODO (98))**: `StreamDiscoveryBrowser` (`Engine/ScreenStream/StreamDiscovery.swift`)
+browses `_paintstream._tcp` with `NWBrowser` while the sheet is on screen, so a laptop on the same
+Wi-Fi as the iPad appears as a row the artist taps instead of typing an address; the typed-address
+path is unchanged and is still how a Tailscale-only laptop (not on this Wi-Fi) gets connected to. A
+tapped row fills `host`/`port` from the discovered laptop's own name (`"<name>.local"`, resolved the
+same way as a typed MagicDNS name — no new connect path) and calls the same `connect()` the button
+does. Empty off-network is the expected state (`streamConnect.nearbyEmpty`), not a fallback.
+`StreamDiscovery.nearbyStreamers(from:)` is the pure, testable half (`StreamDiscoveryLogicTests`);
+`NWBrowser.Result` itself has no public initializer, which is why the browser hands endpoints to that
+function rather than results. **Not driven end to end**: the Mac and the laptop were not on the
+iPad's Wi-Fi network while this was built, so this is proved by that logic test plus the Windows
+side's `Streamer.Core/Discovery/MdnsAdvertiser.cs` and its `MdnsAdvertiserTests` (§4.1), not by
+watching a real laptop appear in the list.
 
 **`StreamBar`** (`Views/StreamBar.swift`, `bottomDockCard`): shows because the active layer's cel at
 the current frame holds a stream element, unless a piece floats (the Move bar wins). Contents: source
@@ -543,7 +571,24 @@ moment an element does, pause again the moment it stops).
   element needs pictures — so the drop box lands files and Send to Computer is enabled whenever a
   document is open, not only after Stream Screen. The laptop encodes nothing for a paused client, and
   a laptop that is off costs the iPad one connection attempt every 5 s.
-- Port **47301**; the firewall rule admits only Tailscale addresses.
+- Port **47301**; the firewall rule admits Tailscale addresses **or the laptop's own local
+  subnets** (TODO (98), widened from Tailscale-only). `AdmissionPolicy.cs` is the one place the
+  rule is actually spelled out and the only thing that checks it precisely (live NIC data, per
+  connection); the firewall rule is a coarser, static superset of the same ranges, because a
+  static rule cannot know which subnet the laptop is on at any given moment. `MdnsAdvertiser.cs`
+  advertises `_paintstream._tcp` on the LAN so the iPad's connect sheet can offer the laptop under
+  "Nearby" (§5.7) instead of the artist typing an address — no new port or protocol, purely how
+  the address gets into the sheet.
+- **USB, investigated and declined (TODO (98)).** The iPad is the client and the laptop is the
+  server (§3: "the laptop listening ... the iPad connecting"), and USB reaches an iPad only through
+  `usbmuxd` — a multiplexer that lets a *host* dial a port the *device* listens on, the opposite
+  direction from how this protocol is wired. Building it would mean the iPad opening a local TCP
+  listener (straightforward) and the laptop driving `usbmuxd`'s protocol to reach it (not
+  straightforward on Windows: no first-party client exists, and the practical routes are bundling
+  Apple Mobile Device Support/iTunes or vendoring `libimobiledevice`'s USB multiplexing, an
+  undocumented protocol, as a new dependency of a laptop that is otherwise dependency-light by
+  design — §4.3). That cost buys a cable-only fallback for a laptop already reachable over Tailscale
+  or, now, the LAN; left undone, and the ask counted as answered by that ruling rather than by code.
 - Freeze is **not** an undo step; Bake Frame is **one**.
 - Snapshots are stored at the laptop's native pixel size, not the canvas's.
 - The last frame is saved as JPEG q0.9, on save alone (§5.6); the bake snapshot as the image

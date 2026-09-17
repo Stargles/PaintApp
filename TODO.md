@@ -153,26 +153,6 @@ the stream was on."*
 
 ---
 
-## (98) Same-network or USB streaming instead of Tailscale
-
-**Status** — filed 2026-09-16. The owner: *"If possible, adding the option for same-network or usb
-connection for streaming instead of tail scale will be nice."*
-
-- [ ] LAN: the admission rule widened from Tailscale addresses to the local subnet; USB if the iPad
-      exposes one.
-
----
-
-## (99) The Windows streamer is a normal program: launch on click, no autostart
-
-**Status** — filed 2026-09-16. The owner: *"The computer side program right now starts up on startup
-and there is no app. Make it just like any normal computer program, clicking the app launches the
-program, and it shouldn't start up every time the computer is started."*
-
-- [ ] No scheduled task at logon; a Start-menu/desktop app the owner double-clicks; the tray stays.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](STREAM.md)), and **built through

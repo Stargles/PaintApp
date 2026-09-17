@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using Streamer.Core;
+using Streamer.Core.Discovery;
 
 namespace Streamer.Tray;
 
@@ -21,6 +22,13 @@ public partial class App : System.Windows.Application
     private MainWindow? _mainWindow;
     private SessionLockMonitor? _lockMonitor;
     private SessionLockPoller? _lockPoller;
+    private MdnsAdvertiser? _mdns;
+    // TODO (99): held for the process lifetime of normal windowed mode only — see OnStartup's
+    // "Normal windowed mode" branch. The CLI diagnostics above it (--list-sources, --check-lock,
+    // --stream) are one-off tools that legitimately run alongside an already-running tray
+    // instance (streamer.ps1 sources reaches kevin's session with exactly such a one-off task
+    // while the main task may already be up) and must not fight this guard.
+    private SingleInstanceGuard? _singleInstance;
 
     /// <summary>STREAM.md §7 stage 4 deliverable 3: the CLI's remote hand, since a
     /// second process (an SSH session) cannot reach the running app's own drop box.</summary>
@@ -103,9 +111,26 @@ public partial class App : System.Windows.Application
             return; // RunHeadlessStreamAsync only returns after being asked to shut down
         }
 
-        // Normal windowed mode: probe the encoder, start the server, restore the last
-        // source (§2.8/§6 — the laptop may reboot mid-session and should resume on its
-        // own), show the tray icon and the window.
+        // Normal windowed mode: the Start Menu/desktop shortcut (TODO (99)) and the triggerless
+        // on-demand Scheduled Task (streamer-remote.sh start) both land here with no arguments,
+        // so this is the one guard against running twice at once — a real second instance would
+        // fail ProtocolServer.StartAsync on the already-bound port anyway, but silently or with a
+        // raw exception is not "just like any normal computer program."
+        _singleInstance = new SingleInstanceGuard(SingleInstanceGuard.AppMutexName);
+        if (!_singleInstance.TryAcquire())
+        {
+            Log("Another PaintStreamer instance is already running — exiting without starting a second one.");
+            System.Windows.MessageBox.Show(
+                "PaintStreamer is already running. Look for its icon in the system tray.",
+                AppName, MessageBoxButton.OK, MessageBoxImage.Information);
+            _singleInstance.Dispose();
+            _singleInstance = null;
+            Shutdown(0);
+            return;
+        }
+
+        // Probe the encoder, start the server, restore the last source (§2.8/§6 — the laptop may
+        // reboot mid-session and should resume on its own), show the tray icon and the window.
         try
         {
             await _session.ProbeEncoderAsync().ConfigureAwait(true);
@@ -124,6 +149,20 @@ public partial class App : System.Windows.Application
         _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
         _server.ControlReceived += control => _ = _session.HandleControlAsync(control);
         await _server.StartAsync().ConfigureAwait(true);
+
+        // TODO (98): advertise on the LAN so the iPad's connect sheet can offer this laptop under
+        // "Nearby" instead of the artist typing its address. Best-effort — a laptop with no
+        // reachable IPv4 NIC yet (still joining Wi-Fi) just logs and tries again on the next query
+        // it receives; the typed-address path is unaffected either way.
+        _mdns = new MdnsAdvertiser(Environment.MachineName, (ushort)Port, Log);
+        try
+        {
+            await _mdns.StartAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Log($"MdnsAdvertiser: failed to start — Nearby discovery will not see this laptop: {ex.Message}");
+        }
 
         // STREAM.md §4.5: lock/display-off detection. The window-message half
         // (WTSRegisterSessionNotification, RegisterPowerSettingNotification) is wired up
@@ -288,8 +327,10 @@ public partial class App : System.Windows.Application
         _lockPoller?.Dispose();
         _outboxWatcher?.Dispose();
         _fileOutbox?.Dispose();
+        if (_mdns != null) await _mdns.DisposeAsync().ConfigureAwait(false);
         if (_server != null) await _server.StopAsync().ConfigureAwait(false);
         if (_session != null) await _session.DisposeAsync().ConfigureAwait(false);
+        _singleInstance?.Dispose();
         _logger?.Dispose();
         base.OnExit(e);
     }

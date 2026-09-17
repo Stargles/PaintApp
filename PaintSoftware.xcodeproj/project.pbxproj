@@ -269,6 +269,7 @@
 		809BAE0C3C182EE401DBF9F5 /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */; };
 		C309D545A183B1F622870F4A /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */; };
 		E2B5B4D182B2B83A8B2B6F07 /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */; };
+		486D4D5356021D96111E2F0C /* PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216CAD086D2D062AC1290BF3 /* PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift */; };
 		F20EBC07008F679715968705 /* StreamElementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */; };
 		3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */; };
 		3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */; };
@@ -277,6 +278,7 @@
 		39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */; };
 		8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */; };
 		14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */; };
+		B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */; };
 		42EF84FD657BFADA355273E3 /* StreamFileTransferLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */; };
 		3F9D5C32A1B26AFA206707D5 /* StreamFileSendLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */; };
 		79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */; };
@@ -746,6 +748,7 @@
 		19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift; sourceTree = "<group>"; };
 		725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift; sourceTree = "<group>"; };
 		D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift; sourceTree = "<group>"; };
+		216CAD086D2D062AC1290BF3 /* PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift; sourceTree = "<group>"; };
 		BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamElementLogicTests.swift; sourceTree = "<group>"; };
 		1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFramingLogicTests.swift; sourceTree = "<group>"; };
 		037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = H264StreamDecoderLogicTests.swift; sourceTree = "<group>"; };
@@ -754,6 +757,7 @@
 		85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamPersistenceLogicTests.swift; sourceTree = "<group>"; };
 		B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBarStateLogicTests.swift; sourceTree = "<group>"; };
 		448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBakeLogicTests.swift; sourceTree = "<group>"; };
+		E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamDiscoveryLogicTests.swift; sourceTree = "<group>"; };
 		150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFileTransferLogicTests.swift; sourceTree = "<group>"; };
 		8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFileSendLogicTests.swift; sourceTree = "<group>"; };
 		F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+StreamBake.swift"; sourceTree = "<group>"; };
@@ -1118,6 +1122,7 @@
 				85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */,
 				B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */,
 				448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */,
+				E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */,
 				150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */,
 				8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */,
 				EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */,
@@ -1380,6 +1385,7 @@
 				19108F008E3DEEF72029D43B /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift */,
 				725748E8EC6E02DA98EA129B /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift */,
 				D8E08FCAD51FA444D9E1121D /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift */,
+				216CAD086D2D062AC1290BF3 /* PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift */,
 				F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */,
 				C61A5AFCE78556DCD043A0C5 /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
@@ -1996,6 +2002,7 @@
 				809BAE0C3C182EE401DBF9F5 /* PaintSoftware/Engine/ScreenStream/H264StreamDecoder.swift in Sources */,
 				C309D545A183B1F622870F4A /* PaintSoftware/Engine/ScreenStream/ScreenStreamClient.swift in Sources */,
 				E2B5B4D182B2B83A8B2B6F07 /* PaintSoftware/Engine/ScreenStream/ScreenStreamCoordinator.swift in Sources */,
+				486D4D5356021D96111E2F0C /* PaintSoftware/Engine/ScreenStream/StreamDiscovery.swift in Sources */,
 				F20EBC07008F679715968705 /* StreamElementLogicTests.swift in Sources */,
 				3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */,
 				3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */,
@@ -2004,6 +2011,7 @@
 				39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */,
 				8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */,
 				14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */,
+				B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */,
 				42EF84FD657BFADA355273E3 /* StreamFileTransferLogicTests.swift in Sources */,
 				3F9D5C32A1B26AFA206707D5 /* StreamFileSendLogicTests.swift in Sources */,
 				79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */,

@@ -53,4 +53,37 @@ final class StreamScreenUITests: PaintUITestCase {
         app.buttons["streamConnect.cancelButton"].tap()
         XCTAssertFalse(address.waitForExistence(timeout: 2), "Cancel closes the sheet without connecting")
     }
+
+    /// TODO (98): the "Nearby" section — cold start, no laptop reachable from the simulator (no
+    /// network at all in CI), so the only thing this can and does pin is that the section itself
+    /// is drawn above the address field: CLAUDE.md's rule that a feature whose model is correct
+    /// but whose surface was never looked at can still ship unusable. The empty state
+    /// (`streamConnect.nearbyEmpty`) is the expected result off-network, not a fallback being
+    /// tolerated — `StreamDiscoveryLogicTests` covers what happens once `NWBrowser` actually finds
+    /// something.
+    func testStreamScreenSheetDrawsANearbySectionAboveTheAddressField() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor")
+
+        app.buttons["toolbar.actionsButton"].tap()
+        app.buttons["actions.addRow"].tap()
+        let row = app.buttons["actions.streamScreenRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+
+        let nearbyHeader = app.staticTexts["streamConnect.nearbyHeader"]
+        XCTAssertTrue(nearbyHeader.waitForExistence(timeout: 5), "the Nearby section header is drawn")
+        let address = app.textFields["streamConnect.addressField"]
+        XCTAssertTrue(address.exists, "the address field is still reachable")
+        // "Above the address field": in a Form, the earlier Section's elements precede the
+        // later Section's in the accessibility tree top-to-bottom, so the header's frame must
+        // sit higher on screen than the address field's.
+        XCTAssertLessThan(nearbyHeader.frame.minY, address.frame.minY,
+                           "Nearby is drawn above the Computer address section")
+
+        let empty = app.staticTexts["streamConnect.nearbyEmpty"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 5), "off-network, the empty state is what Nearby shows")
+
+        app.buttons["streamConnect.cancelButton"].tap()
+    }
 }

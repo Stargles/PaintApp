@@ -730,15 +730,20 @@ If a merge produces a "cannot find X in scope" for a symbol neither branch touch
 before suspecting the code. It is the same family as the `@discardableResult` merge in
 [BUGS.md](BUGS.md): two changes to different lines that compose into a defect neither had alone.
 
-## The Windows laptop — the streamer host for TODO (27)
+## The Windows laptop — the streamer host for TODO (27), (98), (99)
 
 `desktop-cbr0fl6`, `100.104.85.111` on the tailnet (the iPad is `100.70.220.4`). Reach it with
 `ssh -i ~/.ssh/paintapp_windows -o BatchMode=yes PC@100.104.85.111 '<powershell>'` — PowerShell 5.1
 is the login shell, the account has a full admin token, no password ever crosses the wire.
 **Two accounts, and it matters**: `PC` is the admin SSH logs in as; **`kevin` is the person at the
 screen**, and only kevin's session can capture it — an SSH-spawned process sees a fake 1024×768
-"WinDisc" display and no windows. So the streamer runs as the `PaintStreamer` scheduled task with an
-Interactive principal for kevin, driven from here by:
+"WinDisc" display and no windows. **The streamer is a normal program on kevin's side (TODO (99)):**
+a Start Menu shortcut and a desktop shortcut launch `Streamer.Tray.exe` directly, nothing starts it
+at logon, and a named mutex (`SingleInstanceGuard`) stops a double-click from starting a second copy
+while one is already running. The `PaintStreamer` Scheduled Task still exists, registered with an
+Interactive principal for kevin, but **carries no trigger** — it is on-demand only, purely the
+mechanism this Mac uses to reach into kevin's session over SSH (an SSH-spawned process cannot
+capture the screen, above), driven from here by:
 
 ```bash
 tools/windows/streamer-remote.sh status|start|stop|log [n]|sources|deploy|test

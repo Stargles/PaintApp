@@ -29,6 +29,11 @@ struct StreamConnectSheet: View {
     @State private var isConnecting = false
     @State private var failure: String?
 
+    /// TODO (98): "Nearby" — a laptop on the same Wi-Fi as the iPad, found by DNS-SD, so the
+    /// artist can tap it instead of typing an address. The typed-address path below is unchanged
+    /// and is still how a Tailscale-only laptop (not on this Wi-Fi) gets connected to.
+    @StateObject private var discovery = StreamDiscoveryBrowser()
+
     init(canvasManager: CanvasManager, retargeting: StreamRetarget? = nil) {
         self.canvasManager = canvasManager
         self.retargeting = retargeting
@@ -52,6 +57,28 @@ struct StreamConnectSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    if discovery.nearby.isEmpty {
+                        Text("No computers found nearby")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("streamConnect.nearbyEmpty")
+                    } else {
+                        ForEach(discovery.nearby) { streamer in
+                            Button {
+                                connect(to: streamer)
+                            } label: {
+                                Label(streamer.name, systemImage: "desktopcomputer")
+                            }
+                            .accessibilityIdentifier("streamConnect.nearbyRow.\(streamer.name)")
+                        }
+                    }
+                } header: {
+                    Text("Nearby")
+                        .accessibilityIdentifier("streamConnect.nearbyHeader")
+                } footer: {
+                    Text("Computers on this Wi-Fi network that are running the streamer.")
+                }
+
                 Section {
                     TextField("Computer's address", text: $host)
                         .textInputAutocapitalization(.never)
@@ -102,6 +129,17 @@ struct StreamConnectSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .onAppear { discovery.start() }
+        .onDisappear { discovery.stop() }
+    }
+
+    /// A tap on a Nearby row: fill the fields from what was found and connect exactly as if the
+    /// artist had typed them and pressed Connect — Nearby is a shortcut onto the same path, not a
+    /// second one.
+    private func connect(to streamer: NearbyStreamer) {
+        host = streamer.host
+        portText = String(streamer.port)
+        connect()
     }
 
     private func connect() {

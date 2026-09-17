@@ -9,7 +9,9 @@ namespace Streamer.Core;
 /// <summary>
 /// TcpListener 0.0.0.0:47301 (STREAM.md §3/§4.1). One client at a time — a new
 /// connection replaces the old, exactly like tools/stream/fake-streamer.py's Python
-/// reference server. Owns the HELLO handshake and proto check, PING/PONG watchdog,
+/// reference server. Every accepted socket is checked against <see cref="AdmissionPolicy"/>
+/// before anything else runs (TODO (98)); a refused one is closed with no HELLO exchanged.
+/// Owns the HELLO handshake and proto check, PING/PONG watchdog,
 /// VIDEO mux (a single serialized writer per connection so GstProcess's background
 /// thread and STATUS/PONG replies never interleave mid-frame), and CONTROL dispatch —
 /// exposed as an event so StreamerSession decides what pause/resume/keyframe mean.
@@ -104,6 +106,20 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
             catch (ObjectDisposedException) { break; }
 
             var endpoint = tcp.Client.RemoteEndPoint;
+
+            // TODO (98): the app-level half of AdmissionPolicy's rule — the firewall rule
+            // installed by install-streamer.ps1 is now a coarse Tailscale-or-any-RFC1918
+            // allow-list (it cannot know which subnet this NIC is actually on), so this is
+            // where the precise "is it actually on one of MY subnets right now" check lives.
+            // Refused before HELLO, so a non-admitted caller gets nothing but a closed socket.
+            if (endpoint is not IPEndPoint remote ||
+                !AdmissionPolicy.IsAdmitted(remote.Address, AdmissionPolicy.LocalIPv4Subnets()))
+            {
+                _log($"ProtocolServer: refused connection from {endpoint} — not Tailscale or a local subnet");
+                tcp.Close();
+                continue;
+            }
+
             _log($"ProtocolServer: connection from {endpoint}");
 
             ClientConnection? previous;
