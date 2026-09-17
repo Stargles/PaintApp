@@ -19,50 +19,142 @@ enum BrushStamper {
         max(brushSize * CGFloat(fraction), 1)
     }
 
-    /// Walks from `last` toward `point`, invoking `body` at each `spacing`-sized step along the way,
-    /// and returns the position of the final stamp — the carry point the next walk continues from.
-    /// When the two points are closer together than one spacing, nothing is stamped and `last` comes
-    /// straight back, so the leftover distance accumulates into the next call instead of being
-    /// stamped short (which is what keeps a slow drag from bunching dabs up at the start).
+    /// **The live tier's walk** — one stroke laid down as the pen moves, one call per touch sample,
+    /// into the scratch. `StrokeCanvasView` owns one per gesture; it lives here rather than in that
+    /// view so a test can drive the walk the artist watches and compare it with the replay
+    /// (`StrokeLiftParityLogicTests`), instead of mirroring it by hand and measuring a copy.
     ///
-    /// **The live preview's walk, and only the live preview's.** `stampStroke` below replays a
-    /// *stored* stroke, whose points are a refit at a fixed tolerance rather than the input, and so
-    /// walks `StrokePath`'s curve instead — see there. This one is called once per incoming touch
-    /// sample, at input density, where the straight line between two consecutive samples and the
-    /// curve through them are the same line to well under a pixel; it holds its carry point in a
-    /// property across calls, which is why the carry is returned rather than stored.
-    /// Each callback receives the dab's normalised position `t ∈ (0, 1]` along the `last`→`point`
-    /// segment, so the caller can resolve §6's matrix per dab across the pair of samples this walk
-    /// bridges instead of applying one endpoint's reading to all of them.
+    /// **Fed every input sample, and that is deliberate.** A raster layer stores pixels, not
+    /// samples, so there is no geometry to conserve on this path — thinning its input would buy
+    /// nothing and would change the ink a raster stroke lays down. The refit belongs where samples
+    /// are kept: `StrokeCanvasView.recordVectorSample`. At input density the straight line between
+    /// two samples and `StrokePath`'s curve through them are the same line to well under a pixel,
+    /// which is why this walk is a `StrokePath` of two points per call — the same march as
+    /// `stampStroke`'s, on a chord.
     ///
-    /// **`spacing` is `inout` and the body answers with the next one**, exactly as
-    /// `StrokePath.advance` does and for the same reason: BRUSH.md §6 makes spacing a sensor-driven
-    /// output, so the gap between two dabs belongs to the dab the walk is leaving. It is `inout` so
-    /// the value survives across the per-touch-sample calls this walk is made of, alongside the caller's
-    /// own carry point.
-    static func advance(from last: CGPoint, to point: CGPoint, spacing: CGFloat,
-                        _ body: (CGPoint, CGFloat, CGFloat) -> CGFloat) -> (carry: CGPoint, spacing: CGFloat) {
-        let dx = point.x - last.x, dy = point.y - last.y
-        let distance = hypot(dx, dy)
-        var spacing = spacing
-        guard spacing > 0, distance > 0 else { return (last, spacing) }
-        var travelled: CGFloat = 0
-        while travelled + spacing <= distance {
-            travelled += spacing
-            let t = travelled / distance
-            let walked = spacing
-            spacing = max(body(CGPoint(x: last.x + dx * t, y: last.y + dy * t), t, walked),
-                          StrokePath.minimumDabSpacing)
+    /// **§12 stage 7: this walk resolves §6's matrix, through §5.5's funnel, exactly as
+    /// `stampStroke` does.** It has to — on a raster layer these dabs are the cel's pixels and
+    /// nothing re-stamps them at lift, so a sensor the live walk could not read would be a feature
+    /// the raster half of the app does not have. The sensors are built over the **one segment** a
+    /// call bridges: a two-sample run from the previous sample to this one, and the straight line
+    /// through them as the curve. That is the same geometry the walk already draws, so `direction`
+    /// reads the line it is stamping along and `velocity` reads the interval that actually elapsed.
+    /// `taper` answers its neutral, because `totalArcWidths` is nil for a walk that cannot know how
+    /// long the stroke will be.
+    ///
+    /// Pressure ramps across a call, as it does across a replayed segment: `stampStroke` has always
+    /// ramped, and the staircase the ramp exists to prevent was visible live on a fast flick with a
+    /// wide brush.
+    ///
+    /// **Two things about this walk were what changed on lift, and both are TODO (84).** Measured on
+    /// a hand-drawn arc in `StrokeLiftParityLogicTests`, the walk the artist watched against the
+    /// stored stroke's replay of the same samples:
+    ///
+    /// - **It hopped from the last dab straight to the next sample**, so its arc length was the
+    ///   chord from wherever the last dab landed rather than the path the pen took, and a
+    ///   wide-spaced brush cut every corner: on a 48 pt splatter at 0.46 spacing the drops landed
+    ///   inside the curve and fewer of them, a mean channel delta of 0.082/255 over 1,402 pixels
+    ///   against the replay of the very same samples. The march is `StrokePath.advance` now, with
+    ///   its `WalkCarry` crossing the per-sample calls, so a dab lands where the pen's own path has
+    ///   travelled one spacing — which is where the replay puts it, to within the refit.
+    /// - **The first dab faced `+x`**, because a stroke one point long has no direction, while the
+    ///   replay's faces the fitted curve's outgoing tangent: on a 36 pt square nib that was one
+    ///   whole dab turning on lift, 417 pixels at a channel delta of 240/255. The first sample is
+    ///   held for one input interval — about 8 ms — and stamped facing the second, which is what the
+    ///   outgoing tangent at the first knot is to within the refit's tolerance. A tap never gets a
+    ///   second sample and stamps its one dab at `finish`, facing `+x`.
+    struct LiveWalk {
+        /// The stroke's own field, minted at pen-down, so what the pen lays down and what the
+        /// stored stroke replays are drawn from the same randomness — BRUSH.md §4.
+        let random: DabRandom
+        /// The sample the walk is stamping **from** — the other end of the segment `stamp` bridges.
+        /// Held alone, unstamped, until the second sample arrives.
+        private var lastSample: VectorSample?
+        /// Where the march left off — the distance travelled since the last dab and the gap that dab
+        /// asked for — carried across calls exactly as `stampStroke` carries it across segments.
+        /// Nil until the first dab.
+        private var carry: WalkCarry?
+        /// How far the walk has travelled, in brush widths — `DabRandom`'s coordinate, advanced one
+        /// dab's worth per dab exactly as `stampStroke` advances its own.
+        private(set) var arcWidths: CGFloat = 0
+
+        init(seed: UInt64) {
+            random = DabRandom(seed: seed)
         }
-        // Nothing placed: the leftover distance accumulates into the next call instead of being
-        // stamped short, which is what keeps a slow drag from bunching dabs up at the start.
-        guard travelled > 0 else { return (last, spacing) }
-        let coveredT = travelled / distance
-        return (CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT), spacing)
+
+        /// Lays down the dabs from the previous sample up to `sample`. The very first sample of a
+        /// gesture is held rather than stamped; see the header.
+        mutating func stamp(to sample: VectorSample, into target: DabTarget, brush: Brush,
+                            color: UIColor, brushSize: CGFloat) {
+            guard let previous = lastSample else {
+                lastSample = sample
+                return
+            }
+            // Two samples and the line through them. `.captured` because `StrokeInput` always
+            // reports every channel — a finger reports the neutrals, which is what `compacted()`
+            // later drops.
+            let run = StrokeSamples([previous, sample], channels: .captured)
+            let path = StrokePath(points: run.positions)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
+            func values(at parameter: CGFloat, arcWidths: CGFloat) -> BrushDabValues {
+                brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: parameter, arcWidths: arcWidths)) }
+            }
+
+            defer { lastSample = sample }
+            var walked = arcWidths
+            var march: WalkCarry
+            if let carry {
+                march = carry
+            } else {
+                // The held first sample, stamped now that the stroke has a direction: BRUSH.md
+                // §2.30's stroke frame off this two-point path is the chord from it to `sample`,
+                // which is what the fitted curve's outgoing tangent at the first knot is to within
+                // the refit's tolerance.
+                let resolved = values(at: 0, arcWidths: walked)
+                BrushStamper.stampDab(into: target, at: previous.point, brush: brush, values: resolved,
+                                      color: color, brushSize: brushSize,
+                                      random: random, arcWidths: walked,
+                                      tangent: path.tangent(at: 0))
+                march = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize,
+                                                                     fraction: resolved.spacing))
+            }
+            march = path.advance(segment: 0, carry: march) { dab, u, step in
+                // One dab's worth of arc length in brush widths, from the spacing this step actually
+                // walked — the same accumulation `stampStroke` makes, so the two walks address the
+                // same points of the field even though their geometry differs by the refit's
+                // tolerance.
+                walked += brushSize > 0 ? step / brushSize : step
+                let resolved = values(at: u, arcWidths: walked)
+                // The same `StrokePath.tangent` the replay walk reads, off this walk's own two-point
+                // path — so the live tier and the stored stroke differ in the scatter's *frame* only
+                // by the refit's geometry, which is the difference BRUSH.md §4 already names.
+                BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
+                                      color: color, brushSize: brushSize,
+                                      random: random, arcWidths: walked,
+                                      tangent: path.tangent(at: u))
+                return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
+            }
+            arcWidths = walked
+            carry = march
+        }
+
+        /// The lift. A gesture that never got a second sample — a tap — stamps its one dab now,
+        /// facing `+x` for want of a direction; a gesture that did has nothing left to lay down.
+        mutating func finish(into target: DabTarget, brush: Brush, color: UIColor, brushSize: CGFloat) {
+            guard carry == nil, let held = lastSample else { return }
+            let run = StrokeSamples([held, held], channels: .captured)
+            let path = StrokePath(points: run.positions)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
+            let resolved = brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: 0, arcWidths: arcWidths)) }
+            BrushStamper.stampDab(into: target, at: held.point, brush: brush, values: resolved,
+                                  color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
+                                  tangent: path.tangent(at: 0))
+            carry = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
+        }
     }
 
     /// Replays a whole stroke (spacing-interpolated between samples, exactly like
-    /// `StrokeCanvasView.stampPath`) into `raster`, as one `beginStroke`/`endStroke` unit.
+    /// `LiveWalk`) into `raster`, as one `beginStroke`/`endStroke` unit.
     ///
     /// `random` is the stroke's own field — `VectorStroke.dabRandom` for stored geometry, the seed
     /// minted at pen-down for live drawing. Every per-dab random value is a hash of it and the dab's
@@ -157,7 +249,7 @@ enum BrushStamper {
         // stroke is, and a live walk does not.** This one is replaying stored geometry, so the length
         // is measurable — and is measured, once, only when a row actually asks for `taper`, because
         // it is a second flattening pass over the curve and no other brush should pay for it. The
-        // live walk (`StrokeCanvasView.stampPath`) stamps as the pen moves and genuinely cannot know,
+        // live walk (`LiveWalk`) stamps as the pen moves and genuinely cannot know,
         // so `taper` answers its neutral there; that asymmetry is real, is confined to a brush that
         // tapers, and is written down rather than papered over.
         let totalArcWidths: CGFloat? = brush.modulations.readsTaper && brushSize > 0

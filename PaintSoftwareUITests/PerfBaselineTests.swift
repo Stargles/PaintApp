@@ -1217,29 +1217,15 @@ final class PerfBaselineTests: XCTestCase {
             }
         }
 
-        // (c) The footprint punch, on its own fresh scratch: `stampPath`'s walk, verbatim.
+        // (c) The footprint punch, on its own fresh scratch: the live walk itself.
         let footprintScratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
         var footprint: [Double] = []
-        var last: CGPoint?
-        let footprintValues = brush.dabValues(atPressure: 1)
-        let spacing = BrushStamper.stampSpacing(brushSize: size, fraction: footprintValues.spacing)
+        var footprintWalk = BrushStamper.LiveWalk(seed: 0)
         for point in points {
             autoreleasepool {
                 let start = CFAbsoluteTimeGetCurrent()
-                if let previous = last {
-                    last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab, _, _ in
-                        BrushStamper.stampDab(into: footprintScratch, at: dab, brush: brush,
-                                              values: footprintValues,
-                                              color: .black, brushSize: size, random: DabRandom(seed: 0), arcWidths: 0)
-                        return spacing
-                    }.carry
-                } else {
-                    BrushStamper.stampDab(into: footprintScratch, at: point, brush: brush,
-                              values: brush.dabValues(atPressure: 1),
-                                          color: .black, brushSize: size,
-                                          random: DabRandom(seed: 0), arcWidths: 0)
-                    last = point
-                }
+                footprintWalk.stamp(to: VectorSample(point: point, pressure: 1), into: footprintScratch,
+                                    brush: brush, color: .black, brushSize: size)
                 footprint.append(CFAbsoluteTimeGetCurrent() - start)
             }
         }

@@ -14,13 +14,13 @@ import UIKit
 ///
 /// The older form of that note claimed "a slow stroke reads darker than a fast one", and it is worth
 /// recording that the measurement does not support the obvious reading of it. Dab emission is not
-/// timed: `BrushStamper.advance` walks from the *last dab* and returns unmoved when the pen has not
-/// travelled a spacing, so a pencil held still lays **one** dab, not one per sample, and a 400pt line
-/// drawn over 10 seconds gets the same 50 dabs per 100pt as the same line flicked in 0.3 s. What is
-/// left is second order and comes from hand tremor, not from the clock: at a slow speed the direction
-/// from the last dab to the sample that finally clears the spacing carries proportionally more noise,
-/// so the dab chain wanders and lays a few percent more ink over the same ground. Measured on a 400pt
-/// line, dabs per 100pt from 800pt/s down to 40pt/s: 100.0 → 106.0 at 0.4pt of tremor, 100.5 → 149.2
+/// timed: `BrushStamper.LiveWalk` marches the pen's path by arc length and places nothing until it
+/// has travelled a spacing, so a pencil held still lays **one** dab, not one per sample, and a 400pt
+/// line drawn over 10 seconds gets the same 50 dabs per 100pt as the same line flicked in 0.3 s. What
+/// is left is second order and comes from hand tremor, not from the clock: at a slow speed the path
+/// between two dabs carries proportionally more of it, so the dab chain wanders and lays a few
+/// percent more ink over the same ground. Measured on a 400pt line, dabs per 100pt from 800pt/s down
+/// to 40pt/s: 100.0 → 106.0 at 0.4pt of tremor, 100.5 → 149.2
 /// at a shaky 0.8pt. That residue is a stabilizer question, not a sampling one, and it is a *raster*
 /// number: on a vector layer the stored path is a refit at a fixed tolerance (`StrokePathFit`), so
 /// the walk no longer follows the tremor that produced it.
@@ -110,8 +110,6 @@ final class StrokeCanvasView: UIView {
             gestureIsUniversal = false
             universalCutSessions = []
         }
-        lastStampPoint = nil
-        lastLiveSample = nil
         refreshDisplay()
         shapeFollowingTouch = true
     }
@@ -172,10 +170,12 @@ final class StrokeCanvasView: UIView {
     /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
     /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
     private var eraserFootprintLayer: CAShapeLayer?
-    /// The last position actually stamped, so `stampPath(to:)` lays down evenly-spaced stamps
-    /// between input samples rather than one dot per sample — otherwise a fast drag draws a gappy
-    /// line that a bucket fill can leak through.
-    private var lastStampPoint: CGPoint?
+    /// **The live tier's walk for the gesture in flight** — `BrushStamper.LiveWalk`, which lays down
+    /// evenly-spaced dabs between input samples rather than one dot per sample (otherwise a fast
+    /// drag draws a gappy line that a bucket fill can leak through) and carries its rhythm, its
+    /// arc length and the sample it is stamping from across the per-sample calls. Minted with the
+    /// gesture's seed at pen-down.
+    private var liveWalk = BrushStamper.LiveWalk(seed: 0)
 
     /// **The random field this gesture's dabs are drawn from** — BRUSH.md §4, minted at pen-down
     /// rather than at commit.
@@ -187,30 +187,6 @@ final class StrokeCanvasView: UIView {
     /// the seed in hand from the first dab, the two address the same field and the only difference
     /// left is the refit's 0.25 pt.
     private var strokeSeed: UInt64 = DabRandom.freshSeed()
-
-    /// How far the live walk has travelled, in brush widths — `DabRandom`'s coordinate. Reset with
-    /// the walk at pen-down; advanced one dab's worth per dab, exactly as `stampStroke` advances its
-    /// own.
-    private var strokeArcWidths: CGFloat = 0
-
-    /// The sample the live walk is stamping **from** — the other end of the one segment `stampPath`
-    /// bridges, and what lets that walk build a `StrokeSensors` of its own.
-    ///
-    /// **BRUSH.md §12 stage 7: the live tier reads the matrix too, and it has to.** On a raster layer
-    /// the dabs the artist watches land under the pen *are* the cel's pixels — nothing is re-stamped
-    /// at lift — so a brush whose density, direction-follow or velocity response the live walk could
-    /// not see would simply not have those features on half the app. §5.5's funnel needs a run and a
-    /// curve to read; between two touch samples the run is those two samples and the curve is the
-    /// straight line through them, which is exactly what this walk already draws.
-    ///
-    /// `taper` is the one sensor that still answers its neutral here, because the walk genuinely
-    /// cannot know how long the stroke will be — `StrokeSensors.totalArcWidths`, and BRUSH.md §13.
-    private var lastLiveSample: VectorSample?
-
-    /// The gap leading to the live walk's next dab, in canvas points — §6's `spacing` output resolved
-    /// at the previous dab. A property because the walk is made of one call per touch sample and the
-    /// gap spans them, exactly as `lastStampPoint` does.
-    private var liveSpacing: CGFloat = 1
 
     /// Mode 2's preview walks the gesture one **increment** at a time — the previously stored sample
     /// to the one just admitted — so each touch sample asks about the footprint it has just added
@@ -1167,7 +1143,7 @@ final class StrokeCanvasView: UIView {
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
         strokeSeed = DabRandom.freshSeed()
-        strokeArcWidths = 0
+        liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
         // The interval clock belongs to the gesture, not to the app: a stale reading would hand the
         // first segment of this stroke the pause since the *previous* one, and `velocity` would read
         // it as a dead stop. Reset here rather than in either tier's own begin, because both walks
@@ -1204,8 +1180,6 @@ final class StrokeCanvasView: UIView {
                                     // the scratch's and is applied where the window merges.
                                     texture: brush.texture)
         self.scratch = scratch
-        lastStampPoint = nil
-        lastLiveSample = nil
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
         stampPath(to: liveSample(input, at: input.position), into: scratch)
@@ -1271,6 +1245,8 @@ final class StrokeCanvasView: UIView {
         if let finalSample {
             stampPath(to: finalSample, into: scratch)
         }
+        // A tap's one dab — `LiveWalk.finish`.
+        liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: brushSize)
         if let clipPath = selectionClipPath {
             // Drop what the stroke put outside the selection before it reaches the cel, so undo/redo
             // only ever sees the already-clipped result — in the scratch's own window, since the
@@ -1289,8 +1265,6 @@ final class StrokeCanvasView: UIView {
         let beforePatch = dirty.flatMap { raster.copiedPatch(in: $0) }
         scratch.commit(into: raster)
         endScratch()
-        lastStampPoint = nil
-        lastLiveSample = nil
         refreshDisplay()
         if let dirty, let beforePatch, let afterPatch = raster.copiedPatch(in: dirty) {
             registerRasterUndo(raster: raster, in: dirty, before: beforePatch, after: afterPatch,
@@ -1387,8 +1361,6 @@ final class StrokeCanvasView: UIView {
         // Dropping the scratch *is* the rollback on both tiers: the cel's pixels were never
         // touched. No `endStroke()` either — that would count a stroke being thrown away.
         endScratch()
-        lastStampPoint = nil
-        lastLiveSample = nil
         refreshDisplay()
         onStrokeCancelled?()
     }
@@ -1424,79 +1396,10 @@ final class StrokeCanvasView: UIView {
         })
     }
 
-    /// Lays down stamps from `lastStampPoint` up to `point` into `target`, spaced a fraction of the
-    /// brush diameter apart, joining consecutive input samples into a continuous line instead of
-    /// isolated dots. Delegates each dab to `BrushStamper` so live drawing and vector re-rendering
-    /// are pixel-identical. Stays a separate entry point from `BrushStamper.stampStroke` because
-    /// this one carries `lastStampPoint` across per-sample calls, keeping dab rhythm continuous.
-    ///
-    /// **Fed every input sample, and that is deliberate.** A raster layer stores pixels, not samples,
-    /// so there is no geometry to conserve on this path — thinning its input would buy nothing and
-    /// would change the ink a raster stroke lays down. The refit belongs where samples are kept:
-    /// `recordVectorSample`. At input density the straight line between two samples and
-    /// `StrokePath`'s curve through them are the same line to well under a pixel, which is why this
-    /// walk stays straight while `BrushStamper.stampStroke`'s does not.
-    /// **§12 stage 7: this walk resolves §6's matrix, through §5.5's funnel, exactly as `stampStroke`
-    /// does.** It has to — on a raster layer these dabs are the cel's pixels and nothing re-stamps
-    /// them at lift, so a sensor the live walk could not read would be a feature the raster half of
-    /// the app does not have.
-    ///
-    /// The sensors are built over the **one segment** this call bridges: a two-sample run from
-    /// `lastLiveSample` to `sample`, and the straight line through them as the curve. That is the
-    /// same geometry this walk already draws, so `direction` reads the line it is stamping along and
-    /// `velocity` reads the interval that actually elapsed. `taper` answers its neutral, because
-    /// `totalArcWidths` is nil for a walk that cannot know how long the stroke will be.
-    ///
-    /// **Pressure now ramps across a live walk**, where it used to be flat at the destination
-    /// sample's reading for every dab the walk emitted. That is a behaviour change and it removes a
-    /// divergence rather than adding one: `stampStroke` has always ramped, and the staircase the
-    /// ramp exists to prevent was visible live on a fast flick with a wide brush. A finger reports a
-    /// constant pressure of 1, so nothing an XCUITest can draw is affected.
+    /// Lays down stamps from the previous sample up to `sample` into `target` — `liveWalk`, the
+    /// engine's own walk, so live drawing and the vector replay are compared against the real thing.
     private func stampPath(to sample: VectorSample, into target: DabTarget) {
-        let random = DabRandom(seed: strokeSeed)
-        let previous = lastLiveSample ?? sample
-        // Two samples and the line through them. `.captured` because `StrokeInput` always reports
-        // every channel — a finger reports the neutrals, which is what `compacted()` later drops.
-        let run = StrokeSamples([previous, sample], channels: .captured)
-        let sensors = StrokeSensors(samples: run, path: StrokePath(points: run.positions),
-                                    random: random, brushSize: brushSize)
-        func values(at parameter: CGFloat) -> BrushDabValues {
-            brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: parameter, arcWidths: strokeArcWidths)) }
-        }
-
-        defer { lastLiveSample = sample }
-        guard let last = lastStampPoint else {
-            let resolved = values(at: 0)
-            // BRUSH.md §2.30's stroke frame. The first dab of a gesture has only one sample, so
-            // `run` is that point twice and `StrokePath.tangent` answers its `+x` fallback — which is
-            // the same heading `BrushInput.direction`'s neutral names, and is the honest answer: a
-            // stroke one point long has no direction yet.
-            BrushStamper.stampDab(into: target, at: sample.point, brush: brush, values: resolved,
-                                  color: brushColor, brushSize: brushSize,
-                                  random: random, arcWidths: strokeArcWidths,
-                                  tangent: sensors.path.tangent(at: 0))
-            liveSpacing = BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
-            lastStampPoint = sample.point
-            return
-        }
-        // A walk shorter than one spacing returns `last` unchanged; distance accumulates onward.
-        let walk = BrushStamper.advance(from: last, to: sample.point, spacing: liveSpacing) { dab, t, walked in
-            // One dab's worth of arc length in brush widths, from the spacing this step actually
-            // walked — the same accumulation `stampStroke` makes, so the two walks address the same
-            // points of the field even though their geometry differs by the refit's tolerance.
-            strokeArcWidths += brushSize > 0 ? walked / brushSize : walked
-            let resolved = values(at: t)
-            // The same `StrokePath.tangent` the replay walk reads, off this walk's own two-point
-            // path — so the live tier and the stored stroke differ in the scatter's *frame* only by
-            // the refit's geometry, which is the difference BRUSH.md §4 already names between them.
-            BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
-                                  color: brushColor, brushSize: brushSize,
-                                  random: random, arcWidths: strokeArcWidths,
-                                  tangent: sensors.path.tangent(at: t))
-            return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
-        }
-        lastStampPoint = walk.carry
-        liveSpacing = walk.spacing
+        liveWalk.stamp(to: sample, into: target, brush: brush, color: brushColor, brushSize: brushSize)
     }
 
     /// One `StrokeInput` as a stored-shape sample, with its interval taken off the shared clock.
@@ -1631,10 +1534,7 @@ final class StrokeCanvasView: UIView {
     /// Opens the next run's scratch and seeds its walk at the shared boundary sample — exactly the
     /// three lines `beginVectorStroke` opens a gesture with, which is the point: a run is a stroke.
     private func restartTimingScratch(at shared: VectorSample?, canvasSize: CGSize) {
-        strokeArcWidths = 0
-        lastStampPoint = nil
-        lastLiveSample = nil
-        liveSpacing = 1
+        liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
         let fresh = StrokeScratch(canvasSize: canvasSize, role: .additive,
                                   opacity: CGFloat(brushOpacity),
                                   blendMode: brush.stroke.blendMode.cgBlendMode,
@@ -1749,8 +1649,6 @@ final class StrokeCanvasView: UIView {
         endScratch()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil
-        lastStampPoint = nil
-        lastLiveSample = nil
         refreshDisplay()
         vectorElementsBeforeSnapshot = nil
         vectorContentChanged = false
@@ -1832,8 +1730,6 @@ final class StrokeCanvasView: UIView {
         }()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil
-        lastStampPoint = nil
-        lastLiveSample = nil
         lastPreviewSample = nil
         previewCuts = [:]
         previewDoomed = []
@@ -1957,6 +1853,11 @@ final class StrokeCanvasView: UIView {
         } else {
             for knot in pathFit.finish(nil) { currentVectorSamples.append(knot) }
         }
+        // A tap's one dab in the scratch, so the picture held until the render lands shows it —
+        // `LiveWalk.finish`. Nothing for the modes that preview without the walk.
+        if let scratch, !isNoScratchRole, !isEraser || vectorEraserMode == .erase {
+            liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: brushSize)
+        }
         // BRUSH.md §5.5: a channel that turned out to hold nothing but its neutral is dropped, because
         // the funnel answers the same value for an absent channel and an absent one costs no bytes.
         // A finger reports π/2 and 0 for tilt, so this is where a finger-drawn stroke stops paying
@@ -2070,8 +1971,6 @@ final class StrokeCanvasView: UIView {
         endScratch()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil
-        lastStampPoint = nil
-        lastLiveSample = nil
         refreshDisplay()
         // One undo entry for the whole gesture (Mode 3's `before` was snapshotted at touch-down);
         // none at all when nothing changed, so an empty tap doesn't need a second undo press. A

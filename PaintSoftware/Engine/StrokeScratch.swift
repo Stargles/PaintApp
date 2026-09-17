@@ -90,7 +90,7 @@ final class StrokeScratch: DabTarget {
     /// chances for what is under the pen and what is drawn to disagree.
     ///
     /// **It is the ungrouped walk this exists for.** The live tier stamps straight into the window
-    /// as the pen moves — `StrokeCanvasView.stampPath` calls `stampDab`, never `stampStroke` — so
+    /// as the pen moves — `BrushStamper.LiveWalk` calls `stampDab`, never `stampStroke` — so
     /// there is no `beginStrokeGroup` bracket to hang the texture off, and the merge is `commit`.
     /// The grouped path through this class (`VectorCanvas.applyPreview`'s restamps) carries its own
     /// texture on its own group and is untouched by this field, which is why applying it here cannot

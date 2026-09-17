@@ -164,6 +164,7 @@
 		7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */; };
 		2D121EFB1A8EDB89E3C7EFEC /* VectorEraserCommitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */; };
 		4F1C1E5DA6F2BF355D80F4F8 /* EraserWholeAndUniversalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91CD201BEF4F5CCA054FB3E /* EraserWholeAndUniversalUITests.swift */; };
+		F1A02F0E78EA2B5D95324D30 /* StrokeLiftParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097B879B34065240E54B7ED2 /* StrokeLiftParityLogicTests.swift */; };
 		7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */; };
 		7C4A9E1B0D5F000000000302 /* VectorEraserUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */; };
 		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
@@ -634,6 +635,7 @@
 		7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterVectorParityLogicTests.swift; sourceTree = "<group>"; };
 		9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserCommitLogicTests.swift; sourceTree = "<group>"; };
 		F91CD201BEF4F5CCA054FB3E /* EraserWholeAndUniversalUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EraserWholeAndUniversalUITests.swift; sourceTree = "<group>"; };
+		097B879B34065240E54B7ED2 /* StrokeLiftParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeLiftParityLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserHybridLogicTests.swift; sourceTree = "<group>"; };
 		7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorEraserUITests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
@@ -1202,6 +1204,7 @@
 				7C4A9E1B0D5F000000000101 /* RasterVectorParityLogicTests.swift */,
 				9A4E9EB5DDE91AE3A34D6346 /* VectorEraserCommitLogicTests.swift */,
 				F91CD201BEF4F5CCA054FB3E /* EraserWholeAndUniversalUITests.swift */,
+				097B879B34065240E54B7ED2 /* StrokeLiftParityLogicTests.swift */,
 				7C4A9E1B0D5F000000000201 /* VectorEraserHybridLogicTests.swift */,
 				7C4A9E1B0D5F000000000301 /* VectorEraserUITests.swift */,
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
@@ -1823,6 +1826,7 @@
 				7C4A9E1B0D5F000000000102 /* RasterVectorParityLogicTests.swift in Sources */,
 				2D121EFB1A8EDB89E3C7EFEC /* VectorEraserCommitLogicTests.swift in Sources */,
 				4F1C1E5DA6F2BF355D80F4F8 /* EraserWholeAndUniversalUITests.swift in Sources */,
+				F1A02F0E78EA2B5D95324D30 /* StrokeLiftParityLogicTests.swift in Sources */,
 				7C4A9E1B0D5F000000000202 /* VectorEraserHybridLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 				601037081B1ADF05E27131D9 /* PaintSoftware/Services/ProjectLibraryMigration.swift in Sources */,
