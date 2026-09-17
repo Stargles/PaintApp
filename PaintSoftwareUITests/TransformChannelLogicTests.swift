@@ -815,7 +815,7 @@ final class TransformChannelLogicTests: XCTestCase {
     // MARK: - Duplicate (BUGS.md, 2026-09-11)
 
     /// **`duplicateLayer` dropped every cel's pose channels.** Each copied `Cel(...)` named `raster`,
-    /// `fillImage`, `bakedImage` and `vector` and not `transformTracks` or `pendingPoseBaselines`, so
+    /// `bakedImage` and `vector` and not `transformTracks` or `pendingPoseBaselines`, so
     /// a duplicated layer's Move animation was silently deleted — the fourth site `duplicateCel`,
     /// `splitCel` and `pasteCel` fell through before 2026-09-02, reached through `duplicateLayer`'s
     /// own door. The fix routes the cel copy through `copyTiers(of:)`, exactly as `duplicateCel`

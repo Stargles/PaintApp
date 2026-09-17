@@ -487,7 +487,7 @@ final class FillContourLogicTests: XCTestCase {
     /// else, and then a look at what became of the first one.
     ///
     /// The first fill is what breaks, and this is the mechanism the owner reasoned their way to from
-    /// behaviour alone. Until the second gesture starts, fill one is on screen as `cel.fillImage` —
+    /// behaviour alone. Until the second gesture starts, fill one is on screen as `cel.fillPreview` —
     /// the exact GPU mask bytes. `beginInteractiveLassoFill` calls `beginCanvasEdit`, which calls
     /// `commitInteractiveFill`, which clears that preview and traces the mask into a
     /// `VectorFillElement`. So the second fill is what *bakes* the first, and the bake is the lossy

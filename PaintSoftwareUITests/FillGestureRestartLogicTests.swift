@@ -117,7 +117,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
     /// **The owner's sentence, tested literally: the first fill has to bake before the second one
     /// starts.** `beginInteractiveFill` calls `beginCanvasEdit()`, whose whole job is to settle the
-    /// transient fill — but it settled it by asking `guard cel.fillImage != nil`, and `fillImage` is
+    /// transient fill — but it settled it by asking `guard cel.fillPreview != nil`, and `fillPreview` is
     /// written by the render's hop to main. So for as long as that hop was outstanding the answer was
     /// "nothing was previewed", and a fill that had already been computed was thrown away in silence:
     /// no pixels, no undo entry, no message.

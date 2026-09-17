@@ -320,7 +320,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
 
     // MARK: - Duplicate a layer flattens its in-betweens too (BUGS.md, 2026-09-11)
 
-    /// **The fourth door.** `duplicateLayer` walked its own `Cel(...)` — `raster`, `fillImage`,
+    /// **The fourth door.** `duplicateLayer` walked its own `Cel(...)` — `raster`,
     /// `bakedImage`, `vector`, no `copyTiers` at all — so a duplicated layer's in-between came back
     /// blank exactly as `duplicateCel`'s and `pasteCel`'s did before 2026-09-02, through a fourth
     /// door found while auditing every `Cel(...)` for TODO (62).

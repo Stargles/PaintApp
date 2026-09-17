@@ -103,7 +103,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// version of this file did call it — which made the parity assertion prove nothing.** Both sides
     /// would then go through `PixelOps.FrozenCel`, so a field dropped from the freeze would be dropped
     /// from the oracle too and the comparison would pass. MEASURED by mutation, 2026-09-02: with
-    /// `FrozenCel.fillImage` deliberately set to nil, the `rasterize`-based oracle passed and this one
+    /// `FrozenCel.fillPreview` deliberately set to nil, the `rasterize`-based oracle passed and this one
     /// fails. Two implementations of a four-line draw order is exactly the duplication
     /// `CompositorParityLogicTests.flatWalkComposite` accepts one tier up, and for the same reason: an
     /// oracle that shares an implementation with the thing it checks is not an oracle.

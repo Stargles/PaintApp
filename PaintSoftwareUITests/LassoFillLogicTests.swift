@@ -1090,7 +1090,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// reads as a broken history rather than as a fill that missed.
     ///
     /// The mechanism is that no preview is installed at all, so `commitInteractiveFill`'s existing
-    /// `guard ... fillImage != nil` returns before it records anything — there is no second guard to
+    /// `guard ... fillPreview != nil` returns before it records anything — there is no second guard to
     /// keep in step. The notice is the other half: doing nothing *and saying nothing* is the experience
     /// Krita's users report as "it just won't fill anything" (§7).
     func testAnEmptyLassoFillCommitsNothingAndPushesNoUndoEntry() {
@@ -1241,7 +1241,7 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertNotNil(canvas.elements.last?.fill, "…which is the end of the list, not the fills bucket")
     }
 
-    /// **The half a test of the engine alone would miss.** The preview lives in `Cel.fillImage` and the
+    /// **The half a test of the engine alone would miss.** The preview lives in `Cel.fillPreview` and the
     /// commit flattens into `Cel.raster`; if those two disagree about stacking, the artist watches the
     /// picture rearrange itself the instant they lift the pencil. Both are read here through
     /// `PixelOps.rasterize`, which is the one flatten the canvas, the thumbnails and the compositor

@@ -3465,7 +3465,7 @@ final class PerfBaselineTests: XCTestCase {
     /// `CanvasManager.setCanvasPadding` is a whole-document crop/expand — CANVAS_RESIZE.md §0 reads it
     /// as the resize it is, and as of stage 1 it *is* one, sharing `performCanvasResize`'s walk with
     /// "Resize Canvas". It runs **synchronously on the main actor over every layer × every cel**,
-    /// rewriting `raster`, `fillImage`, `bakedImage`, `vector` and the interpolation lattices. On the
+    /// rewriting `raster`, `bakedImage`, `vector` and the interpolation lattices. On the
     /// 1-4-cel documents actually on the owner's iPad (PERFORMANCE.md item 14) that is imperceptible.
     /// Nobody had measured it on the 300-1000-cel document the owner intends.
     ///

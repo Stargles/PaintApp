@@ -550,9 +550,9 @@ extension CanvasManager {
         // guard below asks *"was anything filled?"* rather than *"did the main thread get there in
         // time?"*. An empty lasso result stores no bytes at all, so §7.1's "no undo entry for a loop
         // that enclosed nothing" still falls out of that same guard.
-        if layers[layerIndex].cels[celIndex].fillPreview == nil, let rebuilt = render?.preview() {
+        if layers[layerIndex].cels[celIndex].fillPreview == nil, let render, let rebuilt = render.preview() {
             setFillPreview(layerIndex: layerIndex, celIndex: celIndex,
-                           clippedForSelection(rebuilt, layerIndex: layerIndex, celIndex: celIndex))
+                           clippedForSelection(rebuilt, through: render.window, layerIndex: layerIndex, celIndex: celIndex))
         }
         guard let preview = layers[layerIndex].cels[celIndex].fillPreview else { return }  // nothing was previewed
 
@@ -631,10 +631,10 @@ extension CanvasManager {
             let existing = cel.raster.hasContent
                 ? PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: cel.raster.renderToUIImage())
                 : fillGestureBaseBaked
-            // The preview covers its window; the flatten is the canvas.
-            let finalImage = UIGraphicsImageRenderer(size: canvasSize ?? preview.rect.size,
-                                                     format: PixelOps.transparentFormat()).image { ctx in
-                existing?.draw(in: CGRect(origin: .zero, size: ctx.format.bounds.size))
+            // The preview covers its window; the flatten is the canvas, which is the raster tier's size.
+            let canvas = CGRect(origin: .zero, size: cel.raster.size)
+            let finalImage = UIGraphicsImageRenderer(bounds: canvas, format: PixelOps.transparentFormat()).image { _ in
+                existing?.draw(in: canvas)
                 preview.draw()
             }
             registerUndoableCelChange(layerID: layerID, celID: celID,
@@ -900,7 +900,7 @@ extension CanvasManager {
                 guard let self, context.generation == self.fillGeneration, self.fillGestureActive,
                       let layerIndex = self.layers.firstIndex(where: { $0.id == context.layerID }),
                       let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == context.celID }) else { return }
-                let clipped = self.clippedForSelection(preview, layerIndex: layerIndex, celIndex: celIndex)
+                let clipped = self.clippedForSelection(preview, through: window, layerIndex: layerIndex, celIndex: celIndex)
                 self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, clipped)
                 self.fillLastRender = rendered
                 // The two halves of §7, raised together: the sentence naming both causes, and the
@@ -969,16 +969,14 @@ extension CanvasManager {
     /// has not run yet — same as every other read of `selection`/`allowsPaintingOutsideSelection`
     /// here. Both callers must clip, or a fill baked by a second tap would ignore the selection that
     /// the same fill previewed inside.
-    private func clippedForSelection(_ preview: FillPreview?, layerIndex: Int, celIndex: Int) -> FillPreview? {
+    private func clippedForSelection(_ preview: FillPreview?, through window: FillWindow,
+                                     layerIndex: Int, celIndex: Int) -> FillPreview? {
         guard let preview, let selection, !allowsPaintingOutsideSelection,
               layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
               layers[layerIndex].id == selection.layerID, layers[layerIndex].cels[celIndex].id == selection.celID else { return preview }
         // The selection is in canvas coordinates and the preview's pixels are its window's, so the
         // path is taken into the window before it clips.
-        var toWindow = CGAffineTransform(a: preview.image.size.width / preview.rect.width, b: 0, c: 0,
-                                         d: preview.image.size.height / preview.rect.height,
-                                         tx: 0, ty: 0)
-        toWindow = CGAffineTransform(translationX: -preview.rect.minX, y: -preview.rect.minY).concatenating(toWindow)
+        var toWindow = window.transform
         guard let path = selection.path.copy(using: &toWindow) else { return preview }
         return FillPreview(image: PixelOps.maskedComposite(base: nil, overlay: preview.image, insidePath: path),
                            rect: preview.rect)
