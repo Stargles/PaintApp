@@ -1,7 +1,9 @@
 import XCTest
 
-/// Three tests around one symptom: the canvas stops panning / pinching / rotating, and stays stopped
-/// until the project is closed and reopened.
+/// Tests around one symptom: the canvas stops panning / pinching / rotating, and stays stopped until
+/// the project is closed and reopened. Three ways in are pinned here — a stroke begun under the
+/// slot popover, the Fill and text tools' non-interactive host, and (2026-09-16) a two-finger
+/// gesture that closes a popover.
 ///
 /// The owner isolated the trigger by hand: **a stroke that begins while the timeline's empty-slot
 /// popover is still open.** Tap an empty cel slot until its "Add Drawing" / "Paste" menu raises
@@ -115,6 +117,68 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
 
         assertPinchMovesCanvas(app, canvas,
                                "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
+    }
+
+    // MARK: - The popover torn down under a two-finger gesture (owner report, 2026-09-16)
+
+    /// The owner, 2026-09-16: *"The canvas freeze is back. I again cant find the combination of
+    /// inputs which caused it."* Their recording of the frozen canvas (`recording-20260916-014412`)
+    /// shows every two-finger touch binding only `canvas.touchCounter` and none of `canvas.pan`,
+    /// `canvas.pinch`, `canvas.rotation` or the two taps — recognizers UIKit had left in a terminal
+    /// state with no `reset()`. MEASURED on the simulator: a `.popover` is up, a two-finger pinch
+    /// begins on the paper, its first finger tears the popover down (`dismissPresentationsOverLive-
+    /// Canvas`, as it then ran on *any* touch) — and the popover's screen-covering
+    /// `_UIPassthroughGateGestureRecognizer`, bound to those same touches, goes with it mid-gesture.
+    /// UIKit resets nothing that was bound alongside it, so pan/pinch/rotation *and* the stroke
+    /// recognizer strand, and no toggle un-sticks them. The fix is that a two-finger gesture no
+    /// longer tears a popover down at all: the dismissal waits for a confirmed single touch
+    /// (`CanvasManager.canvasInteractionBegan`), which no transform recognizer is bound to, so the
+    /// popover stays up during the pinch and is closed by a later tap. Both halves of the last
+    /// assertion matter — the same gesture stranded the stroke recognizer, so the stroke after it
+    /// has to draw.
+    ///
+    /// The Views popover because it is the one `CanvasPresentation` reachable in two taps from a
+    /// fresh document; any `.popover` in the closed set stranded the same way.
+    func testCanvasStillTransformsAndDrawsAfterAPinchUnderAPopover() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A vector layer to draw on, so the stroke half can be read off `canvas.host`'s value
+        // (`StrokeCanvasView.lastVectorGestureTrace`, "none,0" until a vector stroke lands) rather
+        // than off undo state, which a fresh document already leaves enabled.
+        openLayerPanel(app)
+        addVectorLayerFromOpenPanel(app)
+        let views = app.buttons["layerPanel.viewsButton"]
+        XCTAssertTrue(views.waitForExistence(timeout: 5))
+        views.tap()
+        let dismissRegion = app.otherElements["PopoverDismissRegion"]
+        XCTAssertTrue(dismissRegion.waitForExistence(timeout: 5), "PREMISE: the Views popover has to be up")
+
+        // The stranding gesture. On the unfixed code its first finger tore the popover down mid-pinch
+        // and left every transform recognizer dead; with the fix the popover stays up and the pinch
+        // is swallowed by its gate. Either way, what matters is what the canvas does *after*.
+        canvas.pinch(withScale: 2.0, velocity: 1.5)
+
+        // Close the popover with a single tap — the way that never strands — whether the pinch left
+        // it up (fixed) or already closed it (unfixed). This also closes the layer panel behind it.
+        if dismissRegion.exists { dismissRegion.tap() }
+        XCTAssertFalse(dismissRegion.waitForExistence(timeout: 1),
+                       "PREMISE: the popover has to be gone before the discriminating pinch")
+        if app.buttons["toolbar.layersButton"].isSelected { app.buttons["toolbar.layersButton"].tap() }
+
+        assertPinchMovesCanvas(app, canvas,
+                               "THE BUG: the canvas stopped transforming after a two-finger pinch under a popover")
+
+        // The stroke half: the same gesture stranded the stroke recognizer too, so a stroke after it
+        // has to still draw. `lastVectorGestureTrace` stays "none,0" if the recognizer never fed a
+        // vector stroke, and reads a live scratch role once one lands.
+        XCTAssertEqual(canvas.value as? String, "none,0",
+                       "PREMISE: no vector stroke before this one")
+        drawShortStroke(on: canvas)
+        XCTAssertNotEqual(canvas.value as? String, "none,0",
+                          "THE BUG (other half): the stroke recognizer was stranded by the same gesture, so the stroke drew nothing")
     }
 
     // MARK: - The text path (owner report (6), 2026-08-27)

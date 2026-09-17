@@ -108,4 +108,50 @@ final class MoveBoxCommitUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
                       "THE DEFECT: letting go of the rotation knob baked the move")
     }
+
+    /// **A touch on the box is a touch on the canvas, and closes an open top-bar dropdown the way
+    /// every other one does.** Before the touch-down decision above, the box's chrome reached the
+    /// tap-away as a tap and `handleMoveBoxCommit` closed the dropdown at *release*, by accident;
+    /// refusing the chrome to the tap took that with it, and a review of the change found the
+    /// dropdown standing over the canvas through a whole grip drag. `Coordinator.moveBoxTouchDown`
+    /// closes it at touch-down now, and the box stays up — the other test's guarantee, re-checked
+    /// here because the closing call and the commit used to be the same line.
+    func testDraggingAGripClosesAnOpenTopBarDropdown() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let strokeTop: CGFloat = 0.30
+        dragOnCanvas(app, from: CGVector(dx: 0.5, dy: strokeTop), to: CGVector(dx: 0.5, dy: 0.70))
+
+        // **The dropdown first, the box second, and that order is the only one that keeps both.**
+        // Opening a top-bar dropdown runs `toggle(_:)` -> `commitAllInteractiveState()`, which
+        // commits a float — so raising the box first and the dropdown second bakes the box. Tapping
+        // Move runs `toggleMove`, which does not touch `activePanel`, so raising the box while the
+        // dropdown is already open leaves the dropdown standing over a live box, which is the state
+        // the finding needs.
+        app.buttons["toolbar.actionsButton"].tap()
+        let dropdownRow = app.buttons["actions.exportRow"]
+        XCTAssertTrue(dropdownRow.waitForExistence(timeout: 5), "PREMISE: the Actions dropdown has to be open")
+
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                      "Move raised no box, so there is no grip to drag")
+        XCTAssertTrue(dropdownRow.exists,
+                      "PREMISE: raising the box must have left the dropdown open (it is a top-row dropdown)")
+
+        // Grab a grip and let go without moving far — a touch that lands on the box, which is what
+        // has to close the dropdown. (A knob flick would also do, but this keeps to a plain grip.)
+        let host = canvas.frame
+        let topGrip = CGVector(dx: 0.5, dy: strokeTop)
+        flickOnCanvas(app, from: topGrip, to: CGVector(dx: topGrip.dx + 12 / host.width, dy: topGrip.dy))
+
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: dropdownRow)],
+             timeout: 3)
+        XCTAssertFalse(dropdownRow.exists,
+                       "THE GAP: touching the Move box with the Actions dropdown open left the dropdown standing")
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
+                      "closing the dropdown must not have baked the move")
+    }
 }

@@ -295,7 +295,7 @@ struct CanvasView: UIViewRepresentable {
         // exactly as recordable as the transformation layer's box — so an armed artist landing on it is
         // told out loud rather than watching nothing happen. The decision is entirely the model's.
         transformOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.beginMoveBoxTake()
+            coordinator?.moveBoxTouchDown()
         }
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
@@ -333,7 +333,7 @@ struct CanvasView: UIViewRepresentable {
         // take is entirely the model's answer (`beginMoveBoxTake`), including the refusal it says out
         // loud for a box over lifted pixels or lassoed ink, neither of which poses a container.
         floatingOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
-            coordinator?.canvasManager.beginMoveBoxTake()
+            coordinator?.moveBoxTouchDown()
         }
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
@@ -3582,11 +3582,40 @@ struct CanvasView: UIViewRepresentable {
         /// `SelectionOverlayView` uses, rather than a third copy of the flag.
         @objc func handleMoveBoxCommit(_ recognizer: TouchTypeTapGestureRecognizer) {
             guard recognizer.state == .ended else { return }
-            // Before the pencil-only guard, as every canvas touch is: a tap that this handler declines
-            // still closes an open top-bar dropdown.
+            // Before the pencil-only guard, as every canvas touch is: a tap away that this handler
+            // declines still closes an open top-bar dropdown. A touch on the box itself never
+            // arrives here — `moveBoxTouchDown` is its site.
             canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             canvasManager.commitVectorFloatIfNeeded()
+        }
+
+        /// **A touch landed on a Move box** — the vector float's (`ObjectTransformOverlayView`) or
+        /// the raster piece's (`FloatingPieceOverlayView`), a grip, the knob or the body alike.
+        ///
+        /// A touch on the box is a touch on the canvas, so it does what every other canvas touch
+        /// does first: `canvasInteractionBegan`, with `mayContinueTake` true because the box is
+        /// KEYFRAMES.md §5's second recordable surface, exactly as `strokeRecognizer.onAnyTouchBegan`
+        /// passes true for §7's — the touch that continues a take must not be the one that stops it.
+        /// Then the take itself, `beginMoveBoxTake`, which may start one — after the canvas-touch
+        /// rule for the reason `StrokeCanvasView.handleBegin` orders its own take after it: a
+        /// presentation the rule closes may record an undo step on dismissal
+        /// (`CanvasPresentation.selectionColour`), and that step has to land before the take's
+        /// bracket opens. The overlay calls this before its drag's latch and bracket
+        /// (`ObjectTransformOverlayView.touchesBegan`), which keeps the take's the outer one.
+        ///
+        /// **This used to happen by accident, at the wrong end.** The box's chrome reached
+        /// `moveBoxCommitRecognizer` as a tap, and `handleMoveBoxCommit` ran `canvasInteractionBegan`
+        /// unconditionally at `.ended` before deciding not to commit — so a grip drag closed an open
+        /// top-bar dropdown at *release*, which nothing had asked for and nothing tested.
+        /// `gestureRecognizer(_:shouldReceive:)` now refuses the box's chrome to that tap at
+        /// touch-down, which is what stopped a knob drag baking the float, and with the refusal went
+        /// the only call that closed the dropdown; a review of that change found the gap.
+        /// `MoveBoxCommitUITests.testDraggingAGripClosesAnOpenTopBarDropdown` pins it, at touch-down
+        /// like every other canvas touch.
+        func moveBoxTouchDown() {
+            canvasManager.canvasInteractionBegan(mayContinueTake: true)
+            canvasManager.beginMoveBoxTake()
         }
 
         /// **Whether the Move box's tap-away is offered this touch at all — decided where the touch
