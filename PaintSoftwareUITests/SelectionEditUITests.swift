@@ -54,11 +54,16 @@ final class SelectionEditUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
         rectangle.tap()
-        XCTAssertFalse(app.sliders["selectPanel.sizeSlider"].exists,
-                       "before a loop is drawn there is nothing to edit, and the band is not up")
+        XCTAssertFalse(app.buttons["selectPanel.editDisclosure"].isEnabled,
+                       "before a loop is drawn there is nothing to edit, and the Edit icon is off")
         dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+        // The band sits behind the action row's Edit icon since TODO (90): what the artist does next
+        // is press it, and the four controls unfold reading the loop.
+        XCTAssertFalse(app.sliders["selectPanel.sizeSlider"].exists,
+                       "the band is folded until Edit is pressed")
+        openSelectionEditBand(app)
         let slider = app.sliders["selectPanel.sizeSlider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 5), "drawing a loop raises the Size slider")
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "pressing Edit raises the Size slider")
         XCTAssertTrue(slider.isEnabled, "the loop caught a stroke on a vector layer, so Size is live")
         let readoutBefore = slider.value as? String ?? ""
         XCTAssertTrue(readoutBefore.hasSuffix(" pt"), "the slider reads the line's own width: \"\(readoutBefore)\"")
@@ -169,6 +174,7 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
         dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+        openSelectionEditBand(app)
         let swatch = app.buttons["selectPanel.colourSwatch"]
         XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the loop raised the colour swatch")
         XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("FF0000"),

@@ -583,6 +583,100 @@ extension CanvasManager {
         return beginVectorMove(ofElementIDs: copiedIDs)
     }
 
+    /// **"To New Layer" on a vector layer: the lassoed elements leave this layer for a new one above
+    /// it** — TODO (93), the owner's *"duplicate the selection, then erase it, so that the stuff in the
+    /// selection is put into another layer and removed from the original."*
+    ///
+    /// **`beginVectorLassoDuplicate`'s copy and `clearSelectionPixels`' removal, as one step.** The
+    /// split is the same one call under the same rule (§5.26 — membership belongs to the selection,
+    /// and this is one more consumer of it): under Cut the ink is bisected at the loop and the inside
+    /// halves travel, under Touching and Enclosed whole elements do. The new layer takes the inside
+    /// list, the source keeps the survivors *in the order the split produced them* — both halves of a
+    /// cut stroke replace their parent at the parent's index, so dropping the inside ids leaves every
+    /// survivor's z-position where it was.
+    ///
+    /// **One undo step, by construction rather than by bracket.** `withStructureUndo` snapshots
+    /// `layers` by value and `Cel.vector` is a class, so a structure step would put the layer away
+    /// and leave the source's display list as the removal left it. The step here is one `recordUndo`
+    /// whose two closures each do both halves — the layer's existence and the source's elements — so
+    /// one press gives back the drawing exactly, and there is no order of two steps to get wrong.
+    ///
+    /// **The moved ink comes up in the Move box on its new layer**, as Duplicate's copy does, and for
+    /// the same reason: it is sitting where it was, and the artist who wanted it on its own layer
+    /// very often wants it somewhere else next. Putting the box down without a nudge records nothing,
+    /// so the one step above is the whole cost of the verb.
+    ///
+    /// **It refuses what a Move refuses**: a derived in-between through `activeVectorMoveTarget()`'s
+    /// own banner, and a loop that would tear an animation group apart
+    /// (`refusesToDamageAnAnimation`) — a group's members belong to one cel's pose channel, and half
+    /// of them on another layer is exactly the partial move that rule exists to stop.
+    ///
+    /// - Returns: whether anything moved. False leaves the document and the loop exactly as they
+    ///   were — nothing here mutates before the last refusal.
+    @discardableResult
+    func moveVectorSelectionToNewLayer() -> Bool {
+        commitAllInteractiveState()
+        guard let selection, let target = activeVectorMoveTarget(),
+              selection.layerID == target.layerID, selection.celID == target.celID else { return false }
+        let source = target.vector
+        let drawn = source.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
+        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
+            noteALassoThatCaughtNothing(vector: source, loops: loops)
+            return false
+        }
+        guard !refusesToDamageAnAnimation(split.elements, movedIDs: split.insideIDs) else { return false }
+        let moved = split.elements.filter { split.insideIDs.contains($0.id) }
+        guard !moved.isEmpty else { return false }
+        let remaining = split.elements.filter { !split.insideIDs.contains($0.id) }
+        let elementsBefore = source.elements
+
+        let sourceIndex = currentLayerIndex
+        let sourceLayerID = target.layerID
+        let sourceCelID = target.celID
+        let insertAt = sourceIndex + 1
+        // The source canvas's own `transform`, so the ink sits exactly over where it was taken from —
+        // `beginVectorLassoDuplicate`'s reason.
+        let canvas = VectorCanvas(size: source.size, elements: moved, transform: source.transform)
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+                      raster: .empty(size: canvasSize ?? source.size), vector: canvas)
+        let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+                          isVisible: true, kind: .vector,
+                          parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
+        let layerID = layer.id
+
+        layers.insert(layer, at: insertAt)
+        // The same seam Clear uses, for the same bound: what leaves is measured, and what arrives
+        // under Cut — the outside halves, under fresh ids — is bounded by the canvas's own hint.
+        source.restoreElements(remaining, changedInk: nil)
+        currentLayerIndex = insertAt
+        // The region left the layer the loop was drawn on, so the loop has nothing left to be about —
+        // Duplicate's rule, one verb over.
+        self.selection = nil
+        celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+
+        recordUndo(label: .moveToNewLayer,
+                   cost: VectorUndoCost.bytes(from: elementsBefore, to: remaining) + 4096,
+                   undo: { [weak self] in
+                       guard let self else { return }
+                       if let index = self.layers.firstIndex(where: { $0.id == layerID }) {
+                           self.layers.remove(at: index)
+                       }
+                       source.restoreElements(elementsBefore, changedInk: nil)
+                       self.currentLayerIndex = self.layerIndex(ofID: sourceLayerID)
+                           ?? min(self.currentLayerIndex, max(0, self.layers.count - 1))
+                       self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                   }, redo: { [weak self] in
+                       guard let self else { return }
+                       let at = min(insertAt, self.layers.count)
+                       self.layers.insert(layer, at: at)
+                       source.restoreElements(remaining, changedInk: nil)
+                       self.currentLayerIndex = at
+                       self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                   })
+        return beginVectorMove(ofElementIDs: Set(moved.map(\.id)))
+    }
+
     /// **A lift that caught nothing says so under `Enclosed`, and stays silent otherwise** — the
     /// owner's ruling of 2026-08-28, and it is a deliberate exception to LASSO_MOVE.md §5.9 rather
     /// than a reversal of it.
@@ -1176,10 +1270,20 @@ extension CanvasManager {
             // `throughStretch` would drop the keystone the artist can see. `restDelta` answers a
             // `PoseMap`, so the question is asked of the composition and not of which button is lit.
             let delta = Self.restDelta(localDelta, pose: float.poses[element.id])
-            let moved: VectorElement?
+            var moved: VectorElement?
             if let affine = delta.affine {
                 moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: affine)
                                     : VectorCanvas.mapping(lifted, throughSimilarity: affine)
+                // **TODO (75): the width the artist drew, whatever the box did.** Both affine arms
+                // multiply `size` by the map's area root (§5.17); with the toggle on it is put back to
+                // the *lifted* stroke's, which is the width before any nudge, since every nudge maps
+                // `liftedInside` absolutely. A stroke already carrying a keystone is left to the map
+                // — see `keepsStrokeWidthOnMove`.
+                if keepsStrokeWidthOnMove, case .stroke(var stroke) = moved, stroke.distort == nil,
+                   case .stroke(let drawn) = lifted {
+                    stroke.size = drawn.size
+                    moved = .stroke(stroke)
+                }
             } else {
                 moved = VectorCanvas.mapping(lifted, through: delta.homography)
             }
@@ -1255,8 +1359,13 @@ extension CanvasManager {
         // two genuinely disagree while the finger is down; dropping the latch at every gesture end
         // hands the display back to the layer's own render of the real geometry, so the error is one
         // gesture's worth and never accumulates.
+        // **And a changed scale drops it while Keep Stroke Width is on** (TODO (75)), for the aspect's
+        // reason: the latched bitmap is ink and scales with the box, where the bake has just kept
+        // every stroke's width. The two disagree for exactly the length of the gesture and agree again
+        // at every gesture end.
         if float.mayDiverge || mirror != oldMirror || aspect != oldAspect
-            || stretchAxis != oldStretchAxis || distort != oldDistort {
+            || stretchAxis != oldStretchAxis || distort != oldDistort
+            || (keepsStrokeWidthOnMove && transform.scale != oldFrameTransform.scale) {
             float.wantsLatch = false
             vector.suppressedElementIDs = []
         }

@@ -73,6 +73,8 @@ struct CanvasNoticeBanner: View {
         // The same glyph for the same reason: the artist's loop, and the rule they picked for it, are
         // what the message is about.
         case .nothingWhollyInside: return "lasso"
+        // And the loop's glyph again: the switch the artist has to flip is the loop's own rule.
+        case .nothingToSubtractFrom: return "lasso"
         // And once more: the loop is what the artist has to redraw, so it is the loop's glyph rather
         // than the timeline's — the group is animated, but nothing about the fix is on the timeline.
         case .onlyPartOfAnAnimationGroup: return "lasso"

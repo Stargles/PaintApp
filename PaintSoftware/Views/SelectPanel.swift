@@ -54,6 +54,12 @@ struct SelectPanel: View {
     @State private var sizeDrag: Double?
     @State private var opacityDrag: Double?
 
+    /// Whether the edit band is unfolded under the action row — TODO (90), the owner: *"The brushstroke
+    /// editor in the select menu is taking an entire layer. It should be a single icon, which expands
+    /// that menu when pressed."* `ActionRecorderControls.showRecordings`' shape: view state behind a
+    /// disclosure button, folded on every fresh panel.
+    @State private var showsEditBand = false
+
     /// **Three bands, not six** — TODO item (49), the owner: *"too tall and obstructs your view. Make
     /// all of them wider and flatter."* At `BottomDock.preferredWidth` the mode tabs sit beside the
     /// membership picker and the tolerance slider is one line instead of two; the panel's order —
@@ -131,6 +137,10 @@ struct SelectPanel: View {
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
 
+                subtractToggle
+
+                Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
+
                 paintOutsideToggle
             }
             .padding(.horizontal, 10)
@@ -147,26 +157,29 @@ struct SelectPanel: View {
                 divider
             }
 
-            // **Up only with a selection** — see the type's doc. `hasSelection` rather than
-            // `editReason == nil`, so that on a pixel layer the band is *dim and captioned* rather
-            // than absent: an artist who lassoed a raster cel should read why the sliders are off,
-            // not wonder where they went.
-            if hasSelection {
-                editBand
-                divider
-            }
-
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
                     .accessibilityIdentifier("selectPanel.duplicateButton")
+                actionTab(icon: "square.on.square.dashed", title: "To New Layer") { canvasManager.moveSelectionToNewLayer() }
+                    .accessibilityIdentifier("selectPanel.moveToNewLayerButton")
                 actionTab(icon: "paintbrush.fill", title: "Fill") { canvasManager.fillSelection() }
                     .accessibilityIdentifier("selectPanel.fillButton")
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
                     .accessibilityIdentifier("selectPanel.deselectButton")
+                editDisclosure
             }
             .padding(.vertical, 6)
+
+            // **Behind the Edit icon, and only with a selection** — TODO (90), and see the type's doc.
+            // `hasSelection` rather than `editReason == nil`, so that on a pixel layer the band is
+            // *dim and captioned* rather than absent: an artist who lassoed a raster cel should read
+            // why the sliders are off, not wonder where they went.
+            if hasSelection, showsEditBand {
+                divider
+                editBand
+            }
 
             if let caption {
                 divider
@@ -181,6 +194,32 @@ struct SelectPanel: View {
     }
 
     // MARK: - The edit band (TODO (42))
+
+    /// **The one icon the edit band folds behind** — TODO (90). The last tab of the action row, lit
+    /// while the band is open, and it reads `expanded`/`collapsed` as its value the way the
+    /// timeline's group chevron does, so a test can tell the two apart without measuring. Disabled
+    /// without a selection like every other tab in the row, since the band it unfolds is up only with
+    /// one.
+    private var editDisclosure: some View {
+        let live = hasSelection
+        return Button {
+            showsEditBand.toggle()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.body)
+                Text("Edit")
+                    .font(.caption2)
+            }
+            .foregroundColor(live ? (showsEditBand ? .blue : .white) : .white.opacity(0.3))
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .disabled(!live)
+        .accessibilityIdentifier("selectPanel.editDisclosure")
+        .accessibilityValue(showsEditBand ? "expanded" : "collapsed")
+        .accessibilityAddTraits(showsEditBand ? [.isSelected] : [])
+    }
 
     /// **Colour · Brush · Size · Opacity, one flat row** — the four things the toolbar shows for the
     /// current brush, pointed at the ink the loop caught. Flat rather than stacked for TODO (49)'s and
@@ -372,12 +411,41 @@ struct SelectPanel: View {
                     // unreadable there (it was before this row gained a third column); giving
                     // rather than overflowing is the difference between cramped and broken.
                     .frame(maxWidth: 96, alignment: .leading)
-                switchIndicator
+                switchIndicator(isOn: canvasManager.allowsPaintingOutsideSelection)
             }
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("selectPanel.allowOutsideToggle")
         .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
+    }
+
+    /// **TODO (95) — Subtract.** Off, a new loop is added to the selection already up; on, it is
+    /// taken from it. `paintOutsideToggle`'s shape exactly — a rule about how the loop behaves, so it
+    /// sits in the rule row beside the other two, and a plain Button driving the switch look for that
+    /// toggle's stated reason.
+    ///
+    /// **A switch rather than a two-segment picker**, which is what the owner asked for and what the
+    /// row has width for: the membership picker beside it already gives at `minimumWidth`, and a
+    /// fourth column that is a label and a knob costs the row less than a segmented control would.
+    private var subtractToggle: some View {
+        let isOn = canvasManager.selectionComposition == .subtract
+        return Button {
+            canvasManager.selectionComposition = isOn ? .add : .subtract
+        } label: {
+            HStack(spacing: 8) {
+                // One word, where the paint-outside switch keeps three: "Subtract" beside a switch
+                // in a row of selection rules already says what it subtracts from, and the width it
+                // gives back is the membership picker's, which is the column that runs out first.
+                Text("Subtract")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .fixedSize()
+                switchIndicator(isOn: isOn)
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("selectPanel.subtractToggle")
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
     /// **TODO item (23) — "What the loop catches".** `Enclosed · Cut · Touching`, ordered by how much
@@ -574,9 +642,8 @@ struct SelectPanel: View {
     ///
     /// **44x26 rather than UIKit's 51x31 since TODO (59)**: it shares a row now, and the row's height
     /// is the membership column's, so the switch has to fit under that rather than set it.
-    private var switchIndicator: some View {
-        let isOn = canvasManager.allowsPaintingOutsideSelection
-        return ZStack(alignment: isOn ? .trailing : .leading) {
+    private func switchIndicator(isOn: Bool) -> some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
             Capsule().fill(isOn ? Color.blue : Color.white.opacity(0.25))
             Circle().fill(Color.white).padding(2)
         }

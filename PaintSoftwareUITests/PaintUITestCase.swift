@@ -808,4 +808,15 @@ class PaintUITestCase: XCTestCase {
         return item
     }
 
+    /// Unfolds the Select panel's edit band — Colour, Brush, Size, Opacity — which since TODO (90)
+    /// sits behind the action row's Edit icon rather than taking a row of its own. A selection must
+    /// already be up: the icon is disabled without one, like every other tab in that row.
+    func openSelectionEditBand(_ app: XCUIApplication) {
+        let edit = app.buttons["selectPanel.editDisclosure"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5), "the Select panel's action row carries the Edit icon")
+        XCTAssertTrue(edit.isEnabled, "a selection is up, so the Edit icon is live")
+        if edit.value as? String != "expanded" { edit.tap() }
+        XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
+    }
+
 }

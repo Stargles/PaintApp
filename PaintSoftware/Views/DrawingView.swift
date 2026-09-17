@@ -710,7 +710,8 @@ struct DrawingView: View {
                 canvasManager.toggleFolderVisibility(folder.id)
             }
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
-             .nothingWhollyInside, .cannotMoveDerivedFrame, .onlyPartOfAnAnimationGroup,
+             .nothingWhollyInside, .nothingToSubtractFrom, .cannotMoveDerivedFrame,
+             .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
              .mergedAsPixels, .fillNeedsMoreMemory, .videoBakeRefused, .streamBakeRefused, .poseBakeRefused,
              .recordingRefused,

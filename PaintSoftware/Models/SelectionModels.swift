@@ -120,17 +120,66 @@ enum FixedAngleRotation {
     }
 }
 
+/// **How the next loop meets the one already on screen** — TODO (95), the owner: *"When the select
+/// tool is used again while a selection already exists, then the new selection should be the boolean
+/// union of the two. A toggle to make a boolean subtract would also be nice."*
+///
+/// The Select panel's rule row carries the switch (`SelectPanel.subtractToggle`);
+/// `CanvasManager.finishSelection` is the one place it is read, so all three modes — a freehand
+/// loop, a rectangle and the wand — compose the same way.
+enum SelectionComposition {
+    /// The new loop is added to what is selected. The default, and what a loop drawn with no
+    /// selection up has always meant.
+    case add
+    /// The new loop is taken away from what is selected.
+    case subtract
+}
+
 /// A finalized selection: a closed path in canvas point space, stamped with the (layer, cel) it
 /// belongs to so a layer/frame switch can tell whether it's still valid (see
 /// `CanvasManager.handleActiveContextChanged`). Keyed by stable UUID rather than array index —
 /// indices shift (or get silently reused) whenever `layers` is mutated, e.g. deleting the very
 /// layer a selection lives on can leave `currentLayerIndex` numerically unchanged while it now
 /// points at a different layer, which an index-based selection would wrongly treat as still valid.
+///
+/// **One path, however many loops made it** — TODO (95). A second loop is composed onto the first
+/// with Core Graphics' own booleans (`composed(with:by:)`), and the result is a *normalized* path:
+/// no overlapping or self-crossing subpaths, so the winding and even-odd rules agree on it. That is
+/// what lets every consumer of a selection go on reading one `CGPath` exactly as it did — the ants,
+/// `PixelOps.maskedPiece`'s clip, and the three membership rules `VectorCanvas.splitForLassoMove`
+/// asks under `lassoFillRule` (LASSO_MOVE.md §5.23–§5.26) — with no set of loops to walk and no
+/// second rule to keep in step with the first.
 struct Selection {
     var path: CGPath
     var bounds: CGRect
     var layerID: UUID
     var celID: UUID
+
+    /// This selection with `loop` added to it or taken from it — the composed path, normalized, and
+    /// its bounds re-measured against the canvas exactly as a fresh loop's are. Nil when nothing is
+    /// left: a subtract that swallowed the whole selection is a deselect, not an empty loop the
+    /// artist is still holding.
+    ///
+    /// **Normalized before the boolean, not only after.** Core Graphics leaves `union` and
+    /// `subtracting` undefined on a self-intersecting operand, and a lasso built from raw touch
+    /// samples crosses itself the moment the artist loops back over their own line —
+    /// `beginVectorLassoMove` makes the same argument for the same path one consumer down.
+    func composed(with loop: CGPath, by composition: SelectionComposition,
+                  within canvasRect: CGRect) -> Selection? {
+        let rule = VectorCanvas.lassoFillRule
+        let incoming = loop.normalized(using: rule)
+        let merged: CGPath
+        switch composition {
+        case .add: merged = path.union(incoming, using: rule)
+        case .subtract: merged = path.subtracting(incoming, using: rule)
+        }
+        let bounds = merged.boundingBoxOfPath.intersection(canvasRect)
+        guard !bounds.isNull, bounds.width > 1, bounds.height > 1 else { return nil }
+        var result = self
+        result.path = merged
+        result.bounds = bounds
+        return result
+    }
 }
 
 // MARK: - Floating piece
@@ -709,6 +758,14 @@ extension CanvasManager {
         selectionMode = mode
     }
 
+    /// Lands a loop — freehand, rectangle or the wand's flood, all three arrive here.
+    ///
+    /// **With a selection already up on this cel, the loop is composed onto it rather than replacing
+    /// it** — TODO (95): the union under `selectionComposition == .add`, the difference under
+    /// `.subtract`. Starting over is the Deselect tab or a tap on the Select icon itself (TODO (94)).
+    /// A subtract that takes everything away is a deselect; one drawn with nothing up says so
+    /// (`CanvasNotice.nothingToSubtractFrom`) rather than becoming a selection under a switch that
+    /// promised the opposite.
     func finishSelection(path: CGPath) {
         // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
         // more concretely: the selection is stamped with the cel it belongs to and immediately
@@ -717,9 +774,22 @@ extension CanvasManager {
         beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
-        let bounds = path.boundingBoxOfPath.intersection(CGRect(origin: .zero, size: canvasSize))
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIndex].id
+        let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        // `handleActiveContextChanged` clears a selection the moment the active cel changes, so one
+        // that is up is on this cel; the check is what keeps that a fact rather than an assumption.
+        if let existing = selection, existing.layerID == layerID, existing.celID == celID {
+            selection = existing.composed(with: path, by: selectionComposition, within: canvasRect)
+            return
+        }
+        if selectionComposition == .subtract {
+            raise(.nothingToSubtractFrom)
+            return
+        }
+        let bounds = path.boundingBoxOfPath.intersection(canvasRect)
         guard bounds.width > 1, bounds.height > 1 else { return }
-        selection = Selection(path: path, bounds: bounds, layerID: layers[currentLayerIndex].id, celID: layers[currentLayerIndex].cels[celIndex].id)
+        selection = Selection(path: path, bounds: bounds, layerID: layerID, celID: celID)
     }
 
     func finishAutomaticSelection(at point: CGPoint) {
@@ -1149,6 +1219,76 @@ extension CanvasManager {
             transform: duplicateLift, liftTransform: duplicateLift,
             mode: transformMode
         )
+    }
+
+    /// **"To New Layer"** — TODO (93), beside Duplicate in the Select panel's action row: the
+    /// selection is put on a new layer above this one and taken off this one, in one undo step. The
+    /// owner asked for a better name than "cut", and this is the verb's own description — what
+    /// leaves, and where it goes — rather than the clipboard's word for half of it.
+    ///
+    /// **The vector arm is `moveVectorSelectionToNewLayer`**, which is `beginVectorLassoDuplicate`'s
+    /// split with the source's inside removed, and it floats the moved ink as Duplicate does. **This
+    /// arm is the pixel one**: `PixelOps.maskedPiece` gives the piece and the remainder in one call,
+    /// the piece becomes the new layer's raster and the remainder becomes this cel's, and — unlike the
+    /// raster Duplicate, which defers its layer insertion to the commit because it has no pixels to
+    /// record until then — both halves are on hand at once, so the step is recorded here and nothing
+    /// floats. The artist who wants it elsewhere taps Move on the new layer, which is now current.
+    func moveSelectionToNewLayer() {
+        if activeLayerKind == .vector {
+            moveVectorSelectionToNewLayer()
+            return
+        }
+        let requested = selection
+        // `clearSelectionPixels`' reason: settle a lifted piece before reading the cel it left a
+        // hole in.
+        commitAllInteractiveState()
+        guard let selection = requested, let canvasSize,
+              layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == selection.layerID,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
+        let sourceIndex = currentLayerIndex
+        let cel = layers[sourceIndex].cels[celIndex]
+        let sourceLayerID = layers[sourceIndex].id
+        let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        let (piece, remainder) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
+
+        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+                         raster: bakedRasterTexture(image: piece, likeExisting: .empty(size: canvasSize)))
+        let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+                             isVisible: true, parentFolderID: layers[sourceIndex].parentFolderID,
+                             cels: [newCel])
+        let newLayerID = newLayer.id
+        let insertAt = sourceIndex + 1
+        let oldRaster = cel.raster, oldBaked = cel.bakedImage, oldFill = cel.fillImage
+        // Flattened into `raster` with the other two tiers nil — `registerUndoableCelChange`'s rule for
+        // every commit path, or the remainder lands somewhere the eraser cannot reach.
+        let newRaster = bakedRasterTexture(image: remainder, likeExisting: cel.raster)
+
+        layers.insert(newLayer, at: insertAt)
+        applyCelChange(layerID: sourceLayerID, celID: cel.id, raster: newRaster, baked: nil, fill: nil)
+        currentLayerIndex = insertAt
+        self.selection = nil
+
+        let cost = oldRaster.approximateCost + newRaster.approximateCost
+                 + Self.approximateImageCost(piece) + Self.approximateImageCost(oldBaked)
+                 + Self.approximateImageCost(oldFill)
+        recordUndo(label: .moveToNewLayer, cost: cost, undo: { [weak self] in
+            guard let self else { return }
+            if let index = self.layers.firstIndex(where: { $0.id == newLayerID }) {
+                self.layers.remove(at: index)
+            }
+            self.applyCelChange(layerID: sourceLayerID, celID: cel.id,
+                                raster: oldRaster, baked: oldBaked, fill: oldFill)
+            self.currentLayerIndex = self.layerIndex(ofID: sourceLayerID)
+                ?? min(self.currentLayerIndex, max(0, self.layers.count - 1))
+        }, redo: { [weak self] in
+            guard let self else { return }
+            let at = min(insertAt, self.layers.count)
+            self.layers.insert(newLayer, at: at)
+            self.applyCelChange(layerID: sourceLayerID, celID: cel.id, raster: newRaster, baked: nil, fill: nil)
+            self.currentLayerIndex = at
+        })
     }
 
     // MARK: Adjusting the floating piece

@@ -124,6 +124,14 @@ struct TopToolbar: View {
         // than silently discarding or stranding it — Undo is the way to back out of a completed move,
         // matching Procreate (there's no separate "cancel transform").
         canvasManager.commitAllInteractiveState()
+        // **Tapping Select off clears the selection** — TODO (94), the owner: *"when the select tool
+        // icon is deselected (clicked), the selection disappears."* The loop is the tool's own state
+        // and the icon reads as lit for as long as either the panel or a loop is up
+        // (`selectIconIsActive`), so a tap that put the panel away and left the ants on screen would
+        // leave the icon lit for a reason the artist cannot see. It is also what makes TODO (95)'s
+        // union usable: with every new loop composing onto the last, the tool's own icon is the
+        // artist's way of starting over.
+        if panel == .select, activePanel == .select { canvasManager.deselect() }
         activePanel = (activePanel == panel) ? .none : panel
     }
 

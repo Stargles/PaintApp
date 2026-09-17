@@ -146,8 +146,23 @@ struct MoveTransformBottomBar: View {
     ///
     /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
     /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
+    ///
+    /// **"Keep Stroke Width" sits beside it — TODO (75)**, the same shape for the same kind of thing:
+    /// a rule about what a Move writes, named for what the artist gets. Off, a scaled piece's strokes
+    /// scale with it (LASSO_MOVE.md §5.17, the ruling and the default); on, they keep the width they
+    /// were drawn at. `CanvasManager.keepsStrokeWidthOnMove` carries the one limit — a keystoned
+    /// stroke has no single width to keep.
     private var precisionRow: some View {
         HStack(alignment: .center, spacing: 16) {
+            Toggle(isOn: $canvasManager.keepsStrokeWidthOnMove) {
+                Text("Keep Stroke Width").foregroundColor(.white)
+            }
+            .tint(.blue)
+            .fixedSize()
+            .accessibilityIdentifier("moveBar.keepStrokeWidthToggle")
+
+            divider
+
             Toggle(isOn: $canvasManager.preserveMovePrecision) {
                 Text("Keep Full Precision").foregroundColor(.white)
             }

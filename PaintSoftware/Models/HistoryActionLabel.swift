@@ -56,6 +56,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Baking a floating Duplicate piece — distinct from `.duplicateLayer`/`.duplicateFrame`/
     /// `.duplicateGuide`, which duplicate a different kind of thing entirely.
     case duplicatePiece
+    /// The Select panel's "To New Layer" — TODO (93): the selection leaves its layer for a new one
+    /// above it, the insertion and the removal one step.
+    case moveToNewLayer
     case insertImage
     /// Importing a video — VIDEO.md §2.1, its own vector layer. Distinct from `.insertImage`
     /// because it is what the history row says and a video is not a photo to the artist.
@@ -273,6 +276,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .changeSelectionOpacity: return "change selection opacity"
         case .move: return "move"
         case .duplicatePiece: return "duplicate"
+        case .moveToNewLayer: return "move to new layer"
         case .insertImage: return "insert image"
         case .insertVideo: return "insert video"
         case .insertStream: return "stream screen"

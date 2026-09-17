@@ -54,6 +54,7 @@ final class RewriteUndoFootprintUITests: PaintUITestCase {
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
         rectangle.tap()
         dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+        openSelectionEditBand(app)
         let swatch = app.buttons["selectPanel.colourSwatch"]
         XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the Select panel offers the Colour swatch")
         XCTAssertTrue(swatch.isEnabled, "the loop made a selection, so Colour is available")

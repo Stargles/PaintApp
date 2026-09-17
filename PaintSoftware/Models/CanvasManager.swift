@@ -795,6 +795,21 @@ final class CanvasManager: ObservableObject {
     /// Not persisted across launches, unlike `pencilOnlyDrawing`: that one is about the artist's
     /// hardware and this one is about the drawing in front of them.
     @Published var preserveMovePrecision: Bool = false
+    /// **TODO (75) — "Keep Stroke Width" on the Move bar.** The owner: *"there should be a toggle
+    /// where there is the option that the brushstroke size is constant. Right now I believe it scales
+    /// with the move."* It does, by ruling — LASSO_MOVE.md §5.17's `sqrt(|det|)` — and that stays the
+    /// default. While this is on, a scaled Move leaves every stroke's `VectorStroke.size` exactly what
+    /// it was at the lift; `applyToVectorFloat` is the one place a Move writes geometry and the one
+    /// place this is read.
+    ///
+    /// **A keystoned stroke is outside it, and that is the shape of the thing rather than a gap.** Under
+    /// Distort a stroke's width is not one number: each dab takes its radius from the map's local scale
+    /// where it lands (`StrokeDistort`, KEYFRAMES.md §8), so "unchanged" has no single width to name.
+    /// The toggle governs the two affine arms, which is every Move, scale, turn, Freeform and Mirror.
+    ///
+    /// Not persisted, for `preserveMovePrecision`'s reason one line up: it is about the drawing in
+    /// front of the artist, not about their hardware.
+    @Published var keepsStrokeWidthOnMove: Bool = false
     /// **TODO item (23) — "What the loop catches", in the Select panel.** Which of the three
     /// membership rules a lasso answers with: `Enclosed`, `Cut` (the default and the shipped
     /// behaviour), `Touching`.
@@ -816,6 +831,13 @@ final class CanvasManager: ObservableObject {
     /// lifted under the old rule has to be re-lifted under the new one, and the order that re-lift
     /// happens in is load-bearing (see `CanvasManager+LassoMove.swift`).
     @Published var selectionMembership: LassoMembership = .cutting
+    /// **TODO (95) — "Add / Subtract", in the Select panel's rule row.** How the next loop meets the
+    /// one already up: added to it, or taken from it. Read in one place, `finishSelection`, so a
+    /// freehand loop, a rectangle and the wand all compose the same way.
+    ///
+    /// Not persisted, for `selectionMembership`'s reason one line up — per-drawing intent, and a
+    /// switch that came back on across launches would eat the first loop of the next session.
+    @Published var selectionComposition: SelectionComposition = .add
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection? {
         didSet {
