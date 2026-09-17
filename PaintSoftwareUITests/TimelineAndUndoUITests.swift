@@ -51,6 +51,8 @@ final class TimelineGestureUITests: PaintUITestCase {
                            "onionPanel.resolutionSizes",
                            "onionPanel.resolutionNote",
                            "onionPanel.tintBar",
+                           "onionPanel.previousTint",
+                           "onionPanel.nextTint",
                            "onionPanel.linkOpacityToggle",
                            "onionPanel.previous.opacity1",
                            "onionPanel.next.opacity1"] {
@@ -63,11 +65,137 @@ final class TimelineGestureUITests: PaintUITestCase {
         XCTAssertEqual(app.descendants(matching: .any)["onionPanel.linkOpacityToggle"].value as? String, "on",
                        "linked opacity is on by default")
 
-        // And the off switch really is the off switch: turning it off closes the panel with it, so
-        // the button cannot leave the artist with a panel describing something that is not drawing.
-        turnOff.tap()
-        XCTAssertTrue(waitForDisappearance(of: turnOff, timeout: 5),
-                      "turning onion skin off dismisses its panel")
+        // The redesigned panel in its default state (TODO (70)) — kept on success as well as on
+        // failure, since this is the "drive it and look at it" record itself, not incidental debris.
+        attachScreen("onion-panel-70-default-layout")
+
+        // The panel no longer carries its own off switch (TODO (69) retired it: the toolbar button's
+        // own tap is both switches now). A quick tap on that button is what has to close the panel —
+        // it cannot leave the artist with a panel describing something that is no longer drawing.
+        button.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.segmentedControls["onionPanel.placementPicker"], timeout: 5),
+                      "turning onion skin off with the toolbar button dismisses its panel")
+    }
+
+    /// **TODO (69), cold start.** A tap toggles onion skin outright and a ~0.4s hold reaches its menu
+    /// instead, the two independent of one another — replacing the old two-stage tap this button used
+    /// to carry (still `interpolateButton`'s own shape, unchanged, one button over).
+    ///
+    /// Driven from a fresh document rather than from constructed state, and asserting what is exposed
+    /// (the button's own on/off value, and whether the panel's placement picker is on screen) rather
+    /// than reading `CanvasManager.isOnionSkinEnabled` directly — a correct model behind an
+    /// unreachable or misattributed gesture is exactly what this repo's own "prove the artist can use
+    /// it" rule is about.
+    func testATapTogglesOnionSkinAndAHoldOpensItsMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let button = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertEqual(button.value as? String, "on", "PREMISE: onion skin ships on")
+
+        // A quick tap toggles it off, and does not open the panel.
+        button.tap()
+        XCTAssertEqual(button.value as? String, "off", "a tap toggled onion skin off")
+        XCTAssertFalse(app.segmentedControls["onionPanel.placementPicker"].waitForExistence(timeout: 1),
+                       "a quick tap must not open the panel")
+
+        // A second quick tap toggles it back on — the same gesture, independent of the hold below.
+        button.tap()
+        XCTAssertEqual(button.value as? String, "on", "a second tap toggled onion skin back on")
+
+        // A hold reaches the menu, without changing the on/off state the taps above just proved.
+        button.press(forDuration: 0.6)
+        XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].waitForExistence(timeout: 5),
+                      "a ~0.4s hold opened the panel")
+        XCTAssertEqual(button.value as? String, "on",
+                       "holding to open the panel must not itself toggle the mode")
+    }
+
+    /// **TODO (72), cold start: one colour picker.** The owner's report was literal — "we have 2
+    /// color pickers, bloating the code" — so this proves the fix by identity, exactly as
+    /// `LayerUITests.testTheCanvasColourRowOpensTheSamePickerTheBrushUses` proved it for the canvas
+    /// swatch: `colorPanel.svSquare`/`colorPanel.hexField` are `ColorPickerPanel`'s own identifiers,
+    /// which the stock `ColorPicker` this replaced never had. Both ends of the gradient bar are
+    /// driven, and a hex round-trip through each proves the pick reaches its own side's binding on
+    /// `CanvasManager.onionSkin` — a real model write, not a `@State` local to the popover — by
+    /// reopening the panel from scratch afterward and reading the swatch's own exposed value, rather
+    /// than reading the model directly.
+    ///
+    /// **This test is what found `anchoredMenuLayer`'s dismiss bug**, not just what pins the fix.
+    /// `ColorPickerPanel`'s popover (300pt) is wider than the onion panel that hosts it (~250pt), so
+    /// its own content — the hex field especially — necessarily draws outside the onion menu's own
+    /// `menuFrame`. Typing into that field used to tear the whole onion menu down mid-edit, on the
+    /// *second* swatch only (position-dependent: which of the panel's own controls the wider popover
+    /// happens to still cover varies by which end of the bar it hangs from). See
+    /// `AnimationTimeline.nestedOnionTintPickerIsOpen` for the fix, and below for what the fix costs:
+    /// closing the picker and closing the onion panel underneath it are now two taps, not one — the
+    /// first is ordinary popover behaviour (an outside tap dismisses the popover; the control it
+    /// covered needs a second, separate tap), and the second is the fix itself, deliberately: the
+    /// onion menu no longer tears down on a touch that only reads as "outside" because the picker
+    /// covering it is wider than it is.
+    ///
+    /// **Dismissed with a tap on a tool button, not on the onion toggle**, for the same swallowed-
+    /// touch reason the two-taps note above states generally: the toggle's own tap was found, live,
+    /// to be the dismissing touch, leaving onion skin's on/off state untouched by that same gesture.
+    /// A plain system-button tap elsewhere has no second job riding on the same touch to lose.
+    func testTheOnionTintSwatchesOpenTheSamePickerTheBrushUses() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let button = app.buttons["timeline.onionSkinToggle"]
+        let selectTool = app.buttons["toolbar.selectButton"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(selectTool.waitForExistence(timeout: 5), "PREMISE: a neutral tap target exists")
+
+        button.press(forDuration: 0.6)
+        XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].waitForExistence(timeout: 5),
+                      "the onion panel is reachable from a fresh document")
+        let originalNext = app.buttons["onionPanel.nextTint"].value as? String
+
+        app.buttons["onionPanel.previousTint"].tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
+                      "the previous-tint swatch opens ColorPickerPanel, not a second colour UI")
+        Thread.sleep(forTimeInterval: 0.3) // let the popover's presentation animation settle
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.exists, "…and its hex field")
+        setHexField(app, hexField, to: "336699")
+
+        selectTool.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5),
+                      "a tap elsewhere closes the picker")
+        XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].exists,
+                      "…without tearing the onion panel down with it — the bug this test found")
+        selectTool.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.segmentedControls["onionPanel.placementPicker"], timeout: 5),
+                      "a second tap, with nothing nested open now, closes the onion panel too")
+
+        button.press(forDuration: 0.6)
+        XCTAssertTrue(app.buttons["onionPanel.previousTint"].waitForExistence(timeout: 5),
+                      "the panel reopens")
+        XCTAssertEqual(app.buttons["onionPanel.previousTint"].value as? String, "336699",
+                       "the pick reached previousTint and survived the panel closing")
+        XCTAssertEqual(app.buttons["onionPanel.nextTint"].value as? String, originalNext,
+                       "…and left nextTint untouched")
+
+        app.buttons["onionPanel.nextTint"].tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
+                      "the next-tint swatch opens the same picker")
+        Thread.sleep(forTimeInterval: 0.3)
+        setHexField(app, app.textFields["colorPanel.hexField"], to: "996633")
+        selectTool.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5))
+        XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].exists,
+                      "…the onion panel survives this swatch's picker closing too")
+        selectTool.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.segmentedControls["onionPanel.placementPicker"], timeout: 5))
+
+        button.press(forDuration: 0.6)
+        XCTAssertTrue(app.buttons["onionPanel.nextTint"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["onionPanel.nextTint"].value as? String, "996633",
+                       "the second pick reached nextTint")
+        XCTAssertEqual(app.buttons["onionPanel.previousTint"].value as? String, "336699",
+                       "…and left the first pick alone")
     }
 
     /// **What the artist sees, driven rather than modelled** — TODO (40), the owner's placement

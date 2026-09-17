@@ -119,6 +119,17 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// own for `effectBloomColour`'s reason: the raw value is what a capture says was open.
     case effectDuplicateOffsetColour
 
+    // MARK: - Onion skin
+
+    /// The previous-drawings tint swatch, the red end of `OnionSkinPanel`'s gradient bar — TODO (72).
+    /// A case of its own rather than sharing `onionNextTintColour`, for `effectBloomColour`'s reason:
+    /// the raw value is what a capture says was open, and "next" while the artist was picking
+    /// "previous" is exactly the evidence-quality loss that argument is against.
+    case onionPreviousTintColour
+
+    /// The next-drawings tint swatch, the green end of the same bar. `onionPreviousTintColour`'s twin.
+    case onionNextTintColour
+
     // MARK: - The Select panel
 
     /// The Select panel's Colour swatch — TODO (42)'s picker, defaulting to the selection's own colour.
@@ -173,9 +184,12 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
              .frameRateOptions,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour, .selectionColour:
-            // All thirteen are raised from chrome that sits over a mounted, touchable `CanvasView` —
-            // eight of them `.popover`s, and the timeline's five `AnchoredMenu`s since TODO (39).
+             .effectDuplicateOffsetColour, .selectionColour,
+             .onionPreviousTintColour, .onionNextTintColour:
+            // All sixteen are raised from chrome that sits over a mounted, touchable `CanvasView` —
+            // the two tint swatches are `.popover`s hung off `OnionSkinPanel`, itself one of the
+            // timeline's `AnchoredMenu`s — nested exactly as `EffectSection`'s swatches sit inside a
+            // rail panel that is not itself a `.popover`.
             // **The rule is the same for both and that is the point of the type**: a presentation
             // left to its own dismissal is dismissed *by* the touch that lands outside it, and this
             // repo has observed twice that the touch is not swallowed:

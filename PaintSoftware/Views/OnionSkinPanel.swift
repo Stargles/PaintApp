@@ -1,31 +1,49 @@
 import SwiftUI
 
-/// The onion-skin panel, modelled on ToonSquid's (product owner, 2026-08-17).
+/// The onion-skin panel — rebuilt to the owner's own reference image, TODO (70): *"I dont like the
+/// current onion skin UI. Try to make it look better, like the image I linked. More compact and
+/// clean."* ~250 pt wide (the call site sets the exact frame, `AnimationTimeline.anchoredMenuContent`),
+/// laid out top to bottom exactly in the reference's order: title, Drawings/Frames, Behind/In Front,
+/// the Previous/Next count row, Tinted/Original Colors over its tint bar, then the per-slot Opacity
+/// row. `OnionSkinSettings.resolution` is not in the reference at all — it is real model state the
+/// redesign is not allowed to drop (TODO (70): *"do not drop settings the model has — if the model has
+/// a setting the reference does not show, place it where it fits"*), so it lives in its own "Quality"
+/// section below a divider, out of the reference's own reading order rather than wedged into it.
 ///
-/// Hung off the timeline's own onion-skin button as a popover, exactly like `InterpolatePanel` hangs
-/// off the interpolate button, and for the same reason: onion skin's subject is the timeline, and
-/// the button *is* the on/off switch, so the panel never needs one. First tap turns it on; a tap
-/// while it is already on opens this.
+/// **The reference's bottom bar (a play glyph and two toggle icons) is not built.** TODO (70) is
+/// explicit that those two icons "map to whichever two boolean options the app's onion model already
+/// has… if the model has none, omit the row rather than invent settings." The model has exactly one
+/// spare boolean beyond `isOpacityLinked` (already the Opacity row's link icon): `loops`, already
+/// spent on the count row's own link/loop icon below, in the same slot this file gave it before this
+/// redesign. Zero remain for the bottom bar, so it is omitted rather than filled with a fabricated
+/// "show during playback" or a second use of `loops` under a different picture.
+///
+/// **Hung off the timeline's own onion-skin button as a popover, exactly like `InterpolatePanel`
+/// hangs off the interpolate button** — onion skin's subject is the timeline. Unlike that button,
+/// the onion-skin button is no longer two-stage (TODO (69)): a tap toggles `isOnionSkinEnabled`
+/// outright and a hold opens this panel, independent of each other, so this panel carries no on/off
+/// switch of its own in either direction — the button already is both switches.
 ///
 /// Everything here is a thin binding onto `CanvasManager.onionSkin`. Every decision the panel can
 /// make — which cel a slot shows, what a linked drag does to the other sliders, how large the
 /// composite is allowed to be — lives in `OnionSkinSource.swift` as pure functions, so the whole
 /// feature is testable without a simulator and this file has nothing to get wrong but layout.
-///
-/// **The out-of-pegs row is deliberately absent** (owner, 2026-08-17): the dots under ToonSquid's
-/// sliders temporarily offset each skin with transform handles, and that is its own feature with its
-/// own gestures and its own undo behaviour. The layout leaves room for it — each slot is a `VStack`
-/// with the slider on top and its read-out below, so a dot is a third row in the same column, and
-/// `OnionSkinSettings` addresses slots by side and distance, which is the same address a per-slot
-/// offset would need.
 struct OnionSkinPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+
+    /// TODO (72): *"the color picker in onion skin isnt the same color picker as the color picker
+    /// used in everything else… Make it the same as the normal color picker."* These two open
+    /// `ColorPickerPanel` — the app's one picker (see its own header) — over the tint bar's red and
+    /// green ends; the stock SwiftUI `ColorPicker` this panel used to carry is gone, along with the
+    /// `.previousTint`/`.nextTint` swatches that were its only call sites.
+    @State private var showPreviousTintPicker = false
+    @State private var showNextTintPicker = false
 
     private var settings: OnionSkinSettings { canvasManager.onionSkin }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Onion Skin")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
@@ -34,51 +52,24 @@ struct OnionSkinPanel: View {
                 placementPicker
                 countRow
                 colouringPicker
-                resolutionPicker
-                tintBar
                 opacitySliders
 
-                Divider().overlay(Color.white.opacity(0.2))
-
-                // The timeline button now *opens* this panel while onion skin is on, so this is the
-                // off switch. Without it the feature could be turned on and never off again, which
-                // is the trap the two-stage button walks straight into if the panel forgets it.
-                Button("Turn Off Onion Skin", role: .destructive) {
-                    canvasManager.isOnionSkinEnabled = false
-                }
-                .font(.caption)
-                .accessibilityIdentifier("onionPanel.turnOff")
+                Divider().overlay(Color.white.opacity(0.15))
+                qualitySection
             }
-            .padding(14)
-            // The bottom inset is the off switch's, not decoration: at five skins a side the panel is
-            // taller than the popover and this is what keeps the last row clear of the rounded corner
-            // it would otherwise sit under. Screenshotted at both counts.
-            .padding(.bottom, 10)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     // MARK: - Drawings | Frames
 
-    /// The distinction is real in this document model rather than cosmetic, so the caption says what
-    /// it is: a cel spans however many frames it is exposed for, so stepping by drawing and stepping
-    /// by frame give different neighbours the moment anything is held.
     private var neighbourhoodPicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker("Neighbourhood", selection: binding(\.neighbourhood)) {
-                ForEach(OnionSkinSettings.Neighbourhood.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("onionPanel.neighbourhoodPicker")
-
-            Text(settings.neighbourhood == .drawings
-                 ? "Neighbouring drawings, however long each is held"
-                 : "Neighbouring frames, so a held drawing fills several")
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.55))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+        Picker("Neighbourhood", selection: binding(\.neighbourhood)) {
+            ForEach(OnionSkinSettings.Neighbourhood.allCases) { Text($0.title).tag($0) }
         }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("onionPanel.neighbourhoodPicker")
     }
 
     // MARK: - Behind | In Front
@@ -93,195 +84,141 @@ struct OnionSkinPanel: View {
 
     // MARK: - Previous / loop / Next
 
-    /// The two count sliders with the loop toggle between them, which is where ToonSquid puts it and
-    /// where it belongs: looping is the thing that joins the two sides into one cycle.
+    /// One row: a count and a slider on the left labelled by side, the loop toggle in the middle, a
+    /// slider and a count on the right — the reference's own layout. The middle icon is `loops`, not
+    /// an invented "link the two counts": that is the setting already in this slot before the redesign
+    /// (`OnionSkinSettings.loops`, "wraps around the first and last drawing"), and the reference calls
+    /// it a "link/loop icon" in the same breath for exactly that reason.
     private var countRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            countSlider(title: "Previous", value: binding(\.previousCount), id: "previousCount")
+        HStack(alignment: .top, spacing: 4) {
+            countColumn(side: .previous)
 
-            HStack(spacing: 8) {
-                Button {
-                    canvasManager.onionSkin.loops.toggle()
-                } label: {
-                    Label(settings.loops ? "Loop on" : "Loop off",
-                          systemImage: settings.loops ? "repeat.circle.fill" : "repeat.circle")
-                        .font(.caption2)
-                        .foregroundColor(settings.loops ? .blue : .white.opacity(0.6))
-                }
-                .accessibilityIdentifier("onionPanel.loopToggle")
-                .accessibilityValue(settings.loops ? "on" : "off")
-
-                Text("wraps around the first and last drawing")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.45))
+            Button {
+                canvasManager.onionSkin.loops.toggle()
+            } label: {
+                Image(systemName: settings.loops ? "repeat.circle.fill" : "repeat.circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(settings.loops ? .blue : .white.opacity(0.5))
             }
-            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityIdentifier("onionPanel.loopToggle")
+            .accessibilityValue(settings.loops ? "on" : "off")
+            .padding(.top, 3)
 
-            countSlider(title: "Next", value: binding(\.nextCount), id: "nextCount")
+            countColumn(side: .next)
         }
     }
 
-    /// Label and value on the same line as the slider rather than above it — three stacked rows of
-    /// label-over-slider is what pushed the opacity sliders, which are the panel's whole point, below
-    /// the fold in the first build.
-    private func countSlider(title: String, value: Binding<Int>, id: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.white)
-                .frame(width: 62, alignment: .leading)
-            Slider(value: Binding(get: { Double(value.wrappedValue) },
-                                  set: { value.wrappedValue = Int($0.rounded()) }),
-                   in: 0...Double(OnionSkinSettings.maxSkinsPerSide),
-                   step: 1)
-                .accessibilityIdentifier("onionPanel.\(id)Slider")
-            Text("\(value.wrappedValue)")
-                .font(.caption.monospacedDigit())
-                .foregroundColor(.white.opacity(0.7))
-                .frame(width: 12, alignment: .trailing)
+    /// The neighbourhood distinction is real (`OnionSkinSettings.Neighbourhood`'s own doc comment), so
+    /// the label under each slider says "Drawings" or "Frames" rather than freezing on the reference's
+    /// own wording — the reference happens to show "Previous Drawings"/"Next Drawings" because that
+    /// is ToonSquid's default mode, and this reads the same in this app's own default.
+    private func countColumn(side: OnionSkinSettings.Side) -> some View {
+        let value = side == .previous ? binding(\.previousCount) : binding(\.nextCount)
+        let noun = settings.neighbourhood == .drawings ? "Drawings" : "Frames"
+        return VStack(spacing: 2) {
+            HStack(spacing: 4) {
+                if side == .previous {
+                    Text("\(value.wrappedValue)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 12, alignment: .trailing)
+                }
+                Slider(value: Binding(get: { Double(value.wrappedValue) },
+                                      set: { value.wrappedValue = Int($0.rounded()) }),
+                       in: 0...Double(OnionSkinSettings.maxSkinsPerSide), step: 1)
+                    .accessibilityIdentifier("onionPanel.\(side == .previous ? "previousCount" : "nextCount")Slider")
+                if side == .next {
+                    Text("\(value.wrappedValue)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 12, alignment: .leading)
+                }
+            }
+            Text(side == .previous ? "Previous \(noun)" : "Next \(noun)")
+                .font(.system(size: 9))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Tinted | Original Colors
 
     private var colouringPicker: some View {
-        Picker("Colouring", selection: binding(\.colouring)) {
-            ForEach(OnionSkinSettings.Colouring.allCases) { Text($0.title).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .accessibilityIdentifier("onionPanel.colouringPicker")
-    }
-
-    // MARK: - Resolution
-
-    /// How sharp the skins are, as a fraction of the canvas (owner, 2026-08-17), with **each option's
-    /// actual composite size under it and one note line under that**.
-    ///
-    /// The owner ruled on both halves of this together (2026-08-18): the sizes are factual and always
-    /// visible, and the caution speaks only when the combination is genuinely expensive. A segmented
-    /// control cannot carry two lines per segment, so the sizes are a legend laid out on the picker's
-    /// own thirds — the same idiom as the caption already under `neighbourhoodPicker`, one row down.
-    private var resolutionPicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker("Resolution", selection: binding(\.resolution)) {
-                ForEach(OnionSkinSettings.Resolution.allCases) { Text($0.title).tag($0) }
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Colouring", selection: binding(\.colouring)) {
+                ForEach(OnionSkinSettings.Colouring.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
-            .accessibilityIdentifier("onionPanel.resolutionPicker")
+            .accessibilityIdentifier("onionPanel.colouringPicker")
 
-            resolutionSizeLegend
-            resolutionNote
+            tintBar
         }
     }
 
-    /// The composite size each option will actually produce on this canvas, under the segment that
-    /// picks it. Not "half of 2048" but the number `OnionSkinBudget` will really use, so the
-    /// readability floor is visible as a fact — on the owner's 2048x1024 the legend reads
-    /// 2048x1024 / 1024x512 / **768x384**, and the last one being larger than a naive quarter needs
-    /// no sentence to explain it.
-    ///
-    /// Monospaced digits so the three columns do not shuffle as the canvas changes, and the selected
-    /// one is brighter rather than boxed — a second box under a segmented control reads as a second
-    /// control.
-    private var resolutionSizeLegend: some View {
-        HStack(spacing: 0) {
-            ForEach(OnionSkinSettings.Resolution.allCases) { resolution in
-                Text(compositeSizeLabel(resolution))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundColor(.white.opacity(resolution == settings.resolution ? 0.85 : 0.45))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        // Three `Text`s in an `HStack` are three accessibility elements and a stack is none, so the
-        // identifier would name nothing without this — the trap `tintBar` does not hit only because
-        // a `ZStack` of shapes has no children to lose.
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("onionPanel.resolutionSizes")
-    }
-
-    private func compositeSizeLabel(_ resolution: OnionSkinSettings.Resolution) -> String {
-        guard let canvas = canvasManager.canvasSize else { return " " }
-        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
-        return "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
-    }
-
-    /// One line, always present, carrying the most useful thing there is to say about the current
-    /// combination — the caution when the estimate crosses `OnionSkinBudget.cautionThresholdMilliseconds`,
-    /// the readability floor when it is what is actually in force, and otherwise the plain trade-off.
-    ///
-    /// **It occupies reserved space rather than animating in, and that is the deliberate half of this
-    /// control.** The caution's trigger is the count sliders and the resolution picker, so the moment
-    /// it would animate is the moment the artist is dragging something two rows below it — a line
-    /// that appears and disappears there pushes the opacity sliders up and down under the finger
-    /// already on them. Two lines' worth of height is held whether or not there is a caution, so
-    /// nothing below this ever moves; the cost is a little empty space on a panel that had room for
-    /// it, and the alternative was the panel's own layout fighting the gesture.
-    ///
-    /// The caution is brighter rather than coloured or badged. It is a caution, not an alarm: it says
-    /// what the current settings cost and what the cheaper one costs, and lets the artist decide.
-    private var resolutionNote: some View {
-        Text(resolutionNoteText)
-            .font(.caption2)
-            .foregroundColor(.white.opacity(caution == nil ? 0.55 : 0.85))
-            .lineLimit(2)
-            .minimumScaleFactor(0.85)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(height: 30, alignment: .topLeading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("onionPanel.resolutionNote")
-    }
-
-    private var caution: String? {
-        guard let canvas = canvasManager.canvasSize else { return nil }
-        return OnionSkinBudget.caution(for: canvas, settings: settings)
-    }
-
-    private var resolutionNoteText: String {
-        if let caution { return caution }
-        guard let canvas = canvasManager.canvasSize else { return "Sharper skins cost more to draw." }
-        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: settings.resolution)
-        let plain = max(canvas.width, canvas.height) * settings.resolution.fraction
-        let edge = Int(max(size.width, size.height).rounded())
-        // The floor only gets a mention when it is doing something; the rest of the time saying so
-        // would be noise about a rule that is not in force.
-        return edge > Int(plain.rounded()) && size != canvas
-            ? "Held up from \(Int(plain.rounded())) px so lines stay readable."
-            : "Sharper skins cost more to draw."
-    }
-
-    // MARK: - Tint bar
-
-    /// Red for previous and green for next, over a checkerboard so the alpha is legible.
-    ///
-    /// **It is a read-out, not decoration.** Each gradient stop sits where that slot sits and carries
-    /// that slot's *actual* opacity, with the current drawing's position in the middle at zero — so
-    /// the bar is a picture of the ramp, and dragging any linked slider visibly rescales the whole
-    /// thing. That is the fastest way to see what "linked opacity" means without reading a word.
-    ///
-    /// Greyed rather than hidden under Original Colors: the tints are still configured there, they
-    /// just are not applied, and a control that vanishes teaches the artist less than one that dims.
+    /// Red for previous and green for next, over a checkerboard so the alpha is legible — a read-out,
+    /// not decoration, exactly as before (see the stop maths below). **Thin, per the reference**, with
+    /// the two tint colours reachable by tapping its own ends rather than through separate swatches
+    /// beside a "Tint" label: TODO (72), "tapping the red end opens the app's picker for the
+    /// previous-drawings tint, the green end for the next-drawings tint." Each tap target is taller
+    /// than the bar itself (an `overlay`, not a child of the clipped `ZStack`) so a thin bar does not
+    /// mean an unusably thin place to tap.
     private var tintBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Tint")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                Spacer()
-                tintSwatch(side: .previous)
-                tintSwatch(side: .next)
-            }
-
-            ZStack {
-                CheckerboardPattern()
-                LinearGradient(stops: gradientStops, startPoint: .leading, endPoint: .trailing)
-            }
-            .frame(height: 26)
-            .cornerRadius(6)
-            .opacity(settings.colouring == .tinted ? 1 : 0.35)
-            .accessibilityIdentifier("onionPanel.tintBar")
+        ZStack {
+            CheckerboardPattern()
+            LinearGradient(stops: gradientStops, startPoint: .leading, endPoint: .trailing)
         }
+        .frame(height: 14)
+        .cornerRadius(4)
+        .opacity(settings.colouring == .tinted ? 1 : 0.35)
+        // The identifier goes on the gradient/checkerboard `ZStack` itself, before the overlays are
+        // composed on top — putting it after them (as this line once did) swallowed the two swatch
+        // buttons into whatever single accessibility element an identified container becomes, and
+        // `onionPanel.previousTint`/`.nextTint` stopped existing to XCUITest. Identifying the base
+        // view first keeps the two overlaid buttons as their own, separately-identified elements.
+        .accessibilityIdentifier("onionPanel.tintBar")
+        .overlay(alignment: .leading) { tintTapTarget(side: .previous) }
+        .overlay(alignment: .trailing) { tintTapTarget(side: .next) }
+    }
+
+    private func tintTapTarget(side: OnionSkinSettings.Side) -> some View {
+        Button {
+            if side == .previous { showPreviousTintPicker = true } else { showNextTintPicker = true }
+        } label: {
+            // Not `Color.clear`: a fully transparent label can render with no backing content for
+            // UIKit's popover-anchor search to find, which is what silently swallowed the presentation
+            // here — found live, not in review. `0.001` is visually indistinguishable from clear.
+            Color.white.opacity(0.001)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 26, height: 22)
+        .contentShape(Rectangle())
+        .accessibilityIdentifier("onionPanel.\(side.rawValue)Tint")
+        // `layerPanel.canvasColorButton`'s own pattern (`LayerUITests
+        // .testTheCanvasColourRowOpensTheSamePickerTheBrushUses`): the hex read back is what proves a
+        // pick reached this side's own binding rather than the other side's or the brush's.
+        .accessibilityValue(settings.tint(on: side).swiftUIColor.hexString)
+        .canvasPresentation(side == .previous ? .onionPreviousTintColour : .onionNextTintColour,
+                            isPresented: side == .previous ? $showPreviousTintPicker : $showNextTintPicker,
+                            canvasManager: canvasManager) {
+            // `supportsOpacity: false`, same as the picker it replaced: a tint's alpha was never the
+            // artist's to set (`OnionSkinFrame.composite` always draws it through `.sourceIn` at the
+            // *slot's* opacity, not the tint's own), so this keeps that rather than quietly reopening it.
+            ColorPickerPanel(color: tintColorBinding(side), supportsOpacity: false)
+                .frame(width: ColorPickerPanel.popoverSize.width, height: ColorPickerPanel.popoverSize.height)
+        }
+    }
+
+    private func tintColorBinding(_ side: OnionSkinSettings.Side) -> Binding<Color> {
+        Binding(
+            get: { settings.tint(on: side).swiftUIColor },
+            set: { picked in
+                let c = picked.rgbaComponents
+                let colour = CodableColor(red: c.r, green: c.g, blue: c.b, alpha: 1)
+                if side == .previous { canvasManager.onionSkin.previousTint = colour }
+                else { canvasManager.onionSkin.nextTint = colour }
+            })
     }
 
     /// Furthest previous at the leading edge, through a transparent middle (the drawing being worked
@@ -322,51 +259,35 @@ struct OnionSkinPanel: View {
         return stops
     }
 
-    private func tintSwatch(side: OnionSkinSettings.Side) -> some View {
-        ColorPicker("", selection: Binding(
-            get: { settings.tint(on: side).swiftUIColor },
-            set: { picked in
-                let c = picked.rgbaComponents
-                let colour = CodableColor(red: c.r, green: c.g, blue: c.b, alpha: 1)
-                if side == .previous { canvasManager.onionSkin.previousTint = colour }
-                else { canvasManager.onionSkin.nextTint = colour }
-            }
-        ), supportsOpacity: false)
-        .labelsHidden()
-        .frame(width: 30)
-        .accessibilityIdentifier("onionPanel.\(side.rawValue)Tint")
-    }
-
     // MARK: - Per-slot opacity
 
-    /// One vertical slider per skin on each side, with the link toggle between the two columns.
+    /// One vertical slider per skin on each side, with the link toggle **between** the two columns —
+    /// the reference's own placement, replacing the old header-row button of the same setting.
     ///
     /// The link toggle is the owner's emphasis and is **on by default**: with it on, dragging any one
     /// slider rescales the whole ramp and every other slider — on both sides — moves with it. See
     /// `OnionSkinOpacityRamp` for exactly what that means, including what a drag to zero does and why
     /// a far slider stops short of full.
     private var opacitySliders: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Opacity")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Opacity")
+                .font(.caption)
+                .foregroundColor(.white)
+
+            HStack(alignment: .top, spacing: 6) {
+                slotColumn(side: .previous)
+
                 Button {
                     canvasManager.onionSkin.setOpacityLinked(!settings.isOpacityLinked)
                 } label: {
-                    Label(settings.isOpacityLinked ? "Linked" : "Free",
-                          systemImage: settings.isOpacityLinked ? "link" : "link.badge.plus")
-                        .font(.caption2)
-                        .foregroundColor(settings.isOpacityLinked ? .blue : .white.opacity(0.6))
+                    Image(systemName: settings.isOpacityLinked ? "link" : "link.badge.plus")
+                        .font(.system(size: 13))
+                        .foregroundColor(settings.isOpacityLinked ? .blue : .white.opacity(0.5))
                 }
                 .accessibilityIdentifier("onionPanel.linkOpacityToggle")
                 .accessibilityValue(settings.isOpacityLinked ? "on" : "off")
-            }
+                .frame(height: 110, alignment: .center)
 
-            HStack(alignment: .top, spacing: 10) {
-                slotColumn(side: .previous)
-                Divider().frame(height: 110).overlay(Color.white.opacity(0.15))
                 slotColumn(side: .next)
             }
             .frame(maxWidth: .infinity)
@@ -384,15 +305,15 @@ struct OnionSkinPanel: View {
         let count = settings.count(on: side)
         VStack(spacing: 4) {
             Text(side == .previous ? "Previous" : "Next")
-                .font(.caption2)
+                .font(.system(size: 9))
                 .foregroundColor(.white.opacity(0.6))
             if count == 0 {
-                Color.clear.frame(height: 110)
+                Color.clear.frame(height: 96)
             } else {
                 // Previous reads right-to-left so the nearest skin of each side sits closest to the
                 // divider — the divider being where the current drawing is.
                 let order = side == .previous ? Array((1...count).reversed()) : Array(1...count)
-                HStack(alignment: .bottom, spacing: 4) {
+                HStack(alignment: .bottom, spacing: 3) {
                     ForEach(order, id: \.self) { slot in slotSlider(side: side, slot: slot) }
                 }
             }
@@ -403,7 +324,7 @@ struct OnionSkinPanel: View {
     private func slotSlider(side: OnionSkinSettings.Side, slot: Int) -> some View {
         let values = settings.opacities(on: side)
         let value = slot - 1 < values.count ? values[slot - 1] : 0
-        return VStack(spacing: 2) {
+        return VStack(spacing: 3) {
             // A `Slider` has no vertical style, so it is laid out horizontally at its natural length
             // and then rotated; the outer frame is what the layout actually reserves. Rotation is a
             // render transform, so the accessibility identifier and the value are untouched and
@@ -411,20 +332,118 @@ struct OnionSkinPanel: View {
             Slider(value: Binding(get: { value },
                                   set: { canvasManager.onionSkin.setOpacity($0, slot: slot, on: side) }),
                    in: 0...1)
-                .frame(width: 96)
+                .frame(width: 88)
                 .rotationEffect(.degrees(-90))
-                .frame(width: 26, height: 96)
+                .frame(width: 20, height: 88)
                 .accessibilityIdentifier("onionPanel.\(side.rawValue).opacity\(slot)")
 
-            Text("\(Int((value * 100).rounded()))")
-                .font(.system(size: 9))
-                .foregroundColor(.white.opacity(0.6))
-            Text("\(slot)")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.white.opacity(0.35))
-            // ToonSquid's out-of-pegs dot belongs here, as a third row in this same column. Out of
-            // scope on the owner's instruction (2026-08-17) — the space is left, nothing is drawn.
+            // ToonSquid's own dot under each slider — its out-of-pegs transform-handle feature stays
+            // out of scope (owner, 2026-08-17: "the space is left, nothing is drawn"). This is that
+            // reserved space finally drawn into, on purpose still inert: a fixed mark rather than a
+            // control, with no state of its own for `OnionSkinSettings` to disagree with.
+            Circle()
+                .fill(Color.white.opacity(0.3))
+                .frame(width: 4, height: 4)
         }
+    }
+
+    // MARK: - Quality (not in the reference; `OnionSkinSettings.resolution` still needs a home)
+
+    /// How sharp the skins are, as a fraction of the canvas — the owner's own vocabulary
+    /// (2026-08-17: "default half resolution, option to make it full or quarter"). Absent from the
+    /// reference image, and TODO (70) is explicit that an unshown setting is placed rather than
+    /// dropped; this sits under its own divider, after everything the reference does show, since nothing
+    /// about it belongs to any one row above.
+    private var qualitySection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Quality")
+                .font(.caption)
+                .foregroundColor(.white)
+
+            Picker("Resolution", selection: binding(\.resolution)) {
+                ForEach(OnionSkinSettings.Resolution.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("onionPanel.resolutionPicker")
+
+            resolutionSizeLegend
+            resolutionNote
+        }
+    }
+
+    /// The composite size each option will actually produce on this canvas, under the segment that
+    /// picks it. Not "half of 2048" but the number `OnionSkinBudget` will really use, so the
+    /// readability floor is visible as a fact — on the owner's 2048x1024 the legend reads
+    /// 2048x1024 / 1024x512 / **768x384**, and the last one being larger than a naive quarter needs
+    /// no sentence to explain it.
+    ///
+    /// Monospaced digits so the three columns do not shuffle as the canvas changes, and the selected
+    /// one is brighter rather than boxed — a second box under a segmented control reads as a second
+    /// control.
+    private var resolutionSizeLegend: some View {
+        HStack(spacing: 0) {
+            ForEach(OnionSkinSettings.Resolution.allCases) { resolution in
+                Text(compositeSizeLabel(resolution))
+                    .font(.system(size: 9).monospacedDigit())
+                    .foregroundColor(.white.opacity(resolution == settings.resolution ? 0.85 : 0.45))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        // Three `Text`s in an `HStack` are three accessibility elements and a stack is none, so the
+        // identifier would name nothing without this — the trap `tintBar` does not hit only because
+        // it draws no children of its own to lose.
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("onionPanel.resolutionSizes")
+    }
+
+    private func compositeSizeLabel(_ resolution: OnionSkinSettings.Resolution) -> String {
+        guard let canvas = canvasManager.canvasSize else { return " " }
+        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
+        return "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
+    }
+
+    /// One line, always present, carrying the most useful thing there is to say about the current
+    /// combination — the caution when the estimate crosses `OnionSkinBudget.cautionThresholdMilliseconds`,
+    /// the readability floor when it is what is actually in force, and otherwise the plain trade-off.
+    ///
+    /// **It occupies reserved space rather than animating in, and that is the deliberate half of this
+    /// control.** The caution's trigger is the count sliders and the resolution picker, so the moment
+    /// it would animate is the moment the artist is dragging something two rows below it in the old
+    /// layout — kept anyway now that Quality sits last, since nothing below it can move again either.
+    /// Two lines' worth of height is held whether or not there is a caution, so nothing else ever moves.
+    ///
+    /// The caution is brighter rather than coloured or badged. It is a caution, not an alarm: it says
+    /// what the current settings cost and what the cheaper one costs, and lets the artist decide.
+    private var resolutionNote: some View {
+        Text(resolutionNoteText)
+            .font(.caption2)
+            .foregroundColor(.white.opacity(caution == nil ? 0.55 : 0.85))
+            .lineLimit(2)
+            .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: 28, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("onionPanel.resolutionNote")
+    }
+
+    private var caution: String? {
+        guard let canvas = canvasManager.canvasSize else { return nil }
+        return OnionSkinBudget.caution(for: canvas, settings: settings)
+    }
+
+    private var resolutionNoteText: String {
+        if let caution { return caution }
+        guard let canvas = canvasManager.canvasSize else { return "Sharper skins cost more to draw." }
+        let size = OnionSkinBudget.compositeSize(for: canvas, resolution: settings.resolution)
+        let plain = max(canvas.width, canvas.height) * settings.resolution.fraction
+        let edge = Int(max(size.width, size.height).rounded())
+        // The floor only gets a mention when it is doing something; the rest of the time saying so
+        // would be noise about a rule that is not in force.
+        return edge > Int(plain.rounded()) && size != canvas
+            ? "Held up from \(Int(plain.rounded())) px so lines stay readable."
+            : "Sharper skins cost more to draw."
     }
 
     // MARK: - Bindings

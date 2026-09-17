@@ -77,6 +77,14 @@ source cannot settle** — see Open question below.
 onion-skin popover (`OnionSkinPanel.swift:326`), and `ShareLink`'s activity popover inside the Actions
 panel (`ActionRecorderControls.swift:142`).
 
+**Onion skin's own entry closed 2026-09-16 — TODO (72).** The stock `ColorPicker` this section and the
+list below both name was the second colour picker the owner reported as bloat and asked deleted; it is
+gone, along with the swatches that were its only call sites. `OnionSkinPanel` now opens the app's one
+`ColorPickerPanel` from the tint bar's own ends, through `.onionPreviousTintColour` /
+`.onionNextTintColour` — two ordinary `CanvasPresentation` cases, registered and protected exactly like
+`effectOutlineColour` two rows below. What was a nested, unregistered stock picker is now nothing this
+census needs to keep asking about.
+
 ## BROKEN — a stroke under it dismisses it mid-sequence, nothing clears it first
 
 *All seven are fixed as of 2026-08-20. Each now names its case in the "Holds it open" column's

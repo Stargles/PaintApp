@@ -313,7 +313,20 @@ struct AnimationTimeline: View {
             AnchoredMenu(anchor: open.anchor,
                          toggleControl: open.toggleControl,
                          identifier: "timeline.anchoredMenu.\(open.presentation.rawValue)",
-                         onDismiss: { closeAnchoredMenu(open.presentation) }) {
+                         onDismiss: {
+                // TODO (72): `OnionSkinPanel`'s two tint swatches open `ColorPickerPanel` as a
+                // `.popover` — 300pt wide — nested inside this ~250pt-wide menu. A touch on that
+                // popover's own content (the hex field, the hue slider) necessarily falls outside
+                // `menuFrame`, so `AnchoredMenuDismissal.shouldDismiss` cannot tell "outside the
+                // onion menu" from "inside the picker the onion menu itself raised" and closes this
+                // menu — tearing the picker down with it, mid-interaction, found live. The picker's
+                // own native outside-touch dismissal is untouched by skipping this: it still closes
+                // itself correctly on a genuinely outside touch. This only stops the *outer* menu
+                // from also tearing itself (and the picker) down while one of its own nested
+                // presentations is legitimately still open.
+                guard !nestedOnionTintPickerIsOpen else { return }
+                closeAnchoredMenu(open.presentation)
+            }) {
                 anchoredMenuContent(open.presentation)
             }
             // As tall as the screen and bottom-aligned to this panel, so a menu can be drawn above
@@ -363,7 +376,11 @@ struct AnimationTimeline: View {
         case .timelineSlotMenu:
             timelineMenuContent
         case .onionSkinOptions:
-            OnionSkinPanel(canvasManager: canvasManager).frame(width: 380, height: 640)
+            // ~250 pt wide, the owner's own spec (TODO (70)) — a compact dark panel, not the wide
+            // popover the old layout needed. `OnionSkinPanel` still scrolls internally if a resolution
+            // caution's second line pushes the content past this, so a bad height estimate here clips
+            // nothing silently.
+            OnionSkinPanel(canvasManager: canvasManager).frame(width: 250, height: 500)
         case .interpolateOptions:
             InterpolatePanel(canvasManager: canvasManager).frame(width: 260)
         case .graphChannelList:
@@ -377,6 +394,13 @@ struct AnimationTimeline: View {
 
     /// Writes the site's own binding, which is what the registration observes — so closing an
     /// anchored menu goes through exactly the path a popover's own dismissal went through.
+    /// See `anchoredMenuLayer`'s `onDismiss` — the guard that keeps a touch on the onion panel's own
+    /// nested colour picker from tearing down the panel underneath it.
+    private var nestedOnionTintPickerIsOpen: Bool {
+        canvasManager.openPresentations.contains(.onionPreviousTintColour)
+            || canvasManager.openPresentations.contains(.onionNextTintColour)
+    }
+
     private func closeAnchoredMenu(_ presentation: CanvasPresentation) {
         switch presentation {
         case .timelineSlotMenu:   timelineMenu = nil
