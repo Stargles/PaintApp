@@ -48,24 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (87) Exiting a canvas returns to its folder in the gallery
-
-**Status** — filed 2026-09-16. The owner: *"exiting a canvas should exit to the folder that the canvas
-is in in the gallery."*
-
-- [ ] The gallery opens on the document's folder, not the root.
-
----
-
-## (78) Layer thumbnails show the cel on the current frame
-
-**Status** — filed 2026-09-16. The owner: *"The thumbnails in the layers menu don't accurately reflect
-the layers on that frame. Sometimes they show the cel of a different frame. Make them do so."*
-
-- [ ] A thumbnail is the current frame's cel for that layer, on every frame change.
-
----
-
 ## (79) Brush size and opacity sliders read in %, size possibly logarithmic
 
 **Status** — filed 2026-09-16. The owner: *"Make the brush size slider on the left bar measured in %
