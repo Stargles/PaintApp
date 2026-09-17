@@ -458,7 +458,7 @@ extension CanvasManager {
            let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == session.celID }) {
             // Clear the transient tier once, or a stale pre-edit fill preview composites over the top —
             // `applyBrushToSelection`'s line, at the first tick rather than the press.
-            setFillImage(layerIndex: layerIndex, celIndex: celIndex, image: (nil as UIImage?))
+            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
         }
         session.applied = true
         selectionEdit = session

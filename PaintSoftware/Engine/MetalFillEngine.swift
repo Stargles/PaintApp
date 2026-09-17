@@ -50,9 +50,12 @@ final class MetalFillEngine {
         var threshold: Float = 0
         var gapRadius: Float = 0
         var edgeOverlap: Float = 0
-        /// px the artwork rect is inset from the buffer on all four sides (see Fill.metal). Occupies
-        /// the slot that used to be `_pad0`, so the layout is unchanged.
-        var edgeInset: Float = 0
+        /// The artwork rect in buffer pixels, `[minX, maxX) x [minY, maxY)` (see Fill.metal). The
+        /// buffer itself when the canvas edge is not a boundary.
+        var artworkMinX: Float = 0
+        var artworkMinY: Float = 0
+        var artworkMaxX: Float = 0
+        var artworkMaxY: Float = 0
         var seedColor: SIMD4<Float> = .zero
         var fillColor: SIMD4<Float> = .zero
     }
@@ -137,10 +140,9 @@ final class MetalFillEngine {
                      lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) -> SessionOutcome {
         let needed = MetalFillSession.predictedBytes(width: width, height: height,
                                                      isLasso: lassoMask != nil)
-        let budget = Self.fillBudgetBytes
-        guard needed <= budget else { return .tooLarge(needed: needed, budget: budget) }
         guard CompositorBudget.hasHeadroom(for: needed) else {
-            return .noHeadroom(needed: needed, available: os_proc_available_memory())
+            return .noHeadroom(needed: needed,
+                               available: CompositorBudget.availableMemoryOverrideBytes ?? os_proc_available_memory())
         }
         guard let session = MetalFillSession(engine: self, referenceRGBA: referenceRGBA,
                                              width: width, height: height,
@@ -154,35 +156,38 @@ final class MetalFillEngine {
     /// with "no budget and no headroom check at all", and RENDER.md §5 stage 7.
     ///
     /// MEASURED on an iOS 26.5 simulator, 2026-09-06, summed off `MTLBuffer.length`: a bucket session
-    /// is **38.0 bytes per canvas pixel** and a lasso one **42.0** — 76 MB and 84 MB at the owner's
-    /// 2048x1024, **608 MB at 4096²** and 9.7 GB at 16383², where `makeBuffer` returns nil and the
-    /// whole gesture used to become a silent no-op. (The census read ~34 and 44 out of the source; the
-    /// four it missed are the CPU copy of the reference the session keeps for `seedColor(atX:y:)`.)
+    /// is **38.0 bytes per working pixel** and a lasso one **42.0** (46 with two reference colours).
+    /// (The census read ~34 and 44 out of the source; the four it missed are the CPU copy of the
+    /// reference the session keeps for `seedColor(atX:y:)`.)
     ///
     /// **Borrowed from `CompositorBudget` rather than invented**, like every other budget in the app:
     /// a fill session is a transient working set held *beside* the document, the compositor's
     /// textures and the caches, so it should scale with the device on the one rule they all use. On
-    /// the owner's iPad 9 that is 183.7 MB, which admits their canvas (76 MB) and 2048² (152 MB) and
-    /// refuses 4096² — where the alternative is 3.3× the compositor's whole allowance allocated in
-    /// `.storageModeShared` buffers that are resident the moment they are made (PERFORMANCE.md §9
-    /// item 8), on top of a document and a rebuild the census already puts at 850–950 MB.
+    /// the owner's iPad 9 that is 183.7 MB.
     ///
-    /// **The budget and the valve are two mechanisms and both are here**, which is `CompositorBudget`'s
-    /// own doctrine rather than belt and braces: the budget is static and says what shape of fill this
-    /// device supports at all, and `hasHeadroom` is dynamic and says whether *right now* is the moment
-    /// — a fill the budget allows can still be declined because another app took the memory.
+    /// **Since TODO (86) this is a budget on the *window* a fill works in, never on the canvas**:
+    /// `FillWindow` sizes every buffer of a gesture to the region being filled and scales the window
+    /// down when the region alone exceeds this, so no canvas is too large to fill and `makeSession`
+    /// has no static refusal left. What remains here is the valve — `hasHeadroom` is dynamic and says
+    /// whether *right now* is the moment: a fill the budget allows can still be declined because
+    /// another app took the memory.
     static var fillBudgetBytes: Int { CompositorBudget.textureBudgetBytes }
 
-    /// What `makeSession` decided, and **why**, because the three ways it can fail are three different
-    /// things to tell the artist and returning nil for all of them told them nothing at all. Before
-    /// this the 16383² case was `makeBuffer` answering nil inside a `guard`, so the fill tool simply
-    /// did not work and said so nowhere — CLAUDE.md's "a refusal with no notice", reached by a door
-    /// nobody had checked.
+    /// The most working pixels a window may hold and still fit `fillBudgetBytes` — what `FillWindow`
+    /// sizes itself against. Priced at the dearest session of its kind, since a lasso's second
+    /// reference colour is not knowable before the window is cut.
+    static func workingPixelBudget(isLasso: Bool) -> Int {
+        max(1, fillBudgetBytes / MetalFillSession.bytesPerPixel(isLasso: isLasso, twoReferenceColours: true))
+    }
+
+    /// What `makeSession` decided, and **why**, because the ways it can fail are different things to
+    /// tell the artist and returning nil for all of them told them nothing at all. Before this the
+    /// 16383² case was `makeBuffer` answering nil inside a `guard`, so the fill tool simply did not
+    /// work and said so nowhere — CLAUDE.md's "a refusal with no notice", reached by a door nobody
+    /// had checked.
     enum SessionOutcome {
         case ready(MetalFillSession)
-        /// This canvas is too big for a fill on this device, whatever the memory situation is.
-        case tooLarge(needed: Int, budget: Int)
-        /// The canvas is within budget but the process cannot afford the allocation at this moment.
+        /// The window is within budget but the process cannot afford the allocation at this moment.
         case noHeadroom(needed: Int, available: Int)
         /// Metal declined, or the arguments do not describe a canvas.
         case unavailable(needed: Int)
@@ -503,28 +508,40 @@ final class MetalFillSession {
     static func predictedBytes(width: Int, height: Int, isLasso: Bool,
                                twoReferenceColours: Bool = true) -> Int {
         let count = max(0, width) * max(0, height)
+        var bytes = count * bytesPerPixel(isLasso: isLasso, twoReferenceColours: twoReferenceColours)
+        // The two that do not scale — the atomic change counter and one `FillParams` — which are
+        // here so the prediction is exact rather than nearly right. A budget that is "close" is a
+        // budget a test cannot pin against the allocation.
+        bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+        if isLasso {
+            // A second `FillParams` and the filled-pixel counter.
+            bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+        }
+        return bytes
+    }
+
+    /// What every working pixel of a session costs, summed off the buffer list `allocatedBytes` sums.
+    static func bytesPerPixel(isLasso: Bool, twoReferenceColours: Bool) -> Int {
         // refBuf, pathWallBuf, outBuf: 4 bytes a pixel each. wall/dilated/closed/bridge/region/
         // regionTmp: 1 each. jfaA/jfaB: 8 each. Plus the CPU reference copy at 4. **38 a pixel**,
         // MEASURED equal to `allocatedBytes` by
         // `MemoryBudgetLogicTests.testAFillSessionsPredictedCostIsWhatItActuallyAllocates`.
-        var bytes = count * (4 + 4 + 4) + count * 6 + count * 16 + count * 4
-        // The two that do not scale — the atomic change counter and one `FillParams` — which are 68
-        // bytes together and are here so the prediction is exact rather than nearly right. A budget
-        // that is "close" is a budget a test cannot pin against the allocation.
-        bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+        var bytes = (4 + 4 + 4) + 6 + 16 + 4
         if isLasso {
-            // lasso, ring, barrier, alpha: 1 byte a pixel each, plus a second `FillParams` and the
-            // filled-pixel counter.
-            bytes += count * 4
-            bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+            // lasso, ring, barrier, alpha: 1 byte a pixel each.
+            bytes += 4
             // wall2, closed2, barrier2, region2: 1 each, only when the ring holds two colours — which
             // is not knowable until the ring is built, so the budget assumes the worst case. A lasso
             // session over a uniform reference resolves to one colour and allocates 42 bytes a pixel
             // rather than 46; the prediction may only over-estimate, never under.
-            if twoReferenceColours { bytes += count * 4 }
+            if twoReferenceColours { bytes += 4 }
         }
         return bytes
     }
+
+    /// This buffer as a rect — what `fill(artworkRect:)` is handed when the canvas edge bounds the
+    /// fill and the buffer *is* the canvas, which is every fixture in the logic tier.
+    var bufferRect: CGRect { CGRect(x: 0, y: 0, width: width, height: height) }
 
     /// The straight-RGBA colour at `(x, y)` in the reference (0..1), used as the flood seed colour.
     func seedColor(atX x: Int, y: Int) -> SIMD4<Float> {
@@ -566,20 +583,18 @@ final class MetalFillSession {
     ///   `CanvasManager.fillEdgeRadius(lasso:)` is where that becomes a radius: for a lasso it passes
     ///   `fillExpandRange.upperBound - v`, which anchors the top of the slider at the ink's outer edge
     ///   so no setting can put paint on clean paper.
-    /// - Parameter canvasEdgeIsWall: make the canvas edge bound the fill. Two mechanisms, both
-    ///   described at length above `edgeBridge` in Fill.metal: the artwork rect's boundary becomes a
-    ///   **barrier** the flood cannot travel across (unconditional — it does not consult
-    ///   `gapRadius`), and gap-closing may additionally **bridge** to that edge so a stroke stopping
-    ///   a few px short of it still seals. A lasso session honours both: the artwork rect is a wall
-    ///   like any other, and §4 case 10 already treats the canvas edge as part of the fence.
-    /// - Parameter edgeInset: px the artwork rect is inset from this buffer on all four sides, i.e.
-    ///   `CanvasManager.canvasPadding`. 0 — the default, and what every caller with no padding
-    ///   passes — makes the artwork rect the buffer itself, at which point both mechanisms reduce to
-    ///   the buffer-rim behaviour the engine had before padding was a consideration. Ignored
-    ///   entirely when `canvasEdgeIsWall` is false.
+    /// - Parameter artworkRect: the paper's rect in **this buffer's** pixels, when the canvas edge
+    ///   bounds the fill; nil when it does not. Two mechanisms, both described at length above
+    ///   `edgeBridge` in Fill.metal: the rect's boundary becomes a **barrier** the flood cannot
+    ///   travel across (unconditional — it does not consult `gapRadius`), and gap-closing may
+    ///   additionally **bridge** to that edge so a stroke stopping a few px short of it still seals.
+    ///   A lasso session honours both: the artwork rect is a wall like any other, and §4 case 10
+    ///   already treats the canvas edge as part of the fence. The rect may extend past the buffer —
+    ///   the buffer is a window of the canvas (`FillWindow`) — and a degenerate one is treated as
+    ///   nil, because a zero-area rect would fence the flood into nothing.
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
-              gapRadius: Float, edgeOverlap: Float, canvasEdgeIsWall: Bool = false,
-              edgeInset: Float = 0, fillColor: SIMD4<Float>) -> [UInt8]? {
+              gapRadius: Float, edgeOverlap: Float, artworkRect: CGRect? = nil,
+              fillColor: SIMD4<Float>) -> [UInt8]? {
         // A lasso session works from its mask, so there is no tapped pixel to be in bounds.
         guard isLasso || isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
@@ -593,12 +608,15 @@ final class MetalFillSession {
         params.threshold = threshold; params.gapRadius = gapRadius; params.edgeOverlap = edgeOverlap
         params.seedColor = primary; params.fillColor = fillColor
         // **One place decides what the option means**, so "off" is provably the pre-padding binary:
-        // with `canvasEdgeIsWall` false the shader sees inset 0 and every edge rule collapses to the
-        // buffer rim. A degenerate inset (negative, or wide enough to leave no artwork rect at all —
-        // a project could load a padding inconsistent with its canvasSize) is treated the same way,
-        // because a zero-area rect would fence the flood into nothing.
-        let inset = edgeInset.rounded()
-        params.edgeInset = (canvasEdgeIsWall && inset > 0 && 2 * inset < Float(min(width, height))) ? inset : 0
+        // without a rect the shader sees the buffer itself and every edge rule collapses to its rim.
+        // A degenerate rect (empty, or one a project loaded with a padding inconsistent with its
+        // canvasSize) is treated the same way, because a zero-area rect would fence the flood into
+        // nothing.
+        let boundary = artworkRect.map { $0.integral }.flatMap { $0.isEmpty ? nil : $0 }
+        let canvasEdgeIsWall = boundary != nil
+        let paper = boundary ?? bufferRect
+        params.artworkMinX = Float(paper.minX); params.artworkMinY = Float(paper.minY)
+        params.artworkMaxX = Float(paper.maxX); params.artworkMaxY = Float(paper.maxY)
         memcpy(paramsBuf.contents(), &params, MemoryLayout<MetalFillEngine.FillParams>.size)
         if let params2Buf, let second = referenceColours.1 {
             var params2 = params
@@ -738,6 +756,29 @@ final class MetalFillSession {
         var result = [UInt8](repeating: 0, count: count * 4)
         result.withUnsafeMutableBytes { memcpy($0.baseAddress!, outBuf.contents(), count * 4) }
         return result
+    }
+
+    /// Which of `sides` the **last** `fill(...)` painted within `band` pixels of — the question
+    /// `FillWindow` grows a bucket window on (TODO (86)). A flood that reaches the band may have more
+    /// to reach past the buffer's rim, and a close computed in the band was computed without the
+    /// walls beyond it, so a window is trusted only where the paint keeps `band` clear of every edge
+    /// that is not the canvas's own.
+    ///
+    /// Read on `fillQueue` after `fill` returned, so the shared buffer is settled — the same standing
+    /// `lastReachedMask()` relies on.
+    func paintedReaches(band: Int, of sides: FillWindow.Sides) -> FillWindow.Sides {
+        let out = outBuf.contents().bindMemory(to: UInt8.self, capacity: count * 4)
+        let band = max(1, min(band, width, height))
+        func painted(in xs: Range<Int>, _ ys: Range<Int>) -> Bool {
+            for y in ys { for x in xs where out[(y * width + x) * 4 + 3] != 0 { return true } }
+            return false
+        }
+        var reached = FillWindow.Sides()
+        if sides.contains(.left), painted(in: 0..<band, 0..<height) { reached.insert(.left) }
+        if sides.contains(.right), painted(in: (width - band)..<width, 0..<height) { reached.insert(.right) }
+        if sides.contains(.top), painted(in: 0..<width, 0..<band) { reached.insert(.top) }
+        if sides.contains(.bottom), painted(in: 0..<width, (height - band)..<height) { reached.insert(.bottom) }
+        return reached
     }
 
     /// Encodes `computeWalls` for whichever reference `params` carries, then the gap-closing

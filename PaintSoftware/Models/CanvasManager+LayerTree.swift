@@ -680,7 +680,7 @@ extension CanvasManager {
                 // `mergeContribution` applies to a pair, applied to a cel with no partner.
                 let tiers = copyTiers(of: topCel)
                 adopted.append(Cel(id: UUID(), startFrame: topCel.startFrame, frameCount: topCel.frameCount,
-                                   raster: tiers.raster, fillImage: tiers.fillImage,
+                                   raster: tiers.raster,
                                    bakedImage: tiers.bakedImage, vector: tiers.vector,
                                    transformTracks: tiers.transformTracks,
                                    pendingPoseBaselines: tiers.pendingPoseBaselines))
@@ -719,7 +719,7 @@ extension CanvasManager {
         )
         layers[bottomIndex].cels[bottomCel].raster =
             bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
-        layers[bottomIndex].cels[bottomCel].fillImage = nil
+        layers[bottomIndex].cels[bottomCel].fillPreview = nil
         layers[bottomIndex].cels[bottomCel].bakedImage = nil
     }
 
@@ -822,7 +822,7 @@ extension CanvasManager {
     /// test with the vector clause taken out, and conservative in the same direction: `raster.version`
     /// having moved means the tier may hold pixels this cannot see without scanning them.
     private func holdsOnlyVectorInk(_ cel: Cel) -> Bool {
-        cel.fillImage == nil && cel.bakedImage == nil
+        cel.fillPreview == nil && cel.bakedImage == nil
             && cel.raster.strokeCount == 0 && cel.raster.version == 0
     }
 
@@ -912,7 +912,7 @@ extension CanvasManager {
     ///
     /// **The cels go through `copyTiers(of:)`, not a hand-rolled `Cel(...)`** — the 2026-09-11 fix for
     /// the fourth site `duplicateCel`, `splitCel` and `pasteCel` fell through before 2026-09-02:
-    /// naming `raster`, `fillImage`, `bakedImage` and `vector` but not `transformTracks` or
+    /// naming `raster`, `bakedImage` and `vector` but not `transformTracks` or
     /// `pendingPoseBaselines` defaults both away, so a duplicated cel's Move animation and held pose
     /// vanished silently. `copyTiers` also flattens a `.generate` cel into a still (`flattenedStill`),
     /// which this site never did either — a duplicated in-between came back **blank**, since a
@@ -924,7 +924,7 @@ extension CanvasManager {
         let cels = source.cels.map { cel -> Cel in
             let tiers = copyTiers(of: cel)
             let copy = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
-                           raster: tiers.raster, fillImage: tiers.fillImage,
+                           raster: tiers.raster,
                            bakedImage: tiers.bakedImage, vector: tiers.vector,
                            transformTracks: tiers.transformTracks,
                            pendingPoseBaselines: tiers.pendingPoseBaselines)

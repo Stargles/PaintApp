@@ -51,7 +51,7 @@ struct LayerRenderSource {
     //
     // A key that *would* hit has to come from the model rather than from the rendered result — the
     // cel's ID with `RasterLayerTexture.version`, `VectorCanvas.version`, and the identities of
-    // `fillImage`/`bakedImage`, plus the request's quality, since `.preview` and `.full` are
+    // `fillPreview`/`bakedImage`, plus the request's quality, since `.preview` and `.full` are
     // different pixels. That is real work with an ABA hazard to handle, and it belongs with the cache
     // that needs it. §5.2's sandwich is that cache, and it caches *composites* of everything above
     // and below the active layer rather than one texture per layer — which is both the thing §5.3
@@ -173,7 +173,7 @@ struct LayerContentVersion: Hashable {
     let rasterVersion: Int
     let vector: ObjectIdentifier?
     let vectorVersion: Int
-    let fillImage: ObjectIdentifier?
+    let fillPreview: ObjectIdentifier?
     let bakedImage: ObjectIdentifier?
     let valueFill: ValueFill?
     let effect: Effect?
@@ -215,7 +215,7 @@ struct LayerContentVersion: Hashable {
         // stamps, and a live stream frame must not re-bake a cel's span per tick — see
         // `VectorCanvas.committedVersion`.
         vectorVersion = cel.vector?.committedVersion ?? -1
-        fillImage = cel.fillImage.map(ObjectIdentifier.init)
+        fillPreview = cel.fillPreview.map { ObjectIdentifier($0.image) }
         bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
     }
 
@@ -225,7 +225,7 @@ struct LayerContentVersion: Hashable {
         hasher.combine(rasterVersion)
         hasher.combine(vector)
         hasher.combine(vectorVersion)
-        hasher.combine(fillImage)
+        hasher.combine(fillPreview)
         hasher.combine(bakedImage)
         hasher.combine(valueFill)
         hasher.combine(derived)

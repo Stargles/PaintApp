@@ -376,7 +376,7 @@ extension CanvasManager {
         vector.restoreElements(rewritten, changedInk: nil, rewriting: caught)
         // The transient tier, or a stale pre-edit fill preview composites over the top —
         // `recolorSelection` clears it for the same reason.
-        setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
+        setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
 
         // **One record for both stores, and that is the requirement rather than tidiness.** Every key
         // on both tracks changes meaning the moment membership does, so an undo that put the geometry

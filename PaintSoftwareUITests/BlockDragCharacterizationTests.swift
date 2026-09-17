@@ -225,7 +225,7 @@ final class BlockDragCharacterizationTests: XCTestCase {
         }
         XCTAssertNil(landed.vector, "A raster layer's cel must not still carry vector geometry")
         XCTAssertNil(landed.bakedImage, "…and holds its content in exactly one tier at rest")
-        XCTAssertNil(landed.fillImage)
+        XCTAssertNil(landed.fillPreview)
     }
 
     /// Recipes address a keyframe as (layer, cel). A block that changes layers has to take every

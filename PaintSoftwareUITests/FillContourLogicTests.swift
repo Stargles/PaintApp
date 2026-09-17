@@ -517,8 +517,11 @@ final class FillContourLogicTests: XCTestCase {
         manager.fillQueue.sync {}
         settle()
 
-        let regionBytes = try XCTUnwrap(manager.fillLastRegionRGBA, "the first lasso previewed nothing")
-        let regionW = manager.fillLastRegionW, regionH = manager.fillLastRegionH
+        let render = try XCTUnwrap(manager.fillLastRender, "the first lasso previewed nothing")
+        XCTAssertEqual(render.window.rect, CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+                       "on a canvas this small the fill's window is the canvas, so the mask below is in canvas pixels")
+        let regionBytes = render.bytes
+        let regionW = render.window.workingWidth, regionH = render.window.workingHeight
         let cut = manager.fillHalfCoverageAlpha
         let firstMask = Mask(bits: (0..<(regionW * regionH)).map { regionBytes[$0 * 4 + 3] >= cut },
                              width: regionW, height: regionH)

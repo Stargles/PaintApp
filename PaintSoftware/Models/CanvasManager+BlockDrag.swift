@@ -191,7 +191,7 @@ extension CanvasManager {
                                                    derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
                 cel.raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
                 cel.vector = nil
-                cel.fillImage = nil
+                cel.fillPreview = nil
                 cel.bakedImage = nil
                 // The recipe goes with the geometry — **both** modes now, where this used to drop
                 // only `.reproject`. A `.generate` recipe was harmless while the flatten was blank;

@@ -22,10 +22,12 @@ final class LayerHostView: UIView {
         // interaction-disabled and the touch lands here instead.
         isMultipleTouchEnabled = true
 
-        // The fill raster is always rendered at exactly canvasSize (see FloodFillEngine), matching this
-        // view's bounds 1:1, so a plain stretch-to-fill can't introduce any resampling blur at the edges.
+        // The preview covers the window the fill worked in (`FillWindow`), so this view is framed to
+        // that rect by `showFillPreview` rather than pinned to the host. At scale 1 the image is the
+        // window's own pixels and the stretch is 1:1; below it the stretch is the resample the fill
+        // already accepted.
         fillImageView.contentMode = .scaleToFill
-        fillImageView.translatesAutoresizingMaskIntoConstraints = false
+        fillImageView.isHidden = true
 
         bakedImageView.isUserInteractionEnabled = false
         bakedImageView.isHidden = true
@@ -71,10 +73,6 @@ final class LayerHostView: UIView {
         addSubview(strokeView)
         addSubview(fillImageView)
         NSLayoutConstraint.activate([
-            fillImageView.topAnchor.constraint(equalTo: topAnchor),
-            fillImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            fillImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            fillImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
             bakedImageView.topAnchor.constraint(equalTo: topAnchor),
             bakedImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             bakedImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -87,6 +85,16 @@ final class LayerHostView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Shows the live fill preview over its own window of the canvas, or nothing. The host's points
+    /// are canvas pixels — the stack is magnified by a transform on the container — so the preview's
+    /// rect is the view's frame directly.
+    func showFillPreview(_ preview: FillPreview?) {
+        fillImageView.image = preview?.image
+        fillImageView.frame = preview?.rect ?? .zero
+        fillImageView.isHidden = preview == nil
+        alignContentMasks()
+    }
 
     // MARK: - Blanking, for §5.2's sandwich
 
@@ -203,12 +211,30 @@ final class LayerHostView: UIView {
         for (view, mask) in zip(maskedContentViews, contentMasks) {
             if let image {
                 mask.contents = image
-                mask.frame = bounds
+                mask.frame = maskFrame(for: view)
                 if view.layer.mask !== mask { view.layer.mask = mask }
             } else {
                 if view.layer.mask === mask { view.layer.mask = nil }
                 mask.contents = nil
             }
+        }
+        CATransaction.commit()
+    }
+
+    /// Where a canvas-sized mask sits in `view`'s own coordinates: the host's bounds, shifted back by
+    /// the view's origin — which is zero for the two pinned views and the preview's window for
+    /// `fillImageView`.
+    private func maskFrame(for view: UIView) -> CGRect {
+        bounds.offsetBy(dx: -view.frame.minX, dy: -view.frame.minY)
+    }
+
+    private func alignContentMasks() {
+        guard contentMaskImage != nil else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (view, mask) in zip(maskedContentViews, contentMasks) {
+            let frame = maskFrame(for: view)
+            if mask.frame != frame { mask.frame = frame }
         }
         CATransaction.commit()
     }
@@ -219,10 +245,6 @@ final class LayerHostView: UIView {
         // size is fixed for a document's life and a stroke cannot outlive it, so this is belt and
         // braces rather than a live resize path — but a mask frozen at the zero frame it was created
         // with would hide the layer entirely, which is too quiet a failure to leave to reasoning.
-        guard contentMaskImage != nil else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for mask in contentMasks where mask.frame != bounds { mask.frame = bounds }
-        CATransaction.commit()
+        alignContentMasks()
     }
 }

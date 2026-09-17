@@ -605,7 +605,7 @@ final class CGContextDabTarget: DabTarget {
 /// current (PencilKit strokes stay vector-smooth at any magnification, unlike this app's other
 /// raster tiers, which caused an ink-blurs-when-zoomed bug — see BUGS.md), every stamp is rasterized
 /// once, directly, at native canvas resolution. Zooming in is then a plain nearest-neighbor pixel
-/// zoom, same as `fillImage`/`bakedImage`.
+/// zoom, same as `bakedImage`.
 ///
 /// IMPLEMENTATION: a persistent CoreGraphics bitmap context that each stamp draws into
 /// *incrementally* — only the pixels under the stamp are touched (O(stamp area)), the whole canvas
@@ -803,7 +803,7 @@ final class RasterLayerTexture: DabTarget {
 
     /// The current pixel content, or a shared 1×1 transparent image when there is no bitmap. Always
     /// at native resolution (scale 1) — callers that need a smaller render (thumbnails) downscale
-    /// this themselves, same as the existing `fillImage`/`bakedImage` path.
+    /// this themselves, same as the existing `bakedImage` path.
     ///
     /// **The blank answer is shared and memoises nothing, and that is the whole of it.** Every vector
     /// cel carries an empty raster tier, and this used to mint a canvas-sized transparent bitmap for
@@ -870,7 +870,7 @@ final class RasterLayerTexture: DabTarget {
 
     /// The single implementation of canvas-flip geometry: `image` mirrored about the centre of a
     /// `canvasSize` canvas. A canvas flip has to move all three raster tiers — this texture (the
-    /// live-stroke tier) plus the cel's `fillImage` and `bakedImage` — in exact lockstep, or content
+    /// live-stroke tier) plus the cel's `fillPreview` and `bakedImage` — in exact lockstep, or content
     /// lands on the wrong side of the canvas relative to the rest. Both `flipped(horizontal:)` below
     /// and `CanvasManager.flipCanvas` route through here so there is only one translate+scale to keep
     /// in step. Infrequent (whole-canvas op), so it renders through `UIGraphicsImageRenderer` rather

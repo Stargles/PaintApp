@@ -196,8 +196,26 @@ enum CompositorBudget {
         }
     }
 
+    /// The bytes `hasHeadroom(for:)` reads as available, imposed by a test, or nil for the process's
+    /// own `os_proc_available_memory()`. The seam `budgetOverrideBytes` is, for the valve: on the
+    /// simulator the real reading is 0 and the valve is inert, so nothing short of this can drive
+    /// the refusal a nearly-full iPad makes. Locked for the same reason, restored to nil the same way.
+    static var availableMemoryOverrideBytes: Int? {
+        get {
+            overrideLock.lock()
+            defer { overrideLock.unlock() }
+            return storedAvailableMemoryOverrideBytes
+        }
+        set {
+            overrideLock.lock()
+            defer { overrideLock.unlock() }
+            storedAvailableMemoryOverrideBytes = newValue
+        }
+    }
+
     private static let overrideLock = NSLock()
     private static var storedBudgetOverrideBytes: Int?
+    private static var storedAvailableMemoryOverrideBytes: Int?
 
     /// Whether the process can afford `bytes` of new allocation *right now*.
     ///
@@ -214,7 +232,7 @@ enum CompositorBudget {
     /// before the next composite starts. Asking for exactly what the textures cost would let a frame
     /// begin that cannot finish.
     static func hasHeadroom(for bytes: Int) -> Bool {
-        hasHeadroom(for: bytes, available: os_proc_available_memory())
+        hasHeadroom(for: bytes, available: availableMemoryOverrideBytes ?? os_proc_available_memory())
     }
 
     /// The rule above **as a function of its argument, so a test can ask what a nearly-full iPad

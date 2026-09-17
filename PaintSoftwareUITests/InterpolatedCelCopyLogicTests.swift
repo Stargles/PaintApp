@@ -326,7 +326,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
     /// door found while auditing every `Cel(...)` for TODO (62).
     ///
     /// Watched failing with `duplicateLayer`'s cel loop restored to a bare `Cel(id:startFrame:
-    /// frameCount:raster:fillImage:bakedImage:vector:)`: the duplicated layer's middle cel is blank.
+    /// frameCount:raster:bakedImage:vector:)`: the duplicated layer's middle cel is blank.
     func testDuplicatingALayerCopiesAnInBetweensPictureRatherThanBlank() throws {
         let (manager, _, _) = try interpolated()
         let want = shown(manager, manager.layers[1].cels[1])

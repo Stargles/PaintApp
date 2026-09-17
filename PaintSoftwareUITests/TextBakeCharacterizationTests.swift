@@ -159,7 +159,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
         XCTAssertNil(cel.bakedImage,
                      "Landing a commit in `bakedImage` is the ghost-layer bug: the eraser only ever "
                      + "stamps `Cel.raster`, so text left there could never be erased.")
-        XCTAssertNil(cel.fillImage)
+        XCTAssertNil(cel.fillPreview)
         XCTAssertGreaterThan(cel.raster.strokeCount, 0,
                              "`bakedRasterTexture` carries the count forward and floors it at 1, "
                              + "which is the cel's \"has content\" heuristic.")

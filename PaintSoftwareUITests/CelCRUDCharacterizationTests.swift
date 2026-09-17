@@ -836,9 +836,9 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
         // Wholesale replacement is how a fill or a bake actually lands, which is why the key
         // compares these by object identity rather than content.
-        cel.fillImage = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
+        cel.fillPreview = CanvasFixture.solidPreview(.green, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
         let afterFill = PixelOps.rasterize(cel: cel, canvasSize: size())
-        XCTAssertFalse(afterFill === before, "A new fillImage is a new flatten")
+        XCTAssertFalse(afterFill === before, "A new fillPreview is a new flatten")
 
         cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20))
         XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === afterFill,

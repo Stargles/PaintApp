@@ -50,14 +50,17 @@ struct Cel: Identifiable {
     /// Live brush strokes, rasterized at canvas-native resolution. A class, not a value type — call
     /// sites needing an independent copy (duplicating/splitting a cel) must call `.makeCopy()`.
     var raster: RasterLayerTexture
-    /// Rasterized bucket-fill output, composited underneath `bakedImage` and `raster`'s strokes.
-    /// Nil until the fill tool is used on this cel.
-    var fillImage: UIImage? = nil
+    /// The fill tool's **live** preview, drawn above every other tier (LASSO_FILL.md §2a) while a
+    /// gesture is adjustable, and nothing else: every commit path clears it, and every document
+    /// operation and save runs `beginCanvasEdit` first, so a cel at rest holds nil. It is the size of
+    /// the window the fill worked in, not the canvas (`FillWindow`, TODO (86)), which is why it is
+    /// not copied, persisted, resized or flipped with the tiers that are.
+    var fillPreview: FillPreview? = nil
     /// Flattened raster content "baked" in by a pixel-level operation (select+move, duplicate,
-    /// color fill, clear selection). Sits above `fillImage`, underneath `raster`'s live strokes.
+    /// color fill, clear selection). Underneath `raster`'s live strokes and the fill preview.
     var bakedImage: UIImage? = nil
     /// Vector content for `.vector` layers (strokes/images as geometry, re-rasterized at
-    /// canvas-native resolution). Nil on `.raster` layers. Still uses `fillImage`/`bakedImage`
+    /// canvas-native resolution). Nil on `.raster` layers. Still uses `fillPreview`/`bakedImage`
     /// the same way a raster layer does; only the live-stroke tier differs.
     var vector: VectorCanvas? = nil
     /// Non-nil makes this an *interpolated* cel: content is computed from the recipe's references
@@ -168,7 +171,7 @@ struct Cel: Identifiable {
     /// tiers, and those are the only consumers this has. Treating a recipe as content instead would
     /// have the onion skin pay a canvas-sized draw to composite nothing.
     var isCertainlyBlank: Bool {
-        fillImage == nil && bakedImage == nil
+        fillPreview == nil && bakedImage == nil
             && raster.strokeCount == 0 && raster.version == 0
             && (vector?.isEmpty ?? true)
     }
@@ -188,7 +191,6 @@ struct Cel: Identifiable {
     /// — and does not go through here.
     struct CopyTiers {
         var raster: RasterLayerTexture
-        var fillImage: UIImage?
         var bakedImage: UIImage?
         var vector: VectorCanvas?
         var transformTracks: [String: TransformTrack]

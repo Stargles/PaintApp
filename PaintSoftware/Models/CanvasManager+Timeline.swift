@@ -211,7 +211,7 @@ extension CanvasManager {
         // consequences out), so the artist could not draw on the copy at all. An empty canvas over a
         // baked still is exactly the state a select-and-move bake leaves behind, and new ink lands
         // on top of the still because `rasterizeUncached` draws `bakedImage` first.
-        return Cel.CopyTiers(raster: .empty(size: cel.raster.size), fillImage: nil, bakedImage: flat,
+        return Cel.CopyTiers(raster: .empty(size: cel.raster.size), bakedImage: flat,
                              vector: cel.vector.map { .empty(size: $0.size) },
                              transformTracks: [:], pendingPoseBaselines: [:])
     }
@@ -220,7 +220,7 @@ extension CanvasManager {
     /// own content otherwise.
     func copyTiers(of cel: Cel) -> Cel.CopyTiers {
         flattenedStill(of: cel) ?? Cel.CopyTiers(
-            raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+            raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage,
             vector: cel.vector?.makeCopy(),
             // **The pose channels come with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel
             // through move, split, duplicate and paste for free"*, which was a claim in
@@ -262,7 +262,7 @@ extension CanvasManager {
         withStructureUndo(label: .duplicateFrame) {
             // No `interpolation:` argument, on either arm — a copy never derives. On the flatten arm
             // that is the ruling; on the verbatim arm the source had no recipe to carry.
-            var newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, fillImage: tiers.fillImage, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
+            var newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
             crop = newCel.cropPoseKeysToSpan()
             noteKeyframeCrop(crop)
             layers[layerIndex].cels.append(newCel)
@@ -293,7 +293,7 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
         let tiers = copyTiers(of: source)
-        copiedCel = CopiedCel(raster: tiers.raster, fillImage: tiers.fillImage,
+        copiedCel = CopiedCel(raster: tiers.raster,
                               bakedImage: tiers.bakedImage, vector: tiers.vector,
                               transformTracks: tiers.transformTracks,
                               pendingPoseBaselines: tiers.pendingPoseBaselines,
@@ -318,7 +318,7 @@ extension CanvasManager {
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: startFrame, maxLength: copiedCel.frameCount) else { return false }
         withStructureUndo(label: .pasteFrame) {
             var newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
-                             raster: copiedCel.raster.makeCopy(), fillImage: copiedCel.fillImage,
+                             raster: copiedCel.raster.makeCopy(),
                              bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy(),
                              // Paste is the fourth verb in §3.1's *"move, split, duplicate and
                              // paste"*, and it dropped the channel by the same door duplicate did.
@@ -416,7 +416,7 @@ extension CanvasManager {
         withStructureUndo(label: .clearFrame) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             layers[layerIndex].cels[celIndex].raster = .empty(size: size)
-            layers[layerIndex].cels[celIndex].fillImage = nil
+            layers[layerIndex].cels[celIndex].fillPreview = nil
             layers[layerIndex].cels[celIndex].bakedImage = nil
             if layers[layerIndex].cels[celIndex].vector != nil {
                 layers[layerIndex].cels[celIndex].vector = .empty(size: size)
@@ -1047,7 +1047,7 @@ extension CanvasManager {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             layers[layerIndex].cels[celIndex].transformTracks = leftTracks
             crop.merge(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
-            var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+            var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             crop.merge(secondHalf.cropPoseKeysToSpan())
             noteKeyframeCrop(crop)
             layers[layerIndex].cels.append(secondHalf)

@@ -582,7 +582,6 @@ struct CelManifest: Codable {
     /// built. (`ProjectBackupManager.validateProject` on that older build would report the package
     /// damaged; there is no forward-compatibility story for the validator, and none is claimed.)
     var rasterOmitted: Bool? = nil
-    var fillImageFileName: String?
     /// Raster content baked into this cel by a select/move/fill/clear operation (`Cel.bakedImage`).
     var bakedImageFileName: String? = nil
     /// JSON file holding this cel's vector content (`Cel.vector` → `VectorCanvasData`) for

@@ -123,7 +123,7 @@ final class StrokeWallLogicTests: XCTestCase {
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)
         return try XCTUnwrap(session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColour,
                                           threshold: threshold, gapRadius: gapRadius,
-                                          edgeOverlap: 0, canvasEdgeIsWall: false,
+                                          edgeOverlap: 0, artworkRect: nil,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
 

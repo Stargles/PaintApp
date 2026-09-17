@@ -1208,8 +1208,8 @@ final class UndoRepairBench: XCTestCase {
                 manager.history.removeAll()
                 manager.registerUndoableCelChange(layerID: manager.layers[0].id,
                                                   celID: manager.layers[0].cels[0].id,
-                                                  oldRaster: old, oldBaked: nil, oldFill: nil,
-                                                  newRaster: new, newBaked: nil, newFill: nil,
+                                                  oldRaster: old, oldBaked: nil,
+                                                  newRaster: new, newBaked: nil,
                                                   label: .clearSelection)
 
                 let timed = alternatingPressAndRender(runs: 5, press: { isRedo in

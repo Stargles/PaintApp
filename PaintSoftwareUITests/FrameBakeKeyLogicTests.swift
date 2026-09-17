@@ -271,7 +271,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         // ── The cel's own tiers, which nothing in this suite reached until now ─────────────────
         //
         // Seven of the nine fields of `LayerContentVersion` had no row at all: `rasterVersion`,
-        // `vectorVersion`, `raster`, `vector`, `fillImage`, `celID` and `derived`. **The first two
+        // `vectorVersion`, `raster`, `vector`, `fillPreview`, `celID` and `derived`. **The first two
         // are the fields an ordinary brush stroke moves, and the only ones** — a dab does not
         // replace the cel, so `celID`, the raster object and `bakedImage` are all unchanged — so
         // `int(version.rasterVersion)` could be deleted from the encoder with this whole file
@@ -309,15 +309,15 @@ final class FrameBakeKeyLogicTests: XCTestCase {
                            "The premise: only the object may differ, or this is the version row again.")
             m.layers[probe].cels[0].raster = replacement
         }
-        row("fill image acquired") { m in
-            m.layers[probe].cels[0].fillImage =
-                CanvasFixture.solidImage(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
+        row("fill preview acquired") { m in
+            m.layers[probe].cels[0].fillPreview =
+                CanvasFixture.solidPreview(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
         }
         // The fill tool replaces this tier wholesale rather than drawing into it, so a second image
         // of identical pixels is a real edit and the object is the only signal there is of it.
-        row("fill image replaced by an identical picture") { m in
-            m.layers[probe].cels[0].fillImage =
-                CanvasFixture.solidImage(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
+        row("fill preview replaced by an identical picture") { m in
+            m.layers[probe].cels[0].fillPreview =
+                CanvasFixture.solidPreview(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
         }
         // Acquiring a vector tier moves `vector` and `vectorVersion` together, so it pins neither on
         // its own; the two rows after it are what separate them.
@@ -337,7 +337,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             let old = probeCel()
             m.layers[probe].cels[0] = Cel(id: UUID(), startFrame: old.startFrame,
                                           frameCount: old.frameCount, raster: old.raster,
-                                          fillImage: old.fillImage, bakedImage: old.bakedImage,
+                                          fillPreview: old.fillPreview, bakedImage: old.bakedImage,
                                           vector: old.vector)
         }
         // `derived` — the `ContentProvider` seam's half, and the one field the encoder cannot switch

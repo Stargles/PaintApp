@@ -109,6 +109,13 @@ enum CanvasFixture {
         }
     }
 
+    /// A live fill preview of `color` covering exactly `rect` of the canvas — the shape the fill tool
+    /// installs: an image the size of its window, placed at the window's rect (`FillPreview`).
+    static func solidPreview(_ color: UIColor, rect: CGRect) -> FillPreview {
+        FillPreview(image: solidImage(color, rect: CGRect(origin: .zero, size: rect.size), size: rect.size),
+                    rect: rect)
+    }
+
     /// Paints `image` into a layer's cel at `frame` as baked content.
     ///
     /// `bakedImage` rather than `raster`: it is the tier that takes a whole image directly, so the

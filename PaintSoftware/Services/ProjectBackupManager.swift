@@ -825,7 +825,6 @@ nonisolated enum ProjectBackupManager {
             /// `ProjectStore.writeAtomically` gates the atomic swap on this very function — every
             /// save of a document with one blank cel would be quietly trashed instead of committed.
             var rasterOmitted: Bool?
-            var fillImageFileName: String?
             var bakedImageFileName: String?
             var vectorFileName: String?
             /// Mirrors `CelManifest.animationFileName` — KEYFRAMES.md §3.5's *"add it to the
@@ -901,8 +900,6 @@ nonisolated enum ProjectBackupManager {
                 // damaged exactly as it always was — `BackupManagerLogicTests` pins both directions.
                 if cel.rasterOmitted != true,
                    !fileIntact(cel.rasterFileName, isPNG: true, role: .raster, cel: cel.id) { return false }
-                if let fill = cel.fillImageFileName,
-                   !fileIntact(fill, isPNG: true, role: .fill, cel: cel.id) { return false }
                 if let baked = cel.bakedImageFileName,
                    !fileIntact(baked, isPNG: true, role: .baked, cel: cel.id) { return false }
                 if let vector = cel.vectorFileName,

@@ -32,7 +32,12 @@ enum LassoFillMask {
     /// and leaving it on would put a ring of ambiguous values around every loop for no benefit. The
     /// fill's own soft edge comes from the coverage ramp in `lassoInvert`, which reads the artwork's
     /// antialiasing rather than the loop's.
-    static func rasterize(path: CGPath, width: Int, height: Int) -> [UInt8]? {
+    ///
+    /// - Parameter transform: canvas coordinates → this buffer's pixels — `FillWindow.transform`,
+    ///   so the stencil is the window's part of the loop at the window's scale. The identity is a
+    ///   buffer that *is* the canvas.
+    static func rasterize(path: CGPath, width: Int, height: Int,
+                          transform: CGAffineTransform = .identity) -> [UInt8]? {
         guard width > 0, height > 0 else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height)
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in
@@ -46,6 +51,7 @@ enum LassoFillMask {
             // `UIGraphicsImageRenderer` hands it a context UIKit has already flipped.)
             ctx.translateBy(x: 0, y: CGFloat(height))
             ctx.scaleBy(x: 1, y: -1)
+            ctx.concatenate(transform)
             ctx.setShouldAntialias(false)
             ctx.setFillColor(gray: 1, alpha: 1)
             ctx.addPath(path)
@@ -267,14 +273,14 @@ struct LassoFillDiagnostic: Identifiable {
     /// Fresh per raise, for `CanvasNotice.raise`'s reason exactly: the presenter drives its fade off
     /// this, so two consecutive empty results have to be distinguishable or the second shows nothing.
     let id: UUID
-    /// The collar, at canvas resolution, already tinted — nil if the mask could not be turned into an
-    /// image, in which case the loop is still worth redrawing on its own.
-    let collar: UIImage?
+    /// The collar, already tinted, over the window the fill worked in — nil if the mask could not be
+    /// turned into an image, in which case the loop is still worth redrawing on its own.
+    let collar: FillPreview?
     /// The closed loop, in canvas coordinates: the same path `beginInteractiveLassoFill` rasterised,
     /// so what is redrawn is the fence the algorithm actually used rather than a re-derivation of it.
     let loop: CGPath
 
-    init(collar: UIImage?, loop: CGPath) {
+    init(collar: FillPreview?, loop: CGPath) {
         self.id = UUID()
         self.collar = collar
         self.loop = loop
@@ -399,7 +405,13 @@ enum StrokeWallMask {
     /// the threshold test would then read the line as fainter than the artist drew it — thinner
     /// coverage along a diagonal would silently open the wall. Full colour or nothing; `hairlineWidth`
     /// is 1.5 so that "nothing" cannot happen to a line sitting on an integer coordinate.
-    static func mask(of canvases: [VectorCanvas], width: Int, height: Int) -> [UInt8]? {
+    ///
+    /// - Parameter transform: canvas coordinates → this buffer's pixels (`FillWindow.transform`).
+    ///   The hairline stays `hairlineWidth` in *buffer* pixels whatever the window's scale, which is
+    ///   what keeps a vector layer's walls continuous at a reduced working resolution — the
+    ///   resampled ink can thin below the threshold there; the path cannot.
+    static func mask(of canvases: [VectorCanvas], width: Int, height: Int,
+                     transform: CGAffineTransform = .identity) -> [UInt8]? {
         guard width > 0, height > 0 else { return nil }
         var strokes: [(path: CGPath, colour: UIColor)] = []
         for canvas in canvases { appendWalls(of: canvas, to: &strokes) }
@@ -417,8 +429,9 @@ enum StrokeWallMask {
             // coordinates lands upside down without it.
             ctx.translateBy(x: 0, y: CGFloat(height))
             ctx.scaleBy(x: 1, y: -1)
+            ctx.concatenate(transform)
             ctx.setShouldAntialias(false)
-            ctx.setLineWidth(hairlineWidth)
+            ctx.setLineWidth(hairlineWidth / max(transform.a, transform.d))
             ctx.setLineCap(.round)
             ctx.setLineJoin(.round)
             // **Source-over, not `.copy`, and the display list's own order.** The reference composite

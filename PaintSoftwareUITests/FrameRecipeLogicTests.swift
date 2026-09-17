@@ -23,7 +23,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     // parity assertion below re-draws each leaf from the values `PixelOps.FrozenCel` froze, and a
     // field that never differs between two leaves is a field the comparison cannot see. So the six
     // leaves are: a raster tier with real stamped dabs, a cel carrying *both* a `bakedImage` and a
-    // `fillImage` in patterns that differ from each other, a vector tier with strokes, a value layer,
+    // `fillPreview` in patterns that differ from each other, a vector tier with strokes, a value layer,
     // a grading layer (pixels: none), and a hidden layer named as somebody's mask source.
 
     private func stroke(_ points: [CGPoint], colour: CodableColor, width: CGFloat = 7) -> VectorStroke {
@@ -49,14 +49,14 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  brush: TestBrushes.hardRound, color: .green, brushSize: 6,
                                  brushOpacity: 1, random: DabRandom(seed: 0))
 
-        // 1 — baked and fill in one cel, in **different** rects and colours. `fillImage` draws last
+        // 1 — baked and fill in one cel, in **different** rects and colours. `fillPreview` draws last
         //     (LASSO_FILL §2a), so swapping or dropping either changes bytes.
         manager.addLayer(name: "Baked and fill")
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.red, rect: CGRect(x: 2, y: 2, width: 30, height: 30))
-        manager.layers[1].cels[0].fillImage =
-            CanvasFixture.solidImage(UIColor.blue.withAlphaComponent(0.6),
-                                     rect: CGRect(x: 18, y: 18, width: 30, height: 30))
+        manager.layers[1].cels[0].fillPreview =
+            CanvasFixture.solidPreview(UIColor.blue.withAlphaComponent(0.6),
+                                       rect: CGRect(x: 18, y: 18, width: 30, height: 30))
 
         // 2 — a vector tier.
         manager.addVectorLayer(name: "Vector")
@@ -135,7 +135,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                 cel.bakedImage?.draw(in: bounds)
                 strokes?.draw(in: bounds)
                 vector?.draw(in: bounds)
-                cel.fillImage?.draw(in: bounds)
+                cel.fillPreview?.draw()
             }.cgImage
         }
         return sources
@@ -292,7 +292,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  random: DabRandom(seed: 0))
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64))
-        manager.layers[1].cels[0].fillImage = nil
+        manager.layers[1].cels[0].fillPreview = nil
 
         PixelOps.clearRasterizeCache()
         let request = recipe.resolve()

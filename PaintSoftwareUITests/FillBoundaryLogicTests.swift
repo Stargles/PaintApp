@@ -76,9 +76,23 @@ final class FillBoundaryLogicTests: XCTestCase {
 
     /// The same, over a square buffer of any size — what the padded fixtures below need, since with
     /// padding the buffer is the artwork plus a margin on all four sides.
+    ///
+    /// `canvasEdgeIsWall`/`edgeInset` are the option and the padding as the app's `FillKey` carries
+    /// them; the session takes the paper as a rect in buffer pixels (`artworkRect`), so this is the
+    /// same arithmetic `CanvasManager.runFill` does for a buffer that is the whole canvas.
     private func fill(_ reference: [UInt8], side: Int, seed: (x: Int, y: Int),
                       gapRadius: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
                       canvasEdgeIsWall: Bool, edgeInset: Float = 0) throws -> [UInt8] {
+        let inset = CGFloat(edgeInset)
+        let paper = canvasEdgeIsWall
+            ? CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: inset, dy: inset) : nil
+        return try fill(reference, side: side, seed: seed, gapRadius: gapRadius, threshold: threshold,
+                        edgeOverlap: edgeOverlap, artworkRect: paper)
+    }
+
+    private func fill(_ reference: [UInt8], side: Int, seed: (x: Int, y: Int),
+                      gapRadius: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
+                      artworkRect: CGRect?) throws -> [UInt8] {
         let engine = try XCTUnwrap(MetalFillEngine.shared,
                                    "No Metal device, or Fill.metal is not a member of this test target")
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference,
@@ -86,8 +100,7 @@ final class FillBoundaryLogicTests: XCTestCase {
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)
         return try XCTUnwrap(session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColour,
                                           threshold: threshold, gapRadius: gapRadius,
-                                          edgeOverlap: edgeOverlap, canvasEdgeIsWall: canvasEdgeIsWall,
-                                          edgeInset: edgeInset,
+                                          edgeOverlap: edgeOverlap, artworkRect: artworkRect,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
 

@@ -72,9 +72,10 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// The alpha of the live preview's region buffer at a canvas pixel — the bytes
     /// `commitInteractiveFill` bakes, and what `isPointInPendingFill` hit-tests.
     private func previewAlpha(_ manager: CanvasManager, _ point: CGPoint) throws -> UInt8 {
-        let bytes = try XCTUnwrap(manager.fillLastRegionRGBA, "No fill has been previewed at all")
-        let w = manager.fillLastRegionW
-        return bytes[(Int(point.y) * w + Int(point.x)) * 4 + 3]
+        let render = try XCTUnwrap(manager.fillLastRender, "No fill has been previewed at all")
+        XCTAssertTrue(render.window.rect.contains(point), "the preview's window \(render.window.rect) does not cover \(point)")
+        let pixel = render.window.workingPixel(of: point)
+        return render.bytes[(pixel.y * render.window.workingWidth + pixel.x) * 4 + 3]
     }
 
     /// The committed pixel at a canvas point, read out of the cel's `raster` tier — the one place a
@@ -128,7 +129,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
 
         tapAndRenderWithoutPublishing(manager, at: Self.onTheSquare)
-        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillImage,
+        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
                      "Fixture check: the render is done and its preview has not reached the main thread")
 
         manager.brushColor = Self.blue
@@ -152,7 +153,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
         manager.endInteractiveFill()
         manager.fillQueue.sync {}
-        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillImage,
+        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
                      "Fixture check: rendered, not yet published")
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 2, y: 2, width: 24, height: 24)))
@@ -222,7 +223,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
     ///
     /// The publish hop guarded only on `fillGestureActive` — *some* fill is live — which the gesture
     /// that replaced it has just set true. So a superseded render installed itself as the current
-    /// preview, overwrote `fillLastRegionRGBA` (the bytes the commit bakes), and raised its own
+    /// preview, overwrote `fillLastRender` (the bytes the commit bakes), and raised its own
     /// message over somebody else's fill. An empty lasso makes that visible in one value: the loop
     /// enclosed nothing, so its hop carries LASSO_FILL.md §7's *"nothing enclosed"* — and it used to
     /// arrive attached to a bucket fill that had plainly filled something.
@@ -239,7 +240,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         XCTAssertNil(manager.notice, "The retired loop does not report onto the fill that replaced it")
         XCTAssertNil(manager.lassoFillDiagnostic, "…nor tint a canvas it is no longer describing")
-        XCTAssertNotNil(manager.layers[0].cels[try celIndex(manager)].fillImage,
+        XCTAssertNotNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
                         "…and the new fill's own preview stands")
     }
 
@@ -276,7 +277,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// forces *"rendered, hop to main not run"*, which is a single runloop turn wide. This forces
     /// *"not rendered at all"*, which is the whole GPU pass — and against `commitInteractiveFill` as
     /// it stood, the first loop was dropped in silence exactly as it was before the generation fix:
-    /// `fillLastRegionRGBA` is nil because no hop has run, `fillRenderedRegion` is nil because no
+    /// `fillLastRender` is nil because no hop has run, `fillRenderedRegion` is nil because no
     /// worker has stored anything, so the commit had no pixels from either source and returned.
     ///
     /// **The owner, on device 2026-08-21: "that bug is present in the lasso... currently I havent

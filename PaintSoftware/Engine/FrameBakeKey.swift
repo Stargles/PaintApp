@@ -359,7 +359,7 @@ private extension BakeKeyEncoder {
         int(version.rasterVersion)
         optional(version.vector) { e, v in e.objectID(v) }
         int(version.vectorVersion)
-        optional(version.fillImage) { e, v in e.objectID(v) }
+        optional(version.fillPreview) { e, v in e.objectID(v) }
         optional(version.bakedImage) { e, v in e.objectID(v) }
         optional(version.valueFill) { e, fill in
             e.uuid(fill.color.id)

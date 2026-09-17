@@ -60,7 +60,6 @@ nonisolated enum ProjectPackageLayout {
         /// The cel's in-between recipe, when it is a derived cel (`InterpolationRecipe`).
         case interpolation
         case raster
-        case fill
         case baked
         /// A photo placed into a vector cel. Its name lives inside the *payload*, not the manifest.
         case placedImage
@@ -71,7 +70,7 @@ nonisolated enum ProjectPackageLayout {
         var directory: String {
             switch self {
             case .drawing, .animation, .interpolation: return "drawings"
-            case .raster, .fill, .baked, .placedImage: return "images"
+            case .raster, .baked, .placedImage:        return "images"
             case .video:                               return "videos"
             }
         }

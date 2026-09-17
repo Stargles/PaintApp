@@ -299,7 +299,6 @@ enum ProjectStore {
             /// main actor, from `hasContent` rather than from a rendered image is what keeps that
             /// allocation from happening at all.
             let rasterImage: UIImage?
-            let fillImage: UIImage?
             let bakedImage: UIImage?
             /// A `makeCopy()`, so the write owns it and live drawing can't mutate it underneath.
             let vector: VectorCanvas?
@@ -472,7 +471,7 @@ enum ProjectStore {
                     let hasRaster = cel.raster.hasContent
                     return CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                       rasterImage: hasRaster ? cel.raster.renderToUIImage() : nil,
-                                      fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+                                      bakedImage: cel.bakedImage,
                                       vector: cel.vector?.makeCopy(),
                                       interpolation: cel.interpolation,
                                       transformTracks: cel.transformTracks,
@@ -542,8 +541,6 @@ enum ProjectStore {
         private weak var vector: VectorCanvas?
         private let hasVector: Bool
         private let vectorVersion: Int
-        private weak var fillImage: UIImage?
-        private let hasFillImage: Bool
         private weak var bakedImage: UIImage?
         private let hasBakedImage: Bool
         private let canvasSize: CGSize
@@ -556,8 +553,6 @@ enum ProjectStore {
             vector = cel.vector
             hasVector = cel.vector != nil
             vectorVersion = cel.vector?.version ?? -1
-            fillImage = cel.fillImage
-            hasFillImage = cel.fillImage != nil
             bakedImage = cel.bakedImage
             hasBakedImage = cel.bakedImage != nil
             self.canvasSize = canvasSize
@@ -578,7 +573,6 @@ enum ProjectStore {
                 && hasRaster == other.hasRaster
                 && same(vector, other.vector, present: hasVector, otherPresent: other.hasVector)
                 && vectorVersion == other.vectorVersion
-                && same(fillImage, other.fillImage, present: hasFillImage, otherPresent: other.hasFillImage)
                 && same(bakedImage, other.bakedImage, present: hasBakedImage, otherPresent: other.hasBakedImage)
                 && canvasSize == other.canvasSize
         }
@@ -1127,7 +1121,6 @@ enum ProjectStore {
         for layer in snapshot.layers {
             for cel in layer.cels {
                 if cel.rasterImage != nil { roles.insert(.raster) }
-                if cel.fillImage != nil { roles.insert(.fill) }
                 if cel.bakedImage != nil { roles.insert(.baked) }
                 if cel.interpolation != nil { roles.insert(.interpolation) }
                 if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty { roles.insert(.animation) }
@@ -1331,7 +1324,6 @@ enum ProjectStore {
     private struct PixelTiers {
         var rasterFileName: String
         var rasterOmitted: Bool?
-        var fillFileName: String?
         var bakedFileName: String?
         var vectorFileName: String?
         var files: [String]
@@ -1377,7 +1369,6 @@ enum ProjectStore {
                 let manifest = entry.manifest
                 tiers = PixelTiers(rasterFileName: manifest.rasterFileName,
                                    rasterOmitted: manifest.rasterOmitted,
-                                   fillFileName: manifest.fillImageFileName,
                                    bakedFileName: manifest.bakedImageFileName,
                                    vectorFileName: manifest.vectorFileName,
                                    files: entry.files)
@@ -1418,7 +1409,6 @@ enum ProjectStore {
         let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                    rasterFileName: pixelTiers.rasterFileName,
                                    rasterOmitted: pixelTiers.rasterOmitted,
-                                   fillImageFileName: pixelTiers.fillFileName,
                                    bakedImageFileName: pixelTiers.bakedFileName,
                                    vectorFileName: pixelTiers.vectorFileName,
                                    interpolationFileName: interpolationFileName,
@@ -1553,25 +1543,19 @@ enum ProjectStore {
         // disk does not change if it is drawn into and saved again. See `CelManifest.rasterOmitted`
         // for why the name stays non-optional, and `ProjectBackupManager.validateProject` for the
         // half of this change without which every such save would be rejected and trashed.
-        // **The four PNG names are untouched by (57)**, deliberately. The one family that *cannot* be
+        // **The PNG names are untouched by (57)**, deliberately. The one family that *cannot* be
         // renamed is the placed images, whose names live inside the payload — so renaming the others
         // would buy a different inconsistency while multiplying the migration from at most three
         // renames per cel to every file in the package, and a UUID filename reads no better either
-        // way. Note `-fill.png` uses a dash where the rest use an underscore; that predates this and
-        // is why nothing here pattern-matches a cel's files by a single separator convention.
+        // way.
         var tiers = PixelTiers(rasterFileName: "\(cel.id.uuidString)_raster.png", rasterOmitted: nil,
-                               fillFileName: nil, bakedFileName: nil, vectorFileName: nil, files: [])
+                               bakedFileName: nil, vectorFileName: nil, files: [])
         if let rasterImage = cel.rasterImage {
             if let data = png(rasterImage) { files.append(write(data, tiers.rasterFileName, .raster)) }
         } else {
             tiers.rasterOmitted = true
         }
 
-        if let fillImage = cel.fillImage, let fillData = png(fillImage) {
-            let name = "\(cel.id.uuidString)-fill.png"
-            files.append(write(fillData, name, .fill))
-            tiers.fillFileName = name
-        }
         if let baked = cel.bakedImage, let bakedData = png(baked) {
             let name = "\(cel.id.uuidString)_baked.png"
             files.append(write(bakedData, name, .baked))
@@ -1994,10 +1978,6 @@ enum ProjectStore {
                 raster = .empty(size: canvasSize)
             }
         }
-        var fillImage: UIImage?
-        if let fillFileName = celManifest.fillImageFileName {
-            fillImage = UIImage(contentsOfFile: fileURL(fillFileName, .fill).path)
-        }
         var bakedImage: UIImage?
         if let bakedFileName = celManifest.bakedImageFileName {
             bakedImage = UIImage(contentsOfFile: fileURL(bakedFileName, .baked).path)
@@ -2134,7 +2114,7 @@ enum ProjectStore {
 
         return DecodedCel(
             cel: Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
-                     raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
+                     raster: raster, bakedImage: bakedImage, vector: vector,
                      interpolation: interpolation,
                      transformTracks: animation.tracks,
                      pendingPoseBaselines: animation.baselines),

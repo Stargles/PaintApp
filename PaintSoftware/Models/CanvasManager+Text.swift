@@ -346,9 +346,9 @@ extension CanvasManager {
         let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
         let composited = PixelOps.compositeOver(base: base, overlay: glyphs)
         registerUndoableCelChange(layerID: layerID, celID: celID,
-                                  oldRaster: cel.raster, oldBaked: cel.bakedImage, oldFill: cel.fillImage,
+                                  oldRaster: cel.raster, oldBaked: cel.bakedImage,
                                   newRaster: bakedRasterTexture(image: composited, likeExisting: cel.raster),
-                                  newBaked: nil, newFill: nil, label: .addText)
+                                  newBaked: nil, label: .addText)
         // The bake never goes through `strokeEnded`, so the layer panel keeps showing the cel as it
         // was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
         scheduleThumbnailRegen(layerID: layerID, celID: celID)

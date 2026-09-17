@@ -141,7 +141,7 @@ final class LassoFillLogicTests: XCTestCase {
         let session = try lassoSession(reference, loop: loop)
         return try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: threshold,
                                           gapRadius: gapRadius, edgeOverlap: edgeRadius,
-                                          canvasEdgeIsWall: canvasEdgeIsWall,
+                                          artworkRect: canvasEdgeIsWall ? session.bufferRect : nil,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
 
@@ -168,7 +168,7 @@ final class LassoFillLogicTests: XCTestCase {
         let region = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
                                                 gapRadius: 8,
                                                 edgeOverlap: Float(manager.fillEdgeRadius(lasso: true)),
-                                                canvasEdgeIsWall: true,
+                                                artworkRect: session.bufferRect,
                                                 fillColor: SIMD4<Float>(1, 0, 0, 1)))
         return (region, session)
     }
@@ -401,7 +401,7 @@ final class LassoFillLogicTests: XCTestCase {
                                                        width: Self.w, height: Self.h).session)
         let region = try XCTUnwrap(session.fill(seedX: 64, seedY: 40, seedColor: session.seedColor(atX: 64, y: 40),
                                                 threshold: 0.15, gapRadius: 8, edgeOverlap: 0,
-                                                canvasEdgeIsWall: true, fillColor: SIMD4<Float>(1, 0, 0, 1)))
+                                                artworkRect: session.bufferRect, fillColor: SIMD4<Float>(1, 0, 0, 1)))
 
         XCTAssertTrue(isFilled(region, 64, 40), "The tapped compartment fills")
         XCTAssertFalse(isFilled(region, 64, 63), "…the line is a wall, not something to paint")
@@ -1040,7 +1040,7 @@ final class LassoFillLogicTests: XCTestCase {
         func count(_ reference: [UInt8], _ loop: CGPath, gapRadius: Float = 8) throws -> Int {
             let session = try lassoSession(reference, loop: loop)
             _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15, gapRadius: gapRadius,
-                             edgeOverlap: 0, canvasEdgeIsWall: true, fillColor: SIMD4<Float>(1, 0, 0, 1))
+                             edgeOverlap: 0, artworkRect: session.bufferRect, fillColor: SIMD4<Float>(1, 0, 0, 1))
             return session.lastFilledPixelCount
         }
         let blank = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
@@ -1257,7 +1257,7 @@ final class LassoFillLogicTests: XCTestCase {
         settle()
 
         let cel = try XCTUnwrap(manager.layers[0].cels.first)
-        XCTAssertNotNil(cel.fillImage, "Fixture check: the preview is installed and nothing is committed yet")
+        XCTAssertNotNil(cel.fillPreview, "Fixture check: the preview is installed and nothing is committed yet")
         let previewed = try pixelOf(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false),
                                     at: onTheInk)
         XCTAssertGreaterThan(previewed.r, 200, "The preview already shows the fill over the ink")
@@ -1348,7 +1348,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheCollarIsTheRingOfPaperInsideTheFenceAndNothingOutsideIt() throws {
         let session = try lassoSession(box(breakInRightWall: 0), loop: loopAroundEverything)
         _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                         gapRadius: 8, edgeOverlap: 0, canvasEdgeIsWall: true,
+                         gapRadius: 8, edgeOverlap: 0, artworkRect: session.bufferRect,
                          fillColor: SIMD4<Float>(1, 0, 0, 1))
         let reached = try XCTUnwrap(session.lastReachedMask())
 
@@ -1374,7 +1374,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheCollarMaskCarriesTheLeakEvenWhereTheSignalDoesNotFire() throws {
         let session = try lassoSession(box(breakInRightWall: 3), loop: loopAroundEverything)
         _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                         gapRadius: 0, edgeOverlap: 0, canvasEdgeIsWall: true,
+                         gapRadius: 0, edgeOverlap: 0, artworkRect: session.bufferRect,
                          fillColor: SIMD4<Float>(1, 0, 0, 1))
         let reached = try XCTUnwrap(session.lastReachedMask())
 

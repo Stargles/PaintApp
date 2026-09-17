@@ -1,7 +1,7 @@
 import UIKit
 
 enum ThumbnailRenderer {
-    static func render(_ raster: RasterLayerTexture, fillImage: UIImage? = nil, canvasSize: CGSize, thumbnailSize: CGSize) -> UIImage {
+    static func render(_ raster: RasterLayerTexture, fillPreview: FillPreview? = nil, canvasSize: CGSize, thumbnailSize: CGSize) -> UIImage {
         guard canvasSize.width > 0, canvasSize.height > 0 else {
             return UIImage()
         }
@@ -9,21 +9,24 @@ enum ThumbnailRenderer {
         let size = CGSize(width: canvasSize.width * renderScale, height: canvasSize.height * renderScale)
         // `raster` is always at native resolution (unlike PKDrawing.image(from:scale:), which could
         // rasterize vector strokes directly at the target scale) — downscale via the same
-        // UIGraphicsImageRenderer draw-and-shrink path the fillImage compositing below already uses.
+        // UIGraphicsImageRenderer draw-and-shrink path the fill preview compositing below already uses.
         let strokesImage = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
             raster.renderToUIImage().draw(in: CGRect(origin: .zero, size: size))
         }
-        guard let fillImage else { return strokesImage }
+        guard let fillPreview else { return strokesImage }
 
         let renderer = UIGraphicsImageRenderer(size: strokesImage.size, format: PixelOps.transparentFormat(scale: strokesImage.scale))
-        return renderer.image { _ in
+        return renderer.image { ctx in
             let rect = CGRect(origin: .zero, size: strokesImage.size)
             // Strokes first, fill on top — the order `PixelOps.rasterizeUncached` draws in, and for
             // the reason given there: a fill covers what is already on the cel (LASSO_FILL.md §2a).
             // This overload only ever sees a *live* fill preview, since a committed fill is flattened
             // into `raster`, but a thumbnail that contradicted the canvas would still be a bug.
             strokesImage.draw(in: rect)
-            fillImage.draw(in: rect)
+            // The preview covers its own window of the canvas; the shrink is the same one the
+            // strokes took.
+            ctx.cgContext.scaleBy(x: renderScale, y: renderScale)
+            fillPreview.draw()
         }
     }
 

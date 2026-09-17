@@ -85,7 +85,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
                        "The copy carries the artist's samples, not a rasterization of them")
         XCTAssertNil(copy.cels.first?.bakedImage,
                      "A vector duplicate puts nothing in the raster tiers; pixels there are the old rasterize")
-        XCTAssertNil(copy.cels.first?.fillImage,
+        XCTAssertNil(copy.cels.first?.fillPreview,
                      "A vector duplicate puts nothing in the raster tiers; pixels there are the old rasterize")
     }
 

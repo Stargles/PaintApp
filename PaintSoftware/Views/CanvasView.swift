@@ -1027,9 +1027,9 @@ struct CanvasView: UIViewRepresentable {
                         host.strokeView.refreshDisplayIfStale()
                     }
                 }
-                let targetFillImage = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillImage }
-                if host.fillImageView.image !== targetFillImage {
-                    host.fillImageView.image = targetFillImage
+                let targetPreview = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillPreview }
+                if host.fillImageView.image !== targetPreview?.image {
+                    host.showFillPreview(targetPreview)
                 }
                 // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container, so an inactive host still swallows touches via UIView's
@@ -2200,7 +2200,7 @@ struct CanvasView: UIViewRepresentable {
             let cel = canvasManager.layers[index].cels[celIdx]
             host.strokeView.raster = cel.raster
             host.strokeView.vectorCanvas = cel.vector
-            host.fillImageView.image = cel.fillImage
+            host.showFillPreview(cel.fillPreview)
             host.bakedImageView.image = cel.bakedImage
             host.bakedImageView.isHidden = cel.bakedImage == nil
         }

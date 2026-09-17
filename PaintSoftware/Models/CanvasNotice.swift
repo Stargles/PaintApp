@@ -175,18 +175,17 @@ struct CanvasNotice: Identifiable, Equatable {
 
         /// **The fill tool could not get the memory it needs, and used to say nothing at all.**
         ///
-        /// `MetalFillSession` allocates 38 bytes per canvas pixel for a bucket fill and 42 for a
-        /// lasso one (MEASURED, RENDER.md §5 stage 7) — 76 MB at the owner's 2048x1024 and 608 MB at
-        /// 4096². `MetalFillEngine.makeSession` refuses past `fillBudgetBytes`, refuses when
+        /// `MetalFillSession` allocates 38 bytes per working pixel for a bucket fill and up to 46 for
+        /// a lasso one (MEASURED, RENDER.md §5 stage 7). `MetalFillEngine.makeSession` refuses when
         /// `CompositorBudget.hasHeadroom` declines, and used to return a bare nil when `makeBuffer`
-        /// came back nil at 16383² — so on a large canvas the artist tapped the bucket and *nothing
-        /// happened*, with no error and no mark. This is that refusal given a voice.
+        /// came back nil — so the artist tapped the bucket and *nothing happened*, with no error and
+        /// no mark. This is that refusal given a voice.
         ///
-        /// **One case for all three reasons.** The artist's next act is the same whichever it was —
-        /// work smaller, or close something else — and CLAUDE.md's own rule about notices is that a
-        /// message which cannot say what to do is worth less than none. The distinction between "this
-        /// canvas is too big for this device" and "this moment is" is in
-        /// `MetalFillEngine.SessionOutcome`, where a debugger can read it.
+        /// Since TODO (86) the working set is a window of the canvas sized to fit `fillBudgetBytes`
+        /// (`FillWindow`), so no canvas is too large to fill and the only refusal left is the
+        /// moment's: the process cannot afford the window right now. The artist's next act is to
+        /// close something else, and the message says so. `MetalFillEngine.SessionOutcome` still
+        /// tells a debugger whether it was the valve or Metal itself.
         case fillNeedsMoreMemory
 
         /// VIDEO.md §8 stage 8: "Bake to Images" refused. In practice this is always an unreadable
@@ -356,7 +355,7 @@ struct CanvasNotice: Identifiable, Equatable {
             return "Couldn't resize — \(refusal.phrase) on this canvas can't be moved. Nothing was changed."
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
-        case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
+        case .fillNeedsMoreMemory: return "Not enough memory to fill right now — close other apps and try again."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."

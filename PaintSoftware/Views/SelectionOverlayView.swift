@@ -51,6 +51,9 @@ final class SelectionOverlayView: UIView {
     /// The diagnostic currently on screen, so a repeated `updateSelectionOverlay` pass — there are
     /// many, and most change nothing — does not restart the fade from the top every time.
     private var shownDiagnosticID: UUID?
+    /// Where the shown collar sits, in the view's points (canvas pixels) — the window its fill worked
+    /// in, so a resize mid-fade can put the frame back where it belongs.
+    private var shownCollarRect: CGRect = .zero
 
     private var lassoPoints: [CGPoint] = []
     private var rectStart: CGPoint?
@@ -165,11 +168,12 @@ final class SelectionOverlayView: UIView {
         super.layoutSubviews()
         refreshHatchPath() // the "outside" rect tracks the view's own bounds, which can change on rotation/resize
         // Same reason, and the collar is the one layer here with a frame rather than a path: its
-        // contents are the canvas, so its frame has to stay the canvas. Inside a `CATransaction` with
-        // actions off, or a resize mid-fade animates the frame as well as the opacity.
+        // contents cover its fill's window of the canvas, so its frame has to stay that window.
+        // Inside a `CATransaction` with actions off, or a resize mid-fade animates the frame as well
+        // as the opacity.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        collarLayer.frame = bounds
+        collarLayer.frame = shownCollarRect
         CATransaction.commit()
     }
 
@@ -198,8 +202,9 @@ final class SelectionOverlayView: UIView {
         let hold = NSNumber(value: LassoFillDiagnostic.holdFraction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        collarLayer.frame = bounds
-        collarLayer.contents = diagnostic.collar?.cgImage
+        shownCollarRect = diagnostic.collar?.rect ?? .zero
+        collarLayer.frame = shownCollarRect
+        collarLayer.contents = diagnostic.collar?.image.cgImage
         collarLayer.isHidden = diagnostic.collar == nil
         diagnosticLoopShadowLayer.path = diagnostic.loop
         diagnosticLoopLayer.path = diagnostic.loop

@@ -2,8 +2,8 @@
 using namespace metal;
 
 // Shared parameter block for every fill kernel. Field order/padding is mirrored exactly by
-// `MetalFillEngine.FillParams` on the Swift side (SIMD4 forces 16-byte alignment → seedColor at
-// offset 32, fillColor at 48, total size 64).
+// `MetalFillEngine.FillParams` on the Swift side (eleven scalars, then SIMD4 forces 16-byte
+// alignment → seedColor at offset 48, fillColor at 64, total size 80).
 struct FillParams {
     uint  width;
     uint  height;
@@ -17,12 +17,16 @@ struct FillParams {
     // seen from either side of the invert — except on the coverage ramp, which is why the lasso's
     // runs where it does; see `lassoEdgeErode`. 0 is identity in both.
     float edgeOverlap;
-    /// px the *artwork rect* is inset from this buffer on all four sides — `CanvasManager.canvasPadding`
-    /// when "Canvas Edge Is a Boundary" is on, and 0 when it is off or there is no padding. 0 means the
-    /// artwork rect and the buffer coincide, which is the pre-padding world: every rule keyed off this
-    /// then reduces algebraically to the buffer rim it used to name. Occupies the slot that used to be
-    /// `_pad0`, so the struct layout is unchanged on both sides.
-    float edgeInset;
+    /// The *artwork rect* in this buffer's pixels, `[minX, maxX) x [minY, maxY)` — the paper's own
+    /// edge, which is where "Canvas Edge Is a Boundary" fences the flood. A rect rather than one
+    /// inset because the buffer is a **window** of the canvas (`FillWindow`, TODO (86)): the paper
+    /// can sit anywhere relative to it, including entirely around it. When the option is off the
+    /// rect is the buffer itself, and every rule keyed off it reduces algebraically to the buffer rim
+    /// it used to name. May extend past the buffer; every reader clamps.
+    float artworkMinX;
+    float artworkMinY;
+    float artworkMaxX;
+    float artworkMaxY;
     float4 seedColor;   // straight RGBA 0..1 sampled at the seed
     float4 fillColor;   // premultiplied RGBA 0..1 painted into the region
 };
@@ -136,36 +140,30 @@ kernel void thresholdDistance(const device float2* coord      [[buffer(0)]],
 
 // MARK: - The canvas edge as a boundary
 //
-// **"The canvas edge" is the edge of the artwork rect, not the edge of this buffer, and with padding
-// those are different rectangles.** `CanvasManager.setCanvasPadding` grows `canvasSize` itself by
-// 2*delta and re-places the content, so the buffer rim is the outer edge of the grey margin while the
-// border the artist draws across sits `edgeInset` px inside it. Everything below is written against
-// the artwork rect `[inset, width-inset) x [inset, height-inset)`; at `inset == 0` the two rectangles
-// coincide and each formula collapses to the buffer-rim one it replaced.
-
-/// The artwork rect's inset in whole pixels. Swift already clamps it to `0 <= 2*inset < min(w, h)`;
-/// the `max` here is belt-and-braces against a float that arrived negative.
-static inline uint insetPixels(constant FillParams& params) {
-    return uint(max(params.edgeInset, 0.0f) + 0.5f);
-}
+// **"The canvas edge" is the edge of the artwork rect, not the edge of this buffer, and the two are
+// different rectangles twice over.** With padding, `CanvasManager.setCanvasPadding` grows
+// `canvasSize` itself and re-places the content, so the paper's border sits inside the canvas; and
+// this buffer is a *window* of that canvas (`FillWindow`), so the paper's border can sit anywhere
+// relative to the buffer — inside it, through it, or entirely around it. Everything below is written
+// against `[artworkMinX, artworkMaxX) x [artworkMinY, artworkMaxY)` in buffer pixels; when Swift
+// hands the buffer itself as the rect each formula collapses to the buffer-rim one it replaced.
 
 /// Whether a pixel is inside the artwork rect (as opposed to out on the padding margin).
 static inline bool insideArtworkRect(uint x, uint y, constant FillParams& params) {
-    uint inset = insetPixels(params);
-    return x >= inset && y >= inset && x + inset < params.width && y + inset < params.height;
+    float fx = float(x), fy = float(y);
+    return fx >= params.artworkMinX && fx < params.artworkMaxX
+        && fy >= params.artworkMinY && fy < params.artworkMaxY;
 }
 
-// Distance from a pixel to the ring one pixel *outside* the artwork rect. With no padding that ring
-// is one pixel beyond the buffer: column 0 is 1 away from the ring at x = -1, and so on — the
-// original formula, which this reduces to term for term at `inset == 0`. With padding the ring moves
-// inward to x = inset-1 / x = width-inset, and the absolute value lets a pixel out on the margin
-// measure to the same ring from the other side, so gap-closing seals against the paper edge from
-// whichever side the artwork approaches it.
+// Distance from a pixel to the ring one pixel *outside* the artwork rect. With the rect at the
+// buffer that ring is one pixel beyond it: column 0 is 1 away from the ring at x = -1, and so on —
+// the original formula. The absolute value lets a pixel out on the margin measure to the same ring
+// from the other side, so gap-closing seals against the paper edge from whichever side the artwork
+// approaches it.
 static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params) {
-    float inset = max(params.edgeInset, 0.0f);
     float x = float(gid.x), y = float(gid.y);
-    float dx = min(fabs(x - inset + 1.0f), fabs(float(params.width)  - inset - x));
-    float dy = min(fabs(y - inset + 1.0f), fabs(float(params.height) - inset - y));
+    float dx = min(fabs(x - (params.artworkMinX - 1.0f)), fabs(params.artworkMaxX - x));
+    float dy = min(fabs(y - (params.artworkMinY - 1.0f)), fabs(params.artworkMaxY - y));
     return min(dx, dy);
 }
 
@@ -328,17 +326,19 @@ static inline void sweepRun(device uchar* region, const device uchar* wall,
 // **once per line, from the thread's own coordinate**, and the inner loop keeps exactly the cost it
 // had: no per-pixel branch, no extra compare.
 //
-// At `inset == 0` the guard is always true and the cuts land on k == 0 and k == extent, which no
-// sweep ever crossed anyway — so the three runs collapse to the one full-line run this used to be,
-// and a padding-0 fill is byte-identical to the old code.
-static inline uint2 runSplit(uint alongExtent, uint acrossPos, uint acrossExtent,
-                             constant FillParams& params) {
-    uint inset = insetPixels(params);
-    // A degenerate inset leaves no artwork rect to bound anything, so sweep the line whole rather
-    // than fence the flood into nothing. Swift already rejects this case; the two agree deliberately.
-    if (2u * inset >= alongExtent || 2u * inset >= acrossExtent) return uint2(0u, alongExtent);
-    bool crossesTheRect = acrossPos >= inset && acrossPos + inset < acrossExtent;
-    return crossesTheRect ? uint2(inset, alongExtent - inset) : uint2(0u, alongExtent);
+// With the rect at the buffer the guard is always true and the cuts land on k == 0 and k == extent,
+// which no sweep ever crossed anyway — so the three runs collapse to the one full-line run, and a
+// padding-0 fill is byte-identical to the code before the rect. A rect edge past the buffer clamps
+// to the buffer's own end for the same reason.
+static inline uint2 runSplit(uint alongExtent, uint acrossPos,
+                             float alongMin, float alongMax, float acrossMin, float acrossMax) {
+    float pos = float(acrossPos);
+    bool crossesTheRect = pos >= acrossMin && pos < acrossMax;
+    if (!crossesTheRect) return uint2(0u, alongExtent);
+    float extent = float(alongExtent);
+    uint lo = uint(clamp(alongMin, 0.0f, extent) + 0.5f);
+    uint hi = uint(clamp(alongMax, 0.0f, extent) + 0.5f);
+    return uint2(lo, max(lo, hi));
 }
 
 // One thread per row: fill every open pixel in the row that is horizontally connected (through
@@ -352,7 +352,8 @@ kernel void floodHoriz(device uchar*        region  [[buffer(0)]],
     if (y >= params.height) return;
     uint w = params.width;
     uint base = y * w;
-    uint2 split = runSplit(w, y, params.height, params);
+    uint2 split = runSplit(w, y, params.artworkMinX, params.artworkMaxX,
+                           params.artworkMinY, params.artworkMaxY);
     sweepRun(region, wall, base, 1u, 0u, split.x, changed);
     sweepRun(region, wall, base, 1u, split.x, split.y, changed);
     sweepRun(region, wall, base, 1u, split.y, w, changed);
@@ -367,7 +368,8 @@ kernel void floodVert(device uchar*        region  [[buffer(0)]],
     if (x >= params.width) return;
     uint w = params.width;
     uint h = params.height;
-    uint2 split = runSplit(h, x, params.width, params);
+    uint2 split = runSplit(h, x, params.artworkMinY, params.artworkMaxY,
+                           params.artworkMinX, params.artworkMaxX);
     sweepRun(region, wall, x, w, 0u, split.x, changed);
     sweepRun(region, wall, x, w, split.x, split.y, changed);
     sweepRun(region, wall, x, w, split.y, h, changed);
@@ -382,7 +384,7 @@ kernel void floodVert(device uchar*        region  [[buffer(0)]],
 //
 // The disk respects the barrier too: a pixel on the padding margin is never grown from a filled
 // pixel on the paper, nor the reverse. Without that, edge overlap would paint up to `edgeOverlap` px
-// of grey around a fill that the flood had correctly stopped at the paper's edge. At `inset == 0`
+// of grey around a fill that the flood had correctly stopped at the paper's edge. With the rect at the buffer
 // every pixel is inside the artwork rect, so the test is always true and this is the old kernel.
 kernel void edgeDilate(const device uchar* region [[buffer(0)]],
                        device uchar*        out    [[buffer(1)]],

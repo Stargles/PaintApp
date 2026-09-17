@@ -141,13 +141,12 @@ final class CanvasResizeLogicTests: XCTestCase {
         let newSize = CGSize(width: 100, height: 140)
 
         // **The fixture has to be worth walking, or every assertion below is vacuous.** Each of the
-        // four tiers is checked for separately rather than counted in total: a total would still pass
-        // if the fixture lost its only `fillImage` and grew a second `bakedImage`, and it is precisely
-        // a *missed tier* that this test exists to catch.
+        // three tiers is checked for separately rather than counted in total: a total would still
+        // pass if the fixture lost its only `bakedImage` and grew a second raster, and it is
+        // precisely a *missed tier* that this test exists to catch.
         let cels = manager.layers.flatMap(\.cels)
         for cel in cels { XCTAssertEqual(cel.raster.size, oldSize, "setup: every cel starts at the old extent") }
         XCTAssertTrue(cels.contains { $0.raster.hasContent }, "setup: a raster tier with real pixels")
-        XCTAssertTrue(cels.contains { $0.fillImage != nil }, "setup: a fillImage tier")
         XCTAssertTrue(cels.contains { $0.bakedImage != nil }, "setup: a bakedImage tier")
         XCTAssertTrue(cels.contains { ($0.vector?.elements.isEmpty == false) }, "setup: a vector tier with geometry")
 
@@ -162,9 +161,6 @@ final class CanvasResizeLogicTests: XCTestCase {
                 celsSeen += 1
                 let where_ = "layer \(layerIndex) cel \(celIndex)"
                 XCTAssertEqual(cel.raster.size, newSize, "raster tier, \(where_)")
-                if let fill = cel.fillImage {
-                    XCTAssertEqual(fill.size, newSize, "fillImage tier, \(where_)")
-                }
                 if let baked = cel.bakedImage {
                     XCTAssertEqual(baked.size, newSize, "bakedImage tier, \(where_)")
                 }
@@ -409,7 +405,6 @@ final class CanvasResizeLogicTests: XCTestCase {
             for (celIndex, cel) in layer.cels.enumerated() {
                 let where_ = "reloaded layer \(layerIndex) cel \(celIndex)"
                 XCTAssertEqual(cel.raster.size, newSize, "raster tier, \(where_)")
-                if let fill = cel.fillImage { XCTAssertEqual(fill.size, newSize, "fillImage tier, \(where_)") }
                 if let baked = cel.bakedImage { XCTAssertEqual(baked.size, newSize, "bakedImage tier, \(where_)") }
                 if let vector = cel.vector { XCTAssertEqual(vector.size, newSize, "vector tier, \(where_)") }
             }
@@ -746,7 +741,6 @@ final class CanvasResizeLogicTests: XCTestCase {
             for (celIndex, cel) in layer.cels.enumerated() {
                 let where_ = "layer \(layerIndex) cel \(celIndex)"
                 XCTAssertEqual(cel.raster.size, newSize, "raster tier, \(where_)")
-                if let fill = cel.fillImage { XCTAssertEqual(fill.size, newSize, "fillImage, \(where_)") }
                 if let baked = cel.bakedImage { XCTAssertEqual(baked.size, newSize, "bakedImage, \(where_)") }
                 if let vector = cel.vector {
                     XCTAssertEqual(vector.size, newSize, "vector tier, \(where_)")
@@ -911,7 +905,6 @@ final class CanvasResizeLogicTests: XCTestCase {
             for (celIndex, cel) in layer.cels.enumerated() {
                 let where_ = "layer \(layerIndex) cel \(celIndex)"
                 XCTAssertEqual(cel.raster.size, CanvasFixture.canvasSize, "raster tier, \(where_)")
-                if let fill = cel.fillImage { XCTAssertEqual(fill.size, CanvasFixture.canvasSize, "fillImage, \(where_)") }
                 if let baked = cel.bakedImage { XCTAssertEqual(baked.size, CanvasFixture.canvasSize, "bakedImage, \(where_)") }
                 if let vector = cel.vector { XCTAssertEqual(vector.size, CanvasFixture.canvasSize, "vector tier, \(where_)") }
             }
@@ -1220,10 +1213,10 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// cost model turns on: `RasterLayerTexture.resized(to:placing:)` early-outs on a blank texture
     /// and allocates nothing, so a vector-only cel is a tenth of an inked one.
     ///
-    /// **All three raster tiers count**, and the two `UIImage` ones are the reason: §2's split notes
-    /// that `fillImage`/`bakedImage` have no `hasContent` door, so a document that has used the
-    /// bucket fill is not on the cheap row even where its `raster` tier is empty.
-    func testTheAuditSeparatesBlankCelsFromInkedOnesAcrossAllThreeRasterTiers() throws {
+    /// **Both raster tiers count**, and the `UIImage` one is the reason: §2's split notes that
+    /// `bakedImage` has no `hasContent` door, so a document that has baked a selection is not on the
+    /// cheap row even where its `raster` tier is empty.
+    func testTheAuditSeparatesBlankCelsFromInkedOnesAcrossBothRasterTiers() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         try XCTUnwrap(manager.layers[1].cels[0].vector)
@@ -1233,12 +1226,12 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(plan.audit.inkedCels, 0)
         XCTAssertTrue(plan.audit.canProceed)
 
-        manager.layers[1].cels[0].fillImage =
+        manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 4, height: 4))
-        let withFill = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
-        XCTAssertEqual(withFill.audit.inkedCels, 1, "fillImage counts — it has no hasContent door")
-        XCTAssertEqual(withFill.audit.blankCels, 1)
-        XCTAssertEqual(withFill.audit.celCount, 2)
+        let withBaked = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
+        XCTAssertEqual(withBaked.audit.inkedCels, 1, "bakedImage counts — it has no hasContent door")
+        XCTAssertEqual(withBaked.audit.blankCels, 1)
+        XCTAssertEqual(withBaked.audit.celCount, 2)
     }
 
     /// **A resize small enough to be imperceptible never raises the busy state at all**, and that is
@@ -1388,9 +1381,9 @@ final class CanvasResizeLogicTests: XCTestCase {
         }
     }
 
-    /// Three layers — two raster, one vector — five cels between them, with `fillImage`,
-    /// `bakedImage`, real stamped raster pixels and real vector geometry all present, so the per-tier
-    /// walk has something of every kind to miss.
+    /// Three layers — two raster, one vector — five cels between them, with `bakedImage`, real
+    /// stamped raster pixels and real vector geometry all present, so the per-tier walk has
+    /// something of every kind to miss.
     private static func documentWithEveryTierPopulated() -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 2)
         let size = CanvasFixture.canvasSize
@@ -1402,8 +1395,6 @@ final class CanvasResizeLogicTests: XCTestCase {
                                color: .red, alpha: 1, hardness: 1)
             raster.endStroke()
         }
-        manager.layers[0].cels[0].fillImage =
-            CanvasFixture.solidImage(.green, rect: CGRect(x: 4, y: 4, width: 16, height: 16), size: size)
         manager.layers[0].cels[0].bakedImage =
             CanvasFixture.solidImage(.blue, rect: CGRect(x: 24, y: 8, width: 12, height: 20), size: size)
 

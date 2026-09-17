@@ -265,8 +265,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// This case used to be arithmetic all the way down: it multiplied `2 * w * h * 4` itself and
     /// divided the budget by it. Every number it printed was right and the code charged **zero**
     /// `registerUndoableCelChange` mandates that a commit path hand
-    /// its flattened result over as a `RasterLayerTexture` and pass nil for `newBaked`/`newFill`, and
-    /// the cost was computed from those four nils — so Move, Clear, Fill and Add Text each recorded a
+    /// its flattened result over as a `RasterLayerTexture` and pass nil for `newBaked`, and
+    /// the cost was computed from those nils — so Move, Clear, Fill and Add Text each recorded a
     /// step of size 0, `UndoHistory.trim()` (which evicts by cost) could never reach one, and a test
     /// that never called the function could not see any of it.
     ///
@@ -302,8 +302,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.currentCost, 0, "Control: the commit below is the only step recorded")
 
         manager.registerUndoableCelChange(layerID: layerID, celID: celID,
-                                          oldRaster: before, oldBaked: nil, oldFill: nil,
-                                          newRaster: after, newBaked: nil, newFill: nil,
+                                          oldRaster: before, oldBaked: nil,
+                                          newRaster: after, newBaked: nil,
                                           label: .fill)
 
         XCTAssertEqual(manager.history.currentCost, wholeCelStep,
@@ -346,8 +346,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
         manager.addLayer()
         manager.history.removeAll()   // `addLayer` records a step of its own — see the case above
         manager.registerUndoableCelChange(layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id,
-                                          oldRaster: blank, oldBaked: nil, oldFill: nil,
-                                          newRaster: drawn, newBaked: nil, newFill: nil,
+                                          oldRaster: blank, oldBaked: nil,
+                                          newRaster: drawn, newBaked: nil,
                                           label: .fill)
         XCTAssertEqual(manager.history.currentCost, drawn.approximateCost,
                        "The first commit on a blank cel is charged one buffer, not two")
@@ -758,32 +758,35 @@ final class MemoryBudgetLogicTests: XCTestCase {
                              "control: a lasso session really is the bigger of the two")
     }
 
-    /// **A fill too big for the budget is refused with a reason, where it used to be a silent nil.**
+    /// **A fill the process cannot afford right now is refused with a reason, where it used to be a
+    /// silent nil.**
     ///
-    /// BUGS.md's census item 3: `MetalFillSession` allocates ~38 bytes per canvas pixel with no budget
-    /// and no headroom check — 608 MB at 4096² against a 183.7 MB texture budget on the owner's iPad,
-    /// and at 16383² `makeBuffer` returns nil and the whole gesture became a `return nil` nobody told
-    /// the artist about. CLAUDE.md's "a refusal with no notice", reached by another door.
-    func testAFillTooLargeForTheBudgetIsRefusedWithAReason() throws {
+    /// BUGS.md's census item 3: `MetalFillSession` allocated ~38 bytes per canvas pixel with no
+    /// budget and no headroom check, and at 16383² `makeBuffer` returned nil and the whole gesture
+    /// became a `return nil` nobody told the artist about. CLAUDE.md's "a refusal with no notice",
+    /// reached by another door. Since TODO (86) the static budget shapes the window rather than
+    /// refusing (`FillWindowLogicTests`), so the valve is the one refusal left, and it says why.
+    func testAFillTheProcessCannotAffordIsRefusedWithAReason() throws {
         let engine = try XCTUnwrap(MetalFillEngine.shared, "no Metal device")
         let side = 256, count = side * side
         let reference = [UInt8](repeating: 0, count: count * 4)
-        defer { CompositorBudget.budgetOverrideBytes = nil }
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
 
-        CompositorBudget.budgetOverrideBytes = MetalFillSession.predictedBytes(width: side, height: side,
-                                                                               isLasso: false) - 1
+        let needed = MetalFillSession.predictedBytes(width: side, height: side, isLasso: false)
+        CompositorBudget.availableMemoryOverrideBytes = needed * 2
         let refused = engine.makeSession(referenceRGBA: reference, width: side, height: side)
-        XCTAssertTrue(refused.isRefusal, "a session past the budget must not be made")
-        guard case .tooLarge(let needed, let budget) = refused else {
+        XCTAssertTrue(refused.isRefusal, "a session the valve declines must not be made")
+        guard case .noHeadroom(let asked, let available) = refused else {
             return XCTFail("and the refusal must say why — got \(refused)")
         }
-        XCTAssertGreaterThan(needed, budget, "the reason must carry both numbers, and they must disagree")
+        XCTAssertEqual(asked, needed, "the reason must carry what was asked for")
+        XCTAssertEqual(available, needed * 2, "and what the process had")
 
-        // The control, and it is the half that matters: one byte more of budget and the same fill is
+        // The control, and it is the half that matters: one byte more of room and the same fill is
         // made. Without it this would pass against an engine that refused every fill.
-        CompositorBudget.budgetOverrideBytes = needed
+        CompositorBudget.availableMemoryOverrideBytes = needed * 2 + 1
         XCTAssertNotNil(engine.makeSession(referenceRGBA: reference, width: side, height: side).session,
-                        "a fill that fits must still be made")
+                        "a fill the process can afford must still be made")
     }
 
     /// **A memo *read* keeps a cel alive ahead of one rendered more recently** — the half of the
@@ -915,15 +918,13 @@ final class MemoryBudgetLogicTests: XCTestCase {
     @MainActor
     func testARefusedFillRaisesANoticeInsteadOfDoingNothing() throws {
         try XCTSkipIf(MetalFillEngine.shared == nil, "no Metal device")
-        defer { CompositorBudget.budgetOverrideBytes = nil }
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(.white,
                                                                rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
-        // One byte under what a session on this canvas needs.
-        let side = Int(CanvasFixture.canvasSize.width)
-        CompositorBudget.budgetOverrideBytes =
-            MetalFillSession.predictedBytes(width: side, height: side, isLasso: false) - 1
+        // A process with one byte to spare: the valve declines whatever the window is.
+        CompositorBudget.availableMemoryOverrideBytes = 1
 
         manager.notice = nil
         manager.beginInteractiveFill(at: CGPoint(x: 8, y: 8))

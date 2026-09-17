@@ -335,8 +335,8 @@ struct CanvasResizeRefusal: Equatable {
 /// audits is exactly the display list the mutation will walk.
 struct CanvasResizeAudit: Equatable {
 
-    /// Cels whose three raster tiers are all empty — no backing bitmap, no `fillImage`, no
-    /// `bakedImage`. `RasterLayerTexture.resized(to:placing:)` early-outs on these and allocates
+    /// Cels whose two raster tiers are both empty — no backing bitmap, no `bakedImage`.
+    /// `RasterLayerTexture.resized(to:placing:)` early-outs on these and allocates
     /// nothing, so their whole cost is the vector arm.
     var blankCels: Int = 0
 
@@ -625,7 +625,7 @@ extension CanvasManager {
         var audit = CanvasResizeAudit()
         for layer in layers {
             for cel in layer.cels {
-                if cel.raster.hasContent || cel.fillImage != nil || cel.bakedImage != nil {
+                if cel.raster.hasContent || cel.bakedImage != nil {
                     audit.inkedCels += 1
                 } else {
                     audit.blankCels += 1
@@ -759,9 +759,6 @@ extension CanvasManager {
                 autoreleasepool {
                     layers[layerIndex].cels[celIndex].raster =
                         layers[layerIndex].cels[celIndex].raster.resized(to: newSize, placing: placement)
-                    if let fill = layers[layerIndex].cels[celIndex].fillImage {
-                        layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, placing: placement)
-                    }
                     if let baked = layers[layerIndex].cels[celIndex].bakedImage {
                         layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, placing: placement)
                     }
@@ -843,9 +840,6 @@ extension CanvasManager {
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
                 layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
-                if let fillImage = layers[layerIndex].cels[celIndex].fillImage {
-                    layers[layerIndex].cels[celIndex].fillImage = Self.flippedImage(fillImage, canvasSize: canvasSize, horizontal: horizontal)
-                }
                 if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
                     layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
@@ -856,7 +850,7 @@ extension CanvasManager {
             }
             // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
             // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
-            // raster/fillImage/bakedImage above. This predates object layers being retired; a vector
+            // raster/bakedImage above. This predates object layers being retired; a vector
             // layer's live strokes already didn't flip. Flagged as a follow-up, not fixed here.
         }
         // Not undoable, same as setCanvasPadding: every cel's raster/fill/baked content is mirrored
@@ -870,7 +864,7 @@ extension CanvasManager {
         startThumbnailBackfill()
     }
 
-    /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center, so a flipped
+    /// Mirrors a cel's baked raster content about the canvas center, so a flipped
     /// canvas doesn't leave raster content behind on the wrong side.
     ///
     /// The geometry itself lives in `RasterLayerTexture.flippedImage` — this used to hold a second

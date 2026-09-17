@@ -773,7 +773,7 @@ final class CanvasManager: ObservableObject {
                                                    derived: derived[celIndex])
                 layers[layerIndex].cels[celIndex].raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
                 layers[layerIndex].cels[celIndex].bakedImage = nil
-                layers[layerIndex].cels[celIndex].fillImage = nil
+                layers[layerIndex].cels[celIndex].fillPreview = nil
                 layers[layerIndex].cels[celIndex].vector = nil
                 // The recipe has to go with the geometry, and **both** modes, not just `.reproject`.
                 // The frame is now stored pixels; leaving the recipe would evaluate it a second time
@@ -3295,7 +3295,7 @@ final class CanvasManager: ObservableObject {
     static func celThumbnailImage(for cel: Cel, canvasSize: CGSize,
                                   derived: DerivedCelContent? = nil) -> UIImage {
         if derived != nil || cel.bakedImage != nil || cel.vector != nil {
-            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already —
+            // PixelOps.rasterize folds fillPreview/bakedImage/raster/vector into one image already —
             // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
             // memo entry out of the compositor's way (see the constant).
             // Two rows, because the two halves scale with different things and only one of them is
@@ -3313,7 +3313,7 @@ final class CanvasManager: ObservableObject {
                                          thumbnailSize: celThumbnailSize)
             }
         }
-        return ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage,
+        return ThumbnailRenderer.render(cel.raster, fillPreview: cel.fillPreview,
                                         canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
     }
 
@@ -3418,12 +3418,21 @@ final class CanvasManager: ObservableObject {
     /// pixels exist but have not reached the main thread yet. See `FillRenderResult`.
     var fillRenderedRegion: FillRenderResult?
 
-    /// Gesture context. `fillSession`/`fillSeedColor`/`fillGestureLoopPath` are only touched on
-    /// `fillQueue`; everything below is main-thread only. **Nothing here is read from `fillQueue`** —
-    /// a worker gets what it needs as an immutable `FillGestureContext` snapshot instead, because the
-    /// old arrangement ("set on the main thread before any `fillQueue` work runs, then only read
-    /// after") is false the moment a second gesture starts while the first is still on the GPU.
+    /// Gesture context. `fillSession`/`fillWindow`/`fillGestureReferences`/`fillSeedColor`/
+    /// `fillGestureLoopPath` are only touched on `fillQueue`; everything below is main-thread only.
+    /// **Nothing here is read from `fillQueue`** — a worker gets what it needs as an immutable
+    /// `FillGestureContext` snapshot instead, because the old arrangement ("set on the main thread
+    /// before any `fillQueue` work runs, then only read after") is false the moment a second gesture
+    /// starts while the first is still on the GPU.
     var fillSession: MetalFillSession?
+    /// The window `fillSession` was built for — TODO (86). A bucket's grows on `fillQueue` as the
+    /// paint reaches its rim (`drainFillWork`), and the session is rebuilt with it; the two are
+    /// written together and only there.
+    var fillWindow: FillWindow?
+    /// The reference layers the live gesture floods against, held for the gesture so a grown window
+    /// can composite them again. The same list every render of the gesture reads — the artwork
+    /// cannot change while a fill is adjustable, since every edit runs `beginCanvasEdit` first.
+    var fillGestureReferences: [(layer: Layer, cel: Cel)] = []
 
     /// The loop the live lasso gesture drew, in canvas coordinates — kept so an empty result can
     /// redraw the artist's own fence (LASSO_FILL.md §7.4). Nil for a bucket fill.
@@ -3460,11 +3469,10 @@ final class CanvasManager: ObservableObject {
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }
-    /// Last painted region (premultiplied RGBA) + its dimensions, kept so a re-tap can be hit-tested
-    /// against the pixels the current fill already covers (`isPointInPendingFill`). Main-thread only.
-    var fillLastRegionRGBA: [UInt8]?
-    var fillLastRegionW = 0
-    var fillLastRegionH = 0
+    /// The last render the main thread installed — its painted pixels and the window they cover —
+    /// kept so a re-tap can be hit-tested against the pixels the current fill already covers
+    /// (`isPointInPendingFill`) and so the commit can bake them. Main-thread only.
+    var fillLastRender: FillRenderResult?
     var fillGestureSeed: (x: Int, y: Int) = (0, 0)
     var fillGestureColor: SIMD4<Float> = .zero   // premultiplied 0..1
     var fillGestureFillColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
