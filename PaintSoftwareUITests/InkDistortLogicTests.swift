@@ -580,16 +580,15 @@ final class InkDistortLogicTests: XCTestCase {
     /// **This is the test that pays for storing the map rather than the walk.** A piece's lattice
     /// holds the parent's *posed* samples; pulling them back through the map the piece inherited by
     /// being a copy of its parent is the parent's rest walk, so no cutter needed a rest-space arm.
-    /// Persisting `StrokeRestWalk` instead would have needed one in `piece(of:samples:parameters:)`,
-    /// in `detachedPiece`, and a second `precise` flag beside them.
+    /// Persisting `StrokeRestWalk` instead would have needed one in `piece(of:samples:parameters:)`
+    /// and a second `precise` flag beside it.
     func testAPieceCutFromAKeystonedStrokeStampsItsParentsOwnDabs() throws {
         let ink = stroke(from: CGPoint(x: 60, y: 100), to: CGPoint(x: 340, y: 320), count: 31, size: 18)
         let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: keystone()))
         let whole = stamped([committed])
 
         let canvas = VectorCanvas(size: CGSize(width: 400, height: 400), elements: [committed])
-        // **Mode 1**, which is the mode that splits *preserving* the lattice — Modes 2 and 3 remove
-        // geometry and re-anchor the walk by design, and the arm below is theirs.
+        // Mode 1; the Mode 2 arm below makes the same claim through the other cutter.
         let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
                                    brush: TestBrushes.hardRound, size: 40, opacity: 1, mode: .erase),
@@ -608,15 +607,13 @@ final class InkDistortLogicTests: XCTestCase {
         }
     }
 
-    /// **A piece that *left* its parent's walk still has per-dab width.**
+    /// **A piece Mode 2 cuts from a keystoned stroke still has per-dab width.**
     ///
-    /// The eraser's Modes 2 and 3 remove geometry, so a piece cannot keep replaying the parent's march
-    /// — it re-anchors, by design (`detachedPiece`). What it must not lose with the walk is the
-    /// keystone: it inherits `distort` by being a copy of its parent, and `effectiveWalk` rebuilds the
-    /// pre-image from *its own* samples, so each dab is still `restSize × localScale` at its own rest
-    /// centre. Persisting `StrokeRestWalk` instead of the map would have needed a rest-space arm here
-    /// — the parent's whole walk is the wrong pre-image for a piece that has left it.
-    func testADetachedPieceOfAKeystonedStrokeStillHasPerDabWidth() throws {
+    /// The cutting modes make the same piece Mode 1 does since TODO (85) — on the parent's lattice —
+    /// so what this arm adds to the one above is the cutter: the geometry it removes and the pieces
+    /// it splices must carry `distort` and the lattice through, and each dab is still
+    /// `restSize × localScale` at its own rest centre.
+    func testAModeTwoPieceOfAKeystonedStrokeStillHasPerDabWidth() throws {
         let ink = stroke(from: CGPoint(x: 60, y: 100), to: CGPoint(x: 340, y: 320), count: 31, size: 18)
         let map = keystone()
         let committed = try XCTUnwrap(VectorCanvas.mapping(.stroke(ink), through: map))
@@ -624,11 +621,11 @@ final class InkDistortLogicTests: XCTestCase {
         let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
                                    brush: TestBrushes.hardRound, size: 40, mode: .cutPoints),
-                      "setup: Mode 2 cut the line and re-anchored the survivors")
+                      "setup: Mode 2 cut the line")
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
-        XCTAssertTrue(pieces.allSatisfy { $0.lattice == nil },
-                      "setup: a detached piece has left its parent's lattice, which is Mode 2's rule")
+        XCTAssertTrue(pieces.allSatisfy { $0.lattice != nil && $0.distort != nil },
+                      "a piece replays its parent's walk and inherits its keystone")
 
         let inverse = try XCTUnwrap(map.inverse)
         var radii: [CGFloat] = []
@@ -636,7 +633,7 @@ final class InkDistortLogicTests: XCTestCase {
             let rest = try XCTUnwrap(inverse.map(dab.center))
             let scale = try XCTUnwrap(map.localScale(at: rest))
             XCTAssertEqual(dab.radius / scale, ink.size / 2, accuracy: 0.02,
-                           "a detached dab at \(dab.center) lost the keystone's width")
+                           "a piece's dab at \(dab.center) lost the keystone's width")
             radii.append(dab.radius)
         }
         XCTAssertGreaterThan(try XCTUnwrap(radii.max()) / (try XCTUnwrap(radii.min())), 1.1,

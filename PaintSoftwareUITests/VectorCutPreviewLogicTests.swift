@@ -245,10 +245,9 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         XCTAssertLessThan(Double(previewPop) / Double(removedByLift), 0.05, """
             The preview must show what the lift removes. \(previewPop) pixels change between the \
             preview and the committed cut against \(removedByLift) the cut removes — that is ink \
-            appearing or vanishing at the moment the finger lifts. (Not required to be zero: Mode 2 \
-            clears each surviving piece's `lattice`, so a piece re-anchors its dab phase at its own \
-            first sample and its far end can move by up to one dab spacing. That is a property of \
-            the commit, not of the preview.)
+            appearing or vanishing at the moment the finger lifts. (Not required to be zero: the \
+            preview erases and restamps into a flat copy of the layer, so a semi-transparent edge \
+            can round differently from the rendered pieces.)
             """)
         XCTAssertGreaterThan(Double(footprintPop) / Double(removedByLift), 0.5, """
             A footprint punch removes the whole nib-wide swathe (\(removedByFootprint) pixels) where \
