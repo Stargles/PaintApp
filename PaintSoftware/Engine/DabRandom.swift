@@ -106,18 +106,8 @@ struct DabRandom: Equatable {
     /// the brief's constraint asks for, and `VectorStroke.seed` is where it lives.
     let seed: UInt64
 
-    /// How far along the original stroke this stroke's own walk begins, in brush widths.
-    ///
-    /// Zero for a stroke drawn as itself and for a piece that still replays its parent's whole walk
-    /// (a `DabLattice` carrier — there the walk *is* the parent's, so it already starts at the
-    /// field's origin). Non-zero exactly for a piece that has left the parent's lattice and re-anchors
-    /// its own: the eraser's Modes 2 and 3, which remove geometry. Without it such a piece would hash
-    /// from zero and the surviving ink would re-roll along its whole length.
-    let arcOffset: CGFloat
-
-    init(seed: UInt64, arcOffset: CGFloat = 0) {
+    init(seed: UInt64) {
         self.seed = seed
-        self.arcOffset = arcOffset
     }
 
     // MARK: - The lattice
@@ -173,9 +163,7 @@ struct DabRandom: Equatable {
     /// interpolation returns that cell's hash exactly — a fresh draw per dab. So the two behaviours
     /// §2.17 describes separately are one code path and cannot drift apart.
     func unit(_ channel: Channel, at arcWidths: CGFloat, wavelength: CGFloat = 0) -> CGFloat {
-        // Both offsets go onto the lattice before they are added, so a piece's local arc lengths
-        // address exactly the cells they would have addressed at offset zero, shifted whole.
-        let index = DabRandom.lattice(arcOffset) &+ DabRandom.lattice(arcWidths)
+        let index = DabRandom.lattice(arcWidths)
         let step = max(DabRandom.lattice(wavelength), 1)
         let (cell, fraction) = DabRandom.cell(index, step: step)
         let low = value(channel, at: cell)

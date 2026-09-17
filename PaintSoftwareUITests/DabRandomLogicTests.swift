@@ -173,20 +173,6 @@ final class DabRandomLogicTests: XCTestCase {
                           "a Hermite fade moves ~1/100 as far over the first 1% of a cell as over the first 10%; a linear one moves 1/10")
     }
 
-    /// **`arcOffset` shifts the whole field and changes nothing else** — the property that lets a
-    /// piece which has re-anchored its walk still draw the parent's randomness.
-    func testAnArcOffsetIsAWholeShiftOfTheField() {
-        let offset: CGFloat = 128 * DabRandom.quantum
-        let shifted = DabRandom(seed: Self.seed, arcOffset: offset)
-        let origin = DabRandom(seed: Self.seed)
-        for step in 0..<200 {
-            let arc = CGFloat(step) * DabRandom.quantum * 37
-            XCTAssertEqual(shifted.unit(.scatterAcross, at: arc),
-                           origin.unit(.scatterAcross, at: arc + offset),
-                           "a field offset by \(offset) must read at \(arc) what the unshifted one reads at \(arc + offset)")
-        }
-    }
-
     // MARK: - Pin 1 — a split stroke stamps the ink it came from
 
     /// **The owner's own constraint, on pixels, at zero tolerance** — *"the randomness seed does not
@@ -196,9 +182,9 @@ final class DabRandomLogicTests: XCTestCase {
     /// `piece(of:)` every splitter shares) and the canvas re-rendered. Not one pixel may move.
     ///
     /// The two operands are the *rendered canvas* before and after, so this cannot pass by two structs
-    /// carrying equal seeds while the arc offset is wrong: a wrong offset moves ink. It goes red if a
-    /// piece stops inheriting `seed`, if `arcOffset` is set on a piece that keeps its parent's walk, or
-    /// if a skipped dab stops advancing the walk's arc length.
+    /// carrying equal seeds while the walk is wrong: a re-phased walk moves ink. It goes red if a
+    /// piece stops inheriting `seed`, if a piece stops replaying its parent's walk, or if a skipped
+    /// dab stops advancing the walk's arc length.
     func testALassoSplitOfAScatteringStrokeMovesNoPixel() {
         let stroke = VectorStroke(brush: Self.scatteringBrush(), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
@@ -372,74 +358,87 @@ final class DabRandomLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - Pin 4 — an eraser punch does not re-roll the surviving ink
+    // MARK: - Pin 4 — an eraser cut draws exactly the dabs the whole stroke drew
 
-    /// **Mode 2 cuts geometry away and the ink that survives in front of the cut is bit-identical.**
+    /// **Both halves of a Mode 2 cut draw exactly the dabs the unsplit stroke drew** — TODO (85),
+    /// the owner's *"make it so splitting a stroke does not change half the entire stroke"*.
     ///
-    /// Mode 2 removes span, so a surviving piece cannot keep replaying its parent's walk — it
-    /// re-anchors at its own first sample, which is documented and intended. What must *not* happen is
-    /// the field re-rolling: the head piece starts where the parent started, so its dabs are the
-    /// parent's dabs, to the byte.
+    /// The operands are **dab lists**, not seeds: every dab either piece draws is compared, centre and
+    /// alpha and radius, against the dab the whole stroke drew at that place, and the two pieces
+    /// together must account for every dab of the whole outside the gap. An implementation that
+    /// copied the seed and re-anchored the walk at the cut — which is what shipped — passes a seed
+    /// comparison and fails this: its second half's dabs land between the parent's, and at a zero
+    /// wavelength each draws a fresh value there.
     ///
-    /// **Red before this change**, because a piece minted a fresh `id` and the seed was derived from
-    /// it — erasing the tail of a stroke resettled the ink at the untouched end.
-    func testAPunchLeavesTheInkInFrontOfItBitIdentical() {
+    /// Each piece is walked the way `VectorCanvas.stamp` walks it — its lattice's samples, drawing
+    /// only its range — so the operand is what the renderer puts down, not the piece's own centreline.
+    func testBothHalvesOfACutDrawExactlyTheDabsTheWholeStrokeDrew() {
         let brush = Self.scatteringBrush()
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
-        let whole = BrushStamper.bake(samples: stroke.samples,
-                                      brush: brush, color: .black, brushSize: 10, brushOpacity: 1,
-                                      random: stroke.dabRandom).dabs
+        let whole = BrushStamper.bake(samples: stroke.samples, brush: brush, color: .black, brushSize: 10,
+                                      brushOpacity: 1, random: stroke.dabRandom).dabs
 
-        let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
-        // A short eraser stroke across the far end of the line.
-        let nib: StrokeSamples = [VectorSample(x: 190, y: 40, pressure: 1), VectorSample(x: 190, y: 80, pressure: 1)]
-        XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints),
-                      "Mode 2 must have cut the stroke")
-        guard let head = canvas.strokes.first else { return XCTFail("a head piece should survive") }
-        XCTAssertEqual(head.seed, Self.seed, "the piece inherits the parent's seed")
-        XCTAssertEqual(head.arcOffset, 0,
-                       "a piece starting at the parent's own origin sits at offset zero in the field")
-
-        let survived = BrushStamper.bake(samples: head.samples,
-                                         brush: head.brush, color: .black, brushSize: head.size,
-                                         brushOpacity: 1, random: head.dabRandom)
-        XCTAssertGreaterThan(survived.dabs.count, 10, "the surviving head should still be most of the line")
-        for index in 0..<survived.dabs.count {
-            Self.assertEqual(survived.dabs[index].center, whole[index].center,
-                             "dab \(index) of the surviving head moved when the far end was erased")
-        }
-    }
-
-    /// **The two survivors of a punch do not share a pattern** — the other half of pin 4, and the one
-    /// that fails if `arcOffset` is dropped.
-    ///
-    /// A cut in the middle leaves a head at offset zero and a tail some way along. Without the offset
-    /// the tail would address the field from zero as well, and the two pieces of one stroke would carry
-    /// *identical* scatter for their first dabs — a doubled pattern the artist would see.
-    func testTheTailOfAPunchDoesNotRepeatTheHeadsPattern() {
-        let brush = Self.scatteringBrush()
-        let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                  size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         let nib: StrokeSamples = [VectorSample(x: 120, y: 40, pressure: 1), VectorSample(x: 120, y: 80, pressure: 1)]
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints))
         let pieces = canvas.strokes
-        guard pieces.count == 2 else { return XCTFail("a mid-line punch should leave two pieces, got \(pieces.count)") }
-        XCTAssertEqual(pieces[0].arcOffset, 0)
-        XCTAssertGreaterThan(pieces[1].arcOffset, 5,
-                             "the tail begins well over five brush widths along the parent")
+        guard pieces.count == 2 else { return XCTFail("a mid-line cut should leave two pieces, got \(pieces.count)") }
 
-        let head = Self.offsets(samples: pieces[0].samples, brush: pieces[0].brush,
-                                size: pieces[0].size, random: pieces[0].dabRandom)
-        let tail = Self.offsets(samples: pieces[1].samples, brush: pieces[1].brush,
-                                size: pieces[1].size, random: pieces[1].dabRandom)
-        let shared = min(head.count, tail.count)
-        XCTAssertGreaterThan(shared, 5, "both pieces should carry several dabs")
-        var identical = 0
-        for index in 0..<shared where head[index] == tail[index] { identical += 1 }
-        XCTAssertEqual(identical, 0,
-                       "the tail must not replay the head's draws — that is what `arcOffset` prevents")
+        var drawn = 0
+        for (index, piece) in pieces.enumerated() {
+            guard let lattice = piece.lattice, let range = lattice.range else {
+                return XCTFail("piece \(index) must replay its parent's walk")
+            }
+            let dabs = BrushStamper.bake(samples: lattice.samples, brush: piece.brush, color: .black,
+                                         brushSize: piece.size, brushOpacity: 1, random: piece.dabRandom,
+                                         visibleRange: range).dabs
+            XCTAssertGreaterThan(dabs.count, 5, "piece \(index) should carry several dabs")
+            for dab in dabs {
+                guard let twin = whole.first(where: { $0.center == dab.center }) else {
+                    return XCTFail("piece \(index) drew a dab at \(dab.center) the whole stroke never drew")
+                }
+                XCTAssertEqual(twin.alpha, dab.alpha, "the same dab draws the same alpha")
+                XCTAssertEqual(twin.radius, dab.radius, "the same dab draws the same radius")
+            }
+            drawn += dabs.count
+        }
+        // The cut removed the dabs whose centreline parameter was under the nib — the nib is 14 pt
+        // across and the dabs 1 pt apart along a 200 pt line — and nothing else.
+        let gap = whole.filter { abs($0.center.x - 120) <= 7 + 1 }.count
+        XCTAssertGreaterThan(gap, 5, "Setup: the nib should have removed a run of dabs")
+        XCTAssertGreaterThanOrEqual(drawn, whole.count - gap,
+                                    "between them the pieces draw every dab of the whole outside the gap")
+    }
+
+    /// The same claim on the **rendered canvas**, for To Cross — the other cutter that used to make
+    /// a piece walk its own sub-run. A stroke crossed by another is cut back to the crossing; the
+    /// pixels outside the removed span do not move.
+    func testAToCrossCutMovesNoPixelOutsideTheRemovedSpan() {
+        let brush = Self.scatteringBrush()
+        let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                  size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
+        let crossing = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                    size: 10, opacity: 1,
+                                    samples: StrokeSamples([VectorSample(x: 160, y: 20, pressure: 1),
+                                                            VectorSample(x: 160, y: 100, pressure: 1)],
+                                                           channels: .pressureOnly),
+                                    seed: Self.seed &+ 1)
+        let size = CGSize(width: 260, height: 120)
+        let canvas = VectorCanvas(size: size, elements: [.stroke(stroke), .stroke(crossing)])
+        let before = canvas.render()
+        let resolved = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 60, y: 60), brush: TestBrushes.hardRound, size: 14)
+        XCTAssertEqual(resolved.outcome, .cut, "Setup: the tip is on the line")
+        let after = canvas.render()
+        // Everything right of the crossing is the surviving piece of the cut line plus the crossing
+        // line, both untouched; compare that half of the picture.
+        guard let lhs = before.cgImage?.cropping(to: CGRect(x: 175, y: 0, width: 85, height: 120)),
+              let rhs = after.cgImage?.cropping(to: CGRect(x: 175, y: 0, width: 85, height: 120)),
+              let report = RasterVectorParity.report(raster: UIImage(cgImage: lhs), vector: UIImage(cgImage: rhs),
+                                                     size: CGSize(width: 85, height: 120)) else {
+            return XCTFail("both renders should be readable")
+        }
+        XCTAssertTrue(report.isExact, "a To Cross cut must not move the surviving ink: \(report.diagnostic)")
     }
 
     // MARK: - The unit the field is addressed in
@@ -490,16 +489,13 @@ final class DabRandomLogicTests: XCTestCase {
 
     // MARK: - Round trip
 
-    /// **The seed and the arc offset survive save and load**, or every cut stroke in a reopened
-    /// document re-rolls.
-    func testTheSeedAndArcOffsetRoundTripThroughTheCodec() throws {
-        var stroke = VectorStroke(brush: Self.scatteringBrush(), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+    /// **The seed survives save and load**, or every stroke in a reopened document re-rolls.
+    func testTheSeedRoundTripsThroughTheCodec() throws {
+        let stroke = VectorStroke(brush: Self.scatteringBrush(), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 4), seed: Self.seed)
-        stroke.arcOffset = 12.5
         let data = try JSONEncoder().encode(stroke)
         let back = try JSONDecoder().decode(VectorStroke.self, from: data)
         XCTAssertEqual(back.seed, Self.seed)
-        XCTAssertEqual(back.arcOffset, 12.5)
     }
 
     /// **A duplicate keeps its ink.** The seed is a field of its own rather than something derived
