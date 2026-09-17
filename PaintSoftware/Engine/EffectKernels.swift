@@ -637,17 +637,20 @@ enum EffectReference {
         return result
     }
 
-    /// **The lens blur's gather** — TODO (74), `Effect.LensBlur`'s rulings 1 and 2 transcribed, and
-    /// `lensBlur` in `Composite.metal` is this function's twin. `offsets` is the sample set
-    /// `Effect.lensBlurSampleOffsets` resolved (`(dx, dy)` pairs, pixels) and `taps` how many of them
-    /// are live — 0 at a zero radius, which is the identity exactly. Each sample is a bilinear
-    /// clamp-to-edge tap on the premultiplied texel, weighted `1 + boost · saturate((Lum − threshold)
-    /// / (1 − threshold))` on its own premultiplied brightness — so a transparent sample weighs 1
-    /// and contributes nothing, and a highlight outweighs the dark round it — and the pixel is the
-    /// weighted mean. A convex combination, so `rgb ≤ a` survives with nothing to re-impose.
+    /// **The lens blur's gather, either pass** — TODO (74), `Effect.LensBlur`'s rulings 1 and 2
+    /// transcribed, and `lensBlur` in `Composite.metal` is this function's twin. `offsets` is both
+    /// sample sets `Effect.lensBlurSampleOffsets` resolved (`(dx, dy)` pairs, pixels), `sampleBase`
+    /// where this pass's begins and `taps` how many of them are live — 0 at a zero radius, which is
+    /// the identity exactly. Each sample is a bilinear clamp-to-edge tap on the premultiplied texel,
+    /// weighted `1 + boost · saturate((Lum − threshold) / (1 − threshold))` on its own premultiplied
+    /// brightness — so a transparent sample weighs 1 and contributes nothing, and a highlight
+    /// outweighs the dark round it (the fill pass carries `amount` 0 and weighs nothing) — and the
+    /// pixel is the weighted mean. A convex combination, so `rgb ≤ a` survives with nothing to
+    /// re-impose.
     private static func lensBlur(_ bytes: [UInt8], params: EffectParams, offsets: [Float],
                                  width: Int, height: Int) -> [UInt8] {
-        let samples = min(Int(params.taps), offsets.count / 2)
+        let base = Int(params.sampleBase)
+        let samples = min(Int(params.taps), max(offsets.count / 2 - base, 0))
         guard samples > 0 else { return bytes }
         let span = max(1 - params.threshold, 1e-4)
         var result = bytes
@@ -657,7 +660,7 @@ enum EffectReference {
                 var sum = SIMD4<Float>(repeating: 0)
                 var total: Float = 0
                 for i in 0..<samples {
-                    let offset = SIMD2<Float>(offsets[2 * i], offsets[2 * i + 1])
+                    let offset = SIMD2<Float>(offsets[2 * (base + i)], offsets[2 * (base + i) + 1])
                     let s = sample(bytes, position + offset, width: width, height: height)
                     let brightness = luminance(SIMD3<Float>(s.x, s.y, s.z))
                     let w = 1 + params.amount * min(max((brightness - params.threshold) / span, 0), 1)

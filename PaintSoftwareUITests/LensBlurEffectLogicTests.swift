@@ -6,11 +6,12 @@ import UIKit
 /// polygon the blades make of the sample set, both backends on the spectrum and on a bright impulse,
 /// a strip window against the whole frame, persistence, and the cost at the owner's canvas.
 ///
-/// **The sample set is the design, and it is pinned as data.** `Effect.lensBlurSampleOffsets` is
-/// what both kernels are handed — a Vogel spiral of `Effect.lensBlurSampleCount` points scaled to
-/// the radius and, for `blades ≥ 3`, out to the polygon — so the reach and the shape are properties
-/// of that array before they are properties of any picture, and the picture tests below only have
-/// to show the kernels honour it. `EffectParameterCharacterizationTests`, `FrameBakeKeyLogicTests`,
+/// **The sample sets are the design, and they are pinned as data.** `Effect.lensBlurSampleOffsets`
+/// is what both kernels are handed — a Vogel spiral of `Effect.lensBlurSampleCount` points at the
+/// aperture's share of the radius and, for `blades ≥ 3`, out to the polygon, then the fill's
+/// `Effect.lensBlurFillSampleCount` at the rest — so the reach and the shape are properties of that
+/// array before they are properties of any picture, and the picture tests below only have to show
+/// the kernels honour it. `EffectParameterCharacterizationTests`, `FrameBakeKeyLogicTests`,
 /// `EffectLayerLogicTests`, `EffectParameterTrackLogicTests` and `MergeBakeLogicTests` own the
 /// hand-typed all-effects sweeps this shipped a nineteenth row into; `LensBlurUITests` drives the
 /// same effect from an empty document and asserts what the canvas draws.
@@ -77,15 +78,28 @@ final class LensBlurEffectLogicTests: XCTestCase {
         return stride(from: 0, to: flat.count, by: 2).map { SIMD2<Double>(Double(flat[$0]), Double(flat[$0 + 1])) }
     }
 
+    /// The aperture's samples — the first `lensBlurSampleCount` pairs — and the fill's, the rest.
+    private func apertureOffsets(_ lens: Effect.LensBlur) -> [SIMD2<Double>] {
+        Array(offsets(lens).prefix(Effect.lensBlurSampleCount))
+    }
+
+    private func fillOffsets(_ lens: Effect.LensBlur) -> [SIMD2<Double>] {
+        Array(offsets(lens).dropFirst(Effect.lensBlurSampleCount))
+    }
+
+    private func reach(_ points: [SIMD2<Double>]) -> Double {
+        points.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.max() ?? 0
+    }
+
     // MARK: - The identity
 
     /// **Radius 0 is the identity, byte for byte, on both backends** — `taps` is 0 and the pass
     /// returns its input texel, whatever the boost and threshold say (there is no sample to weigh).
     ///
     /// MEASURED by mutation: with `params.taps` set from `lensBlurSampleCount` unconditionally, the
-    /// GPU still reads its `[0, 0]` offsets as sixty-four centre taps and stays the identity — but the
-    /// CPU's `min(taps, offsets.count / 2)` then gathers one sample and the two sides diverge on the
-    /// spectrum; the assertion here is what would say so.
+    /// premise goes red at 64 — and past it the GPU would read its `[0, 0]` stub as sixty-four centre
+    /// taps and stay the identity while the CPU's `min(taps, offsets.count / 2)` gathered one, which
+    /// is the divergence the two byte-equality assertions are there for.
     func testRadiusZeroIsTheIdentityByteForByteOnBothBackends() throws {
         let bytes = spectrumBytes()
         let effect = Effect.lensBlur(Effect.LensBlur(radius: 0, blades: 6, threshold: 0.2, boost: 5))
@@ -102,25 +116,32 @@ final class LensBlurEffectLogicTests: XCTestCase {
 
     // MARK: - The disc
 
-    /// **The sample set is `lensBlurSampleCount` points, every one inside the radius, and the
-    /// outermost reaches it** — the array both kernels gather over, pinned before any picture is.
-    /// Vogel's `√((i + ½)/N)` puts the last sample at `0.996·r`, so "reaches" is within a pixel of
-    /// the circle; a polygon's radius runs from its apothem `cos(π/n)·r` at a flat to `r` at a
-    /// vertex, and the last sample lands wherever the spiral puts it, so for a polygon "reaches"
-    /// means past the apothem — the circle's bound would demand a sample on a vertex.
-    func testTheSampleSetFillsTheDiscOutToTheRadius() {
+    /// **The aperture set is `lensBlurSampleCount` points inside its share of the radius, the fill
+    /// set `lensBlurFillSampleCount` inside the rest, and the two shares sum to the radius** — the
+    /// array both kernels gather over, pinned before any picture is. Vogel's `√((i + ½)/N)` puts
+    /// the last sample at `0.996·r`, so "reaches" is within a pixel of the circle; a polygon's radius
+    /// runs from its apothem `cos(π/n)·r` at a flat to `r` at a vertex, and the last sample lands
+    /// wherever the spiral puts it, so for a polygon "reaches" means past the apothem — the circle's
+    /// bound would demand a sample on a vertex.
+    func testTheSampleSetsFillTheDiscOutToTheRadius() {
         for blades in [0, 5, 6, 9] {
             let radius = 12.0
-            let points = offsets(Effect.LensBlur(radius: radius, blades: blades))
-            XCTAssertEqual(points.count, Effect.lensBlurSampleCount, "\(blades) blades: the count is fixed")
-            let distances = points.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }
-            XCTAssertLessThanOrEqual(distances.max() ?? .infinity, radius + 1e-4,
-                                     "\(blades) blades: no sample lies outside the radius")
-            let rim = blades >= 3 ? radius * cos(.pi / Double(blades)) : radius
-            XCTAssertGreaterThan(distances.max() ?? 0, rim - 1,
-                                 "\(blades) blades: the outermost sample reaches the aperture's rim")
-            XCTAssertLessThan(distances.min() ?? .infinity, radius * 0.2,
-                              "\(blades) blades: the innermost sample sits near the centre")
+            let lens = Effect.LensBlur(radius: radius, blades: blades)
+            let aperture = apertureOffsets(lens), fill = fillOffsets(lens)
+            XCTAssertEqual(aperture.count, Effect.lensBlurSampleCount, "\(blades) blades: the aperture's count is fixed")
+            XCTAssertEqual(fill.count, Effect.lensBlurFillSampleCount, "\(blades) blades: the fill's count is fixed")
+            let apertureRadius = radius * (1 - Effect.lensBlurFillShare)
+            let fillRadius = radius * Effect.lensBlurFillShare
+            XCTAssertLessThanOrEqual(reach(aperture), apertureRadius + 1e-4,
+                                     "\(blades) blades: no aperture sample lies outside its share")
+            XCTAssertLessThanOrEqual(reach(fill), fillRadius + 1e-4,
+                                     "\(blades) blades: no fill sample lies outside its share")
+            let rim = blades >= 3 ? apertureRadius * cos(.pi / Double(blades)) : apertureRadius
+            XCTAssertGreaterThan(reach(aperture), rim - 1,
+                                 "\(blades) blades: the outermost aperture sample reaches the rim")
+            XCTAssertGreaterThan(reach(fill), fillRadius * 0.9, "\(blades) blades: the fill reaches its own share")
+            XCTAssertLessThan(aperture.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.min() ?? .infinity,
+                              radius * 0.2, "\(blades) blades: the innermost sample sits near the centre")
         }
         XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 0)).weights, [0, 0],
                        "A zero radius binds a stub, like every effect that convolves nothing")
@@ -128,10 +149,11 @@ final class LensBlurEffectLogicTests: XCTestCase {
 
     /// **A white point becomes a disc of the radius the artist typed** — measured in bytes on the
     /// picture. On an opaque black field, a lens blur of radius `r` and no boost hands every sample
-    /// weight 1, so an output pixel is lit exactly when one of its sixty-four taps lands on the
-    /// impulse: the lit set is the sample set reflected through the impulse, and it reaches `r`
-    /// (plus one pixel for the bilinear tap) and no further. Its count is close to the sample count —
-    /// a tap that straddles four texels lights up to four, a tap near another's may share one.
+    /// weight 1, so an output pixel is lit exactly when a fill tap of its lands on a pixel an
+    /// aperture tap of *that* pixel's lit from the impulse: the lit set is the two sample sets
+    /// convolved and reflected through the impulse, and it reaches `r` (plus a pixel a pass for the
+    /// bilinear taps) and no further. Its count is well past the aperture's sample count — the fill
+    /// turns each of the aperture's dots into sixteen.
     ///
     /// MEASURED by mutation: with the offsets scaled by `r / 2` in `lensBlurSampleOffsets`, the
     /// farthest lit pixel lands at half the radius and the reach assertion goes red.
@@ -150,7 +172,7 @@ final class LensBlurEffectLogicTests: XCTestCase {
                 farthest = max(farthest, (dx * dx + dy * dy).squareRoot())
             }
         }
-        XCTAssertLessThanOrEqual(farthest, radius + 1, "The disc reaches no further than the radius plus a bilinear tap")
+        XCTAssertLessThanOrEqual(farthest, radius + 2, "The disc reaches no further than the radius plus a bilinear tap a pass")
         XCTAssertGreaterThan(farthest, radius - 1.5, "…and it does reach the radius: farthest lit pixel at \(farthest)")
         XCTAssertGreaterThanOrEqual(litCount, Effect.lensBlurSampleCount,
                                     "Every sample lights at least one pixel: \(litCount) lit")
@@ -198,7 +220,8 @@ final class LensBlurEffectLogicTests: XCTestCase {
         }
         let plainExcess = excess(plain), boostedExcess = excess(boosted)
         XCTAssertGreaterThan(plainExcess.lit, 0, "PREMISE: the impulse reaches the picture at all")
-        XCTAssertLessThanOrEqual(Double(plainExcess.total), 9 * Double(255 - ground) + Double(plainExcess.lit) * 0.5,
+        // Half a step of rounding per lit pixel per pass, and the fill pass spreads the aperture's.
+        XCTAssertLessThanOrEqual(Double(plainExcess.total), 9 * Double(255 - ground) + Double(plainExcess.lit),
                                  "A plain disc average spreads nine pixels' light and no more: \(plainExcess)")
         XCTAssertGreaterThan(Double(boostedExcess.total), Double(plainExcess.total) * 2,
                              "Boosted \(boostedExcess) against plain \(plainExcess): the highlight must outweigh the ground")
@@ -210,28 +233,32 @@ final class LensBlurEffectLogicTests: XCTestCase {
         XCTAssertEqual(pixel(plain, 4, 4), [ground, ground, ground, 255])
     }
 
-    /// **Blades reshape the sample set into the polygon** — a four-blade aperture is a square with a
-    /// vertex on +x, i.e. the diamond `|x| + |y| ≤ r`, and a round one is not. Pinned on the offsets,
-    /// which is where the shape lives; the kernels read them as they are.
+    /// **Blades reshape the aperture set into the polygon, and the fill stays round** — a four-blade
+    /// aperture is a square with a vertex on +x, i.e. the diamond `|x| + |y| ≤ r`, and a round one
+    /// is not. Pinned on the offsets, which is where the shape lives; the kernels read them as they
+    /// are.
     ///
-    /// MEASURED by mutation: with the polygon scale left out of `lensBlurSampleOffsets`, the
-    /// four-blade set has samples past the diamond and the first assertion goes red.
-    func testBladesShapeTheSampleSetIntoAPolygon() {
+    /// MEASURED by mutation: with the polygon scale left out of `vogelDisc`, the four-blade set has
+    /// samples past the diamond and the first assertion goes red.
+    func testBladesShapeTheApertureIntoAPolygon() {
         let radius = 20.0
-        let diamond = offsets(Effect.LensBlur(radius: radius, blades: 4))
+        let apertureRadius = radius * (1 - Effect.lensBlurFillShare)
+        let diamond = apertureOffsets(Effect.LensBlur(radius: radius, blades: 4))
         for p in diamond {
-            XCTAssertLessThanOrEqual(abs(p.x) + abs(p.y), radius + 1e-3,
-                                     "Four blades: every sample inside the diamond, \(p) is not")
+            XCTAssertLessThanOrEqual(abs(p.x) + abs(p.y), apertureRadius + 1e-3,
+                                     "Four blades: every aperture sample inside the diamond, \(p) is not")
         }
-        let round = offsets(Effect.LensBlur(radius: radius, blades: 0))
-        XCTAssertTrue(round.contains { abs($0.x) + abs($0.y) > radius + 1 },
+        let round = apertureOffsets(Effect.LensBlur(radius: radius, blades: 0))
+        XCTAssertTrue(round.contains { abs($0.x) + abs($0.y) > apertureRadius + 1 },
                       "PREMISE: the round set has samples the diamond excludes")
         // A polygon is at least its apothem wide in every direction, so the hexagon keeps the samples
         // out to `cos(π/6)·r` at its flats — the shape is a scaled disc, not a clipped one.
-        let hexagon = offsets(Effect.LensBlur(radius: radius, blades: 6))
-        let hexagonReach = hexagon.map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.max() ?? 0
-        XCTAssertGreaterThan(hexagonReach, radius * cos(.pi / 6) - 1,
-                             "Six blades: the outermost sample still reaches the polygon's rim")
+        XCTAssertGreaterThan(reach(apertureOffsets(Effect.LensBlur(radius: radius, blades: 6))),
+                             apertureRadius * cos(.pi / 6) - 1,
+                             "Six blades: the outermost aperture sample still reaches the polygon's rim")
+        // The fill is the same round disc whatever the blades say.
+        XCTAssertEqual(fillOffsets(Effect.LensBlur(radius: radius, blades: 4)),
+                       fillOffsets(Effect.LensBlur(radius: radius, blades: 0)))
         // Below three sides there is no polygon: 1 and 2 are the circle, byte for byte.
         XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: radius, blades: 2)).weights,
                        Effect.lensBlur(Effect.LensBlur(radius: radius, blades: 0)).weights)
@@ -289,28 +316,39 @@ final class LensBlurEffectLogicTests: XCTestCase {
 
     // MARK: - The abstraction
 
-    /// One pass, its own kind, no combine — and `passes[0]` is the effect's own `kindCode` and
-    /// `params`, the invariant every effect keeps.
-    func testALensBlurIsOnePassOfItsOwnKind() {
-        let effect = Effect.lensBlur(Effect.LensBlur(radius: 8))
-        XCTAssertEqual(effect.passes.count, 1)
+    /// **Two passes of one kind: the aperture, then the fill** — `passes[0]` is the effect's own
+    /// `kindCode` and `params`, the invariant every effect keeps, and the fill differs from it in
+    /// exactly where its offsets start, how many there are, and that it weights nothing.
+    func testALensBlurIsAnApertureGatherThenAFillGather() {
+        let effect = Effect.lensBlur(Effect.LensBlur(radius: 8, boost: 3))
+        XCTAssertEqual(effect.passes.count, 2)
         XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params))
         XCTAssertEqual(effect.params.taps, UInt32(Effect.lensBlurSampleCount))
+        XCTAssertEqual(effect.params.sampleBase, 0)
+        XCTAssertEqual(effect.params.amount, 3)
+        let fill = effect.passes[1]
+        XCTAssertEqual(fill.kind, effect.kindCode, "The fill is the same gather over the same table")
+        XCTAssertEqual(fill.params.taps, UInt32(Effect.lensBlurFillSampleCount))
+        XCTAssertEqual(fill.params.sampleBase, UInt32(Effect.lensBlurSampleCount), "…reading the offsets after the aperture's")
+        XCTAssertEqual(fill.params.amount, 0, "…and weighting nothing, since the aperture already weighted the highlights")
+        XCTAssertEqual(effect.weights.count, 2 * (Effect.lensBlurSampleCount + Effect.lensBlurFillSampleCount))
+        XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 0)).passes.map(\.params.taps), [0, 0],
+                       "A zero radius is two identities")
         XCTAssertEqual(effect.input, .ink, "Bloom's stored default")
         XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(input: .backdrop)).input, .backdrop, "…and the artist's choice reaches the walk")
         XCTAssertTrue(effect.reshapesCoverage)
         XCTAssertFalse(effect.readsAbsolutePosition)
     }
 
-    /// **The apron is the radius plus one** — every offset lies within the radius and the tap is
-    /// bilinear — and it is stated in whole rows off the *clamped* radius, so a strip under a
+    /// **The apron is the radius plus two** — the two passes' discs sum to the radius and each tap
+    /// is bilinear — and it is stated in whole rows off the *clamped* radius, so a strip under a
     /// radius past `Effect.maxBlurTaps` is sized for the radius that actually renders.
-    func testTheApronIsTheRadiusPlusOneAndTheRadiusIsCapped() {
+    func testTheApronIsTheRadiusPlusTwoAndTheRadiusIsCapped() {
         let frame = (width: 100, height: 100)
-        XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 7.2)).verticalKernelRadius(frameSize: frame), 9)
-        XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 0)).verticalKernelRadius(frameSize: frame), 1)
+        XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 7.2)).verticalKernelRadius(frameSize: frame), 10)
+        XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 0)).verticalKernelRadius(frameSize: frame), 2)
         XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: 500)).verticalKernelRadius(frameSize: frame),
-                       Effect.maxBlurTaps + 1)
+                       Effect.maxBlurTaps + 2)
         let capped = offsets(Effect.LensBlur(radius: 500)).map { ($0.x * $0.x + $0.y * $0.y).squareRoot() }.max() ?? 0
         XCTAssertLessThanOrEqual(capped, Double(Effect.maxBlurTaps) + 1e-3, "The sample set honours the same cap")
         XCTAssertEqual(Effect.lensBlur(Effect.LensBlur(radius: .nan)).params.taps, 0, "A non-finite radius is the identity")
@@ -318,7 +356,7 @@ final class LensBlurEffectLogicTests: XCTestCase {
 
     /// **A window with enough apron matches the whole frame's own rows; one with none does not** —
     /// `GlareEffectLogicTests`' strip test, on this gather. A bright bar at rows 40…43 of a 90-row
-    /// frame; a destination at row 50 is 7 rows below the bar, inside a radius-9 disc's 10-row reach.
+    /// frame; a destination at row 50 is 7 rows below the bar, inside a radius-9 disc's 11-row reach.
     /// The naive strip of rows 46…89 has no bar in it and clamps to its own top row; the strip
     /// starting at the bar's row minus the apron contains everything a row-50 gather can reach.
     func testAWindowWithEnoughApronMatchesTheWholeAndOneWithNoneDoesNot() {
@@ -333,7 +371,7 @@ final class LensBlurEffectLogicTests: XCTestCase {
         }
         let effect = Effect.lensBlur(Effect.LensBlur(radius: 9, threshold: 0.3, boost: 3))
         let apron = effect.verticalKernelRadius(frameSize: (width, height))
-        XCTAssertEqual(apron, 10, "PREMISE: radius 9 plus the bilinear tap")
+        XCTAssertEqual(apron, 11, "PREMISE: radius 9 plus a bilinear tap a pass")
 
         let whole = EffectReference.apply(effect, to: bytes, width: width, height: height)
         func rowBytes(_ full: [UInt8], _ row: Int) -> [UInt8] {
@@ -385,9 +423,20 @@ final class LensBlurEffectLogicTests: XCTestCase {
     /// prints. Gated like `EffectMultiPassLogicTests.testBlurCostAtCanvasResolution`, for its reason:
     ///
     /// ```
-    /// xcodebuild test … -only-testing:PaintSoftwareUITests/LensBlurEffectLogicTests/testLensBlurCostAtTheOwnersCanvas \
-    ///   PAINT_PERF_HEAVY=1
+    /// xcrun simctl spawn "$UDID" launchctl setenv PAINT_PERF_HEAVY 1     # the runner's own environment
+    /// xcodebuild test … -only-testing:PaintSoftwareUITests/LensBlurEffectLogicTests/testLensBlurCostAtTheOwnersCanvas
     /// ```
+    ///
+    /// (A `TEST_RUNNER_` prefix does not reach a simulator's runner — PERFORMANCE.md §11.12.)
+    ///
+    /// MEASURED 2026-09-17 on the simulator, 96.7% idle, Debug — the GPU figure, which the Swift
+    /// optimisation level does not touch: **radius 16, 64 + 16 samples, 35 / 34 / 36 ms** a call
+    /// with the upload and readback in it, against **22 ms** for the radius-0 identity (the round
+    /// trip alone) and **24 ms** for a radius-16 Gaussian's two passes. So the two gathers are
+    /// ~13 ms at the owner's canvas, a radius-16 Gaussian's two passes ~2–8 ms (the same run read
+    /// 28 against a 20 ms round trip minutes earlier — the round trip is most of the number), and
+    /// the lens blur's does not move with the radius. The aperture pass alone, before the fill
+    /// existed, read 30 / 29 / 31 against a 20 ms round trip.
     ///
     /// The GPU side is shader code and the Swift optimisation level does not reach it, but
     /// `MetalEffectEngine.apply` uploads and reads back per call, so the radius-0 row is measured
@@ -426,7 +475,7 @@ final class LensBlurEffectLogicTests: XCTestCase {
         #endif
         let report = [
             "configuration \(configuration)",
-            "samples \(Effect.lensBlurSampleCount)",
+            "samples \(Effect.lensBlurSampleCount)+\(Effect.lensBlurFillSampleCount)",
             "gpu2048x1024lensR16 \(lensSeconds.map { "\(Int($0 * 1000))" }.joined(separator: "/"))ms",
             "gpu2048x1024lensR0 \(Int(identitySeconds * 1000))ms",
             "gpu2048x1024gaussianR16 \(Int(gaussianSeconds * 1000))ms",

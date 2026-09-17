@@ -1075,19 +1075,28 @@ extension Effect {
     /// **A defocused lens** — TODO (74)'s *"simulates the type of blur an actual defocused lens
     /// would produce like bokeh"*, designed 2026-09-17. Four rulings, taken for the owner:
     ///
-    /// 1. **One gather over a fixed disc of samples, not a separable pair.** A lens blur's kernel is
-    ///    the aperture's shape — a disc, or the polygon the iris blades make — and a disc does not
-    ///    separate into two 1D passes the way a Gaussian does. So every pixel gathers
-    ///    `Effect.lensBlurSampleCount` bilinear taps at the offsets `lensBlurSampleOffsets` resolves
-    ///    once in Swift: a Vogel spiral (`r = √((i + ½)/N)`, `θ = i · golden angle`), which fills a
-    ///    disc evenly with no rings, mapped onto the `blades`-gon by scaling each point out to the
-    ///    polygon's radius in its own direction. Both backends read the same offsets off the same
-    ///    float table (`weights`, which for this effect carries offsets rather than kernel weights),
-    ///    so neither evaluates the spiral itself — `Blur`'s Gaussian precedent, for the same parity
-    ///    reason. **64 samples is the count**, fixed whatever the radius: the cost is 256 texel reads
-    ///    per pixel at every radius, the same order as a radius-64 Gaussian's two passes, and the
-    ///    number is a named constant rather than a function of the radius so that a keyed radius
-    ///    tweens smoothly instead of changing the sample pattern mid-ramp.
+    /// 1. **A gather over a fixed disc of samples, not a separable pair — and then a second, small
+    ///    one that fills it in.** A lens blur's kernel is the aperture's shape — a disc, or the
+    ///    polygon the iris blades make — and a disc does not separate into two 1D passes the way a
+    ///    Gaussian does. So every pixel gathers `Effect.lensBlurSampleCount` bilinear taps at the
+    ///    offsets `lensBlurSampleOffsets` resolves once in Swift: a Vogel spiral (`r = √((i + ½)/N)`,
+    ///    `θ = i · golden angle`), which fills a disc evenly with no rings, mapped onto the
+    ///    `blades`-gon by scaling each point out to the polygon's radius in its own direction. Both
+    ///    backends read the same offsets off the same float table (`weights`, which for this effect
+    ///    carries offsets rather than kernel weights), so neither evaluates the spiral itself —
+    ///    `Blur`'s Gaussian precedent, for the same parity reason.
+    ///
+    ///    **Sixty-four samples at the slider's end are sixty-four dots.** Driven on the simulator at
+    ///    radius 63 with a 15 px highlight, one gather drew the highlight as its own sample pattern —
+    ///    the spacing between samples is `r·√(π/N) ≈ 0.22 r`, fourteen pixels there, wider than the
+    ///    highlight itself. The fix is not more samples (256 would be four times the cost and still
+    ///    seven pixels apart) but a **second pass**: a plain disc of `lensBlurFillSampleCount` taps at
+    ///    `lensBlurFillShare` of the radius, gathered from the first pass's output, so every dot of
+    ///    the first becomes sixteen and the effective kernel is 1,024 samples for 80 taps' cost. The
+    ///    first pass takes the remaining share of the radius, so the two together reach exactly `r`.
+    ///    The counts are named constants rather than functions of the radius, so a keyed radius
+    ///    tweens smoothly instead of changing the pattern mid-ramp; the cost is 320 texel reads a
+    ///    pixel at every radius, the same order as a radius-64 Gaussian's two passes.
     /// 2. **The bokeh is a weight on the samples, not a pre-pass.** The textbook boost multiplies
     ///    bright pixels *before* the gather, which needs an HDR intermediate — an 8-bit one clips
     ///    white at 1.0 and the boost does nothing. Weighting instead: each sample's weight is
@@ -1103,7 +1112,7 @@ extension Effect {
     /// 4. **`input` is the artist's stored choice, seeded `.ink`** — `Bloom.input`'s field and
     ///    reason (`Effect.input`'s Lens Blur bullet).
     struct LensBlur: Equatable {
-        /// Pixels — the aperture's radius. 0 is the identity.
+        /// Pixels — the aperture's radius, the reach of both passes together. 0 is the identity.
         var radius: Double = 0
         /// How many sides the aperture polygon has. **0 is a circle**; below 3 there is no polygon
         /// to make, so 1 and 2 are circles too; 5…9 are what real irises have.
@@ -1400,6 +1409,12 @@ struct EffectParams: Equatable {
     var wheelGlobalA: Float = 0
     var wheelGlobalB: Float = 0
     var wheelGlobalL: Float = 0
+    /// **Where a lens-blur pass's sample set begins in the float table** (TODO (74)) — 0 for the
+    /// aperture pass, `Effect.lensBlurSampleCount` for the fill pass that follows it in the same
+    /// `weights` binding. The pass's identity is data, as a blur pass's step vector is: the same
+    /// kernel reads a different slice. Appended at the end for the reason every field since the
+    /// colour triple was.
+    var sampleBase: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -1631,11 +1646,14 @@ extension Effect {
             p.wheelHighlightsA = highlights.a; p.wheelHighlightsB = highlights.b; p.wheelHighlightsL = highlights.l
             p.wheelGlobalA = global.a; p.wheelGlobalB = global.b; p.wheelGlobalL = global.l
         case .lensBlur(let lens):
-            // `taps` is the sample count — every sample, or none at all when the radius is 0 and
-            // the pass is the identity. The radius itself is already in the offsets (`weights`),
-            // so the kernel never sees it; `threshold` is Bloom's own field and `amount` carries
-            // the boost, the same trailing-scalar reuse `sharpen.amount` and `outline.width` make.
+            // Pass 0's block: the aperture gather. `taps` is its sample count — every sample, or
+            // none at all when the radius is 0 and the pass is the identity — and `sampleBase` is
+            // where its offsets start in `weights` (0; the fill pass in `passes` starts after it).
+            // The radius itself is already in the offsets, so the kernel never sees it; `threshold`
+            // is Bloom's own field and `amount` carries the boost, the same trailing-scalar reuse
+            // `sharpen.amount` and `outline.width` make.
             p.taps = Self.lensBlurRadius(lens.radius) > 0 ? UInt32(Self.lensBlurSampleCount) : 0
+            p.sampleBase = 0
             p.threshold = Float(lens.threshold.isFinite ? min(max(lens.threshold, 0), 1) : 1)
             p.amount = Float(lens.boost.isFinite ? max(lens.boost, 0) : 0)
         }
@@ -1696,6 +1714,17 @@ extension Effect {
             var combine = first
             combine.kind = Self.kDuplicateCombine
             return [first, combine]
+
+        case .lensBlur(let lens):
+            // The aperture, then the fill — `LensBlur`'s ruling 1. The fill is the same kind over
+            // the same table, differing in where its offsets start, how many there are, and that
+            // it weights nothing: the first pass has already weighted the highlights, and a second
+            // weighting would boost the boost. Two identities at a zero radius, byte for byte.
+            var fill = first
+            fill.params.taps = Self.lensBlurRadius(lens.radius) > 0 ? UInt32(Self.lensBlurFillSampleCount) : 0
+            fill.params.sampleBase = UInt32(Self.lensBlurSampleCount)
+            fill.params.amount = 0
+            return [first, fill]
 
         case .glare(let glare):
             // Fog Glow is a bloom, not three passes of its own — `Glare.asBloom`'s doc.
@@ -1769,8 +1798,11 @@ extension Effect {
         }
     }
 
-    /// **The lens blur's sample set, in pixels** — `lensBlurSampleCount` `(dx, dy)` pairs flattened,
-    /// or `[0, 0]` at a zero radius (the kernels never read it then; `taps` is 0).
+    /// **The lens blur's two sample sets, in pixels** — the aperture's `lensBlurSampleCount` `(dx, dy)`
+    /// pairs at `(1 − lensBlurFillShare) · radius`, shaped by `blades`, then the fill's
+    /// `lensBlurFillSampleCount` pairs at `lensBlurFillShare · radius`, always round — flattened one
+    /// after the other, which is how `sampleBase` addresses them. `[0, 0]` at a zero radius (the
+    /// kernels never read it then; `taps` is 0).
     ///
     /// A Vogel spiral: point `i` sits at radius `√((i + ½) / N)` and angle `i · 2.39996…` (the golden
     /// angle), which tiles a disc with even density and no concentric rings. For `blades ≥ 3` each
@@ -1781,14 +1813,18 @@ extension Effect {
     static func lensBlurSampleOffsets(radius: Double, blades: Int) -> [Float] {
         let r = lensBlurRadius(radius)
         guard r > 0 else { return [0, 0] }
-        let count = lensBlurSampleCount
+        return vogelDisc(count: lensBlurSampleCount, radius: r * (1 - lensBlurFillShare), blades: blades)
+            + vogelDisc(count: lensBlurFillSampleCount, radius: r * lensBlurFillShare, blades: 0)
+    }
+
+    private static func vogelDisc(count: Int, radius: Double, blades: Int) -> [Float] {
         let goldenAngle = Double.pi * (3 - 5.0.squareRoot())
         var offsets: [Float] = []
         offsets.reserveCapacity(count * 2)
         for i in 0..<count {
             let rho = ((Double(i) + 0.5) / Double(count)).squareRoot()
             let theta = Double(i) * goldenAngle
-            var scale = rho * r
+            var scale = rho * radius
             if blades >= 3 {
                 let sector = 2 * Double.pi / Double(blades)
                 let phi = theta.truncatingRemainder(dividingBy: sector) - sector / 2
@@ -1800,9 +1836,17 @@ extension Effect {
         return offsets
     }
 
-    /// The samples one lens-blur gather takes — `LensBlur`'s ruling 1, and the cost the effect has
-    /// at every radius: `4 · lensBlurSampleCount` texel reads per pixel, bilinear.
+    /// The samples the aperture gather takes — `LensBlur`'s ruling 1. With the fill's sixteen the
+    /// cost at every radius is `4 · (64 + 16)` texel reads per pixel, bilinear.
     static let lensBlurSampleCount = 64
+
+    /// The samples the fill gather takes, from the aperture pass's output.
+    static let lensBlurFillSampleCount = 16
+
+    /// The share of the radius the fill disc takes, the aperture taking the rest. 0.15 is a little
+    /// under the aperture's own sample spacing (`0.85 · r · √(π/64) ≈ 0.19 r`), so each dot's fill
+    /// meets its neighbours' and the effective 1,024-sample kernel is continuous to the eye.
+    static let lensBlurFillShare = 0.15
 
     /// `LensBlur.radius`, clamped to the model's domain: non-negative, finite, and no further than
     /// `maxBlurTaps` for the apron's sake (ruling 3).
@@ -1937,10 +1981,10 @@ extension Effect {
             var maxSine = 0.0
             for i in 0..<count { maxSine = max(maxSine, abs(sin(angle0 + Double(i) * step))) }
             return Int((Double(taps) * maxSine).rounded(.up)) + 1
-        // The reach is the radius — every offset lies within it (`lensBlurSampleOffsets` scales
-        // the unit disc, and a polygon's radius never exceeds 1) — plus one for the bilinear tap.
+        // The reach is the radius — the two passes' discs sum to it (`lensBlurSampleOffsets` scales
+        // the unit disc, and a polygon's radius never exceeds 1) — plus one bilinear tap per pass.
         case .lensBlur(let lens):
-            return Int(Self.lensBlurRadius(lens.radius).rounded(.up)) + 1
+            return Int(Self.lensBlurRadius(lens.radius).rounded(.up)) + 2
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise,
              .recolor, .colorWheels:
             return 0

@@ -1272,6 +1272,8 @@ final class EffectMultiPassLogicTests: XCTestCase {
             .glare(Effect.Glare(type: .fogGlow, size: 4)),
             // TODO (63): one pass, kind 18.
             .colorWheels(Effect.ColorWheels(global: .init(hue: 30, saturation: 0.5, luminance: 0.2))),
+            // TODO (74): two passes of kind 19, the fill reached through `passes` alone.
+            .lensBlur(Effect.LensBlur(radius: 9, blades: 5, boost: 3)),
         ]
         for effect in everything {
             XCTAssertEqual(effect.passes.first, EffectPass(kind: effect.kindCode, params: effect.params),

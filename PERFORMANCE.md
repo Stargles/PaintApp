@@ -5124,3 +5124,33 @@ cel's bitmap copy-on-write and hand the *next dab* a canvas-sized copy, so the a
 a stroke is live, while playback runs, during a resize, and while anything interactive is pending —
 `ContentView.autosaveIsHeld` is the list. The clock is `AutosaveClock`: 2.5 s after the last edit,
 30 s after the first unsaved one, whichever is sooner.
+
+---
+
+## 20. The Lens Blur's two gathers at the owner's canvas (2026-09-17)
+
+**MEASURED on the simulator, Debug, 96.7% idle, by
+`LensBlurEffectLogicTests.testLensBlurCostAtTheOwnersCanvas`** (opt-in through `PAINT_PERF_HEAVY`,
+set with `simctl spawn … launchctl setenv` — §11.12). The figure is the GPU's, which the Swift
+optimisation level does not reach; `MetalEffectEngine.apply` uploads and reads back per call, so the
+radius-0 row is the round trip alone and the gather is the difference.
+
+| 2048×1024, one call | ms |
+|---|---|
+| Lens Blur, radius 16, 64 aperture + 16 fill samples, three takes | **35 / 34 / 36** |
+| Lens Blur, radius 0 (the identity: upload and readback only) | 22 |
+| Gaussian Blur, radius 16, two passes | 24 |
+
+So the lens blur's two gathers cost **~13 ms** at the owner's canvas against the Gaussian's ~2 ms
+here (the same Gaussian read 28 against a 20 ms round trip minutes earlier, so call it 2–8; the
+round trip is most of either number). The cost is **fixed whatever the radius**: 80 bilinear taps a
+pixel, 320 texel reads, at radius 1 or 128 — the sample sets are resolved once in Swift and only
+their scale changes (`Effect.lensBlurSampleOffsets`). The aperture pass alone, before the fill pass
+existed, read 30 / 29 / 31 against a 20 ms round trip, so the fill's sixteen taps cost about what
+their share of the eighty says.
+
+*Why 64 + 16 rather than 64 or 256*: one gather of sixty-four drew a 15 px highlight at radius 63 as
+sixty-four dots — its samples are `0.22 r` apart, wider than the highlight — and 256 would be four
+times the cost for a spacing still seven pixels wide. The fill pass turns each dot into sixteen at a
+quarter of the aperture's cost, an effective 1,024-sample kernel; the disc is continuous to the eye at
+the slider's end (`LensBlurUITests`' screenshot). Device figure INFERRED at §1's ~1.3×.

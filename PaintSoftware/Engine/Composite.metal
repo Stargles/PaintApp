@@ -469,6 +469,8 @@ struct EffectParams {
     float wheelGlobalA;
     float wheelGlobalB;
     float wheelGlobalL;
+    // Where a lens-blur pass's sample set begins in the float table (TODO (74)).
+    uint  sampleBase;
 };
 
 /// Mirrors `RecolorTableEntry` in Effect.swift field for field — twelve floats, all-scalar, under the
@@ -1128,23 +1130,25 @@ static inline float4 glareStreaks(texture2d<float, access::read> source, constan
 
 // MARK: Lens blur
 
-/// **The lens blur's gather** — `EffectReference.lensBlur`'s twin; `Effect.LensBlur`'s rulings 1 and 2
-/// are the sentences both transcribe. `offsets` is the sample set resolved in Swift (`(dx, dy)` pairs,
-/// pixels, riding the `weights` binding) and `taps` how many are live — 0 at a zero radius, which is
-/// the identity exactly. Each sample is a bilinear clamp-to-edge tap, weighted `1 + boost ·
-/// saturate((Lum − threshold) / (1 − threshold))` on its own premultiplied brightness, and the pixel is
-/// the weighted mean: a highlight outweighs the dark round it, which is what makes a bright point a
-/// bright disc. A convex combination, so `rgb ≤ a` survives with nothing to re-impose.
+/// **The lens blur's gather, either pass** — `EffectReference.lensBlur`'s twin; `Effect.LensBlur`'s
+/// rulings 1 and 2 are the sentences both transcribe. `offsets` is both sample sets resolved in Swift
+/// (`(dx, dy)` pairs, pixels, riding the `weights` binding), `sampleBase` where this pass's begins and
+/// `taps` how many are live — 0 at a zero radius, which is the identity exactly. Each sample is a
+/// bilinear clamp-to-edge tap, weighted `1 + boost · saturate((Lum − threshold) / (1 − threshold))` on
+/// its own premultiplied brightness (the fill pass carries `amount` 0 and weighs nothing), and the
+/// pixel is the weighted mean: a highlight outweighs the dark round it, which is what makes a bright
+/// point a bright disc. A convex combination, so `rgb ≤ a` survives with nothing to re-impose.
 static inline float4 lensBlur(texture2d<float, access::read> source, constant EffectParams &params,
                               constant float *offsets, uint2 gid) {
     uint samples = params.taps;
     if (samples == 0u) { return source.read(gid); }
+    uint base = params.sampleBase;
     float span = max(1.0f - params.threshold, 1e-4f);
     float2 position = float2(gid);
     float4 sum = float4(0.0f);
     float total = 0.0f;
     for (uint i = 0u; i < samples; ++i) {
-        float2 offset = float2(offsets[2u * i], offsets[2u * i + 1u]);
+        float2 offset = float2(offsets[2u * (base + i)], offsets[2u * (base + i) + 1u]);
         float4 s = sampleBilinear(source, position + offset);
         float w = 1.0f + params.amount * saturate((lum(s.rgb) - params.threshold) / span);
         sum += s * w;
