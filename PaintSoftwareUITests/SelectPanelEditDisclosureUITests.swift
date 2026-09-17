@@ -38,7 +38,8 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         let actionRowTop = app.buttons["selectPanel.clearButton"].frame.minY
         let foldedFloor = app.otherElements["bottomDock.floor"].frame.maxY
 
-        // 3. Press: the band unfolds under the row, reading the line.
+        // 3. Press: the band unfolds above the row, reading the line, and the row — with the icon
+        //    the finger is on — stays put.
         edit.tap()
         XCTAssertEqual(edit.value as? String, "expanded")
         let slider = app.sliders["selectPanel.sizeSlider"]
@@ -46,7 +47,8 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue((slider.value as? String ?? "").hasSuffix(" pt"),
                       "…which reads the lassoed line's own width: \(slider.value ?? "nil")")
         XCTAssertTrue(app.buttons["selectPanel.colourSwatch"].exists, "…beside the colour swatch")
-        XCTAssertGreaterThan(slider.frame.minY, actionRowTop, "the band unfolds below the action row")
+        XCTAssertLessThan(slider.frame.maxY, app.buttons["selectPanel.clearButton"].frame.minY,
+                          "the band unfolds above the action row")
         XCTAssertEqual(app.buttons["selectPanel.clearButton"].frame.minY, actionRowTop, accuracy: 1,
                        "…and the row the icon sits in did not move under the finger")
         attach(app, "edit-band-expanded")

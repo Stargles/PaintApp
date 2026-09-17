@@ -157,6 +157,20 @@ struct SelectPanel: View {
                 divider
             }
 
+            // **Behind the Edit icon, and only with a selection** — TODO (90), and see the type's doc.
+            // `hasSelection` rather than `editReason == nil`, so that on a pixel layer the band is
+            // *dim and captioned* rather than absent: an artist who lassoed a raster cel should read
+            // why the sliders are off, not wonder where they went.
+            //
+            // **Above the action row, not below it.** The dock is anchored at the bottom of the
+            // screen, so a band unfolding *under* the row would push the row — and the Edit icon the
+            // artist has just pressed — up out from under their finger. Unfolding above it, the row
+            // stays exactly where it was and the rule row rises instead.
+            if hasSelection, showsEditBand {
+                editBand
+                divider
+            }
+
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
                     .accessibilityIdentifier("selectPanel.duplicateButton")
@@ -171,15 +185,6 @@ struct SelectPanel: View {
                 editDisclosure
             }
             .padding(.vertical, 6)
-
-            // **Behind the Edit icon, and only with a selection** — TODO (90), and see the type's doc.
-            // `hasSelection` rather than `editReason == nil`, so that on a pixel layer the band is
-            // *dim and captioned* rather than absent: an artist who lassoed a raster cel should read
-            // why the sliders are off, not wonder where they went.
-            if hasSelection, showsEditBand {
-                divider
-                editBand
-            }
 
             if let caption {
                 divider
@@ -425,17 +430,18 @@ struct SelectPanel: View {
     /// toggle's stated reason.
     ///
     /// **A switch rather than a two-segment picker**, which is what the owner asked for and what the
-    /// row has width for: the membership picker beside it already gives at `minimumWidth`, and a
-    /// fourth column that is a label and a knob costs the row less than a segmented control would.
+    /// row has width for — and **the label sits above the knob, not beside it.** MEASURED on the
+    /// simulator with the label beside: the membership picker, which is the column that gives first,
+    /// lost the width it needs and its segments truncated to "Enclo…" and "Touchi…". Stacked, this
+    /// column is the switch's own 44 points and the picker reads whole. One word, where the
+    /// paint-outside switch keeps three: "Subtract" over a switch in a row of selection rules
+    /// already says what it subtracts from.
     private var subtractToggle: some View {
         let isOn = canvasManager.selectionComposition == .subtract
         return Button {
             canvasManager.selectionComposition = isOn ? .add : .subtract
         } label: {
-            HStack(spacing: 8) {
-                // One word, where the paint-outside switch keeps three: "Subtract" beside a switch
-                // in a row of selection rules already says what it subtracts from, and the width it
-                // gives back is the membership picker's, which is the column that runs out first.
+            VStack(spacing: 6) {
                 Text("Subtract")
                     .font(.caption)
                     .foregroundColor(.white)

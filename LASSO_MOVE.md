@@ -302,6 +302,8 @@ has a vector arm.
 | Reset | `CanvasManager.resetFloating()` / `canResetFloating`. One undo step on a vector float (§5.13); nothing on a raster piece, which has no per-nudge steps for it to sit beside |
 | the Select menu standing down while anything floats | `DrawingView` — the *presentation* is suppressed, `activePanel` is deliberately not cleared, so the panel returns by itself at the bake |
 | `TransformMode.warp` | **deleted** (§5.14) |
+| Keep Stroke Width (TODO (75), 2026-09-17) | `CanvasManager.keepsStrokeWidthOnMove`, beside Keep Full Precision on the bar. Off is §5.17's `sqrt(|det|)` and stays the default; on, `applyToVectorFloat` puts every stroke's `size` back to the *lifted* stroke's after the map, and drops the latch after a scaled nudge so the layer re-renders the truth. A keystoned stroke is outside it — its width is per dab, not one number |
+| a folder's Move (TODO (71), 2026-09-17) | `CanvasManager.beginVectorFolderMove` from `FolderOptionsPanel`'s Move row: every vector layer in the folder, at any depth, lifted whole into **one** `VectorFloat` — one `VectorFloatPart` per layer, one box measured over all of them — so the drag, the knobs, Mirror, Reset, the bake and the per-nudge undo step are this menu's own, and what it writes is geometry. The folder's own container pose, which this row used to raise, is deleted whole |
 
 The Select-menu suppression is presentation only, and that is what keeps it out of the touch
 arbitration: `CanvasTouchInputs.panel` is fed the same `activePanel` it always was, so
@@ -320,6 +322,17 @@ between drags is always the truth. It re-arms on the next touch.
 
 **Move with no selection is unchanged**: it still transforms the whole cel, which is the owner's
 *"This is currently correct, nothing needs to change"*, honoured literally.
+
+**The Select panel gained two things beside this menu on 2026-09-17, and both are consumers of the
+same one loop.** A second loop **composes** onto the first — the union under the rule row's Add, the
+difference under its Subtract switch (TODO (95), `Selection.composed(with:by:within:)`, read in
+`finishSelection` so a freehand loop, a rectangle and the wand all compose alike). The result is one
+normalized `CGPath`, so Move, Recolour, Clear and the new **To New Layer** tab all read it exactly as
+they read a single loop, under whichever of §5.26's three rules is picked. To New Layer (TODO (93),
+`moveVectorSelectionToNewLayer` and the raster arm in `moveSelectionToNewLayer`) is Duplicate's split
+with the source's inside removed, as one undo step; the vector arm floats the moved ink on its new
+layer as Duplicate floats its copy. Starting a selection over is the Deselect tab or a tap on the
+Select icon itself (TODO (94)), which now clears the loop as it puts the panel away.
 
 **A second, separate defect found while scoping, and since fixed as TODO item (33).**
 `SelectPanel`'s Duplicate button calls `beginDuplicate()`, which had no vector branch and always
@@ -1377,6 +1390,11 @@ thing stage 3a had to decide without a ruling.
     and Mirror already use — so the layer re-renders from real geometry between gestures and the error
     is one gesture's worth and cannot accumulate. Making the preview exact *is* the stretched-ink
     renderer, which is a later stage and not this one.
+
+    **The ruling is the default, and since 2026-09-17 it has an opt-out** — TODO (75)'s Keep Stroke
+    Width on the Move bar, the owner's *"the option that the brushstroke size is constant"*. On, a
+    scaled Move leaves every stroke's width what it was drawn at; the map is unchanged, only the
+    scalar is put back, so Freeform still contains Uniform on both settings of the switch.
 
 ---
 

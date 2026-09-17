@@ -223,15 +223,15 @@ alternative, an `EffectParameter`-shaped descriptor family over a `TransformMode
 track dictionary, is a third channel kind: a new store, a new union arm, a new persistence key, a new
 recorder arm — every cost §3.6 lists as the reason `TargetChannel` exists.
 
-**The row needs the property on `LayerFolder` too**, and the honest answer is that
-`LayerFolder.transform` takes the four pose modes as well (not repeat: a folder has no block). The
-accumulator's `inner` line reads the mode exactly as the layer's does. Declining that leaves five
-keyable rows on a folder that key nothing — §2.23's dead control by a new door — so it is not optional
-if the rows are. **Built in stage 2–3**: a folder's pose goes down its recursion as the topmost poser of
-the folder's own stack rather than as a map composed onto `outer`, which is the only place a folder in
-Parallax can hand each child its share; the folder's panel carries the same Mode picker and rows. **A
-folder in Rotate integrates from frame 0**, since it has no bar to start from — the one place the two
-homes differ, and a question for the owner if a folder's spin should have a start of its own.
+**A folder holds none of this since 2026-09-17 (TODO (71)).** `LayerFolder.transform` took the four
+pose modes from stage 2–3 — a folder's pose went down its recursion as the topmost poser of its own
+stack, with the same Mode picker and rows on its panel — until the owner ruled a folder's Move should
+be *"the move tool on it instead of a transform layer behaviour"*: the folder's pose, its mode rows
+(`rotateSpeed`, the three shakes — `TargetChannel.folderPath` is nil for them now) and its Transform
+toggle are deleted whole, and the folder's Move row lifts the folder's contents into the Move tool's
+own float (LASSO_MOVE.md §0). `parallaxShare` stays on the folder, since a folder is one *item*
+beneath a Parallax layer (ruling 3). A transform layer at the top of a folder is what poses a folder
+now.
 
 What is **not** keyable lives on `LayerPose` beside the mode rather than on the two homes: repeat's
 period (`repeatPeriod`), shake's frequency (`shakePeriod`) and seed (`shakeSeed`) — three fields, each

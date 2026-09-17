@@ -2737,13 +2737,15 @@ its box is the canvas frame. `PoseChannelID.raisesMoveBox` was the one line that
 is true for every channel now; `revealPoseChannel` was the one that had to learn there are two kinds of
 box. `LayerFolder.transform` is the case still without an entry.
 
-**Half of that is fixed, 2026-09-06, TODO (21) — the options-panel half, which is the one that
-existed to fix.** `FolderOptionsPanel` now carries the same `transformMoveRow` a value layer's panel
-does, behind a Transform toggle `setFolderTransform` turns on and off, and `beginContainerPoseMove`
-takes a `KeyframeTarget` so the box it raises can be a folder's own rather than always the current
-layer's — `LayerFolder.transform` had no writer of any kind before this; the field could not become
-non-nil outside a hand-edited save file. **The other half shipped 2026-09-12, TODO (21)'s folder
-band.** `graphBandExpansion` — what a band is open *on* — was keyed by `layerIndex` throughout
+**Half of that was fixed on 2026-09-06 and then deleted whole on 2026-09-17 (TODO (71)).**
+`FolderOptionsPanel` carried the same `transformMoveRow` a value layer's panel does, behind a
+Transform toggle, and `beginContainerPoseMove` took a `KeyframeTarget` so the box could be a
+folder's own — until the owner ruled a folder's Move should be the Move tool over its contents
+rather than a container behaviour. `LayerFolder.transform` is gone, `containerPose(of:)` answers
+nil for a folder, `poseSources(of:)` lists no pose rows for one, and the folder's Move row is
+`beginVectorFolderMove` (LASSO_MOVE.md §0). A transform layer at the top of a folder is the folder
+twin now. **The other half shipped 2026-09-12, TODO (21)'s folder band**, and stands: a folder's
+opacity, grade and parallax share open into a band. `graphBandExpansion` — what a band is open *on* — was keyed by `layerIndex` throughout
 `TimelineLayoutKey`/`TimelineGraphChannelList`, so a folder's channels, while fully modelled and
 drawn by `poseSources`/`graphBandListing`, could not be opened into a band at all. It is a
 `KeyframeTarget` now (`TimelineRowLayout.Expansion.target`, `TimelineGraphBand.Content.target`,
@@ -2761,9 +2763,8 @@ band's own drag reaches (its undo is a structure snapshot restore). The two door
 in `FolderGraphBandUITests`: **a tap on a name in the timeline's name column picks that row** (a
 layer's or a folder's — the column was inert before), and **`FolderOptionsPanel` has a "Show in Graph
 Editor" row** beside Add Keyframe, since that panel is where the folder's keyframes are placed from. A
-folder row that is expanded keeps the block half for its bar and diamonds, as a layer row does; its
-pose group is headed "Group Transform" rather than `defaultName`'s "Layer Transform"; and the
-channel list's empty text says "group". `FolderGraphBandLogicTests` pins the rest.
+folder row that is expanded keeps the block half for its bar and diamonds, as a layer row does, and
+the channel list's empty text says "group". `FolderGraphBandLogicTests` pins the rest.
 
 #### The fold, and the two funnels
 
