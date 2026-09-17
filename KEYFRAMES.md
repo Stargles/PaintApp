@@ -1482,8 +1482,8 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   animated stroke's `samples` are; a baked document reopens to the frames the animated one would. A
   hand Distort is unchanged — it still pulls back, and an ulp is nothing to it. The stored spine is
   valid only while it is the pre-image of `samples` under the map: `drawn` composes onto the map and
-  keeps it, `piece(of:)` carries it as the piece's rest lattice, and the interpolation warp, a
-  detached eraser piece and a local edit's reprojection drop it (`withoutStoredRest`).
+  keeps it, `piece(of:)` carries it as the piece's rest lattice, and the interpolation warp and a
+  local edit's reprojection drop it (`withoutStoredRest`).
 - **The cost is disclosed with a number computed from the count and a MEASURED rate**
   (`CanvasManager.measuredSaveMillisecondsPerVectorCel`, from `PerfBaselineTests`' vector-only save
   bench on this Mac), not the 15.2 ms/cel above — that is the raster cel's `pngData()`, and a baked

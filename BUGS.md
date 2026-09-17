@@ -2217,11 +2217,11 @@ menu's keyframe items, and deliberately not fixed there.
   build-up); per-stamp `.normal` compositing builds opacity up where a stroke crosses itself, which
   is the flow-versus-opacity distinction the engine does not make.
   **The "slow strokes read darker than fast ones" half of this entry was wrong and is corrected**:
-  dab emission is not timed. `BrushStamper.advance` walks from the last *dab* and returns unmoved
-  below one spacing, so a pencil held still lays one dab, and a 400pt line gets the same 50 dabs per
-  100pt whether it takes 0.3 s or 10 s. What is left is hand tremor, not the clock — at a slow speed
-  the aim from the last dab to the sample that finally clears the spacing carries proportionally more
-  noise, so the chain wanders: 100.0 → 106.0 dabs per 100pt from 800 to 40 pt/s at 0.4pt of tremor,
+  dab emission is not timed. `BrushStamper.LiveWalk` marches the pen's path by arc length and places
+  nothing below one spacing, so a pencil held still lays one dab, and a 400pt line gets the same 50
+  dabs per 100pt whether it takes 0.3 s or 10 s. What is left is hand tremor, not the clock — at a slow
+  speed the path between two dabs carries proportionally more of it, so the chain wanders: 100.0 →
+  106.0 dabs per 100pt from 800 to 40 pt/s at 0.4pt of tremor,
   100.5 → 149.2 at a shaky 0.8pt. Removing that residue is a stabilizer question, not a sampling one —
   and it is a *raster* number: on a vector layer the stored path is a refit at a fixed tolerance
   (`StrokePathFit`, BRUSH.md §3.3) and the walk no longer follows the tremor that produced it.

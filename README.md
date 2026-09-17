@@ -45,12 +45,15 @@ toolset, and a frame-by-frame animation timeline.
 - **Canvas**: adjustable padding margin, flip horizontal/vertical, custom size presets, and a
   **render resolution** setting (Full / 75% / 50%) that trades live-canvas sharpness for speed on
   heavily layered artwork — it reaches only what is on screen, never the saved file or the export
-- **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection). An eraser *is* a
-  stroke — it is an `.erase` element in the same z-ordered display list as the paint it eats, so it
-  is non-destructive and undoable, and Mode 1 splits a cleanly severed stroke into real pieces.
-  In Mode 3 the brush size is a **selection radius**, not just a reach: every stroke whose centreline
-  the circle covers is cut back to its own nearest crossings outside the circle, so erasing where two
-  lines meet takes both. The circle is drawn on the canvas under the finger while the gesture is live
+- **Vector eraser**: three CSP-style modes (erase, cut points, cut to intersection) and a fourth,
+  Whole, that deletes every line the footprint touches. An eraser *is* a stroke — it is an `.erase`
+  element in the same z-ordered display list as the paint it eats, so it is non-destructive and
+  undoable, and Mode 1 splits a cleanly severed stroke into real pieces. A gesture that touches no
+  ink lands nothing and records no undo step. In Mode 3 the brush size is a **selection radius**, not
+  just a reach: every stroke whose centreline the circle covers is cut back to its own nearest
+  crossings outside the circle, so erasing where two lines meet takes both. The circle is drawn on
+  the canvas under the finger while the gesture is live. A **Universal** switch in the eraser panel
+  aims one gesture at every visible vector layer at once, as one undo step
 - **Animation Timeline**: multi-cel frame-by-frame animation, scrub/play, per-cel copy/clear/extend
 - **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them
   become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between
@@ -77,7 +80,7 @@ PaintSoftware/
 │   ├── Brush.swift / BrushLibrary.swift
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
 │   ├── StrokePath.swift         #   the refit (which samples are stored) and the curve every tier walks
-│   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the three modes
+│   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the four modes
 │   ├── Eyedropper.swift         #   which pixel a canvas point names, and its colour (pure)
 │   ├── InterpolationEvaluator.swift / GuidePath.swift
 │   ├── Deform/                  #   lattice + ARAP deformation (app-type-free)

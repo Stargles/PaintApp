@@ -204,8 +204,8 @@ persist and it is the wrong one. The centre line has to be stored **posed**, bec
 every geometry reader asks for — bounds, the spatial index, lasso membership, the eraser's candidacy
 test, damage rectangles, thumbnails. What is left over is each dab's radius and angle, and that is
 exactly a homography plus one width. Storing the walk instead would put a second copy of every sample
-on disk **and** need a rest-space arm in `piece(of:samples:parameters:)`, in `detachedPiece`, and a
-second `precise` flag beside them; storing the map needs **none** of that, because a cut piece's
+on disk **and** need a rest-space arm in `piece(of:samples:parameters:)` and a second `precise` flag
+beside it; storing the map needs **none** of that, because a cut piece's
 lattice is the parent's posed walk and pulling it back through the map the piece inherited *is* the
 parent's rest walk. `VectorStroke.effectiveWalk` is where the pre-image is rebuilt, once, at render —
 one inverse and two array maps, paid only by a distorted stroke.
@@ -473,13 +473,13 @@ let source = lattice?.samples ?? stroke.samples
 
 So a piece carrying a `DabLattice` renders at the **parent's** sample positions, filtered to its own
 range. Translate a piece's `samples` and leave its lattice alone and it **renders where it used to
-be**. That is why both eraser modes that remove geometry set `piece.lattice = nil` in the one
-`detachedPiece(of:samples:startParameter:)` they share (`VectorLayer.swift:3033-3048`).
+be**.
 
-Nil-ing it is the wrong fix here, because it throws away the thing the lattice exists for: a piece
-that re-anchors its own lattice re-phases every dab along its whole length, and for a scattering
-brush re-rolls the pattern. The artist would move one half of a stroke and watch the *other*
-half's texture change — the exact defect `DabLattice` was built to prevent.
+Nil-ing the lattice is the wrong fix here, because it throws away the thing the lattice exists for: a
+piece that re-anchors its own lattice re-phases every dab along its whole length, and for a scattering
+brush re-rolls the pattern. The artist would move one half of a stroke and watch the *other* half's
+texture change — the exact defect `DabLattice` was built to prevent, and the one the eraser's cutting
+modes had until TODO (85) put their pieces on the lattice too.
 
 **The rule:**
 
@@ -488,7 +488,7 @@ half's texture change — the exact defect `DabLattice` was built to prevent.
 - The piece that **moves** keeps the parent's lattice with `lattice.samples` translated by the same
   delta as its own `samples`. `parameters` are untouched — a parameter is an index into
   the parent's domain and a rigid translation does not change it — and since BRUSH.md §4 the RNG seed
-  lives on `VectorStroke.seed`/`arcOffset` rather than on the lattice, so a copied piece keeps the
+  lives on `VectorStroke.seed` rather than on the lattice, so a copied piece keeps the
   parent's seed by construction and `BrushStamper` replays the same RNG sequence with no lattice field
   to preserve.
 
@@ -675,7 +675,7 @@ and CSP both cut vector geometry outright and have no punch object to strand.
 **Both pieces mint fresh `UUID`s.** That is what Modes 2 and 3 already do (`piece.id = UUID()`,
 `VectorLayer.swift:3019` and `:3045`). The tempting alternative — the stationary piece keeps the
 parent's id — buys nothing: since BRUSH.md §4 separated the two, dab phase and the RNG sequence come
-from `VectorStroke.seed` and `arcOffset` (`dabRandom`, `VectorLayer.swift:90`) rather than from the id,
+from `VectorStroke.seed` (`dabRandom`) rather than from the id,
 and both pieces carry the parent's `seed` by being copied above, so renders
 are unaffected; and it makes "which one is the original" a coin flip the moment a lasso cuts one
 stroke into three.

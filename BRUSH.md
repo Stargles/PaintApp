@@ -310,7 +310,7 @@ What it forbids is one assumption: *"a `Brush` is a description of how to stamp 
 today, and the first fill brush makes it *one case of* something larger. The seam that has to stay
 clean is therefore **where a stored stroke becomes ink**, and the good news is that it is already one
 place per tier — `VectorLayer.stamp(stroke:into:isEraser:)` on the replay side and
-`StrokeCanvasView.stampPath` on the live one — with `VectorStroke` storing samples and a `BrushRef` and
+`BrushStamper.LiveWalk` on the live one — with `VectorStroke` storing samples and a `BrushRef` and
 nothing about dabs. A fill brush stores the identical stroke and resolves differently at those two
 sites; it needs no new storage and no format change.
 
@@ -341,7 +341,7 @@ origin is `.zero`, and the two previews are the deliberate exception: a swatch s
 
 **Every tier, and there are four rather than three.** The cel (`RasterLayerTexture`), the render-local
 context (`CGContextDabTarget`, which is `VectorCanvas.renderLocalContent`), the **ungrouped** live walk
-— `StrokeCanvasView.stampPath` stamps dabs with no group open, so the scratch carries the texture
+— `BrushStamper.LiveWalk` stamps dabs with no group open, so the scratch carries the texture
 itself and applies it where the window merges — and a **grouped walk inside a scratch window**, which is
 `VectorCanvas.applyPreview`'s restamps and the only reader of `canvasOrigin`. Nothing was added to
 `DabImageCache` or `DabGradientCache`: a texture in a dab-level key would be a texture in the wrong
@@ -1055,6 +1055,18 @@ faithful to the drawn path (0.250 pt against 0.391 pt), because the fit is defin
 curve is for the tangent, and for not polygonising a stroke walked at a spacing wider than it was drawn
 at. The first dab sits on the first stored point and takes the outgoing tangent.
 
+**The live walk is the same march on a chord** — `BrushStamper.LiveWalk`, a two-point `StrokePath` per
+touch sample with the `WalkCarry` crossing the calls, so a dab lands where the pen's own path has
+travelled one spacing and the first dab, held for one input interval, faces the way the stroke goes.
+Both were TODO (84): the live walk hopped from the last dab straight to the next sample, so a
+wide-spaced brush cut every corner it turned, and its first dab faced `+x`. MEASURED
+(`StrokeLiftParityLogicTests`): the live walk and the replay of its own samples are now byte-identical
+for every brush that does not read the stroke's frame, and what is left between the stroke under the
+pen and the baked one is the refit alone — every round tip under 0.010/255 mean channel delta, the
+widest-spaced sprites 0.015–0.049/255. That residue cannot be closed from the live side: the stored
+stroke is a curve through knots the walk has not received yet, and the only walk that would agree with
+it would trail the nib by up to a knot spacing.
+
 ### 3.5 Stamp — built, §12 stage 3
 
 `DabTarget` has an image primitive beside `stampCircle`:
@@ -1200,24 +1212,27 @@ different dabs from the thing it previews.
 every dab has its own cell, the interpolation fraction is zero, and the answer is that cell's hash — a
 fresh draw per dab. So §2.17's two behaviours are one code path and cannot drift apart.
 
-### 4.2 The two fields, and what carries them
+### 4.2 The one field, and what carries it
 
-**Two fields on the stroke, both per-stroke rather than per-sample**: a `seed` that is **inherited on split
-rather than regenerated**, and the `arcOffset` of this piece from the original stroke's origin. Every
-cutter here derives a piece by *copying* the stroke and replacing what the cut changed, so both travel by
-default and losing one takes a deliberate act — the lasso split, the eraser's three modes, an
-interpolation in-between and every `VectorCanvas.mapping` copy are all the same `var piece = stroke`.
+**One field on the stroke, per-stroke rather than per-sample**: a `seed` that is **inherited on split
+rather than regenerated**. Every cutter here derives a piece by *copying* the stroke and replacing what
+the cut changed, so it travels by default and losing it takes a deliberate act — the lasso split, the
+eraser's cutting modes, an interpolation in-between and every `VectorCanvas.mapping` copy are all the
+same `var piece = stroke`.
 
-**`arcOffset` is zero except where a piece re-anchors its own walk.** A `DabLattice` carrier replays the
-parent's whole walk, so it already starts at the field's origin; the eraser's Modes 2 and 3 remove
-geometry and cannot, so they record how far along the parent the survivor begins.
-`VectorCanvas.detachedArcOffset` is the one function that answers it, shared by the cut and by its
-preview.
+**Every piece replays its parent's walk** — `DabLattice`, the parent's samples plus the parameters the
+piece's own samples sit at, drawn only over the piece's range — so a piece's dabs are the parent's dabs
+in the parent's places, and the field is addressed at the parent's arc lengths with no offset to carry.
+The eraser's Modes 2 and 3 used to make a piece that left the lattice and walked its own sub-run from
+the cut, with an `arcOffset` shifting the field to where it began; the field survived but the walk
+re-anchored, so every dab past the cut landed somewhere new and, at λ = 0, drew a fresh value there —
+half the stroke's ink changed on a cut (TODO (85)). No walk of a sub-run reproduces the parent's dabs
+(the curve through the piece's own knots is not the parent's curve near the cut), so the lattice is the
+only piece there is and `arcOffset` is gone, wire key included.
 
-**`DabLattice.seedID` is gone with it.** It carried the parent's id so the RNG could be re-seeded off it;
-that is what "becomes a two-field copy" means. The lattice is now about dab *geometry* only — where a
-piece's dabs land — and the stroke's own seed is about their randomness. Separating the two is what lets a
-piece that *had* to re-anchor its walk keep its randomness anyway.
+**`DabLattice.seedID` is gone too.** It carried the parent's id so the RNG could be re-seeded off it. The
+lattice is about dab *geometry* only — where a piece's dabs land — and the stroke's own seed is about
+their randomness.
 
 **`DiscardedDabTarget` is deleted**, along with `BrushStamper.DabRNG` and its non-deterministic
 initialiser. A dab outside a piece's range is skipped outright and the walk's arc length advances over it,
@@ -2926,7 +2941,7 @@ first, which cleanly replaces the old one."*
    - **The live tier had to be taught the matrix**, which this stage did not anticipate. On a raster
      layer the dabs the pen lays down *are* the cel's pixels — nothing is re-stamped at lift — so a
      walk that could not read §6 would have left half the app without the feature.
-     `StrokeCanvasView.stampPath` builds a two-sample `StrokeSensors` over the segment it is bridging.
+     `BrushStamper.LiveWalk` builds a two-sample `StrokeSensors` over the segment it is bridging.
      One behaviour change rides along and it removes a divergence: **live pressure now ramps across a
      walk** instead of being flat at the destination sample. A finger reports a constant 1, so nothing
      an XCUITest can draw is affected.

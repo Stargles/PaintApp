@@ -2812,12 +2812,13 @@ the canvas at n = 200, 25% at n = 2000. The saving shrinks accordingly, and that
 working rather than failing: cost scales with the area touched, and a denser drawing means a cut
 touches more area. **Anyone quoting the 3.5x row should quote the 2.1x row beside it.**
 
-**Half the repairs used to pay for two walks, and a margin removed it.** A cut piece re-anchors its
-dab walk (`detachedPiece`), so its dabs sit at arc offsets its parent's did not and one near an end
-reaches past the parent's measured union; the render then widens the clip by what escaped and goes
-round again. MEASURED at **19 of 40 repairs**. `regionDamage(replacing:)` now declares the rectangle
-widened by the largest brush diameter among the strokes it replaced — **not** a bound, since §12
-stage 8 refuted a box derived from the brush, but a hint that makes the escape check pass first time.
+**Half the repairs used to pay for two walks, and the pieces are what removed it.** A cut piece
+re-anchored its dab walk, so its dabs sat at arc offsets its parent's did not and one near an end
+reached past the parent's measured union; the render then widened the clip by what escaped and went
+round again. MEASURED at **19 of 40 repairs**, and closed first by a margin of one brush diameter on
+`regionDamage(replacing:)`, then for good by TODO (85): a piece replays its parent's walk, so every dab
+it draws is one the parent drew and nothing can reach past the parent's union. The margin is gone with
+the pieces that needed it; `UndoRepairLogicTests` reads zero widened repairs on the cut fixtures.
 
 | n = 2000, To Cross drag | widened | render total | worst single render | dabs |
 |---|---|---|---|---|

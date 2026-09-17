@@ -1854,8 +1854,10 @@ final class StrokeCanvasView: UIView {
             for knot in pathFit.finish(nil) { currentVectorSamples.append(knot) }
         }
         // A tap's one dab in the scratch, so the picture held until the render lands shows it —
-        // `LiveWalk.finish`. Nothing for the modes that preview without the walk.
-        if let scratch, !isNoScratchRole, !isEraser || vectorEraserMode == .erase {
+        // `LiveWalk.finish`. Only the gestures the walk draws: a brush stroke, or the eraser in
+        // Mode 1, which an in-between forces whatever the picker says (`beginVectorStroke`).
+        let modeInForce = inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode
+        if let scratch, !isEraser || modeInForce == .erase {
             liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: brushSize)
         }
         // BRUSH.md §5.5: a channel that turned out to hold nothing but its neutral is dropped, because
