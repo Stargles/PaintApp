@@ -231,6 +231,9 @@ final class StrokeCanvasView: UIView {
     /// behind the finger. `VectorCanvas.cutPreviewEdits` merges into this and reads the caps off the
     /// merged result. It is a few ranges per stroke touched, not per sample.
     private var previewCuts: [UUID: VectorCanvas.CutPreviewProgress] = [:]
+    /// Mode 4's preview: the strokes the gesture has already erased out of the scratch, so each is
+    /// walked once. Empty except mid-drag.
+    private var previewDoomed: Set<UUID> = []
     /// Smooths raw touch positions into a trailing "follow" point before `stampPath`. Reset to the
     /// raw touch-down position at the start of every stroke so the first stamp lands under the
     /// touch rather than smoothing in from an earlier stroke's trailing point.
@@ -1810,12 +1813,13 @@ final class StrokeCanvasView: UIView {
                 // `renderIfNonEmpty` memoizes, in the base the `refreshDisplay` at the end of this
                 // method is about to install. Keeping them would draw that ink a second time.
                 unlandedInk.removeAll()
-                // **Mode 1 and Mode 2 want different windows, and §12 stage 8 is where they part.**
-                // Mode 1 *is* an eraser stroke, so its window holds removal coverage and caps at the
-                // eraser's opacity like any other stroke. Mode 2's window is a picture — `applyPreview`
-                // erases doomed spans out of it and then restamps the end caps back — and each of
-                // those `stampStroke` calls carries its own cap already.
-                let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) != .cutPoints
+                // **Mode 1 and the cutting modes want different windows, and §12 stage 8 is where
+                // they part.** Mode 1 *is* an eraser stroke, so its window holds removal coverage and
+                // caps at the eraser's opacity like any other stroke. Mode 2's window is a picture —
+                // `applyPreview` erases doomed spans out of it and then restamps the end caps back —
+                // and each of those `stampStroke` calls carries its own cap already; Mode 4's is the
+                // same picture with whole strokes erased out of it.
+                let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) == .erase
                 return isModeOne
                     ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
                                     opacity: CGFloat(brushOpacity), texture: brush.texture)
@@ -1832,6 +1836,7 @@ final class StrokeCanvasView: UIView {
         lastLiveSample = nil
         lastPreviewSample = nil
         previewCuts = [:]
+        previewDoomed = []
         livePreviewFrames = 0
         pathFit.reset()
         let input = StrokeInput(touch: touch, in: self)
@@ -2114,6 +2119,7 @@ final class StrokeCanvasView: UIView {
         vectorScratchRole = .overlay
         lastPreviewSample = nil
         previewCuts = [:]
+        previewDoomed = []
         updateEraserFootprint(at: nil)
     }
 
@@ -2201,14 +2207,53 @@ final class StrokeCanvasView: UIView {
             return
         }
         // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) this
-        // eraser's removal coverage shown punched out of a copy of the layer, or (Mode 2) the doomed
-        // spans punched out of that same copy. Mode 3 has no scratch content — it has already cut
-        // for real.
+        // eraser's removal coverage shown punched out of a copy of the layer, (Mode 2) the doomed
+        // spans punched out of that same copy, or (Mode 4) the doomed strokes whole. Mode 3 has no
+        // scratch content — it has already cut for real.
         guard let scratch, !isNoScratchRole else { return }
-        if isEraser, vectorEraserMode == .cutPoints, inBetweenCelID == nil, let vectorCanvas {
+        if isEraser, inBetweenCelID == nil, let vectorCanvas, vectorEraserMode == .cutPoints {
             previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)
+        } else if isEraser, inBetweenCelID == nil, let vectorCanvas, vectorEraserMode == .wholeStroke {
+            previewWholeStrokes(to: point, pressure: pressure, in: vectorCanvas, into: scratch)
         } else {
             stampPath(to: sample, into: scratch)
+        }
+    }
+
+    /// The two-sample step from the previous preview position to this one — the increment both
+    /// cutting previews walk — or nil when the selection clip excludes this position.
+    ///
+    /// The selection clip is applied the same way `commitVectorStroke` applies it — see
+    /// `StrokeGeometry.splitRuns`, which keeps only runs of consecutive *inside* samples, so a
+    /// segment counts only when both its ends are inside. A sample that is the first inside one
+    /// after an excluded stretch starts a new run, and previews as the lone dab that run will be.
+    ///
+    /// Positions and pressure only: the preview is a footprint walk, and nothing it reaches asks
+    /// for a channel. `pressureOnly` says so rather than leaving it to a default.
+    private func previewIncrement(to point: CGPoint, pressure: CGFloat) -> StrokeSamples? {
+        let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
+        let previous = lastPreviewSample
+        lastPreviewSample = sample
+        let increment: [VectorSample]
+        if let clipPath = selectionClipPath {
+            guard clipPath.contains(point) else { return nil }
+            increment = previous.map { clipPath.contains($0.point) ? [$0, sample] : [sample] } ?? [sample]
+        } else {
+            increment = previous.map { [$0, sample] } ?? [sample]
+        }
+        return StrokeSamples(increment, channels: .pressureOnly)
+    }
+
+    /// Mode 4's live feedback: each stroke the eraser reaches is erased out of the scratch copy of
+    /// the layer whole, on the sample that reaches it — `VectorCanvas.wholeStrokePreviewEdits`
+    /// names them once each, and `applyPreview(erasing:into:)` walks them as erasers. Nothing is
+    /// mutated; the deletion happens exactly once, in `commitVectorStroke`.
+    private func previewWholeStrokes(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
+                                     into scratch: StrokeScratch) {
+        guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
+        for stroke in canvas.wholeStrokePreviewEdits(alongPath: increment, brush: brush, size: brushSize,
+                                                     accumulating: &previewDoomed) {
+            VectorCanvas.applyPreview(erasing: stroke, into: scratch)
         }
     }
 
@@ -2231,26 +2276,10 @@ final class StrokeCanvasView: UIView {
     /// dropped — so this does not buy the cold-re-render term that costs Mode 3 ~95 ms a sample.
     /// The real cut still happens exactly once, in `commitVectorStroke`.
     ///
-    /// The selection clip is applied the same way `commitVectorStroke` applies it — see
-    /// `StrokeGeometry.splitRuns`, which keeps only runs of consecutive *inside* samples, so a
-    /// segment erases only when both its ends are inside. A sample that is the first inside one
-    /// after an excluded stretch starts a new run, and previews as the lone dab that run will be.
     private func previewCutSpans(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
                                  into scratch: StrokeScratch) {
-        let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
-        let previous = lastPreviewSample
-        lastPreviewSample = sample
-        // Positions and pressure only: the preview is a footprint walk, and nothing it reaches asks
-        // for a channel. `pressureOnly` says so rather than leaving it to a default.
-        let increment: [VectorSample]
-        if let clipPath = selectionClipPath {
-            guard clipPath.contains(point) else { return }
-            increment = previous.map { clipPath.contains($0.point) ? [$0, sample] : [sample] } ?? [sample]
-        } else {
-            increment = previous.map { [$0, sample] } ?? [sample]
-        }
-        for edit in canvas.cutPreviewEdits(alongPath: StrokeSamples(increment, channels: .pressureOnly),
-                                           brush: brush, size: brushSize,
+        guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
+        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: brushSize,
                                            accumulating: &previewCuts) {
             VectorCanvas.applyPreview(edit, into: scratch)
         }

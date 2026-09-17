@@ -207,8 +207,9 @@ enum FillMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// How the eraser behaves on a `.vector` layer. Modelled on Clip Studio Paint's three vector-eraser
-/// modes. Raster layers ignore this entirely — there the eraser stays a `.destinationOut` brush.
+/// How the eraser behaves on a `.vector` layer. Three modes modelled on Clip Studio Paint's, and a
+/// fourth the owner asked for. Raster layers ignore this entirely — there the eraser stays a
+/// `.destinationOut` brush.
 ///
 /// Lives here rather than in `Engine/` because it is a *tool* setting owned by `CanvasManager`,
 /// persisted in `ProjectManifest`, and pushed into `StrokeCanvasView` alongside `isEraser`.
@@ -234,25 +235,33 @@ enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// next. Owner's ruling, 2026-08-18.
     case cutToIntersection
 
+    /// Mode 4 — *erase every line it touches* (owner, 2026-09-16, TODO (80)): every stroke whose
+    /// **ink** the eraser's footprint touches is deleted whole — not split, not punched. The test is
+    /// `VectorEraser.touchesInk`, against the stroke's own pressures, so a light line goes only for
+    /// an eraser that reached the ink it actually has. Fills, images and text are untouched, as by
+    /// every cutting mode.
+    case wholeStroke
+
     var id: String { rawValue }
 
-    /// Label for the segmented control in `EraserSettingsPanel`. Short enough to fit three across.
+    /// Label for the segmented control in `EraserSettingsPanel`. Short enough to fit four across.
     var displayName: String {
         switch self {
         case .erase: return "Erase"
         case .cutPoints: return "Cut"
         case .cutToIntersection: return "To Cross"
+        case .wholeStroke: return "Whole"
         }
     }
 
     /// Whether input for this mode should go through `StrokeStabilizer`. Mode 1 is a brush stroke,
     /// so jitter shows up directly in the erased edge and wants the same smoothing a paint stroke
-    /// gets. Modes 2 and 3 are cuts, which belong exactly where the finger went — smoothing would
-    /// move the cut away from the aimed line.
+    /// gets. The other three select geometry to remove, which belongs exactly where the finger went
+    /// — smoothing would move the cut away from the aimed line.
     var isStabilized: Bool {
         switch self {
         case .erase: return true
-        case .cutPoints, .cutToIntersection: return false
+        case .cutPoints, .cutToIntersection, .wholeStroke: return false
         }
     }
 }

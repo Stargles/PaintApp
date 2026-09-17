@@ -342,4 +342,68 @@ final class VectorEraserCommitLogicTests: XCTestCase {
                        "off is the absence of the key, so an older document's bytes are unchanged")
         XCTAssertFalse(try JSONDecoder().decode(ProjectManifest.self, from: bytes).universalEraser)
     }
+
+    // MARK: - (80) Whole: every line the eraser touches goes
+
+    /// Three lines: one the footprint crosses, one it only grazes — its centreline 1 pt outside the
+    /// eraser's edge, its ink 1 pt inside — and one it never reaches. The first two go whole; the
+    /// third and the cel's fill are left as they were, and no punch is retained.
+    func testWholeModeDeletesEveryStrokeTheFootprintTouchesAndNothingElse() {
+        let crossed = Self.stroke([CGPoint(x: 20, y: 128), CGPoint(x: 236, y: 128)], size: 6)
+        // Radius 20 about x == 128 reaches x == 148; a 4 pt line at x == 149 has ink from 147.
+        let grazed = Self.stroke([CGPoint(x: 149, y: 40), CGPoint(x: 149, y: 216)], size: 4)
+        let far = Self.stroke([CGPoint(x: 20, y: 30), CGPoint(x: 236, y: 30)], size: 6)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 100, y: 100, width: 56, height: 56), transform: nil),
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let canvas = VectorCanvas(size: Self.canvasSize,
+                                  elements: [.fill(fill), .stroke(crossed), .stroke(grazed), .stroke(far)])
+        let nib = Self.brush(size: 40)
+        XCTAssertTrue(canvas.erase(alongPath: Self.gesture([CGPoint(x: 128, y: 128)]), brush: nib, size: 40,
+                                   mode: .wholeStroke))
+        let survivors = canvas.strokes
+        XCTAssertEqual(survivors.map(\.id), [far.id],
+                       "the crossed line and the grazed line go whole; the far one stays")
+        XCTAssertEqual(canvas.elements.count, 2, "the fill is untouched and no punch is retained")
+    }
+
+    /// A Whole gesture that touches no ink changes nothing and reports so — (81) through this mode.
+    func testWholeModeOverNothingChangesNothing() {
+        let line = Self.stroke([CGPoint(x: 20, y: 128), CGPoint(x: 236, y: 128)], size: 6)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(line)])
+        // Radius 20 about y == 160 reaches y == 140; the line's ink ends at y == 131.
+        XCTAssertFalse(canvas.erase(alongPath: Self.gesture([CGPoint(x: 128, y: 160)]), brush: Self.brush(size: 40),
+                                    size: 40, mode: .wholeStroke))
+        XCTAssertEqual(canvas.strokes.count, 1)
+    }
+
+    /// The preview names each doomed stroke once, on the sample that reaches it, and never one the
+    /// lift will keep.
+    func testWholeModePreviewNamesEachDoomedStrokeOnce() {
+        let crossed = Self.stroke([CGPoint(x: 20, y: 128), CGPoint(x: 236, y: 128)], size: 6)
+        let far = Self.stroke([CGPoint(x: 20, y: 30), CGPoint(x: 236, y: 30)], size: 6)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(crossed), .stroke(far)])
+        let nib = Self.brush(size: 20)
+        var doomed: Set<UUID> = []
+        let first = canvas.wholeStrokePreviewEdits(alongPath: Self.gesture([CGPoint(x: 128, y: 100), CGPoint(x: 128, y: 120)]),
+                                                   brush: nib, size: 20, accumulating: &doomed)
+        XCTAssertEqual(first.map(\.id), [crossed.id], "reached on the sample whose footprint meets its ink")
+        let second = canvas.wholeStrokePreviewEdits(alongPath: Self.gesture([CGPoint(x: 128, y: 120), CGPoint(x: 128, y: 140)]),
+                                                    brush: nib, size: 20, accumulating: &doomed)
+        XCTAssertTrue(second.isEmpty, "named once, not on every sample that stays over it")
+        XCTAssertEqual(canvas.strokes.count, 2, "the preview mutates nothing")
+    }
+
+    /// Whole under the universal eraser: each visible layer loses every line the gesture touches.
+    func testWholeModeUnderTheUniversalEraser() {
+        let stack = Self.stack()
+        let canvases = stack.canvases
+        let drag = Self.gesture([CGPoint(x: 32, y: 20), CGPoint(x: 32, y: 44)])
+        let landed = stack.manager.commitUniversalErase(runs: [drag], brush: Self.brush(size: 6), size: 6,
+                                                        opacity: 1, mode: .wholeStroke)
+        XCTAssertEqual(landed.count, 2)
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 0)
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 0)
+        XCTAssertEqual(canvases[stack.aside]?.strokes.count, 1)
+        XCTAssertEqual(canvases[stack.hidden]?.strokes.count, 1)
+    }
 }

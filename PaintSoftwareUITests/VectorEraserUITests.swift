@@ -86,7 +86,7 @@ final class ModePickerUITests: VectorEraserTestSupport {
 
     // MARK: - The picker itself
 
-    /// The three-way control is shown *only* on a `.vector` layer. On a raster layer the
+    /// The four-way control is shown *only* on a `.vector` layer. On a raster layer the
     /// eraser is a plain `.destinationOut` brush with no modes to pick between and the panel must
     /// look exactly as it did before the feature existed.
     func testVectorModePickerIsHiddenOnARasterLayerAndShownOnAVectorLayer() throws {
@@ -108,7 +108,7 @@ final class ModePickerUITests: VectorEraserTestSupport {
         let picker = modePicker(app)
         XCTAssertTrue(picker.waitForExistence(timeout: 5),
                       "Switching to a vector layer should reveal the mode picker")
-        for segment in ["Erase", "Cut", "To Cross"] {
+        for segment in ["Erase", "Cut", "To Cross", "Whole"] {
             XCTAssertTrue(picker.buttons[segment].exists, "The picker should offer '\(segment)'")
         }
         XCTAssertTrue(picker.buttons["Erase"].isSelected,

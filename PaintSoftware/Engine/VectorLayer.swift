@@ -3292,6 +3292,8 @@ final class VectorCanvas {
                                              suppressing: [])
             changed = resolved.outcome == .cut
             damage = resolved.damage
+        case .wholeStroke:
+            (changed, damage) = removeTouchedStrokes(sweep: sweep)
         }
         if changed { invalidate(damage) }
         return changed
@@ -3645,19 +3647,71 @@ final class VectorCanvas {
                 }
             }
         }
-        // The index holds centrelines, so the query is grown by the widest half-width on the layer
-        // — a stroke whose centreline sits outside the sweep's box can still have ink inside it.
+        return !touchedStrokeIndices(by: sweep).isEmpty
+    }
+
+    /// The display-list indices, ascending, of the paint strokes whose ink `sweep` touches —
+    /// `VectorEraser.touchesInk` over the index's candidates. Caller must hold `lock`.
+    ///
+    /// The index holds centrelines, so the query is grown by the widest half-width on the layer —
+    /// a stroke whose centreline sits outside the sweep's box can still have ink inside it.
+    private func touchedStrokeIndices(by sweep: VectorEraser.Sweep) -> [Int] {
         let reach = maxPaintReach()
-        guard reach > 0 else { return false }
+        guard reach > 0 else { return [] }
         var seen: Set<Int> = []
+        var touched: [Int] = []
         for ref in strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
         where seen.insert(ref.elementIndex).inserted {
-            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint else { continue }
-            if VectorEraser.touchesInk(of: stroke.samples, brush: stroke.brush, size: stroke.size, sweep: sweep) {
-                return true
-            }
+            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
+                  VectorEraser.touchesInk(of: stroke.samples, brush: stroke.brush, size: stroke.size,
+                                          sweep: sweep) else { continue }
+            touched.append(ref.elementIndex)
         }
-        return false
+        return touched.sorted()
+    }
+
+    /// Mode 4: every paint stroke whose ink the footprint touches is deleted whole. Caller must hold
+    /// `lock`. **Returns the damage as well** — the union of what the deleted strokes last painted,
+    /// which is the whole of where the picture changes, since nothing takes their place.
+    private func removeTouchedStrokes(sweep: VectorEraser.Sweep) -> (changed: Bool, damage: Damage) {
+        let doomed = touchedStrokeIndices(by: sweep)
+        guard !doomed.isEmpty else { return (false, .everything) }
+        let removed = doomed.compactMap { _elements[$0].stroke }
+        let damage = regionDamage(replacing: removed)
+        let gone = Set(doomed)
+        _elements = _elements.enumerated().filter { !gone.contains($0.offset) }.map(\.element)
+        forgetPaintedBounds(removed.map(\.id))
+        return (true, damage)
+    }
+
+    /// **The strokes a Mode 4 gesture is about to delete, for the live preview** — the paint strokes
+    /// under `canvasSpaceSamples` that `doomed` does not already hold, in **canvas** space, ready to
+    /// be punched out of the scratch copy of the layer with `applyPreview(erasing:into:)`. Each id
+    /// is added to `doomed`, so a drag reports every stroke once, on the sample that reaches it.
+    /// **Reads only**: no element changes and `version` does not move.
+    func wholeStrokePreviewEdits(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
+                                 accumulating doomed: inout Set<UUID>) -> [VectorStroke] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !canvasSpaceSamples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return [] }
+        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
+        let scale = Self.scale(of: _transform)
+        let localSize = scale > 0 ? size / scale : size
+        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize) else { return [] }
+        var edits: [VectorStroke] = []
+        for index in touchedStrokeIndices(by: sweep) {
+            guard doomed.insert(_elements[index].id).inserted,
+                  let stroke = Self.mapping(_elements[index], throughSimilarity: _transform).stroke else { continue }
+            edits.append(stroke)
+        }
+        return edits
+    }
+
+    /// Draws one Mode 4 preview edit into `target`: the stroke's own walk, as an eraser, so the
+    /// copy of the layer loses exactly the dabs the lift will stop drawing. Flat-copy limits as for
+    /// `applyPreview(_:into:)` — ink another stroke laid over this one goes with it until the lift.
+    static func applyPreview(erasing stroke: VectorStroke, into target: DabTarget) {
+        stamp(stroke: stroke, into: target, isEraser: true)
     }
 
     /// Garbage collection: a retained `.erase` element is dropped once nothing *beneath it* (not
