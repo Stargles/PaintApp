@@ -67,6 +67,8 @@
 		043A4C1856CFB84247FD383E /* VectorCanvasDataLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */; };
 		A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */; };
+		ED2D79834C54CDA14CD89BF5 /* EditorStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A0E6322174F854ADFB6D5 /* EditorStateLogicTests.swift */; };
+		F577F098649ABA90C857E13B /* AutosaveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D6225D9EF98A354501797D /* AutosaveLogicTests.swift */; };
 		C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */; };
 		B09E10D0839E1B4C4667D4E3 /* ProjectPackageLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */; };
 		E3F5A93396CFEBF2B3AF9FE6 /* ProjectPackageRenameLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */; };
@@ -539,6 +541,8 @@
 		40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorCanvasDataLogicTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEngineLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupManagerLogicTests.swift; sourceTree = "<group>"; };
+		FC7A0E6322174F854ADFB6D5 /* EditorStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditorStateLogicTests.swift; sourceTree = "<group>"; };
+		A9D6225D9EF98A354501797D /* AutosaveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutosaveLogicTests.swift; sourceTree = "<group>"; };
 		C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectSaveLogicTests.swift; sourceTree = "<group>"; };
 		4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectPackageLayoutLogicTests.swift; sourceTree = "<group>"; };
 		13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectPackageRenameLogicTests.swift; sourceTree = "<group>"; };
@@ -1089,6 +1093,8 @@
 				B7CFBA1730CD0070396FE76C /* TimelineGestureArbitrationLogicTests.swift */,
 				2A96376C9031630557D740C1 /* FillContourLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
+				FC7A0E6322174F854ADFB6D5 /* EditorStateLogicTests.swift */,
+				A9D6225D9EF98A354501797D /* AutosaveLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				4AD93130C2DA22F2AFA7DC57 /* ProjectPackageLayoutLogicTests.swift */,
 				13BCCAE96E71555570F1EC06 /* ProjectPackageRenameLogicTests.swift */,
@@ -1688,6 +1694,8 @@
 				5C94BDA5DAEF20A8CC60471B /* TimelineGestureArbitrationLogicTests.swift in Sources */,
 				53169DD6B542AA4076A51909 /* FillContourLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
+				ED2D79834C54CDA14CD89BF5 /* EditorStateLogicTests.swift in Sources */,
+				F577F098649ABA90C857E13B /* AutosaveLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B09E10D0839E1B4C4667D4E3 /* ProjectPackageLayoutLogicTests.swift in Sources */,
 				E3F5A93396CFEBF2B3AF9FE6 /* ProjectPackageRenameLogicTests.swift in Sources */,

@@ -1361,12 +1361,7 @@ enum ProjectStore {
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
                                  canvasSize: CGSize, tally: WriteTally,
                                  reuse: (ledger: PackageLedger, package: URL)?) -> CelWrite {
-        var encodeSeconds = 0.0
-        var writeSeconds = 0.0
-        var encoded = 0
-        var reused = 0
-        var bytes = 0
-
+        let cost = CelCost()
         // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
         // from, and it is the one thing the encoder needs that the payload cannot work out for
         // itself. `PackedSampleRun` writes the origin it was given into the file, so a decoder needs
@@ -1374,41 +1369,6 @@ enum ProjectStore {
         // coordinate — `SampleCodingLogicTests` pins that by saving near the edge of a canvas too
         // wide to encode about the origin.
         let sampleOrigin = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-        func json<T: Encodable>(_ value: T) -> Data? {
-            let started = CFAbsoluteTimeGetCurrent()
-            let encoder = JSONEncoder()
-            encoder.userInfo[.sampleQuantisationOrigin] = sampleOrigin
-            // Not `try?`. An encode that throws used to leave `vectorFileName` nil and save the cel
-            // **empty**, which is the same silent-loss shape `VectorCanvasData`'s per-element decode
-            // was built to end, arriving from the other direction. Nothing in the tree throws here
-            // today; the point is that if something starts to, it says so.
-            do {
-                let data = try encoder.encode(value)
-                encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-                return data
-            } catch {
-                encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-                log.error("""
-                    Encoding \(String(describing: T.self), privacy: .public) for cel \
-                    \(cel.id.uuidString, privacy: .public) failed, so that content is not written: \
-                    \(String(describing: error), privacy: .public)
-                    """)
-                return nil
-            }
-        }
-        /// Writes one file at the address its **role** gives it — TODO (57). `name` is what the
-        /// manifest records: bare for a PNG, package-relative (`drawings/…`) for the three JSON
-        /// sidecars, and `ProjectPackageLayout.writePath` reads the difference off the name.
-        /// Answers the path it wrote, which is what the ledger records.
-        @discardableResult
-        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) -> String {
-            let started = CFAbsoluteTimeGetCurrent()
-            let path = ProjectPackageLayout.writePath(named: name, role: role)
-            try? data.write(to: ProjectPackageLayout.resolve(path, in: packageURL))
-            writeSeconds += CFAbsoluteTimeGetCurrent() - started
-            bytes += data.count
-            return path
-        }
 
         var tiers: PixelTiers? = nil
         if let reuse, let entry = reuse.ledger.entry(for: cel.id), entry.stamp.matches(cel.stamp) {
@@ -1421,21 +1381,20 @@ enum ProjectStore {
                                    bakedFileName: manifest.bakedImageFileName,
                                    vectorFileName: manifest.vectorFileName,
                                    files: entry.files)
-                reused = entry.files.filter { $0.hasSuffix(".png") || $0.hasSuffix(".jpg") }.count
+                cost.reused = entry.files.filter { $0.hasSuffix(".png") || $0.hasSuffix(".jpg") }.count
             }
-            writeSeconds += CFAbsoluteTimeGetCurrent() - started
+            cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         }
-        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, json: json, write: write,
-                                                   encodeSeconds: &encodeSeconds, encoded: &encoded,
-                                                   writeSeconds: &writeSeconds)
+        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, sampleOrigin: sampleOrigin, cost: cost)
 
         // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
         // same reason the vector payload has one: it is unbounded in size (lattices) and the
         // gallery reads every manifest in full.
         var interpolationFileName: String?
-        if let recipe = cel.interpolation, let data = json(recipe) {
+        if let recipe = cel.interpolation,
+           let data = encodeJSON(recipe, cel: cel.id, sampleOrigin: sampleOrigin, cost: cost) {
             let name = ProjectPackageLayout.recordedName(for: .interpolation, cel: cel.id)
-            write(data, name, .interpolation)
+            writeFile(data, named: name, role: .interpolation, in: packageURL, cost: cost)
             interpolationFileName = name
         }
 
@@ -1445,15 +1404,16 @@ enum ProjectStore {
         // keyframes and that gap can span exactly this save.
         var animationFileName: String?
         if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty,
-           let data = json(CelAnimationData(tracks: cel.transformTracks,
-                                            baselines: cel.pendingPoseBaselines)) {
+           let data = encodeJSON(CelAnimationData(tracks: cel.transformTracks,
+                                                  baselines: cel.pendingPoseBaselines),
+                                 cel: cel.id, sampleOrigin: sampleOrigin, cost: cost) {
             let name = ProjectPackageLayout.recordedName(for: .animation, cel: cel.id)
-            write(data, name, .animation)
+            writeFile(data, named: name, role: .animation, in: packageURL, cost: cost)
             animationFileName = name
         }
 
-        tally.record(encodeSeconds: encodeSeconds, writeSeconds: writeSeconds,
-                     pngsEncoded: encoded, pngsReused: reused, bytesWritten: bytes)
+        tally.record(encodeSeconds: cost.encodeSeconds, writeSeconds: cost.writeSeconds,
+                     pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes)
 
         let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                    rasterFileName: pixelTiers.rasterFileName,
@@ -1468,19 +1428,65 @@ enum ProjectStore {
                                                          files: pixelTiers.files))
     }
 
+    /// What one `writeCel` spent — one per cel, on the worker that writes it, so no lock. Folded
+    /// into `WriteTally` at the end. A class rather than `inout` counters because the helpers below
+    /// and the closures inside `encodePixelTiers` all add to it, and two `inout` borrows of one
+    /// local is an exclusivity violation the runtime traps on.
+    private final class CelCost {
+        var encodeSeconds = 0.0
+        var writeSeconds = 0.0
+        var encoded = 0
+        var reused = 0
+        var bytes = 0
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T, cel: UUID, sampleOrigin: CGPoint,
+                                                 cost: CelCost) -> Data? {
+        let started = CFAbsoluteTimeGetCurrent()
+        defer { cost.encodeSeconds += CFAbsoluteTimeGetCurrent() - started }
+        let encoder = JSONEncoder()
+        encoder.userInfo[.sampleQuantisationOrigin] = sampleOrigin
+        // Not `try?`. An encode that throws used to leave `vectorFileName` nil and save the cel
+        // **empty**, which is the same silent-loss shape `VectorCanvasData`'s per-element decode
+        // was built to end, arriving from the other direction. Nothing in the tree throws here
+        // today; the point is that if something starts to, it says so.
+        do {
+            return try encoder.encode(value)
+        } catch {
+            log.error("""
+                Encoding \(String(describing: T.self), privacy: .public) for cel \
+                \(cel.uuidString, privacy: .public) failed, so that content is not written: \
+                \(String(describing: error), privacy: .public)
+                """)
+            return nil
+        }
+    }
+
+    /// Writes one file at the address its **role** gives it — TODO (57). `name` is what the
+    /// manifest records: bare for a PNG, package-relative (`drawings/…`) for the three JSON
+    /// sidecars, and `ProjectPackageLayout.writePath` reads the difference off the name.
+    /// Answers the path it wrote, which is what the ledger records.
+    @discardableResult
+    private static func writeFile(_ data: Data, named name: String, role: ProjectPackageLayout.Role,
+                                  in packageURL: URL, cost: CelCost) -> String {
+        let started = CFAbsoluteTimeGetCurrent()
+        let path = ProjectPackageLayout.writePath(named: name, role: role)
+        try? data.write(to: ProjectPackageLayout.resolve(path, in: packageURL))
+        cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
+        cost.bytes += data.count
+        return path
+    }
+
     /// The encode half of `writeCel`: the raster, fill and baked PNGs, the placed images, the stream
     /// pictures, the clips, and the display list — the body of the old per-cel loop, verbatim.
     private static func encodePixelTiers(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
-                                         json: (VectorCanvasData) -> Data?,
-                                         write: (Data, String, ProjectPackageLayout.Role) -> String,
-                                         encodeSeconds: inout Double, encoded: inout Int,
-                                         writeSeconds: inout Double) -> PixelTiers {
+                                         sampleOrigin: CGPoint, cost: CelCost) -> PixelTiers {
         var files: [String] = []
         func png(_ image: UIImage) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
             let data = image.pngData()
-            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-            encoded += 1
+            cost.encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            cost.encoded += 1
             return data
         }
         /// A stream's last picture — STREAM.md §5.6's JPEG at quality 0.9, since a screen capture
@@ -1489,9 +1495,15 @@ enum ProjectStore {
         func jpeg(_ image: UIImage) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
             let data = image.jpegData(compressionQuality: Self.streamLastFrameJPEGQuality)
-            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-            encoded += 1
+            cost.encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            cost.encoded += 1
             return data
+        }
+        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) -> String {
+            writeFile(data, named: name, role: role, in: packageURL, cost: cost)
+        }
+        func json(_ payload: VectorCanvasData) -> Data? {
+            encodeJSON(payload, cel: cel.id, sampleOrigin: sampleOrigin, cost: cost)
         }
         /// Copies one imported asset into the staged package — VIDEO.md §6's *"the source file is
         /// copied into the project whole"*, which is why it is a file copy rather than a re-encode:
@@ -1523,7 +1535,7 @@ enum ProjectStore {
             files.append(path)
             guard !fm.fileExists(atPath: destination.path) else { return }
             let started = CFAbsoluteTimeGetCurrent()
-            defer { writeSeconds += CFAbsoluteTimeGetCurrent() - started }
+            defer { cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started }
             do {
                 try fm.copyItem(at: source, to: destination)
             } catch {

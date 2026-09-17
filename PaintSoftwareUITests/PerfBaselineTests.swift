@@ -4214,9 +4214,17 @@ final class PerfBaselineTests: XCTestCase {
                 // blank tiers and whose `pngsEncoded` is 0; the per-cel contract is pinned in
                 // `ProjectSaveLogicTests`. Read this one as "an inked cel still costs a PNG", which
                 // is the thing it can actually see.
-                XCTAssertEqual(profile.pngsEncoded, cels,
-                               "Every save re-encodes every cel: one raster PNG each, nothing skipped")
-                XCTAssertEqual(profile.pngsReused, 0, "Nothing memoizes a cel's PNG bytes yet")
+                //
+                // **And since TODO (76), the second pass is the counter `pngsReused` was reserved
+                // for.** The document has not moved between the two passes, so the re-save clones
+                // every cel out of the live package and encodes none — `AutosaveLogicTests` pins the
+                // bytes; this pins the count at scale. The sum is the invariant: a full write and an
+                // incremental one account for the same PNGs.
+                XCTAssertEqual(profile.pngsEncoded + profile.pngsReused, cels,
+                               "One raster PNG per inked cel, encoded or cloned, nothing skipped")
+                XCTAssertEqual(profile.pngsReused, pass == 0 ? 0 : cels,
+                               pass == 0 ? "The first save of a session encodes everything"
+                                         : "An unchanged document re-saves by cloning every cel — `PackageLedger`")
                 // The fan-out, as an integer rather than as a clock. A serial walk touches one
                 // thread; a spread one touches several, and no amount of host load changes which —
                 // so this is the line that would notice if `writePackage` silently went back to a
@@ -4247,6 +4255,79 @@ final class PerfBaselineTests: XCTestCase {
         // tighten this into a timing assertion on a machine that runs several suites at once.
         XCTAssertLessThan(ProjectStore.lastSaveProfile?.totalSeconds ?? 0, 120.0,
                           "A 32-cel save taking two minutes is structural, not contention")
+    }
+
+    /// **What one autosave costs the artist's thread** — TODO (76)'s one promise, as a number: the
+    /// owner asked that it *"must not lag out the main thread"*, and the main thread's whole share
+    /// of a save is `SaveSnapshot.init`, which `SaveProfile.snapshotSeconds` clocks.
+    ///
+    /// The document is the owner's canvas with fifty inked cels; the save measured is the ordinary
+    /// autosave — one cel touched since the last save — so the counters say what the snapshot
+    /// skipped (49 clones, 1 encode) and the clock says what it cost. **The counts are the durable
+    /// half** and are asserted on any machine; the budget on the clock is opt-in, the shape
+    /// `DabCostBench` uses, because this Mac hosts several suites at once and a wall-clock assertion
+    /// under four parallel clones is CLAUDE.md's named trap. The number is printed regardless, and
+    /// PERFORMANCE.md's autosave section is where it is written down as MEASURED.
+    @MainActor
+    func testWhatOneAutosaveCostsTheMainThread() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-autosave-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let layerCount = 5
+        let celsPerLayer = 10
+        let cels = layerCount * celsPerLayer
+        let url = ProjectStore.createNewProjectURL(name: "Perf Autosave")
+        let authored = autoreleasepool { multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer) }
+
+        func save() async -> ProjectStore.SaveProfile? {
+            let written = expectation(description: "save lands")
+            ProjectStore.save(authored, to: url) { written.fulfill() }
+            await fulfillment(of: [written], timeout: 600)
+            return ProjectStore.lastSaveProfile
+        }
+
+        // The session's first save is the full write; the artist then draws on one cel and the
+        // autosave fires. Three of those, so the number reported is a minimum rather than a cold one.
+        _ = await save()
+        var snapshotSeconds: [Double] = []
+        var profile: ProjectStore.SaveProfile?
+        for pass in 0..<3 {
+            autoreleasepool {
+                inkOneCel(authored.layers[pass % layerCount].cels[pass].raster, canvas: Self.ownersCanvasSize,
+                          brush: authored.selectedBrush, seed: 1000 + pass)
+            }
+            profile = await save()
+            guard let profile else { return XCTFail("Every save publishes a profile — see ProjectStore.SaveProfile") }
+            snapshotSeconds.append(profile.snapshotSeconds)
+            XCTAssertEqual(profile.pngsEncoded, 1, "One cel moved, one PNG is encoded")
+            XCTAssertEqual(profile.pngsReused, cels - 1, "The other \(cels - 1) are cloned, not encoded")
+            XCTAssertFalse(profile.encodedOnMainThread)
+        }
+        guard let profile else { return }
+        let best = snapshotSeconds.min() ?? 0
+        report("one autosave — \(cels) cels at 2048x1024, one cel touched", [
+            ("cels", "\(profile.celCount)"),
+            ("snapshotOnMain", milliseconds(best)),
+            ("snapshotOnMainEachPass", snapshotSeconds.map(milliseconds).joined(separator: " / ")),
+            ("celWalk", milliseconds(profile.celWalkSeconds)),
+            ("swap", milliseconds(profile.swapSeconds)),
+            ("total", milliseconds(profile.totalSeconds)),
+            ("pngsEncoded", "\(profile.pngsEncoded)"),
+            ("pngsReused", "\(profile.pngsReused)"),
+        ])
+
+        // The budget: 2 ms on the main thread for an autosave of this document, asserted only when
+        // asked for — see the doc comment.
+        if ProcessInfo.processInfo.environment["PAINTAPP_AUTOSAVE_BUDGET"] != nil {
+            XCTAssertLessThan(best, 0.002,
+                              "An autosave's main-thread share at \(cels) cels must stay under 2 ms")
+        }
     }
 
     /// **What spreading the per-cel PNG encode over cores is worth**, measured against a serial walk

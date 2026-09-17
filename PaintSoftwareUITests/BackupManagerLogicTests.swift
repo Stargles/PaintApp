@@ -77,9 +77,11 @@ final class BackupManagerLogicTests: XCTestCase {
     }
 
     /// Mirrors what ProjectStore.save does around writePackage: stash live, "write" the new state
-    /// (here: recreate the package), refresh latest, rotate.
+    /// (here: recreate the package), refresh latest, rotate. Each cycle is a session's first save,
+    /// which is the one that takes a rotated slot; `AutosaveLogicTests` covers the rolling one.
     private func simulateSaveCycle(projectURL: URL, id: UUID) {
-        XCTAssertTrue(ProjectBackupManager.stashLiveProjectForSave(projectURL: projectURL, projectID: id))
+        XCTAssertTrue(ProjectBackupManager.stashLiveProjectForSave(projectURL: projectURL, projectID: id,
+                                                                   stash: .sessionStart))
         _ = makeProject(name: projectURL.deletingPathExtension().lastPathComponent, id: id)
         ProjectBackupManager.refreshLatestSnapshot(projectURL: projectURL, projectID: id)
         ProjectBackupManager.pruneBackups(forProjectID: id)
