@@ -75,9 +75,11 @@ struct AutosaveClock: Equatable {
 ///
 /// **One timer, re-armed from the due time, never a poll.** Each edit moves the due time and re-arms;
 /// a timer that fires into a hold re-arms for a second later, which is the only repeat in here and
-/// only while something is held. `savesInFlight` is counted here rather than in the view because
-/// every kind of save — the artist's exit, the scene phase, this one — reports through the same
-/// two calls, and the count is part of the hold.
+/// only while something is held with a save owed — and it is also how a hold that lifts without an
+/// edit or a save (playback stopping, a Move box committing) lets the save through, within a
+/// second, with no observer on any of those states. `savesInFlight` is counted here rather than in
+/// the view because every kind of save — the artist's exit, the scene phase, this one — reports
+/// through the same two calls, and the count is part of the hold.
 @MainActor
 final class AutosaveDriver: ObservableObject {
     private(set) var clock = AutosaveClock()

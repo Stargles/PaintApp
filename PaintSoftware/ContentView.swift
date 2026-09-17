@@ -103,11 +103,6 @@ struct ContentView: View {
                 autosave.stop()
             }
         }
-        // Playback stopping is the one hold that lifts without an edit or a save, so it needs its
-        // own nudge; a stroke's lift is followed by the stroke's own `recordUndo`.
-        .onChange(of: canvasManager.isPlaying) { _, playing in
-            if !playing { autosave.arm() }
-        }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Playback ends when the app leaves the foreground, and this is not politeness — the
             // playhead is derived from elapsed *wall* time (see `CanvasManager.play()`), so an

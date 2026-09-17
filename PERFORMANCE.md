@@ -5097,13 +5097,15 @@ canvas, **50 inked raster cels**, one cel touched since the previous save — th
 
 | one autosave, 50 cels at 2048×1024, one cel touched | |
 |---|---|
-| **on the main thread** (`snapshotSeconds`, best of three; the three read 0.3 / 0.3 / 0.3) | **0.3 ms** |
+| **on the main thread** (`snapshotSeconds`, best of three; the three read 0.3 / 0.3 / 0.3, and **0.2 / 0.2 / 0.2 in Release** on the same device) | **0.3 ms** |
 | per-cel walk, on `saveQueue` | 19.8 ms |
 | validate + stash + rename + refresh, on `saveQueue` | 19.7 ms |
 | total, on `saveQueue` | 45.7 ms |
 | PNGs encoded / cloned | 1 / 49 |
 
-The budget the test carries is **2 ms**, opt-in through `PAINTAPP_AUTOSAVE_BUDGET` for the reason
+The Release run's other columns read within a millisecond of Debug's (19.7 / 19.0 / 44.3 ms), which
+is what a walk of clones and one PNG looks like: there is no Swift arithmetic here for the optimiser
+to find. The budget the test carries is **2 ms**, opt-in through `PAINTAPP_AUTOSAVE_BUDGET` for the reason
 `DabCostBench`'s cap is; the counts are asserted on every run. The device figure is INFERRED at
 §1's ~1.3×, i.e. well under a millisecond — a snapshot that reads pointers does not scale with the
 machine the way an encode does.
