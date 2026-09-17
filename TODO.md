@@ -80,17 +80,20 @@ opacity is just a linear 0 to 100."*
 
 ---
 
-## (86) Canvas sizes over 6k, and the fill tool's memory
+## (86) Canvas sizes over 6k
 
-**Status** — filed 2026-09-16. The owner: *"Right now, canvas sizes over 6k are banned, as well as
-using the fill tool because it takes too much memory. Try to find a way to fix this if there is a way.
-The fill tool especially, I don't see why it should ever have a memory complexity which is affected by
-the canvas size. For the canvas size, if it is genuinely too much to put into memory, then experiment
-with virtual memory caching like the renderer already does with layers."*
+**Status** — filed 2026-09-16; the fill half **closed 2026-09-17** (a fill's memory is its region's,
+`FillWindow`, PERFORMANCE.md §22.1). The owner, on the other half: *"For the canvas size, if it is
+genuinely too much to put into memory, then experiment with virtual memory caching like the renderer
+already does with layers."*
 
-- [ ] Fill at a resolution independent of the canvas extent (a bounded scan, or fill at a working
-      resolution and vectorise), with the figure MEASURED.
 - [ ] The 6k ban lifted where the strip compositor and the frame store already make it affordable.
+      **Measured not to, on a simulator proxy with the iPad's budget** (PERFORMANCE.md §22.2): a
+      graded three-layer document with a stroke in flight is 1089 MB above rest at 6000² and 1811 MB
+      at 7000², against the iPad's 1850 MiB ceiling — the sandwich's two halves are display surfaces
+      no cache can page out. What would move it is the graded edit probe run on the owner's iPad at
+      7000² (`PlaybackProbe -probeGraded -probeMode edit`, §22.2 has the command) surviving with
+      margin; nothing short of the device settles it.
 
 ---
 

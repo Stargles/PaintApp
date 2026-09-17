@@ -3810,11 +3810,12 @@ session keeps for `seedColor(atX:y:)`, and the lasso's second reference colour i
 is the worst case rather than the figure. `MetalFillSession.predictedBytes` is the worst case (46 with
 two colours) and `MemoryBudgetLogicTests` pins it equal to `allocatedBytes` for a real session.
 
-At the owner's canvas that is **76 MB, 41% of the iPad 9's entire texture budget**, transient, on every
-bucket tap. At 4096² it is 608 MB, 3.3× that budget. `fillBudgetBytes` refuses past
-`CompositorBudget.textureBudgetBytes`, `hasHeadroom` declines when the moment is wrong, and both now
-raise `CanvasNotice.Kind.fillNeedsMoreMemory` — where the 16383² case used to be `makeBuffer` returning
-nil inside a `guard`, so the artist tapped the bucket and **nothing happened at all**.
+Per *canvas* pixel, when this was measured; **per window pixel since §22** — the session is cut to
+the region being filled, so at the owner's canvas a fill of a shape is the shape's window and a fill of
+the page grows to it. `fillBudgetBytes` sizes the window rather than refusing it, `hasHeadroom`
+declines when the moment is wrong and raises `CanvasNotice.Kind.fillNeedsMoreMemory` — where the
+16383² case used to be `makeBuffer` returning nil inside a `guard`, so the artist tapped the bucket
+and **nothing happened at all**.
 
 ### 13.4 Undo: BUGS.md said 3–6× over, §9 item 4 said 33–264× under, and both were half right
 
@@ -5201,3 +5202,124 @@ every bake grew the pool by a 1080p frame for the life of the document (`videoco
 lifetime maximum is ~16–36 such buffers); it copies now. And every undo step recorded while the
 laptop streamed held a copy of the element with that frame in it, unbudgeted — `StreamPicture`
 holds the frame by reference so every copy of the element shares one.
+
+---
+
+## 22. The fill's memory is the region's, and the 6000 ceiling stays (2026-09-17)
+
+TODO (86). The owner: *"canvas sizes over 6k are banned, as well as using the fill tool because it
+takes too much memory... The fill tool especially, I don't see why it should ever have a memory
+complexity which is affected by the canvas size. For the canvas size, if it is genuinely too much to
+put into memory, then experiment with virtual memory caching like the renderer already does with
+layers."* Two questions; the first is answered by construction and MEASURED, the second is answered
+no, with the measurement that says so and the run that would say otherwise.
+
+### 22.1 What scaled the fill with the canvas, and what bounds it now
+
+Every buffer of a fill gesture was the canvas: the reference composite (a canvas-sized renderer
+plus a canvas-sized byte copy, 8 B/px), TODO (46)'s path wall (4), the GPU session (38 for a bucket,
+up to 46 for a lasso — §13.3), its painted output (4), the preview `UIImage` and the `Data` under it
+(8), and the §7 collar tint on an empty lasso (8). **About 70 bytes a canvas pixel per gesture**:
+147 MB at the owner's 2048×1024, 1.2 GB at 4096², 2.5 GB at 6000². `MetalFillEngine.fillBudgetBytes`
+(183.7 MB on the iPad 9) refused the session above ~2200² for a bucket and ~2000² for a lasso, so
+the tool was gone on every canvas the owner works at above their default.
+
+**`Engine/FillWindow.swift` cuts every one of those buffers to a window of the canvas.** A lasso's
+window is the loop's bounds plus a halo of 88 px — two gap-close radii at the slider's top, the edge
+operator's reach, and two for the JFA — and is exact, because the collar flood never leaves the loop
+and no kernel reads further than the halo. A bucket's window starts at 1024² about the tap and
+**grows** toward whichever sides the paint reaches within the halo band (`MetalFillSession
+.paintedReaches`), doubling that way and re-running, so a fill converges in a logarithmic number of
+sessions and is never more than about four times the region's box. The session itself learned one
+thing: the paper is a rect in buffer pixels (`fill(artworkRect:)`) rather than a symmetric inset,
+so a window that straddles the canvas edge fences the flood where the paper ends and one inside the
+paper fences nothing. When the window alone exceeds the budget it is worked at the largest scale that
+fits and the traced path comes back through the window's inverse — a region a few pixels soft along
+its edge where the alternative was refusing the gesture; a vector layer keeps its walls at any scale
+because the path wall is a hairline redrawn at the working resolution. `SessionOutcome.tooLarge` is
+deleted: nothing is too large. The valve (`hasHeadroom`) is the one refusal left, and it has a test
+seam now (`CompositorBudget.availableMemoryOverrideBytes`) because on a simulator it was inert.
+
+The preview followed: `Cel.fillPreview` is a `FillPreview` — an image over its window's rect —
+rather than a canvas-sized `UIImage`, drawn at its rect by the layer host, the flatten, the
+thumbnail and the §7 collar. Every save runs `commitAllInteractiveState` first and every document
+operation runs `beginCanvasEdit`, so a cel at rest never held one; the tier's persistence, package
+role, undo field, resize and flip arms were dead and are gone.
+
+**MEASURED, `FillFootprintBench`, iOS 26.5 simulator (iPad Pro 13-inch M4), Release, `phys_footprint`
+before a gesture and at its peak with the layer's display render already resident** — a footprint
+proxy, and one that charges the memo to the display, since the host holds that picture whether or not
+the artist fills. One vector layer, a 200 px box of ink at the centre, a lasso 40 px around it and then
+a tap inside it:
+
+| canvas | lasso Δ | bucket Δ | the two windows | canvas frame |
+|---|---|---|---|---|
+| 2048² | 21.4 MB | 33.9 MB | 456² / 1024² | 16 MB |
+| 6000² | 15.2 MB | 48.5 MB | 456² / 1024² | 137 MB |
+| 8192² | 18.9 MB | 57.1 MB | 456² / 1024² | 256 MB |
+
+Where the gesture used to cost 243 MB, 2.1 GB and 3.9 GB. The lasso's three are flat to the noise;
+the bucket's climb by 23 MB across a 16× range, and the probe found it: **CoreGraphics copies every
+source row a clipped draw touches at the source's full stride**, so drawing the canvas-sized memo into
+a 1024-row window costs `1024 × canvasWidth × 4` — 8, 24 and 33 MB — for the duration of the draw.
+Cropping the image first does not avoid it (the crop shares the rows). It is linear in the canvas's
+*width*, transient, and an order of magnitude below the session it sits beside; it is named in
+`compositeReferenceRGBA` rather than fought.
+
+The bench prints unconditionally and asserts flatness within 32 MB only under
+`PAINTAPP_FILL_FOOTPRINT=1` (set with `simctl spawn … launchctl setenv` on a simulator, §11.8's
+correction), CLAUDE.md's rule for a number that samples the machine.
+
+### 22.2 The ceiling — MEASURED on a simulator with the iPad's budget, and it stays at 6000
+
+§15.5 set `maxCanvasExtent` at 6000 for *brush input* on the owner's iPad; BUGS.md then watched a
+6000² document die in the *bake*. Neither run could see the other's working set, so `PlaybackProbe`
+gained three things for this: `-probeBudgetBytes` (so a simulator run makes the ring, the memos and
+the strips decide as a 192 MiB device would), a footprint sample every 50 ms through the bake as
+well as the play, and `-probeGraded` (a Multiply blend on the second layer, so the sandwich is in the
+working set — the one part §15.5 could only estimate). Every figure is **`phys_footprint` peak minus
+the process at rest with no document**, Release, iOS 26.5 simulator, `CompositorBudget` at 192 MiB.
+It is a proxy for the iPad (the render server's copies live in `backboardd` on both, the app's own
+allocations are the same code), and the device's ceiling to read it against is **1850 MiB** (§15.5).
+
+| document | 4096² | 6000² | 7000² | 8192² | 10000² |
+|---|---|---|---|---|---|
+| 1 vector layer, 2 frames, bake + 5 s play | 521 MB | 788 MB | — | 1398 MB | — |
+| 3 layers, 2 frames, bake + 5 s play | — | 832 MB | — | 1459 MB | **2066 MB** |
+| 3 layers, 2 frames, 3 stroke commits with undo/redo | — | 832 MB | — | 1257 MB | — |
+| the same, **graded** (Multiply on layer 2) | — | **1089 MB** | **1811 MB** | **2363 MB** | — |
+
+The ring is off above ~4900² (`frameRingByteBudget`), so a plain document's working set is its
+memos, the baked frame on screen and the decode in flight — about five canvas frames — and a plain
+document would survive to roughly 9000². **The first thing to break above 6000 is a graded document
+with a stroke in flight**: the sandwich's two halves and the re-bake they trigger put a 7000² graded
+document at 98% of the iPad's ceiling on this proxy, and 8192² past it. 6000² sits at 59%. So the
+ceiling stays where §15.5 put it, for a reason §15.5 estimated and this run measured: the 40%
+margin it reserved for the sandwich was the right size within a third.
+
+**What would move it.** The proxy is a proxy: the honest lift is the graded edit probe run on the
+owner's iPad at 7000² —
+
+```
+xcrun devicectl device process launch --device E3B83820-… Starg.PaintSoftware -playbackProbe \
+  -probeWidth 7000 -probeHeight 7000 -probeLayers 3 -probeGraded -probeMode edit -probeEdits 3
+```
+
+— surviving with the margin §15.5 asked for. Nothing in this pass makes that likelier or less
+likely; it makes it measurable. Separately, the BUGS.md 6000² bake death is 788 MB on this proxy,
+which is not close to 1850: either the device's bake holds twice what the simulator's does, or the
+ring switch-off that landed in the same pass as the report is what fixed it. Only the device says.
+
+### 22.3 The two traps, and what they are now
+
+The owner's iPad logged two `EXC_BREAKPOINT`s in these logs rather than jetsam kills. One was
+`VectorCanvas.walk` under `rasterize`, four times: CoreGraphics would not make the canvas-sized
+context, **UIKit then does not run `UIGraphicsImageRenderer`'s drawing block at all** (MEASURED on
+the simulator with a 2³¹-wide row: `ran=false`, an empty image, `cgImage == nil`), and the walk's
+findings stayed an implicitly unwrapped nil. The other was `Data.init(count:)` under
+`FrameBakeStore.loadDecoded` on the bake queue — Foundation's initialiser is a `fatalError` on a nil
+`malloc`. Both are refusals now: the render answers nil and installs no memo, the decode answers nil
+and is a miss, and each signals `MemoryPressure.Level.allocationRefused` — every cache trims as for a
+warning, and `CanvasManager` raises `CanvasNotice.Kind.outOfMemoryToDraw`, because a frame silently
+skipped is CLAUDE.md's refusal with no notice. `MemoryBudgetLogicTests` holds both refusals and the
+notice.

@@ -149,7 +149,12 @@ Two deliberate divergences from Krita:
 
 ## 6. Pixel-level specification
 
-Buffers, all at canvas resolution and all passes restricted to the loop's bounding box:
+Buffers, all in the **window** the fill works in — the loop's bounding box plus an 88 px halo, at
+canvas resolution when that fits `MetalFillEngine.fillBudgetBytes` and at the largest scale that fits
+when it does not (`FillWindow`, TODO (86); PERFORMANCE.md §22.1 is the measurement). Nothing below
+reads a pixel outside the window: the collar flood cannot leave the loop, and every neighbourhood
+operator reaches at most the halo. A bucket fill takes the same buffers in a window that starts at
+1024² about the tap and grows toward whichever edges its paint reaches.
 
 - `R` — the reference composite the tool reads (honour the existing reference-layer setting: all layers vs. current). **The loop's live preview stroke must not appear in `R`;** it is UI, not artwork.
 - `loopMask` (1 bit), `reached` (1 bit), `fillAlpha` (8 bit).

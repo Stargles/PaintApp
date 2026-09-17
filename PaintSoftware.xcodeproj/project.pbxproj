@@ -60,6 +60,7 @@
 		4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */; };
 		E600A079E7FD19755BD9EC47 /* LassoFillLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */; };
 		CC2FC241770A84675CE4475A /* FillGestureRestartLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */; };
+		D25059E0F4C56C3889AC162E /* LargeCanvasFillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36196FAB5CCD310409D53B94 /* LargeCanvasFillUITests.swift */; };
 		57BD445CB196501AF5919ABE /* FillFootprintBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C754AA52C4D29CC8CDFDBD /* FillFootprintBench.swift */; };
 		37507273F710BBC1739771FE /* FillWindowLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234F08A0923C12D0CF572533 /* FillWindowLogicTests.swift */; };
 		5C94BDA5DAEF20A8CC60471B /* TimelineGestureArbitrationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CFBA1730CD0070396FE76C /* TimelineGestureArbitrationLogicTests.swift */; };
@@ -550,6 +551,7 @@
 		84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlacedImageShapeLogicTests.swift; sourceTree = "<group>"; };
 		71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LassoFillLogicTests.swift"; sourceTree = "<group>"; };
 		EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillGestureRestartLogicTests.swift"; sourceTree = "<group>"; };
+		36196FAB5CCD310409D53B94 /* LargeCanvasFillUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LargeCanvasFillUITests.swift"; sourceTree = "<group>"; };
 		F4C754AA52C4D29CC8CDFDBD /* FillFootprintBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillFootprintBench.swift"; sourceTree = "<group>"; };
 		234F08A0923C12D0CF572533 /* FillWindowLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillWindowLogicTests.swift"; sourceTree = "<group>"; };
 		B7CFBA1730CD0070396FE76C /* TimelineGestureArbitrationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "TimelineGestureArbitrationLogicTests.swift"; sourceTree = "<group>"; };
@@ -1126,6 +1128,7 @@
 				487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */,
 				84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */,
 				EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */,
+				36196FAB5CCD310409D53B94 /* LargeCanvasFillUITests.swift */,
 				F4C754AA52C4D29CC8CDFDBD /* FillFootprintBench.swift */,
 				234F08A0923C12D0CF572533 /* FillWindowLogicTests.swift */,
 				B7CFBA1730CD0070396FE76C /* TimelineGestureArbitrationLogicTests.swift */,
@@ -1745,6 +1748,7 @@
 				4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */,
 				7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */,
 				CC2FC241770A84675CE4475A /* FillGestureRestartLogicTests.swift in Sources */,
+				D25059E0F4C56C3889AC162E /* LargeCanvasFillUITests.swift in Sources */,
 				57BD445CB196501AF5919ABE /* FillFootprintBench.swift in Sources */,
 				37507273F710BBC1739771FE /* FillWindowLogicTests.swift in Sources */,
 				5C94BDA5DAEF20A8CC60471B /* TimelineGestureArbitrationLogicTests.swift in Sources */,

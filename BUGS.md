@@ -208,6 +208,14 @@ construction** — the arithmetic says the ring cannot help there, and the app c
 And PERFORMANCE.md §11.11b/c's *"the owner's 6000×6000 Test1"* cannot have been played back, whatever
 it was drawn at.
 
+**On a simulator with the iPad's budget the same document bakes and plays at 788 MB above rest**
+(PERFORMANCE.md §22.2, 2026-09-17, `PlaybackProbe -probeBudgetBytes 201326592`), nowhere near the
+1850 MiB ceiling — so either the device's bake holds twice what the simulator's does, or the ring
+switch-off that landed in the same pass as this report is what fixed it. Only the device says, and
+the probe now samples through the bake so a device run answers it. The two `EXC_BREAKPOINT`s the
+device logged under memory pressure — `VectorCanvas.walk` and `FrameBakeStore.loadDecoded` — are
+refusals now (§22.3), so whatever a 6000² bake does on the device, it does not trap.
+
 ## Evicting a vector render that a layer host is displaying frees nothing (2026-09-09)
 
 `VectorRenderCache` budgets the canvases' memos; `StrokeCanvasView`'s base slot holds a second
@@ -875,8 +883,9 @@ trusting the rest of a list assembled by reading code.
    reference colour as unconditional in the other. `MetalFillEngine.fillBudgetBytes`,
    `CompositorBudget.hasHeadroom` and `CanvasNotice.Kind.fillNeedsMoreMemory` are the budget, the valve and
    the voice; at 16383² this used to be `makeBuffer` returning nil inside a `guard`, so the artist tapped the
-   bucket and nothing happened at all. `compositeReferenceRGBA`'s transient canvas-sized pair is **still
-   open** and is not budgeted.
+   bucket and nothing happened at all. Since TODO (86) every one of those bytes is per *window* pixel
+   (`FillWindow`, PERFORMANCE.md §22), `compositeReferenceRGBA`'s pair included, and the budget shapes the
+   window rather than refusing it.
 4. **Blanked layer hosts keep every byte** — **DECLINED 2026-09-06, with the measurement that would settle it.**
    `setBlanked` still installs a zero-alpha mask and `reconcileLayers` still re-renders blanked hosts. The
    reason it was not built: **every image a host holds is an alias, not a copy** — `StrokeCanvasView`'s
