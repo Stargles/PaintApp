@@ -48,40 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (68) The 2026-09-13 iPad build (`d398588`) regressed the app — four felt, more suspected
-
-**Status** — filed 2026-09-16 from the owner's brief; BUGS.md's newest entry names the suspect
-commits. **The four recordings the owner made on the iPad are the evidence** — pulled 2026-09-16 into
-the session scratchpad from `Documents/Recordings/`: `recording-20260915-040910` and
-`recording-20260915-215123` are the Move-node bake (#1, #2), `recording-20260916-014412` is the
-freeze (#3), `recording-20260916-152252` is playback (#4).
-
-**The owner, 2026-09-16:** *"The build currently shipped on the ipad by the previous session has
-shipped significant regressions and bugs. Note: the amount of regressions triggers an alarm for me.
-There being this many means that more undiscovered bugs could have been made. I want you to be able to
-have the confidence at the end of fixing these that most if not all regressions are likely covered,
-including the potential ones that have not been discovered yet. Remember that clean code and
-architecture is a priority of this project. Find the root causes and fix it, don't slap on a messy fix."*
-
-1. *"FPS is no longer smooth during animation playback. This hints that some heavy operation is being
-   run every frame, or the pre-render bake isn't working properly. It is supposed to be 60 on the ipad,
-   right now it is around 20 to 30. Recording #4 (latest) is proof of this. Remember, tests on ipad are
-   the source of truth."*
-2. *"The canvas freeze is back. I again cant find the combination of inputs which caused it, but
-   recording 3 is me trying to do actions (i think it was moving the canvas) while it is frozen."*
-3. *"I cant move the canvas when by touching outside the canvas. I suspect this one could be deep and
-   connected to many more bugs."*
-4. *"the bug where moving a node in the move tool baking the move is back. Recordings 1 and 2 are
-   evidence."*
-
-**What is left**
-- [ ] Root cause and fix for each of the four, from the recordings and the `94caa67..d398588` diff.
-- [ ] A sweep of that whole diff for regressions the owner has not felt yet, with the same standard.
-- [ ] A Release build on the iPad, driven as CLAUDE.md says — play a scene, pan from the grey, drag
-      and release a Move node, draw a stroke — and the owner's confirmation.
-
----
-
 ## (71) A layer folder's Move selects everything in it and uses the Move tool
 
 **Status** — filed 2026-09-16. The owner: *"Currently there is a transform move in layer folders that
