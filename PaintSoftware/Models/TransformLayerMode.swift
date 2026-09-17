@@ -2,8 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// **What a container pose *does* with the pose the artist authored** — TRANSFORM_LAYER.md §5, the
-/// modes of the transform layer, and the same three on a posed folder (§3.3: a folder's pose takes
-/// the pose modes as well, or its keyable rows would key nothing).
+/// modes of the transform layer.
 ///
 /// **Named `TransformLayerMode` and not `TransformMode`**, because that name is taken: `TransformMode`
 /// is the Move bar's Uniform / Freeform / Distort picker (`SelectionModels.swift`), which is about
@@ -18,15 +17,12 @@ import Foundation
 /// **Repeat is the one that is not a pose** (§3.1's second shape): it produces a *frame* per entry
 /// beneath it rather than a map, and it is here rather than in a home of its own because it is the
 /// same kind of leaf with the same scope rule — spent in `renderNodes`' carry on the entries
-/// beneath, in its own container — and the owner listed it with the others. It is also the one mode
-/// a **folder cannot take** (`folderCases`): the loop's extent is the block, and a folder has none.
+/// beneath, in its own container — and the owner listed it with the others.
 ///
-/// **The mode lives on `LayerPose`** (`LayerPose.mode`), which is what makes a folder's pose take it
-/// for free — `Layer.transform` and `LayerFolder.transform` are one type — and what keeps "a mode
-/// never outlives the pose it qualifies" structural, `LayerPose.track`'s own argument for nesting.
-/// The scalars each mode reads (`rotateSpeed`, `parallaxShare`, the three shake amplitudes) are
-/// `TargetChannel` rows on the two homes, §3.3, and are *not* here: a key path into a nested optional
-/// is not writable. What is **not** keyable — shake's seed and period — lives on `LayerPose` beside
+/// **The mode lives on `LayerPose`** (`LayerPose.mode`), which is what keeps "a mode never outlives
+/// the pose it qualifies" structural, `LayerPose.track`'s own argument for nesting. The scalars each
+/// mode reads (`rotateSpeed`, `parallaxShare`, the three shake amplitudes) are `TargetChannel` rows,
+/// §3.3, and are *not* here: a key path into a nested optional is not writable. What is **not** keyable — shake's seed and period — lives on `LayerPose` beside
 /// the mode, for the same "never outlives the pose it qualifies" reason.
 enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
 
@@ -79,9 +75,6 @@ enum TransformLayerMode: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// **The modes a posed folder may take** — every pose mode and not Repeat (§3.3: *"not repeat: a
-    /// folder has no block"*). The folder panel's picker lists these; the layer's lists `allCases`.
-    static let folderCases: [TransformLayerMode] = [.move, .parallax, .rotate, .shake]
 }
 
 // MARK: - The arithmetic, stated once

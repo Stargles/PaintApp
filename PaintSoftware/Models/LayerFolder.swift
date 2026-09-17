@@ -114,40 +114,10 @@ struct LayerFolder: Identifiable {
     /// on the folder side, same rules, same reasons.
     var pendingBaselines: [String: Double] = [:]
 
-    /// **The pose this folder shows its contents at** — KEYFRAMES.md §4.4's transformation layer in
-    /// its container form, and `effect`'s twin two fields up under §2.21's ruling.
-    ///
-    /// **Where it differs from the layer form, and it is only the scope.** `Layer.transform` poses
-    /// everything *beneath that layer inside its own container* — §4.4 reuses the adjustment layer's
-    /// scope rule verbatim. This poses everything *inside this folder*, which is the same rule with
-    /// the container itself as the subject, exactly as `effect` above grades this folder's finished
-    /// composite rather than the backdrop a `.value` layer in effect mode grades.
-    ///
-    /// **Redundant with the layer form and kept anyway, which is §2.21's argument rather than a new
-    /// one.** A transformation layer at the top of a folder poses everything else in it, so this
-    /// field expresses nothing new. §2.21 refused exactly that reasoning for the grade — the artist
-    /// meets one control in two places, and one that works in one and silently refuses in the other
-    /// is a defect nothing reveals until they reach for it. The cost is one storage site and one arm
-    /// on the accumulator, paid here.
-    ///
-    /// Absent for every project saved before this field and for every folder nobody has posed, which
-    /// is one meaning rather than two — `alphaMask`'s argument, and the whole migration this needs.
-    var transform: LayerPose? = nil
-    /// `Layer.rotateSpeed` on the folder — TRANSFORM_LAYER.md §3.3: a folder's pose takes the pose
-    /// modes as well, so a folder in `.rotate` spins its contents at this many degrees per frame.
-    /// The one difference from the layer form is the origin: a folder has no block, so its angle
-    /// integrates from frame 0 rather than from a bar's first frame.
-    var rotateSpeed: Double = 0
     /// `Layer.parallaxShare` on the folder — this folder's share as **one item** beneath a Parallax
     /// transform layer (§2 ruling 3: a folder counts as one item and nothing inside it is split up).
     /// Nil is the positional default, as it is on the layer, and for the same three reasons.
     var parallaxShare: Double? = nil
-    /// `Layer.shakeX` / `shakeY` / `shakeRotation` on the folder — §3.3: a folder's pose takes the
-    /// pose modes as well, so a folder in `.shake` jolts its contents by these. Its beats count from
-    /// frame 0, as its spin does, because a folder has no block.
-    var shakeX: Double = 0
-    var shakeY: Double = 0
-    var shakeRotation: Double = 0
 }
 
 // MARK: - Compositor nodes (§4.3)

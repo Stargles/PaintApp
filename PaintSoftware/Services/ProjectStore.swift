@@ -445,17 +445,8 @@ enum ProjectStore {
                                channelBaselines: folder.channelBaselines.isEmpty ? nil : folder.channelBaselines,
                                keyframeMarks: folder.keyframeMarks.isEmpty ? nil : folder.keyframeMarks,
                                pendingBaselines: folder.pendingBaselines.isEmpty ? nil : folder.pendingBaselines,
-                               // §4.4's container pose. Already optional in the model, so there is
-                               // no empty-to-absent line to write: a folder nobody has posed carries
-                               // nil and the synthesized encoder omits the key.
-                               transform: folder.transform,
-                               // TRANSFORM_LAYER.md §5's scalar rows: zero-to-absent for the speed,
-                               // and the share is optional on both sides.
-                               rotateSpeed: folder.rotateSpeed == 0 ? nil : folder.rotateSpeed,
-                               parallaxShare: folder.parallaxShare,
-                               shakeX: folder.shakeX == 0 ? nil : folder.shakeX,
-                               shakeY: folder.shakeY == 0 ? nil : folder.shakeY,
-                               shakeRotation: folder.shakeRotation == 0 ? nil : folder.shakeRotation)
+                               // TRANSFORM_LAYER.md §5.2's share, optional on both sides.
+                               parallaxShare: folder.parallaxShare)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -1967,12 +1958,7 @@ enum ProjectStore {
                         // baselines follow `effectTracks`' rule exactly.
                         keyframeMarks: f.keyframeMarks ?? [],
                         pendingBaselines: f.pendingBaselines ?? [:],
-                        // Optional on both sides — absent means "not posed", which is the same one
-                        // meaning `alphaMask` and `effect` above carry.
-                        transform: f.transform,
-                        rotateSpeed: f.rotateSpeed ?? 0,
-                        parallaxShare: f.parallaxShare,
-                        shakeX: f.shakeX ?? 0, shakeY: f.shakeY ?? 0, shakeRotation: f.shakeRotation ?? 0)
+                        parallaxShare: f.parallaxShare)
         }
 
         // Restore view presets.

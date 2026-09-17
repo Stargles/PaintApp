@@ -266,10 +266,10 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(elements.count, 3, "one stroke became two, the punch is untouched")
         XCTAssertEqual(elements[2].id, punchID, "the punch must stay at the top of the list")
         let float = manager.vectorFloat
-        XCTAssertEqual(float?.insideIDs.count, 1, "exactly one half travels")
-        XCTAssertFalse(float?.insideIDs.contains(elements[0].id) ?? true,
+        XCTAssertEqual(float?.parts[0].insideIDs.count, 1, "exactly one half travels")
+        XCTAssertFalse(float?.parts[0].insideIDs.contains(elements[0].id) ?? true,
                        "the outside half is written first, so it is the one that stays")
-        XCTAssertTrue(float?.insideIDs.contains(elements[1].id) ?? false,
+        XCTAssertTrue(float?.parts[0].insideIDs.contains(elements[1].id) ?? false,
                       "the inside half is written second, below the punch")
         // The centre of each half, to say which is which in artwork terms rather than by index.
         XCTAssertLessThan(elements[0].stroke?.samples.last?.x ?? 0, 31, "the stationary half is the left one")
@@ -292,7 +292,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements.count, 1, "a wholly-inside stroke is not split")
         XCTAssertEqual(vector.elements.first?.id, originalID, "and keeps its identity")
         XCTAssertEqual(vector.elements.first?.stroke?.lattice, originalLattice, "and its dab phase")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [originalID])
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [originalID])
     }
 
     /// **Selection is by the centre line, knowingly.** A 40 pt stroke whose spine lies outside the
@@ -331,7 +331,7 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 24, y: 2, width: 40, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         XCTAssertEqual(vector.elements.count, 2, "one fill became two")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1)
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs.count, 1)
         manager.commitVectorFloatIfNeeded()
 
         assertPixelsIdentical(cgImage(vector), before, "the two halves must sum to the original fill")
@@ -349,7 +349,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 44, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [element.id])
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [element.id])
 
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 8, dy: 0))
         let moved = vector.elements.compactMap(\.text).first
@@ -373,7 +373,7 @@ final class LassoMoveLogicTests: XCTestCase {
             }
             select(manager, layerIndex, path)
             _ = manager.beginVectorLassoMove()
-            let inside = manager.vectorFloat?.insideIDs ?? []
+            let inside = manager.vectorFloat?.parts[0].insideIDs ?? []
             return Set(vector.elements.enumerated().filter { inside.contains($0.element.id) }.map(\.offset))
         }
         // A bow tie: two lobes crossing in the middle, which is what a doubled-back lasso looks like.
@@ -402,7 +402,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         let erasers = vector.elements.filter { $0.stroke?.composite == .erase }
         XCTAssertEqual(erasers.count, 2, "the punch splits at the loop like any other stroke")
-        let inside = manager.vectorFloat?.insideIDs ?? []
+        let inside = manager.vectorFloat?.parts[0].insideIDs ?? []
         XCTAssertEqual(erasers.filter { inside.contains($0.id) }.count, 1,
                        "and exactly the half inside the loop travels")
     }
@@ -419,9 +419,9 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 8, y: 24, width: 16, height: 16)))
         XCTAssertTrue(manager.beginVectorLassoMove(), "a lasso holding only a punch still lifts")
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
-        XCTAssertEqual(float.insideIDs.count, 1)
+        XCTAssertEqual(float.parts[0].insideIDs.count, 1)
 
-        let isolated = vector.renderIsolated(ids: float.insideIDs)
+        let isolated = vector.renderIsolated(ids: float.parts[0].insideIDs)
         XCTAssertNotNil(isolated, "the float still has an image, even though it is empty")
         XCTAssertNil(PixelOps.opaqueContentBounds(isolated!),
                      "and it is legitimately blank — nothing may read that as 'nothing was selected'")
@@ -456,7 +456,7 @@ final class LassoMoveLogicTests: XCTestCase {
         // Re-lift just the piece so the "before" and "after" pictures are of the same geometry.
         select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        guard let float = manager.vectorFloat, let movedID = float.insideIDs.first else {
+        guard let float = manager.vectorFloat, let movedID = float.parts[0].insideIDs.first else {
             return XCTFail("no float")
         }
         XCTAssertNotNil(vector.elements.first { $0.id == movedID }?.stroke?.lattice,
@@ -564,7 +564,7 @@ final class LassoMoveLogicTests: XCTestCase {
         // The travelling half's own geometry, which is where a nudge lands. (The *rendered* image is
         // the hole while the piece is floating, so it says nothing about where the piece is.)
         func travellingX() -> CGFloat? {
-            guard let inside = manager.vectorFloat?.insideIDs else { return nil }
+            guard let inside = manager.vectorFloat?.parts[0].insideIDs else { return nil }
             return vector.elements.first { inside.contains($0.id) }?.stroke?.samples.first?.x
         }
         XCTAssertEqual(travellingX() ?? 0, 34 + 16, accuracy: 1.0, "four drags of 4, 8, 12, 16 land at +16")
@@ -720,7 +720,7 @@ final class LassoMoveLogicTests: XCTestCase {
             let before = vector.rasterizations
             XCTAssertTrue(manager.beginVectorLassoMove())
             _ = vector.render()                       // the hole
-            _ = vector.renderIsolated(ids: manager.vectorFloat?.insideIDs ?? [])   // the float
+            _ = vector.renderIsolated(ids: manager.vectorFloat?.parts[0].insideIDs ?? [])   // the float
             for i in 1...max(nudges, 1) where nudges > 0 {
                 manager.nudgeVectorFloat(to: movedBy(manager, dx: CGFloat(i), dy: 0))
             }
@@ -861,7 +861,7 @@ final class LassoMoveLogicTests: XCTestCase {
         let loopRect = CGRect(x: 30, y: 16, width: 28, height: 32)
         select(manager, layerIndex, loop(loopRect))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        guard let float = manager.vectorFloat, let movedID = float.insideIDs.first,
+        guard let float = manager.vectorFloat, let movedID = float.parts[0].insideIDs.first,
               let lifted = vector.elements.first(where: { $0.id == movedID })?.stroke else {
             return XCTFail("no float")
         }
@@ -934,7 +934,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// relative walk, so it is the *ratio* between the two that a shrink destroys.
     ///
     /// What a Move could have done is fail to come back, and it does not. Every nudge maps
-    /// `float.liftedInside` — the elements exactly as the lift produced them — so the scalar reaching
+    /// `float.parts[0].liftedInside` — the elements exactly as the lift produced them — so the scalar reaching
     /// the walk is the box's own accumulated factor rather than a running geometry, and there is no
     /// term for an error to land in. `0.02 * 50` is **bit-exactly** 1 in IEEE double, which is why
     /// the third walk here is not merely close to the first; the assertion below spends a line saying
@@ -1001,7 +1001,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// conservation test, and the one that would catch a `size` that accumulated instead of being
     /// derived.
     ///
-    /// It is not trivially true. Every nudge maps `float.liftedInside`, the elements exactly as the
+    /// It is not trivially true. Every nudge maps `float.parts[0].liftedInside`, the elements exactly as the
     /// split produced them, so the map is absolute from the lift and the round trip is a return to
     /// the identity. An implementation that scaled the *current* geometry instead would come back at
     /// 4× — and would drift on every intermediate drag besides.
@@ -1068,7 +1068,7 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 20, y: 16, width: 28, height: 32)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
-        XCTAssertEqual(float.insideIDs.count, 4, "all four kinds travel")
+        XCTAssertEqual(float.parts[0].insideIDs.count, 4, "all four kinds travel")
         let centre = float.frame.transform.position
         func scaledAbout(_ p: CGPoint, _ k: CGFloat) -> CGPoint {
             CGPoint(x: centre.x + (p.x - centre.x) * k, y: centre.y + (p.y - centre.y) * k)
@@ -2073,11 +2073,11 @@ final class LassoMoveLogicTests: XCTestCase {
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))
         select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        XCTAssertEqual(manager.vectorFloat?.mayDiverge, false, "fixture precondition: ordinary artwork")
+        XCTAssertEqual(manager.vectorFloat?.parts[0].mayDiverge, false, "fixture precondition: ordinary artwork")
 
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
         XCTAssertEqual(manager.vectorFloat?.wantsLatch, true, "a plain move keeps the cheap path")
-        XCTAssertEqual(vector.suppressedElementIDs, manager.vectorFloat?.insideIDs)
+        XCTAssertEqual(vector.suppressedElementIDs, manager.vectorFloat?.parts[0].insideIDs)
 
         let pose = stretched(manager, x: 3, y: 1)
         manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect, stretchAxis: 0.8)
@@ -2228,7 +2228,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         XCTAssertEqual(vector.elements.map(\.id), idsBefore, "the lift is not a split")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, Set(idsBefore))
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, Set(idsBefore))
         XCTAssertEqual(vector.suppressedElementIDs, Set(idsBefore), "all of it is suppressed while it floats")
     }
 
@@ -2244,7 +2244,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertFalse(before.isEmpty, "fixture precondition")
 
         XCTAssertTrue(manager.beginVectorWholeCelMove())
-        XCTAssertTrue(manager.vectorFloat?.insideIDs.contains(offCanvasID) == true,
+        XCTAssertTrue(manager.vectorFloat?.parts[0].insideIDs.contains(offCanvasID) == true,
                       "content beyond the canvas edge is part of the whole cel and must travel with it")
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 5, dy: 0))
         manager.commitVectorFloatIfNeeded()
@@ -4292,7 +4292,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(rect))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [originalID], "and lifts it whole")
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [originalID], "and lifts it whole")
         manager.cancelVectorFloat()
 
         select(manager, layerIndex, loop(rect))
@@ -4615,7 +4615,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginVectorLassoMove())
 
         XCTAssertEqual(vector.elements.count, 1, "Touching cut nothing")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [id], "and lifted the stroke whole")
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [id], "and lifted the stroke whole")
     }
 
     /// **Flipping the rule before the first nudge re-lifts, and must not bake and must not record a
@@ -4648,11 +4648,11 @@ final class LassoMoveLogicTests: XCTestCase {
                        "a picker tap is not an edit — nothing recorded, nothing consumed")
         XCTAssertEqual(vector.elements.count, 1, "the cut was undone: one stroke again")
         XCTAssertEqual(vector.elements[0].id, id, "and it is the original, not a re-split piece")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [id])
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [id])
         XCTAssertEqual(manager.vectorFloat?.nudges, 0, "still un-nudged, so the picker stays live")
         XCTAssertEqual(vector.suppressedElementIDs, [id],
                        "and the new float's ids are the ones the flatten skips")
-        XCTAssertEqual(manager.vectorFloat?.elementsBeforeLift.count, 1,
+        XCTAssertEqual(manager.vectorFloat?.parts[0].elementsBeforeLift.count, 1,
                        "the cancel's restore is what the next one puts back — the pre-lift list")
 
         manager.commitVectorFloatIfNeeded()
@@ -4677,7 +4677,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(manager.selectionMembership, .cutting, "the picker snaps back to the rule that works")
         XCTAssertNotNil(manager.vectorFloat, "and the artist keeps the piece they had lifted")
         XCTAssertEqual(vector.elements.count, 2, "cut exactly as it was")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1)
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs.count, 1)
         XCTAssertEqual(manager.notice?.code, "nothingWhollyInside",
                        "and is told why the picker did not stay where they put it")
     }
@@ -4841,7 +4841,7 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         XCTAssertEqual(vector.elements.count, 1, "and the very same setting lifts it whole too")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs, [originalID],
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs, [originalID],
                        "one property, two consumers — neither grew its own copy")
     }
 
@@ -4868,7 +4868,7 @@ final class LassoMoveLogicTests: XCTestCase {
                            y: (dx * sin(r) + dy * cos(r)) / s.y - frame.contentOffset.y)
         }
         var result: [(u: CGPoint, pad: CGPoint)] = []
-        for element in vector.elements where float.insideIDs.contains(element.id) {
+        for element in vector.elements where float.parts[0].insideIDs.contains(element.id) {
             var points: [CGPoint] = []
             var reach: CGFloat = 0
             switch element {

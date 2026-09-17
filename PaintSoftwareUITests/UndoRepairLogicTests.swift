@@ -1673,8 +1673,8 @@ final class UndoRepairLogicTests: XCTestCase {
         let manager = manager(around: canvas, selecting: Self.straddlingLoop, membership: .cutting)
         XCTAssertTrue(manager.beginVectorLassoMove(), "fixture: the lift must take")
         guard let float = manager.vectorFloat else { return XCTFail("fixture: no float") }
-        XCTAssertFalse(float.insideIDs.isEmpty, "fixture: the loop caught nothing")
-        XCTAssertEqual(canvas.suppressedElementIDs, float.insideIDs,
+        XCTAssertFalse(float.parts[0].insideIDs.isEmpty, "fixture: the loop caught nothing")
+        XCTAssertEqual(canvas.suppressedElementIDs, float.parts[0].insideIDs,
                        "fixture: the lifted pieces are suppressed while the latch is armed")
         // The lift itself is `.everything` (the suppression changed). Settle it.
         let settled = canvas.render()

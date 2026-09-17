@@ -114,73 +114,15 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         return manager.commitFloatingPieceIfNeeded()
     }
 
-    /// `moveBox`'s exact technique, targeting a folder rather than the current layer — the one
-    /// difference being `beginContainerPoseMove`'s new `for:` argument, so a failure here is about
-    /// the `.folder` arm and not about the gesture-to-pose pipeline the layer arm shares with it.
-    @discardableResult
-    private func moveBoxOnFolder(_ manager: CanvasManager, folderID: UUID, by delta: CGVector) -> Bool {
-        guard manager.beginContainerPoseMove(for: .folder(id: folderID)) else { return false }
-        manager.updateFloatingPose(
-            transform: FloatingTransform(position: CGPoint(x: canvasCentre.x + delta.dx,
-                                                           y: canvasCentre.y + delta.dy),
-                                         scaleX: 1, scaleY: 1, rotation: 0),
-            distortQuad: nil)
-        return manager.commitFloatingPieceIfNeeded()
-    }
-
-    /// **A folder's Move box travels the whole pipeline and lands on `LayerFolder.transform`** —
-    /// TODO (21). Cold start: a document with one layer and one folder, the folder made posing the
-    /// only way an artist can make it so (`setFolderTransform`, which is what the options panel's
-    /// new switch calls), then `beginContainerPoseMove(for:)` → `updateFloatingPose` →
-    /// `commitFloatingPieceIfNeeded`, which is every hop a finger takes.
-    ///
-    /// **Asserted on the folder's own field, which had no writer at all before this** — the pose
-    /// could not become non-nil outside a hand-edited save file, so nothing downstream of
-    /// `beginContainerPoseMove`'s `.folder` arm had ever run.
-    func testAFolderMoveBoxCommitsOntoTheFoldersOwnTransform() throws {
+    /// **A folder raises no container box** — TODO (71): a folder poses nothing, and its Move is the
+    /// Move tool over its contents (`beginVectorFolderMove`, pinned in `FolderMoveLogicTests`). This
+    /// is the model saying so where a caller could still ask through the general address.
+    func testAFolderRaisesNoContainerPoseBox() {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "ink")
         let folder = manager.addFolder(name: "F")
-        guard let at = manager.layers.firstIndex(where: { $0.name == "ink" }) else {
-            return XCTFail("fixture layer missing")
-        }
-        manager.layers[at].parentFolderID = folder
-        manager.setFolderTransform(folder, to: manager.restingContainerPose)
-        XCTAssertTrue(moveBoxOnFolder(manager, folderID: folder, by: CGVector(dx: 30, dy: 0)))
-        guard let fAt = manager.folders.firstIndex(where: { $0.id == folder }) else {
-            return XCTFail("folder missing after move")
-        }
-        let resolved = try XCTUnwrap(manager.folders[fAt].transform?.resolvedPose(atFrame: 0))
-        let decomposed = try XCTUnwrap(PoseComponents.decompose(resolved))
-        XCTAssertEqual(decomposed.x, Double(canvasCentre.x) + 30, accuracy: 1e-6,
-                       "A 30pt drag of the folder's box moves the folder's own pose 30pt")
-
-        // **Undo lands on rest, not on what the preview was showing.** `commitContainerFloat` puts
-        // the folder back to its rest state *before* `commitContainerPose` writes, so that the undo
-        // step it records has rest on its other side. The committed pose above is identical with or
-        // without that restore — the write is computed from the piece's own transform rather than
-        // read back off the preview — so the forward assertion cannot see the difference and only
-        // the reverse one can. Measured: deleting that restore leaves every assertion above green.
-        manager.undo()
-        let undone = try XCTUnwrap(manager.folders[fAt].transform?.resolvedPose(atFrame: 0))
-        XCTAssertEqual(try XCTUnwrap(PoseComponents.decompose(undone)).x,
-                       Double(canvasCentre.x), accuracy: 1e-6,
-                       "One press of Undo returns the folder to rest, not to the pose the live "
-                       + "preview had already written while the box was still up")
-    }
-
-    /// **A folder that is not posing refuses the box rather than raising an empty one** — the
-    /// `.folder` arm of `beginContainerPoseMove`'s "not posing" guard, which is what keeps the
-    /// options panel's Move row honest: the row is drawn only when the switch is on, and this is the
-    /// model saying the same thing where a caller could ask anyway.
-    func testAFolderThatIsNotPosingRefusesTheMoveBox() {
-        let manager = CanvasManager()
-        manager.canvasSize = size
-        manager.addVectorLayer(name: "ink")
-        let folder = manager.addFolder(name: "F")
-        XCTAssertNil(manager.folders.first(where: { $0.id == folder })?.transform,
-                     "A freshly-added folder poses nothing")
+        XCTAssertNil(manager.containerPose(of: .folder(id: folder)), "A folder poses nothing")
         XCTAssertFalse(manager.beginContainerPoseMove(for: .folder(id: folder)))
         XCTAssertNil(manager.floatingPiece, "…and nothing came up")
     }

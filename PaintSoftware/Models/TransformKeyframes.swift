@@ -90,15 +90,6 @@ extension CanvasManager {
         return frames.sorted()
     }
 
-    /// **The same for a folder's own pose** — §2.21's twin, absolute frames, no cel conversion.
-    ///
-    /// A folder holds no cels, so this is the *whole* of a folder target's pose contribution; there
-    /// is no kind gate because a folder has no kinds.
-    func poseKeyframeFrames(inFolder id: UUID) -> [Int] {
-        guard let track = folders.first(where: { $0.id == id })?.transform?.track else { return [] }
-        return track.keyedFrames.sorted()
-    }
-
     // MARK: - Raising the Move box from the channel list — KEYFRAMES.md §11.7
 
     /// **What a click on a channel list row does** — the owner's *"clicking on a move item in there
@@ -113,8 +104,7 @@ extension CanvasManager {
     ///
     /// - Returns: whether a box came up. False for a channel whose ink is not on the cel under the
     ///   playhead, and — for a container pose — when the band's row is not posing (a layer that is
-    ///   not a transformation layer, a folder whose Transform is off), which is the case a stale
-    ///   filter can still name.
+    ///   not a transformation layer), which is the case a stale filter can still name.
     @discardableResult
     func revealPoseChannel(_ channel: PoseChannelID) -> Bool {
         guard channel.raisesMoveBox else { return false }
@@ -125,10 +115,8 @@ extension CanvasManager {
         // is that day; this arm is the one thing that did change, because the box a container pose
         // raises is not a vector float and so cannot go through `beginVectorChannelMove`.
         //
-        // **On the band's own row**, which since TODO (21)'s folder band may be a folder — the
-        // list is a control of the open band, so the box it raises is the box for the container
-        // whose curves the artist is looking at. §11.7's *"`LayerFolder.transform` is the case
-        // still without an entry"* closes here.
+        // **On the band's own row** — the list is a control of the open band, so the box it raises
+        // is the box for the layer whose curves the artist is looking at.
         case .container: return beginContainerPoseMove(for: graphBandTarget)
         }
     }
@@ -154,10 +142,8 @@ extension CanvasManager {
     ///   the state a menu left up while an undo removed the node underneath it reaches — the same
     ///   guard `removeEffectParameterKey` states for the grade side.
     ///
-    /// **Addressed by `KeyframeTarget`**, so a folder's own pose — TODO (21)'s folder band — takes
-    /// the same door: its container arm reads `containerPose(of:)` and writes through
-    /// `writeContainerPose(_:from:target:)`, which were already the two-home accessors. A cel
-    /// channel is a layer's alone; on a folder it names nothing and answers false.
+    /// **Addressed by `KeyframeTarget`**, the address every keyframe writer shares; both arms answer
+    /// false for a folder, which holds neither a pose nor a cel.
     @discardableResult
     func removePoseChannelKey(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
         guard targetExists(target),
@@ -820,22 +806,19 @@ extension CanvasManager {
         Self.invertedAffine(map)
     }
 
-    // MARK: - The container's own pose — KEYFRAMES.md §4.4's transformation layer, §2.21's folder twin
+    // MARK: - The container's own pose — KEYFRAMES.md §4.4's transformation layer
 
-    /// **Where a Move on a transformation layer or a posed folder would go**, `transformWrite`'s
-    /// container twin with `KeyframeControl.write`'s four inputs read off `target`.
+    /// **Where a Move on a transformation layer would go**, `transformWrite`'s container twin with
+    /// `KeyframeControl.write`'s four inputs read off `target`.
     ///
     /// **`containerPose(of:)`, never a raw field**, which is this file's rule everywhere else and is
     /// load-bearing here for the reason `poseKeyframeFrames(inLayer:)` gives: a `.raster` layer
     /// carrying a pose left behind by a kind change poses nothing, so routing a write onto it would
-    /// key an animation the canvas is not running. A folder has no second field to reconcile, so the
-    /// accessor is a plain read there — `containerPose(of:)`'s own doc carries the asymmetry.
+    /// key an animation the canvas is not running.
     ///
-    /// **`target` rather than `layerID`, since a folder's transform earned its own writer.** Every
-    /// caller of this file's container-pose pipeline used to name a layer because a layer was the
-    /// only thing that could pose; `KeyframeTarget` already existed for the grade's own two homes
-    /// (§2.21), so widening this pipeline to reach `LayerFolder.transform` was a signature change and
-    /// not a new mechanism.
+    /// **`target` rather than `layerID`** because the address every keyframe writer shares is
+    /// `KeyframeTarget` — the grade's two homes (§2.21) — and a folder named here simply has no pose
+    /// to route (TODO (71)), which the accessor's nil says without a second signature.
     func containerPoseWrite(_ target: KeyframeTarget, atFrame frame: Int) -> KeyframeControl.Write {
         guard let pose = containerPose(of: target) else { return .storedValue }
         let placed = keyframeFrames(of: target)
@@ -848,7 +831,7 @@ extension CanvasManager {
             playheadIsOnKeyframe: placed.contains(frame))
     }
 
-    /// **One committed Move on a transformation layer or a posed folder, routed** — §2.5's
+    /// **One committed Move on a transformation layer, routed** — §2.5's
     /// write-at-commit for §4.4's container pose, through `KeyframeControl.write`'s same five arms.
     ///
     /// ## It is a *value* channel, not a geometry channel, and that is the one real difference
@@ -948,11 +931,6 @@ extension CanvasManager {
     /// **Records nothing while an enclosing bracket is open** — `withStructureUndo`'s own rule, so a
     /// live drag that calls this on every tick costs the artist one press of Undo rather than one per
     /// tick.
-    ///
-    /// **`target` rather than `layerID`**, so a folder's own posed contents (§2.21) go through the
-    /// identical funnel a transformation layer's always have — `KeyframeTarget.folder` was already
-    /// the grade's second home, and a container pose has no reason to need a second writer where the
-    /// grade needed none.
     func writeContainerPose(_ pose: LayerPose?, from before: LayerPose?, target: KeyframeTarget,
                             label: HistoryActionLabel = .effectKeyframes) {
         guard targetExists(target) else { return }
@@ -980,13 +958,13 @@ extension CanvasManager {
     }
 
     /// The one mutation every direction of the undo above goes through, re-resolving `target` by id
-    /// on every call — `applyCelPoseState`'s rule for the payload one container up.
+    /// on every call — `applyCelPoseState`'s rule for the payload one container up. A folder target
+    /// writes nothing: a folder has no pose (TODO (71)).
     ///
     /// **The raw field is written and the accessor is read**, which is
     /// `applyGraphBandPoseSnapshot`'s pairing and needed for its reason: nil is a real value here, so
     /// a restore has to be able to write it, while a pose left inert by a kind change must not be
-    /// treated as one this path may put back into force. A folder has no kind to change, so its arm
-    /// is the layer arm with the second field reconciled away — `containerPose(of:)`'s own asymmetry.
+    /// treated as one this path may put back into force.
     ///
     /// **Not `private`: `CanvasManager+Recording.swift` restores a take's base pose through it**
     /// (KEYFRAMES.md §5's Move box surface), for the same reason `commitContainerFloat` writes the
@@ -994,16 +972,10 @@ extension CanvasManager {
     /// `targetExists`' precedent one file over, and the alternative was a second spelling of this
     /// `switch` in the recorder, which is how two writers drift apart.
     func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
-            if layers[index].transform != pose { layers[index].transform = pose }
-            if let marks, layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
-        case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
-            if folders[index].transform != pose { folders[index].transform = pose }
-            if let marks, folders[index].keyframeMarks != marks { folders[index].keyframeMarks = marks }
-        }
+        guard case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return }
+        if layers[index].transform != pose { layers[index].transform = pose }
+        if let marks, layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
     }
 
     /// `graphBandPoseUndoCost`'s container term, in the same currency and for the same reason.
@@ -1032,18 +1004,15 @@ struct ParallaxItem: Equatable {
 
 extension CanvasManager {
 
-    /// **Switches a transform layer's — or a posed folder's — mode**, TRANSFORM_LAYER.md §5. One
-    /// undo step; nothing else moves: the authored pose, its track and its keys stay exactly as they
-    /// are, because §6's factorisation makes the mode a qualifier on the pose rather than a rewrite
-    /// of it. Refused on a target with no pose to qualify.
+    /// **Switches a transform layer's mode**, TRANSFORM_LAYER.md §5. One undo step; nothing else
+    /// moves: the authored pose, its track and its keys stay exactly as they are, because §6's
+    /// factorisation makes the mode a qualifier on the pose rather than a rewrite of it. Refused on
+    /// a target with no pose to qualify — which every folder is.
     ///
-    /// **Repeat is refused on a folder** (§3.3: *"not repeat: a folder has no block"*, and the loop's
-    /// extent is the block) — the folder picker does not list it, and this is the model's half of
-    /// the same rule. On a layer entering Repeat with no period yet, the period is **pre-filled from
-    /// where the drawings beneath end** (§2 ruling 11), inside the same undo step.
+    /// On a layer entering Repeat with no period yet, the period is **pre-filled from where the
+    /// drawings beneath end** (§2 ruling 11), inside the same undo step.
     func setTransformLayerMode(_ target: KeyframeTarget, to mode: TransformLayerMode) {
         guard var pose = containerPose(of: target), pose.mode != mode else { return }
-        if mode == .repeat, case .folder = target { return }
         pose.mode = mode
         // **The shake's seed is minted the first time the pose enters Shake** (§5.4: *"minted at
         // creation"*), inside the same undo step as the pick, so two shake layers differ from birth
@@ -1150,23 +1119,16 @@ extension CanvasManager {
     }
 
     /// **The stack a container pose reaches, and where the poser sits in it** — the same two operands
-    /// `RenderTree.renderNodes` builds, so the panel's list and the render's items are one walk. A
-    /// layer's poser is the layer's own position in its container; a folder's is the top of the
-    /// folder's own contents.
+    /// `RenderTree.renderNodes` builds, so the panel's list and the render's items are one walk. The
+    /// poser is the layer's own position in its container; a folder poses nothing (TODO (71)).
     private func poserStack(of target: KeyframeTarget) -> (stack: [ContainerEntry], position: Int)? {
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return nil }
-            let stack = Array(containerEntries(inContainer: layers[index].parentFolderID).reversed())
-            guard let position = stack.firstIndex(where: {
-                if case .layer(let at) = $0 { return at == index } else { return false }
-            }) else { return nil }
-            return (stack, position)
-        case .folder(let id):
-            guard folders.contains(where: { $0.id == id }) else { return nil }
-            let stack = Array(containerEntries(inContainer: id).reversed())
-            return (stack, stack.count)
-        }
+        guard case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return nil }
+        let stack = Array(containerEntries(inContainer: layers[index].parentFolderID).reversed())
+        guard let position = stack.firstIndex(where: {
+            if case .layer(let at) = $0 { return at == index } else { return false }
+        }) else { return nil }
+        return (stack, position)
     }
 
     /// **The items a parallax poser distributes its move over, top to bottom, with the share each is

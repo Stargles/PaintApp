@@ -395,51 +395,18 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         XCTAssertFalse(app.sliders["maskTuning.threshold"].exists)
     }
 
-    /// **TODO (21)'s cold-start reachability check: `LayerFolder.transform` exists in the model with
-    /// no UI entry, and this is that entry.** A fresh folder is not posing, so the Move row must not
-    /// exist until the artist turns the new switch on — and it must go away again when they turn it
-    /// off, which is `Channel.isAnimated`'s own caution (§11.4) applied to an on/off control rather
-    /// than to a curve: an affordance that outlives the state it stands for is worse than none.
-    func testFolderTransformToggleAddsAndRemovesTheMoveRow() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-        addFolderFromAddMenu(app)
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
-
-        app.buttons["layerPanel.folder.Folder 1.options"].tap()
-        let toggle = app.switches["layerOptions.folderTransformToggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5),
-                      "A folder's options must offer a way to turn its own pose on")
-        XCTAssertEqual(toggle.value as? String, "0", "A freshly-added folder is not posing")
-        XCTAssertFalse(app.buttons["layerOptions.transformMove"].exists,
-                       "No Move row while the folder is not posing — the row must not be a red "
-                       + "herring left standing beside a switch nobody has flipped yet")
-
-        // Hit the switch itself — `testFolderOptionsButtonOpensPassThroughToggleOffByDefault`'s own
-        // finding: tapping a SwiftUI `Toggle`'s label does not flip it.
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-        XCTAssertEqual(toggle.value as? String, "1")
-        XCTAssertTrue(app.buttons["layerOptions.transformMove"].waitForExistence(timeout: 5),
-                      "Turning a folder's Transform on must raise the same Move row a value layer's "
-                      + "transform mode does — TODO (21) names it as the missing entry")
-
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-        XCTAssertEqual(toggle.value as? String, "0")
-        XCTAssertFalse(app.buttons["layerOptions.transformMove"].exists,
-                       "…and the row must go with it when the artist turns Transform back off")
-    }
-
-    /// **The row does something real: it re-poses whatever is inside the folder**, mirroring
-    /// `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt`'s own proof for a transform layer's
-    /// transform mode — CLAUDE.md's "a correct value drawn in the wrong place" is exactly the shape a
-    /// test that stopped at the switch and the row would miss, so this one drags the box and reads
-    /// the ink back off the canvas rather than off the model.
+    /// **TODO (71)'s cold-start reachability check, and the proof the row does something real: a
+    /// folder's Move row lifts the ink inside the folder into the Move tool's own box and moves it.**
+    /// The owner: *"make it select everything in the folder and use the move tool on it instead of a
+    /// transform layer behaviour."* Mirrors `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt`'s
+    /// proof for a transform layer — CLAUDE.md's "a correct value drawn in the wrong place" is exactly
+    /// the shape a test that stopped at the row would miss, so this one drags the box and reads the
+    /// ink back off the canvas rather than off the model.
     ///
-    /// A folder's pose composes into its *children*, never into a value layer's own backdrop, so the
-    /// ink has to actually live inside the folder — which is why this test drags the born layer into
-    /// one rather than drawing under a transformation layer the way the value-layer test does.
-    func testFolderTransformMoveRowPosesTheInkInsideIt() throws {
+    /// What the artist does next, at every step: draw, add a folder, drag the layer in, open the
+    /// folder's options, tap Move — the Move bar docks and a box hugs the drawing — drag the box,
+    /// tap Done. No step's answer is "read the source".
+    func testFolderMoveRowMovesTheInkInsideIt() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -518,40 +485,21 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
                           "Sanity: the ink-bearing layer actually landed inside the folder")
 
         app.buttons["layerPanel.folder.Folder 1.options"].tap()
-        // Hit the switch itself, not its label — see the toggle test above.
-        app.switches["layerOptions.folderTransformToggle"]
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-        let moveRow = app.buttons["layerOptions.transformMove"]
-        XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
+        let moveRow = app.buttons["layerOptions.folderMove"]
+        XCTAssertTrue(moveRow.waitForExistence(timeout: 5),
+                      "A folder's options offer Move, with no switch to turn on first")
         var shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-transform-before-move"; shot.lifetime = .keepAlways; add(shot)
+        shot.name = "folder-move-before-move"; shot.lifetime = .keepAlways; add(shot)
 
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), """
             Tapping the folder's Move row raised no box. `DrawingView` docks the Move bar off
-            `isAnyPieceFloating`, so its absence means `beginContainerPoseMove(for:)` refused.
+            `isAnyPieceFloating`, so its absence means `beginVectorFolderMove` refused.
             """)
-        XCTAssertFalse(app.switches["layerOptions.folderTransformToggle"].exists,
+        XCTAssertFalse(app.buttons["layerOptions.folderMove"].exists,
                        "The options panel steps out of the way, as it does for a layer's own row")
-
-        // **Distort is offered on this box and refuses nothing.** This assertion used to read the
-        // opposite — it matched `distortUnavailableReason`'s *"not available on a transformation
-        // layer yet"* caption, which was then the one sentence that identified a container float —
-        // and KEYFRAMES §8 stage 5b deleted that arm when animated Distort shipped, so the caption
-        // no longer exists to match. The two changes touch different lines and merged without a
-        // conflict, which is precisely the shape CLAUDE.md warns about: a test left asserting a
-        // string the app had stopped producing. Kept, inverted, because the fact is still worth
-        // pinning and now for the folder arm specifically — a container box takes every mode, and
-        // the only thing `distortUnavailableReason` still refuses is a float carrying a placed image
-        // or a video, which this one is not.
-        let modePicker = app.segmentedControls.firstMatch
-        XCTAssertTrue(modePicker.waitForExistence(timeout: 5))
-        modePicker.buttons["Distort"].tap()
-        XCTAssertFalse(app.staticTexts["moveBar.modeCaption"].exists,
-                       "A folder's container box refuses no transform mode, so Distort must raise no "
-                       + "caption on it — the caption is reserved for a float carrying a kind that "
-                       + "cannot take a homography")
-        modePicker.buttons["Uniform"].tap()
+        XCTAssertTrue(app.switches["moveBar.keepStrokeWidthToggle"].exists,
+                      "It is the Move tool's own bar, Keep Stroke Width and all — not a container box")
 
         // **The baseline for "did it move" is taken here, box up, not back at `inkBefore`.** That
         // one was sampled against the bare editor and every reading since has the layers rail and
@@ -570,23 +518,25 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
                            "\(what): the paper's own edge moved, so the ruler moved with it")
         }
 
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.50))
-        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.50))
+        // **The drag starts on the ink**, which is inside the box: a Move box hugs the drawing it
+        // holds (LASSO_MOVE.md §5.22), so a finger put down on bare paper is a touch away from the
+        // box and puts the piece down (§5.12) rather than moving it.
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.50))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.52, dy: 0.50))
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
         shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-transform-mid-drag"; shot.lifetime = .keepAlways; add(shot)
+        shot.name = "folder-move-mid-drag"; shot.lifetime = .keepAlways; add(shot)
 
-        // **The live preview moves the ink too, before Done is ever tapped** — `showContainerPoseLive`
-        // writes the folder's pose on every tick, and the commit independently recomputes the same
-        // pose from the piece's own transform rather than reading that preview back, so a broken
-        // preview would still land the *right* pose at commit while showing the *wrong* one while the
-        // artist is still dragging. Reading the ink here, still mid-gesture, is what a screenshot
-        // alone would only prove to a human looking at it.
+        // **The live preview moves the ink too, before Done is ever tapped** — the latched bitmap
+        // rides a Core Animation transform under the finger, and the bake at gesture end writes the
+        // geometry independently, so a broken latch would still land the right document while
+        // showing the wrong one for the length of the drag. Reading the ink here, still mid-gesture,
+        // is what a screenshot alone would only prove to a human looking at it.
         let inkMidDrag = try XCTUnwrap(inkColumn(), "The ink is still on the canvas mid-drag")
         sameRuler(inkBeforeDrag, inkMidDrag, "mid-drag")
         XCTAssertGreaterThan(inkMidDrag.x, inkBeforeDrag.x + 0.05,
                              "The live preview must move the folder's ink while the box is still up, "
-                             + "not only once Done bakes the final pose")
+                             + "not only once Done bakes the final geometry")
 
         if app.buttons["moveBar.doneButton"].exists { app.buttons["moveBar.doneButton"].tap() }
         XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "Done commits and the bar goes down")
@@ -598,23 +548,19 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         sameRuler(inkBeforeDrag, inkAfter, "after commit")
         XCTAssertGreaterThan(inkAfter.x, inkBeforeDrag.x + 0.05, """
             The drawing inside the folder did not travel with the box. A Move row that raises a box
-            which poses nothing is the same unusable feature wearing a control.
+            which moves nothing is the same unusable feature wearing a control.
             """)
         shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-transform-after-commit"; shot.lifetime = .keepAlways; add(shot)
+        shot.name = "folder-move-after-commit"; shot.lifetime = .keepAlways; add(shot)
 
-        // The pose must survive the commit rather than resetting — a Move that quietly turns its own
-        // switch back off would look, from the panel, exactly like a Move that had never happened.
-        // The rail closes on its own somewhere in the drag-into-folder-then-Move sequence above (it
-        // does not for a plain layer, per `testATransformLayerOffersAMoveRowThatPosesTheInkBeneathIt`'s
-        // own "left up on purpose" note) — reopen defensively rather than assume either state.
-        if !app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 2) {
-            app.buttons["toolbar.layersButton"].tap()
-        }
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
-        app.buttons["layerPanel.folder.Folder 1.options"].tap()
-        XCTAssertEqual(app.switches["layerOptions.folderTransformToggle"].value as? String, "1",
-                      "Committing a Move must not silently turn the folder's Transform back off")
+        // **One press of Undo puts the ink back** — the Move tool's own step per nudge (§5.5), which
+        // is the whole difference from the container box this row used to raise: what moved is the
+        // drawing's geometry, on the undo stack like any other Move.
+        app.buttons["sideToolbar.undoButton"].tap()
+        let inkUndone = try XCTUnwrap(inkColumn(), "The ink is still on the canvas after undo")
+        sameRuler(inkBeforeDrag, inkUndone, "after undo")
+        XCTAssertEqual(inkUndone.x, inkBeforeDrag.x, accuracy: 0.01,
+                       "Undo returns the folder's ink to where it was drawn")
     }
 }
 

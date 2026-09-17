@@ -231,7 +231,7 @@ enum PixelOps {
             /// derivations can never collide on one entry.
             let derived: AnyHashable?
             /// **KEYFRAMES §4.4's container pose, as `PoseMap.encoded`** — what a transformation
-            /// layer above this leaf, or a posed folder around it, resolved to at this frame. Six
+            /// layer above this leaf resolved to at this frame. Six
             /// numbers for an affine pose and nine for a keystone (§8 stage 5b).
             ///
             /// **`derived` does not imply it, which is why this is here.** A vector cel folds the

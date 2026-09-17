@@ -136,8 +136,8 @@ struct LayerPanel: View {
                 // §4.4 until 2026-09-11, reached by adding a Value Layer and picking Transform from
                 // its Blend Mode row, which the owner had to be told; now an artist who wants to move
                 // what is beneath adds a *Transform Layer* and its panel is about transforming. The
-                // glyph is the toolbar's own Move glyph, which `transformMoveRow` already borrows for
-                // the same reason: the layer and the button do one thing.
+                // glyph is the toolbar's own Move glyph, which `moveRow` already borrows for the
+                // same reason: the layer and the button do one thing.
                 Button {
                     closingOptions { canvasManager.addTransformLayer() }
                 } label: {
@@ -409,9 +409,9 @@ struct LayerOptionsPanel: View {
         // would be one the artist can set and never see.
         if canvasManager.layers[index].kind == .transform {
             let target = KeyframeTarget.layer(id: canvasManager.layers[index].id)
-            transformModeRow(canvasManager: canvasManager, target: target, modes: TransformLayerMode.allCases)
+            transformModeRow(canvasManager: canvasManager, target: target)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-            transformMoveRow(scope: "beneath this layer") {
+            moveRow(caption: "Pose everything beneath this layer", identifier: "layerOptions.transformMove") {
                 leavingMaskEdit { canvasManager.beginContainerPoseMove() }
             }
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
@@ -760,8 +760,8 @@ private func effectSettingsRow(title: String, identifier: String,
     .accessibilityValue(title)
 }
 
-/// **Transform mode's row: the one that raises the Move box** — the entry point §4.4 always assumed
-/// and never drew.
+/// **The row that raises a Move box** — a transform layer's (the entry point §4.4 always assumed and
+/// never drew) and a folder's (TODO (71)).
 ///
 /// The toolbar's own move glyph, deliberately, so the two read as one control rather than as two
 /// features that happen to overlap: this row and that button do the identical thing on a
@@ -769,21 +769,21 @@ private func effectSettingsRow(title: String, identifier: String,
 /// the artist who learns either has learned the other.
 ///
 /// **The caption names the scope, not the gesture.** "Drag the box" is what the box itself already
-/// says once it is up; what the artist cannot see from the canvas is that this layer moves *what is
-/// beneath it* rather than anything of its own — a transformation layer holds no ink, so a box with
-/// nothing visibly inside it is otherwise a puzzle. `scope` is that sentence's own object, supplied
-/// by the caller rather than fixed here, because a folder poses what is *inside* it and a value
-/// layer poses what is *beneath* it — the same row and the same gesture, naming two different things.
+/// says once it is up; what the artist cannot see from the canvas is *what* the box holds — a
+/// transformation layer holds no ink, so a box with nothing visibly inside it is otherwise a puzzle,
+/// and a folder's box holds several layers at once. The caller supplies the sentence and the
+/// identifier, because the two rows raise two different boxes: a transform layer's poses what is
+/// beneath it, a folder's moves the ink inside it.
 ///
-/// File-level beside `effectSettingsRow` and `maskRow`, so a folder's pose (§2.21) can be given the
-/// same row without a second spelling of it — `FolderOptionsPanel` is the day it earned one.
-private func transformMoveRow(scope: String, onMove: @escaping () -> Void) -> some View {
+/// File-level beside `effectSettingsRow` and `maskRow`, so a folder can be given the same row
+/// without a second spelling of it.
+private func moveRow(caption: String, identifier: String, onMove: @escaping () -> Void) -> some View {
     Button(action: onMove) {
         HStack(spacing: 10) {
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Move").foregroundColor(.white)
-                Text("Pose everything \(scope)")
+                Text(caption)
                     .font(.caption2)
                     .foregroundColor(.gray)
                     .lineLimit(2)
@@ -795,24 +795,20 @@ private func transformMoveRow(scope: String, onMove: @escaping () -> Void) -> so
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .accessibilityIdentifier("layerOptions.transformMove")
+    .accessibilityIdentifier(identifier)
 }
 
-/// **A container pose's mode picker** — TRANSFORM_LAYER.md §5's five modes on a transform layer's
-/// panel, and the four pose modes on a posed folder's (§3.3). A `Menu` on a row with a title, the
-/// live value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape. Each mode
-/// was listed only once its stage landed: a row that is offered and does nothing is CLAUDE.md's
-/// *"refusal with no notice"* wearing a menu.
+/// **A transform layer's mode picker** — TRANSFORM_LAYER.md §5's five modes. A `Menu` on a row with a
+/// title, the live value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape.
+/// Each mode was listed only once its stage landed: a row that is offered and does nothing is
+/// CLAUDE.md's *"refusal with no notice"* wearing a menu.
 ///
 /// The identifiers are the row's own (`layerOptions.transformModeButton`,
-/// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name. `modes` is
-/// what the picker lists — every case on a layer, `TransformLayerMode.folderCases` on a folder,
-/// which has no block for Repeat to loop within (§3.3).
-private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget,
-                              modes: [TransformLayerMode]) -> some View {
+/// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name.
+private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
     let current = canvasManager.transformLayerMode(of: target) ?? .move
     return Menu {
-        ForEach(modes) { mode in
+        ForEach(TransformLayerMode.allCases) { mode in
             Button {
                 canvasManager.setTransformLayerMode(target, to: mode)
             } label: {
@@ -1478,9 +1474,6 @@ struct FolderOptionsPanel: View {
     /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same bar — and since
     /// that bar moved to the bottom of the screen, the same `DrawingView` state raises it.
     @Binding var showingEffectSettings: Bool
-    /// `LayerOptionsPanel.showingTransformSettings`'s twin, TODO (64): a posed folder takes the same
-    /// four modes a layer's does (§3.3) bar Repeat, so its rows dock at the bottom the same way.
-    @Binding var showingTransformSettings: Bool
     var onClose: () -> Void
 
     @State private var draftName: String = ""
@@ -1556,57 +1549,20 @@ struct FolderOptionsPanel: View {
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                 }
 
-                // **Transform (§2.21, KEYFRAMES.md §4.4's folder twin) — offered on every folder, node
-                // or not.** Unlike Pass Through above, this is not inert on a node: `RenderTree`
-                // composes a folder's pose into its children on the way down whether or not the
-                // folder is a compositor node (`folder.transform`, handed to the recursion as its
-                // topmost poser, read unconditionally), and it is
-                // independent of `effect`/`compositorOp` too — `containerPose(of:)` reads the raw
-                // field with no gate. So there is no reading under which showing this switch here
-                // would be a control the render tree overrides. (A layer has no such switch: a
-                // transform layer is a kind, added from the `+` menu, TRANSFORM_LAYER.md §2.)
-                //
-                // The toggle turns the pose on and off; the row beneath — `transformMoveRow`, the
-                // exact one `LayerOptionsPanel` uses — is what raises the box once it is on, which is
-                // TODO (21)'s "a row and a box" read literally: the box already existed for a layer,
-                // and this folder needed only its own entry to it.
-                Toggle(isOn: Binding(
-                    get: { canvasManager.folders.indices.contains(index) ? canvasManager.folders[index].transform != nil : false },
-                    set: { on in
-                        canvasManager.setFolderTransform(folderID, to: on ? canvasManager.restingContainerPose : nil)
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Transform").foregroundColor(.white)
-                        Text("Pose everything inside this group")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
-                }
-                .tint(.blue)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .accessibilityIdentifier("layerOptions.folderTransformToggle")
-
-                if canvasManager.folders[index].transform != nil {
-                    // **The mode, on the folder too** — TRANSFORM_LAYER.md §3.3: a folder's pose takes
-                    // the pose modes as well, or the keyable rows those modes read would key nothing
-                    // on a folder, which is §2.23's dead control by a new door.
-                    transformModeRow(canvasManager: canvasManager, target: .folder(id: folderID),
-                                     modes: TransformLayerMode.folderCases)
-                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                    // `LayerOptionsPanel`'s row closes its own mask-edit session and the panel itself
-                    // before raising the box (`leavingMaskEdit`, private to that struct) — inlined
-                    // rather than duplicated across a second private helper, matching how the Delete
-                    // action just below already closes this same session by hand.
-                    transformMoveRow(scope: "inside this group") {
-                        canvasManager.endMaskEdit()
-                        canvasManager.beginContainerPoseMove(for: .folder(id: folderID))
-                        onClose()
-                    }
-                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                    transformModeSection(canvasManager: canvasManager, target: .folder(id: folderID),
-                                        showingTransformSettings: $showingTransformSettings)
+                // **Move — the Move tool over everything inside this group** (TODO (71)), the
+                // owner: *"make it select everything in the folder and use the move tool on it
+                // instead of a transform layer behaviour."* Offered on every folder, node or not: a
+                // node's children are ink like any other folder's. It lifts every vector layer in
+                // the group, at any depth, into one Move box — `CanvasManager.beginVectorFolderMove`
+                // — so the drag, the knobs, the Mirror buttons and the bake are the Move tool's own,
+                // and what it writes is geometry rather than a pose. The row is the layer panel's
+                // own Move row so the two read as one control; the caption is a folder's meaning of
+                // it. `LayerOptionsPanel`'s row closes its mask-edit session before raising the box;
+                // this does the same by hand, as the Delete action below already does.
+                moveRow(caption: "Move everything inside this group", identifier: "layerOptions.folderMove") {
+                    canvasManager.endMaskEdit()
+                    canvasManager.beginVectorFolderMove(folderID)
+                    onClose()
                 }
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
@@ -1697,15 +1653,15 @@ struct FolderOptionsPanel: View {
     /// wrong set, since a folder's own marks are in absolute document frames and can sit outside
     /// every child's block.
     ///
-    /// **Whereas a folder's animation already lives in this panel.** The Transform toggle and
-    /// `transformMoveRow` above are how a folder's *pose* channel is reached at all, and the opacity
-    /// slider on the folder's own row is how its scalar is edited. Putting the mark beside them makes
-    /// one surface the answer to "animate this group" rather than two.
+    /// **Whereas a folder's animation already lives in this panel.** The grade's settings row above
+    /// is how a folder's effect channels are reached, and the opacity slider on the folder's own row
+    /// is how its scalar is edited. Putting the mark beside them makes one surface the answer to
+    /// "animate this group" rather than two.
     ///
     /// **It takes no channel argument, and that is the design.** `addKeyframe(_:atFrame:)` walks the
-    /// grade's parameters, `TargetChannel.all` and the container pose itself, so one press serves
-    /// every channel kind a folder has and the next row added to `TargetChannel.all` needs nothing
-    /// here. The view's whole contribution is a `KeyframeTarget` and a frame.
+    /// grade's parameters and `TargetChannel.all`, so one press serves every channel kind a folder
+    /// has and the next row added to `TargetChannel.all` needs nothing here. The view's whole
+    /// contribution is a `KeyframeTarget` and a frame.
     ///
     /// **The frame is read now rather than captured.** The cel menu pins the frame it was raised on
     /// because it is anchored over that column and playback does not stop for a menu; this panel is

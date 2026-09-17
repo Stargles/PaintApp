@@ -963,12 +963,13 @@ final class FrameBaker {
         /// scheduled to fill it. TRANSFORM_LAYER.md's modes made it plain — a Rotate layer at a
         /// constant speed re-poses every frame with no track to be seen, so `channelTracks` above
         /// could not catch it either — and `TransformLayerModesUITests` caught it on the canvas.
-        /// Layers then folders, the other three fields' shape. The pose's `baseline` is left out:
-        /// it is §2.27's authoring state between two marks and reaches no pixel.
+        /// Layers only — a folder poses nothing (TODO (71)). The pose's `baseline` is left out: it is
+        /// §2.27's authoring state between two marks and reaches no pixel.
         let containerPoses: [ContainerPoseStamp?]
-        /// **The scalars the modes read as stored bases** — `Layer.rotateSpeed`,
-        /// `Layer.parallaxShare` and the three shake amplitudes, on both homes. Their *curves* ride
-        /// `channelTracks`; the typed numbers live in these fields and nowhere the tree can see.
+        /// **The scalars the modes read as stored bases** — `Layer.rotateSpeed`, the three shake
+        /// amplitudes, and `parallaxShare` on both homes (a folder is one item beneath a Parallax
+        /// layer). Their *curves* ride `channelTracks`; the typed numbers live in these fields and
+        /// nowhere the tree can see.
         let rotateSpeeds: [Double]
         let parallaxShares: [Double?]
         let shakeAmplitudes: [[Double]]
@@ -996,11 +997,9 @@ final class FrameBaker {
             channelTracks = manager.layers.map(\.channelTracks) + manager.folders.map(\.channelTracks)
             keyframeMarks = manager.layers.map(\.keyframeMarks) + manager.folders.map(\.keyframeMarks)
             containerPoses = manager.layers.map { $0.layerTransform.map(ContainerPoseStamp.init) }
-                + manager.folders.map { $0.transform.map(ContainerPoseStamp.init) }
-            rotateSpeeds = manager.layers.map(\.rotateSpeed) + manager.folders.map(\.rotateSpeed)
+            rotateSpeeds = manager.layers.map(\.rotateSpeed)
             parallaxShares = manager.layers.map(\.parallaxShare) + manager.folders.map(\.parallaxShare)
             shakeAmplitudes = manager.layers.map { [$0.shakeX, $0.shakeY, $0.shakeRotation] }
-                + manager.folders.map { [$0.shakeX, $0.shakeY, $0.shakeRotation] }
             canvasSize = manager.canvasSize
             canvasPadding = manager.canvasPadding
             guides = manager.guideStrokes

@@ -89,8 +89,14 @@ struct TargetChannel: Identifiable {
     /// structs with the same property, so the channel carries one key path into each rather than a
     /// closure pair — which is what makes "a folder's opacity is the same channel" true in the type
     /// system instead of by two parallel `switch`es that can drift.
+    ///
+    /// **`folderPath` is nil for a channel a folder does not own.** The four pose-mode channels —
+    /// `rotateSpeed` and the three shakes — qualify a transform layer's pose, and a folder has no
+    /// pose since TODO (71) made its Move the Move tool's rather than a container's. A folder asked
+    /// for one of them answers nothing (`CanvasManager.storedValue(of:channel:)`), writes nothing,
+    /// and lists nothing, which is `storedEffect(of:)`'s asymmetry reached by the other kind.
     let layerPath: WritableKeyPath<Layer, Double>
-    let folderPath: WritableKeyPath<LayerFolder, Double>
+    let folderPath: WritableKeyPath<LayerFolder, Double>?
 
     /// **Layer and folder opacity** — the owner's ask of 2026-09-09, *"layer opacity should also be
     /// able to be keyframed"*.
@@ -150,7 +156,7 @@ struct TargetChannel: Identifiable {
         editLabel: .rotateSpeed,
         keyframeLabel: .rotateSpeedKeyframes,
         layerPath: \Layer.rotateSpeed,
-        folderPath: \LayerFolder.rotateSpeed)
+        folderPath: nil)
 
     /// **How far a Shake transform layer jolts sideways, in the box's own points** — TRANSFORM_LAYER.md
     /// §5.4 and §2 ruling 9, the owner's *"Shake x, shake y, rotate shake sliders would be preferred
@@ -167,7 +173,7 @@ struct TargetChannel: Identifiable {
         editLabel: .shakeX,
         keyframeLabel: .shakeXKeyframes,
         layerPath: \Layer.shakeX,
-        folderPath: \LayerFolder.shakeX)
+        folderPath: nil)
 
     /// `shakeX`'s vertical twin.
     static let shakeY = TargetChannel(
@@ -179,7 +185,7 @@ struct TargetChannel: Identifiable {
         editLabel: .shakeY,
         keyframeLabel: .shakeYKeyframes,
         layerPath: \Layer.shakeY,
-        folderPath: \LayerFolder.shakeY)
+        folderPath: nil)
 
     /// **How far a Shake transform layer rocks, in degrees about the box's centre** — the owner's
     /// *"rotate shake"*. `uiRange` is 0…30°, past which the picture reads as a spin rather than a
@@ -193,7 +199,7 @@ struct TargetChannel: Identifiable {
         editLabel: .shakeRotation,
         keyframeLabel: .shakeRotationKeyframes,
         layerPath: \Layer.shakeRotation,
-        folderPath: \LayerFolder.shakeRotation)
+        folderPath: nil)
 
     /// **Every channel of this kind, in a fixed order.** The order is the channel list's and the
     /// band's colour order, so it is decided here and nowhere else — `Effect.parameters`' contract
@@ -363,15 +369,16 @@ extension Layer {
 extension LayerFolder {
 
     /// `Layer.resolvedValue(_:atFrame:)` on the other home — §2.21's rule for grades, reached by the
-    /// channel that arrived after it.
-    func resolvedValue(_ channel: TargetChannel, atFrame frame: Int) -> Double {
+    /// channel that arrived after it. Nil for a channel a folder does not own (`TargetChannel.folderPath`).
+    func resolvedValue(_ channel: TargetChannel, atFrame frame: Int) -> Double? {
+        guard let path = channel.folderPath else { return nil }
         guard !channelTracks.isEmpty, let curve = channelTracks[channel.id], !curve.isEmpty
-        else { return self[keyPath: channel.folderPath] }
+        else { return self[keyPath: path] }
         return channel.clamped(curve.evaluate(at: Double(frame)))
     }
 
     /// The group's opacity at `frame`.
-    func opacity(atFrame frame: Int) -> Double { resolvedValue(.opacity, atFrame: frame) }
+    func opacity(atFrame frame: Int) -> Double { resolvedValue(.opacity, atFrame: frame) ?? opacity }
 
     /// `Layer.parallaxShareValue` on the folder — the same view, for the same key path.
     var parallaxShareValue: Double {
@@ -388,12 +395,4 @@ extension LayerFolder {
         return parallaxShare ?? positionalDefault
     }
 
-    /// The group's turn rate at `frame`, degrees per frame.
-    func rotateSpeed(atFrame frame: Int) -> Double { resolvedValue(.rotateSpeed, atFrame: frame) }
-
-    /// `Layer.containerPoseMovesContents` on the folder — the same predicate over `transform`.
-    var containerPoseMovesContents: Bool {
-        guard let pose = transform else { return false }
-        return Layer.containerPoseMovesContents(pose, stored: { self[keyPath: $0.folderPath] }, tracks: channelTracks)
-    }
 }

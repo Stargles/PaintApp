@@ -815,7 +815,7 @@ extension CanvasManager {
     /// reaches or which frame a Repeat layer shows them at.
     ///
     /// `poses` is keyed by `layers` index and holds **only** the leaves a container pose actually
-    /// moves: a document with no transformation layer and no posed folder produces an empty
+    /// moves: a document with no transformation layer produces an empty
     /// dictionary, which is what keeps this free for every document that has never used the feature.
     /// `frames` is keyed the same way and holds only the leaves a Repeat layer shows at a frame
     /// **other than `frame`** — the source frame, TRANSFORM_LAYER.md §5.5 — so it too is empty for
@@ -834,7 +834,7 @@ extension CanvasManager {
         var poses: [Int: PoseMap] = [:]
         var frames: [Int: Int] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame, documentFrame: frame,
-                               inheriting: nil, ownPoser: nil, poses: &poses, frames: &frames)
+                               inheriting: nil, poses: &poses, frames: &frames)
         return (tree, poses, frames)
     }
 
@@ -863,10 +863,9 @@ extension CanvasManager {
     /// (§3.3: *"the accumulator's `inner` line reads the mode exactly as the layer's does"*).
     ///
     /// - Parameters:
-    ///   - pose: the authored pose, `Layer.layerTransform` or `LayerFolder.transform`.
+    ///   - pose: the authored pose, `Layer.layerTransform`.
     ///   - blockStart: the first frame of the block in force — a rotate layer's origin (§5.3, *"a
-    ///     block restarts the sum"*), the shake's beat origin (§5.4), and 0 for a folder, which has
-    ///     no block.
+    ///     block restarts the sum"*) and the shake's beat origin (§5.4).
     ///   - channels: the poser's own `TargetChannel` rows — whether each has a curve, and its value
     ///     at a frame — read per frame for rotate's integral and at `frame` for shake's amplitudes.
     ///   - shareOf: the share of the item at a stack position, given its positional default — the
@@ -926,9 +925,9 @@ extension CanvasManager {
         }
     }
 
-    /// **A poser's own scalar rows, read through whichever home it is** — the two closures every
-    /// mode arm needs of a `TargetChannel`: whether it carries a curve (rotate's closed form against
-    /// its sum) and its resolved value at a frame.
+    /// **A poser's own scalar rows** — the two closures every mode arm needs of a `TargetChannel`:
+    /// whether it carries a curve (rotate's closed form against its sum) and its resolved value at a
+    /// frame.
     fileprivate struct PoserChannels {
         let hasCurve: (TargetChannel) -> Bool
         let value: (TargetChannel, Int) -> Double
@@ -937,11 +936,6 @@ extension CanvasManager {
             hasCurve = { layer.channelTracks[$0.id]?.isEmpty == false }
             value = { layer.resolvedValue($0, atFrame: $1) }
         }
-
-        init(folder: LayerFolder) {
-            hasCurve = { folder.channelTracks[$0.id]?.isEmpty == false }
-            value = { folder.resolvedValue($0, atFrame: $1) }
-        }
     }
 
     /// **The items a parallax poser at `position` shares its move out over, top to bottom** —
@@ -949,8 +943,7 @@ extension CanvasManager {
     /// list so the two cannot disagree: a layer with a drawing surface is one item, a folder is one
     /// item and its contents are not, and a pixel-less layer (any transform layer, any value layer)
     /// is none and takes no share (§2 ruling 3). Rank 0 is the item nearest the parallax layer, which
-    /// is the one that moves most. `stack` is bottom to top, as `renderNodes` holds it; a folder's own
-    /// pose asks with `position == stack.count`.
+    /// is the one that moves most. `stack` is bottom to top, as `renderNodes` holds it.
     func parallaxItemPositions(in stack: [ContainerEntry], beneath position: Int) -> [Int] {
         var items: [Int] = []
         for q in stride(from: min(position, stack.count) - 1, through: 0, by: -1) {
@@ -998,11 +991,8 @@ extension CanvasManager {
     }
 
     /// `inherited` is the pose this whole container is already being shown through — nil at the root
-    /// and at every container no transformation layer or posed folder reaches. `ownPoser` resolves
-    /// the container's *own* pose (a folder's `transform`) against its stack, and it is applied here
-    /// as the topmost poser of this stack, so that a folder in Parallax shares its pose out over its
-    /// children exactly as a parallax layer does over the entries beneath it. `poses` collects
-    /// §4.4's per-leaf map on the way down.
+    /// and at every container no transformation layer reaches. `poses` collects §4.4's per-leaf map
+    /// on the way down.
     ///
     /// `frame` is the frame *this container* is walked at and `documentFrame` the one the whole
     /// walk was asked for; they differ inside a folder beneath a Repeat, which is walked at the
@@ -1011,7 +1001,6 @@ extension CanvasManager {
     /// read as its own source and be looked up at the playhead.
     private func renderNodes(inContainer container: UUID?, atFrame frame: Int, documentFrame: Int,
                              inheriting inherited: PoseMap?,
-                             ownPoser: ((_ stack: [ContainerEntry]) -> ContainerPoser?)?,
                              poses: inout [Int: PoseMap],
                              frames: inout [Int: Int]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
@@ -1081,7 +1070,7 @@ extension CanvasManager {
         // with each poser's contribution prepended in that order — which for a stack of Move layers
         // is the same association the running product had (`M_k ∘ (… ∘ (M_1 ∘ inherited))`), so a
         // document with no parallax layer composes the same `CGAffineTransform`s in the same order
-        // and lands on the same bits. The folder's own pose, when there is one, is the first poser.
+        // and lands on the same bits.
         //
         // **The carry is a (pose, frame) view since TRANSFORM_LAYER.md §5.5, and the frame half runs
         // first.** A Repeat layer at position *p* shows every entry beneath it at the source frame
@@ -1108,7 +1097,6 @@ extension CanvasManager {
             }
         }
         var posers: [ContainerPoser] = []
-        if let ownPoser, let own = ownPoser(stack) { posers.append(own) }
         var carried = [PoseMap?](repeating: inherited, count: stack.count)
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
             if !posers.isEmpty {
@@ -1242,38 +1230,16 @@ extension CanvasManager {
                 // the group properties below have somewhere to hang even with nothing inside — and
                 // so a group that is empty only at this frame doesn't blink out of the tree.
                 //
-                // **The folder's own pose is composed in on the way down, and that is the whole of
-                // §2.21's folder form** — this container's contents are moved by the folder's pose
-                // and then carried by whatever is already carrying the folder, which is the same
-                // "inner first" order the accumulation above uses one level out.
-                //
-                // **The folder's pose goes down as the recursion's topmost poser rather than as a
-                // map already composed onto `outer`**, because since TRANSFORM_LAYER.md §3.3 a
-                // folder's pose has a mode too, and a folder in Parallax hands each child its own
-                // share — which is only expressible where the children are in view. For a folder in
-                // Move the recursion composes exactly `map.concatenating(outer)` onto every child,
-                // the value `inner` used to carry. The origin for a folder in Rotate is frame 0: a
-                // folder has no block (§3.3, *"not repeat: a folder has no block"*).
+                // **A folder poses nothing of its own** — its contents are carried by whatever is
+                // already carrying the folder, and a Move on the folder is the Move tool's over its
+                // contents (TODO (71)), which writes geometry rather than a pose.
                 //
                 // **At the carried frame, not the walk's** (§5.5): a folder under a Repeat is walked
-                // at the source frame, so everything inside it — its cels, its curves, its own pose
-                // — repeats with it.
-                let outer = carried[position]
-                let ownPose = folder.transform
+                // at the source frame, so everything inside it — its cels, its curves — repeats with
+                // it.
                 let children = renderNodes(
-                    inContainer: folder.id, atFrame: entryFrame, documentFrame: documentFrame, inheriting: outer,
-                    ownPoser: ownPose.map { pose in
-                        { stack in
-                            self.containerPoser(
-                                pose: pose, atFrame: entryFrame, blockStart: 0,
-                                channels: PoserChannels(folder: folder),
-                                shareOf: { q, positional in
-                                    self.parallaxShare(of: stack[q], atFrame: entryFrame, positionalDefault: positional)
-                                },
-                                stack: stack, position: stack.count)
-                        }
-                    },
-                    poses: &poses, frames: &frames)
+                    inContainer: folder.id, atFrame: entryFrame, documentFrame: documentFrame,
+                    inheriting: carried[position], poses: &poses, frames: &frames)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps

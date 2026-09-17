@@ -168,16 +168,14 @@ extension CanvasManager {
         }
     }
 
-    /// **The container pose as stored on a target** — §4.4's transformation layer on the layer side,
-    /// §2.21's folder twin on the other. `storedEffect(of:)`'s shape one payload over, including its
+    /// **The container pose as stored on a target** — §4.4's transformation layer, and nothing on a
+    /// folder: a folder poses nothing since TODO (71), whose Move lifts the folder's *contents* into
+    /// the Move tool's own float instead. `storedEffect(of:)`'s shape one payload over, including its
     /// asymmetry: `layerTransform` rather than the raw field, because a `.raster` layer carrying a
-    /// pose left behind by a kind change poses nothing, while a folder's field's presence *is* the
-    /// answer and there is no second field to reconcile.
+    /// pose left behind by a kind change poses nothing.
     func containerPose(of target: KeyframeTarget) -> LayerPose? {
-        switch target {
-        case .layer(let id): return layers.first { $0.id == id }?.layerTransform
-        case .folder(let id): return folders.first { $0.id == id }?.transform
-        }
+        guard case .layer(let id) = target else { return nil }
+        return layers.first { $0.id == id }?.layerTransform
     }
 
     /// The grade at one frame — every keyed parameter evaluated, through whichever of the two
@@ -299,19 +297,10 @@ extension CanvasManager {
         }
         // A pose key is a landed key exactly as a curve key is. Ungated by the grade, unlike the
         // effect curves: a pose channel is not a property of an effect at all, so a drawing layer with
-        // no grade whatsoever still carries its transform keys.
-        //
-        // **A folder holds no cels, so it holds no *object* channels — and since §4.4 it holds a
-        // container pose of its own, which this used to miss.** The comment here said "a folder holds
-        // no cels, so it holds no object channels" and stopped, which was true and was read as
-        // exhaustive; `LayerFolder.transform` arrived afterwards with a `TransformTrack` on it, and a
-        // key on a folder's pose therefore drew a node in the graph editor with no indicator beside
-        // it. That is §2.28's biconditional broken through the door §2.28 could not have known about.
-        // `poseKeyframeFrames(inLayer:)` folds the layer's own container pose for the same reason.
-        switch target {
-        case .layer(let id): keyed.formUnion(poseKeyframeFrames(inLayer: id))
-        case .folder(let id): keyed.formUnion(poseKeyframeFrames(inFolder: id))
-        }
+        // no grade whatsoever still carries its transform keys. **A folder holds no cels and — since
+        // TODO (71) — no pose of its own, so it holds no pose channels at all**; its keys are all in
+        // the two dictionaries folded above.
+        if case .layer(let id) = target { keyed.formUnion(poseKeyframeFrames(inLayer: id)) }
         return keyed
     }
 
@@ -1128,29 +1117,19 @@ extension CanvasManager {
                    })
     }
 
-    /// Writes a pose delta onto the cels it names. A folder target carries none — it holds no cels.
+    /// Writes a pose delta onto the cels it names and the container pose it carries. A folder target
+    /// carries neither — it holds no cels and, since TODO (71), no pose.
     private func applyPoseDelta(_ delta: KeyframePoseDelta, to target: KeyframeTarget) {
-        guard !delta.isEmpty else { return }
-        if case .layer(let layerID) = target {
-            for (celID, state) in delta.cels {
-                applyCelPoseState(state, layerID: layerID, celID: celID)
-            }
+        guard !delta.isEmpty, case .layer(let layerID) = target,
+              let index = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        for (celID, state) in delta.cels {
+            applyCelPoseState(state, layerID: layerID, celID: celID)
         }
         // The raw field, gated on the accessor by whoever built the delta — a delta only ever names
         // a container the target is actually posing through, so writing it back cannot put a pose
-        // left inert by a kind change into force. Both homes, §2.21: a folder holds no cels and its
-        // pose is therefore the *whole* of its pose delta.
-        guard let container = delta.container else { return }
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }),
-                  layers[index].transform != container else { return }
-            layers[index].transform = container
-        case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }),
-                  folders[index].transform != container else { return }
-            folders[index].transform = container
-        }
+        // left inert by a kind change into force.
+        guard let container = delta.container, layers[index].transform != container else { return }
+        layers[index].transform = container
     }
 
     /// The one mutation every direction of every undo above goes through. **The target is re-resolved
@@ -1201,14 +1180,17 @@ extension CanvasManager {
 /// Everything downstream — the union, the mark rule, the undo step, the recorder — is shared.
 extension CanvasManager {
 
-    /// This channel's **stored** value on a target, or nil if the target is not in the document.
+    /// This channel's **stored** value on a target, or nil if the target is not in the document — or
+    /// is a folder and the channel is one a folder does not own (`TargetChannel.folderPath`).
     /// `storedEffect(of:)`'s counterpart, and note there is no `layerEffect`-style accessor to route
     /// through: opacity is in force on every layer whatever its kind, so there is no mode to ask
     /// about.
     func storedValue(of target: KeyframeTarget, channel: TargetChannel) -> Double? {
         switch target {
         case .layer(let id): return layers.first { $0.id == id }?[keyPath: channel.layerPath]
-        case .folder(let id): return folders.first { $0.id == id }?[keyPath: channel.folderPath]
+        case .folder(let id):
+            guard let path = channel.folderPath else { return nil }
+            return folders.first { $0.id == id }?[keyPath: path]
         }
     }
 
@@ -1226,9 +1208,10 @@ extension CanvasManager {
                   layers[index][keyPath: channel.layerPath] != clamped else { return }
             layers[index][keyPath: channel.layerPath] = clamped
         case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }),
-                  folders[index][keyPath: channel.folderPath] != clamped else { return }
-            folders[index][keyPath: channel.folderPath] = clamped
+            guard let path = channel.folderPath,
+                  let index = folders.firstIndex(where: { $0.id == id }),
+                  folders[index][keyPath: path] != clamped else { return }
+            folders[index][keyPath: path] = clamped
         }
     }
 

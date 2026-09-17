@@ -79,7 +79,7 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
         guard let float = manager.vectorFloat else {
             return XCTFail("An imported image must arrive in the Move box — TODO item (34)")
         }
-        XCTAssertEqual(float.insideIDs, [vector.images[0].id],
+        XCTAssertEqual(float.parts[0].insideIDs, [vector.images[0].id],
                        "The float must carry the picture that was just imported, and nothing else")
     }
 
@@ -103,7 +103,7 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
         guard let float = manager.vectorFloat else {
             return XCTFail("An imported image must arrive in the Move box — TODO item (34)")
         }
-        XCTAssertFalse(float.insideIDs.contains(existing.id),
+        XCTAssertFalse(float.parts[0].insideIDs.contains(existing.id),
                        "The stroke that was already on the layer must not travel with the import")
         XCTAssertFalse(vector.suppressedElementIDs.contains(existing.id),
                        "A whole-cel lift would suppress the artist's existing drawing; this lift must not")
@@ -129,9 +129,9 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
         guard let vector = activeVector(manager), let float = manager.vectorFloat else {
             return XCTFail("An imported image must arrive in the Move box — TODO item (34)")
         }
-        XCTAssertEqual(float.layerID, manager.layers[manager.currentLayerIndex].id,
+        XCTAssertEqual(float.parts[0].layerID, manager.layers[manager.currentLayerIndex].id,
                        "The box belongs to the layer the picture landed on")
-        XCTAssertEqual(float.insideIDs, [vector.images[0].id])
+        XCTAssertEqual(float.parts[0].insideIDs, [vector.images[0].id])
     }
 
     /// **The lift must not lose the picture.** A float suppresses its ids out of the layer's own
@@ -167,8 +167,8 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
         guard let float = manager.vectorFloat else {
             return XCTFail("The second import must arrive in the Move box too")
         }
-        XCTAssertEqual(float.insideIDs.count, 1, "Only the newest picture is held")
-        XCTAssertEqual(vector.suppressedElementIDs, float.insideIDs,
+        XCTAssertEqual(float.parts[0].insideIDs.count, 1, "Only the newest picture is held")
+        XCTAssertEqual(vector.suppressedElementIDs, float.parts[0].insideIDs,
                        "The first import's suppression was settled, not stranded")
     }
 }

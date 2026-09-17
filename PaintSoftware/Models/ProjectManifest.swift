@@ -224,22 +224,14 @@ struct FolderManifest: Codable {
     /// migration there for what it does with it.
     var wasSavedBeforeGroupProperties = false
 
-    /// `LayerFolder.transform` — KEYFRAMES.md §4.4's container pose, **written only when there is
-    /// one**. `alphaMask`'s recipe: absence is what every project saved before this field carries and
-    /// what every folder nobody has posed carries, which is one meaning rather than two.
-    var transform: LayerPose? = nil
-
-    /// `LayerFolder.rotateSpeed` — TRANSFORM_LAYER.md §5.3's degrees per frame, **written only when
-    /// non-zero**; absent decodes to 0, which is what every document before the modes says.
-    var rotateSpeed: Double? = nil
-    /// `LayerFolder.parallaxShare` — §5.2's typed share, optional on both sides: absent is *the
-    /// positional default*, which is one meaning in the model and on disk.
+    /// `LayerFolder.parallaxShare` — TRANSFORM_LAYER.md §5.2's typed share, optional on both sides:
+    /// absent is *the positional default*, which is one meaning in the model and on disk.
+    ///
+    /// **A folder's own pose and its pose-mode scalars were keys here until TODO (71)** — `transform`,
+    /// `rotateSpeed`, `shakeX`, `shakeY`, `shakeRotation` — and are not read: a folder poses nothing
+    /// now, and TODO.md's standing permission (no document written so far has to survive) is what
+    /// lets a document that carried them open with the keys ignored rather than migrated.
     var parallaxShare: Double? = nil
-    /// `LayerFolder.shakeX` / `shakeY` / `shakeRotation` — §5.4's three amplitudes, **written only
-    /// when non-zero**, `rotateSpeed`'s rule. The shake's seed and period ride inside `transform`.
-    var shakeX: Double? = nil
-    var shakeY: Double? = nil
-    var shakeRotation: Double? = nil
 
     init(id: UUID, name: String, hasCustomName: Bool = false, isExpanded: Bool, isVisible: Bool,
          parentFolderID: UUID? = nil,
@@ -249,9 +241,7 @@ struct FolderManifest: Codable {
          channelTracks: [String: AnimationCurve]? = nil,
          channelBaselines: [String: Double]? = nil,
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
-         transform: LayerPose? = nil,
-         rotateSpeed: Double? = nil, parallaxShare: Double? = nil,
-         shakeX: Double? = nil, shakeY: Double? = nil, shakeRotation: Double? = nil) {
+         parallaxShare: Double? = nil) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -269,12 +259,7 @@ struct FolderManifest: Codable {
         self.channelBaselines = channelBaselines
         self.keyframeMarks = keyframeMarks
         self.pendingBaselines = pendingBaselines
-        self.transform = transform
-        self.rotateSpeed = rotateSpeed
         self.parallaxShare = parallaxShare
-        self.shakeX = shakeX
-        self.shakeY = shakeY
-        self.shakeRotation = shakeRotation
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -309,12 +294,7 @@ struct FolderManifest: Codable {
         channelBaselines = try container.decodeIfPresent([String: Double].self, forKey: .channelBaselines)
         keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
-        transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
-        rotateSpeed = try container.decodeIfPresent(Double.self, forKey: .rotateSpeed)
         parallaxShare = try container.decodeIfPresent(Double.self, forKey: .parallaxShare)
-        shakeX = try container.decodeIfPresent(Double.self, forKey: .shakeX)
-        shakeY = try container.decodeIfPresent(Double.self, forKey: .shakeY)
-        shakeRotation = try container.decodeIfPresent(Double.self, forKey: .shakeRotation)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -326,8 +306,7 @@ struct FolderManifest: Codable {
         case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
         case isIsolated, alphaMask, compositorRole, effect, effectTracks
         case channelTracks, channelBaselines
-        case keyframeMarks, pendingBaselines, transform
-        case rotateSpeed, parallaxShare, shakeX, shakeY, shakeRotation
+        case keyframeMarks, pendingBaselines, parallaxShare
     }
 }
 

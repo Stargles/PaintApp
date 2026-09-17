@@ -158,8 +158,8 @@ enum TimelineGraphChannelList {
     /// transformation layers and normal move."*
     ///
     /// The components rather than the channels, so the rule reaches all three pose channel kinds at
-    /// once — a cel's Move, an animation group's, and a transformation layer's or folder's
-    /// `containerPose` — which is what *"includes transformation layers and normal move"* asks for
+    /// once — a cel's Move, an animation group's, and a transformation layer's `containerPose` —
+    /// which is what *"includes transformation layers and normal move"* asks for
     /// and what `PoseChannelID.resolve(parameterID:)` makes one line rather than three.
     static let poseComponentsHiddenByDefault: Set<PoseComponents.Component> = [.scaleX, .scaleY, .skew]
 

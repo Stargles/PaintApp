@@ -2163,12 +2163,13 @@ extension CanvasManager {
         return (grade + own + poses.channels, poses.declined)
     }
 
-    /// **Every pose track that addresses `target`, across both of §3.1's time bases.**
+    /// **Every pose track that addresses `target`, across both of §3.1's time bases.** A folder has
+    /// none: it holds no cels and, since TODO (71), no pose of its own.
     ///
     /// Two kinds, and the asymmetry between them is §3.1 rather than an accident of storage. A
     /// **cel** channel keys cel-local and rides its cel, so each cel contributes its own tracks with
     /// its own `startFrame` as the offset; a **container** channel — the transformation layer's
-    /// `Layer.transform`, or a folder's — keys in absolute document frames and needs none.
+    /// `Layer.transform` — keys in absolute document frames and needs none.
     ///
     /// **Read through `layerTransform`, never the raw field**, which is `storedEffect(of:)`'s rule
     /// one payload over: a `.raster` layer carrying a pose left behind by a kind change poses
@@ -2179,37 +2180,27 @@ extension CanvasManager {
     /// Costs one `isEmpty` per cel on a document that has never been keyframed, which is what makes
     /// it affordable from a layout pass.
     func poseSources(of target: KeyframeTarget) -> [TimelineGraphBand.PoseSource] {
+        guard case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return [] }
         var sources: [TimelineGraphBand.PoseSource] = []
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return [] }
-            if let pose = layers[index].layerTransform, !pose.track.isEmpty {
-                sources.append(TimelineGraphBand.PoseSource(channel: .container, track: pose.track,
-                                                            frameOffset: 0))
-            }
-            for cel in layers[index].cels where !cel.transformTracks.isEmpty {
-                // Sorted by id so the band's channel order does not depend on Swift's per-process
-                // hash seed — `poseMappings`' argument for sorting the render order, reached here.
-                for key in cel.transformTracks.keys.sorted() {
-                    guard let channel = TransformChannelID(id: key),
-                          let track = cel.transformTracks[key], !track.isEmpty else { continue }
-                    sources.append(TimelineGraphBand.PoseSource(
-                        channel: .cel(channel), track: track, frameOffset: cel.startFrame,
-                        // The cel's own span, inclusive, which is where a key of this track may be
-                        // dragged to and no further — `Channel.frameWindows`. `endFrame` is
-                        // exclusive, so the last frame the artist sees is one below it.
-                        frameWindow: cel.startFrame...max(cel.startFrame, cel.endFrame - 1),
-                        name: poseChannelName(channel)))
-                }
-            }
-        case .folder(let id):
-            guard let folder = folders.first(where: { $0.id == id }),
-                  let pose = folder.transform, !pose.track.isEmpty else { return [] }
-            // Named for what it is — the channel list's header over a folder band reads "Group
-            // Transform", the folder panel's own word for the toggle that made it, where
-            // `defaultName` would say "Layer Transform" about a row that is not a layer.
+        if let pose = layers[index].layerTransform, !pose.track.isEmpty {
             sources.append(TimelineGraphBand.PoseSource(channel: .container, track: pose.track,
-                                                        frameOffset: 0, name: "Group Transform"))
+                                                        frameOffset: 0))
+        }
+        for cel in layers[index].cels where !cel.transformTracks.isEmpty {
+            // Sorted by id so the band's channel order does not depend on Swift's per-process
+            // hash seed — `poseMappings`' argument for sorting the render order, reached here.
+            for key in cel.transformTracks.keys.sorted() {
+                guard let channel = TransformChannelID(id: key),
+                      let track = cel.transformTracks[key], !track.isEmpty else { continue }
+                sources.append(TimelineGraphBand.PoseSource(
+                    channel: .cel(channel), track: track, frameOffset: cel.startFrame,
+                    // The cel's own span, inclusive, which is where a key of this track may be
+                    // dragged to and no further — `Channel.frameWindows`. `endFrame` is
+                    // exclusive, so the last frame the artist sees is one below it.
+                    frameWindow: cel.startFrame...max(cel.startFrame, cel.endFrame - 1),
+                    name: poseChannelName(channel)))
+            }
         }
         return sources
     }
@@ -2240,7 +2231,7 @@ extension CanvasManager {
         /// Empty for a folder: a folder holds children rather than cels, so its band has no cel
         /// channel to snapshot and this is one dictionary lookup that finds nothing.
         var cels: [UUID: Cel] = [:]
-        /// The container pose — `Layer.transform` or `LayerFolder.transform` — raw. Nil is a real
+        /// The container pose — `Layer.transform` — raw. Nil is a real
         /// value here (a target with no container pose), so a restore writes it back
         /// unconditionally rather than skipping.
         var container: LayerPose?

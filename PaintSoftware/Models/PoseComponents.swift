@@ -374,7 +374,7 @@ enum PoseComponents {
 /// **Every pose channel a band can list, across both of KEYFRAMES §3.1's time bases.**
 ///
 /// A cel's channels (`TransformChannelID`) key in **cel-local** frames and a container's
-/// (`LayerPose.track` on `Layer.transform` or `LayerFolder.transform`) keys in **absolute document**
+/// (`LayerPose.track` on `Layer.transform`) keys in **absolute document**
 /// frames. The band's x axis is the timeline's, which is absolute, so the conversion happens once —
 /// in `CanvasManager.graphBandPoseChannels(layerIndex:)` — and everything downstream reads one kind
 /// of frame.
@@ -397,8 +397,8 @@ enum PoseChannelID: Hashable {
     /// One channel of one cel's drawing — the whole cel, or one animation group inside it.
     case cel(TransformChannelID)
 
-    /// The container's own pose: `Layer.transform` on a transformation layer, or
-    /// `LayerFolder.transform` on the folder. One per target, which is why it carries nothing.
+    /// The container's own pose: `Layer.transform` on a transformation layer. One per target,
+    /// which is why it carries nothing.
     case container
 
     /// **The channel-list group id**, and the text before the dot in every parameter id below.

@@ -336,20 +336,20 @@ struct FloatingPiece {
     /// restore the *dragged* copy.
     var effectRest: EffectBoxRest?
 
-    /// **What a `.containerPose` box actually poses** — a transformation layer or, since §2.21's
-    /// folder twin, a folder — nil on every other kind. **And which grade home an `.effectBox`
-    /// writes** — the same `KeyframeTarget` naming a value layer or a graded folder, because the two
-    /// questions have one answer type and a second field typed the same way would be a second place
-    /// for them to disagree.
+    /// **What a `.containerPose` box actually poses** — a transformation layer, and nil on every
+    /// other kind. **And which grade home an `.effectBox` writes** — the same `KeyframeTarget` naming
+    /// a value layer or a graded folder, because the two questions have one answer type and a second
+    /// field typed the same way would be a second place for them to disagree. (A `.containerPose`
+    /// box never names a folder: a folder poses nothing since TODO (71).)
     ///
     /// **`sourceLayerID`/`targetLayerID` still name the layer that was current when the box went up,
-    /// even when this names a folder**, and that is bookkeeping rather than a second address for the
-    /// same thing. Those two fields are what `handleActiveContextChanged` compares against
+    /// even when this names a folder's grade**, and that is bookkeeping rather than a second address
+    /// for the same thing. Those two fields are what `handleActiveContextChanged` compares against
     /// `currentLayerIndex`'s own id to decide whether the box survives a scrub — *when* this box was
-    /// raised, not *what* it poses — so a folder's box auto-commits under the same "did the active
-    /// layer/cel change" rule a layer's always has, and no field that is typed and named for a layer
-    /// ever has to hold anything but one. This field is what `showContainerPoseLive`,
-    /// `commitContainerFloat` and every writer downstream of them read instead.
+    /// raised, not *what* it poses — so a box auto-commits under the same "did the active layer/cel
+    /// change" rule, and no field that is typed and named for a layer ever has to hold anything but
+    /// one. This field is what `showContainerPoseLive`, `commitContainerFloat` and every writer
+    /// downstream of them read instead.
     var containerTarget: KeyframeTarget?
 
     /// The rectangle the piece's bitmap occupies in its own local space: `baseSize`, centred on the
@@ -705,7 +705,7 @@ extension CanvasManager {
         // here would keep its ids suppressed on a cel the artist has walked away from — artwork in
         // the document that renders nowhere.
         if let float = vectorFloat,
-           !(float.layerID == activeLayerID && float.celID == activeCelID) {
+           !(float.parts[0].layerID == activeLayerID && float.parts[0].celID == activeCelID) {
             commitVectorFloatIfNeeded()
         }
         if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
@@ -903,16 +903,13 @@ extension CanvasManager {
         // now travel with it; see `CanvasView.Coordinator.updateVectorFloat`.
     }
 
-    /// **Raises the Move box over a transformation layer's own pose, or a folder's** — KEYFRAMES.md
-    /// §4.4's artist entry and §2.21's folder twin, and the gesture `PoseChannelID.raisesMoveBox` was
-    /// waiting for.
+    /// **Raises the Move box over a transformation layer's own pose** — KEYFRAMES.md §4.4's artist
+    /// entry, and the gesture `PoseChannelID.raisesMoveBox` was waiting for.
     ///
     /// **The box is the canvas frame, not the content.** A container holds no geometry, so there is
     /// no ink to measure a box around and nothing under it belongs to this layer — the artist is
     /// moving *the frame everything beneath is shown in*, and the canvas rect is what that frame is.
-    /// This is the same fallback `beginMove` already takes for a cel with no opaque pixels in it. A
-    /// folder is the identical case one container up: it holds children rather than pixels, and the
-    /// frame it poses is the same canvas rect.
+    /// This is the same fallback `beginMove` already takes for a cel with no opaque pixels in it.
     ///
     /// **It lifts at rest and composes**, rather than starting the box at the pose already in force.
     /// `FloatingTransform` is position + scale + rotation and cannot express a skew, so a box seeded
@@ -928,25 +925,23 @@ extension CanvasManager {
     /// existed once, was deleted in §4.4's entry pass because the render then posed at every frame
     /// and there was nothing to refuse, and is back with the ruling that gives it something to refuse
     /// — this time with `CanvasNotice.moveOutsideTransformBlock` rather than the silence that pass
-    /// was reported for. A folder has no block, so its arm has no gate.
+    /// was reported for.
     ///
-    /// - Parameter target: what to pose — a specific layer or folder, or nil for the current layer,
-    ///   which is `TopToolbar`'s Move glyph and `LayerOptionsPanel`'s own `transformMoveRow`'s
-    ///   meaning and was this function's whole signature before `FolderOptionsPanel` earned the same
-    ///   row. Naming a folder is `FolderOptionsPanel`'s `transformMoveRow` alone — nothing routes to
-    ///   one implicitly, the same way `beginMove` never guesses a layer is a transformation layer
-    ///   without being told by `layerTransform`.
+    /// - Parameter target: what to pose — a specific layer, or nil for the current layer, which is
+    ///   `TopToolbar`'s Move glyph and `LayerOptionsPanel`'s own `moveRow`'s meaning. A folder named
+    ///   here poses nothing (`containerPose(of:)`) and raises no box: a folder's Move is
+    ///   `beginVectorFolderMove`, the Move tool over its contents (TODO (71)).
     /// - Returns: whether a box came up. False when the named target (or the current layer, if none
-    ///   was named) is not posing, when a transform layer's bar does not cover the playhead, or
-    ///   before the document has a canvas size to measure the frame against.
+    ///   was named) is not posing, when its bar does not cover the playhead, or before the document
+    ///   has a canvas size to measure the frame against.
     @discardableResult
     func beginContainerPoseMove(for target: KeyframeTarget? = nil) -> Bool {
         commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return false }
         let target = target ?? .layer(id: layers[currentLayerIndex].id)
-        guard let pose = containerPose(of: target) else { return false }
-        if case .layer(let id) = target, let index = layers.firstIndex(where: { $0.id == id }),
-           activeCelIndex(inLayer: index, atFrame: currentFrame) == nil {
+        guard let pose = containerPose(of: target), case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return false }
+        if activeCelIndex(inLayer: index, atFrame: currentFrame) == nil {
             raise(.moveOutsideTransformBlock(frame: currentFrame))
             return false
         }
@@ -956,12 +951,12 @@ extension CanvasManager {
                                      scaleX: 1, scaleY: 1, rotation: 0)
         // **`sourceLayerID`/`targetLayerID` name the current layer whatever `target` is** —
         // `containerTarget`'s own doc says why: those two fields are read only for the "did the
-        // active layer/cel change" heuristic, never for what this box poses, so a field typed for a
-        // layer is never asked to hold a folder's id.
+        // active layer/cel change" heuristic, never for what this box poses.
         let layerID = layers[currentLayerIndex].id
         // Recorded when there is one, so `handleActiveContextChanged` keeps answering "still targeted"
-        // — a scrub within one cel leaves the box up, anything else commits it. Nil only for a folder
-        // target raised from a layer with no block here; a layer target is gated above.
+        // — a scrub within one cel leaves the box up, anything else commits it. Nil only when the
+        // target is another layer and the current one has no block here; the target itself is gated
+        // above.
         let celID = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
             .map { layers[currentLayerIndex].cels[$0].id }
         floatingPiece = FloatingPiece(
@@ -1365,15 +1360,9 @@ extension CanvasManager {
         } else {
             live.track.setKey(TransformTrack.Key(frame: currentFrame, pose: posed))
         }
-        guard current != live else { return }
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
-            layers[index].transform = live
-        case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
-            folders[index].transform = live
-        }
+        guard current != live, case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return }
+        layers[index].transform = live
     }
 
     /// Why **Distort** cannot act on what is floating, or nil when it can. One line under the Move
@@ -1425,7 +1414,8 @@ extension CanvasManager {
         // §5.14's rule is that a reader must be able to tell a deferral from a refusal, and the artist
         // is a reader too — so this names the kind that is in the way and the move that clears it.
         // Move, scale, turn, Freeform and Mirror all still work on the piece as it stands.
-        guard float.liftedInside.values.contains(where: VectorCanvas.refusesDistort) else { return nil }
+        guard float.parts.contains(where: { $0.liftedInside.values.contains(where: VectorCanvas.refusesDistort) })
+        else { return nil }
         return "Distort can't reshape a placed image or video — leave those out of the selection."
     }
 
@@ -1733,15 +1723,10 @@ extension CanvasManager {
               containerPose(of: target) != nil
         else { return }
         let rest = restState.resolvedPose(atFrame: currentFrame)
-        guard let posed = Self.containerPose(rest, movedBy: piece) else { return }
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
-            layers[index].transform = restState
-        case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
-            folders[index].transform = restState
-        }
+        guard let posed = Self.containerPose(rest, movedBy: piece),
+              case .layer(let id) = target,
+              let index = layers.firstIndex(where: { $0.id == id }) else { return }
+        layers[index].transform = restState
         guard posed != rest else { return }
         commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: currentFrame)
     }

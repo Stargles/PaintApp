@@ -1012,7 +1012,7 @@ extension CanvasManager {
         return !isScrubbingInterpolation
     }
 
-    /// **Whether a transformation layer or a posed folder anywhere in this document moves anything**
+    /// **Whether a transformation layer anywhere in this document moves anything**
     /// — KEYFRAMES §4.4's container pose, asked of the whole document and without a frame.
     ///
     /// ## Why the engagement predicate has to ask this separately
@@ -1051,7 +1051,6 @@ extension CanvasManager {
     @MainActor
     var hasContainerPoseInForce: Bool {
         layers.contains(where: \.containerPoseMovesContents)
-            || folders.contains(where: \.containerPoseMovesContents)
     }
 
     /// One layer's `LayerContentVersion` at `frame`, resolving its derivation — what

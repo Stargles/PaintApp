@@ -502,7 +502,7 @@ final class InkDistortLogicTests: XCTestCase {
                                  distort: .some(BoxDistort(quad: Self.pulled(float.frame),
                                                            boxSize: float.contentSize,
                                                            boxOffset: .zero, boxAngle: 0)))
-        let strokes = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat)))
+        let strokes = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0]))
             .elements.compactMap(\.stroke)
         XCTAssertFalse(strokes.isEmpty, "setup: the float carries ink")
         for stroke in strokes {
@@ -785,7 +785,7 @@ final class InkDistortLogicTests: XCTestCase {
     func testSeedingADistortFromTheDrawnBoxChangesNoSample() throws {
         let manager = try Self.managerWithFloat()
         let float = try XCTUnwrap(manager.vectorFloat)
-        let before = try XCTUnwrap(manager.vectorCanvas(ofFloat: float)).elements
+        let before = try XCTUnwrap(manager.vectorCanvas(of: float.parts[0])).elements
         let drawn = CanvasManager.fittedFrame(of: float, at: ObjectTransformDrag.Pose(
             transform: float.frame.transform, aspect: float.frame.aspect,
             boxAngle: float.frame.boxAngle, stretchAxis: float.frame.stretchAxis, distort: nil))
@@ -795,7 +795,7 @@ final class InkDistortLogicTests: XCTestCase {
                                                            boxSize: drawn.contentSize,
                                                            boxOffset: drawn.contentOffset,
                                                            boxAngle: drawn.boxAngle)))
-        let after = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements
+        let after = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements
         assertSamePoints(Self.positions(after), Self.positions(before), accuracy: 1e-9)
         XCTAssertNotNil(manager.vectorFloat?.distort, "and the residue is on the model, ready to be pulled")
     }
@@ -806,7 +806,7 @@ final class InkDistortLogicTests: XCTestCase {
     func testResetClearsTheKeystoneAndTheButtonKnowsAboutIt() throws {
         let manager = try Self.managerWithFloat()
         let float = try XCTUnwrap(manager.vectorFloat)
-        let before = try XCTUnwrap(manager.vectorCanvas(ofFloat: float)).elements
+        let before = try XCTUnwrap(manager.vectorCanvas(of: float.parts[0])).elements
         XCTAssertFalse(manager.canResetFloating, "setup: nothing has moved yet")
 
         manager.nudgeVectorFloat(to: float.frame.transform,
@@ -814,13 +814,13 @@ final class InkDistortLogicTests: XCTestCase {
                                                            boxSize: float.contentSize,
                                                            boxOffset: .zero, boxAngle: 0)))
         XCTAssertTrue(manager.canResetFloating, "a pulled corner is something to put back")
-        let keystoned = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements
+        let keystoned = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements
         XCTAssertNotEqual(Self.positions(keystoned), Self.positions(before),
                           "setup: the keystone actually moved the ink")
 
         manager.resetFloating()
         XCTAssertNil(manager.vectorFloat?.distort)
-        let reset = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements
+        let reset = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements
         assertSamePoints(Self.positions(reset), Self.positions(before), accuracy: 1e-9)
         XCTAssertFalse(manager.canResetFloating)
     }
@@ -835,10 +835,10 @@ final class InkDistortLogicTests: XCTestCase {
                                  distort: .some(BoxDistort(quad: Self.pulled(float.frame),
                                                            boxSize: float.contentSize,
                                                            boxOffset: .zero, boxAngle: 0)))
-        let keystoned = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements
+        let keystoned = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements
 
         manager.turnVectorFloatBox(to: 0.6)
-        let after = try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements
+        let after = try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements
         assertSamePoints(Self.positions(after), Self.positions(keystoned), accuracy: 0,
                          "a box turn moves no ink, keystone or no keystone")
     }
@@ -851,11 +851,11 @@ final class InkDistortLogicTests: XCTestCase {
         let manager = try Self.managerWithFloat()
         let float = try XCTUnwrap(manager.vectorFloat)
         let quad = Self.pulled(float.frame)
-        let atRest = Self.positions(try XCTUnwrap(manager.vectorCanvas(ofFloat: float)).elements)
+        let atRest = Self.positions(try XCTUnwrap(manager.vectorCanvas(of: float.parts[0])).elements)
         manager.nudgeVectorFloat(to: float.frame.transform,
                                  distort: .some(BoxDistort(quad: quad, boxSize: float.contentSize,
                                                            boxOffset: .zero, boxAngle: 0)))
-        let keystoned = Self.positions(try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements)
+        let keystoned = Self.positions(try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements)
         // Non-vacuous: without this the whole test passes against a `distortMap` that drops the
         // residue, because a translation of nothing is still a translation. MEASURED as a real
         // difference rather than asserted as one — the mutation sweep found this gap.
@@ -865,7 +865,7 @@ final class InkDistortLogicTests: XCTestCase {
         moved.position = CGPoint(x: moved.position.x + 17, y: moved.position.y - 9)
         manager.nudgeVectorFloat(to: moved)
         XCTAssertEqual(manager.vectorFloat?.distort?.quad, quad, "the residue survived the move")
-        let after = Self.positions(try XCTUnwrap(manager.vectorCanvas(ofFloat: try XCTUnwrap(manager.vectorFloat))).elements)
+        let after = Self.positions(try XCTUnwrap(manager.vectorCanvas(of: try XCTUnwrap(manager.vectorFloat).parts[0])).elements)
         XCTAssertEqual(after.count, keystoned.count)
         for (before, now) in zip(keystoned, after) {
             XCTAssertEqual(now.x, before.x + 17, accuracy: 1e-6)

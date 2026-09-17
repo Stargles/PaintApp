@@ -167,7 +167,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     }
 
     /// **A cel whose pose *rests* at this frame carries no pose on its float**, so every consumer of
-    /// `VectorFloat.poses` takes its empty fast path.
+    /// `VectorFloatPart.poses` takes its empty fast path.
     ///
     /// Not a definition: it is `TransformTrack.mapping`'s "nil for a resting pose" rule reaching all
     /// the way through `celPoseMaps` to the float, which is what keeps a document that has been
@@ -180,8 +180,8 @@ final class PosedLassoMoveLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         let float = try XCTUnwrap(manager.vectorFloat)
-        XCTAssertTrue(float.poses.isEmpty, "frame 0 holds the rest pose, so there is nothing to carry")
-        let rest = try XCTUnwrap(CanvasManager.localBounds(of: float.elementsBeforeLift))
+        XCTAssertTrue(float.parts[0].poses.isEmpty, "frame 0 holds the rest pose, so there is nothing to carry")
+        let rest = try XCTUnwrap(CanvasManager.localBounds(of: float.parts[0].elementsBeforeLift))
         XCTAssertEqual(float.pivot.x, rest.midX, accuracy: 1e-9)
         manager.cancelVectorFloat()
     }
@@ -194,7 +194,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         manager.currentFrame = 5
 
         XCTAssertTrue(manager.beginVectorWholeCelMove())
-        XCTAssertTrue(try XCTUnwrap(manager.vectorFloat).poses.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(manager.vectorFloat).parts[0].poses.isEmpty)
         manager.cancelVectorFloat()
     }
 
@@ -227,7 +227,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 24, y: 10, width: 24, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove(),
                       "a loop around the ink the artist can see has to catch that ink")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1)
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs.count, 1)
         manager.cancelVectorFloat()
 
         select(manager, layerIndex, loop(CGRect(x: 2, y: 10, width: 22, height: 40)))
@@ -256,8 +256,8 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         let float = try XCTUnwrap(manager.vectorFloat)
 
         XCTAssertEqual(vector.elements.count, 2, "one stroke in, two out")
-        let inside = sampleXs(vector.elements.filter { float.insideIDs.contains($0.id) })
-        let outside = sampleXs(vector.elements.filter { !float.insideIDs.contains($0.id) })
+        let inside = sampleXs(vector.elements.filter { float.parts[0].insideIDs.contains($0.id) })
+        let outside = sampleXs(vector.elements.filter { !float.parts[0].insideIDs.contains($0.id) })
         // `membershipRuns` bisects the crossing and gives it to both halves, so each run carries it.
         XCTAssertEqual(inside.first ?? .nan, 10, accuracy: 1e-4,
                        "the cut fell at the loop's edge pulled back into rest space — canvas 30 less the 20pt pose")

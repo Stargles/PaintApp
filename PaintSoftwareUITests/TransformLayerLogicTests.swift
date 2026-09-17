@@ -242,29 +242,6 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertNil(poses[stack.outside])
     }
 
-    /// §2.21's folder form: a posed folder moves everything *inside* it, at any depth, and nothing
-    /// outside. The complement of the layer form — `above` moves here and does not above.
-    func testAFolderPosesEverythingInsideItAndNothingOutside() {
-        let stack = makeStack(mover: nil)
-        guard let at = stack.manager.folders.firstIndex(where: { $0.id == stack.folder }) else {
-            return XCTFail("The fixture's folder went missing")
-        }
-        stack.manager.folders[at].transform = pose(CGAffineTransform(translationX: 5, y: 0))
-
-        let poses = stack.manager.layerPoses(atFrame: 0)
-        XCTAssertEqual(Set(poses.keys), [stack.inner, stack.mover, stack.above],
-                       "A folder's pose is its contents' pose, and only its contents'")
-        XCTAssertNil(poses[stack.floor])
-        XCTAssertNil(poses[stack.outside])
-        // **The value, not only the key set** — the layer form's own test one door up asserts
-        // `tx == 12`, and this one asserted membership alone until TODO (21) gave the field a writer.
-        // A pose that reached the right three leaves carrying the identity map would have satisfied
-        // the assertions above, which is the shape of "a correct set drawn as nothing moving".
-        XCTAssertEqual(poses[stack.inner]?.affine?.tx, 5)
-        XCTAssertEqual(poses[stack.mover]?.affine?.tx, 5)
-        XCTAssertEqual(poses[stack.above]?.affine?.tx, 5)
-    }
-
     /// **Composition order, with two maps that do not commute.**
     ///
     /// A leaf under two transformation layers is moved by the lower one and then carried by the upper
@@ -342,11 +319,9 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertTrue(manager.layerPoses(atFrame: 0).isEmpty,
                       "An operand's pose is not the node's answer to how its inputs combine")
 
-        // …and the node itself, posed from outside, still carries both of its operands.
-        guard let at = manager.folders.firstIndex(where: { $0.id == node }) else {
-            return XCTFail("The node went missing")
-        }
-        manager.folders[at].transform = pose(slide)
+        // …and a transform layer *outside* the node still carries both of its operands.
+        manager.addTransformLayer(name: "outer")
+        manager.layers[manager.layers.firstIndex { $0.name == "outer" }!].transform = pose(slide)
         XCTAssertEqual(manager.layerPoses(atFrame: 0).count, 2)
     }
 
@@ -435,42 +410,6 @@ final class TransformLayerLogicTests: XCTestCase {
         let restBounds = try XCTUnwrap(inkBounds(resting))
         let posedBounds = try XCTUnwrap(inkBounds(posed))
         XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5)
-    }
-
-    /// **The folder-posed analogue of the test above, in pixels** — TODO (21).
-    ///
-    /// The test above proves a folder's pose reaches its children's *entries in the pose map*; this
-    /// one proves the ink lands somewhere else on the canvas because of it. They are separate for
-    /// the reason CLAUDE.md gives about a correct value drawn in the wrong place: `layerPoses` could
-    /// answer perfectly while `PixelOps.rasterize` ignored what it was handed, and the map assertion
-    /// alone could not tell the two apart. Now that `setFolderTransform` lets an artist reach this
-    /// field at all, the pixel end of it is worth pinning rather than inferring.
-    func testAFolderPosedCelRasterizesAtTheShiftedPosition() throws {
-        let manager = CanvasManager()
-        manager.canvasSize = size
-        manager.addVectorLayer(name: "ink")
-        let drawn = manager.layers.firstIndex { $0.name == "ink" } ?? 0
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size),
-                      vector: .empty(size: size))
-        cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
-        manager.layers[drawn].cels = [cel]
-        let folder = manager.addFolder(name: "F")
-        manager.layers[drawn].parentFolderID = folder
-        guard let fAt = manager.folders.firstIndex(where: { $0.id == folder }) else {
-            return XCTFail("fixture folder missing")
-        }
-        manager.folders[fAt].transform = pose(CGAffineTransform(translationX: 20, y: 0))
-
-        let resting = PixelOps.rasterize(cel: cel, canvasSize: size, derived: nil, pose: nil)
-        let posed = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(
-                                        for: cel, atFrame: 0,
-                                        inheriting: manager.layerPoses(atFrame: 0)[drawn]),
-                                       pose: manager.layerPoses(atFrame: 0)[drawn])
-        let restBounds = try XCTUnwrap(inkBounds(resting))
-        let posedBounds = try XCTUnwrap(inkBounds(posed))
-        XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5,
-                       "Ink inside a posed folder is drawn 20pt to the right of where it rests")
     }
 
     /// **§2.3's *"crisp lines, not a bitmap magnify"*, asserted where the decision actually lives.**
@@ -688,10 +627,10 @@ final class TransformLayerLogicTests: XCTestCase {
 
     // MARK: - Persistence
 
-    /// §3.5's field-presence idiom, on both of the two homes. A transformation layer whose pose did
-    /// not survive a reload would look like an ordinary value layer painting mid-grey over the stack,
-    /// which is a wrong picture rather than a lost setting.
-    func testATransformLayerAndAPosedFolderSurviveASaveAndReload() throws {
+    /// §3.5's field-presence idiom. A transformation layer whose pose did not survive a reload would
+    /// look like an ordinary value layer painting mid-grey over the stack, which is a wrong picture
+    /// rather than a lost setting.
+    func testATransformLayerSurvivesASaveAndReload() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("transform-layer-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -702,10 +641,6 @@ final class TransformLayerLogicTests: XCTestCase {
         }
 
         let stack = makeStack(mover: animatedPose(CGAffineTransform(translationX: 24, y: 0)))
-        guard let folderAt = stack.manager.folders.firstIndex(where: { $0.id == stack.folder }) else {
-            return XCTFail("The fixture's folder went missing")
-        }
-        stack.manager.folders[folderAt].transform = pose(CGAffineTransform(scaleX: 2, y: 2))
         let moverID = stack.manager.layers[stack.mover].id
 
         let url = root.appendingPathComponent("round-trip.paintproj", isDirectory: true)
@@ -718,8 +653,6 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertEqual(mover.transform, stack.manager.layers[stack.mover].transform,
                        "The pose and its whole track, key handles included")
         XCTAssertNotNil(mover.layerTransform, "…and still live, which needs the kind as well")
-        XCTAssertEqual(reloaded.folders.first { $0.id == stack.folder }?.transform,
-                       stack.manager.folders[folderAt].transform)
         XCTAssertEqual(Set(reloaded.layerPoses(atFrame: 8).keys),
                        Set(stack.manager.layerPoses(atFrame: 8).keys),
                        "The reloaded document poses the same leaves, which is the only thing the "

@@ -28,7 +28,7 @@ import CoreGraphics
 ///    store hits for free (`FrameBakeKey(s + p + k) == FrameBakeKey(s + k)`); an opacity curve, a
 ///    transform layer and a folder beneath all repeat; a repeat under a repeat composes; a hidden
 ///    repeat loops nothing; the period is pre-filled from where the drawings beneath end, typed as one
-///    undo step, and refused on a folder; drawing on a repeated frame lands on the source cel; the
+///    undo step; drawing on a repeated frame lands on the source cel; the
 ///    timeline's ghost segments agree with the render walk on a nested fixture.
 ///  * **Persistence** — the mode and the rows round-trip through a manifest and a real package,
 ///    and an older document with none of them decodes to Move.
@@ -451,45 +451,6 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(wheels.map(\.rotateSpeed), [15, 15], "…and the speed")
         let drawings = fx.manager.layers.filter { $0.kind == .raster }
         XCTAssertEqual(drawings.map(\.parallaxShare), [0.4, 0.4], "…and a typed share")
-    }
-
-    // MARK: - The folder twin (§3.3)
-
-    /// **A folder's pose takes the modes as well** (§3.3): a folder in Parallax shares its move over
-    /// its own children — three inside it take 100/67/33 — and the same folder switched to Rotate at
-    /// 15°/frame has them turned 90° at frame 6, integrating from frame 0 because a folder has no
-    /// block. A recursion that composed the folder's pose as one map onto every child would hand all
-    /// three the full move and never read the mode at all.
-    func testAFolderInParallaxSharesOverItsChildrenAndInRotateSpinsThem() throws {
-        let fx = fourDrawings(mover: pose(.identity, mode: .move))
-        let folder = fx.manager.addFolder(name: "F")
-        for name in ["a", "b", "c"] {
-            fx.manager.layers[layerIndex(named: name, in: fx.manager)].parentFolderID = folder
-        }
-        let at = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
-        fx.manager.folders[at].transform = pose(CGAffineTransform(translationX: 90, y: 0), mode: .parallax)
-        let a = layerIndex(named: "a", in: fx.manager), b = layerIndex(named: "b", in: fx.manager)
-        let c = layerIndex(named: "c", in: fx.manager), d = layerIndex(named: "d", in: fx.manager)
-
-        var poses = fx.manager.layerPoses(atFrame: 0)
-        XCTAssertEqual(poses[a]?.affine?.tx ?? 0, 90, accuracy: 1e-9, "the folder's top child is its 100% item")
-        XCTAssertEqual(poses[b]?.affine?.tx ?? 0, 60, accuracy: 1e-9)
-        XCTAssertEqual(poses[c]?.affine?.tx ?? 0, 30, accuracy: 1e-9)
-        XCTAssertNil(poses[d], "a layer outside the folder is not the folder's item")
-        XCTAssertEqual(fx.manager.parallaxItems(beneath: .folder(id: folder)).map(\.name), ["a", "b", "c"],
-                       "…and the folder's panel lists exactly those three")
-
-        fx.manager.folders[at].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .rotate)
-        fx.manager.folders[at].rotateSpeed = 15
-        XCTAssertTrue(fx.manager.hasContainerPoseInForce, "a spinning folder engages the compositor")
-        poses = fx.manager.layerPoses(atFrame: 6)
-        let right = CGPoint(x: centre.x + 10, y: centre.y)
-        for (name, index) in [("a", a), ("b", b), ("c", c)] {
-            let p = try XCTUnwrap(poses[index]?.applied(to: right), "\(name) is posed by the folder")
-            XCTAssertEqual(p.x, centre.x, accuracy: 1e-6, "\(name): 90° six frames from frame 0")
-            XCTAssertEqual(p.y, centre.y + 10, accuracy: 1e-6)
-        }
-        XCTAssertNil(fx.manager.layerPoses(atFrame: 0)[a], "at frame 0 the folder has not turned")
     }
 
     // MARK: - Rotate: the integral from the block's start (§5.3, ruling 6)
@@ -1048,13 +1009,10 @@ final class TransformLayerModesLogicTests: XCTestCase {
         empty.addTransformLayer(name: "alone")
         XCTAssertEqual(empty.suggestedRepeatPeriod(forLayer: 0), empty.layers[0].cels[0].frameCount)
 
-        // A folder cannot loop.
+        // A folder has no mode at all: it poses nothing (TODO (71)), so the switch refuses it.
         let folder = fx.manager.addFolder(name: "G")
-        let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
-        fx.manager.folders[folderAt].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox))
         fx.manager.setTransformLayerMode(.folder(id: folder), to: .repeat)
-        XCTAssertEqual(fx.manager.folders[folderAt].transform?.mode, .move, "Repeat is refused on a folder")
-        XCTAssertFalse(TransformLayerMode.folderCases.contains(.repeat), "…and the folder picker does not list it")
+        XCTAssertNil(fx.manager.transformLayerMode(of: .folder(id: folder)), "a folder takes no mode")
     }
 
     /// **Drawing on a repeated frame lands on the source cel** (ruling 13): at frame 4, which shows
@@ -1166,12 +1124,9 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(back.parallaxShare, 0.4)
 
         let folderWritten = FolderManifest(id: UUID(), name: "G", isExpanded: true, isVisible: true,
-                                           transform: LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .parallax),
-                                           rotateSpeed: -3, parallaxShare: 0.6)
+                                           parallaxShare: 0.6)
         let folderBack = try JSONDecoder().decode(FolderManifest.self, from: try JSONEncoder().encode(folderWritten))
-        XCTAssertEqual(folderBack.transform?.mode, .parallax)
-        XCTAssertEqual(folderBack.rotateSpeed, -3)
-        XCTAssertEqual(folderBack.parallaxShare, 0.6)
+        XCTAssertEqual(folderBack.parallaxShare, 0.6, "a folder's share — its one mode row — round-trips")
 
         // An older document: a transform layer with none of the three keys.
         let older = LayerManifest(id: UUID(), name: "Old", opacity: 1, isVisible: true, kind: .transform,
@@ -1195,7 +1150,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(loopingBack.mode, .repeat)
         XCTAssertEqual(loopingBack.repeatPeriod, 8)
 
-        // Stage 4's fields: the seed and period inside the pose, the amplitudes beside it, both homes.
+        // Stage 4's fields: the seed and period inside the pose, the amplitudes beside it.
         let shaking = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake, shakeSeed: 0xC0FFEE, shakePeriod: 3)
         let shakenLayer = LayerManifest(id: UUID(), name: "Quake", opacity: 1, isVisible: true, kind: .transform,
                                         transform: shaking, shakeX: 12, shakeY: 4, shakeRotation: 1.5, cels: [cel])
@@ -1204,17 +1159,11 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(shakenBack.transform?.shakeSeed, 0xC0FFEE)
         XCTAssertEqual(shakenBack.transform?.shakePeriod, 3)
         XCTAssertEqual(shakenBack.shakeX, 12); XCTAssertEqual(shakenBack.shakeY, 4); XCTAssertEqual(shakenBack.shakeRotation, 1.5)
-        let shakenFolder = FolderManifest(id: UUID(), name: "G", isExpanded: true, isVisible: true,
-                                          transform: shaking, shakeX: 2, shakeY: 3, shakeRotation: 4)
-        let shakenFolderBack = try JSONDecoder().decode(FolderManifest.self, from: try JSONEncoder().encode(shakenFolder))
-        XCTAssertEqual(shakenFolderBack.transform?.shakeSeed, 0xC0FFEE)
-        XCTAssertEqual(shakenFolderBack.transform?.shakePeriod, 3)
-        XCTAssertEqual([shakenFolderBack.shakeX, shakenFolderBack.shakeY, shakenFolderBack.shakeRotation], [2, 3, 4])
     }
 
-    /// **A shake survives a real package**: the seed, the period and the amplitudes on a layer and
-    /// on a folder come back, and the reloaded document jolts the same leaves to the same maps at
-    /// every frame — which is ruling 9's *"the same every time you play"* across a save.
+    /// **A shake survives a real package**: the seed, the period and the amplitudes come back, and
+    /// the reloaded document jolts the same leaves to the same maps at every frame — which is ruling
+    /// 9's *"the same every time you play"* across a save.
     func testAShakeSurvivesAPackageRoundTrip() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("transform-shake-tests-\(UUID().uuidString)", isDirectory: true)
@@ -1228,10 +1177,6 @@ final class TransformLayerModesLogicTests: XCTestCase {
         fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeX.id] = curve([(0, 9), (8, 0)])
         let folder = fx.manager.addFolder(name: "G")
         fx.manager.layers[fx.drawn].parentFolderID = folder
-        let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
-        fx.manager.folders[folderAt].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .shake,
-                                                           shakeSeed: 0xF00D, shakePeriod: 4)
-        fx.manager.folders[folderAt].shakeRotation = 5
         let moverID = fx.manager.layers[fx.mover].id, drawnID = fx.manager.layers[fx.drawn].id
 
         let url = root.appendingPathComponent("shake.paintproj", isDirectory: true)
@@ -1246,10 +1191,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(mover.transform?.shakePeriod, 2)
         XCTAssertEqual([mover.shakeX, mover.shakeY, mover.shakeRotation], [9, 3, 2])
         XCTAssertEqual(mover.channelTracks[TargetChannel.shakeX.id], fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeX.id])
-        let reloadedFolder = try XCTUnwrap(reloaded.folders.first { $0.id == folder })
-        XCTAssertEqual(reloadedFolder.transform?.shakeSeed, 0xF00D)
-        XCTAssertEqual(reloadedFolder.transform?.shakePeriod, 4)
-        XCTAssertEqual(reloadedFolder.shakeRotation, 5)
+        XCTAssertNotNil(reloaded.folders.first { $0.id == folder }, "the folder the drawing sits in came back")
         let reloadedDrawn = index(of: drawnID, in: reloaded)
         for frame in 0..<10 {
             XCTAssertEqual(reloaded.layerPoses(atFrame: frame)[reloadedDrawn]?.encoded ?? [],
@@ -1308,8 +1250,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         let folder = fx.manager.addFolder(name: "G")
         fx.manager.layers[layerIndex(named: "d", in: fx.manager)].parentFolderID = folder
         let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
-        fx.manager.folders[folderAt].transform = LayerPose(pose: PoseQuad(restingIn: canvasBox), mode: .rotate)
-        fx.manager.folders[folderAt].channelTracks[TargetChannel.rotateSpeed.id] = curve([(0, 0), (8, 15)])
+        fx.manager.folders[folderAt].channelTracks[TargetChannel.parallaxShare.id] = curve([(0, 0.2), (8, 0.5)])
         let moverID = fx.manager.layers[fx.mover].id, cID = fx.manager.layers[fx.c].id
 
         let url = root.appendingPathComponent("modes.paintproj", isDirectory: true)
@@ -1321,9 +1262,9 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.layers.first { $0.id == moverID }?.transform?.mode, .parallax)
         XCTAssertEqual(reloaded.layers.first { $0.id == cID }?.parallaxShare, 0.9)
         let reloadedFolder = try XCTUnwrap(reloaded.folders.first { $0.id == folder })
-        XCTAssertEqual(reloadedFolder.transform?.mode, .rotate)
-        XCTAssertEqual(reloadedFolder.channelTracks[TargetChannel.rotateSpeed.id],
-                       fx.manager.folders[folderAt].channelTracks[TargetChannel.rotateSpeed.id])
+        XCTAssertEqual(reloadedFolder.channelTracks[TargetChannel.parallaxShare.id],
+                       fx.manager.folders[folderAt].channelTracks[TargetChannel.parallaxShare.id],
+                       "the folder's keyed share — one item beneath the parallax layer — round-trips")
         for frame in [0, 6, 8] {
             let before = fx.manager.layerPoses(atFrame: frame)
             let after = reloaded.layerPoses(atFrame: frame)

@@ -148,7 +148,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
         guard let copy = copyLayer(manager, above: layerIndex), let float = manager.vectorFloat else {
             return XCTFail("Duplicate should leave the copy floating, the way the raster arm does")
         }
-        XCTAssertEqual(float.layerID, copy.id, "The box holds the copy, not the original")
+        XCTAssertEqual(float.parts[0].layerID, copy.id, "The box holds the copy, not the original")
         XCTAssertEqual(manager.currentLayerIndex, layerIndex + 1, "and the copy is the active layer")
         XCTAssertNil(manager.selection, "Duplicate spends its selection at the lift (LASSO_MOVE §5.6)")
         XCTAssertNil(manager.floatingPiece,

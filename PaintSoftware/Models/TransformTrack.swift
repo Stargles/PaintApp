@@ -499,7 +499,7 @@ extension Cel {
 // MARK: - The container pose (§2.3, §4.4)
 
 /// **The pose a *container* shows everything inside it at** — KEYFRAMES.md §2.3's transformation
-/// layer and §4.4, plus §2.21's folder twin of the same thing.
+/// layer and §4.4.
 ///
 /// ## What it is, and what it is not
 ///
@@ -509,11 +509,11 @@ extension Cel {
 /// same-size, same-position images, with no positional argument anywhere in either backend. It is
 /// applied where the ink is **stamped**, not where the pixels are composited.
 ///
-/// **Its two homes are the two homes `Effect` already has**, and that symmetry is §2.21's ruling
-/// rather than a convenience: `Layer.transform` is the transformation *layer*, which poses
-/// everything beneath it inside its own container, and `LayerFolder.transform` poses the folder's
-/// own contents. `Layer.layerEffect` / `LayerFolder.effect` is the exact precedent, one field over,
-/// and the reasoning §2.21 gives for refusing to let the two differ applies word for word.
+/// **Its one home is `Layer.transform`**, the transformation *layer*, which poses everything beneath
+/// it inside its own container. A folder held a twin of it (§2.21's argument, applied to the pose)
+/// until TODO (71), when the owner asked for a folder's Move to be the Move tool over its contents
+/// rather than a container behaviour; a transformation layer at the top of a folder is that twin
+/// now.
 ///
 /// ## Two fields, because a channel needs a base and a pose channel's base is not the geometry
 ///

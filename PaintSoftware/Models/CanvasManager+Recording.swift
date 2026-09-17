@@ -52,8 +52,7 @@ extension CanvasManager {
         /// have no base to restore, and the pose the artist let go on would silently become the stored
         /// one *and* the track's — the move would then apply twice.
         ///
-        /// Nil on a target that poses nothing, which is every target but a transformation layer and a
-        /// posed folder.
+        /// Nil on a target that poses nothing, which is every target but a transformation layer.
         let basePose: LayerPose?
 
         /// Every pose the Move box reported, with the wall time it reported it at — `channels`'
@@ -155,7 +154,7 @@ extension CanvasManager {
             case .noTarget:
                 return "Nothing to record onto — add a layer first."
             case .moveBoxNotPosing:
-                return "This Move box can't be recorded — a recorded move needs a transform layer, or a folder with Transform on. Still armed, so add or switch to one and press Move again."
+                return "This Move box can't be recorded — a recorded move needs a transform layer. Still armed, so add or switch to one and press Move again."
             case .noScene:
                 return "Nothing to record over — this scene is one frame. Add a drawing further along the timeline first."
             case .nothingCaptured:
@@ -328,7 +327,7 @@ extension CanvasManager {
     ///
     /// ## Which box is recordable, and why only one of them is
     ///
-    /// A container pose — a transformation layer's `Layer.transform`, or a posed folder's — is a
+    /// A container pose — a transformation layer's `Layer.transform` — is a
     /// **value** channel: it has a stored base the drag writes as a preview and a track that animates
     /// it, which is exactly the shape `RecordingTake` already implements for a slider
     /// (`commitContainerPose`'s own header draws the distinction). So a take over it is the slider's
@@ -347,9 +346,8 @@ extension CanvasManager {
     func beginMoveBoxTake() -> Bool {
         guard isRecordingArmed || isRecording else { return false }
         // **Read off the piece rather than off `keyframeTarget`**, `beginArmedTake`'s own rule for its
-        // own reason: the take is aimed at the thing the artist's finger is on, and a folder's box is
-        // raised while a *layer* is current — so the current layer is the wrong answer by construction
-        // for §2.21's twin.
+        // own reason: the take is aimed at the thing the artist's finger is on, and a box is raised
+        // from a panel row for a layer that need not be current.
         if let piece = floatingPiece, piece.kind == .containerPose,
            let target = piece.containerTarget, containerPose(of: target) != nil {
             return beginArmedTake(on: target, isRecordable: true)
@@ -438,9 +436,9 @@ extension CanvasManager {
                                       startFrame: currentFrame,
                                       baseEffect: storedEffect(of: target),
                                       baseChannelValues: baseChannelValues,
-                                      // Nil on every target but a transformation layer or a posed
-                                      // folder, and captured unconditionally — `RecordingTake
-                                      // .basePose` carries the hazard that makes it unconditional.
+                                      // Nil on every target but a transformation layer, and
+                                      // captured unconditionally — `RecordingTake.basePose`
+                                      // carries the hazard that makes it unconditional.
                                       basePose: containerPose(of: target),
                                       // Read *after* the bracket above, so it counts the brackets
                                       // that were open before the take rather than including its own.

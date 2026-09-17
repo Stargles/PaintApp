@@ -3,11 +3,12 @@ import CoreGraphics
 
 /// **A folder's channels open into a graph band** — TODO (21)'s last box but one, KEYFRAMES.md §11.7.
 ///
-/// `graphBandExpansion` was keyed by `layerIndex` throughout, so a folder's opacity, grade, rotate
-/// speed, parallax share, shake rows and its own pose — all keyable from `FolderOptionsPanel` since
-/// `eef2e65`, all drawn as diamonds on the folder's timeline row — could not be *opened* anywhere.
-/// The widening is to `KeyframeTarget`, and the row a folder needs to be named by is
-/// `CanvasManager.selectedFolderID`, the timeline's second row selection.
+/// `graphBandExpansion` was keyed by `layerIndex` throughout, so a folder's opacity, grade and
+/// parallax share — all keyable from `FolderOptionsPanel`, all drawn as diamonds on the folder's
+/// timeline row — could not be *opened* anywhere. The widening is to `KeyframeTarget`, and the row
+/// a folder needs to be named by is `CanvasManager.selectedFolderID`, the timeline's second row
+/// selection. (A folder's own pose was a fourth channel kind here until TODO (71), which made a
+/// folder's Move the Move tool's rather than a container's; a folder poses nothing now.)
 ///
 /// **What this file pins, and what it leaves to `FolderGraphBandUITests`.** Everything here reaches
 /// the model: which row the band resolves to, what it lists, where a write lands, what the pick
@@ -25,10 +26,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     private let opacityID = TargetChannel.opacity.id
-    private let rotateSpeedID = TargetChannel.rotateSpeed.id
+    private let parallaxShareID = TargetChannel.parallaxShare.id
     private let brightnessID = "brightnessContrast.brightness"
-    private var containerX: String { PoseChannelID.container.parameterID(.x) }
-    private var containerRotation: String { PoseChannelID.container.parameterID(.rotation) }
     private let ppf = TimelineKeyMarkers.basePixelsPerFrame
     private let band = TimelineGraphBand.height
 
@@ -70,19 +69,6 @@ final class FolderGraphBandLogicTests: XCTestCase {
         XCTAssertTrue(manager.setTargetChannelTrack(target, channelID: opacityID,
                                                     to: curve([(0, 1), (8, 0)])),
                       "Fixture premise: the folder's opacity took a curve")
-    }
-
-    /// A container pose on the folder, keyed at rest on 0 and slid 24 points right on 8.
-    private func keyPose(_ manager: CanvasManager, _ folder: UUID,
-                         file: StaticString = #filePath, line: UInt = #line) {
-        guard var pose = manager.restingContainerPose else {
-            return XCTFail("The fixture's canvas must have a size", file: file, line: line)
-        }
-        let rest = pose.pose
-        pose.track.setKey(TransformTrack.Key(frame: 0, pose: rest))
-        pose.track.setKey(TransformTrack.Key(
-            frame: 8, pose: PoseQuad(box: rest.box, mappedBy: CGAffineTransform(translationX: 24, y: 0))))
-        manager.setFolderTransform(folder, to: pose)
     }
 
     private func layerRow(_ manager: CanvasManager, _ index: Int) -> KeyframeTarget {
@@ -259,8 +245,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
     func testAFoldersBandListsTheFoldersChannelsAndNotItsChildrens() throws {
         let (manager, folder, target) = folderManager()
         keyOpacity(manager, target)
-        manager.folders[folderIndex(manager, folder)].channelTracks[rotateSpeedID] = curve([(0, 1), (8, 3)])
-        keyPose(manager, folder)
+        manager.folders[folderIndex(manager, folder)].channelTracks[parallaxShareID] = curve([(0, 1), (8, 0.3)])
         // The child's own opacity, keyed on frames the folder does not key.
         XCTAssertTrue(manager.setTargetChannelTrack(layerRow(manager, 0), channelID: opacityID,
                                                     to: curve([(2, 1), (5, 0.4)])))
@@ -269,19 +254,14 @@ final class FolderGraphBandLogicTests: XCTestCase {
         manager.isGraphEditorOpen = true
         let listed = manager.graphBandListing(of: try content(manager).target)
 
-        XCTAssertEqual(listed.channels.map(\.parameterID),
-                       [opacityID, rotateSpeedID]
-                       + PoseComponents.Component.allCases.map { PoseChannelID.container.parameterID($0) },
-                       "The folder's own scalars first, then its pose decomposed — and nothing of "
-                       + "the layer inside it")
+        XCTAssertEqual(listed.channels.map(\.parameterID), [opacityID, parallaxShareID],
+                       "The folder's own scalars, and nothing of the layer inside it — a folder has "
+                       + "no pose rows since TODO (71)")
         XCTAssertEqual(listed.channels.first { $0.parameterID == opacityID }?.curve.keys.map(\.frame),
                        [0, 8], "The opacity row is the *folder's* curve, keyed at 0 and 8 — the "
                        + "child's is keyed at 2 and 5 and shares the id")
-        XCTAssertEqual(listed.channels.first { $0.parameterID == rotateSpeedID }?.name,
-                       TargetChannel.rotateSpeed.name)
-        XCTAssertEqual(listed.channels.first { $0.parameterID == containerX }?.curve.keys.map(\.frame),
-                       [0, 8], "The pose rows are the authored track at absolute frames — a folder's "
-                       + "container pose keys in document frames, so no offset applies")
+        XCTAssertEqual(listed.channels.first { $0.parameterID == parallaxShareID }?.name,
+                       TargetChannel.parallaxShare.name)
         XCTAssertEqual(listed.declined, [], "Nothing projective, nothing declined")
 
         // The band's own accessibility value says the same thing, which is what the UI class reads.
@@ -295,25 +275,23 @@ final class FolderGraphBandLogicTests: XCTestCase {
     }
 
     /// **The channel list is built from the same listing and names the folder's groups**, so the
-    /// popup over a folder band shows Opacity, Rotate Speed and the pose group with its Move name —
-    /// and hides on the folder's target, not the layer's.
+    /// popup over a folder band shows Opacity and Parallax — and hides on the folder's target, not
+    /// the layer's.
     func testTheChannelListOverAFolderBandNamesTheFoldersGroupsAndFiltersOnTheFolder() throws {
         let (manager, folder, target) = folderManager()
         keyOpacity(manager, target)
-        manager.folders[folderIndex(manager, folder)].channelTracks[rotateSpeedID] = curve([(0, 1), (8, 3)])
-        keyPose(manager, folder)
+        manager.folders[folderIndex(manager, folder)].channelTracks[parallaxShareID] = curve([(0, 1), (8, 0.3)])
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
 
         let groups = try XCTUnwrap(manager.graphChannelGroups)
-        XCTAssertEqual(groups.map(\.name),
-                       [TargetChannel.opacity.name, TargetChannel.rotateSpeed.name, "Group Transform"],
-                       "The pose group is named for a group, not `defaultName`'s \"Layer Transform\"")
-        XCTAssertEqual(groups.last?.navigation, .container,
-                       "The pose group's header is the subject a tap raises the box for")
+        XCTAssertEqual(groups.map(\.name), [TargetChannel.opacity.name, TargetChannel.parallaxShare.name],
+                       "The folder's two scalar groups, and no pose group: a folder poses nothing")
+        XCTAssertTrue(groups.allSatisfy { $0.navigation == nil },
+                      "Neither header is the subject a tap raises a box for")
 
-        // TODO (59)'s default hides the pose's flat scale and skew rows; switching the opacity row
-        // off must land on the folder's filter and shorten the folder's band.
+        // Switching the opacity row off must land on the folder's filter and shorten the folder's
+        // band.
         let before = try content(manager).channels.count
         manager.setGraphChannels([opacityID], visible: false)
         XCTAssertEqual(try content(manager).channels.count, before - 1, "One row fewer is drawn")
@@ -323,24 +301,18 @@ final class FolderGraphBandLogicTests: XCTestCase {
                        "…and answers nothing for the layer's band")
     }
 
-    /// **Tapping the pose group's header over a folder band raises the folder's box**, not the
-    /// current layer's — `revealPoseChannel`'s `.container` arm asks the band's row. The layer here
-    /// is a plain drawing layer with no pose, so the old answer would have been a refusal.
-    func testRevealingTheContainerChannelOverAFolderBandRaisesTheFoldersBox() {
+    /// **Tapping a container header over a folder band raises nothing** — a folder has no pose and
+    /// so no container channel to reveal; `revealPoseChannel`'s `.container` arm asks the band's row
+    /// and the row answers with no pose. The layer here is a plain drawing layer with no pose either,
+    /// so both rows refuse the same way.
+    func testRevealingTheContainerChannelOverAFolderBandRaisesNoBox() {
         let (manager, folder, target) = folderManager()
-        keyPose(manager, folder)
+        keyOpacity(manager, target)
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
 
-        XCTAssertTrue(manager.revealPoseChannel(.container), "A box came up")
-        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose)
-        XCTAssertEqual(manager.floatingPiece?.containerTarget, target, """
-            The box poses the folder — the row whose curves the list is a control of. A build that \
-            raised `beginContainerPoseMove()` with no target would pose the current layer, which \
-            here has no pose and refuses, so the assertion above would have gone red first; on a \
-            transformation layer it would have raised the wrong box in silence.
-            """)
-        manager.commitAllInteractiveState()
+        XCTAssertFalse(manager.revealPoseChannel(.container), "A folder has no container pose to reveal")
+        XCTAssertNil(manager.floatingPiece, "…and nothing came up")
 
         manager.selectLayer(0)
         XCTAssertFalse(manager.revealPoseChannel(.container),
@@ -395,52 +367,10 @@ final class FolderGraphBandLogicTests: XCTestCase {
                        "One press puts the folder's key back")
     }
 
-    /// **A node drag on a folder's pose curve writes the folder's `transform.track`** — the pose
-    /// funnel on the second home. The snapshot names the folder, carries no cels, and the write
-    /// and the restore both re-resolve it by id.
-    func testANodeDragOnAFoldersPoseCurveWritesTheFoldersTrack() throws {
-        let (manager, folder, target) = folderManager()
-        keyPose(manager, folder)
-        manager.selectFolderRow(folder)
-        manager.isGraphEditorOpen = true
-        // Draw the X row alone so the grab is unambiguous: six rows key the same two frames.
-        manager.setGraphChannels(PoseComponents.Component.allCases
-                                    .map { PoseChannelID.container.parameterID($0) }
-                                    .filter { $0 != containerX }, visible: false)
-        let content = try content(manager)
-        XCTAssertEqual(content.channels.map(\.parameterID), [containerX], "PREMISE: one row drawn")
-
-        let snapshot = manager.graphBandPoseSnapshot(of: content.target)
-        XCTAssertEqual(snapshot.target, target)
-        XCTAssertTrue(snapshot.cels.isEmpty, "A folder has no cels to snapshot")
-        XCTAssertEqual(snapshot.container?.track.keyedFrames, [0, 8], "…and its container pose")
-
-        let node = TimelineGraphBand.KeyRef(parameterID: containerX, frame: 8)
-        let moves = TimelineGraphBand.moves(of: [node], in: content.channels,
-                                            translation: CGSize(width: ppf * 3, height: 0),
-                                            pixelsPerFrame: ppf, bandHeight: band)
-        XCTAssertEqual(moves[node]?.frame, 11, "PREMISE: a retime of three frames")
-
-        let before = manager.history.undoStack.count
-        XCTAssertTrue(manager.writeGraphBandPoseEdits(
-            TimelineGraphBand.poseEdits(moves, in: content.channels),
-            from: snapshot, target: content.target))
-        let at = folderIndex(manager, folder)
-        XCTAssertEqual(manager.folders[at].transform?.track.keyedFrames, [0, 11],
-                       "The folder's key travelled from 8 to 11")
-        XCTAssertNil(manager.layers[0].transform, "The layer inside it gained no pose")
-        XCTAssertEqual(manager.history.undoStack.count - before, 1, "Outside a bracket, one step")
-        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 11],
-                       "…and the diamond on the folder's row went with the node — §2.28")
-
-        XCTAssertTrue(manager.restoreGraphBandPoses(snapshot, target: content.target))
-        XCTAssertEqual(manager.folders[at].transform?.track.keyedFrames, [0, 8],
-                       "A cancelled drag puts the folder's track back in one call")
-    }
-
-    /// **The node menu's writers address a folder** — Delete on an opacity node, Reset Curve's
-    /// predicate, and Delete and tap-to-add on a pose node — through the target-addressed funnels
-    /// the menu now carries. Each is paired with the layer's own store staying untouched.
+    /// **The node menu's writers address a folder** — Delete on an opacity node and Reset Curve's
+    /// predicate — through the target-addressed funnels the menu now carries, each paired with the
+    /// layer's own store staying untouched; and the pose writers refuse a folder outright, since it
+    /// has no pose and no cels.
     func testTheNodeMenusWritersReachAFoldersOwnStores() {
         let (manager, folder, target) = folderManager()
         keyOpacity(manager, target)
@@ -450,7 +380,6 @@ final class FolderGraphBandLogicTests: XCTestCase {
         // below refuses — mutation-tested; with identical curves that read went unnoticed.
         XCTAssertTrue(manager.setTargetChannelTrack(layerRow(manager, 0), channelID: opacityID,
                                                     to: curve([(0, 1), (8, 0), (12, 0.5)])))
-        keyPose(manager, folder)
         let at = folderIndex(manager, folder)
 
         // Delete Keyframe on the folder's opacity node at 8.
@@ -465,19 +394,14 @@ final class FolderGraphBandLogicTests: XCTestCase {
         XCTAssertFalse(manager.removeEffectParameterKey(target: target, parameterID: opacityID, frame: 8),
                        "A second Delete on the same node is not an edit")
 
-        // Delete Keyframe on the folder's pose node at 8, then tap-to-add one back at 4.
-        XCTAssertTrue(manager.removePoseChannelKey(target: target, parameterID: containerX, frame: 8))
-        XCTAssertEqual(manager.folders[at].transform?.track.keyedFrames, [0])
-        XCTAssertTrue(manager.addPoseChannelKey(target: target, parameterID: containerRotation,
-                                                frame: 4, value: 10))
-        XCTAssertEqual(manager.folders[at].transform?.track.keyedFrames, [0, 4],
-                       "A tap on the Rotation row added a key at 4")
-        let added = manager.folders[at].transform?.track.key(atFrame: 4)?.pose
-        XCTAssertEqual(added.flatMap { PoseComponents.decompose($0)?.rotation } ?? 0, 10, accuracy: 0.01,
-                       "…holding the tapped rotation and the other five components as they resolved")
+        // A container channel names nothing on a folder: a folder has no pose.
+        let containerX = PoseChannelID.container.parameterID(.x)
+        XCTAssertFalse(manager.removePoseChannelKey(target: target, parameterID: containerX, frame: 0))
+        XCTAssertFalse(manager.addPoseChannelKey(target: target, parameterID: containerX,
+                                                 frame: 4, value: 10))
         XCTAssertNil(manager.layers[0].transform, "The layer gained no pose from any of it")
 
-        // A cel channel names nothing on a folder: a folder has no cels.
+        // And a cel channel names nothing on a folder either: a folder has no cels.
         XCTAssertFalse(manager.removePoseChannelKey(target: target,
                                                     parameterID: PoseChannelID.cel(.cel).parameterID(.x),
                                                     frame: 0))

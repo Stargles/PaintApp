@@ -13,18 +13,18 @@ import UIKit
 /// landing:
 ///
 ///  * **§2.28's union, computed independently.** Every comparison's right-hand side is rebuilt from
-///    the folder's own stored fields — `keyframeMarks`, `effectTracks`, `channelTracks` and
-///    `transform?.track` — by `storedUnion(_:_:)` below, which never calls the accessor it is
+///    the folder's own stored fields — `keyframeMarks`, `effectTracks` and `channelTracks` — by
+///    `storedUnion(_:_:)` below, which never calls the accessor it is
 ///    checking. A test that read `keyframeFrames(of:)` on both sides would be comparing one
 ///    expression with itself.
 ///  * **What is drawn.** The workflow test's operands are the *folder node's opacity in the render
 ///    tree* at three frames, which is the number the compositor multiplies alpha by — not the curve,
 ///    and not the stored field. An assertion about `AnimationCurve` alone is true under any
 ///    implementation including one that reaches no tree.
-///  * **That the entry point takes no channel argument.** One press has to serve the grade, every
-///    row of `TargetChannel.all` and the container pose. That is asserted by *iterating*
-///    `TargetChannel.all` rather than by naming `.opacity`, so the day a second row lands the test
-///    widens with it instead of silently covering half the table.
+///  * **That the entry point takes no channel argument.** One press has to serve the grade and
+///    every row of `TargetChannel.all` a folder owns. That is asserted by *iterating* the table
+///    rather than by naming `.opacity`, so the day a second row lands the test widens with it
+///    instead of silently covering half the table.
 ///
 /// The panel rows themselves are in `Views/LayerPanel.swift`, which is **not** compiled into this
 /// target — so nothing here can pin them, and `FolderKeyframeEntryUITests` is what does.
@@ -77,7 +77,6 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         var frames = Set(folder.keyframeMarks)
         for curve in folder.effectTracks.values { frames.formUnion(curve.keys.map(\.frame)) }
         for curve in folder.channelTracks.values { frames.formUnion(curve.keys.map(\.frame)) }
-        if let track = folder.transform?.track { frames.formUnion(track.keyedFrames) }
         return frames.sorted()
     }
 
@@ -266,17 +265,17 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
 
     // MARK: - One press, every channel kind
 
-    /// **One press serves the grade, every `TargetChannel` row and the container pose** — requirement
-    /// 1, and the reason the panel row takes a `KeyframeTarget` and a frame and nothing else.
+    /// **One press serves the grade and every `TargetChannel` row a folder owns** — requirement 1,
+    /// and the reason the panel row takes a `KeyframeTarget` and a frame and nothing else.
     ///
-    /// Operands: for each of the three stores, *whether a key now sits on frame 10*, against the
-    /// single `addKeyframe` call that is supposed to have put it there. Every one of the three is
-    /// keyed 0 and 20 beforehand, so §2.24's surviving half — "hold this pose here" — must reach all
-    /// of them or the group drifts through the new mark on whichever channel was missed.
+    /// Operands: for each of the two stores, *whether a key now sits on frame 10*, against the
+    /// single `addKeyframe` call that is supposed to have put it there. Every one of them is keyed 0
+    /// and 20 beforehand, so §2.24's surviving half — "hold this pose here" — must reach all of them
+    /// or the group drifts through the new mark on whichever channel was missed.
     ///
-    /// **The `TargetChannel` half iterates `all` rather than naming `.opacity`.** `addKeyframe`'s own
-    /// loop is `for channel in TargetChannel.all`, so the day a second row lands (a blend amount, an
-    /// effect strength) this assertion covers it without being rewritten — which is the claim that
+    /// **The `TargetChannel` half iterates the table rather than naming `.opacity`.** `addKeyframe`'s
+    /// own loop is `for channel in TargetChannel.all`, so the day a second row lands (a blend amount,
+    /// an effect strength) this assertion covers it without being rewritten — which is the claim that
     /// "the next row needs no third case here" stated as a test rather than as a comment.
     func testOneGroupKeyframePressHoldsEveryChannelKindAtOnce() {
         let (manager, folder, target) = folderManager(frames: 32)
@@ -286,19 +285,16 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
             Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         let at = folderIndex(manager, folder)
         manager.folders[at].effectTracks[brightnessID] = curve([(0, 1), (20, 2)])
-        for channel in TargetChannel.all {
+        // The rows a folder owns — opacity and its parallax share. The four pose-mode rows have no
+        // folder home (`TargetChannel.folderPath`), since a folder poses nothing (TODO (71)).
+        let owned = TargetChannel.all.filter { $0.folderPath != nil }
+        XCTAssertEqual(owned.map(\.id), ["opacity", "parallaxShare"],
+                       "Fixture premise: a folder owns exactly these two rows")
+        for channel in owned {
             manager.folders[at].channelTracks[channel.id] = curve([(0, 1), (20, 0.2)])
         }
-        guard var pose = manager.restingContainerPose else {
-            return XCTFail("The fixture's canvas must have a size, or there is no resting pose to "
-                           + "build a container channel from")
-        }
-        let resting = pose.pose
-        pose.track.setKey(TransformTrack.Key(frame: 0, pose: resting))
-        pose.track.setKey(TransformTrack.Key(frame: 20, pose: resting))
-        manager.folders[at].transform = pose
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 20],
-                       "Fixture premise: three channel kinds, all keyed on the same two frames")
+                       "Fixture premise: both channel kinds, all keyed on the same two frames")
 
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 10),
                       "One press on the group's Add Keyframe row")
@@ -306,16 +302,13 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         XCTAssertNotNil(manager.folders[index].effectTracks[brightnessID]?
                             .keys.first { $0.frame == 10 },
                         "The grade's channel took a key at 10 — §2.21's home, §2.24's hold")
-        for channel in TargetChannel.all {
+        for channel in owned {
             XCTAssertNotNil(manager.folders[index].channelTracks[channel.id]?
                                 .keys.first { $0.frame == 10 },
-                            "\(channel.name): every row of `TargetChannel.all` took a key at 10, so "
-                            + "the next row added to that table needs no new case in the panel")
+                            "\(channel.name): every row of `TargetChannel.all` a folder owns took a "
+                            + "key at 10, so the next row added to that table needs no new case in "
+                            + "the panel")
         }
-        XCTAssertNotNil(manager.folders[index].transform?.track.key(atFrame: 10),
-                        "The container pose took a key at 10 — the kind that lives on `LayerPose` "
-                        + "rather than in a curve dictionary, and the one a per-kind entry point "
-                        + "would have forgotten")
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10, 20],
                        "…and the union names the new frame once, however many channels key it")
         XCTAssertEqual(storedUnion(manager, folder), [0, 10, 20])

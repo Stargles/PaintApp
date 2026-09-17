@@ -1290,7 +1290,7 @@ extension CanvasManager {
     ///
     /// ## `inheriting` — §4.4's container pose, and the one arm that declines it
     ///
-    /// A transformation layer above this cel (or a posed folder around it) resolves to an affine in
+    /// A transformation layer above this cel resolves to an affine in
     /// `CanvasManager.renderNodes` and arrives here. It reaches the **pose** arm, where it is composed
     /// onto every element after the cel's own channels.
     ///

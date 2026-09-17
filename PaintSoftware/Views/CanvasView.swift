@@ -1480,19 +1480,20 @@ struct CanvasView: UIViewRepresentable {
         /// guarded against the float having ended meanwhile.
         private func refreshStreamFloat(layerID: UUID) {
             guard !streamFloatRenderInFlight, let float = canvasManager.vectorFloat,
-                  float.layerID == layerID, let host = layerHosts[layerID],
-                  host.strokeView.hasVectorFloat,
-                  let vector = canvasManager.vectorCanvas(ofFloat: float) else { return }
+                  let part = float.parts.first(where: { $0.layerID == layerID }),
+                  let host = layerHosts[layerID], host.strokeView.hasVectorFloat,
+                  let vector = canvasManager.vectorCanvas(of: part) else { return }
             streamFloatRenderInFlight = true
-            let ids = float.insideIDs
-            let poses = float.poses
+            let ids = part.insideIDs
+            let poses = part.poses
             DispatchQueue.global(qos: .userInteractive).async {
                 let image = vector.renderIsolated(ids: ids, posedBy: poses)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.streamFloatRenderInFlight = false
-                    guard let current = self.canvasManager.vectorFloat, current.layerID == layerID,
-                          current.insideIDs == ids, let host = self.layerHosts[layerID],
+                    guard let current = self.canvasManager.vectorFloat,
+                          current.parts.contains(where: { $0.layerID == layerID && $0.insideIDs == ids }),
+                          let host = self.layerHosts[layerID],
                           host.strokeView.hasVectorFloat else { return }
                     host.strokeView.replaceVectorFloatImage(image)
                 }
@@ -1945,7 +1946,7 @@ struct CanvasView: UIViewRepresentable {
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
             if let float = canvasManager.vectorFloat,
-               canvasManager.layerIndex(ofID: float.layerID) != nil {
+               canvasManager.layerIndex(ofID: float.parts[0].layerID) != nil {
                 let pose = liveVectorFloatPose ?? Self.pose(of: float)
                 // **The box is fitted, not the lift's** — `CanvasManager.fittedFrame(of:at:)` hugs
                 // the ink in the box's own turned frame (LASSO_MOVE.md §5.22). It returns a frame
@@ -2008,14 +2009,17 @@ struct CanvasView: UIViewRepresentable {
         /// model has no business rasterizing. `hasVectorFloat` is what keeps a pass that changes
         /// nothing free.
         func updateVectorFloat() {
-            guard let float = canvasManager.vectorFloat, float.wantsLatch,
-                  let host = layerHosts[float.layerID],
-                  let vector = canvasManager.vectorCanvas(ofFloat: float) else {
+            guard let float = canvasManager.vectorFloat, float.wantsLatch else {
                 for host in layerHosts.values { host.strokeView.endVectorFloat() }
                 selectionOverlay?.setLiveSelectionTransform(rasterFloatAntsTransform())
                 return
             }
-            if !host.strokeView.hasVectorFloat {
+            // **One latch per part, on that part's own host** — a folder Move (TODO (71)) carries
+            // several layers under one box, and each layer's host shows its own share of the piece
+            // under the one transform `showVectorFloat` writes to all of them.
+            for part in float.parts {
+                guard let host = layerHosts[part.layerID], !host.strokeView.hasVectorFloat,
+                      let vector = canvasManager.vectorCanvas(of: part) else { continue }
                 // `latchedFrameTransform`, not the lift's: a `mayDiverge` float drops its latch
                 // between gestures and re-arms against geometry that has since moved, so the bitmap
                 // and the base it is measured from have to describe the same moment.
@@ -2024,7 +2028,7 @@ struct CanvasView: UIViewRepresentable {
                     // posed.** The float's geometry is stored at rest like all the rest of the cel;
                     // the layer's own render poses what it draws and this bitmap bypasses it, so it
                     // applies the same map itself. Empty on every unkeyframed document.
-                    image: vector.renderIsolated(ids: float.insideIDs, posedBy: float.poses),
+                    image: vector.renderIsolated(ids: part.insideIDs, posedBy: part.poses),
                     base: VectorCanvas.affine(from: float.latchedFrameTransform,
                                               aspect: float.latchedAspect,
                                               stretchAxis: float.latchedStretchAxis,
@@ -2066,7 +2070,11 @@ struct CanvasView: UIViewRepresentable {
             // The piece is measured from where its *bitmap* sits, which is the lift for an ordinary
             // float and the last nudge for a re-armed one — `latchedAspect` as well as
             // `latchedFrameTransform`, or a stretch already in the bitmap would be applied twice.
-            layerHosts[float.layerID]?.strokeView.updateVectorFloat(placement)
+            // Every part's host takes the same transform: the box is one box, and each latched
+            // bitmap was measured from the same base.
+            for part in float.parts {
+                layerHosts[part.layerID]?.strokeView.updateVectorFloat(placement)
+            }
             // The ants are measured from where the *model's* selection path sits, which is the last
             // nudge. Identity between gestures, which is when the two are the same thing.
             let written = VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
@@ -2083,7 +2091,6 @@ struct CanvasView: UIViewRepresentable {
         /// the ants from where the *model's* selection path sits, which is the last nudge. Identical
         /// to the affine arm's two references; only the currency is wider.
         private func showDistortedVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
-            guard let host = layerHosts[float.layerID] else { return }
             let live = CanvasManager.floatPictureMap(of: float, transform: pose.transform,
                                                      aspect: pose.aspect,
                                                      stretchAxis: pose.stretchAxis,
@@ -2095,7 +2102,9 @@ struct CanvasView: UIViewRepresentable {
                                                         distort: float.latchedDistort)
             let size = canvasManager.canvasSize ?? .zero
             if let view = LiveLayerTransform.viewMap(from: latched, to: live, inBoundsOfSize: size) {
-                host.strokeView.updateVectorFloat(projective: view.catransform3D)
+                for part in float.parts {
+                    layerHosts[part.layerID]?.strokeView.updateVectorFloat(projective: view.catransform3D)
+                }
             }
             let written = CanvasManager.floatPictureMap(of: float, transform: float.frame.transform,
                                                         aspect: float.frame.aspect,

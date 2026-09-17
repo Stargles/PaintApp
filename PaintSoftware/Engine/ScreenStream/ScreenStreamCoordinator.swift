@@ -595,7 +595,7 @@ final class ScreenStreamCoordinator: ObservableObject {
                       drawnFrameIndex[key] != latest.index else { continue }
                 drawnFrameIndex[key] = latest.index
                 vector.setStreamFrame(id: stream.id, image: UIImage(cgImage: latest.image))
-                if let float, float.layerID == layer.id, float.insideIDs.contains(stream.id) {
+                if let float, float.carries(elementID: stream.id, onLayer: layer.id) {
                     floatNeedsRepaint = true
                 } else {
                     hostNeedsRepaint = true

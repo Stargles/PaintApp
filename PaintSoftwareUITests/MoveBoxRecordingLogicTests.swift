@@ -538,37 +538,7 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - §2.21's folder twin, and an animated container
-
-    /// **A folder's Move box records onto the folder**, not onto whichever layer happens to be current
-    /// — which is why `beginMoveBoxTake` reads the target off the floating piece rather than off
-    /// `keyframeTarget`. A folder's box is raised from the folder options panel while a *layer* is
-    /// current, so the current layer is the wrong answer by construction.
-    func testAFoldersMoveBoxRecordsOntoTheFolderAndNotTheCurrentLayer() throws {
-        let (manager, clock) = movingDocument()
-        let folderID = manager.addFolder(name: "F")
-        manager.setFolderTransform(folderID, to: manager.restingContainerPose)
-        manager.history.removeAll()
-        manager.refreshUndoRedoState()
-        let layerPoseBefore = manager.layers[moverIndex].layerTransform
-
-        manager.armRecording()
-        XCTAssertTrue(manager.beginContainerPoseMove(for: .folder(id: folderID)))
-        XCTAssertTrue(manager.beginMoveBoxTake())
-        XCTAssertEqual(manager.recordingTake?.target, .folder(id: folderID),
-                       "The take is aimed at the folder whose box is up")
-        for i in 1...48 {
-            dragBox(manager, clock, to: CGVector(dx: CGFloat(i), dy: 0),
-                    at: 1_000 + TimeInterval(i) / 24)
-        }
-        manager.stopRecording()
-
-        let folder = try XCTUnwrap(manager.folders.first { $0.id == folderID })
-        XCTAssertTrue(try XCTUnwrap(folder.transform).track.isAnimated,
-                      "The curve landed on the folder's own pose")
-        XCTAssertEqual(manager.layers[moverIndex].layerTransform, layerPoseBefore,
-                       "…and the transformation layer that was current is untouched")
-    }
+    // MARK: - An animated container
 
     /// **A take over an already animated container carries the animation it replaces.**
     ///

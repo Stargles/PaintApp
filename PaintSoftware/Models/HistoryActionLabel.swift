@@ -145,7 +145,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// A repeat layer's period changing (`setRepeatPeriod`), TRANSFORM_LAYER.md §5.5 — typed, not
     /// keyable, one label.
     case repeatPeriod
-    /// A transform layer's — or a posed folder's — mode being switched (`setTransformLayerMode`),
+    /// A transform layer's mode being switched (`setTransformLayerMode`),
     /// TRANSFORM_LAYER.md §5: Move, Parallax or Rotate.
     case transformLayerMode
     /// A keyframe being placed (`CanvasManager.addKeyframe`) — KEYFRAMES.md §2.26. Named apart from
@@ -206,12 +206,6 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case groupLayers
     case mergeLayers
     case duplicateLayer
-    /// A folder becoming — or ceasing to be — a transformation group (`setFolderTransform`),
-    /// KEYFRAMES.md §2.21. Named apart from `.blendMode` because a folder's transform is an
-    /// independent thing to want back, and an artist who toggled it by mistake should not read "undo
-    /// blend mode" for a group. (A layer has no such toggle: a transform layer is a kind, and adding
-    /// one is `.addTransformLayer`.)
-    case transform
     case opacity
 
     // MARK: Cel timeline
@@ -339,7 +333,6 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .groupLayers: return "group layers"
         case .mergeLayers: return "merge layers"
         case .duplicateLayer: return "duplicate layer"
-        case .transform: return "change group transform"
         case .opacity: return "change opacity"
 
         case .shuffleFrame: return "reorder frame"

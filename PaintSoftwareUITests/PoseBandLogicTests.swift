@@ -243,25 +243,6 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(nodes, [2, 11], "…which is exactly where the band puts its nodes")
     }
 
-    /// **And so do a folder's**, §2.21's twin. `keyedFrames`' comment said a folder holds no cels and
-    /// therefore no object channels, which was true and was read as exhaustive; §4.4 gave the folder
-    /// a container pose of its own afterwards.
-    func testAFoldersOwnPoseKeysAreKeyframes() {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        let folderID = manager.addFolder(name: "Moved")
-        let canvasBox = CGRect(origin: .zero, size: size)
-        let index = manager.folders.firstIndex { $0.id == folderID }
-        XCTAssertNotNil(index, "Fixture: the folder is in the document")
-        manager.folders[index!].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 3, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 7, pose: PoseQuad(box: canvasBox,
-                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-
-        XCTAssertEqual(manager.keyframeFrames(of: .folder(id: folderID)), [3, 7])
-    }
-
     /// **The band and `listedAnimationChannelIDs` are the same list, in both directions** — the pin
     /// the effect channels already carry, extended to the pose ones.
     ///
@@ -610,10 +591,10 @@ final class PoseBandLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.revealPoseChannel(.cel(.cel)))
         let float = try XCTUnwrap(manager.vectorFloat)
-        XCTAssertEqual(float.layerID, layerID)
-        XCTAssertEqual(float.celID, celID)
+        XCTAssertEqual(float.parts[0].layerID, layerID)
+        XCTAssertEqual(float.parts[0].celID, celID)
         let elements = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements)
-        XCTAssertEqual(float.insideIDs, Set(elements.map(\.id)),
+        XCTAssertEqual(float.parts[0].insideIDs, Set(elements.map(\.id)),
                        "`.cel` means whatever is on this cel")
     }
 
@@ -638,8 +619,8 @@ final class PoseBandLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.revealPoseChannel(.cel(.group(group.id))))
         let float = try XCTUnwrap(manager.vectorFloat)
-        XCTAssertEqual(float.insideIDs, [taggedID], "Only the tagged element travels")
-        XCTAssertEqual(float.liftedInside.count, 1)
+        XCTAssertEqual(float.parts[0].insideIDs, [taggedID], "Only the tagged element travels")
+        XCTAssertEqual(float.parts[0].liftedInside.count, 1)
     }
 
     /// A channel whose ink is not on the cel under the playhead raises nothing and says so, rather

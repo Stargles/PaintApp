@@ -374,7 +374,7 @@ final class TwoAnimationGroupMoveLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.beginVectorChannelMove(.group(groupB)),
                       "a channel lift carries exactly one group's membership")
-        XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1, "and only that group's ink")
+        XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs.count, 1, "and only that group's ink")
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 25, dy: 0))
         XCTAssertTrue(manager.commitVectorFloatIfNeeded())
         XCTAssertNil(manager.notice)

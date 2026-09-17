@@ -674,8 +674,8 @@ struct DrawingView: View {
     /// the target has a pose at all, and whether that pose's mode is one with rows to show.
     private var transformBeingEdited: TransformEditing? {
         guard showingTransformSettings, let id = layerOptionsID else { return nil }
-        let target: KeyframeTarget = canvasManager.folders.contains { $0.id == id }
-            ? .folder(id: id) : .layer(id: id)
+        // A layer, always: a folder poses nothing (TODO (71)) and its panel has no mode row.
+        let target = KeyframeTarget.layer(id: id)
         guard let mode = canvasManager.transformLayerMode(of: target), mode != .move else { return nil }
         return TransformEditing(target: target, mode: mode)
     }
@@ -757,8 +757,7 @@ struct DrawingView: View {
                 if let layerOptionsID {
                     if canvasManager.folders.contains(where: { $0.id == layerOptionsID }) {
                         FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID,
-                                           showingEffectSettings: $showingEffectSettings,
-                                           showingTransformSettings: $showingTransformSettings) {
+                                           showingEffectSettings: $showingEffectSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))

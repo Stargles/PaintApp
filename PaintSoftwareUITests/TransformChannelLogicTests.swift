@@ -365,12 +365,12 @@ final class TransformChannelLogicTests: XCTestCase {
 
         manager.currentFrame = 6
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "the in-between of a pose is a frame like any other")
-        XCTAssertFalse(manager.vectorFloat?.poses.isEmpty ?? true,
+        XCTAssertFalse(manager.vectorFloat?.parts[0].poses.isEmpty ?? true,
                        "and the float knows it is posed, which is what makes the box and the drag land")
         manager.cancelVectorFloat()
         manager.currentFrame = 0
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "as is a frame that rests")
-        XCTAssertTrue(manager.vectorFloat?.poses.isEmpty ?? false, "…carrying nothing, there")
+        XCTAssertTrue(manager.vectorFloat?.parts[0].poses.isEmpty ?? false, "…carrying nothing, there")
         manager.cancelVectorFloat()
     }
 

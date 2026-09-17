@@ -2184,8 +2184,8 @@ final class CanvasManager: ObservableObject {
     }
 
     /// **A container showing its contents exactly where they are, measured against this canvas** —
-    /// what `addTransformLayer` stamps, what `setFolderTransform` turns a folder's pose on with, and
-    /// what a transformation layer holds until the artist moves it.
+    /// what `addTransformLayer` stamps, and what a transformation layer holds until the artist moves
+    /// it.
     ///
     /// Nil before the document has a canvas size, which is the one state in which there is no box to
     /// measure a pose against. Every pose on this path is measured against the canvas rect: a
@@ -2539,7 +2539,7 @@ final class CanvasManager: ObservableObject {
         guard layers.indices.contains(index) else { return }
         // Settle a float lifted from this layer *before* the layer goes, for `rasterizeLayer`'s
         // reason one door along. `handleActiveContextChanged` below does commit it, but by then the
-        // layer is out of `layers`, so `vectorCanvas(ofFloat:)` resolves nothing and the suppression
+        // layer is out of `layers`, so `vectorCanvas(of:)` resolves nothing and the suppression
         // is left on the canvas — which `captureStructure` above is still holding by reference, so
         // undoing the delete brings the layer back with its ink suppressed and nothing left alive to
         // clear it.
@@ -3540,30 +3540,6 @@ final class CanvasManager: ObservableObject {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].blendMode != mode else { return }
         withStructureUndo(label: .blendMode) {
             folders[idx].blendMode = mode
-        }
-    }
-
-    /// **Turns a folder's own pose on or off** — the writer for `LayerFolder.transform` (§2.21) that
-    /// TODO (21) found missing: the field existed, `RenderTree.renderNodes` already composes it into
-    /// every leaf beneath the folder unconditionally, and nothing anywhere could ever set it to a
-    /// value the artist chose.
-    ///
-    /// **Independent of `effect`, `blendMode` and `isCompositorNode`, and that is not an omission.**
-    /// A folder has real content — its children — so its pose, its grade and its own blend mode are
-    /// three independent wrappers around that content rather than three answers to one question:
-    /// `containerPose(of:)` reads `folders[…].transform` with no gate on `effect`, and the render tree
-    /// carries a folder's `effect` through "unconditionally like the leaf's" while composing its pose
-    /// in on the way down — both regardless of the other. Nothing here needs to clear anything. (A
-    /// layer's pose has no on/off writer at all any more: a transform layer *is* the kind that poses,
-    /// `addTransformLayer`, and a folder is the one container whose pose is a switch.)
-    ///
-    /// **No rename**: `setFolderBlendMode` and `setFolderIsolated` beside this don't rename either,
-    /// and this follows them rather than `setNodeEffect`'s node-specific scheme.
-    func setFolderTransform(_ folderID: UUID, to pose: LayerPose?) {
-        guard let idx = folders.firstIndex(where: { $0.id == folderID }),
-              folders[idx].transform != pose else { return }
-        withStructureUndo(label: .transform) {
-            folders[idx].transform = pose
         }
     }
 
