@@ -171,7 +171,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
         XCTAssertTrue(manager.openPresentations.isEmpty, "Removing what is already gone is a no-op, not an error")
     }
 
-    /// **`canvasInteractionBegan()` has to do both halves.** It is the single entry point the six
+    /// **`canvasInteractionBegan()` has to do both halves.** It is the single entry point the seven
     /// canvas-touch sites in `CanvasView` call — the count read "four" here too until 2026-08-26,
     /// and `CanvasManager.canvasInteractionBegan`'s own comment names them and says what the
     /// miscount cost. Each half was somebody's whole fix at some point:
@@ -194,22 +194,23 @@ final class CanvasPresentationLogicTests: XCTestCase {
                        "…and the overlapping presentation has to have come down with it")
     }
 
-    /// **TODO (67): `canvasTouchLanded` is the half of `canvasInteractionBegan` that must run on
-    /// *every* canvas touch, including the first finger of a two-finger pan/pinch/rotate — and must
-    /// NOT send `interactionBegan`, which is what closes the bottom-docked panels
-    /// (`DrawingView`'s `activePanel`, the Effect Settings bar among them).** Before this split,
-    /// `StrokeGestureRecognizer.onAnyTouchBegan` routed straight through `canvasInteractionBegan`,
-    /// so a two-finger canvas transform's first finger closed the Colour Wheels settings bar (the
-    /// owner's report) before the second finger ever arrived to say this was never a stroke.
+    /// **`canvasTouchLanded` runs on *every* canvas touch — the first finger of a two-finger
+    /// pan/pinch/rotate included — and must therefore close nothing: neither a bottom-docked panel
+    /// (via `interactionBegan`) nor a presentation over the canvas (via
+    /// `dismissPresentationsOverLiveCanvas`).** Both closings live in `canvasInteractionBegan`,
+    /// which only a confirmed single touch reaches (`StrokeGestureRecognizer.onSingleTouchBegan`).
     ///
-    /// This is the model-level half of that fix: the seam `StrokeGestureRecognizer.onSingleTouchBegan`
-    /// is unreachable from this target (it needs a real `UITouch`/`UIEvent`, which cannot be
-    /// constructed here — the same limit `StrokeInterruptionLogicTests`' header names for
-    /// `touchesBegan` itself), so what a logic test *can* pin is that the two halves of the old,
-    /// single `canvasInteractionBegan` now really are two functions with two different effects
-    /// rather than one function under two names. `OptionsPanelUITests`' drive is the other half —
-    /// the one that actually delivers a two-finger touch.
-    func testCanvasTouchLandedDismissesButDoesNotSignal() {
+    /// **The presentation half was the canvas freeze (owner, 2026-09-16).** TODO (67) moved the
+    /// panel-closing `send()` to the single-touch path but left the presentation dismissal here, on
+    /// the any-touch path — so a two-finger pinch's first finger tore an open `.popover` down
+    /// mid-gesture, and the popover's `_UIPassthroughGateGestureRecognizer` going with it stranded
+    /// pan/pinch/rotate and the stroke recognizer in a terminal state UIKit never resets. Moving the
+    /// dismissal to `canvasInteractionBegan` (below) is the fix; this pins that
+    /// `canvasTouchLanded` no longer dismisses. It could only be pinned by an XCUITest before
+    /// (`CanvasTransformFreezeUITests`), because the seam `onSingleTouchBegan` is unreachable from
+    /// this target (a real `UITouch`/`UIEvent` cannot be constructed here) — but the *split itself*
+    /// is a model fact, and this is the model-level half.
+    func testCanvasTouchLandedNeitherDismissesNorSignals() {
         let manager = CanvasFixture.manager()
         var signals = 0
         let subscription = manager.interactionBegan.sink { signals += 1 }
@@ -221,18 +222,21 @@ final class CanvasPresentationLogicTests: XCTestCase {
         manager.canvasTouchLanded()
 
         XCTAssertEqual(signals, 0, """
-            `canvasTouchLanded` must not send `interactionBegan` — that is the whole reason it exists \
-            apart from `canvasInteractionBegan`: a two-finger canvas transform's first finger reaches \
-            only this, and must not close the bottom-docked panels a stroke would.
+            `canvasTouchLanded` must not send `interactionBegan` — a two-finger canvas transform's \
+            first finger reaches only this, and must not close the bottom-docked panels a stroke would.
             """)
-        XCTAssertEqual(manager.openPresentations, [.galleryProjectVersions],
-                       "…but it still has to drop whatever sits over the live canvas, same as the full function")
+        XCTAssertEqual(manager.openPresentations, [.timelineSlotMenu, .galleryProjectVersions],
+                       """
+                       …and it must NOT dismiss a presentation either — that dismissal on the \
+                       any-touch path is the canvas freeze: it tore a popover's gate recognizer down \
+                       mid-two-finger-gesture and stranded the transform recognizers.
+                       """)
 
-        // And the full function still does both — the no-regression half of the split.
+        // The full function, which a confirmed single touch reaches, does both.
         manager.canvasInteractionBegan()
-        XCTAssertEqual(signals, 1, "`canvasInteractionBegan` must still send `interactionBegan` once")
+        XCTAssertEqual(signals, 1, "`canvasInteractionBegan` must send `interactionBegan` once")
         XCTAssertEqual(manager.openPresentations, [.galleryProjectVersions],
-                       "Nothing left to drop the second time — `.galleryProjectVersions` never overlapped")
+                       "…and drop the overlapping presentation — `.galleryProjectVersions` never overlapped")
     }
 
     // MARK: - The half the compiler cannot check
