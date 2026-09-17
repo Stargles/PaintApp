@@ -13,14 +13,13 @@ model and render path are specified there and this document does not restate the
   **the kind is the discriminant** (ruling 2, stage 0). It was the third mode of `.value` until
   2026-09-11, chosen by presence with the precedence effect, then transform, then flat colour; a
   document saved that way decodes as the new kind (`LayerKind.migratingTransformModeValueLayers`).
-  `LayerFolder.transform` is the same `LayerPose` on the folder (§2.21's twin).
+  A folder holds no pose of its own since TODO (71), 2026-09-17 — see §3.3.
 - **It is applied in one place and never reaches the compositor.** `RenderTree.renderNodes(inContainer:
   atFrame:inheriting:poses:)` walks each container bottom-to-top, composes every transform layer's
   `mapping(atFrame:)` into `accumulated`, and records a per-entry `carried[position]` — an array,
   already per entry, assigned uniformly today. The result is `[layerIndex: PoseMap]`, spent in
   `leafSnapshots` on three consumers off one value: the vector derivation (§2.3's re-pose), the
-  raster tiers' CTM (`PixelOps.FrozenCel.pose`, §2.12), and `LayerContentVersion.pose` (§4.5). A
-  folder's own pose is composed on the way into its recursion ("inner first").
+  raster tiers' CTM (`PixelOps.FrozenCel.pose`, §2.12), and `LayerContentVersion.pose` (§4.5).
 - **Scope is structural**: `carried` is a local, so a pose cannot leave its container; inside a
   compositor node the sibling carry is suppressed. **The accumulator reads the block** (ruling 1,
   stage 1): it composes a layer's pose only where `activeCelIndex` finds a cel, and the leaf
@@ -538,12 +537,12 @@ reachability XCUITest from a fresh document and an assertion on what is drawn, p
 | 6 ✅ | **Duplicate offset** — `Effect.duplicateOffset`, two passes on both backends (the resample through the box's inverse, the combine under a layer blend mode), the seven CPU blend formulas, `FloatingPieceKind.effectBox` as the second writer, the frame-size apron. **Shipped 2026-09-11.** | `DuplicateOffsetEffectLogicTests`: the identity paints nothing on soft ink (the `min`/`max` regions, §3.4); rim and intersection over a disc slid half a radius counted pixel for pixel and held to the two circles' areas; a quarter turn carries the copy clockwise on screen on both backends; a half-size copy's rim is the annulus; the seven CoreGraphics modes against W3C by hand; every blend mode in both regions to a channel step against the shader, MEASURED max 1; the same on a strip window off the frame's centre; a strip with its apron is the rows of the whole and one without is not; `params` resolved once; the round trip and the bare-kind decode; the box comes up at the copy's pose, previews live, writes the five as one step and one undo restores them; an unmoved box writes nothing and Mirror is a negative scale; a key at the playhead on a keyed channel; the refusal past the bar with its notice; Distort refused by name; the composited canvas shows the rim on both backends. `EffectParityLogicTests.testNoEffectChangesAlpha` sweeps both regions; `FrameBakeKeyLogicTests` drops each of the nine fields; `StripedCompositeLogicTests` / `…MetalLogicTests` pin the twenty-row slide under the driver and the width-dependent reach. `DuplicateOffsetUITests` drives it from a fresh document — draw, `+`, the scrolled menu, the swatch's picker, Adjust Box, the Distort caption, the drag, Done — and reads a red rim and black intersection off the canvas, then the written Offset X off the reopened slider |
 
 Every stage has shipped. The mode picker in `LayerPanel.transformModeRow`
-lists every case of `TransformLayerMode` (`Models/TransformLayerMode.swift`) on a layer and
-`TransformLayerMode.folderCases` on a folder, which is all of them but Repeat — **not `TransformMode`,
+lists every case of `TransformLayerMode` (`Models/TransformLayerMode.swift`) — **not `TransformMode`,
 which was taken**: that name is the Move bar's Uniform / Freeform / Distort picker, and stage 2 found
-the collision on the day it introduced the enum. The mode lives on `LayerPose.mode`, so a folder's
-pose carries it for free (§3.3); the scalars a mode reads are `TargetChannel` rows on the two homes,
-because a key path through an optional payload is not writable; what is not keyable (§3.3's closing
+the collision on the day it introduced the enum. The mode lives on `LayerPose.mode`; the scalars a
+mode reads are `TargetChannel` rows (`rotateSpeed` and the shakes on the layer alone, `parallaxShare`
+on both homes — §3.3), because a key path through an optional payload is not writable; what is not
+keyable (§3.3's closing
 paragraph) sits on `LayerPose` beside the mode.
 
 **Two things stages 4 and 5 found that the design did not say.** A leaf inside a *folder* beneath a

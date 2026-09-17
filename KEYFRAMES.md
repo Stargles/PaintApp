@@ -1037,8 +1037,8 @@ answer.
 **Six findings, and the construction itself survived exactly — accumulate down each container, emit per
 layer index, stamp ink at the posed position. Four of the six are claims this section makes that are
 false against the code; two are things it does not mention that turned out to be half the work.**
-`Layer.transform` and `LayerFolder.transform` are both a `LayerPose` (a stored `PoseQuad` plus a
-`TransformTrack` in §3.1's absolute document frames); `CanvasManager.renderTreeAndPoses(atFrame:)`
+`Layer.transform` is a `LayerPose` (a stored `PoseQuad` plus a `TransformTrack` in §3.1's absolute
+document frames; a folder held a twin of it until TODO (71)); `CanvasManager.renderTreeAndPoses(atFrame:)`
 accumulates the pose down each container and emits `[layerIndex: CGAffineTransform]` beside the tree.
 What was wrong:
 

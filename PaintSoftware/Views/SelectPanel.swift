@@ -10,9 +10,11 @@ import SwiftUI
 /// **The edit band — Colour, Brush, Size, Opacity — is TODO (42)**, the owner's *"a better tool where
 /// you can also change the brush type, size, etc. of the strokes inside the selection … all changes
 /// able to be seen live in the drawing."* It is the four things the toolbar shows for the *current*
-/// brush, applied to ink that already exists, and it is up only while a selection exists: the panel
-/// the owner called too tall (TODO (59)) is measured without one, and a band of sliders that is dim
-/// with nothing to drive would be height for nothing. Colour is a swatch that opens the app's one
+/// brush, applied to ink that already exists. **Since TODO (90) it folds behind the action row's
+/// Edit icon** — the owner: *"taking an entire layer. It should be a single icon, which expands that
+/// menu when pressed"* — and the icon is live only while a selection exists: the panel the owner
+/// called too tall (TODO (59)) is measured without one, and a band of sliders that is dim with
+/// nothing to drive would be height for nothing. Colour is a swatch that opens the app's one
 /// colour picker **on the selection's own colour** — *"defaulting to the current color"* — rather
 /// than applying the palette's; Size and Opacity are sliders that preview on every tick and commit
 /// **one** undo step on lift (`CanvasManager.beginSelectionEdit` / `previewSelectionEdit` /
@@ -26,10 +28,10 @@ import SwiftUI
 ///
 /// **"What the loop catches" sits directly above the edit band and the action row** (TODO item
 /// (23)), because those are what obey it: Move — reached from the toolbar, not from here — Colour,
-/// Brush, Size, Opacity and Clear all read `CanvasManager.selectionMembership`, so the artist should
-/// be able to read the rule and the controls in one glance. It is above rather than below because it
-/// is chosen *first*: the panel's order is how you select (the mode tabs), what the loop then
-/// catches, and what to do with it.
+/// Brush, Size, Opacity, Clear and To New Layer all read `CanvasManager.selectionMembership`, so the
+/// artist should be able to read the rule and the controls in one glance. It is above rather than
+/// below because it is chosen *first*: the panel's order is how you select (the mode tabs), how the
+/// next loop meets the last (Subtract, TODO (95)), what the loop then catches, and what to do with it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
