@@ -130,7 +130,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         // prediction the budget weighs is deliberately the upper one. A rate rather than a total,
         // because the rate is the durable fact and the total follows from the canvas.
         XCTAssertEqual(fill / (ownersCanvasBytes / 4), 46, "46 bytes a canvas pixel, worst case")
-        XCTAssertEqual(total, 844 * Self.mib + 136, "the seven budgets at the owner's canvas")
+        // The fill's two counters and two `FillParams` are the only bytes here that do not scale.
+        let fillConstants = 2 * (MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride)
+        XCTAssertEqual(fillConstants, 168, "a `FillParams` is 80 bytes — eleven scalars and two float4s")
+        XCTAssertEqual(total, 844 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
         XCTAssertLessThan(total, ceiling,
                           "seven ceilings added together must still fit inside the process limit, or the arithmetic is asking for a jetsam")
 

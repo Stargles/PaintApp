@@ -1001,7 +1001,12 @@ extension CanvasManager {
     ///
     /// The tiers are the canvas-sized pictures the layer hosts already display — the raster tier's
     /// memoized readback and the vector canvas's own memo — drawn through the window's transform, so
-    /// the composite allocates the window and nothing the size of the canvas.
+    /// the composite allocates the window and nothing the size of the canvas. **One transient is
+    /// CoreGraphics' own and is linear in the canvas's width**: drawing a bitmap-backed image into a
+    /// context that clips it copies every source row the destination touches at the source's full
+    /// stride, MEASURED (`FillFootprintBench`) at `windowHeight × canvasWidth × 4` — 24 MB for a
+    /// 1024-row window on a 6000² canvas, 33 MB on 8192², freed when the draw returns. Cropping the
+    /// image to the window first does not avoid it; the crop shares the rows.
     private static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow) -> [UInt8]? {
         let width = window.workingWidth, height = window.workingHeight
         guard width > 0, height > 0 else { return nil }

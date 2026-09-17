@@ -617,4 +617,39 @@ final class FillBoundaryLogicTests: XCTestCase {
         XCTAssertEqual(manager.currentFillKey().inset, 16,
                        "The fill renders against the artwork rect, so the key has to carry the padding")
     }
+
+    // MARK: - The paper as a rect, seen from a window (TODO (86))
+
+    /// The buffer is a window of the canvas since `FillWindow`, so the paper's edge can lie anywhere
+    /// relative to it — through it, or outside it altogether. The rule is the paper's edge and not
+    /// the buffer's: a bar leaving a gap at the *top of the buffer* seals against a paper edge that
+    /// sits there, and does not seal against one that lies above the window, out of sight.
+    func testThePaperEdgeIsTheBoundaryWhereverItLiesRelativeToTheBuffer() throws {
+        let reference = verticalBarLeavingATopGap(fromY: 6)
+        let buffer = CGRect(x: 0, y: 0, width: Self.canvasW, height: Self.canvasH)
+
+        // The paper edge on the buffer's top edge — the whole-canvas case, sealed as before.
+        let atTheRim = try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60), artworkRect: buffer)
+        XCTAssertFalse(isFilled(atTheRim, 100, 60), "the bar's tip seals against the paper edge on the rim")
+
+        // The paper a window above and to the left of this buffer: nothing in the buffer is an edge.
+        let around = try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60),
+                              artworkRect: buffer.insetBy(dx: -300, dy: -300))
+        XCTAssertTrue(isFilled(around, 100, 60), "with the paper's edge 300 px away the gap is a gap")
+        XCTAssertEqual(filledCount(around),
+                       filledCount(try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60), artworkRect: nil)),
+                       "…and the fill is the one the option off gives, pixel for pixel")
+
+        // The paper's *right* edge through the buffer at x = 40, its top at the rim: the flood is
+        // fenced at that column, whatever the bar at 63 does.
+        let through = try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60),
+                               artworkRect: CGRect(x: -300, y: 0, width: 340, height: 500))
+        XCTAssertTrue(isFilled(through, 20, 60))
+        XCTAssertFalse(isFilled(through, 45, 60), "the paper's edge at x = 40 is a barrier between pixels")
+        XCTAssertFalse(isFilled(through, 100, 60))
+
+        // A degenerate rect is the option off, not a fence around nothing.
+        let empty = try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60), artworkRect: .zero)
+        XCTAssertEqual(filledCount(empty), filledCount(around))
+    }
 }
