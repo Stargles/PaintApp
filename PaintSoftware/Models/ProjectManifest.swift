@@ -31,6 +31,9 @@ struct ProjectManifest: Codable {
     /// `.cutToIntersection` should reopen still cutting to intersections, without leaking into the
     /// next project. Meaningless for all-raster projects, which just save/reload the default.
     var vectorEraserMode: VectorEraserMode
+    /// Whether the eraser reaches every visible vector layer — `CanvasManager.universalEraser`,
+    /// persisted beside the mode it aims. Absent means off.
+    var universalEraser: Bool = false
     var folders: [FolderManifest] = []
     var viewPresets: [ViewPresetManifest] = []
     /// The document-level interpolation registries. Live in the manifest rather than beside a cel
@@ -57,7 +60,7 @@ struct ProjectManifest: Codable {
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
-         vectorEraserMode: VectorEraserMode = .erase,
+         vectorEraserMode: VectorEraserMode = .erase, universalEraser: Bool = false,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
          animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil) {
@@ -74,6 +77,7 @@ struct ProjectManifest: Codable {
         self.selectedBrush = selectedBrush
         self.customBrushes = customBrushes
         self.vectorEraserMode = vectorEraserMode
+        self.universalEraser = universalEraser
         self.folders = folders
         self.viewPresets = viewPresets
         self.motionGroups = motionGroups
@@ -101,6 +105,7 @@ struct ProjectManifest: Codable {
         selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.roundSoft
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
         vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
+        universalEraser = try container.decodeIfPresent(Bool.self, forKey: .universalEraser) ?? false
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
         viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
         // Absent for pre-interpolation projects and any project that never uses it (an empty
@@ -129,6 +134,7 @@ struct ProjectManifest: Codable {
         try container.encode(selectedBrush, forKey: .selectedBrush)
         try container.encode(customBrushes, forKey: .customBrushes)
         try container.encode(vectorEraserMode, forKey: .vectorEraserMode)
+        if universalEraser { try container.encode(true, forKey: .universalEraser) }
         try container.encode(folders, forKey: .folders)
         try container.encode(viewPresets, forKey: .viewPresets)
         if !motionGroups.isEmpty { try container.encode(motionGroups, forKey: .motionGroups) }
@@ -142,7 +148,7 @@ struct ProjectManifest: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
-             vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes,
+             vectorEraserMode, universalEraser, folders, viewPresets, motionGroups, guideStrokes,
              animationGroups, brushTableFileName
     }
 }

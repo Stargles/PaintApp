@@ -1121,6 +1121,15 @@ final class CanvasManager: ObservableObject {
     /// Defaults to `.erase`, the mode that behaves like the raster eraser users already know.
     @Published var vectorEraserMode: VectorEraserMode = .erase
 
+    /// **The universal eraser** — TODO (82). On, an eraser gesture on a vector layer is committed to
+    /// *every* visible vector layer's shown cel that it erases something on, as one undo step
+    /// (`commitUniversalErase`); off, it reaches the active layer alone. A cel it touches no ink of
+    /// gets nothing, which is (81)'s rule applied per layer rather than a second one.
+    ///
+    /// Beside `vectorEraserMode` for the same reason that is here and not on the brush: it is how the
+    /// eraser is *aimed*, not what its stamp is, and it persists with the mode in the manifest.
+    @Published var universalEraser = false
+
     // MARK: - Real-size stamp preview
 
     /// Which size slider, if any, currently has a finger on it — the whole visibility rule for the

@@ -40,8 +40,8 @@ struct EraserSettingsPanel: View {
 
     // MARK: - Vector mode
 
-    /// The three-way vector-eraser mode control, occupying the accessory slot the brush panel uses
-    /// for custom-texture import.
+    /// The four-way vector-eraser mode control and the Universal switch under it, occupying the
+    /// accessory slot the brush panel uses for custom-texture import.
     ///
     /// Shown only on a `.vector` layer: on a raster layer the eraser is a plain `.destinationOut`
     /// brush with no modes to pick between, and the panel stays exactly as it was before this
@@ -62,6 +62,18 @@ struct EraserSettingsPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("\(Self.spec.idPrefix).vectorModePicker")
+
+                // TODO (82). The caption is the rule in one sentence, including the half the
+                // artist cannot see from a single layer: a layer the gesture erases nothing on is
+                // left alone.
+                Toggle(isOn: $canvasManager.universalEraser) {
+                    Text("Universal")
+                        .foregroundColor(.white)
+                }
+                .accessibilityIdentifier("\(Self.spec.idPrefix).universalToggle")
+                Text("Erase on every visible vector layer at once. A layer the stroke erases nothing on is left as it was.")
+                    .font(.caption)
+                    .foregroundColor(.gray)
             }
             .padding(.horizontal)
             .padding(.bottom, 8)

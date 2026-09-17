@@ -572,6 +572,8 @@ struct CanvasView: UIViewRepresentable {
             /// Must be in the cache key: without it, changing eraser mode leaves every other field
             /// equal and the guard silently does nothing.
             let vectorEraserMode: VectorEraserMode
+            /// In the key for the same reason.
+            let universalEraser: Bool
         }
         private var lastAppliedTool: [UUID: AppliedTool] = [:]
         private var lastOrderedLayerIDs: [UUID] = []
@@ -2540,7 +2542,7 @@ struct CanvasView: UIViewRepresentable {
             let activeBrush = isEraser ? canvasManager.selectedEraserBrush : canvasManager.selectedBrush
 
             // Only push new tool settings when something tool-relevant actually changed.
-            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush, vectorEraserMode: canvasManager.vectorEraserMode)
+            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush, vectorEraserMode: canvasManager.vectorEraserMode, universalEraser: canvasManager.universalEraser)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
 
@@ -2550,6 +2552,7 @@ struct CanvasView: UIViewRepresentable {
             host.strokeView.brush = activeBrush
             host.strokeView.isEraser = isEraser
             host.strokeView.vectorEraserMode = canvasManager.vectorEraserMode
+            host.strokeView.universalEraser = canvasManager.universalEraser
             // .fill is handled by fillTapRecognizer, not the stroke view.
         }
 

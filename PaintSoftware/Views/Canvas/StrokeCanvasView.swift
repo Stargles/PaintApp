@@ -45,6 +45,9 @@ final class StrokeCanvasView: UIView {
     /// Which of the three vector-eraser behaviours applies. Only consulted when `isEraser` is
     /// true and this view drives a `vectorCanvas`; a raster layer's eraser has no modes.
     var vectorEraserMode: VectorEraserMode = .erase
+    /// `CanvasManager.universalEraser`, pushed down beside the mode: the lift then hands the gesture
+    /// to `CanvasManager.commitUniversalErase` instead of this view's own canvas alone.
+    var universalEraser = false
     var pencilOnlyDrawing: Bool = false {
         didSet { strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing }
     }
@@ -104,6 +107,8 @@ final class StrokeCanvasView: UIView {
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
             inBetweenCelID = nil
+            gestureIsUniversal = false
+            universalCutSessions = []
         }
         lastStampPoint = nil
         lastLiveSample = nil
@@ -421,6 +426,15 @@ final class StrokeCanvasView: UIView {
     /// `VectorEraser.IntersectionDriver`, covered by headless logic tests; this view only pumps
     /// positions through it.
     private var intersectionDriver = VectorEraser.IntersectionDriver()
+
+    /// **Whether the gesture in flight is a universal erase** — TODO (82) — latched at touch-down
+    /// from `universalEraser`, so a switch flipped mid-gesture cannot commit under a different rule
+    /// from the one it began under. Never true at an in-between, where every mode is a local edit
+    /// of one derived cel.
+    private var gestureIsUniversal = false
+    /// The universal Mode 3 gesture's per-cel sessions — `CanvasManager.UniversalCutSession`, one
+    /// per visible vector layer, each with its own latch and snapshot. Empty except mid-drag.
+    private var universalCutSessions: [CanvasManager.UniversalCutSession] = []
 
     /// Whether this vector gesture actually changed the display list, so a drag that cut/drew
     /// nothing doesn't register an undo step that undoes nothing. Needed especially for Mode 3,
@@ -1350,12 +1364,17 @@ final class StrokeCanvasView: UIView {
         cancelTimingStroke()
         if let vectorCanvas {
             // Mode 3 commits during the drag, so it can already have changed the document by the
-            // time the second finger lands. Roll the display list back to the touch-down snapshot.
-            if vectorContentChanged, let before = vectorElementsBeforeSnapshot {
+            // time the second finger lands. Roll the display list back to the touch-down snapshot —
+            // every cel's, under the universal eraser, whose sessions hold every snapshot.
+            if !universalCutSessions.isEmpty {
+                canvasManager?.cancelUniversalIntersectionCut(universalCutSessions)
+                universalCutSessions = []
+            } else if vectorContentChanged, let before = vectorElementsBeforeSnapshot {
                 // The same rollback an undo of this gesture would perform, so it is bounded the same
                 // way: `vectorGestureDamage` is exactly what the cuts already made declared.
                 vectorCanvas.restoreElements(before, changedInk: vectorGestureDamage)
             }
+            gestureIsUniversal = false
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
             vectorContentChanged = false
@@ -1770,6 +1789,9 @@ final class StrokeCanvasView: UIView {
         inBetweenCelID = layerID.flatMap { canvasManager?.inBetweenCelID(inLayer: $0) }
         // Fresh driver so Mode 3's first sample cuts immediately rather than resolving on lift.
         intersectionDriver = VectorEraser.IntersectionDriver()
+        gestureIsUniversal = isEraser && universalEraser && inBetweenCelID == nil
+        universalCutSessions = gestureIsUniversal && vectorEraserMode == .cutToIntersection
+            ? (canvasManager?.beginUniversalIntersectionCut() ?? []) : []
         // At an in-between the eraser is always Mode 1: Modes 2/3 edit stored geometry, and an
         // in-between has none (it's derived). Mode 1 is itself a stroke, so it rides `localEdits`
         // like any other.
@@ -1869,6 +1891,17 @@ final class StrokeCanvasView: UIView {
         }
     }
 
+    /// `resolveIntersectionCut` under the universal eraser: every session's cel, each with its own
+    /// latch. `vectorContentChanged` is about *this* view's canvas — the picture it holds and the
+    /// held ink it retires — so it is set only when that one cut; the other cels are the manager's,
+    /// and so is the undo.
+    private func resolveUniversalIntersectionCut(at point: CGPoint, own canvas: VectorCanvas) {
+        guard let canvasManager else { return }
+        let cut = canvasManager.resolveUniversalIntersectionCut(at: point, brush: brush, size: brushSize,
+                                                                sessions: &universalCutSessions)
+        if cut.contains(where: { $0 === canvas }) { vectorContentChanged = true }
+    }
+
     /// Folds what `canvas` declared for the edit just made into `vectorGestureDamage`.
     ///
     /// Reads `lastDamage` rather than taking a rectangle as an argument, because the mutating methods
@@ -1959,6 +1992,22 @@ final class StrokeCanvasView: UIView {
             for run in sampleRuns where !run.isEmpty {
                 recordLocalEdit(forCel: celID, samples: run)
             }
+        } else if gestureIsUniversal {
+            // TODO (82): every visible vector layer's shown cel, this one included, and the undo step
+            // is the manager's — one for all of them. What is left to this view is its own picture:
+            // `vectorContentChanged` says whether the cel it shows was among those the gesture
+            // landed on, and it is read below by the held-ink and refresh path exactly as for a
+            // single-layer gesture, but not by `registerVectorUndo`.
+            let changed: [VectorCanvas]
+            if vectorEraserMode == .cutToIntersection {
+                changed = canvasManager?.endUniversalIntersectionCut(universalCutSessions) ?? []
+                universalCutSessions = []
+            } else {
+                changed = canvasManager?.commitUniversalErase(runs: sampleRuns, brush: brush,
+                                                              size: brushSize, opacity: brushOpacity,
+                                                              mode: vectorEraserMode) ?? []
+            }
+            vectorContentChanged = changed.contains { $0 === vectorCanvas }
         } else if isEraser {
             // Mode 3 already committed incrementally during the drag (see `resolveIntersectionCut`);
             // re-running here would cut a second time against the post-cut geometry.
@@ -2020,10 +2069,12 @@ final class StrokeCanvasView: UIView {
         lastLiveSample = nil
         refreshDisplay()
         // One undo entry for the whole gesture (Mode 3's `before` was snapshotted at touch-down);
-        // none at all when nothing changed, so an empty tap doesn't need a second undo press.
-        if vectorContentChanged {
+        // none at all when nothing changed, so an empty tap doesn't need a second undo press. A
+        // universal gesture's step is already recorded, across every cel it reached.
+        if vectorContentChanged, !gestureIsUniversal {
             registerVectorUndo(canvas: vectorCanvas, from: before, to: vectorCanvas.elements)
         }
+        gestureIsUniversal = false
         vectorElementsBeforeSnapshot = nil
         // A local edit records its own undo step, so `vectorContentChanged` stays false here.
         inBetweenCelID = nil
@@ -2142,7 +2193,11 @@ final class StrokeCanvasView: UIView {
         // sample. There is nothing to save here anyway: Mode 3 commits during the drag and
         // `endVectorStroke` never reads `currentVectorSamples` for it.
         if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection, inBetweenCelID == nil {
-            resolveIntersectionCut(at: point, in: vectorCanvas)
+            if gestureIsUniversal {
+                resolveUniversalIntersectionCut(at: point, own: vectorCanvas)
+            } else {
+                resolveIntersectionCut(at: point, in: vectorCanvas)
+            }
             return
         }
         // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) this

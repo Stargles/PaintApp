@@ -2,8 +2,9 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// What an eraser gesture leaves in a cel at commit — TODO (80), (81), (83) — driven through the real
-/// `VectorCanvas.erase` rather than the geometry it is built on.
+/// What an eraser gesture leaves in a cel at commit — TODO (80), (81), (82), (83) — driven through
+/// the real `VectorCanvas.erase` and `CanvasManager.commitUniversalErase` rather than the geometry
+/// they are built on.
 ///
 /// Same arrangement as `VectorEraserHybridLogicTests`: the engine files compile into this target as
 /// well as the app, so no `@testable import`.
@@ -198,5 +199,147 @@ final class VectorEraserCommitLogicTests: XCTestCase {
                       "across the hypotenuse")
         XCTAssertTrue(canvas.eraserTouchesInk(alongPath: Self.gesture([CGPoint(x: 40, y: 200)]), brush: nib, size: 20),
                       "wholly inside the region, touching no edge")
+    }
+
+    // MARK: - (82) The universal eraser
+
+    /// Four vector layers and a raster one, in a 64² document: `under` and `alsoUnder` each hold a
+    /// horizontal line the gesture crosses; `aside` holds one it never reaches; `hidden` holds one
+    /// under the gesture but is switched off. Every stroke is 4 pt wide.
+    private struct Stack {
+        let manager: CanvasManager
+        let under: Int, alsoUnder: Int, aside: Int, hidden: Int
+        var canvases: [Int: VectorCanvas] {
+            var out: [Int: VectorCanvas] = [:]
+            for index in [under, alsoUnder, aside, hidden] { out[index] = manager.layers[index].cels[0].vector }
+            return out
+        }
+    }
+
+    private static func stack() -> Stack {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        func vectorLayer(withLineAt y: CGFloat) -> Int {
+            manager.addVectorLayer()
+            let index = manager.layers.count - 1
+            let line = stroke((0...8).map { CGPoint(x: 4 + CGFloat($0) * 7, y: y) }, size: 4)
+            manager.layers[index].cels[0].vector?.addStroke(line)
+            return index
+        }
+        let under = vectorLayer(withLineAt: 32)
+        let alsoUnder = vectorLayer(withLineAt: 34)
+        let aside = vectorLayer(withLineAt: 8)
+        let hidden = vectorLayer(withLineAt: 30)
+        manager.toggleLayerVisibility(layerIndex: hidden)
+        manager.currentLayerIndex = under
+        return Stack(manager: manager, under: under, alsoUnder: alsoUnder, aside: aside, hidden: hidden)
+    }
+
+    /// A vertical Cut through the middle: both visible lines under it are cut in two, the line
+    /// aside and the hidden line are untouched, and one undo press restores both cut lines.
+    func testUniversalCutLandsOnEveryVisibleLayerItErasesOnAsOneUndoStep() {
+        let stack = Self.stack()
+        let manager = stack.manager
+        let canvases = stack.canvases
+        let drag = Self.gesture([CGPoint(x: 32, y: 20), CGPoint(x: 32, y: 44)])
+        let nib = Self.brush(size: 6)
+        let steps = manager.history.undoStack.count
+
+        let landed = manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .cutPoints)
+        XCTAssertEqual(landed.count, 2, "the two visible layers with ink under the gesture, and no other")
+        XCTAssertTrue(landed.contains { $0 === canvases[stack.under] })
+        XCTAssertTrue(landed.contains { $0 === canvases[stack.alsoUnder] })
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 2, "cut in two")
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 2, "cut in two")
+        XCTAssertEqual(canvases[stack.aside]?.strokes.count, 1, "a layer the gesture erases nothing on is left alone")
+        XCTAssertEqual(canvases[stack.hidden]?.strokes.count, 1, "a hidden layer is never reached")
+
+        XCTAssertEqual(manager.history.undoStack.count - steps, 1, "the gesture is one undo step")
+        manager.undo()
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 1, "one press restores both layers")
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 1)
+        manager.redo()
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 2)
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 2)
+    }
+
+    /// Mode 1 through the same stack: a punch lands on the two layers with ink under it and on
+    /// neither of the others — (81)'s predicate, asked per layer.
+    func testUniversalPunchLandsOnlyWhereItTouchesInk() {
+        let stack = Self.stack()
+        let canvases = stack.canvases
+        let drag = Self.gesture([CGPoint(x: 32, y: 20), CGPoint(x: 32, y: 44)])
+        let nib = Self.brush(size: 6)
+        let landed = stack.manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .erase)
+        XCTAssertEqual(landed.count, 2)
+        for index in [stack.under, stack.alsoUnder] {
+            XCTAssertEqual(canvases[index]?.strokes.filter { $0.composite == .erase }.count, 1,
+                           "one punch on layer \(index)")
+        }
+        for index in [stack.aside, stack.hidden] {
+            XCTAssertEqual(canvases[index]?.strokes.filter { $0.composite == .erase }.count, 0,
+                           "no punch on layer \(index)")
+        }
+    }
+
+    /// A gesture that reaches no ink on any layer records nothing at all.
+    func testUniversalEraseOverNothingRecordsNoStep() {
+        let stack = Self.stack()
+        let steps = stack.manager.history.undoStack.count
+        let miss = Self.gesture([CGPoint(x: 32, y: 50), CGPoint(x: 32, y: 60)])
+        let landed = stack.manager.commitUniversalErase(runs: [miss], brush: Self.brush(size: 6), size: 6,
+                                                        opacity: 1, mode: .erase)
+        XCTAssertTrue(landed.isEmpty)
+        XCTAssertEqual(stack.manager.history.undoStack.count, steps, "no step for a gesture that landed nowhere")
+    }
+
+    /// To Cross under the universal eraser: a session per visible layer, each cut on the sample that
+    /// reaches its line, one undo step at the lift — and a cancel puts every cut back.
+    func testUniversalToCrossCutsPerLayerAndUndoesAsOne() {
+        let stack = Self.stack()
+        let manager = stack.manager
+        let canvases = stack.canvases
+        let nib = Self.brush(size: 6)
+        let steps = manager.history.undoStack.count
+
+        var sessions = manager.beginUniversalIntersectionCut()
+        XCTAssertEqual(sessions.count, 3, "every visible vector layer, hidden excluded")
+        let cut = manager.resolveUniversalIntersectionCut(at: CGPoint(x: 32, y: 33), brush: nib, size: 6,
+                                                          sessions: &sessions)
+        XCTAssertEqual(cut.count, 2, "the two lines under the tip")
+        // Neither line crosses anything, so each is deleted whole — To Cross's rule.
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 0)
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 0)
+        XCTAssertEqual(canvases[stack.aside]?.strokes.count, 1)
+        let landed = manager.endUniversalIntersectionCut(sessions)
+        XCTAssertEqual(landed.count, 2)
+        XCTAssertEqual(manager.history.undoStack.count - steps, 1, "one step for both cels")
+        manager.undo()
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 1)
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 1)
+        XCTAssertEqual(manager.history.undoStack.count, steps)
+
+        // The cancel arm: cut, then a second finger lands.
+        var again = manager.beginUniversalIntersectionCut()
+        _ = manager.resolveUniversalIntersectionCut(at: CGPoint(x: 32, y: 33), brush: nib, size: 6, sessions: &again)
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 0, "Setup: cut again")
+        manager.cancelUniversalIntersectionCut(again)
+        XCTAssertEqual(canvases[stack.under]?.strokes.count, 1, "the cancel restores every cel")
+        XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 1)
+        XCTAssertEqual(manager.history.undoStack.count, steps, "and records nothing")
+    }
+
+    /// The switch persists with the mode it aims, and a manifest written before it existed reads
+    /// as off.
+    func testUniversalEraserRoundTripsThroughTheManifestAndDefaultsToOff() throws {
+        let on = ProjectManifest(id: UUID(), name: "t", canvasWidth: 64, canvasHeight: 64, fps: 12,
+                                 layers: [], modifiedAt: Date(), universalEraser: true)
+        let back = try JSONDecoder().decode(ProjectManifest.self, from: JSONEncoder().encode(on))
+        XCTAssertTrue(back.universalEraser)
+        let off = ProjectManifest(id: UUID(), name: "t", canvasWidth: 64, canvasHeight: 64, fps: 12,
+                                  layers: [], modifiedAt: Date())
+        let bytes = try JSONEncoder().encode(off)
+        XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("universalEraser"),
+                       "off is the absence of the key, so an older document's bytes are unchanged")
+        XCTAssertFalse(try JSONDecoder().decode(ProjectManifest.self, from: bytes).universalEraser)
     }
 }

@@ -389,6 +389,7 @@ enum ProjectStore {
         let selectedBrush: Brush
         let customBrushes: [Brush]
         let vectorEraserMode: VectorEraserMode
+        let universalEraser: Bool
         let folders: [FolderManifest]
         let viewPresets: [ViewPresetManifest]
         let motionGroups: [MotionGroup]
@@ -427,6 +428,7 @@ enum ProjectStore {
             selectedBrush = canvasManager.selectedBrush
             customBrushes = canvasManager.customBrushes
             vectorEraserMode = canvasManager.vectorEraserMode
+            universalEraser = canvasManager.universalEraser
             folders = canvasManager.folders.map { folder in
                 FolderManifest(id: folder.id, name: folder.name, hasCustomName: folder.hasCustomName,
                                isExpanded: folder.isExpanded,
@@ -1143,6 +1145,7 @@ enum ProjectStore {
             selectedBrush: snapshot.selectedBrush,
             customBrushes: snapshot.customBrushes,
             vectorEraserMode: snapshot.vectorEraserMode,
+            universalEraser: snapshot.universalEraser,
             folders: snapshot.folders,
             viewPresets: snapshot.viewPresets,
             motionGroups: snapshot.motionGroups,
@@ -1933,6 +1936,7 @@ enum ProjectStore {
         // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
         // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.
         manager.vectorEraserMode = manifest.vectorEraserMode
+        manager.universalEraser = manifest.universalEraser
         // Document-level interpolation state. Both default to empty for every project that predates
         // the feature or simply never used it.
         manager.motionGroups = manifest.motionGroups
