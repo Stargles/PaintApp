@@ -857,7 +857,20 @@ final class CanvasManager: ObservableObject {
     /// Select bottom bar; only meaningful while `selection` is non-nil.
     @Published var allowsPaintingOutsideSelection: Bool = false
 
+    /// The active brush's stroke diameter, **in canvas points** — same unit as `Brush.size`, which
+    /// this is copied from on every preset pick (see the two writers below). Persisted and shared
+    /// across documents in that unit, unchanged by TODO (79): a brush preset draws the same absolute
+    /// line whichever canvas it is used on, which is the point of a preset library.
+    ///
+    /// **TODO (79) — the side toolbar's slider reads and writes this as a percentage of the current
+    /// document's canvas, where 100% is defined as the canvas's shorter side** (`artworkSize`, not
+    /// the padded buffer — see `CanvasManager+BrushSize.swift`'s `brushSizeReferenceExtent`). That
+    /// mapping is presentation only, computed fresh on every read; nothing about this property's own
+    /// storage or unit changed, so a document opened at a different canvas size still draws the same
+    /// point size it always did and simply reads as a different percentage on the toolbar.
     @Published var brushSize: CGFloat = 5.0
+    /// The active brush's stroke opacity, `0...1` — **linear**, unlike `brushSize`'s slider. The side
+    /// toolbar's badge shows this ×100 as a plain percentage; there is no curve to document here.
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
     /// **This property's `didSet` used to be the fifth closer of an engaged whole-layer vector Move**

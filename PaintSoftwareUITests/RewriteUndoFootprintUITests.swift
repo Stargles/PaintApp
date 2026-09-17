@@ -64,7 +64,9 @@ final class RewriteUndoFootprintUITests: PaintUITestCase {
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5), "the swatch opens the colour picker")
         setHexField(app, hexField, to: "0000FF")
-        app.staticTexts["Size"].firstMatch.tap()
+        // TODO (79) replaced the rail's plain "Size" caption with a percentage badge; same spot,
+        // same purpose — a tap outside the popover.
+        app.otherElements["sideToolbar.brushSizeReadout"].tap()
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker, which commits")
         XCTAssertTrue(waitUntil(canvas, l1Mid, isBlue),
                       "Recolour did not turn the lassoed line blue on screen")

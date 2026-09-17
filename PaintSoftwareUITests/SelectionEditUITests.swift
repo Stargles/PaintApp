@@ -190,9 +190,10 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(hexField.exists, "PREMISE: the picker is still up while the line changed")
         attach(app, "2-line-blue-while-the-picker-is-still-up")
 
-        // 4. Dismiss the picker — a tap on the band's Size label, outside the popover — and that is
+        // 4. Dismiss the picker — a tap on the rail's Size badge, outside the popover — and that is
         //    the one undo step. What the artist does next: tap away, press undo.
-        app.staticTexts["Size"].firstMatch.tap()
+        // TODO (79) replaced the plain "Size" caption with a percentage badge; same spot, same job.
+        app.otherElements["sideToolbar.brushSizeReadout"].tap()
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker")
         XCTAssertTrue(isBlue(rgba(canvas, l1Mid)), "the line keeps the picked colour after the picker closes")
         let undo = app.buttons["sideToolbar.undoButton"]

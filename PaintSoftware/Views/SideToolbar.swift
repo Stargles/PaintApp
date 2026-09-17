@@ -77,15 +77,22 @@ struct SideToolbar: View {
                         identifier: "sideToolbar.eraserOpacitySlider"
                     )
                 } else {
+                    // TODO (79): the slider drags `brushSizeSliderPosition` (0...1, logarithmic —
+                    // see `BrushSizeCurve`), not `brushSize` itself. `CanvasManager+BrushSize.swift`
+                    // is the whole of the conversion; this file only ever sees a slider position in
+                    // and a percentage to print, same as it always saw a Double in either range.
                     labeledSlider(
                         title: "Size",
-                        value: Binding(get: { Double(canvasManager.brushSize) }, set: { canvasManager.brushSize = CGFloat($0) }),
-                        range: 1...50,
+                        value: Binding(get: { canvasManager.brushSizeSliderPosition },
+                                       set: { canvasManager.brushSizeSliderPosition = $0 }),
+                        range: 0...1,
                         identifier: "sideToolbar.brushSizeSlider",
                         // See the eraser's twin above for why the window goes above the rail rather
                         // than level with it.
                         preview: SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider",
-                                                    tool: .brush, side: .above)
+                                                    tool: .brush, side: .above),
+                        badge: (icon: "circle.fill", percent: canvasManager.brushSizePercent,
+                                identifier: "sideToolbar.brushSizeReadout")
                     )
                     Button(action: resetSettings) {
                         Image(systemName: "arrow.counterclockwise")
@@ -99,7 +106,9 @@ struct SideToolbar: View {
                         title: "Opacity",
                         value: $canvasManager.brushOpacity,
                         range: 0...1,
-                        identifier: "sideToolbar.brushOpacitySlider"
+                        identifier: "sideToolbar.brushOpacitySlider",
+                        badge: (icon: "circle.lefthalf.filled", percent: canvasManager.brushOpacity,
+                                identifier: "sideToolbar.brushOpacityReadout")
                     )
                 }
                 // The Apple Pencil / finger-drawing gate used to live here. It moved to the Actions
@@ -186,14 +195,21 @@ struct SideToolbar: View {
         .accessibilityAddTraits(canvasManager.selectedTool == .eyedropper ? [.isSelected] : [])
     }
 
-    /// A vertical slider with a small caption beneath it. The caption is what makes the rail readable
-    /// once its two sliders change meaning between brush and fill modes.
+    /// A vertical slider with a small caption (or, for the brush's own Size/Opacity, a percentage
+    /// badge — TODO (79)) beneath it. The caption/badge is what makes the rail readable once its two
+    /// sliders change meaning between brush, eraser and fill modes.
     /// `preview` non-nil marks this as a *size* slider: holding it raises the real-size stamp window
     /// beside the rail. This hook only covers the **lift** — a press that never moves produces no
     /// `onEditingChanged` at all, so the touch-down half lives in `.sizePreviewSlider` below, which
     /// carries the measurement.
+    ///
+    /// `badge`, when given, replaces the plain `Text(title)` caption with `percentBadge` — the owner's
+    /// *"The % should be displayed on top of the size logo so you know what it is. Same for
+    /// opacity."* Only the brush's own two sliders pass one; the eraser and fill sliders keep their
+    /// plain text captions, which TODO (79) never asked to change.
     private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>,
-                               identifier: String, preview: SizePreviewRequest? = nil) -> some View {
+                               identifier: String, preview: SizePreviewRequest? = nil,
+                               badge: (icon: String, percent: Double, identifier: String)? = nil) -> some View {
         VStack(spacing: 4) {
             VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier,
                            onEditingChanged: { isEditing in
@@ -202,14 +218,57 @@ struct SideToolbar: View {
                            })
                 .frame(height: sliderHeight)
                 .sizePreviewSlider(preview, canvasManager: canvasManager)
-            Text(title)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.7)
-                .frame(width: 56)
+            if let badge {
+                percentBadge(icon: badge.icon, percent: badge.percent, identifier: badge.identifier)
+            } else {
+                Text(title)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: 56)
+            }
         }
+    }
+
+    /// An icon with the slider's current value overlaid as a rounded percentage — TODO (79). Same
+    /// 30×30 footprint as the reset/eyedropper icon boxes elsewhere on this rail, so the three read
+    /// as one family rather than the badge looking like a fourth kind of control.
+    ///
+    /// The percentage is also the button's `accessibilityValue`, not just its drawn text — the same
+    /// convention `eyedropperButton` already uses for its hex swatch — so a test (or VoiceOver) reads
+    /// the number without OCR-ing the label.
+    private func percentBadge(icon: String, percent: Double, identifier: String) -> some View {
+        // Below 1% a rounded integer reads as "0%" — indistinguishable from the brush having no
+        // size at all, which is exactly the readout the owner asked for so the artist would *not*
+        // have to guess. One decimal only down there; whole numbers everywhere else, where a
+        // fraction would just be clutter in a 30pt badge.
+        let scaled = percent * 100
+        let percentText = scaled < 1 && scaled > 0
+            ? String(format: "%.1f%%", scaled)
+            : "\(Int(scaled.rounded()))%"
+        return ZStack {
+            Image(systemName: icon)
+                .font(.footnote)
+                .foregroundColor(.white.opacity(0.5))
+                .frame(width: 30, height: 30)
+                .background(Color.white.opacity(0.15))
+                .cornerRadius(6)
+            Text(percentText)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+        }
+        // `.ignore` + an explicit identifier/value, exactly as `canvas.host` and the eyedropper's
+        // swatch already do: without it the `Image` and `Text` would surface as two separate
+        // accessibility elements and `.accessibilityIdentifier` on the `ZStack` would not land
+        // reliably on either. This is deliberately not a `Button` — the badge is read-only, and the
+        // owner never asked for tapping it to do anything.
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(identifier)
+        .accessibilityValue(percentText)
     }
 
     private func resetSettings() {
