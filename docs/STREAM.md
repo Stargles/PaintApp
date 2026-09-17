@@ -1,6 +1,6 @@
 # Streaming the computer's screen as a layer — TODO (27)
 
-The owner's brief is in [TODO.md](TODO.md) item (27), verbatim. This file is the design: what exists
+The owner's brief is in [TODO.md](../TODO.md) item (27), verbatim. This file is the design: what exists
 that it builds on (§0), what the owner ruled (§2), the wire protocol both programs implement (§3), the
 Windows streamer (§4), the iPad side (§5), the defaults taken without a ruling (§6), the build order
 (§7) and what is unconfirmed (§8). Designed 2026-09-13.

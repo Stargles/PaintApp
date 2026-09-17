@@ -36,8 +36,8 @@ toolset, and a frame-by-frame animation timeline.
   without ever being made smaller: a frame whose working set would not fit — a 4K canvas with two
   effect layers on a 3 GB iPad — is walked in horizontal strips, and within a strip node by node, at
   the size that was asked for. The canvas at rest and playback are not composited on demand at all;
-  they are read from a background bake on disk. See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md) and
-  [RENDER.md](RENDER.md)
+  they are read from a background bake on disk. See [LAYER_COMPOSITING.md](docs/LAYER_COMPOSITING.md) and
+  [RENDER.md](docs/RENDER.md)
 - **Effects**: 20, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
   shift, gradient map, recolour, colour wheels, posterize (with dither and halftone screens), noise,
   gaussian/directional blur, lens blur (a disc or blade-polygon defocus with a highlight boost for
@@ -61,7 +61,7 @@ toolset, and a frame-by-frame animation timeline.
 - **Animation Timeline**: multi-cel frame-by-frame animation, scrub/play, per-cel copy/clear/extend
 - **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them
   become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between
-  and Commit — see [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md)
+  and Commit — see [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md)
 - **Color**: five picker types over one shared colour model, switched by a bottom tab bar —
   **Disc** (a hue ring with a saturation/brightness disc, Procreate's), **Triangle** (a hue ring with
   an HSL triangle, Paint Tool SAI/Krita's), **Square** (a hue ring with the SV square), **Value**

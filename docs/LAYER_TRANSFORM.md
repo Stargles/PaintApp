@@ -161,7 +161,7 @@ come from.
 
 ### The three defects removal *fixes*, first — because they are the case
 
-All three are INFERRED from source. None is in [BUGS.md](BUGS.md). Each has a repro the owner can run
+All three are INFERRED from source. None is in [BUGS.md](../BUGS.md). Each has a repro the owner can run
 in under a minute, and stage 1 (§7) should not be started until at least defect A is confirmed.
 
 **A. Drawing on a scaled-down cel silently loses ink.** `renderLocalContent` rasterizes into a context

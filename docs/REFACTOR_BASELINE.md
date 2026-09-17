@@ -1,7 +1,7 @@
 # Performance baseline — a DATED snapshot, not current numbers
 
 **Every figure below is stale and must be re-measured before it is trusted. Read
-[PERFORMANCE.md](PERFORMANCE.md) for what is current.** This file is kept because its *method* and its
+[PERFORMANCE.md](../PERFORMANCE.md) for what is current.** This file is kept because its *method* and its
 measurement traps are still right, and because five places cite it — including two test files — but its
 numbers describe a much smaller app. The clearest tell is the full-suite row: **541 s parallel against
 the 33 min / 3714 tests CLAUDE.md now records**, an order of magnitude apart. Its "Known remaining costs" §1 —

@@ -80,7 +80,7 @@ and theirs is a 9th-generation iPad taking a first-generation Pencil. So unlike 
 turn on the storage cost and is not reopened by measuring it.
 
 **2.7 Tilt ships — altitude and azimuth are both sensors.** The owner deferred it on storage grounds and
-reversed that on the measurement: a thousand strokes of geometry is **0.9 MB** ([PERFORMANCE.md](PERFORMANCE.md)
+reversed that on the measurement: a thousand strokes of geometry is **0.9 MB** ([PERFORMANCE.md](../PERFORMANCE.md)
 §11), so two more bytes a point is not a cost worth a feature. Owner: *"Since I now know that brushstroke
 memory usage is minimal, i will go ahead and make the assertion to add in the pencil tilt that i previously
 canceled."*
@@ -1278,7 +1278,7 @@ thousand-point run carrying every channel against 5000 for the same run carrying
 JSON escaping are what the file pays, MEASURED over a thousand samples: **10.785 B a sample against
 6.743**, a ratio of **1.599** — the payload ratio almost exactly, because the run's two fixed costs are
 ~30 bytes against ~10,000. Against the MEASURED 0.9 MB a thousand strokes
-([PERFORMANCE.md](PERFORMANCE.md) §11) that is ~1.3 MB, which is why §2.7 was reversed on seeing the number.
+([PERFORMANCE.md](../PERFORMANCE.md) §11) that is ~1.3 MB, which is why §2.7 was reversed on seeing the number.
 
 **And the common case is cheaper than eight**, at no cost in behaviour: a channel whose every value
 quantises to the neutral's byte is **dropped at commit** (`StrokeSamples.compacted()`), because the funnel
@@ -1729,7 +1729,7 @@ The owner gave four. Three are already expressible and the fourth is not, and kn
 what stops the editor being designed around a mechanism that does not exist.
 
 1. **Edge softness / antialiasing as an option.** One field on `BrushDabSettings`, built here.
-   [BUGS.md](BUGS.md) carries the measurement, the mechanism, and why hardness 1.00 is a legitimate
+   [BUGS.md](../BUGS.md) carries the measurement, the mechanism, and why hardness 1.00 is a legitimate
    deterministic aliased look while 0.93–0.99 wanders with the size slider.
 2. **Spacing that grows with the brush.** **Already the behaviour, with nothing to build**:
    `BrushDabSettings.spacing` is a *fraction of the stroke's diameter* (§6), so a brush at size 4 and
@@ -2440,13 +2440,13 @@ ends and its own taper, and multiplying by nothing shared, fixes it with no dyna
 
 **Edge softness may be part of the nib rather than a fault in the dab.** The owner, on seeing rough ink
 references: *"some versions of it are heavily aliased thus adding to the rough look... I may settle down on
-there being multiple versions of this brush."* [BUGS.md](BUGS.md) records that a hard round dab is fully
+there being multiple versions of this brush."* [BUGS.md](../BUGS.md) records that a hard round dab is fully
 aliased at hardness 0.95 and reads that as a defect; against a nib whose edge is *meant* to be seen it is at
 least as likely to be an ingredient. §6 already carries `hardness` as an output, so the mechanism exists —
 what is unsettled is whether the rough ink family ships as one brush or several, and that is a contact-sheet
 question rather than an argument. **It is answered, and the answer is a control**: the owner ruled that edge
 softness belongs in the brush editor as a slider or a toggle, so it is one field on `BrushDabSettings`
-built with §12 stage 10 — not a repair taken beforehand. [BUGS.md](BUGS.md) carries the measurement, the
+built with §12 stage 10 — not a repair taken beforehand. [BUGS.md](../BUGS.md) carries the measurement, the
 mechanism (CoreGraphics spends its band budget in proportion to the gradient's extent, so hardness 1.00 is
 a *deterministic* two-alpha edge while 0.93-0.99 wanders with the size slider) and the field's cost.
 **Do not antialias the dab globally**, and do not take the repair on its own: softness 0 is today's hard
@@ -2822,7 +2822,7 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 - **Imported-asset lifetime is half solved** — `ProjectStore` copies an imported tip's PNG into the
   project and restores it on load, and since stage 5 the *filter* is exact (`BrushTip.importedTextureFileName`,
   which cannot disagree with itself the way `shape == .custom` plus a nil-able name could). What it walks
-  is still the palette rather than the drawing; §5.4 and [BUGS.md](BUGS.md) carry that, and stage 6 owns it.
+  is still the palette rather than the drawing; §5.4 and [BUGS.md](../BUGS.md) carry that, and stage 6 owns it.
 - **`supportsCleanCut` / `supportsSplitting` gate on brush *properties*, not on a list of known brushes**,
   so a scattered, jittered imported brush falls back to the exact alpha punch automatically. Do not relax
   `supportsSplitting`: its coverage test measures against a capsule chain, and scattered ink is not bounded
@@ -2924,7 +2924,7 @@ first, which cleanly replaces the old one."*
    outcome reached by having no intermediate state at all.
    **What is deliberately not built**: layer and document scope for the verb, and the reason is filed rather
    than hidden — nothing in the repo batches per-cel content restores across *several* cels into one undo
-   `Action`, and a selection lives in one cel. [BUGS.md](BUGS.md) carries it.
+   `Action`, and a selection lives in one cel. [BUGS.md](../BUGS.md) carries it.
 7. **DONE — the modulation matrix.** §6. Every dab parameter is `base + Σ amount · curve(input)`,
    resolved once per dab through §5.5's funnel by `Brush.dabValues(_:)`; `BrushDynamics` is deleted
    whole and the five presets carry two rows each instead. `density` (§2.18) skips a dab whose draw

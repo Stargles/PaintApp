@@ -1021,7 +1021,7 @@ it is the dependency order.
    progress phases, and `ToolsAndSelectionUITests.testExportIsInTheActionsMenuAndRunsThroughToAShareableFile`
    drives the Actions menu through to a shareable file. **Owed: `ExportSheet` itself has no test, and
    nothing has run on the device.**
-7. ~~**The rest of the memory audit** (BUGS.md)~~ **Done 2026-09-06.** [PERFORMANCE.md](PERFORMANCE.md) §13 is
+7. ~~**The rest of the memory audit** (BUGS.md)~~ **Done 2026-09-06.** [PERFORMANCE.md](../PERFORMANCE.md) §13 is
    the measurement and BUGS.md's census carries the per-item verdicts. **Four built, two declined with numbers.**
 
    Built: `Engine/VectorRenderCache.swift` is a byte budget and an LRU registry over the vector render memo, and

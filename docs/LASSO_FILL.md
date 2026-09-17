@@ -79,7 +79,7 @@ lift:
   shapes meet at a point or a diagonal hairline runs through the loop — is the start of **two**
   boundary edges. Storing one edge per vertex dropped the second, the walk dead-ended, and
   `fillPath` closed the open subpath with a straight chord: the owner's screenshot,
-  [docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg](docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg),
+  [docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg](bug-evidence/lasso-fill-holes-2026-09-06.jpg),
   in which every wrong edge is straight and nothing in the drawing is. The store is a
   multimap now, and because in- and out-degree are equal at every vertex the Euler argument
   guarantees every walk closes.

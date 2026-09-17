@@ -1314,7 +1314,7 @@ than a scheduled item.
 
 *Verified*: `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`.
 
-*One figure this item could not launder.* [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §9.6 asks for the
+*One figure this item could not launder.* [LAYER_TRANSFORM.md](docs/LAYER_TRANSFORM.md) §9.6 asks for the
 **8,714 samples** on the owner's own cel to be landed here labelled MEASURED with its provenance. It
 still has none — it is not traceable to any run in this repo, and this pass did not find one. What is
 recorded instead is the *190 strokes* beside it, which TODO.md does carry, and a fixture built as
@@ -1422,7 +1422,7 @@ path the owner has ruled may block. **It does not even buy that**, and that is t
 `VectorCanvas.mapping` on **encode** and writes `transform = []` (`VectorLayer.swift:3426-3444`), so
 the walk is not removed, it is *moved to the next save* — off a path the artist was told is loading
 and onto one item 15 fought for milliseconds on, with the save's cost now silently depending on
-whether a resize happened. [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §10 carries which of that
+whether a resize happened. [LAYER_TRANSFORM.md](docs/LAYER_TRANSFORM.md) §10 carries which of that
 document's three defects come back with it (A and C do; B cannot) and the two further costs — the
 item (8) encoder quantises about the *canvas* centre, and `bakePreciseStrokes` snaps onto that same
 grid, both of which are wrong by `d` the moment stored geometry stops being canvas geometry.
@@ -1670,7 +1670,7 @@ the animation bakes in the background, non-current frames are gradually replaced
 stages 4 and 5 merged: the canvas at rest and playback are served from LZ4 frames on disk through a
 decoded ring, and only the two mid-stroke halves are still composited live. So what has to hit 41 ms is the **playback of a baked frame**, and the live composite of the frame
 the artist is *looking at while drawing* is a different budget with a different consumer: one person,
-one frame, at the pace of an edit. [KEYFRAMES.md](KEYFRAMES.md) §2.25 states this as a ruling in its
+one frame, at the pace of an edit. [KEYFRAMES.md](docs/KEYFRAMES.md) §2.25 states this as a ruling in its
 own right — *the live per-frame cost of a derived frame is not held to the 24 fps budget; the prebake
 is what must play at 24 fps* — and that is the sentence to read before optimising anything on this
 path.
@@ -2744,7 +2744,7 @@ touching - 3.2 us a dab is the same walk the whole layer uses and §11.2 has alr
 linear and flat. The 2.5 ms is one 8 MB blit plus one 8 MB allocation per pen-up, and it exists
 because `renderLocalContent` must hand back an immutable `UIImage`. A mutable standing bitmap stamped
 in place would remove both, and would cost the memo its immutability - which is the same trade
-[RENDER.md](RENDER.md) §3.8 makes carefully elsewhere, and is **not** proposed here: 3.4 ms a pen-up
+[RENDER.md](docs/RENDER.md) §3.8 makes carefully elsewhere, and is **not** proposed here: 3.4 ms a pen-up
 is four frames' headroom at 60 Hz and nothing in §11.7 is waiting on it. Recorded so the next person
 does not re-derive it.
 

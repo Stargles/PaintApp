@@ -7,13 +7,13 @@ were all one project, because they all needed the same missing thing. **The buil
 ## 1. Why these are one project
 
 The app had no compositor: "compositing" was two unrelated implementations, neither of which could
-express any of this. [`Compositor`](PaintSoftware/Engine/Compositor.swift) is now the offline one —
+express any of this. [`Compositor`](../PaintSoftware/Engine/Compositor.swift) is now the offline one —
 a tree walk over an immutable `RenderRequest`, with a CoreGraphics reference and a Metal backend
 behind a flag that agree byte for byte. The live canvas is unchanged:
 
 | path | where | how |
 |---|---|---|
-| **Live canvas** | `CanvasView.reconcileLayers` ([CanvasView.swift:466](PaintSoftware/Views/CanvasView.swift:466)) | one `LayerHostView` per layer, all siblings in one flat container, z-order by `bringSubviewToFront`, per-layer `isHidden` + `alpha` — each now folding in every enclosing group's. **Core Animation does the compositing**, always source-over. |
+| **Live canvas** | `CanvasView.reconcileLayers` ([CanvasView.swift:466](../PaintSoftware/Views/CanvasView.swift:466)) | one `LayerHostView` per layer, all siblings in one flat container, z-order by `bringSubviewToFront`, per-layer `isHidden` + `alpha` — each now folding in every enclosing group's. **Core Animation does the compositing**, always source-over. |
 | **Offline** | `Compositor.composite` | tree walk over a snapshot. One consumer: the project thumbnail. |
 
 A folder is a compositing unit as of phase 4: it carries an opacity, a blend mode and an isolation
@@ -33,7 +33,7 @@ Express groups / nodes / masks / blends in the one compositor; do not grow a sec
 ## 2. What is *not* changing
 
 - **`layers` stays a flat array with the contiguous-span folder invariant.** That arithmetic is
-  load-bearing and hard-won (session 41, [CanvasManager+LayerTree.swift:24](PaintSoftware/Models/CanvasManager+LayerTree.swift:24)).
+  load-bearing and hard-won (session 41, [CanvasManager+LayerTree.swift:24](../PaintSoftware/Models/CanvasManager+LayerTree.swift:24)).
   A contiguous span *is* a subtree in array form — the tree is already there, it is just never
   derived. **This plan derives a tree; it does not restructure storage.** Every restack / group /
   merge operation and every view binding is untouched. §4.3 shows this survives compositor nodes too.
@@ -56,7 +56,7 @@ Cheap to break, expensive to relearn.
 5. **The compositor consumes an immutable snapshot, never live model state** — from day one, even
    though it runs on the main thread at first. This is what makes §9's background renderer possible
    without a rewrite, and the app has already learned this lesson once
-   ([ProjectStore.swift:178](PaintSoftware/Services/ProjectStore.swift:178): "the background queue
+   ([ProjectStore.swift:178](../PaintSoftware/Services/ProjectStore.swift:178): "the background queue
    sees no shared mutable state").
 6. **The sandwich keeps the compositor out of the drawing path.** §5.2.
 7. **Vector is the default layer kind**, and empty vector layers must be free to match. §8.
@@ -417,7 +417,7 @@ written, which is worth recording so nobody goes looking for the work:
   chosen by the merge rather than by the tree, and sits below the compositor beside
   `PixelOps.rasterize` (§2).
 - **The onion skin is not one either.** `InterpolationReferenceOnionSkinSource`
-  ([OnionSkinSource.swift:106](PaintSoftware/Views/OnionSkinSource.swift:106)) flattens an arbitrary
+  ([OnionSkinSource.swift:106](../PaintSoftware/Views/OnionSkinSource.swift:106)) flattens an arbitrary
   *cel set* at alpha 1, deliberately ignoring layer opacity and visibility. Routing it through the
   compositor would change what the onion skin shows, not merely how it is computed — a product
   decision, still open.
@@ -696,7 +696,7 @@ entry directly beneath, so it never reaches a backend as a blend mode at all —
 Sequencing: Tier 3 splits into "cheap LUT/per-pixel" (one item covering the first six), then the two
 that need the multi-pass buffer (blur, bloom), with Sobel/Sharpen/Outline alongside them.
 
-**The first six have shipped as kernels** — `Effect` in [Effect.swift](PaintSoftware/Models/Effect.swift),
+**The first six have shipped as kernels** — `Effect` in [Effect.swift](../PaintSoftware/Models/Effect.swift),
 `applyEffect` in `Composite.metal`, `EffectReference` as the CPU reference, measured against each other
 by `EffectParityLogicTests`. Curves ship alongside Levels: both resolve to the same 256-entry table in
 Swift, so a third curve shape is a case in `Effect` and no shader change.
@@ -727,19 +727,19 @@ deliberately **not** CSS `hue-rotate()`'s matrix.
 
 ## 8. Vector as the default layer
 
-The plain **+** ([LayerPanel.swift:91](PaintSoftware/Views/LayerPanel.swift:91)) calls
+The plain **+** ([LayerPanel.swift:91](../PaintSoftware/Views/LayerPanel.swift:91)) calls
 `addVectorLayer()`. Also, for consistency: the new-canvas initial layer
-([CanvasSizePickerView.swift:82](PaintSoftware/Views/CanvasSizePickerView.swift:82)) and the
-"No Layers" alert's button ([DrawingView.swift:109](PaintSoftware/Views/DrawingView.swift:109)),
+([CanvasSizePickerView.swift:82](../PaintSoftware/Views/CanvasSizePickerView.swift:82)) and the
+"No Layers" alert's button ([DrawingView.swift:109](../PaintSoftware/Views/DrawingView.swift:109)),
 whose label becomes "Add Vector Layer". The explicit raster/vector choices in the + menu
-([LayerPanel.swift:68](PaintSoftware/Views/LayerPanel.swift:68)) stay as they are.
+([LayerPanel.swift:68](../PaintSoftware/Views/LayerPanel.swift:68)) stay as they are.
 
 XCUITests that add a layer and assume raster will need auditing.
 
 ### 8.1 Prerequisite: an empty vector layer was made free
 
 **An empty vector layer's storage was already free** — `Cel.fillImage`/`bakedImage`/`vector` are
-nil-by-default optionals ([Cel.swift:12](PaintSoftware/Models/Cel.swift:12)) and creation costs a few
+nil-by-default optionals ([Cel.swift:12](../PaintSoftware/Models/Cel.swift:12)) and creation costs a few
 hundred bytes; an earlier draft of this document was wrong to say otherwise. **The actual tax was the
 render cache**: `VectorCanvas.render()` had no empty early-out, so an empty layer held 16.8 MB of
 transparent pixels at 2048² (64 MB at 4000²) the instant `StrokeCanvasView.vectorCanvas`'s `didSet`
@@ -775,7 +775,7 @@ speculative work — the compositor needs it anyway to avoid recompositing const
 Point 3 is the one that must be right from the start. The composite currently runs on the main actor
 *specifically because* it reads live texture objects — `ProjectStore` documents the rule it is
 preserving: "the background queue sees no shared mutable state"
-([ProjectStore.swift:178](PaintSoftware/Services/ProjectStore.swift:178)). Building the compositor
+([ProjectStore.swift:178](../PaintSoftware/Services/ProjectStore.swift:178)). Building the compositor
 against a snapshot from day one costs almost nothing and is the difference between adding a thread
 later and rewriting for one.
 
@@ -816,7 +816,7 @@ later and rewriting for one.
    `stack.leafLayerIndices`, and a folder is not a leaf — so a group used as a mask *source* whose
    effect reshapes coverage (blur, outline, bloom, Sobel, sharpen) can serve a stale mask. Fixing it
    means putting node grades into the key, which is a change of its own rather than an extension of
-   the per-layer version. Tracked in [BUGS.md](BUGS.md).
+   the per-layer version. Tracked in [BUGS.md](../BUGS.md).
 
 ## 11. Build order
 
@@ -828,7 +828,7 @@ effects as both a layer and a node — each additive on what came before, which 
 carried none of 0–3's risk. `CompositorParityLogicTests`, `MaskParityLogicTests`, `SandwichLogicTests`
 and `LayerUITests` are what still pin the guarantees this table used to narrate phase by phase. §9.2's
 background renderer stays deferred until the sequencer exists — only §9.1's substrate shipped, inside
-phase 2. What remains is in §10 and [BUGS.md](BUGS.md).
+phase 2. What remains is in §10 and [BUGS.md](../BUGS.md).
 
 **One correction to §5.1 that phase 5 measured, and phase 7 tested again rather than assuming it would
 repeat.** "The CoreGraphics one is the reference … the byte-for-byte definition of correct" holds for

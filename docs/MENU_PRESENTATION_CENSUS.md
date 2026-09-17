@@ -133,7 +133,7 @@ paragraph used to name — `SelectPanel`, `StrokeSettingsPanel`, `MaskTuningSect
 
 **The fifth, `TextSettingsPanel`, grew three, and the sentence that said otherwise was false from Add
 Text's later stages until 2026-08-27.** Found by `tools/presentation-census.sh`, logged in
-[BUGS.md](BUGS.md), and corrected here: the font-family `Menu`, the face `Menu` and a stock
+[BUGS.md](../BUGS.md), and corrected here: the font-family `Menu`, the face `Menu` and a stock
 `ColorPicker`. All three are in the count of fourteen the script prints — they were never missing from
 the tooling, only from this file's prose.
 
@@ -164,7 +164,7 @@ class**, and the reasoning is the mechanism rather than the geometry:
   `MenuInterruptionUITests` measured for the blend-mode menu.
 - **The stock `ColorPicker` is still the open question**, unchanged and unanswered. One tap outside it
   also dismissed it without placing a box in the same session, which is *not* the measurement
-  [BUGS.md](BUGS.md) asks for: `.popover`'s failure mode is a **drag**, where the outside touch begins
+  [BUGS.md](../BUGS.md) asks for: `.popover`'s failure mode is a **drag**, where the outside touch begins
   a stroke and the teardown lands mid-sequence, and a tap cannot distinguish that. Treat this row as
   UNKNOWN until somebody runs `MenuInterruptionUITests`' shape against it.
 
@@ -216,7 +216,7 @@ does to a **drag on other chrome**, and that turned out to be a different and wo
 
 **A `.popover` swallows a drag outside it whole.** The surface underneath does not scroll, and the
 popover does not dismiss either — only a tap gets out. Traced from the owner's ActionRecorder capture
-in [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
+in [docs/bug-evidence/timeline-freeze-2026-09-06.md](bug-evidence/timeline-freeze-2026-09-06.md)
 and reproduced: `hitTest` still returns the view under the finger and the whole ancestor chain of
 recognizers is intact, but `_UIPassthroughGateGestureRecognizer` means `touchesBegan` never fires.
 MEASURED: menu up, a drag moved the cel block **0.0 pt**; menu gone, the same drag moved it **369 pt**.

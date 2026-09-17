@@ -508,7 +508,7 @@ versions of this brush."** So the question is not only *"is this edge wrong"* bu
 brush-level parameter"** — and a global fix that antialiases every dab would delete a texture the owner
 wants rather than repairing one they do not. §6 already has `hardness` as an output; whether its top end
 should stay aliased on purpose, and whether the rough ink family ships in more than one version, is
-[BRUSH.md](BRUSH.md) §8.4's question rather than this entry's. **The measurement below stands either
+[BRUSH.md](docs/BRUSH.md) §8.4's question rather than this entry's. **The measurement below stands either
 way** — what is in dispute is what to do about it, not what it is.
 
 **Found while measuring `DabGradientCache` for BRUSH.md §12 stage 3's image primitive. Reported, not
@@ -1265,7 +1265,7 @@ commit, but the layer is already out of `layers` so the float resolves nothing �
 back with the suppression still live**.
 
 This one is left because it is `setCanvasPadding`'s own coupling rather than a missing commit, and it sits
-in TODO item (9) / [CANVAS_RESIZE.md](CANVAS_RESIZE.md) territory — the resize path is being rebuilt there
+in TODO item (9) / [CANVAS_RESIZE.md](docs/CANVAS_RESIZE.md) territory — the resize path is being rebuilt there
 and a fix written now would be written against the path that is going away.
 
 ## Drawing on a scaled-down vector cel silently discarded most of the ink (2026-08-27) — FIXED `cf5de83`
@@ -1283,7 +1283,7 @@ vacuous pass and stage 2 has to delete that control deliberately.
 survived. That is the owner's *"a box around the original object"* rendered as data, and it settles the
 disagreement with our own prediction in their favour.
 
-**Found by reading while designing [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), mechanically confirmed by an
+**Found by reading while designing [LAYER_TRANSFORM.md](docs/LAYER_TRANSFORM.md), mechanically confirmed by an
 independent reviewer, and SEEN ON THE IPAD 2026-08-27.** The owner: *"After I shrink the entire canvas and
 put in a line, the line does not bake properly, and only the part of the line in a box around the original
 object gets baked. This box is likely the canvas borders after it got shrunk, and I suspect that there is
@@ -1335,7 +1335,7 @@ silently discarded.
 - **A whole-cel Move that scales *up* is a bitmap magnify, and the doc comment claims the opposite.**
   `setVectorTransform` says "losslessly (the geometry is re-rasterized at the new transform, no
   resolution loss)" (`CanvasManager.swift:331-332`). It is not — `render()` applies the affine to an
-  already-rasterized bitmap. [CANVAS_RESIZE.md](CANVAS_RESIZE.md) §2 states the general fact correctly,
+  already-rasterized bitmap. [CANVAS_RESIZE.md](docs/CANVAS_RESIZE.md) §2 states the general fact correctly,
   about a canvas resize, and **nobody joined the two**. Two doc comments in this tree contradict each
   other and the wrong one is on the Move path.
 - **Interpolation ignores the cel transform entirely.** `interpolationContentProvider` returns raw
@@ -2178,7 +2178,7 @@ source layer, tracking edits to a layer the artist thinks they have left behind.
 answers — remap each `CelRef` through the old→new id mapping the duplication already builds, drop
 the recipe as it does today but say so in the UI, or copy verbatim and accept the shared reference
 as intentional — are a vector-interpolation product call, not a layer-compositing one. See
-[VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md).
+[VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md).
 
 ## Fill tool: the gap-closing UI test is still skipped (2026-07-21)
 
@@ -2277,4 +2277,4 @@ menu's keyframe items, and deliberately not fixed there.
   entry point goes through the gallery first.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
-  [VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
+  [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.

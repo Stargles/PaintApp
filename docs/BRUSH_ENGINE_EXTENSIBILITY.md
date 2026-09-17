@@ -26,7 +26,7 @@ persistence, and the zero-tolerance parity test **for free**.
 There is **one real blocker**, and it is narrow and structural rather than diffuse:
 
 > `DabTarget` can only draw a **circle**. Its entire drawing surface is
-> `stampCircle(at:radius:color:alpha:hardness:blendMode:)` ([RasterLayerTexture.swift:14](PaintSoftware/Engine/RasterLayerTexture.swift:14)).
+> `stampCircle(at:radius:color:alpha:hardness:blendMode:)` ([RasterLayerTexture.swift:14](../PaintSoftware/Engine/RasterLayerTexture.swift:14)).
 
 `.ABR` and Procreate brushes are, at bottom, **stamp-image** brushes: a grayscale alpha bitmap
 placed per dab with its own rotation, roundness and scale. There is no way to express one through a
@@ -70,7 +70,7 @@ kind that renders differently in the two tiers fails a test that is already writ
 
 `DabRNG` is seeded from the stroke id, `DabLattice` carries a parent's seed to its pieces, and
 `DiscardedDabTarget` exists so that dabs *outside* a piece's visible range are still **computed and
-then dropped** rather than skipped ([BrushStamper.swift:303](PaintSoftware/Engine/BrushStamper.swift:303)).
+then dropped** rather than skipped ([BrushStamper.swift:303](../PaintSoftware/Engine/BrushStamper.swift:303)).
 
 This is a real constraint on every dynamic an importer might add, and it is currently implicit. State
 it as a rule:
@@ -89,7 +89,7 @@ per-stroke in effect. Do not copy that pattern for a per-dab-varying parameter.
 ### 3. Imported-asset lifetime is already solved
 
 `ProjectStore` copies every `.custom` brush's texture into `<project>/brushes/` on save and restores
-it into the shared library on load ([ProjectStore.swift:96](PaintSoftware/Services/ProjectStore.swift:96)).
+it into the shared library on load ([ProjectStore.swift:96](../PaintSoftware/Services/ProjectStore.swift:96)).
 So "a project references a brush texture the user later deleted" already has an answer, and ABR/
 Procreate imports inherit it. `VectorCanvasData.ImageRef` is the same idea for placed images and is
 the model to copy if a brush ever needs more than a file name.
@@ -143,7 +143,7 @@ the two could disagree (`.custom` with a nil name, or `.hardRound` with a name s
 
 > **`customTextureFileName` is written by the UI and copied by the project store, but the renderer
 > never reads it.** `stampDab` routes `.custom` to `stampApproximateSquare`
-> ([BrushStamper.swift:256](PaintSoftware/Engine/BrushStamper.swift:256)).
+> ([BrushStamper.swift:256](../PaintSoftware/Engine/BrushStamper.swift:256)).
 
 So the custom-stamp feature is plumbing and persistence with no pixel path behind it. That is not a
 bug to fix in isolation — it is the ABR work, arriving early and half-built. When the image primitive

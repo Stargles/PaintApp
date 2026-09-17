@@ -59,7 +59,7 @@ and `shouldRequireFailure` (`:2676`) reads three of them back out to answer a fo
 - 2026-08-17: the eyedropper picked a colour **and** painted a stroke, because `shouldInteract`'s tool
   clause was a hand-maintained `!= .fill` list (`Tool.swift:50` records it).
 - Still open: "two-finger pan/pinch/rotate is dead while Fill is selected, on device"
-  ([BUGS.md:551](BUGS.md)) — unexplained after three attempts.
+  ([BUGS.md:551](../BUGS.md)) — unexplained after three attempts.
 
 **What makes it structural, not sloppy**: `activePanel` is `@State` on a SwiftUI view
 (`DrawingView.swift:15`), mirrored into the coordinator twice (`CanvasView.swift:333`, `:346`), while
@@ -96,7 +96,7 @@ key above it costs one `==` compare after the bucket lookup. It is a hand-writte
 encoder with no `default:` clause for that reason (RENDER.md §3.5).
 
 **A key that cannot see an input serves a stale picture, intermittently.** That is a live bug:
-[BUGS.md:566](BUGS.md) — a mask sourced from a *graded group* can be stale, because `MaskResolver`'s
+[BUGS.md:566](../BUGS.md) — a mask sourced from a *graded group* can be stale, because `MaskResolver`'s
 key is built per leaf layer and a folder is not a leaf. `MaskResolver.swift:249` carries a second
 instance (`AlphaMask`'s thresholds are statics, so `masks` cannot see them changing — hence
 `tuningGeneration`). `InterpolationPreviewKey`'s doc comment enumerates four more inputs that had to be
@@ -144,7 +144,7 @@ file references, and it has **already drifted**: `interpolationFileName` is writ
 and named in the manifest (`ProjectManifest.swift:490`) but is absent from the skeleton, so it is never
 validated.
 
-[BUGS.md](BUGS.md)'s *"`validateProject` cannot see a file that is intact but unreadable"* entry already
+[BUGS.md](../BUGS.md)'s *"`validateProject` cannot see a file that is intact but unreadable"* entry already
 covers the validator's *blind spot* and rules a content probe too
 expensive; today's evidence does not change that ruling. It did not cover the **reporting** half either
 — nothing in `BUGS.md` did — which is why that half needed the separate fix below rather than falling
@@ -217,7 +217,7 @@ site then must state every field. Nine call sites to update; no behaviour change
   reads like the headline problem and is not: `REFACTOR_BASELINE.md` records 6.5 ms for a 500-sample
   stroke end to end, and each reconcile pass is already memoized. Extracting the two types in §1.1 and
   §1.2 is the useful 10% of that refactor; the other 90% is churn against 1,594 tests.
-- **Do not fix `MaskResolver`'s byte bound or tune any budget** — [BUGS.md:52](BUGS.md) and
+- **Do not fix `MaskResolver`'s byte bound or tune any budget** — [BUGS.md:52](../BUGS.md) and
   `PERFORMANCE.md` §5 both rule on this. 16 MiB at the owner's canvas; the admission valve never fires.
 - **Do not build a dirty-tracking save.** `PERFORMANCE.md` §5, settled for good 2026-08-21, with the
   owner's own "leaving the gallery is instant". Nothing found here reopens it.

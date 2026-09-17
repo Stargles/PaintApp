@@ -1,6 +1,6 @@
 # Effect backdrop — what an adjustment layer grades
 
-The specification for [BUGS.md](BUGS.md)'s *"Every effect and blend mode is masked to the layer's own
+The specification for [BUGS.md](../BUGS.md)'s *"Every effect and blend mode is masked to the layer's own
 ink"*, opened 2026-08-27 off the owner's device report and their ruling on it. **Everything in it is
 settled — §5's four questions were answered the same day and two of them overruled the recommendation.
 §6 is the build order.**

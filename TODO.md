@@ -97,15 +97,6 @@ already does with layers."*
 
 ---
 
-## (89) Organise the feature `.md` files into a folder
-
-**Status** — filed 2026-09-16. The owner: *"It may be worth organizing all the feature .md files into
-a folder since most of them are archived."*
-
-- [ ] Move the archived feature specs under one folder; fix every link in CLAUDE.md, HANDOFF.md, README.md.
-
----
-
 ## (97) The iPad crashed while the stream was on
 
 **Status** — filed 2026-09-16. The owner: *"I have experienced multiple times the ipad crashed while
@@ -127,7 +118,7 @@ one report of a different kind:
 
 ## (27) Stream the computer's screen as a layer
 
-**Status** — briefed 2026-09-13, designed the same day ([STREAM.md](STREAM.md)), and **built through
+**Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
 stage 4 the same day**: the Windows streamer (`streamer/`, installed on the laptop as the `PaintStreamer`
 task), the iPad stream layer, the bar with Freeze / Bake Frame, files both ways. On the owner's iPad.
 What remains is stage 5 — proving it on the real link with the owner at the laptop — and the one

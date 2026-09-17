@@ -855,7 +855,7 @@ fixed `24×24` frame (`TransformOverlaySupport.swift:39-51`) living inside `Canv
 **transformed** `container` — so they shrink as the artist zooms in and grow as they zoom out.
 `ADD_TEXT.md` §1 names this explicitly (*"Do not copy `TransformHandleView`'s fixed 24×24 … it
 carries the unfixed shrink-with-zoom bug that produced 'faint blue line, does not have nodes in
-it'"*), [BUGS.md](BUGS.md)'s cleanup list records it, and it is the owner's own live report in
+it'"*), [BUGS.md](../BUGS.md)'s cleanup list records it, and it is the owner's own live report in
 TODO.md's move-tool item (d).
 
 **The correct implementation exists**: Add Text Stage 4's `Views/TextTransformOverlayView.swift`
@@ -865,7 +865,7 @@ hit testing, raw `touchesBegan/Moved/Ended` so a drag bites on the first pixel.
 
 **This feature must not ship a third fixed-size overlay, and it must not do the port either.** A
 branch is porting `ObjectTransformOverlayView` onto the Stage 4 pattern right now, and
-`FloatingPieceOverlayView` is the other half of the same [BUGS.md](BUGS.md) cleanup entry. Stage 1
+`FloatingPieceOverlayView` is the other half of the same [BUGS.md](../BUGS.md) cleanup entry. Stage 1
 therefore **adds no handles of its own**: it reuses `FloatingPieceOverlayView` exactly as it stands
 and inherits the handle-size fix when that convergence reaches it. If stage 1's device check shows
 the nodes shrinking at 0.3× zoom, that is the already-filed bug arriving on a second tool — report
@@ -1031,7 +1031,7 @@ containing split strokes sees strokes.
 ## 3. Staged delivery
 
 Each stage merges to `main` on its own and is usable on the owner's iPad. Follow the multi-session
-protocol in [CLAUDE.md](CLAUDE.md): one worktree per stage, and a new *test* file needs a hand-written
+protocol in [CLAUDE.md](../CLAUDE.md): one worktree per stage, and a new *test* file needs a hand-written
 `project.pbxproj` entry with an id derived from the file's own name — plus the duplicate-id check
 after any rebase that touches that file.
 
@@ -1151,18 +1151,18 @@ about makes the pair a *general affine* and still not a homography.
   what a raster Move retains in history from one canvas-sized pair of images to two, on a stack whose
   budget is already device-derived. It wants its own branch and its own measurement.
 - **Port `FloatingPieceOverlayView` onto the Stage 4 handle pattern**, the other half of
-  [BUGS.md](BUGS.md)'s duplicated-overlay cleanup entry. A branch is doing
+  [BUGS.md](../BUGS.md)'s duplicated-overlay cleanup entry. A branch is doing
   `ObjectTransformOverlayView` now; this one follows it.
 
 ---
 
 ## 4. Performance rules
 
-The measured trap ([BUGS.md](BUGS.md):382-392, `StrokeCanvasView.refreshDisplay`'s `.overlay`
+The measured trap ([BUGS.md](../BUGS.md):382-392, `StrokeCanvasView.refreshDisplay`'s `.overlay`
 branch) has three ingredients: a **canvas-sized** allocation, **per input event**, plus two
 canvas-sized `draw(in:)` calls — MEASURED on the owner's iPad 9 in Release at **53.8 ms a dab** on a
 vector layer at 4096², against 4.0 ms on raster. This feature must break all three, and the second
-measured figure is even more to the point: [PERFORMANCE.md](PERFORMANCE.md) item 10 measured the
+measured figure is even more to the point: [PERFORMANCE.md](../PERFORMANCE.md) item 10 measured the
 Mode 3 eraser's live drag at
 **94.6 ms per cutting sample**, because a cut invalidates the cache and re-stamps a ~150-element
 layer. **That is the number that says cutting must never enter a drag loop**, and it is why the
@@ -1649,7 +1649,7 @@ about *where the three rules live* rather than about what they do.
     Two neighbours do not, and neither is an exception: **Fill** paints the loop's own area and
     catches no existing element, so there is nothing for a membership rule to be about; and
     **Duplicate** is `PixelOps.maskedPiece` on a flattened cel, which is the pixel cut — its
-    rasterizing of a vector layer is a defect filed in [BUGS.md](BUGS.md) and is where that would be
+    rasterizing of a vector layer is a defect filed in [BUGS.md](../BUGS.md) and is where that would be
     fixed, not here.
 
     **Enclosed catching nothing says so for all three** (§5.24). The ruling is written about a lift
@@ -1719,7 +1719,7 @@ the loop is asked in rather than about which rule it is asked under.
   history depth. Watch for the case the ruling was not asked about: a long drag the artist made in
   four small movements *without lifting* is one nudge, correctly, and may still surprise.
 - **Whether the move nodes are usable at zoom.** They are `TransformHandleView`'s fixed 24×24 inside
-  a transformed container until the [BUGS.md](BUGS.md) convergence reaches this overlay, so this
+  a transformed container until the [BUGS.md](../BUGS.md) convergence reaches this overlay, so this
   shows the owner's own item-(d) symptom on a second tool. **Expected, already filed, not a new
   bug** — report it as an observation rather than fixing it here.
 

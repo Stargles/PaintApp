@@ -6,7 +6,7 @@ A/B before anything is built. This is that A/B, plus what reading the real code 
 item's premises.
 
 **Nothing here is a recommendation.** The pictures are in `docs/linear-light-ab/`; the generator is
-[tools/linear_light_ab.swift](tools/linear_light_ab.swift), committed so this can be re-rendered
+[tools/linear_light_ab.swift](../tools/linear_light_ab.swift), committed so this can be re-rendered
 rather than re-derived.
 
 ---

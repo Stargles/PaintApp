@@ -1,6 +1,6 @@
 # Canvas Resize — Specification
 
-The owner's ask, [TODO.md](TODO.md) item **(9)**, verbatim:
+The owner's ask, [TODO.md](../TODO.md) item **(9)**, verbatim:
 
 > *"a resize canvas option in actions would be nice, to which users can resize the canvas however they
 > want. They should be able to control whether it gets cropped/expanded, or if everything gets scaled.
@@ -32,7 +32,7 @@ stage 3**. §6 is the owner's rulings — six questions, all now answered.
 
 ### `setCanvasPadding` is a whole-document crop/expand with a symmetric-margin UI bolted on
 
-[`CanvasManager+Document.swift:19-56`](PaintSoftware/Models/CanvasManager+Document.swift). Read it as
+[`CanvasManager+Document.swift:19-56`](../PaintSoftware/Models/CanvasManager+Document.swift). Read it as
 the resize it is, not as the slider it looks like:
 
 ```swift
@@ -56,8 +56,8 @@ That is the crop/expand behaviour the ask names, complete, for all four content 
 transient-state bake and the undo invalidation already reasoned about in the doc comment at `:13-18`.
 The **only** thing constraining it is that `delta` is one number applied to all four sides. Its
 Actions-menu control is the "Canvas Padding" slider,
-[`ActionsMenu.swift:217-240`](PaintSoftware/Views/ActionsMenu.swift), range `0...512`
-([`CanvasManager.swift:30`](PaintSoftware/Models/CanvasManager.swift)).
+[`ActionsMenu.swift:217-240`](../PaintSoftware/Views/ActionsMenu.swift), range `0...512`
+([`CanvasManager.swift:30`](../PaintSoftware/Models/CanvasManager.swift)).
 
 **It is NOT what the owner's freeze report (6) meant, and that was settled by asking (2026-08-27).**
 The owner: *"by 'try to resize the canvas' I meant moving the canvas with two fingers if I recall
@@ -104,9 +104,9 @@ different shape.
 
 | primitive | file:line | what it does | scales? |
 |---|---|---|---|
-| `RasterLayerTexture.resized(to:placing:)` | [`RasterLayerTexture.swift:913`](PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: content)` into a `newSize` renderer, raising `interpolationQuality` only when `content.size != size`. A blank texture stays blank and allocates nothing. | **yes**, when the rect is a different size |
-| `PixelOps.resizedCanvasImage(_:to:placing:)` | [`PixelOps.swift:754`](PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **yes** |
-| `VectorCanvas.resized(to:placing:)` | [`VectorLayer.swift:1575`](PaintSoftware/Engine/VectorLayer.swift) | derives `k` from the placement rect and **bakes** `_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an identity-transform canvas. Lossless at `k == 1`, exact at any `k`. | **yes** |
+| `RasterLayerTexture.resized(to:placing:)` | [`RasterLayerTexture.swift:913`](../PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: content)` into a `newSize` renderer, raising `interpolationQuality` only when `content.size != size`. A blank texture stays blank and allocates nothing. | **yes**, when the rect is a different size |
+| `PixelOps.resizedCanvasImage(_:to:placing:)` | [`PixelOps.swift:754`](../PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **yes** |
+| `VectorCanvas.resized(to:placing:)` | [`VectorLayer.swift:1575`](../PaintSoftware/Engine/VectorLayer.swift) | derives `k` from the placement rect and **bakes** `_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an identity-transform canvas. Lossless at `k == 1`, exact at any `k`. | **yes** |
 
 **That last row is stage 2's correction to this section, and it went in the feature's favour.** It read
 *"appends a translation to the canvas-level `_transform`; touches no element"* until stage 2 checked
@@ -123,7 +123,7 @@ source (a copy, nothing filtered) and the scale mode passes one of a different s
 
 ### `VectorCanvas.mapping(_:throughSimilarity:)` is the exact vector scaler, already written and already tested
 
-[`VectorLayer.swift:1591-1673`](PaintSoftware/Engine/VectorLayer.swift), built for the lasso move's
+[`VectorLayer.swift:1591-1673`](../PaintSoftware/Engine/VectorLayer.swift), built for the lasso move's
 scale grip. It takes one element and one similarity and returns the mapped element, carrying every
 scalar that a naive point-map would leave behind:
 
@@ -151,8 +151,8 @@ settle it rather than debate it.
 
 ### `CanvasSizePickerView` is create-only and is not on this path
 
-[`CanvasSizePickerView.swift`](PaintSoftware/Views/CanvasSizePickerView.swift), 85 lines. One call
-site, [`ContentView.swift:37`](PaintSoftware/ContentView.swift), on the new-document screen. It sets
+[`CanvasSizePickerView.swift`](../PaintSoftware/Views/CanvasSizePickerView.swift), 85 lines. One call
+site, [`ContentView.swift:37`](../PaintSoftware/ContentView.swift), on the new-document screen. It sets
 `canvasManager.canvasSize` on a manager with no layers and calls `addVectorLayer()`. It contributes
 the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widthField` /
 `sizePicker.heightField` accessibility ids) and nothing else. It is not a resize and never was.
@@ -160,7 +160,7 @@ the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widt
 ### Two existing defects on this path, which a resize inherits unless it fixes them
 
 1. **`flipCanvas` does not mirror vector content at all.**
-   [`CanvasManager+Document.swift:837`](PaintSoftware/Models/CanvasManager+Document.swift) says so
+   [`CanvasManager+Document.swift:837`](../PaintSoftware/Models/CanvasManager+Document.swift) says so
    in its own comment and flags it as a follow-up. A resize must not inherit the shape of that
    omission: every tier, or none.
 2. **`setCanvasPadding` misses two things that hold canvas coordinates.** `guideStrokes`
@@ -168,7 +168,7 @@ the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widt
    transformed, so growing the padding leaves every interpolation guide 
    `delta` points off its artwork. And `copiedCel` (`CanvasManager.swift:715`) is a canvas-sized
    clipboard payload that nothing clears; `pasteCel`
-   ([`CanvasManager+Timeline.swift:257`](PaintSoftware/Models/CanvasManager+Timeline.swift)) does
+   ([`CanvasManager+Timeline.swift:257`](../PaintSoftware/Models/CanvasManager+Timeline.swift)) does
    no size check, so a copy-resize-paste installs a cel whose `RasterLayerTexture.size` is the old
    canvas's. Both are one line each in the generalised loop, and stage 1 fixes both.
 
@@ -176,9 +176,9 @@ the **validation** a resize dialog wants (`1...8192`, `:15-16`, `sizePicker.widt
 
 **The raster tier already rescales on load, non-uniformly, silently.** `decodeCel` builds every
 texture as `RasterLayerTexture.load(from: image, size: canvasSize)`
-([`ProjectStore.swift:1693`](PaintSoftware/Services/ProjectStore.swift)), and `setContents` draws the
+([`ProjectStore.swift:1693`](../PaintSoftware/Services/ProjectStore.swift)), and `setContents` draws the
 decoded PNG as `image.draw(in: CGRect(origin: .zero, size: size))`
-([`RasterLayerTexture.swift:784-796`](PaintSoftware/Engine/RasterLayerTexture.swift)). So a PNG whose
+([`RasterLayerTexture.swift:784-796`](../PaintSoftware/Engine/RasterLayerTexture.swift)). So a PNG whose
 dimensions disagree with `manifest.canvasWidth/Height` is **stretched to fit, aspect and all**.
 
 The vector tier does not do this — `VectorCanvas(size: canvasSize, elements: …)` leaves elements
@@ -189,17 +189,17 @@ closed off explicitly: **the header and every buffer move together, in one opera
 ### What does *not* exist
 
 - ~~No `HistoryActionLabel` case for a canvas resize~~ — **stage 3 added `.resizeCanvas`**
-  ([`HistoryActionLabel.swift`](PaintSoftware/Models/HistoryActionLabel.swift); `.resizeFrame` is a
+  ([`HistoryActionLabel.swift`](../PaintSoftware/Models/HistoryActionLabel.swift); `.resizeFrame` is a
   *timeline* duration op and `.transform` is a layer transform). The enum's exhaustive `phrase` switch
   is what forced the decision in §2 to be made rather than defaulted, exactly as this line predicted.
-- No scaling raster primitive. `ImageWarp` ([`ImageWarp.swift:65`](PaintSoftware/Engine/ImageWarp.swift))
+- No scaling raster primitive. `ImageWarp` ([`ImageWarp.swift:65`](../PaintSoftware/Engine/ImageWarp.swift))
   is the app's only true resampler, and it is a *homography* warp built for text distort — far more
   machinery than a uniform scale needs.
 - No transform for `Lattice` / `InterpolationRecipe` (§1).
 - No determinate progress UI anywhere in the app, and **stage 3 did not add one** — see §4, which
   records why an atomic walk and a progress bar are exclusive. The only *working* long-operation
   pattern is `GalleryOpenState` + `Task { await Task.yield(); … }`
-  ([`GalleryView.swift:134-145`](PaintSoftware/Views/GalleryView.swift)), and `isResizing` is now a
+  ([`GalleryView.swift:134-145`](../PaintSoftware/Views/GalleryView.swift)), and `isResizing` is now a
   second instance of it — with the twist that the flag is raised only on the *predicted-slow* path,
   because a flag nothing suspends around is a flag SwiftUI never renders. The two other spinner flags
   are still dead (`isRegisteringInterpolation` guards synchronous work and can never be observed;
@@ -387,7 +387,7 @@ Three consequences, the first two settled in §5:
 ### The spacing floor: a large downscale changes how a stroke stamps, not only where
 
 `BrushStamper.stampSpacing` is `max(brushSize · spacingFraction, 1)`
-([`BrushStamper.swift:18-19`](PaintSoftware/Engine/BrushStamper.swift)). The `1` is an **absolute** floor
+([`BrushStamper.swift:18-19`](../PaintSoftware/Engine/BrushStamper.swift)). The `1` is an **absolute** floor
 in canvas points and does not scale. Below `brushSize · spacingFraction == 1` the dab spacing stops
 tracking the brush size, so a scaled stroke gets a different dab count.
 
@@ -440,7 +440,7 @@ at the new size"* — is the difference between a known trade and a mystery.
 
 `UndoHistory` charges in approximate retained bytes against `maxCost = min(max(physical/16, 64 MiB),
 768 MiB)` — **192 MiB on the owner's iPad 9** — summed across *both* stacks
-([`UndoHistory.swift:83-86`](PaintSoftware/Models/UndoHistory.swift), `:140-142`), and it evicts oldest
+([`UndoHistory.swift:83-86`](../PaintSoftware/Models/UndoHistory.swift), `:140-142`), and it evicts oldest
 silently rather than refusing (`:201-206`). A whole-cel operation is charged `w·h·4` twice = **16 MiB at
 2048×1024**, so about **12** fit (PERFORMANCE.md item 13, owner-ruled correct 2026-08-21).
 
@@ -615,7 +615,7 @@ Four rules:
    is the one reachable cause, and it is a real one: `VectorFillElement.init(path:)` ends `?? Data()`,
    so a fill can be born unreadable as well as decoded so.
 3. **Gate the save while a resize is in flight.** `ScenePhaseSaveGate` fires on `active → !active`
-   ([`ScenePhaseSaveGate.swift:33-35`](PaintSoftware/Services/ScenePhaseSaveGate.swift)), so an artist
+   ([`ScenePhaseSaveGate.swift:33-35`](../PaintSoftware/Services/ScenePhaseSaveGate.swift)), so an artist
    switching apps mid-resize would otherwise write a document that is half old-size and half new. An
    `isResizing` flag consulted by `ContentView.saveIfNeeded` alongside its existing
    `screen == .editor && canvasSize != nil` guard is the whole of it. **Shipped in stage 3** as
@@ -768,7 +768,7 @@ the dialog says so before the artist commits — §6 asks whether it should refu
 ## 4. Staged delivery
 
 Each stage merges on its own and is usable on the owner's iPad. Follow the multi-session protocol in
-[CLAUDE.md](CLAUDE.md); a new *test* file needs a hand-written `project.pbxproj` entry with an id
+[CLAUDE.md](../CLAUDE.md); a new *test* file needs a hand-written `project.pbxproj` entry with an id
 derived from the file name, plus the duplicate-id check after any rebase touching that file.
 
 **Stage 0 — the save tells you when it failed. ~30 lines, independent, ships alone.**
