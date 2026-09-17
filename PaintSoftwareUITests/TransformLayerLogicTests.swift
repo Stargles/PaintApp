@@ -319,9 +319,14 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertTrue(manager.layerPoses(atFrame: 0).isEmpty,
                       "An operand's pose is not the node's answer to how its inputs combine")
 
-        // …and a transform layer *outside* the node still carries both of its operands.
+        // …and a transform layer *outside* the node, above it at the root, still carries both of its
+        // operands. `addTransformLayer` lands beside the current layer, which is inside the node, so
+        // the new layer is lifted out to the root by hand; it is the topmost index, so it sits above
+        // the node in the root's stack.
         manager.addTransformLayer(name: "outer")
-        manager.layers[manager.layers.firstIndex { $0.name == "outer" }!].transform = pose(slide)
+        let outer = manager.layers.firstIndex { $0.name == "outer" }!
+        manager.layers[outer].parentFolderID = nil
+        manager.layers[outer].transform = pose(slide)
         XCTAssertEqual(manager.layerPoses(atFrame: 0).count, 2)
     }
 

@@ -1005,8 +1005,13 @@ extension CanvasManager {
         // Nothing has been suppressed yet, so a folder with nothing measurable in it is a plain
         // refusal with nothing to put back.
         guard let bounds = ink.bounds() else { return false }
-        for part in parts {
-            vectorCanvas(of: part)?.suppressedElementIDs = part.insideIDs
+        // Assigning the suppression is the one invalidation of the lift, and it bumps the version —
+        // so each part's `sourceVersion` is read *after* it, or the first nudge would read the
+        // document as having moved under the float and cancel it.
+        for index in parts.indices {
+            guard let vector = vectorCanvas(of: parts[index]) else { continue }
+            vector.suppressedElementIDs = parts[index].insideIDs
+            parts[index].sourceVersion = vector.contentVersion
         }
         let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
         vectorFloat = Self.float(parts: parts, ink: ink, bounds: bounds,
