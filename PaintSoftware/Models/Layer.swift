@@ -274,9 +274,9 @@ struct Layer: Identifiable {
 
 extension Layer {
 
-    /// The grade this layer applies to the backdrop beneath it, or nil if it draws pixels or is a flat
-    /// colour instead — §4.4's stack-layer wrapper, and the *only* place "is this layer an effect" is
-    /// decided.
+    /// The grade this layer applies to the backdrop beneath it, or nil if it draws plain pixels or is
+    /// a flat colour instead — §4.4's stack-layer wrapper, and the *only* place "is this layer an
+    /// effect" is decided.
     ///
     /// **`layerEffect` rather than the old `compositingEffect`**, because there is no longer a
     /// `.compositing` kind for the name to refer to: §4.4's wrapper is now one of the two modes of a
@@ -287,7 +287,14 @@ extension Layer {
     /// once carried a grade and has since been changed back must not silently start grading the stack;
     /// and a `.value` layer with no effect is not "an effect that does nothing", it is the *other*
     /// mode, which `valueFill` answers. Rendering asks this, never `kind` or `effect` on their own.
-    var layerEffect: Effect? { kind == .value ? effect : nil }
+    ///
+    /// **A vector layer answers too, since TODO (92)** — `LayerKind.carriesEffect` is the kind test
+    /// now, and it says which two. The vector reading is EFFECT_BACKDROP.md §2.4's: the grade acts on
+    /// the composite beneath the layer through the layer's own ink as a mask, so a vector layer
+    /// with a grade still holds pixels (`leafSnapshots` rasterizes them, as the mask's source) and
+    /// is still reached by the compositor through its effect rather than its source (the ink's
+    /// colour is never composited). The render tree mints the ink mask (`RenderTree.renderNodes`).
+    var layerEffect: Effect? { kind.carriesEffect ? effect : nil }
 
     /// **The pose this layer applies to everything beneath it in its container, or nil** — §4.4's
     /// transformation layer, and `layerEffect`'s twin in every respect including why the kind test is

@@ -121,7 +121,7 @@ struct LayerPanel: View {
                 //
                 // **There is no "Effect Layer" entry any more, and nothing was lost.** §4.4's
                 // wrapper stopped being a kind of its own and became a *mode* of this one, chosen by
-                // the value layer's own Blend Mode row (`LayerPanel.valueBlendModeRow`). A second entry
+                // the value layer's own Blend Mode row (`LayerPanel.blendOrEffectRow`). A second entry
                 // here would be a second way to create the same kind, differing only in which mode
                 // it arrived in — and the artist who wanted the other mode would have to delete the
                 // layer and add it again rather than flipping the picker that is already there.
@@ -354,11 +354,13 @@ struct LayerOptionsPanel: View {
 
         // §4.5: a value layer is one of two things, and this is where it is told which. The picker
         // sits above everything that only modifies the layer, because in either mode it *is* the
-        // layer. Absent on every other kind — `setLayerEffect` and `setLayerFill` both refuse a
-        // non-`.value` layer anyway, so offering either control there would be a control that does
-        // nothing.
-        if canvasManager.layers[index].kind == .value {
-            valueBlendModeRow(index: index)
+        // layer. **A vector layer takes the same merged row since TODO (92)**: its grade acts through
+        // its own ink (`LayerKind.carriesEffect`), and a blend mode and a grade are the same
+        // either/or on it that they are on a value layer — `setLayerBlendMode` clears the grade on
+        // both. Absent on the other two kinds — `setLayerEffect` refuses them, so offering the
+        // control there would be a control that does nothing.
+        if canvasManager.layers[index].kind.carriesEffect {
+            blendOrEffectRow(index: index)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
             // **Gated on `layerEffect`, not on `valueFill`.** The two look like complements and are
@@ -375,15 +377,17 @@ struct LayerOptionsPanel: View {
                                   identifier: "layerOptions.effectSettings") {
                     showingEffectSettings = true
                 }
-            } else {
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            } else if canvasManager.layers[index].kind == .value {
                 // Flat-colour mode: the colour *is* the layer, so its swatch is the first thing
                 // under the picker that chose it. Absent in effect mode, where the fill is inert
                 // storage the render never reads — a swatch there would be a colour the artist can
                 // pick and never see (`Layer.valueFill` argues the asymmetry, and `setLayerFill`'s
-                // doc points here for where "you cannot pick this right now" belongs).
+                // doc points here for where "you cannot pick this right now" belongs). A vector
+                // layer without a grade is ink, and has no colour row: its blend row above is all.
                 valueColorRow(index: index)
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             }
-            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
 
         // **A transform layer's panel is about transforming** — TRANSFORM_LAYER.md §2 ruling 2, and
@@ -423,12 +427,12 @@ struct LayerOptionsPanel: View {
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
 
-        // **A value layer's blend row is up top, merged with its grades** (`valueBlendModeRow`), so it
-        // must not appear a second time down here, and a transform layer has none (above). This one
-        // is for the kinds that hold pixels, where a blend is a modifier on content the layer already
-        // has rather than the answer to what the layer *is* — and where there is no grade for it to
-        // conflict with, so it needs none of the merged row's rules.
-        if canvasManager.layers[index].kind.holdsPixels {
+        // **A value layer's and a vector layer's blend row is up top, merged with the grades**
+        // (`blendOrEffectRow`), so it must not appear a second time down here, and a transform layer
+        // has none (above). This one is for the raster layer, where a blend is a modifier on content
+        // the layer already has rather than the answer to what the layer *is* — and where there is
+        // no grade for it to conflict with, so it needs none of the merged row's rules.
+        if !canvasManager.layers[index].kind.carriesEffect, canvasManager.layers[index].kind.holdsPixels {
             blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
                 canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
             }
@@ -497,7 +501,12 @@ struct LayerOptionsPanel: View {
     /// from §4.4's entry pass until 2026-09-11, when TRANSFORM_LAYER.md §2 ruling 2 made the
     /// transformation layer a kind of its own with its own `+` entry; a value layer cannot become
     /// one now, so there is nothing for the section to pick.
-    private func valueBlendModeRow(index: Int) -> some View {
+    ///
+    /// **The vector layer's row too, since TODO (92)** — the same list, the same either/or, the same
+    /// identifiers: an artist picks Gaussian Blur on a drawing and what is under the drawing blurs
+    /// through it (EFFECT_BACKDROP.md §2.4). Named for what it is now rather than for the value
+    /// layer it was written for.
+    private func blendOrEffectRow(index: Int) -> some View {
         let effect = canvasManager.layers[index].layerEffect
         let blend = canvasManager.layers[index].blendMode
         return Menu {
@@ -799,7 +808,7 @@ private func moveRow(caption: String, identifier: String, onMove: @escaping () -
 }
 
 /// **A transform layer's mode picker** — TRANSFORM_LAYER.md §5's five modes. A `Menu` on a row with a
-/// title, the live value in the caption and a checkmark on the pick — `valueBlendModeRow`'s shape.
+/// title, the live value in the caption and a checkmark on the pick — `blendOrEffectRow`'s shape.
 /// Each mode was listed only once its stage landed: a row that is offered and does nothing is
 /// CLAUDE.md's *"refusal with no notice"* wearing a menu.
 ///

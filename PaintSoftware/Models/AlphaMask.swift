@@ -17,12 +17,34 @@ import Foundation
 enum MaskSource: Hashable {
     case layer(UUID)
     case folder(UUID)
+    /// **A layer's own ink, read as an amount rather than a clip** — TODO (92), EFFECT_BACKDROP.md
+    /// §2.4: a vector layer's grade acts on the composite beneath it through the layer's rendered
+    /// alpha times its opacity, so the alpha is the coverage *as it is* — no §6.3 threshold, a soft
+    /// brush's skirt grades softly — where a `.layer` source is thresholded into a clip.
+    ///
+    /// **Minted by `RenderTree.renderNodes` alone, onto the grading node's own masks, and never by
+    /// the panel**: an artist cannot name one, so no document writes one and none decodes one. It
+    /// resolves through the same stack machinery as the other two (`RenderRequest.maskSourceStacks`
+    /// builds the layer as a pixel leaf without its grade, since the grading node itself has no
+    /// source to composite; the layer's opacity reaches the grade through the mix's own
+    /// `opacity × coverage`), which is what lets `MaskResolver`'s cache and both backends' `mix`
+    /// handle it with no new branch.
+    case ink(UUID)
 
     /// The model object this names, whichever kind it is — every cycle and lifecycle rule below is
     /// stated over ids rather than over kinds.
     var id: UUID {
         switch self {
-        case .layer(let id), .folder(let id): return id
+        case .layer(let id), .folder(let id), .ink(let id): return id
+        }
+    }
+
+    /// Whether this source's alpha is the coverage itself (`.ink`) rather than the shape a clip is
+    /// cut from (`.layer`, `.folder`, which `MaskResolver` puts through `AlphaMask.coverage`).
+    var isAmount: Bool {
+        switch self {
+        case .ink: return true
+        case .layer, .folder: return false
         }
     }
 }
@@ -241,6 +263,9 @@ struct AlphaMask: Hashable {
 extension MaskSource: Codable {
 
     private enum CodingKeys: String, CodingKey { case kind, id }
+    /// `.ink` is not here: it is minted onto a render node and never onto a `Layer` or a
+    /// `LayerFolder`, so no manifest carries one (`MaskSource.ink`'s doc). Encoding one is a
+    /// caller's mistake and is said so rather than written as a kind a decoder would then need.
     private enum Kind: String, Codable { case layer, folder }
 
     init(from decoder: Decoder) throws {
@@ -261,6 +286,10 @@ extension MaskSource: Codable {
         case .folder(let id):
             try container.encode(Kind.folder, forKey: .kind)
             try container.encode(id, forKey: .id)
+        case .ink:
+            throw EncodingError.invalidValue(self, .init(
+                codingPath: encoder.codingPath,
+                debugDescription: "A MaskSource.ink is a render node's, never a document's"))
         }
     }
 }

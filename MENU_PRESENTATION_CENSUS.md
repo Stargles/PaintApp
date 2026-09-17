@@ -151,7 +151,7 @@ class**, and the reasoning is the mechanism rather than the geometry:
   its options panels", is now true of three of its five rather than all five.
 - **Version 3's "effect picker" moved with them**, and is worth naming precisely because the label is
   misleading: it is `pickerRow`'s `Menu` — the Posterize effect's Screen dropdown, *inside* the
-  settings panel — not the catalogue menu that chooses an effect, which is `valueBlendModeRow`'s and
+  settings panel — not the catalogue menu that chooses an effect, which is `blendOrEffectRow`'s and
   `nodeOperationRow`'s and stayed in the rail. It is a `Menu`, so the paragraph below applies to it.
 - **The three unregisterable presentations in `TextSettingsPanel`** now open upward from near the
   bottom of the screen instead of downward from the top-leading dropdown. Both anchors put them over

@@ -1011,7 +1011,7 @@ timeline, which the notice says.
 
 **A third thing, found only by trying to drive it — and the whole scenario below is history, not
 current UI (TODO(45), 2026-09-11).** Transform left the Blend Mode menu entirely on 2026-09-11
-(TRANSFORM_LAYER.md §2 ruling 2, `LayerPanel.valueBlendModeRow`'s own doc comment): it is a `LayerKind`
+(TRANSFORM_LAYER.md §2 ruling 2, `LayerPanel.blendOrEffectRow`'s own doc comment): it is a `LayerKind`
 of its own now, added from the `+` menu, so there is no longer a Transform *entry* in this menu to be
 above or below the grade catalogue. What follows describes why it was moved to the top of that menu,
 a fix now superseded by removing it from the menu altogether. The Transform entry sat at the bottom of its menu,

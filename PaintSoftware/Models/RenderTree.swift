@@ -320,6 +320,27 @@ extension RenderNode {
                           blendMode: blendMode, isIsolated: isIsolated, masks: masks, effect: effect)
     }
 
+    /// **This grading leaf as the pixel leaf a mask source reads** — TODO (92). The grade off, since
+    /// a grading node has no source to composite and would recurse into its own ink mask; the mode
+    /// `.normal`, since the ink is composited onto transparency alone and a mode there reads as
+    /// Normal anyway; and visible, as every mask source stack is — a hidden grading node is never
+    /// composited, so its mask is never asked for.
+    ///
+    /// The two callers differ on the opacity and the declared masks, and both differences are the
+    /// same fact seen from two sides: **for the node's own ink mask** (`MaskSource.ink`,
+    /// `forOwnMask`) the node's opacity and its declared clip are already applied by the mix that
+    /// reads the mask (`mixBack`'s `opacity × coverage`, and the clip as a second mask on the same
+    /// node), so applying either inside the ink too would square it — the leaf reads at opacity 1
+    /// with no masks. **For another node's clip** naming this layer (`MaskSource.layer`) nothing
+    /// downstream applies them, so both stay, exactly as `ignoringVisibility` keeps them for an
+    /// ungraded source: what the artist masks by is the layer's ink as the layer shows it.
+    func asInkLeaf(forOwnMask: Bool) -> RenderNode {
+        RenderNode(id: id, content: content, opacity: forOwnMask ? 1 : opacity, isVisible: true,
+                   blendMode: .normal, isIsolated: false,
+                   masks: forOwnMask ? [] : masks.filter { !$0.sources.contains(where: \.isAmount) },
+                   effect: nil)
+    }
+
     /// The node with this `Layer.id` or `LayerFolder.id`, anywhere in `nodes`. Nil when the id names
     /// nothing in the tree, which for a mask source means it contributes no alpha.
     static func find(_ id: UUID, in nodes: [RenderNode]) -> RenderNode? {
@@ -1219,8 +1240,15 @@ extension CanvasManager {
                                   blendMode: effect != nil || layer.layerTransform != nil || containerIsNode
                                       ? .normal : layer.blendMode.compositedMode,
                                   isIsolated: false,
+                                  // **A vector layer's grade acts through its own ink** — TODO
+                                  // (92): the layer's rendered alpha, times its opacity, is the
+                                  // amount the grade is mixed back by, minted here as the node's
+                                  // first mask (`MaskSource.ink`). A value layer's grade has no
+                                  // ink and takes no such mask; a vector layer without a grade
+                                  // draws its ink as pixels and takes none either.
                                   masks: masks(ofNode: layer.id, declared: layer.alphaMask,
-                                               clippingTo: layer.blendMode == .clipToBelow ? below : nil),
+                                               clippingTo: layer.blendMode == .clipToBelow ? below : nil,
+                                               inkOf: effect != nil && layer.kind.holdsPixels ? layer.id : nil),
                                   effect: effect))
             case .folder(let folder):
                 // Unconditional descent: `isExpanded` is a panel affordance and must not reach
@@ -1328,8 +1356,13 @@ extension CanvasManager {
     ///
     /// Every rule the compositor would otherwise have to know is spent here, which is why
     /// `RenderNode.masks` can be read literally.
-    private func masks(ofNode nodeID: UUID, declared: AlphaMask?, clippingTo below: MaskSource?) -> [AlphaMask] {
+    private func masks(ofNode nodeID: UUID, declared: AlphaMask?, clippingTo below: MaskSource?,
+                       inkOf grading: UUID? = nil) -> [AlphaMask] {
         var result: [AlphaMask] = []
+        // **The vector layer's own ink, first** — TODO (92), EFFECT_BACKDROP.md §2.4. An amount
+        // rather than a clip (`MaskSource.ink`), and a mask of its own so that the declared clip
+        // below it multiplies in as the intersection `MaskResolver` makes of two masks on one node.
+        if let grading { result.append(AlphaMask(sources: [.ink(grading)])) }
         if let declared, declared.isEnabled {
             var usable = declared
             usable.sources = declared.sources.filter { canMask(nodeID, with: $0) }
@@ -1370,7 +1403,9 @@ extension CanvasManager {
     /// masking with a group is masking with its contents.
     private func covered(by source: MaskSource) -> [UUID] {
         switch source {
-        case .layer(let id):
+        // An ink source is its own node's and is minted past this check (`masks(ofNode:…)` appends
+        // it unconditionally), so it is never walked from here; it covers itself, like a layer.
+        case .layer(let id), .ink(let id):
             return [id]
         case .folder(let id):
             let subtree = folderSubtree(id)

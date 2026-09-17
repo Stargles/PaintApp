@@ -559,7 +559,7 @@ class PaintUITestCase: XCTestCase {
         row.tap()
 
         // One row, not two: a value layer's grades live in its Blend Mode menu below the blends
-        // (`LayerPanel.valueBlendModeRow`), which is the owner's merge of the old Mode row into this
+        // (`LayerPanel.blendOrEffectRow`), which is the owner's merge of the old Mode row into this
         // one. The identifiers are the blend row's for that reason.
         let modeButton = app.buttons["layerOptions.blendModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5),

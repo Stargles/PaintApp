@@ -97,6 +97,21 @@ enum MaskResolver {
         return resolved
     }
 
+    /// **`image`'s alpha, as a coverage** — the amount an `.ink` source resolves to, for a caller that
+    /// holds the pixels and no document to resolve them from: `CanvasManager.mergeContribution`
+    /// baking a vector layer's grade through its own ink (TODO (92)). No threshold, for
+    /// `MaskSource.ink`'s reason; the bytes are read through the same conversion both compositors
+    /// use, so the coverage is the alpha the walk would have composited.
+    static func coverage(fromAlphaOf image: CGImage) -> ResolvedMask? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0,
+              let bytes = CoreGraphicsCompositor.premultipliedBytes(image, width: width, height: height)
+        else { return nil }
+        var coverage = [UInt8](repeating: 0, count: width * height)
+        for pixel in coverage.indices { coverage[pixel] = bytes[pixel * 4 + 3] }
+        return ResolvedMask(width: width, height: height, coverage: coverage)
+    }
+
     /// Multiplies `image`'s alpha by `mask` — the mask applied, and the only thing "applying a mask"
     /// ever means here (§6.1: never baked, always this, at draw time).
     ///
@@ -175,11 +190,19 @@ enum MaskResolver {
         return ResolvedMask(width: width, height: height, coverage: product)
     }
 
-    /// One mask: the union of its sources' alpha, put through §6.3's threshold.
+    /// One mask: the union of its clip sources' alpha, put through §6.3's threshold — and, unioned
+    /// with that, its amount sources' alpha as it is.
+    ///
+    /// **Two unions rather than one, since TODO (92).** A `.layer` or `.folder` source is a shape a
+    /// clip is cut from, and the cut is the threshold table below; an `.ink` source *is* the coverage
+    /// (`MaskSource.isAmount`), so it joins after the table, inverted the plain way if the mask asks.
+    /// A mask of clip sources alone runs exactly the path it always ran, byte for byte; a mask of one
+    /// ink source — the only kind the render tree mints — is that source's alpha, untouched.
     private static func resolve(_ mask: AlphaMask, of request: RenderRequest,
                                 width: Int, height: Int) -> [UInt8]? {
         var union = [UInt8](repeating: 0, count: width * height)
-        var resolvedAnySource = false
+        var resolvedAnyClip = false
+        var amounts: [UInt8]?
 
         for source in mask.sources {
             // A source naming something that is not in the document contributes no alpha rather than
@@ -198,7 +221,15 @@ enum MaskResolver {
             guard let composite = CoreGraphicsCompositor.composite(sourceRequest),
                   let bytes = CoreGraphicsCompositor.premultipliedBytes(composite, width: width, height: height)
             else { continue }
-            resolvedAnySource = true
+            if source.isAmount {
+                var amount = amounts ?? [UInt8](repeating: 0, count: width * height)
+                for pixel in 0..<(width * height) {
+                    amount[pixel] = max(amount[pixel], bytes[pixel * 4 + 3])
+                }
+                amounts = amount
+                continue
+            }
+            resolvedAnyClip = true
             for pixel in 0..<(width * height) {
                 union[pixel] = max(union[pixel], bytes[pixel * 4 + 3])
             }
@@ -206,14 +237,21 @@ enum MaskResolver {
         // An enabled mask whose every source failed to resolve is not a mask that hides everything;
         // it is no mask (§6.6). Inverting nothing is still nothing, which is why this returns before
         // the threshold rather than after it.
-        guard resolvedAnySource else { return nil }
+        guard resolvedAnyClip || amounts != nil else { return nil }
 
-        // The threshold is a function of one alpha byte, so 256 answers cover the canvas. Worth the
-        // table: this runs over 4.2M pixels at 2048².
-        let table: [UInt8] = (0...255).map { alpha in
-            UInt8((min(max(mask.coverage(forSourceAlpha: Float(alpha) / 255), 0), 1) * 255).rounded(.toNearestOrEven))
+        if resolvedAnyClip {
+            // The threshold is a function of one alpha byte, so 256 answers cover the canvas. Worth
+            // the table: this runs over 4.2M pixels at 2048².
+            let table: [UInt8] = (0...255).map { alpha in
+                UInt8((min(max(mask.coverage(forSourceAlpha: Float(alpha) / 255), 0), 1) * 255).rounded(.toNearestOrEven))
+            }
+            for pixel in union.indices { union[pixel] = table[Int(union[pixel])] }
         }
-        for pixel in union.indices { union[pixel] = table[Int(union[pixel])] }
+        if let amounts {
+            for pixel in union.indices {
+                union[pixel] = max(union[pixel], mask.invert ? 255 - amounts[pixel] : amounts[pixel])
+            }
+        }
         return union
     }
 

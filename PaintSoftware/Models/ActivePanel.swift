@@ -13,7 +13,7 @@ import Foundation
 ///
 /// **No `adjust` case.** The toolbar carried a slider icon for one, and behind it was
 /// `StubToolPanel` — a placeholder that had never grown a feature. Every grade the artist can
-/// actually apply lives on a value layer's own Blend Mode menu (`LayerPanel.valueBlendModeRow`),
+/// actually apply lives on a value layer's own Blend Mode menu (`LayerPanel.blendOrEffectRow`),
 /// reached from the layer they want to grade, which is where the owner said it belongs: "the adjust
 /// icon at the top can be removed, its what the layer edit does."
 ///

@@ -67,10 +67,13 @@ final class LayerKindLogicTests: XCTestCase {
         }
     }
 
-    /// **Only one kind grades, only one poses, and neither is a kind that draws.** The three
-    /// accessors are the render path's whole reading of a layer; a kind that answered two of them, or
-    /// a drawing kind that answered any, would be the forty-rows-that-set-nothing trap in reverse.
-    func testEachPixelLessKindAnswersExactlyOneOfTheThreeAccessors() {
+    /// **Two kinds grade, one poses, and no kind answers two of the three accessors.** The three
+    /// accessors are the render path's whole reading of a layer; a kind that answered two of them
+    /// would be the forty-rows-that-set-nothing trap in reverse. The vector layer is the one drawing
+    /// kind that grades (TODO (92), `LayerKind.carriesEffect`) — through its own ink, which is why a
+    /// drawing kind can: the pixels it holds are the mask, not a second thing the grade competes
+    /// with. The raster layer still reads no payload.
+    func testEachKindAnswersAtMostOneOfTheThreeAccessors() {
         for kind in LayerKind.allCases {
             let m = manager(with: kind)
             var layer = m.layers[m.currentLayerIndex]
@@ -80,10 +83,12 @@ final class LayerKindLogicTests: XCTestCase {
             layer.transform = m.restingContainerPose
             let answers = [layer.layerEffect != nil, layer.valueFill != nil, layer.layerTransform != nil]
             switch kind {
-            case .raster, .vector: XCTAssertEqual(answers, [false, false, false], "\(kind) draws pixels and reads no payload")
+            case .raster: XCTAssertEqual(answers, [false, false, false], "a raster layer draws pixels and reads no payload")
+            case .vector: XCTAssertEqual(answers, [true, false, false], "a vector layer with a grade grades, through its ink")
             case .value: XCTAssertEqual(answers, [true, false, false], "a value layer with a grade grades — and its fill is inert under it")
             case .transform: XCTAssertEqual(answers, [false, false, true], "a transform layer poses, whatever else it carries")
             }
+            XCTAssertEqual(layer.layerEffect != nil, kind.carriesEffect, "\(kind): the accessor and the kind's own answer agree")
         }
     }
 

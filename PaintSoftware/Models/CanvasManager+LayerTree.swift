@@ -555,7 +555,12 @@ extension CanvasManager {
 
             if !stayedVector {
                 rasterizeLayer(layerIndex: bottomIndex)
-                rasterizeLayer(layerIndex: topIndex)
+                // **Not the top layer while it grades** (TODO (92)): `rasterizeLayer` makes it
+                // `.raster`, a kind that carries no grade, so the bake would then read the ink as
+                // pixels and composite the stencil's colour — the one thing the ruling says never
+                // happens. `mergeContribution` reads a grading vector cel through the seam itself,
+                // and the layer is deleted below whatever kind it is left in.
+                if layers[topIndex].layerEffect == nil { rasterizeLayer(layerIndex: topIndex) }
             }
             mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
                              asVector: stayedVector, canvasSize: canvasSize)
@@ -771,6 +776,9 @@ extension CanvasManager {
         guard layers.indices.contains(bottomIndex), layers.indices.contains(topIndex) else { return false }
         let below = layers[bottomIndex], above = layers[topIndex]
         guard below.kind == .vector, above.kind == .vector,
+              // A grading vector layer's ink is a stencil, not ink to concatenate (TODO (92)); the
+              // pixel arm bakes the grade through it.
+              below.layerEffect == nil, above.layerEffect == nil,
               below.opacity == 1, above.opacity == 1,
               // **And neither is *animating* its opacity**, TODO (21). The two tests above read the
               // stored base, which a curve overrides at every frame — so a layer stored at 1 and
@@ -861,7 +869,18 @@ extension CanvasManager {
         // opacity : 0` ternary this used to spell at each of two call sites.
         guard layer.isVisible else { return .nothing }
         if let effect = layer.layerEffect(atFrame: frame) {
-            return isBackdrop ? .nothing : .grade(effect, opacity: layer.opacity(atFrame: frame))
+            guard !isBackdrop else { return .nothing }
+            // **A vector layer's grade is baked through its own ink** (TODO (92)) — the cel's alpha
+            // as the coverage, exactly the amount the walk mixes the grade back by, so the merge and
+            // the canvas agree about where the grade reached. Through the seam, since this layer was
+            // *not* rasterized first (`mergeLayers` says why) and an in-between's ink is derived. A
+            // value layer's grade has no ink and takes none.
+            let coverage = layer.kind.holdsPixels
+                ? PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
+                                     derived: derivedCelContent(for: layer.cels[celIndex], atFrame: frame)).cgImage
+                    .flatMap(MaskResolver.coverage(fromAlphaOf:))
+                : nil
+            return .grade(effect, opacity: layer.opacity(atFrame: frame), coverage: coverage)
         }
         // §4.4's transformation layer poses the layers beneath it, which is not something a pixel
         // bake can express; `mergeLossKind` warns before the artist reaches this.

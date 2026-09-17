@@ -2169,10 +2169,10 @@ final class CanvasManager: ObservableObject {
     /// Sets or clears the grade on a `.value` layer — **the mode picker's whole model half.** Passing
     /// an `Effect` puts the layer in effect mode; passing nil returns it to flat colour.
     ///
-    /// Nothing happens on a layer that is not `.value`: the kind is what makes an effect live
-    /// (`Layer.layerEffect`), so writing one onto a raster layer would store a value that never
-    /// renders. That guard used to read `.compositing` and is the one line of this method the
-    /// kind-retirement changed.
+    /// Nothing happens on a layer whose kind cannot carry one: the kind is what makes an effect live
+    /// (`Layer.layerEffect`, `LayerKind.carriesEffect`), so writing one onto a raster layer would
+    /// store a value that never renders. That guard used to read `.compositing`, then `.value`; it
+    /// admits `.vector` since TODO (92), whose grade acts through the layer's own ink.
     ///
     /// **Clearing drops the effect and keeps the fill, and that asymmetry is deliberate** — see
     /// `Layer.valueFill`, which argues it. In short: `effect`'s presence *is* the mode, so it has to go
@@ -2193,13 +2193,14 @@ final class CanvasManager: ObservableObject {
     /// record a second step and split one artist action in two — and would leave a reachable state in
     /// which the grade is back but its channels are not.
     ///
-    /// **The layer renames itself to follow the mode**, unless the artist has named it (owner's call,
-    /// asked and answered directly: "yea rename it"). Enter Gaussian Blur and the row reads "Gaussian
-    /// Blur"; switch to Levels and it follows; go back to a flat colour and it is "Value n" again. The
-    /// row is where an artist reads their stack, and a row reading "Value 3" for something that is
-    /// actually a blur is the state `LayerStackCell.title(for:)` exists to prevent — the rename in the
-    /// *other* direction matters just as much, since leaving "Gaussian Blur" on a layer that is now a
-    /// flat colour is the identical lie told backwards.
+    /// **A value layer renames itself to follow the mode**, unless the artist has named it (owner's
+    /// call, asked and answered directly: "yea rename it"). Enter Gaussian Blur and the row reads
+    /// "Gaussian Blur"; switch to Levels and it follows; go back to a flat colour and it is "Value n"
+    /// again. The row is where an artist reads their stack, and a row reading "Value 3" for something
+    /// that is actually a blur is the state `LayerStackCell.title(for:)` exists to prevent — the
+    /// rename in the *other* direction matters just as much, since leaving "Gaussian Blur" on a layer
+    /// that is now a flat colour is the identical lie told backwards. **A vector layer keeps its
+    /// name**: its grade is something it carries, not what it is, and the row's badge says which.
     ///
     /// `Layer.hasCustomName` is what makes that safe; see it for why a flag and not a guess.
     ///
@@ -2210,7 +2211,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// One undo step per call, like every other discrete pick.
     func setLayerEffect(layerIndex: Int, to effect: Effect?) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value,
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind.carriesEffect,
               layers[layerIndex].effect != effect else { return }
         withStructureUndo(label: effect == nil ? .valueLayerColor : .valueLayerEffect) {
             layers[layerIndex].effect = effect
@@ -2222,7 +2223,7 @@ final class CanvasManager: ObservableObject {
             // empty because they changed which effect the layer runs.
             layers[layerIndex].pendingBaselines =
                 Effect.channelEntriesAddressed(by: effect, from: layers[layerIndex].pendingBaselines)
-            if !layers[layerIndex].hasCustomName {
+            if layers[layerIndex].kind == .value, !layers[layerIndex].hasCustomName {
                 layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
             }
         }
@@ -3547,10 +3548,12 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Sets a layer's blend mode (§7). Undoable as one step, like every other discrete pick.
-    /// **On a value layer, picking a blend clears the grade** — `setMixBlendMode`'s rule, arriving here
-    /// because the owner asked for the same collapse the node picker already had: "Move all the things
-    /// in mode into blend mode for value." One menu now answers *what is this layer*, and the two
+    /// **On a layer that grades, picking a blend clears the grade** — `setMixBlendMode`'s rule, arriving
+    /// here because the owner asked for the same collapse the node picker already had: "Move all the
+    /// things in mode into blend mode for value." One menu now answers *what is this layer*, and the two
     /// answers it offers are mutually exclusive, so the setter that writes one has to clear the other.
+    /// A vector layer's grade (TODO (92)) is cleared the same way and for the same reason: the render
+    /// pins a grading leaf to `.normal`, so a mode beside a grade is a tick the canvas never shows.
     ///
     /// Without this, the merged menu could leave both set: `RenderTree`'s leaf derivation pins an
     /// effect-carrying leaf to `.normal` whatever the layer stores, so the artist would pick Multiply,
@@ -3570,7 +3573,7 @@ final class CanvasManager: ObservableObject {
     /// mode is a kind now (TRANSFORM_LAYER.md §2 ruling 2) and there is no route to clear.
     func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind != .transform else { return }
-        let clearsEffect = layers[layerIndex].kind == .value && layers[layerIndex].effect != nil
+        let clearsEffect = layers[layerIndex].layerEffect != nil
         guard layers[layerIndex].blendMode != mode || clearsEffect else { return }
         withStructureUndo(label: .blendMode) {
             layers[layerIndex].blendMode = mode
@@ -3582,7 +3585,7 @@ final class CanvasManager: ObservableObject {
                                                                          from: layers[layerIndex].effectTracks)
                 layers[layerIndex].pendingBaselines =
                     Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
-                if !layers[layerIndex].hasCustomName {
+                if layers[layerIndex].kind == .value, !layers[layerIndex].hasCustomName {
                     layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
                 }
             }
@@ -3711,6 +3714,8 @@ final class CanvasManager: ObservableObject {
         switch target {
         case .layer(let id): return layers.first { $0.id == id }?.alphaMask
         case .folder(let id): return folders.first { $0.id == id }?.alphaMask
+        // A render node's, never a panel target (`MaskSource.ink`): nothing declares a mask on one.
+        case .ink: return nil
         }
     }
 
@@ -3723,6 +3728,8 @@ final class CanvasManager: ObservableObject {
             setAlphaMask(mask, forLayer: index)
         case .folder(let id):
             setAlphaMask(mask, forFolder: id)
+        case .ink:
+            break
         }
     }
 

@@ -1683,16 +1683,17 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
     ///
     /// Two pickers, because the effect groups (`EffectCatalog.groupTitles`, unreachable from this
     /// target the same way `EffectCatalog` itself is — see `EffectParameterCharacterizationTests`'
-    /// own header — so the three names are repeated here as literals) only ever join the blend
-    /// groups on a value layer's merged picker (`valueBlendModeRow`), never on a pixel layer's plain
-    /// `blendModeRow`. `BlendMode.menuGroupTitles` is reachable here, unlike `EffectCatalog`: it is a
-    /// `Models/` file with no SwiftUI in it.
+    /// own header — so the four names are repeated here as literals) join the blend groups on the
+    /// merged picker (`blendOrEffectRow`) — a value layer's, and since TODO (92) a vector layer's
+    /// too — and never on a raster layer's plain `blendModeRow`. The vector layer's menu is asked
+    /// only for its blend headers here; the value layer's for both. `BlendMode.menuGroupTitles` is
+    /// reachable here, unlike `EffectCatalog`: it is a `Models/` file with no SwiftUI in it.
     func testBlendModeAndEffectMenusShowGroupHeaders() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
 
-        // The fresh document's own vector layer: `BlendMode.menuGroupTitles`, no effect groups.
+        // The fresh document's own vector layer: `BlendMode.menuGroupTitles` at the top of its menu.
         let row = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
@@ -1719,7 +1720,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         // current scroll position, so a header past the first few groups does not exist in the
         // accessibility tree until swept into view the same way an effect entry does.
         let collection = app.collectionViews.firstMatch
-        for title in BlendMode.menuGroupTitles + ["Colour", "Blur & Light", "Stylise"] {
+        for title in BlendMode.menuGroupTitles + ["Colour", "Blur & Light", "Stylise", "Guides"] {
             for _ in 0..<10 {
                 if app.staticTexts[title].exists { break }
                 guard collection.exists else { break }

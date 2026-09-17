@@ -1272,9 +1272,15 @@ extension CanvasManager {
             // **A transformation layer is elided exactly as a grading one is**, and for the identical
             // reason: §4.4's transform mode holds no pixels, so rasterizing its blank cel would mint
             // a canvas-sized transparent image per frame for a leaf whose whole contribution is
-            // already spent — in `renderNodes`, on the leaves beneath it. Asked through
-            // `layerTransform` so this and the tree derivation read one accessor.
-            guard layer.layerEffect(atFrame: leafFrame) == nil, layer.layerTransform == nil else {
+            // already spent — in `renderNodes`, on the leaves beneath it.
+            //
+            // **A vector layer that grades is *not* elided, since TODO (92)** — its pixels are the
+            // ink mask its grade acts through (`MaskSource.ink`), rasterized here exactly as a
+            // hidden mask source's are, and the compositor still reaches the leaf by its grade and
+            // never by its source. So the elision is "holds no pixels and is not a flat colour"
+            // (`LayerKind.holdsPixels`, then `valueFill` below), and the frame-resolved grade no
+            // longer decides it: a grading vector leaf is rasterized at every frame it grades.
+            guard layer.kind.holdsPixels || layer.valueFill != nil else {
                 leaves[index] = LeafSnapshot(version: version, content: nil)
                 continue
             }
@@ -1334,7 +1340,22 @@ extension CanvasManager {
         var stacks: [MaskSource: [RenderNode]] = [:]
         for source in wanted {
             guard let node = RenderNode.find(source.id, in: tree) else { continue }
-            stacks[source] = [node.ignoringVisibility]
+            // **A grading leaf that holds pixels is read as its ink** (TODO (92)) — its own ink
+            // source and any other node's clip naming it alike, since a grading node has no source
+            // to composite and would otherwise resolve to nothing. `asInkLeaf` says what comes off
+            // and what stays; the two readings differ only in the declared masks.
+            let gradesInk = node.effect != nil && {
+                if case .leaf(let layerIndex) = node.content { return layers[layerIndex].kind.holdsPixels }
+                return false
+            }()
+            if source.isAmount {
+                // Only while the node is visible: a hidden grading node is never composited and its
+                // mask never read, and building the stack would rasterize a hidden layer for
+                // nothing every frame.
+                if gradesInk, node.isVisible { stacks[source] = [node.asInkLeaf(forOwnMask: true)] }
+                continue
+            }
+            stacks[source] = [gradesInk ? node.asInkLeaf(forOwnMask: false) : node.ignoringVisibility]
         }
         return stacks
     }

@@ -316,6 +316,7 @@ private extension BakeKeyEncoder {
         switch maskSource {
         case .layer(let id):  tag(0x30); uuid(id)
         case .folder(let id): tag(0x31); uuid(id)
+        case .ink(let id):    tag(0x32); uuid(id)
         }
     }
 
@@ -631,6 +632,7 @@ private extension MaskSource {
         switch self {
         case .layer(let id):  return "0" + id.uuidString
         case .folder(let id): return "1" + id.uuidString
+        case .ink(let id):    return "2" + id.uuidString
         }
     }
 }

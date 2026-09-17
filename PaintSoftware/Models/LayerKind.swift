@@ -60,6 +60,24 @@ extension LayerKind {
         case .value, .transform: return false
         }
     }
+
+    /// Whether a layer of this kind may carry a grade — `Layer.layerEffect`'s kind test, and the
+    /// other half of the question `holdsPixels` answers.
+    ///
+    /// **Two kinds since TODO (92), 2026-09-17, and they carry it differently.** A `.value` layer in
+    /// effect mode *is* the grade: it holds no pixels and the compositor reaches it by its effect
+    /// alone. A `.vector` layer carries one **through its own ink** — EFFECT_BACKDROP.md §2.4: the
+    /// layer's rendered alpha, times its opacity, is the mask the grade acts through on the composite
+    /// beneath, and the ink's colour is never composited. A `.raster` layer does not (the owner
+    /// asked for vector layers, and a raster layer that once carried a grade and was changed back
+    /// must not silently start grading — `Layer.layerEffect`'s own argument), and a `.transform`
+    /// layer has nothing a grade could act through. A `switch` for `holdsPixels`' reason.
+    var carriesEffect: Bool {
+        switch self {
+        case .value, .vector: return true
+        case .raster, .transform: return false
+        }
+    }
 }
 
 extension LayerKind {

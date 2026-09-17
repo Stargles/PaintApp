@@ -1325,12 +1325,14 @@ enum MergeContribution {
     /// Pixels, blended in `mode` at `opacity`. A raster or vector layer's flattened cel, or §4.5's
     /// flat-colour value layer resolved into the canvas-sized sheet it is.
     case pixels(UIImage, mode: BlendMode, opacity: Double)
-    /// §4.4's grade over whatever is beneath it, crossfaded back by `opacity`.
+    /// §4.4's grade over whatever is beneath it, crossfaded back by `opacity` — and by `coverage`,
+    /// which is a vector layer's own ink (TODO (92), EFFECT_BACKDROP.md §2.4) and nil for a value
+    /// layer's grade, which has none.
     ///
     /// No blend mode travels with it, and the omission is `RenderTree.renderNodes`' rule rather than
     /// a field dropped on the way: a leaf in effect mode is pinned to `.normal` whatever it stores,
     /// because a grade replaces the pixels it graded and there are not two things to compose.
-    case grade(Effect, opacity: Double)
+    case grade(Effect, opacity: Double, coverage: ResolvedMask?)
     /// Nothing this merge can bake — a layer that holds no pixels *and* has nothing inside the merge
     /// to act on. §4.4's transformation layer, and a grading layer in the *lower* position, whose
     /// backdrop is everything the merge deliberately excludes.
@@ -1391,8 +1393,8 @@ extension CoreGraphicsCompositor {
                 switch top {
                 case .pixels(let image, let mode, let opacity):
                     draw(image, mode: mode, opacity: opacity, in: bounds, context: context)
-                case .grade(let effect, let opacity):
-                    grade(effect, opacity: opacity, in: bounds, context: context)
+                case .grade(let effect, let opacity, let coverage):
+                    grade(effect, opacity: opacity, coverage: coverage, in: bounds, context: context)
                 case .nothing:
                     break
                 }
@@ -1405,8 +1407,10 @@ extension CoreGraphicsCompositor {
     ///
     /// Not a second implementation of grading: `EffectReference.apply` is the one CPU reference and
     /// `mixBack` is the one crossfade, both shared verbatim with the walk. What is absent is only
-    /// what a merge does not have — a mask to resolve, and an `.ink` re-walk with no paper to escape.
-    private static func grade(_ effect: Effect, opacity: Double, in bounds: CGRect,
+    /// what a merge does not have — a declared mask to resolve, and an `.ink` re-walk with no paper
+    /// to escape. `coverage` is the one mask a merge *does* have: a vector layer's own ink (TODO (92)),
+    /// handed in already resolved since it needs no document to read.
+    private static func grade(_ effect: Effect, opacity: Double, coverage: ResolvedMask?, in bounds: CGRect,
                               context: UIGraphicsImageRendererContext) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
         guard width > 0, height > 0,
@@ -1414,7 +1418,7 @@ extension CoreGraphicsCompositor {
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
         let graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
-        mixBack(graded, over: backdrop, opacity: opacity, coverage: nil,
+        mixBack(graded, over: backdrop, opacity: opacity, coverage: coverage,
                 in: bounds, context: context, width: width, height: height)
     }
 }

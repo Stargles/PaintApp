@@ -274,7 +274,7 @@ stops at the parenthesis.
 **The layer form has no blend mode of its own**, matching §4.3's rule for nodes. The renderer pins an
 effect-carrying leaf to `.normal`, so a blend dropdown that stayed live in effect mode would be setting
 a value nothing read. §4.5 is where that landed: rather than hiding a separate blend row in effect mode,
-the row *is* the effect picker (`valueBlendModeRow`), so there is only ever one control and it can never
+the row *is* the effect picker (`blendOrEffectRow`), so there is only ever one control and it can never
 disagree with the renderer. Wrap the layer in a folder to blend a grade's result.
 
 **The retired `compositing` kind — read this before touching `LayerKind`'s decoder.** The effect
@@ -313,7 +313,7 @@ anyone can describe — so a kind apiece made the mutually-exclusive pair expres
 `kind` and once as which payload happened to be set, with nothing keeping them honest. It also made
 "change this layer from a grade to a colour" a kind rewrite, which every `kind ==` test in the app has
 an opinion about, instead of the one-field edit it now is. The panel follows: **one Blend Mode menu**
-listing every blend mode and the thirteen effects together (`LayerPanel.valueBlendModeRow`), not a
+listing every blend mode and the thirteen effects together (`LayerPanel.blendOrEffectRow`), not a
 segmented control plus a separate picker. There is no "Flat Colour" entry — every blend mode in the
 list already clears the effect, so leaving effect mode is picking the mode you want to land in rather
 than picking "flat" and then a mode, and Normal sits first where "Flat Colour" used to. The row itself
