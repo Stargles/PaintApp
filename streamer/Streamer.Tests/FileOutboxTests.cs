@@ -24,17 +24,27 @@ public class FileOutboxTests : IDisposable
         return path;
     }
 
+    // events is appended to under `lock (events)` by the TransferUpdated handler on the
+    // outbox's pump thread; every read from the test thread must snapshot under the same
+    // lock rather than enumerate the live list, or a read racing an append throws
+    // "Collection was modified; enumeration operation may not execute" (BUGS.md,
+    // FileOutboxTests.NoClientQueuesWithAWaitingReasonThenSendsOnceOneConnects).
+    private static List<OutboundFileEventArgs> Snapshot(List<OutboundFileEventArgs> events)
+    {
+        lock (events) return events.ToList();
+    }
+
     private static async Task<OutboundFileEventArgs> WaitForState(
         List<OutboundFileEventArgs> events, OutboundFileState state, TimeSpan? timeout = null)
     {
         var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
         while (DateTime.UtcNow < deadline)
         {
-            var match = events.LastOrDefault(e => e.State == state);
+            var match = Snapshot(events).LastOrDefault(e => e.State == state);
             if (match != null) return match;
             await Task.Delay(10);
         }
-        throw new TimeoutException($"never reached state {state}; saw: {string.Join(", ", events.Select(e => e.State))}");
+        throw new TimeoutException($"never reached state {state}; saw: {string.Join(", ", Snapshot(events).Select(e => e.State))}");
     }
 
     [Theory]
@@ -146,7 +156,7 @@ public class FileOutboxTests : IDisposable
         // before the pump task — on another thread — gets to the front of the queue and
         // discovers there is no client; wait for THAT specific follow-up event rather
         // than "any Queued", or this can observe the first one and return early.
-        await WaitUntil(() => events.Any(e => e.State == OutboundFileState.Queued && e.Reason == "Waiting for the iPad…"));
+        await WaitUntil(() => Snapshot(events).Any(e => e.State == OutboundFileState.Queued && e.Reason == "Waiting for the iPad…"));
         Assert.Empty(transport.Sent);
 
         transport.HasClient = true;

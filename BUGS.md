@@ -24,15 +24,6 @@ was already stalled — the same session's `backboardd` was at its jetsam limit 
 layout pass. Not reproduced; nothing to cap. Left open with the trace's shape here so a second
 report can be compared against it: if it fires in the same view again, that is the signal.
 
-## `FileOutboxTests.NoClientQueuesWithAWaitingReasonThenSendsOnceOneConnects` races its own events list (2026-09-13)
-
-`streamer/Streamer.Tests/FileOutboxTests.cs`: `events` is a `List<OutboundFileEventArgs>` appended
-under `lock (events)` by the outbox's `TransferUpdated` handler on the pump thread, but the polling
-predicate in `WaitUntil(() => events.Any(...))` enumerates it with no lock on the test thread every
-10 ms — `Collection was modified; enumeration operation may not execute`. Seen once in four
-`dotnet test` runs on the laptop, passed in isolation. Fix: take the same lock inside the predicate (or
-snapshot `events.ToArray()` under it). A chip was filed for it.
-
 ## Xcode has no Apple ID signed in at all, so the CLI build fails even with a still-valid cached profile on disk (2026-09-13)
 
 `deploy/resign.sh` (outside this repo, at `~/PaintApp/deploy/resign.sh`) now tracks the installed
