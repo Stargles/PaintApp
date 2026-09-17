@@ -127,12 +127,16 @@ nonisolated enum ProjectPackageLayout {
 
     // MARK: - Writing
 
-    /// Where to **write** `name`. A slashed name is package-relative; a bare one goes in the role's
-    /// own directory.
+    /// The package-relative path `name` is **written** at. A slashed name already is one; a bare one
+    /// goes in the role's own directory. `ProjectStore.PackageLedger` records this string per file,
+    /// which is what lets a later save clone the file out of the live package by the same address.
+    static func writePath(named name: String, role: Role) -> String {
+        name.contains("/") ? name : "\(role.directory)/\(name)"
+    }
+
+    /// Where to **write** `name` — `writePath` resolved against the package.
     static func writeURL(named name: String, role: Role, in package: URL) -> URL {
-        if name.contains("/") { return resolve(name, in: package) }
-        return package.appendingPathComponent(role.directory, isDirectory: true)
-            .appendingPathComponent(name)
+        resolve(writePath(named: name, role: role), in: package)
     }
 
     /// Creates exactly the content directories a document needs, once, **before** the per-cel

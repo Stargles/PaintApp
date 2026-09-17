@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 struct ProjectManifest: Codable {
     var id: UUID
@@ -55,6 +55,9 @@ struct ProjectManifest: Codable {
     /// Nil for a document with no vector ink at all, which is the one case where there is nothing to
     /// redeem.
     var brushTableFileName: String? = nil
+    /// Where the editor was — frame, layer, zoom, onion skin, loop — TODO (77). Nil for a package
+    /// written before it existed, which opens at the defaults exactly as it did.
+    var editorState: EditorStateManifest? = nil
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int,
          layers: [LayerManifest], modifiedAt: Date,
@@ -63,7 +66,8 @@ struct ProjectManifest: Codable {
          vectorEraserMode: VectorEraserMode = .erase, universalEraser: Bool = false,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
-         animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil) {
+         animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil,
+         editorState: EditorStateManifest? = nil) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -84,6 +88,7 @@ struct ProjectManifest: Codable {
         self.guideStrokes = guideStrokes
         self.animationGroups = animationGroups
         self.brushTableFileName = brushTableFileName
+        self.editorState = editorState
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
@@ -115,6 +120,9 @@ struct ProjectManifest: Codable {
         animationGroups = try container.decodeIfPresent([AnimationGroup].self,
                                                         forKey: .animationGroups) ?? []
         brushTableFileName = try container.decodeIfPresent(String.self, forKey: .brushTableFileName)
+        // `try?`, unlike every line above: this is where the editor was, not what the artwork is,
+        // and a record this build cannot read is worth the defaults rather than a refused open.
+        editorState = try? container.decodeIfPresent(EditorStateManifest.self, forKey: .editorState)
     }
 
     /// Written explicitly so the two interpolation registries can be *omitted* when empty — a
@@ -143,13 +151,14 @@ struct ProjectManifest: Codable {
         // Absent means "this document has no vector ink", the same absence-is-the-meaning idiom every
         // optional key here follows.
         try container.encodeIfPresent(brushTableFileName, forKey: .brushTableFileName)
+        try container.encodeIfPresent(editorState, forKey: .editorState)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
              vectorEraserMode, universalEraser, folders, viewPresets, motionGroups, guideStrokes,
-             animationGroups, brushTableFileName
+             animationGroups, brushTableFileName, editorState
     }
 }
 
@@ -158,6 +167,17 @@ struct CodableColor: Codable, Equatable {
     var green: Double
     var blue: Double
     var alpha: Double
+
+    var color: Color { Color(red: red, green: green, blue: blue, opacity: alpha) }
+}
+
+extension Color {
+    /// Through `rgbaComponents`, which resolves against a fixed trait collection first — see
+    /// ColorConversion.swift's header for the two bugs that reading `UIColor` directly caused.
+    var codable: CodableColor {
+        let c = rgbaComponents
+        return CodableColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
+    }
 }
 
 struct FolderManifest: Codable {

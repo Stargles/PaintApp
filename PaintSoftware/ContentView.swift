@@ -11,6 +11,11 @@ struct ContentView: View {
     @State private var canvasManager = CanvasManager()
     @Environment(\.scenePhase) private var scenePhase
 
+    /// The autosave — TODO (76). `AutosaveClock` decides *when*; this view supplies the edits, the
+    /// hold and the save, because it is the one object that can see all three: the manager's edit
+    /// signal, the screen, and `saveIfNeeded`. See `AutosaveDriver`.
+    @StateObject private var autosave = AutosaveDriver()
+
     /// The save the artist started that is waiting on an answer to the damaged-save banner, or nil
     /// when nothing is being asked. See `SaveDamageGate` for the ruling this implements.
     @State private var pendingDamagedSave: PendingDamagedSave?
@@ -88,6 +93,21 @@ struct ContentView: View {
         // Both phases, not just the new one: `.inactive` occurs on the way out *and* on the way back,
         // so testing `newPhase` alone saved three times per app switch and stalled the return leg.
         // `ScenePhaseSaveGate` carries the reasoning and the transition matrix.
+        // The autosave listens to whichever document is in the editor and stops when it leaves.
+        // `isHeld` and `save` read the view's own state through the closures, which is how the
+        // driver sees the screen and `saveIfNeeded` without owning either.
+        .onChange(of: screen, initial: true) { _, newScreen in
+            if newScreen == .editor {
+                autosave.follow(canvasManager, isHeld: { autosaveIsHeld }, save: { saveIfNeeded(intent: .automatic) })
+            } else {
+                autosave.stop()
+            }
+        }
+        // Playback stopping is the one hold that lifts without an edit or a save, so it needs its
+        // own nudge; a stroke's lift is followed by the stroke's own `recordUndo`.
+        .onChange(of: canvasManager.isPlaying) { _, playing in
+            if !playing { autosave.arm() }
+        }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Playback ends when the app leaves the foreground, and this is not politeness — the
             // playhead is derived from elapsed *wall* time (see `CanvasManager.play()`), so an
@@ -113,16 +133,43 @@ struct ContentView: View {
 
     private func startNewProject(in folder: URL) {
         canvasManager = CanvasManager()
+        handToolsToArtist()
         newProjectFolder = folder
         screen = .sizePicker
     }
 
     private func openProject(_ manager: CanvasManager) {
         canvasManager = manager
+        handToolsToArtist()
         // The document already has a URL, so the pending folder is spent — clearing it stops a
         // later "Save As"-shaped path inheriting a folder the artist chose for something else.
         newProjectFolder = nil
         screen = .editor
+    }
+
+    /// The app half of TODO (77): whatever manager is about to be edited gets the brush size, opacity,
+    /// colour, tool and eraser the artist last had in hand. Stored by `saveIfNeeded`, so every save
+    /// — the autosave included — keeps the record current.
+    private func handToolsToArtist() {
+        if let preferences = EditorPreferences.stored() {
+            canvasManager.applyEditorPreferences(preferences)
+        }
+    }
+
+    // MARK: - Autosave (TODO (76))
+
+    /// Whether an autosave may start this instant. Every clause is a reason a snapshot taken now
+    /// would either hitch something the artist is doing or capture a state they are halfway through.
+    /// A save already in flight holds too: an autosave fired into one would snapshot a document whose
+    /// previous snapshot has not landed — harmless to the package, and exactly the doubling the
+    /// artist's own exit must not pay for.
+    private var autosaveIsHeld: Bool {
+        screen != .editor
+            || autosave.savesInFlight > 0
+            || canvasManager.strokeIsLive
+            || canvasManager.isPlaying
+            || canvasManager.isResizing
+            || canvasManager.hasInteractiveStatePending
     }
 
     /// Shows the gallery only once the save has actually landed on disk. `GalleryView` lists projects
@@ -160,12 +207,21 @@ struct ContentView: View {
             ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
                                                 in: newProjectFolder ?? ProjectStore.projectsDirectory)
         canvasManager.projectURL = url
+        // The artist's tools, beside the document — TODO (77)'s app half; and this save carries
+        // every edit the autosave was waiting on, whatever started it.
+        canvasManager.editorPreferences.store()
+        autosave.saveStarted()
         // `onSaveFailed` is the one channel `completion` never was (ARCHITECTURE_REVIEW.md finding
         // 3): `writeAtomically`'s three failure returns used to be silent, so the gallery could
         // appear exactly as it does on a real save while the artist's edits were never written.
-        if ProjectStore.save(canvasManager, to: url, intent: intent,
-                              onSaveFailed: { canvasManager.raise(.saveFailed) },
-                              completion: completion) == .ask {
+        let decision = ProjectStore.save(canvasManager, to: url, intent: intent,
+                                         onSaveFailed: { canvasManager.raise(.saveFailed) },
+                                         completion: {
+            autosave.saveFinished()
+            completion?()
+        })
+        if decision == .ask {
+            autosave.saveFinished()
             // Nothing was written and `completion` did not run, so the editor stays put with the
             // banner up. The two buttons below are the only ways out.
             pendingDamagedSave = PendingDamagedSave(completion: completion)

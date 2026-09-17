@@ -265,9 +265,10 @@ extension CanvasManager {
 /// against "the settings now" in one `==` (see `Coordinator.OnionSkinKey`), and every decision this
 /// carries is then testable without a view or a manager.
 ///
-/// **Not persisted.** `isOnionSkinEnabled`/`onionSkinOpacity` were not in the project manifest
-/// either, and onion skin is a way of looking at a drawing rather than part of it. Adding it to
-/// `ProjectManifest` later is additive and needs nothing here to change.
+/// **Persisted with the document since TODO (77)**, as part of `EditorStateManifest`: onion skin is a
+/// way of looking at a drawing rather than part of it, and the way the artist was looking at this
+/// drawing is what the round trip through the gallery has to bring back. `Codable` is synthesized;
+/// a record this build cannot decode reads as the defaults (see `EditorStateManifest.init(from:)`).
 /// **What the Behind placement subtracts, named but not yet drawn.**
 ///
 /// `CanvasManager.onionSkinInkRequest(at:)` resolves one on the main actor — which cel, at what
@@ -297,7 +298,7 @@ struct OnionSkinInkRequest {
     }
 }
 
-struct OnionSkinSettings: Equatable {
+struct OnionSkinSettings: Equatable, Codable {
 
     /// What "one step away" counts, and the distinction is real in this model rather than cosmetic —
     /// see `OnionSkinPlanner.resolvedCelIndices` for the arithmetic.
@@ -308,21 +309,21 @@ struct OnionSkinSettings: Equatable {
     /// - `frames`: step by *timeline frame*, then resolve whichever cel covers that frame. A drawing
     ///   held for five frames is therefore five steps away from the one after it, and an empty frame
     ///   is an empty skin. This is what plays back.
-    enum Neighbourhood: String, CaseIterable, Identifiable {
+    enum Neighbourhood: String, CaseIterable, Identifiable, Codable {
         case drawings, frames
         var id: String { rawValue }
         var title: String { self == .drawings ? "Drawings" : "Frames" }
     }
 
     /// Where the skins composite relative to the drawing being worked on.
-    enum Placement: String, CaseIterable, Identifiable {
+    enum Placement: String, CaseIterable, Identifiable, Codable {
         case behind, inFront
         var id: String { rawValue }
         var title: String { self == .behind ? "Behind" : "In Front" }
     }
 
     /// Whether a skin keeps its own colours or is recoloured to the side's tint.
-    enum Colouring: String, CaseIterable, Identifiable {
+    enum Colouring: String, CaseIterable, Identifiable, Codable {
         case tinted, originalColors
         var id: String { rawValue }
         var title: String { self == .tinted ? "Tinted" : "Original Colors" }
@@ -341,7 +342,7 @@ struct OnionSkinSettings: Equatable {
     /// every canvas at or below 3072², and on a 4096² one it buys 768² against Quarter's 1024² —
     /// 1.8x the speed for the edge of legibility. A fourth segment on an already-dense panel did not
     /// look worth that; it is three lines to add if the owner wants it.
-    enum Resolution: String, CaseIterable, Identifiable {
+    enum Resolution: String, CaseIterable, Identifiable, Codable {
         case full, half, quarter
         var id: String { rawValue }
         var fraction: CGFloat {

@@ -3,19 +3,6 @@ import UIKit
 import SwiftUI
 import os
 
-private extension Color {
-    var codable: CodableColor {
-        let c = rgbaComponents
-        return CodableColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
-    }
-}
-
-private extension CodableColor {
-    var color: Color {
-        Color(red: red, green: green, blue: blue, opacity: alpha)
-    }
-}
-
 struct ProjectSummary: Identifiable {
     let id: UUID
     let url: URL
@@ -323,6 +310,9 @@ enum ProjectStore {
             /// the way down, so like `interpolation` they need no defensive copy.
             let transformTracks: [String: TransformTrack]
             let pendingPoseBaselines: [String: PoseQuad]
+            /// What the pixel tiers above were, by identity and version, at the moment they were
+            /// read — `PackageLedger`'s half of the incremental save.
+            let stamp: CelSaveStamp
         }
 
         struct LayerContent {
@@ -395,8 +385,14 @@ enum ProjectStore {
         let motionGroups: [MotionGroup]
         let animationGroups: [AnimationGroup]
         let guideStrokes: [GuideStroke]
+        let editorState: EditorStateManifest
         let layers: [LayerContent]
-        let thumbnail: UIImage?
+        /// The gallery tile's composite, **as a recipe rather than as pixels**. Minting it reads the
+        /// live model and so belongs here on the main actor; resolving it is pure (RENDER.md §3.2)
+        /// and happens on `saveQueue` in `writePackage`, because an autosave runs while the artist
+        /// is working and a tile-sized composite of every visible layer is the one part of this
+        /// snapshot that was not a handful of pointer reads.
+        let thumbnailRecipe: FrameRecipe?
 
         /// The box the gallery tile fits into — the composite's size hint *and* the renderer's
         /// target, deliberately one constant so the two cannot drift apart. Named rather than
@@ -404,18 +400,11 @@ enum ProjectStore {
         /// agree; two literals is exactly how they would stop agreeing.
         static let thumbnailBounds = CGSize(width: 320, height: 320)
 
-        /// Reads published state and renders the per-cel images; deliberately does no encoding, so it
-        /// stays the cheap half. It is a handful of canvas-sized draws over caches this initialiser
-        /// has just warmed — nothing like the multi-second PNG encode that is being moved off main.
-        ///
-        /// The thumbnail composite stays here too, but the reason has changed since the compositor
-        /// landed. It used to be forced: `PixelOps.compositeCanvas` read the live
-        /// `RasterLayerTexture`/`VectorCanvas` of every visible layer, so running it anywhere but the
-        /// main actor would have broken the rule that the background queue sees no shared mutable
-        /// state. Now only `makeRenderRequest` reads live objects, and `Compositor.composite` is pure
-        /// — so the composite *could* move off main, and stays because the snapshot it needs is built
-        /// here anyway and the work is small. LAYER_COMPOSITING.md §9.1 point 3 is what bought that
-        /// freedom, and §9.2 is what will eventually spend it.
+        /// Reads published state and takes the per-cel images; deliberately does no encoding and no
+        /// pixel work, so it stays the cheap half — the only half on the artist's own thread.
+        /// `renderToUIImage()` is a memo read for a cel the canvas has already displayed and a
+        /// copy-on-write share of the cel's own bitmap otherwise; `makeCopy()` shares the display
+        /// list the same way (PERFORMANCE.md §13.6). `SaveProfile.snapshotSeconds` is its clock.
         @MainActor
         init(_ canvasManager: CanvasManager) {
             projectID = canvasManager.projectID
@@ -460,6 +449,8 @@ enum ProjectStore {
             motionGroups = canvasManager.motionGroups
             animationGroups = canvasManager.animationGroups
             guideStrokes = canvasManager.guideStrokes
+            editorState = canvasManager.editorState
+            let canvasSize = self.canvasSize
             layers = canvasManager.layers.map { layer in
                 LayerContent(id: layer.id, name: layer.name, hasCustomName: layer.hasCustomName,
                              opacity: layer.opacity,
@@ -478,13 +469,15 @@ enum ProjectStore {
                              parallaxShare: layer.parallaxShare,
                              shakeX: layer.shakeX, shakeY: layer.shakeY, shakeRotation: layer.shakeRotation,
                              cels: layer.cels.map { cel in
-                    CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                               rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
-                               fillImage: cel.fillImage, bakedImage: cel.bakedImage,
-                               vector: cel.vector?.makeCopy(),
-                               interpolation: cel.interpolation,
-                               transformTracks: cel.transformTracks,
-                               pendingPoseBaselines: cel.pendingPoseBaselines)
+                    let hasRaster = cel.raster.hasContent
+                    return CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                                      rasterImage: hasRaster ? cel.raster.renderToUIImage() : nil,
+                                      fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+                                      vector: cel.vector?.makeCopy(),
+                                      interpolation: cel.interpolation,
+                                      transformTracks: cel.transformTracks,
+                                      pendingPoseBaselines: cel.pendingPoseBaselines,
+                                      stamp: CelSaveStamp(cel, hasRaster: hasRaster, canvasSize: canvasSize))
                 })
             }
 
@@ -509,19 +502,140 @@ enum ProjectStore {
             // this correct for a canvas whose aspect the budget clamp did move, and it costs a copy
             // of a tile-sized image.
             // **A recipe composited chunk-wise, since RENDER.md stage 3.** The tile is small enough
-            // that the plan is one chunk on any device, so nothing about this save's cost moves; what
-            // moves is that there is one way for a whole frame to become an image (§2.15) rather than
-            // a second path beside it.
-            if let size = canvasManager.canvasSize,
-               let recipe = canvasManager.makeFrameRecipe(atFrame: canvasManager.currentFrame,
-                                                          includeBackground: true,
-                                                          sizing: .fitting(Self.thumbnailBounds)),
-               let composited = recipe.composite() {
-                thumbnail = ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),
-                                                     canvasSize: size, thumbnailSize: Self.thumbnailBounds)
-            } else {
-                thumbnail = nil
+            // that the plan is one chunk on any device; what moves is that there is one way for a
+            // whole frame to become an image (§2.15) rather than a second path beside it — and, since
+            // the autosave, that the resolving happens on `saveQueue` (see `thumbnailRecipe`).
+            thumbnailRecipe = canvasManager.makeFrameRecipe(atFrame: canvasManager.currentFrame,
+                                                            includeBackground: true,
+                                                            sizing: .fitting(Self.thumbnailBounds))
+        }
+
+        /// The gallery tile, resolved from `thumbnailRecipe` — pure, and called on `saveQueue`.
+        func renderThumbnail() -> UIImage? {
+            guard let composited = thumbnailRecipe?.composite() else { return nil }
+            return ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),
+                                            canvasSize: canvasSize, thumbnailSize: Self.thumbnailBounds)
+        }
+    }
+
+    /// What one cel's **pixel tiers** were when a snapshot read them — the raster texture, the
+    /// vector display list, the fill and baked images — by object identity and version.
+    ///
+    /// **This is the dirty check PERFORMANCE.md §5 says must fail closed, and every field is shaped
+    /// by that.** Identity is a *weak* reference compared with `===`, never an `ObjectIdentifier`: an
+    /// address can be reused by a new texture the moment the old one is freed, and a stamp that
+    /// matched such a texture would clone last save's pixels over this save's. A zeroing weak
+    /// reference cannot be matched by anything but the object it was taken from. Versions are the
+    /// same counters `LayerContentVersion` keys every in-memory cache on (`RasterLayerTexture.version`,
+    /// `VectorCanvas.version` — not `committedVersion`, so a stream's newest picture is written too).
+    /// `hasRaster` and `canvasSize` are folded in for the two ways a texture's *bytes* can change
+    /// without its identity: a blank tier acquiring a bitmap, and the sample origin the vector
+    /// encoder quantises about (`writeCel`'s `sampleOrigin`).
+    ///
+    /// The value tiers — the interpolation recipe and the pose channels — are deliberately **not**
+    /// here: `writeCel` re-encodes them on every save, because a recipe is not `Equatable` and a JSON
+    /// encode off the main thread is nothing beside the PNG encodes this stamp exists to skip.
+    struct CelSaveStamp {
+        private weak var raster: RasterLayerTexture?
+        private let rasterVersion: Int
+        private let hasRaster: Bool
+        private weak var vector: VectorCanvas?
+        private let hasVector: Bool
+        private let vectorVersion: Int
+        private weak var fillImage: UIImage?
+        private let hasFillImage: Bool
+        private weak var bakedImage: UIImage?
+        private let hasBakedImage: Bool
+        private let canvasSize: CGSize
+
+        @MainActor
+        init(_ cel: Cel, hasRaster: Bool, canvasSize: CGSize) {
+            raster = cel.raster
+            rasterVersion = cel.raster.version
+            self.hasRaster = hasRaster
+            vector = cel.vector
+            hasVector = cel.vector != nil
+            vectorVersion = cel.vector?.version ?? -1
+            fillImage = cel.fillImage
+            hasFillImage = cel.fillImage != nil
+            bakedImage = cel.bakedImage
+            hasBakedImage = cel.bakedImage != nil
+            self.canvasSize = canvasSize
+        }
+
+        /// True only when every tier is the **same object** at the **same version** on both sides —
+        /// a tier that has been freed on either side answers false, which is the direction that
+        /// re-encodes rather than the one that clones.
+        func matches(_ other: CelSaveStamp) -> Bool {
+            func same<T: AnyObject>(_ a: T?, _ b: T?, present: Bool, otherPresent: Bool) -> Bool {
+                guard present == otherPresent else { return false }
+                guard present else { return true }
+                guard let a, let b else { return false }
+                return a === b
             }
+            return same(raster, other.raster, present: true, otherPresent: true)
+                && rasterVersion == other.rasterVersion
+                && hasRaster == other.hasRaster
+                && same(vector, other.vector, present: hasVector, otherPresent: other.hasVector)
+                && vectorVersion == other.vectorVersion
+                && same(fillImage, other.fillImage, present: hasFillImage, otherPresent: other.hasFillImage)
+                && same(bakedImage, other.bakedImage, present: hasBakedImage, otherPresent: other.hasBakedImage)
+                && canvasSize == other.canvasSize
+        }
+    }
+
+    /// **What the live package on disk holds for each cel, as written by this document's own
+    /// saves** — the memo PERFORMANCE.md item 15 retired for the gallery exit and the autosave
+    /// brought back, because a save every thirty seconds cannot re-encode fifty PNGs each time.
+    ///
+    /// One per open document (`CanvasManager.packageLedger`), so its lifetime *is* the editing
+    /// session: a document reopened is a new ledger, and its first save is a full write. Written only
+    /// on `saveQueue`, only after a `.liveProject` save has **landed**, and read only on `saveQueue`
+    /// — so an entry describes a file that exists in the package at `landedAt`, byte for byte what
+    /// the stamp names. `writeCel` clones those files into the next stage instead of re-encoding
+    /// them; anything that does not line up — a stamp that differs, a file that will not clone, a
+    /// package that moved — falls through to the encode. **Emptied on every save that does not
+    /// land**, so the next one starts from nothing rather than from a guess.
+    ///
+    /// The clone is `clonefile(2)`: on APFS a reused cel costs one directory entry and no bytes,
+    /// which is also what keeps the rolling backup slot cheap (see `writeAtomically`).
+    final class PackageLedger: @unchecked Sendable {
+        struct Entry {
+            let stamp: CelSaveStamp
+            /// The manifest as the pixel tiers were written — the value-tier file names in it are
+            /// stale by construction and `writeCel` overwrites them.
+            let manifest: CelManifest
+            /// Package-relative paths of every file the pixel tiers wrote, `writePath` spelling.
+            let files: [String]
+        }
+
+        private let lock = NSLock()
+        private var entries: [UUID: Entry] = [:]
+        private var landed: URL?
+
+        /// Where the package this ledger describes was last written, or nil before the first save
+        /// of the session lands.
+        var landedAt: URL? {
+            lock.lock(); defer { lock.unlock() }
+            return landed
+        }
+
+        func entry(for celID: UUID) -> Entry? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[celID]
+        }
+
+        /// Replaces the whole ledger with what the save that just landed at `url` wrote.
+        func record(_ entries: [UUID: Entry], landedAt url: URL) {
+            lock.lock(); defer { lock.unlock() }
+            self.entries = entries
+            landed = url
+        }
+
+        func clear() {
+            lock.lock(); defer { lock.unlock() }
+            entries = [:]
+            landed = nil
         }
     }
 
@@ -695,6 +809,7 @@ enum ProjectStore {
         let saveStarted = CFAbsoluteTimeGetCurrent()
         let snapshot = SaveSnapshot(canvasManager)
         let snapshotSeconds = CFAbsoluteTimeGetCurrent() - saveStarted
+        let ledger = canvasManager.packageLedger
 
         // A save is usually triggered by the app being backgrounded (see ContentView's scenePhase
         // handler). While it ran on main, iOS's "finish what you were doing" window covered it; work
@@ -711,6 +826,7 @@ enum ProjectStore {
         saveQueue.async {
             let landed = writeAtomically(snapshot, to: url,
                             destination: decision == .writeAside ? .versionSlot : .liveProject,
+                            ledger: ledger,
                             startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
                 if landed == nil {
@@ -773,6 +889,7 @@ enum ProjectStore {
     @discardableResult
     private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL,
                                         destination: WriteDestination = .liveProject,
+                                        ledger: PackageLedger,
                                         startedAt saveStarted: CFAbsoluteTime,
                                         snapshotSeconds: Double) -> URL? {
         let fm = FileManager.default
@@ -832,8 +949,15 @@ enum ProjectStore {
         let stageURL = stagedTarget.deletingLastPathComponent()
             .appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
         try? fm.removeItem(at: stageURL)
+        // **Reuse only out of the package this document's own saves landed, and only into the
+        // live project** — `PackageLedger`. A ledger whose `landedAt` is not the address resolved
+        // above describes a package something else has moved, and a version slot is written
+        // whole because nothing ever records one.
+        let reuse: (ledger: PackageLedger, package: URL)? =
+            destination == .liveProject && ledger.landedAt == url ? (ledger, url) : nil
+        let stash: ProjectBackupManager.SaveStash = ledger.landedAt == nil ? .sessionStart : .rolling
         let packageStarted = CFAbsoluteTimeGetCurrent()
-        let celWalkSeconds = writePackage(snapshot, to: stageURL, tally: tally)
+        let (celWalkSeconds, ledgerEntries) = writePackage(snapshot, to: stageURL, tally: tally, reuse: reuse)
         let packageEnded = CFAbsoluteTimeGetCurrent()
 
         // Published on every exit, including the three failure returns below: a save that bailed on a
@@ -864,6 +988,7 @@ enum ProjectStore {
         // in Trash for diagnosis.
         guard ProjectBackupManager.validateProject(at: stageURL) else {
             _ = ProjectBackupManager.moveToTrash(stageURL, tag: "failedsave")
+            ledger.clear()
             return nil
         }
 
@@ -873,7 +998,8 @@ enum ProjectStore {
         /// precisely what this write exists not to touch.
         func commitSwap(to target: URL) -> URL? {
             if destination == .liveProject {
-                guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
+                guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID,
+                                                                  stash: stash) else {
                     try? fm.removeItem(at: stageURL)
                     return nil
                 }
@@ -884,7 +1010,8 @@ enum ProjectStore {
                 // below destroys.
                 if target != url, fm.fileExists(atPath: target.path) {
                     _ = ProjectBackupManager.stashLiveProjectForSave(projectURL: target,
-                                                                     projectID: snapshot.projectID)
+                                                                     projectID: snapshot.projectID,
+                                                                     stash: .sessionStart)
                 }
                 // **`origin.name` before the move**, which is `ProjectPackageLayout.tidy` step 5's
                 // rule and now the save's too. The marker is `backupDirectory(forProjectAt:)`'s
@@ -955,7 +1082,15 @@ enum ProjectStore {
             // follow.
             landed = commitSwap(to: stagedTarget)
         }
-        guard let landed else { return nil }
+        guard let landed else {
+            ledger.clear()
+            return nil
+        }
+        // The ledger describes `landed` from here on — recorded only now, after the rename, so an
+        // entry never names a file that is not in the package at that address. A version slot
+        // records nothing: the live package, which is what the next save would clone from, did
+        // not change.
+        if destination == .liveProject { ledger.record(ledgerEntries, landedAt: landed) }
 
         // Restore points: `latest` = exact copy of this save; autos rotated by count. `latest` means
         // "the last state the project file was actually in", so a version slot must not refresh it —
@@ -973,10 +1108,13 @@ enum ProjectStore {
     /// PNG and JSON encoding that used to block the main thread actually happens.
     ///
     /// Returns the wall clock of the per-cel walk alone, which is the term PERFORMANCE.md §1 claims
-    /// the whole gallery wait is made of; `tally` collects what that walk spent inside itself.
-    @discardableResult
+    /// the whole gallery wait is made of, and the ledger entries for what the walk wrote; `tally`
+    /// collects what that walk spent inside itself. `reuse` is the live package the walk may clone
+    /// unchanged cels out of, with the ledger that says which — see `PackageLedger`.
     private static func writePackage(_ snapshot: SaveSnapshot, to url: URL,
-                                     tally: WriteTally = WriteTally()) -> Double {
+                                     tally: WriteTally = WriteTally(),
+                                     reuse: (ledger: PackageLedger, package: URL)? = nil)
+        -> (celWalkSeconds: Double, ledgerEntries: [UUID: PackageLedger.Entry]) {
         let fm = FileManager.default
         try? fm.createDirectory(at: url, withIntermediateDirectories: true)
         // **Exactly the content directories this document needs, created once, before the fan-out** —
@@ -1022,20 +1160,22 @@ enum ProjectStore {
         // them — which is the order `activeCelIndex` scans on the way back in, and the one property
         // here that would be quiet if it were wrong.
         //
-        // **Nothing about *what* gets written changes**, which is what makes this the safe half of
-        // PERFORMANCE.md §5's entry on this path: the same bytes go to the same files, and the
-        // memo that would skip an unchanged cel entirely is a separate change with a separate risk.
+        // **What gets written is the same bytes to the same files whether a cel is encoded or
+        // cloned** — `PackageLedger` is the memo PERFORMANCE.md §5 named as the separate risk, and
+        // `writeCel` is where its fail-closed rule lives.
         let celWalkStarted = CFAbsoluteTimeGetCurrent()
         let jobs: [(layerIndex: Int, cel: SaveSnapshot.CelContent)] =
             snapshot.layers.enumerated().flatMap { layerIndex, layer in
                 layer.cels.map { (layerIndex, $0) }
             }
         let written = PixelOps.parallelMap(jobs.count) { index in
-            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally)
+            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally, reuse: reuse)
         }
         var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
-        for (index, celManifest) in written.enumerated() {
-            celManifestsByLayer[jobs[index].layerIndex].append(celManifest)
+        var ledgerEntries: [UUID: PackageLedger.Entry] = [:]
+        for (index, write) in written.enumerated() {
+            celManifestsByLayer[jobs[index].layerIndex].append(write.manifest)
+            ledgerEntries[write.manifest.id] = write.ledgerEntry
         }
         let celWalkSeconds = CFAbsoluteTimeGetCurrent() - celWalkStarted
 
@@ -1151,13 +1291,14 @@ enum ProjectStore {
             motionGroups: snapshot.motionGroups,
             guideStrokes: snapshot.guideStrokes,
             animationGroups: snapshot.animationGroups,
-            brushTableFileName: brushTableFileName
+            brushTableFileName: brushTableFileName,
+            editorState: snapshot.editorState
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
         }
 
-        if let thumbnailImage = snapshot.thumbnail, let data = thumbnailImage.pngData() {
+        if let thumbnailImage = snapshot.renderThumbnail(), let data = thumbnailImage.pngData() {
             try? data.write(to: url.appendingPathComponent("thumbnail.png"))
         }
 
@@ -1175,18 +1316,41 @@ enum ProjectStore {
         // file that was written.
         ProjectPackageLayout.pruneEmptyContentDirectories(in: url)
 
-        return celWalkSeconds
+        return (celWalkSeconds, ledgerEntries)
     }
 
-    /// One cel's PNGs and JSON, encoded and written, with what each half cost recorded in `tally`.
+    /// What `writeCel` produces for one cel: the manifest row, and the ledger entry that lets the
+    /// next save reuse its pixel tiers.
+    private struct CelWrite {
+        let manifest: CelManifest
+        let ledgerEntry: PackageLedger.Entry
+    }
+
+    /// The pixel tiers' file names as `writeCel` settled them — by encode or by clone — plus every
+    /// package-relative path those tiers occupy. The value tiers are not here; see `CelSaveStamp`.
+    private struct PixelTiers {
+        var rasterFileName: String
+        var rasterOmitted: Bool?
+        var fillFileName: String?
+        var bakedFileName: String?
+        var vectorFileName: String?
+        var files: [String]
+    }
+
+    /// One cel's PNGs and JSON, written, with what each half cost recorded in `tally`.
     ///
     /// **Extracted from `writePackage`'s loop so the per-cel walk has a name and a boundary**, which
     /// is what lets `SaveProfile` say how much of a save is this and how much is everything else.
-    /// The body is the old loop verbatim; the only additions are the two clocks.
     ///
     /// It reads this cel's own snapshot content and writes only files named after this cel's id, so
     /// two cels share nothing — the same property that makes the load's `decodeCel` safe to fan out,
-    /// and the reason `writePackage` now runs this over cores.
+    /// and the reason `writePackage` runs this over cores.
+    ///
+    /// **The pixel tiers are cloned rather than encoded when `reuse` says the live package already
+    /// holds them** — `PackageLedger`'s incremental save. The ledger's entry for this cel has to
+    /// carry a stamp that `matches` the snapshot's, and every file it names has to clone; either
+    /// failing sends the cel down the encode path it always took, so the worst a wrong ledger can
+    /// do is cost an encode. The value tiers below are re-encoded either way.
     ///
     /// **What a wrong answer here would look like, since that is what ranks the risk.** Every path
     /// out of this function names its file after `cel.id`, which is a UUID, so two workers cannot
@@ -1195,29 +1359,14 @@ enum ProjectStore {
     /// cels came back in completion order, and `writePackage` reconstructs that order from the job
     /// list rather than from completion — see its comment.
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
-                                 canvasSize: CGSize, tally: WriteTally) -> CelManifest {
+                                 canvasSize: CGSize, tally: WriteTally,
+                                 reuse: (ledger: PackageLedger, package: URL)?) -> CelWrite {
         var encodeSeconds = 0.0
         var writeSeconds = 0.0
         var encoded = 0
+        var reused = 0
         var bytes = 0
 
-        func png(_ image: UIImage) -> Data? {
-            let started = CFAbsoluteTimeGetCurrent()
-            let data = image.pngData()
-            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-            encoded += 1
-            return data
-        }
-        /// A stream's last picture — STREAM.md §5.6's JPEG at quality 0.9, since a screen capture
-        /// has no alpha to lose and a 1080p PNG per stream per save would be the larger file in a
-        /// document of drawings.
-        func jpeg(_ image: UIImage) -> Data? {
-            let started = CFAbsoluteTimeGetCurrent()
-            let data = image.jpegData(compressionQuality: Self.streamLastFrameJPEGQuality)
-            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-            encoded += 1
-            return data
-        }
         // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
         // from, and it is the one thing the encoder needs that the payload cannot work out for
         // itself. `PackedSampleRun` writes the origin it was given into the file, so a decoder needs
@@ -1249,12 +1398,100 @@ enum ProjectStore {
         }
         /// Writes one file at the address its **role** gives it — TODO (57). `name` is what the
         /// manifest records: bare for a PNG, package-relative (`drawings/…`) for the three JSON
-        /// sidecars, and `ProjectPackageLayout.writeURL` reads the difference off the name.
-        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) {
+        /// sidecars, and `ProjectPackageLayout.writePath` reads the difference off the name.
+        /// Answers the path it wrote, which is what the ledger records.
+        @discardableResult
+        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) -> String {
             let started = CFAbsoluteTimeGetCurrent()
-            try? data.write(to: ProjectPackageLayout.writeURL(named: name, role: role, in: packageURL))
+            let path = ProjectPackageLayout.writePath(named: name, role: role)
+            try? data.write(to: ProjectPackageLayout.resolve(path, in: packageURL))
             writeSeconds += CFAbsoluteTimeGetCurrent() - started
             bytes += data.count
+            return path
+        }
+
+        var tiers: PixelTiers? = nil
+        if let reuse, let entry = reuse.ledger.entry(for: cel.id), entry.stamp.matches(cel.stamp) {
+            let started = CFAbsoluteTimeGetCurrent()
+            if cloneFiles(entry.files, from: reuse.package, into: packageURL) {
+                let manifest = entry.manifest
+                tiers = PixelTiers(rasterFileName: manifest.rasterFileName,
+                                   rasterOmitted: manifest.rasterOmitted,
+                                   fillFileName: manifest.fillImageFileName,
+                                   bakedFileName: manifest.bakedImageFileName,
+                                   vectorFileName: manifest.vectorFileName,
+                                   files: entry.files)
+                reused = entry.files.filter { $0.hasSuffix(".png") || $0.hasSuffix(".jpg") }.count
+            }
+            writeSeconds += CFAbsoluteTimeGetCurrent() - started
+        }
+        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, json: json, write: write,
+                                                   encodeSeconds: &encodeSeconds, encoded: &encoded,
+                                                   writeSeconds: &writeSeconds)
+
+        // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
+        // same reason the vector payload has one: it is unbounded in size (lattices) and the
+        // gallery reads every manifest in full.
+        var interpolationFileName: String?
+        if let recipe = cel.interpolation, let data = json(recipe) {
+            let name = ProjectPackageLayout.recordedName(for: .interpolation, cel: cel.id)
+            write(data, name, .interpolation)
+            interpolationFileName = name
+        }
+
+        // The pose channels, when this cel has any — KEYFRAMES.md §3.5, and its own JSON file for
+        // the two reasons above: unbounded size, and a manifest the gallery reads in full.
+        // §2.27's held baseline rides in the same file, because it is the state *between* two
+        // keyframes and that gap can span exactly this save.
+        var animationFileName: String?
+        if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty,
+           let data = json(CelAnimationData(tracks: cel.transformTracks,
+                                            baselines: cel.pendingPoseBaselines)) {
+            let name = ProjectPackageLayout.recordedName(for: .animation, cel: cel.id)
+            write(data, name, .animation)
+            animationFileName = name
+        }
+
+        tally.record(encodeSeconds: encodeSeconds, writeSeconds: writeSeconds,
+                     pngsEncoded: encoded, pngsReused: reused, bytesWritten: bytes)
+
+        let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                                   rasterFileName: pixelTiers.rasterFileName,
+                                   rasterOmitted: pixelTiers.rasterOmitted,
+                                   fillImageFileName: pixelTiers.fillFileName,
+                                   bakedImageFileName: pixelTiers.bakedFileName,
+                                   vectorFileName: pixelTiers.vectorFileName,
+                                   interpolationFileName: interpolationFileName,
+                                   animationFileName: animationFileName)
+        return CelWrite(manifest: manifest,
+                        ledgerEntry: PackageLedger.Entry(stamp: cel.stamp, manifest: manifest,
+                                                         files: pixelTiers.files))
+    }
+
+    /// The encode half of `writeCel`: the raster, fill and baked PNGs, the placed images, the stream
+    /// pictures, the clips, and the display list — the body of the old per-cel loop, verbatim.
+    private static func encodePixelTiers(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
+                                         json: (VectorCanvasData) -> Data?,
+                                         write: (Data, String, ProjectPackageLayout.Role) -> String,
+                                         encodeSeconds: inout Double, encoded: inout Int,
+                                         writeSeconds: inout Double) -> PixelTiers {
+        var files: [String] = []
+        func png(_ image: UIImage) -> Data? {
+            let started = CFAbsoluteTimeGetCurrent()
+            let data = image.pngData()
+            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            encoded += 1
+            return data
+        }
+        /// A stream's last picture — STREAM.md §5.6's JPEG at quality 0.9, since a screen capture
+        /// has no alpha to lose and a 1080p PNG per stream per save would be the larger file in a
+        /// document of drawings.
+        func jpeg(_ image: UIImage) -> Data? {
+            let started = CFAbsoluteTimeGetCurrent()
+            let data = image.jpegData(compressionQuality: Self.streamLastFrameJPEGQuality)
+            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+            encoded += 1
+            return data
         }
         /// Copies one imported asset into the staged package — VIDEO.md §6's *"the source file is
         /// copied into the project whole"*, which is why it is a file copy rather than a re-encode:
@@ -1281,7 +1518,9 @@ enum ProjectStore {
             // moving one would mean parsing every payload — and it does not have to, because this
             // copy reads the runtime `assetURL` the reader resolved, which already knows both
             // addresses. An old package keeps its clip in `images/` and opens forever.
-            let destination = ProjectPackageLayout.writeURL(named: name, role: .video, in: packageURL)
+            let path = ProjectPackageLayout.writePath(named: name, role: .video)
+            let destination = ProjectPackageLayout.resolve(path, in: packageURL)
+            files.append(path)
             guard !fm.fileExists(atPath: destination.path) else { return }
             let started = CFAbsoluteTimeGetCurrent()
             defer { writeSeconds += CFAbsoluteTimeGetCurrent() - started }
@@ -1308,30 +1547,27 @@ enum ProjectStore {
         // renames per cel to every file in the package, and a UUID filename reads no better either
         // way. Note `-fill.png` uses a dash where the rest use an underscore; that predates this and
         // is why nothing here pattern-matches a cel's files by a single separator convention.
-        let fileName = "\(cel.id.uuidString)_raster.png"
-        var rasterOmitted: Bool? = nil
+        var tiers = PixelTiers(rasterFileName: "\(cel.id.uuidString)_raster.png", rasterOmitted: nil,
+                               fillFileName: nil, bakedFileName: nil, vectorFileName: nil, files: [])
         if let rasterImage = cel.rasterImage {
-            if let data = png(rasterImage) { write(data, fileName, .raster) }
+            if let data = png(rasterImage) { files.append(write(data, tiers.rasterFileName, .raster)) }
         } else {
-            rasterOmitted = true
+            tiers.rasterOmitted = true
         }
 
-        var fillFileName: String?
         if let fillImage = cel.fillImage, let fillData = png(fillImage) {
             let name = "\(cel.id.uuidString)-fill.png"
-            write(fillData, name, .fill)
-            fillFileName = name
+            files.append(write(fillData, name, .fill))
+            tiers.fillFileName = name
         }
-        var bakedFileName: String?
         if let baked = cel.bakedImage, let bakedData = png(baked) {
             let name = "\(cel.id.uuidString)_baked.png"
-            write(bakedData, name, .baked)
-            bakedFileName = name
+            files.append(write(bakedData, name, .baked))
+            tiers.bakedFileName = name
         }
 
         // Vector content: write the placed images' PNGs, then a JSON of the strokes + image
         // refs + overall transform (see VectorCanvasData).
-        var vectorFileName: String?
         // `cel.vector` is this save's own copy (see `SaveSnapshot.CelContent`), so reading its
         // strokes/fills/images here cannot race live drawing on the original.
         if let vector = cel.vector, !vector.isEmpty {
@@ -1339,7 +1575,7 @@ enum ProjectStore {
             for element in vector.images {
                 let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
                 if let data = png(element.image) {
-                    write(data, name, .placedImage)
+                    files.append(write(data, name, .placedImage))
                     imageFileNames[element.id] = name
                 }
             }
@@ -1359,7 +1595,7 @@ enum ProjectStore {
             for element in vector.streams {
                 guard let frame = element.displayFrame, let data = jpeg(frame) else { continue }
                 let name = "\(cel.id.uuidString)_stream_\(element.id.uuidString).jpg"
-                write(data, name, .placedImage)
+                files.append(write(data, name, .placedImage))
                 streamFrameFileNames[element.id] = name
             }
             let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames,
@@ -1369,44 +1605,43 @@ enum ProjectStore {
                 // package-relative path it is, which is the whole of the format version: a bare name
                 // in this field means a package written before (57), and the reader resolves either.
                 let name = ProjectPackageLayout.recordedName(for: .drawing, cel: cel.id)
-                write(data, name, .drawing)
-                vectorFileName = name
+                files.append(write(data, name, .drawing))
+                tiers.vectorFileName = name
             }
         }
+        tiers.files = files
+        return tiers
+    }
 
-        // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
-        // same reason the vector payload has one: it is unbounded in size (lattices) and the
-        // gallery reads every manifest in full.
-        var interpolationFileName: String?
-        if let recipe = cel.interpolation, let data = json(recipe) {
-            let name = ProjectPackageLayout.recordedName(for: .interpolation, cel: cel.id)
-            write(data, name, .interpolation)
-            interpolationFileName = name
+    /// Clones every one of `paths` from `source` into `stage`, answering false — with the partial
+    /// set removed again — if any will not clone, so the caller falls back to the encode with a
+    /// clean slate. A path that already exists in the stage counts as cloned: two cels of one split
+    /// clip share its file, and a worker that lost that race to its twin has what it wanted.
+    ///
+    /// `clonefile(2)` first, `copyItem` if the volume will not clone — the same two the backup
+    /// manager's `cloneItem` reaches for, without its `removeItem` of the destination, which here
+    /// would be a race between workers rather than a tidy-up.
+    private static func cloneFiles(_ paths: [String], from source: URL, into stage: URL) -> Bool {
+        let fm = FileManager.default
+        var cloned: [URL] = []
+        for path in paths {
+            let src = ProjectPackageLayout.resolve(path, in: source)
+            let dst = ProjectPackageLayout.resolve(path, in: stage)
+            if fm.fileExists(atPath: dst.path) { continue }
+            let status: Int32 = src.withUnsafeFileSystemRepresentation { s in
+                dst.withUnsafeFileSystemRepresentation { d in
+                    guard let s, let d else { return -1 }
+                    return clonefile(s, d, 0)
+                }
+            }
+            if status == 0 || fm.fileExists(atPath: dst.path) || (try? fm.copyItem(at: src, to: dst)) != nil {
+                cloned.append(dst)
+                continue
+            }
+            for url in cloned { try? fm.removeItem(at: url) }
+            return false
         }
-
-        // The pose channels, when this cel has any — KEYFRAMES.md §3.5, and its own JSON file for
-        // the two reasons above: unbounded size, and a manifest the gallery reads in full.
-        // §2.27's held baseline rides in the same file, because it is the state *between* two
-        // keyframes and that gap can span exactly this save.
-        var animationFileName: String?
-        if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty,
-           let data = json(CelAnimationData(tracks: cel.transformTracks,
-                                            baselines: cel.pendingPoseBaselines)) {
-            let name = ProjectPackageLayout.recordedName(for: .animation, cel: cel.id)
-            write(data, name, .animation)
-            animationFileName = name
-        }
-
-        tally.record(encodeSeconds: encodeSeconds, writeSeconds: writeSeconds,
-                     pngsEncoded: encoded, pngsReused: 0, bytesWritten: bytes)
-
-        return CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                           rasterFileName: fileName, rasterOmitted: rasterOmitted,
-                           fillImageFileName: fillFileName,
-                           bakedImageFileName: bakedFileName,
-                           vectorFileName: vectorFileName,
-                           interpolationFileName: interpolationFileName,
-                           animationFileName: animationFileName)
+        return true
     }
 
     // MARK: - Loading
@@ -2013,7 +2248,9 @@ enum ProjectStore {
 
         manager.layers = layers
         migrateGroupVisibility(manager, folders: manifest.folders)
-        manager.currentLayerIndex = 0
+        // Last, after the layers and folders it names exist — TODO (77). A package from before it
+        // carries none and opens at the defaults, as it always did.
+        manager.restoreEditorState(manifest.editorState ?? EditorStateManifest())
         // What this open could not read, carried on the document rather than logged and forgotten.
         // `SaveDamageGate` is the only thing that reads it; `CanvasManager` merely holds it, which is
         // the smallest seam that gets a value produced in the vector decode to the save path.

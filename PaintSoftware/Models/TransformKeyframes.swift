@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Combine
 
 /// **Writing the transform channel** — KEYFRAMES.md §2.5's *"a transform key stores a pose, and it is
 /// written at commit"*, routed through the same five arms every other channel obeys.
@@ -311,6 +312,7 @@ extension CanvasManager {
                                self?.applyCelPoseState(state, layerID: layerID, celID: celID)
                            })
         refreshUndoRedoState()
+        documentEdited.send()
         return true
     }
 

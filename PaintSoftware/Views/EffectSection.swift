@@ -1587,10 +1587,6 @@ struct RecolorEntriesEditor: View {
 // rather than `UIColor.getRed` directly is the whole point: that file's header records two separate
 // bugs caused by reading components off a colour that had not been resolved against a fixed trait
 // collection first.
-fileprivate extension CodableColor {
-    var color: Color { Color(red: red, green: green, blue: blue, opacity: alpha) }
-}
-
 fileprivate extension Color {
     var effectColor: CodableColor {
         let components = rgbaComponents

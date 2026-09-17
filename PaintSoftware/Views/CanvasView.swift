@@ -687,6 +687,8 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
                     guard let self else { return }
+                    // The autosave waits for the lift — see `CanvasManager.strokeIsLive`.
+                    self.canvasManager.strokeIsLive = true
                     // A new stroke means the previous touch sequence is over, whatever UIKit did or
                     // did not call on the way out. `StrokeGestureRecognizer.reset()` clears its own
                     // count, but a recognizer stranded without a reset — which BUGS.md documents
@@ -725,6 +727,7 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
                     guard let self else { return }
+                    self.canvasManager.strokeIsLive = false
                     self.isSandwichStrokeLive = false
                     // The clear needs applying for the same reason the latch does, and a cancel is
                     // the case with no publish to rely on at all: it restores the pre-touch content,
@@ -814,6 +817,7 @@ struct CanvasView: UIViewRepresentable {
                     // is a lift, and a lift is what unfreezes the sandwich's cache key (see
                     // `makeSandwichKey`) so the canvas snaps back to the exact composite.
                     self.isSandwichStrokeLive = false
+                    self.canvasManager.strokeIsLive = false
                     self.canvasManager.refreshUndoRedoState()
                     self.cancelShapeDetection()
                     // If the shape was being followed, lift transitions it to adjustable state; no
@@ -3256,6 +3260,14 @@ struct CanvasView: UIViewRepresentable {
             fitScale = min(hostBounds.width / canvasSize.width, hostBounds.height / canvasSize.height)
             if baseCenter == nil {
                 baseCenter = CGPoint(x: hostBounds.midX, y: hostBounds.midY)
+                // The first time the canvas has a host is the one moment the saved view applies —
+                // TODO (77). After it, the committed transform is the artist's and the record
+                // follows it (`commitLiveTransformIfAllEnded`), never the other way round.
+                if let saved = canvasManager.viewTransform {
+                    committedScale = max(CGFloat(saved.scale), 0.01)
+                    committedRotation = CGFloat(saved.rotation)
+                    committedOffset = CGSize(width: saved.offsetX, height: saved.offsetY)
+                }
             }
             applyTransform()
         }
@@ -3849,6 +3861,12 @@ struct CanvasView: UIViewRepresentable {
             committedRotation = effectiveRotation()
             committedOffset.width += liveOffset.width
             committedOffset.height += liveOffset.height
+            // The document's record of where the artist left the canvas — TODO (77). Written here,
+            // on commit, rather than per frame of the gesture, because a save reads it and a
+            // gesture's intermediate positions are nothing a reopened document should land on.
+            canvasManager.viewTransform = CanvasViewTransform(scale: committedScale, rotation: committedRotation,
+                                                              offsetX: committedOffset.width,
+                                                              offsetY: committedOffset.height)
             liveScale = 1
             liveRotation = 0
             liveOffset = .zero

@@ -3,7 +3,7 @@ import Foundation
 /// `CaseIterable` exists for `ToolLogicTests`, which walks every case and asserts its
 /// `paintsOnCanvas` answer is *stated* rather than inherited. See that property for why the
 /// enumeration is the point.
-enum Tool: Hashable, CaseIterable {
+enum Tool: String, Codable, CaseIterable {
     case pen
     case pencil
     case eraser

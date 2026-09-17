@@ -102,6 +102,11 @@ final class CanvasManager: ObservableObject {
     @Published var projectName: String = "Untitled"
     var projectID: UUID = UUID()
     var projectURL: URL?
+    /// What this document's own saves have put in the package at `projectURL`, per cel — the store's
+    /// memo for skipping an unchanged cel's encode. Held here so its lifetime is the editing session:
+    /// a reopened document is a new `CanvasManager`, and its first save writes everything. Only
+    /// `ProjectStore` reads or writes it, and only on its own queue.
+    let packageLedger = ProjectStore.PackageLedger()
 
     /// What the load of this document could not read, or empty for the ordinary case — a new project,
     /// or one that opened whole. Set once by `ProjectStore.assemble` and never mutated after.
@@ -1442,6 +1447,14 @@ final class CanvasManager: ObservableObject {
     @Published var loopStartFrame: Int?
     @Published var loopEndFrame: Int?
 
+    /// Where the artist left the canvas — zoom, rotation, pan — written by `CanvasView.Coordinator`
+    /// when a navigation gesture commits and read by it once, when the canvas first gets its bounds.
+    /// Saved with the document (`EditorStateManifest`) so the round trip through the gallery comes
+    /// back to the same view. **Not `@Published`, deliberately**: a pan must raise no SwiftUI pass
+    /// (see `applyTransform`), and nothing draws from this field — the coordinator owns the live
+    /// transform and this is its record.
+    var viewTransform: CanvasViewTransform?
+
     @Published var canUndo: Bool = false
     @Published var canRedo: Bool = false
     /// The single global undo/redo stack for every mutating action in the document — strokes,
@@ -1454,7 +1467,22 @@ final class CanvasManager: ObservableObject {
     func recordUndo(label: HistoryActionLabel, cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) {
         history.record(.init(label: label, cost: cost, undo: undo, redo: redo))
         refreshUndoRedoState()
+        documentEdited.send()
     }
+
+    /// **The document changed, in the sense the undo history means it** — TODO (76)'s edit signal.
+    /// Sent from `recordUndo`, which every mutating action funnels through, and from undo, redo and
+    /// the one `extendLast` site, so the autosave's definition of an edit is the app's own rather
+    /// than a second list of mutation sites. A `PassthroughSubject` for `thumbnailInstalled`'s
+    /// reason: `ContentView` alone listens, and a `@Published` would wake every observer.
+    let documentEdited = PassthroughSubject<Void, Never>()
+
+    /// **A stroke is under the pen right now** — set by `CanvasView.Coordinator` from the stroke
+    /// view's began/ended/cancelled callbacks, the same three that latch its `isSandwichStrokeLive`.
+    /// The autosave reads it and waits: a snapshot taken mid-stroke would share the cel's bitmap
+    /// copy-on-write and hand the next dab a canvas-sized copy to pay for. Not `@Published`, for the
+    /// reason a dab publishes nothing (RENDER.md §5.2).
+    var strokeIsLive = false
 
     /// Rough retained-byte estimate for an image held by an undo/redo closure, used to feed
     /// `UndoHistory`'s memory-budgeted trimming. Precision doesn't matter here — this only needs to
@@ -1651,6 +1679,14 @@ final class CanvasManager: ObservableObject {
         // line" — every existing caller of this method inherits the text bake with no per-tool
         // retrofit, which is the whole reason the chokepoint exists.
         commitInteractiveText()
+    }
+
+    /// Whether `commitAllInteractiveState()` would settle anything. The autosave's hold — TODO (76):
+    /// a save nobody asked for must never bake the fill, shape, text, selection edit or floating
+    /// piece the artist is still adjusting, so it waits for them instead of committing them.
+    var hasInteractiveStatePending: Bool {
+        fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
+            || floatingPiece != nil || vectorFloat != nil
     }
 
     /// `beginCanvasEdit()` plus settling a floating Move/Duplicate piece — for the points where the
@@ -4170,6 +4206,7 @@ final class CanvasManager: ObservableObject {
         // reverted, never stale.
         if let label = history.undo() {
             raise(.historyUndo(label))
+            documentEdited.send()
         }
         refreshUndoRedoState()
     }
@@ -4184,6 +4221,7 @@ final class CanvasManager: ObservableObject {
         finalizePendingGesturesForHistoryAction()
         if let label = history.redo() {
             raise(.historyRedo(label))
+            documentEdited.send()
         }
         refreshUndoRedoState()
     }

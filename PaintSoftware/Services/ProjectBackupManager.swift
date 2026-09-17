@@ -328,15 +328,45 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - Save-time rotation
 
-    /// Stashes the current on-disk package into a new timestamped autosave slot (a rename — free)
+    /// Which restore point a save's stash of the live package becomes.
+    ///
+    /// **The autosave is why there are two.** Before it, a save happened when the artist left the
+    /// editor, so the five rotated "Before save" slots were five sessions' opening states. A save
+    /// every thirty seconds through the same rotation would turn them into the last two and a half
+    /// minutes, and the state the artist opened the document in — the one worth going back to
+    /// after a bad session — would be gone within the session. So the first save of a document
+    /// session stashes into the rotation as before, and every save after it refreshes one rolling
+    /// slot instead: "Before save" keeps meaning *as opened*, and "Before last save" is the thirty
+    /// seconds the autosave just replaced. `ProjectStore.PackageLedger.landedAt` is what tells the
+    /// two apart.
+    enum SaveStash {
+        /// A fresh `auto-<timestamp>` slot, count-rotated by `pruneBackups`.
+        case sessionStart
+        /// The one `before-last-save` slot, replaced in place.
+        case rolling
+    }
+
+    static let rollingSlotName = "before-last-save.paintproj"
+
+    /// Stashes the current on-disk package into the restore point `stash` names (a rename — free)
     /// and frees `projectURL` for the freshly staged package. Returns false only if the old package
     /// could neither be moved nor copied — in which case the caller must NOT clobber it.
-    static func stashLiveProjectForSave(projectURL: URL, projectID: UUID) -> Bool {
+    static func stashLiveProjectForSave(projectURL: URL, projectID: UUID, stash: SaveStash) -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: projectURL.path) else { return true }
         let dir = backupsDirectory(projectID: projectID)
         writeOriginMarker(directory: dir, projectFileName: projectURL.lastPathComponent)
-        let slot = uniqueSlotURL(directory: dir, prefix: "auto")
+        let slot: URL
+        switch stash {
+        case .sessionStart:
+            slot = uniqueSlotURL(directory: dir, prefix: "auto")
+        case .rolling:
+            slot = dir.appendingPathComponent(rollingSlotName)
+            // The previous rolling stash goes before the live package moves, never after: a kill
+            // between the two lines loses a restore point, and the other order would lose the
+            // project.
+            try? fm.removeItem(at: slot)
+        }
         if (try? fm.moveItem(at: projectURL, to: slot)) != nil { return true }
         if cloneItem(at: projectURL, to: slot), (try? fm.removeItem(at: projectURL)) != nil { return true }
         return false
@@ -473,6 +503,8 @@ nonisolated enum ProjectBackupManager {
             // Said from the artist's side: these are their edits, kept because the project file was
             // left alone rather than overwritten. See `unsavedChangesSlotURL`.
             label = "Unsaved changes"
+        } else if url.lastPathComponent == rollingSlotName {
+            label = "Before last save"
         } else {
             label = "Before save"
         }
