@@ -21,6 +21,14 @@ only the last five remain — `git log` is the real history.
 
 ## Build and test
 
+**Build from a worktree outside `~/Desktop` (2026-09-24).** After the macOS 26.5.2 update `actool`
+can no longer read the Desktop folder — *"currentDirectoryPath is unexpectedly nil … Operation not
+permitted"*, `BUILD FAILED` before a line compiles — while the same catalog builds from anywhere else.
+Until the owner grants Xcode access (System Settings → Privacy & Security → Files and Folders or Full
+Disk Access), make worktrees under `~/PaintWork/PaintApp-<id>` instead of `../PaintApp-<id>`; merges
+still run from the main worktree, which needs no build. Bash tool calls that run `xcodebuild` also need
+the sandbox disabled.
+
 Xcode lives at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Metal shaders need the
 toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 

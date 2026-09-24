@@ -48,53 +48,163 @@ rather than assuming it still holds.
 
 ---
 
-## (79) Brush size and opacity sliders read in %, size possibly logarithmic
+## (110) The canvas freeze, again — after changing Dither to Lens Blur
 
-**Status** — filed 2026-09-16. The owner: *"Make the brush size slider on the left bar measured in %
-of canvas size. Experiment with making it logarithmic to its actual size to offer finer control on
-smaller brushes, though I probably have to experience it to decide if I like it or a simple linear scale.
-The % should be displayed on top of the size logo so you know what it is. Same for opacity, though
-opacity is just a linear 0 to 100."*
+**Status** — filed 2026-09-24. The owner: *"Canvas freeze happened again, The recording is listed on
+the ipad but only captures the wedged state with me trying to move the canvas around. Due to the random
+and infrequent nature of this canvas freeze bug, constantly recording my actions would produce way too
+much data space, so that is out of the question. To guide you however, i changed a dither layer to a
+lens blur layer and then tried to move the screen and thats when the canvas move froze. I tried to
+recreate it but I cant."* Recording: `recording-20260923-200911.jsonl` (build 2026-09-18, `6f3c691`).
 
-- [ ] The owner feels the log curve on the iPad and rules log or linear — shipped as the default
-      (`BrushSizeCurve.swift`), size in % of canvas with opacity linear 0–100 and both drawn over
-      their icons; only this sub-point, the owner's own hands-on call, is left.
-
----
-
-## (86) Canvas sizes over 6k
-
-**Status** — filed 2026-09-16; the fill half **closed 2026-09-17** (a fill's memory is its region's,
-`FillWindow`, PERFORMANCE.md §22.1). The owner, on the other half: *"For the canvas size, if it is
-genuinely too much to put into memory, then experiment with virtual memory caching like the renderer
-already does with layers."*
-
-- [ ] The 6k ban lifted where the strip compositor and the frame store already make it affordable.
-      **Measured not to, on a simulator proxy with the iPad's budget** (PERFORMANCE.md §22.2): a
-      graded three-layer document with a stroke in flight is 1089 MB above rest at 6000² and 1811 MB
-      at 7000², against the iPad's 1850 MiB ceiling — the sandwich's two halves are display surfaces
-      no cache can page out. What would move it is the graded edit probe run on the owner's iPad at
-      7000² (`PlaybackProbe -probeGraded -probeMode edit`, §22.2 has the command) surviving with
-      margin; nothing short of the device settles it.
+- [ ] Root cause from the recording and the effect-change path; fix; a test that fails without it.
+- [ ] A way to catch the *transition* next time that costs no disk until it is wanted.
 
 ---
 
-## (97) The iPad crashed while the stream was on
+## (101) Streaming: "did not answer", LAN finds nothing, USB
 
-**Status** — filed 2026-09-16. The owner: *"I have experienced multiple times the ipad crashed while
-the stream was on."* **The crash is named and its mechanism removed** (2026-09-17): the iPad's own
-logs show the render server, `backboardd`, jetsammed at its 1850 MB limit four times in two days
-while a stream was decoding, and the tick was presenting every frame by re-rasterizing the canvas and
-handing Core Animation a fresh canvas-sized image thirty times a second — PERFORMANCE.md §21,
-STREAM.md §5.3, `StreamSurfaceView`. The simulator cannot stand in for the device's render server,
-so the proof is the next streaming session on the iPad going without a respring. What is left is
-one report of a different kind:
+**Status** — filed 2026-09-24. The owner: *"Alot of times like right now, I can see the ipad and the
+computer clearly connected to tailscale, but for some reason it says the computer did not answer. The
+ipad is doing this right now, no idea why. The Ipad also cannot sense the computer over LAN for some
+reason It is also connected to the windows computer via the usb and still cannot see it through that."*
+Found the same day: the laptop had rebooted and the streamer was not running (TODO (99) removed its
+autostart, as asked), and the app declares neither `NSBonjourServices` nor
+`NSLocalNetworkUsageDescription`, so iOS refuses the Nearby browse and any LAN connection silently.
+USB was ruled out on 2026-09-17 (docs/STREAM.md §6).
 
-- [ ] `PaintSoftware-2026-09-16-133830.ips` is a `0x8BADF00D` scene-update watchdog inside a
-  `LazyVStack` layout whose shape matches `BrushEditorScreen.outputColumn` — a static catalog of 13
-  entries, and no `ForEach` in the app iterates anything that grows with the scene (BUGS.md, the
-  2026-09-16 entry, has the trace's shape). Not reproduced; if a second report lands in the same
-  view, that is the signal to follow.
+- [ ] The two Info.plist keys; Nearby and a LAN address proved on the owner's iPad.
+- [ ] The iPad says *why* it could not connect — the laptop is up but PaintStreamer is not running
+      (refused) vs the laptop is unreachable (timeout) vs locked — in words the owner can act on.
+
+---
+
+## (102) The canvas name leaves the animation bar, and Scribble stays off it
+
+**Status** — filed 2026-09-24. The owner: *"Currently it displays the canvas name on the bottom left on
+the animation bar. This is ergonomically very bad, as it frequently activates the scribble write mode
+when my apple pencil touches near it. Move it to the top left and disable the scribble feature. Text
+writing has a similar disable scribble feature, I wonder if you can reuse that code."*
+
+- [ ] The name at the top left; Scribble cannot start on it (the text tool's mechanism, reused).
+
+---
+
+## (103) Add (+) is its own top-bar icon, with shapes and a gradient
+
+**Status** — filed 2026-09-24. The owner: *"The add button (+) is located under actions. Make it a
+seperate independant icon on the top bar. Additionally, put other things under the add like add
+square/rectangle, circle/ellipse, add linear gradient."*
+
+- [ ] A top-bar + icon holding Insert Photo, Insert Video, Stream Screen, Add Text, Rectangle,
+      Ellipse, Linear Gradient.
+
+---
+
+## (104) A Settings icon; Actions keeps only the actions
+
+**Status** — filed 2026-09-24. The owner: *"Along with the new add icon, there should also be a
+settings icon. Move resize canvas, canvas padding, bake percise strokes, fingers can paint, render
+resolution to it. In actions should be cut, copy, paste, flip horizontal, flip vertical, export in that
+order."*
+
+- [ ] Settings: Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint, Render
+      Resolution (and whatever else in Actions is a setting, e.g. Record My Actions).
+- [ ] Actions: Cut, Copy, Paste, Flip Horizontal, Flip Vertical, Export — in that order.
+
+---
+
+## (105) A video's speed follows the scene's frame rate
+
+**Status** — filed 2026-09-24. The owner: *"When the fps is set to 12fps instead of 24 and it has an
+inserted video, then that video should play twice as slow, not two times. Right now it plays the same
+speed regardless of what fps you set."*
+
+- [ ] A video advances one step per animation frame, so halving the scene's fps halves its speed.
+
+---
+
+## (106) Colour picker, second pass
+
+**Status** — filed 2026-09-24. The owner: *"The color picker wheel's color is not accurate and rotated
+around 90 degrees out of phase. The red on the wheel is right, but red is selected at the top.
+Additionally, The wheel and the square/triangle inside should be a lot bigger, and the width of the ring
+slightly smaller. Make the color picker itself as big as possible within the GUI (the diameter of the
+circle is just under the width of the tab) Remove the disc color picker. If you look at the actual color
+picker for triangle (and disc), the edges are very pixelated, not smooth. Fix. The triangle also should
+be rotated 90 degrees clockwise. The opacity slider should also display the color like in the image.
+Next, the current and previous color section takes up way too much space. Put it in the top left. The
+image I attached is a good reference. Try to get it to look like it. Try to make everything compact."*
+The reference (2026-09-24): a compact dark panel; current and previous colour as two overlapping
+circles at the top left; a large hue ring nearly the panel's width with a triangle inside whose
+full-hue vertex points right; below it an opacity bar drawn as a checkerboard fading into the colour,
+with a round thumb; a **Recent** row of swatches; the palette's name and swatch grid; a bottom tab bar
+(Classic, Wheel, Values, Pick, Palettes).
+
+- [ ] Hue phase: the marker and the drawn ring agree (red picked where red is drawn).
+- [ ] Disc removed; the ring as large as the panel allows, thinner; the inner shape larger; edges
+      antialiased; the triangle turned 90° clockwise.
+- [ ] Opacity bar in the colour over a checkerboard; the swatches compact at the top left; the whole
+      panel compact, to the reference.
+
+---
+
+## (107) The onion skin panel is 25% wider
+
+**Status** — filed 2026-09-24. The owner: *"The onion screen seems a bit too horizontally compressed.
+Make it around 0.25x more wider."*
+
+- [ ] 1.25x the width, the layout breathing into it.
+
+---
+
+## (108) To New Layer's cel spans the cel it was lifted from
+
+**Status** — filed 2026-09-24. The owner: *"When I press to new layer on a selection, it makes a new
+layer but makes the cel cover the entire length of the animation. Make it so the cel is just as long as
+the cel it was lifted from."*
+
+- [ ] The new layer's cel has the source cel's start and length.
+
+---
+
+## (109) Select panel: Edit sits beside Fill and To New Layer
+
+**Status** — filed 2026-09-24. The owner: *"The edit button in the select menu should be beside fill
+and to new layer."*
+
+- [ ] Edit in the same row as Fill and To New Layer.
+
+---
+
+## (79) Brush size and opacity sliders — the follow-ups
+
+**Status** — the log curve is **ruled** (the owner, 2026-09-24: *"the logorithmic brush size changer on
+the ipad feels very nice"*). What is left, in their words: *"I noticed that the eraser does not have
+it. Additionally, the % of screen size icon should not be there, it should only display the % when the
+user is actively adjusting it, and it should display right over or under the brush size pop up
+indicator. There also seems to be a bug where if I start drawing while holding the size indicator, the
+indicator stays on the screen even when i lift my finger off the slider."*
+
+- [ ] The eraser's size slider uses the same `BrushSizeCurve`.
+- [ ] No permanent % badge over the icons; the % shows only while adjusting, beside the size pop-up.
+- [ ] Drawing while a finger holds the slider, then lifting it, leaves no indicator on screen.
+
+---
+
+## (86) The canvas-size ceiling comes from the device, not a constant
+
+**Status** — the fill half closed 2026-09-17 (`FillWindow`). The 6000 ceiling was MEASURED to be this
+iPad's (docs/PERFORMANCE.md §22.2). The owner, 2026-09-24: *"Is 6k the true upper limit of this ipad
+with no possible way to make it 16k? Like virtual memory or something. If so then that is okay, as a
+limitation of the ipad, but remember: No part of this program should be specifically tuned for this
+ipad only. Anything like this should automatically change based on the specs of the machine. For
+example, running the paint app on a better ipad or another device should not necessarily limit the
+canvas size to 6k, only whatever is best."*
+
+- [ ] The ceiling is computed from the running device's memory and a MEASURED per-pixel cost model,
+      not a literal; audit every other device-tuned constant the same way (ring budgets, fill budget,
+      strip heights) and derive each from the machine.
 
 ---
 
