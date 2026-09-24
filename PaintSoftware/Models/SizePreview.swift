@@ -70,22 +70,55 @@ struct SizePreviewRequest: Equatable {
     func opacity(brushOpacity: Double, eraserOpacity: Double) -> Double {
         tool == .eraser ? eraserOpacity : brushOpacity
     }
+
+    /// Its twin for the percentage the pop-up prints beside the stamp — TODO (79)(b). Both tools'
+    /// percentages are already computed off the one shared reference extent
+    /// (`CanvasManager.brushSizeReferenceExtent`); this only picks which of the two the request is
+    /// about, the same way `toolSize`/`opacity` do.
+    func sizePercent(brushSizePercent: Double, eraserSizePercent: Double) -> Double {
+        tool == .eraser ? eraserSizePercent : brushSizePercent
+    }
+}
+
+/// Formats a 0...1 fraction as the rounded percentage the rail prints — shared by the size pop-up
+/// (`SizePreviewWindow`) and the opacity sliders' own caption (`SideToolbar`), so the same number is
+/// never rounded two different ways by two different views.
+///
+/// Below 1% a rounded integer reads as "0%", indistinguishable from the tool having no size at all —
+/// exactly the ambiguity the owner's readout exists to remove — so that one range keeps a decimal.
+enum SizePreviewPercentFormat {
+    static func string(for fraction: Double) -> String {
+        let scaled = fraction * 100
+        return scaled < 1 && scaled > 0 ? String(format: "%.1f%%", scaled) : "\(Int(scaled.rounded()))%"
+    }
 }
 
 // MARK: - Visibility
 
 /// Down shows, lift hides, and a value change in between is not an event at all.
 ///
-/// Two things drive it, and it takes both. A `DragGesture(minimumDistance: 0)` attached alongside
-/// the slider reports the **touch-down**, which is what the owner asked for and which
-/// `Slider.onEditingChanged` does *not* give: measured 2026-08-22, a press on the thumb that never
-/// moves produces no editing event at all, because SwiftUI only calls it once a drag begins. The
-/// slider's own `onEditingChanged` stays wired up as the second reporter of the **lift**, so a
-/// cancelled drag still lowers the window. See `View.sizePreviewSlider`.
+/// **One thing drives it**: `View.trackingTouch`'s `@GestureState`-backed touch tracker, reporting
+/// both the touch-down and the lift (or a cancellation standing in for one — see below).
+/// `minimumDistance: 0` is what makes the touch-down itself register with no movement required, which
+/// is what the owner asked for and which `Slider.onEditingChanged` alone cannot give: measured
+/// 2026-08-22, a press on the thumb that never moves produces no editing event at all, because
+/// SwiftUI only calls it once a drag actually begins.
+///
+/// **This used to be two reporters — the touch-down gesture above, plus `Slider.onEditingChanged`
+/// wired up separately as a second source for the lift — and that second one is exactly what TODO
+/// (79)(c) found broken.** `onEditingChanged(false)` needs UIKit to actually deliver the touch's end
+/// back to *this* view, and it does not have to: starting a Pencil stroke on the canvas while a
+/// finger still holds this slider hands that Pencil touch to `StrokeGestureRecognizer` on an entirely
+/// different view, and nothing about that requires the slider's own recognizer to ever see the
+/// finger's lift. The indicator stayed on screen because nothing here ever heard the end.
+/// `@GestureState` does not have this hole: SwiftUI resets it to its initial value the moment the
+/// gesture it backs stops being active for *any* reason — a normal release or a cancellation alike —
+/// so `View.trackingTouch`'s callback fires `false` either way, with no second reporter needed. See
+/// `View.sizePreviewSlider`.
 ///
 /// Value changes arrive on the value binding instead and never reach here, so dragging the slider
-/// cannot dismiss the preview it just raised. A repeated `true` (both reporters can emit one)
-/// re-asserts the same request rather than toggling it off.
+/// cannot dismiss the preview it just raised. A repeated `true` re-asserts the same request rather
+/// than toggling it off.
 struct SizePreviewVisibility: Equatable {
     private(set) var active: SizePreviewRequest?
 

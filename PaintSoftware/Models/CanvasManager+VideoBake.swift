@@ -115,15 +115,16 @@ extension CanvasManager {
 
         let startFrame = cel.startFrame
         let endFrame = cel.endFrame
-        let documentFPS = fps
 
         // Whether *anything* in the block's own span can be decoded at all — asked before any
         // mutation, so a file that opens but names a crop with nothing in it refuses cleanly
         // instead of leaving every resulting cel still showing the video.
         var anyDecodes = false
         for frame in startFrame..<endFrame {
+            // TODO (105): `video.resolvedFrameRate`, not the document's live fps — see
+            // `VectorVideoElement.mappedFrameRate`.
             let time = VideoFrameMap.sourceTime(of: video, atDocumentFrame: frame,
-                                                celStartFrame: startFrame, documentFPS: documentFPS)
+                                                celStartFrame: startFrame, documentFPS: video.resolvedFrameRate)
             if VideoFrameSource.shared.frame(assetURL: video.assetURL, at: time) != nil {
                 anyDecodes = true
                 break
@@ -176,7 +177,7 @@ extension CanvasManager {
                     // cel-selection mutation just below this one pins directly.
                     let time = VideoFrameMap.sourceTime(of: posedVideo, atDocumentFrame: frame,
                                                         celStartFrame: bakedCel.startFrame,
-                                                        documentFPS: documentFPS)
+                                                        documentFPS: posedVideo.resolvedFrameRate)
                     guard let decoded = VideoFrameSource.shared.frame(assetURL: posedVideo.assetURL, at: time),
                           let cgImage = decoded.makeImage() else {
                         return element // Left showing the video — see the doc comment above.

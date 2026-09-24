@@ -321,7 +321,72 @@ final class VideoFrameMapLogicTests: XCTestCase {
         XCTAssertGreaterThan(bytes[centre + 3], 0, "The placeholder covers the video's own rect.")
     }
 
+    // MARK: - TODO (105): the document's live fps must not move a fixed frame's resolved instant
+
+    /// **The owner's own example.** Animation frame 12 resolves to source time 0.5 s whether the
+    /// scene is 24 fps or 12 fps — the *only* thing the document's rate changes is how much wall-clock
+    /// time elapses reaching frame 12 (0.5 s at 24 fps, 1.0 s at 12 fps), which is a fact about the
+    /// playback clock and not about this map. Before the fix, every call site read the document's
+    /// *live* fps as `documentFPS`, and because a document frame is itself reached by a clock
+    /// advancing at that same live fps, `elapsed / documentFPS` collapsed to `elapsed`'s own
+    /// wall-clock seconds by construction — a video that always played at real time, at any fps,
+    /// which is exactly what the owner reported.
+    func testChangingTheDocumentsFpsDoesNotMoveWhatAFixedAnimationFrameShows() throws {
+        let url = try writeClip(fps: 24)
+        let manager = try managerShowingAVideo(asset: url, speed: 1, blockLength: 24)
+        let clip = try XCTUnwrap(videoElement(in: manager))
+        XCTAssertEqual(clip.resolvedFrameRate, 24,
+                       "PREMISE: the fixture stores no rate, so it resolves to the default 24")
+
+        manager.fps = 24
+        let atTwentyFour = try resolvedSourceTime(manager, atFrame: 12)
+        manager.fps = 12
+        let atTwelve = try resolvedSourceTime(manager, atFrame: 12)
+
+        XCTAssertEqual(atTwentyFour.seconds, 0.5, accuracy: 0.001,
+                       "frame 12 at 24 fps is half a second in")
+        XCTAssertEqual(atTwelve.seconds, 0.5, accuracy: 0.001,
+                       "…and still half a second in at 12 fps — the document's live rate must not "
+                       + "move which instant a fixed frame index shows")
+    }
+
+    /// The bake key must move with the corrected resolution, not with the old one — VIDEO.md's own
+    /// requirement that a changed fps re-bakes whatever *does* change. Two different `mappedFrameRate`s
+    /// on an otherwise-identical element point at two different instants for the same document frame,
+    /// so their digests must differ; `VideoCelIdentity.cuts` is what carries that into the key.
+    func testTwoElementsMappedAtDifferentRatesDigestDifferentlyAtTheSameFrame() throws {
+        let url = try writeClip(fps: 24)
+        let manager = try managerShowingAVideo(asset: url, speed: 1, blockLength: 24)
+        manager.fps = 24
+        guard case .video(let originalVideo)? = manager.layers[1].cels[0].vector?.elements.first else {
+            return XCTFail("PREMISE: the fixture holds one video element")
+        }
+        var video = originalVideo
+        video.mappedFrameRate = 12
+        manager.layers[1].cels[0].vector?.elements = [.video(video)]
+        manager.layers[1].cels[0].vector?.bumpVersion()
+
+        let mappedAtTwelve = try digest(manager, frame: 12)
+        video.mappedFrameRate = 24
+        manager.layers[1].cels[0].vector?.elements = [.video(video)]
+        manager.layers[1].cels[0].vector?.bumpVersion()
+        let mappedAtTwentyFour = try digest(manager, frame: 12)
+
+        XCTAssertNotEqual(mappedAtTwelve, mappedAtTwentyFour,
+                          "a changed mapped rate resolves a different source instant, so it must re-bake")
+    }
+
     // MARK: - Support
+
+    private func resolvedSourceTime(_ manager: CanvasManager, atFrame frame: Int) throws -> SourceTime {
+        let cel = manager.layers[1].cels[0]
+        let derived = try XCTUnwrap(manager.videoCelContent(for: cel, atFrame: frame),
+                                    "a video cel must derive at every frame of its block")
+        let identity = try XCTUnwrap(derived.identity.base as? VideoCelIdentity)
+        let clip = try XCTUnwrap(videoElement(in: manager))
+        return try XCTUnwrap(identity.cuts[clip.id.uuidString]?.sourceTime,
+                             "the identity must carry a cut for this element")
+    }
 
     private func writeClip(fps: Int, named name: String = "clip.mp4") throws -> URL {
         let url = directory.appendingPathComponent("\(fps)-\(name)")

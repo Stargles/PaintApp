@@ -53,4 +53,27 @@ extension CanvasManager {
             brushSize = CGFloat(percent) * brushSizeReferenceExtent
         }
     }
+
+    // MARK: - The eraser's twin — TODO (79)(a)
+
+    /// `eraserSize` (canvas points) as a fraction of `brushSizeReferenceExtent`. The eraser's own
+    /// diameter, read the same way `brushSizePercent` reads the paint brush's — the reference extent
+    /// is a property of the *canvas*, not of either tool, so both read the one accessor above.
+    var eraserSizePercent: Double {
+        Double(eraserSize / brushSizeReferenceExtent)
+    }
+
+    /// **The eraser's rail slider used to bind `eraserSize` directly — 1...50, linear — while the
+    /// brush's own slider went through `BrushSizeCurve` above.** TODO (79)(a), the owner: *"I noticed
+    /// that the eraser does not have it [the log curve]."* There was no second copy of the curve to
+    /// diverge from; the eraser's slider simply never called it. This is `brushSizeSliderPosition`'s
+    /// exact twin, so `SideToolbar`'s eraser row now binds here instead and both tools share the one
+    /// curve in `BrushSizeCurve`.
+    var eraserSizeSliderPosition: Double {
+        get { BrushSizeCurve.sliderPosition(forPercent: eraserSizePercent) }
+        set {
+            let percent = BrushSizeCurve.percent(forSliderPosition: newValue)
+            eraserSize = CGFloat(percent) * brushSizeReferenceExtent
+        }
+    }
 }

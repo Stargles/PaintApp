@@ -1196,7 +1196,11 @@ extension CanvasManager {
 
         let sourceLayerID = layers[sourceLayerIndex].id
         let sourceCelID = cel.id
-        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: canvasSize))
+        // TODO (108): the new layer's cel spans exactly the source cel it was lifted from — not
+        // `newLayerBlockLength`'s whole-scene span, which is right for a genuinely new layer with
+        // nothing to match but wrong here, where there is a source cel to match.
+        let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
+                         raster: .empty(size: canvasSize))
         let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [newCel])
         let insertIndex = sourceLayerIndex + 1
         layers.insert(newLayer, at: insertIndex)
@@ -1248,7 +1252,9 @@ extension CanvasManager {
         let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
         let (piece, remainder) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
 
-        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+        // TODO (108): span exactly the source cel, not the whole scene — see the same note on
+        // `beginDuplicate` above, which had the identical defect.
+        let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
                          raster: bakedRasterTexture(image: piece, likeExisting: .empty(size: canvasSize)))
         let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
                              isVisible: true, parentFolderID: layers[sourceIndex].parentFolderID,

@@ -812,6 +812,30 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
     /// kind, and a video is as movable as a placed photo.
     var animationGroupID: UUID? = nil
 
+    /// **The document's own fps at the instant this video was inserted** — TODO (105), the owner:
+    /// *"When the fps is set to 12fps instead of 24 and it has an inserted video, then that video
+    /// should play twice as slow, not the same speed regardless of what fps you set."*
+    ///
+    /// §4.3's frame map used to read the document's *live, current* fps as its `documentFPS`
+    /// denominator, at every call site, every time. Since a document frame is itself reached by a
+    /// playback clock advancing at that same live fps, `elapsed / documentFPS` is `elapsed`'s own
+    /// wall-clock seconds **by construction** — the map always answered "the same real-world instant
+    /// this many seconds in", whatever the artist set the scene's fps to. That is exactly the bug: a
+    /// video's presented speed must instead come from a rate fixed at the moment it was mapped in, so
+    /// that lowering the scene's fps later stretches the same document-frame span over more wall-clock
+    /// time without moving the video any further into its own footage — the owner's "twice as slow".
+    ///
+    /// Nil for a video this build inserted before this field existed, or for one a document with no
+    /// video ever wrote at all (VIDEO.md's own header: no build has shipped one yet) — `resolvedFrameRate`
+    /// is where "no stored rate" becomes 24, once, rather than a `?? 24` repeated at every reader.
+    var mappedFrameRate: Int? = nil
+
+    /// `mappedFrameRate`, with the one fallback TODO (105) names for a video that predates the field.
+    /// Every §4.3 call site reads this — never `mappedFrameRate` and never a document's live fps —
+    /// so a crop drag, an Adjust Speed choice and a played/baked frame all agree about which rate this
+    /// element's footage is mapped at.
+    var resolvedFrameRate: Int { mappedFrameRate ?? 24 }
+
     /// **The source frame this element is showing right now** — stage 3, and runtime-only in
     /// `assetURL`'s exact sense: it is never persisted, never compared and never carried by a copy
     /// that outlives one render.
@@ -7248,6 +7272,10 @@ struct VectorCanvasData: Codable {
         var mirrored: Bool
         /// Absent means untagged — `VectorVideoElement.animationGroupID`.
         var animationGroupID: UUID?
+        /// `VectorVideoElement.mappedFrameRate` — TODO (105). Absent means "no stored rate", the same
+        /// shape `animationGroupID` already uses, and `VectorVideoElement.resolvedFrameRate` is the
+        /// one place that reads as 24.
+        var mappedFrameRate: Int?
     }
 
     /// The persisted form of a `VectorStreamElement` — STREAM.md §5.1's fields, and nothing runtime.
@@ -7542,7 +7570,8 @@ struct VectorCanvasData: Codable {
                                        aspect: Double(el.aspect),
                                        stretchAxis: Double(el.stretchAxis),
                                        mirrored: el.mirrored,
-                                       animationGroupID: el.animationGroupID))
+                                       animationGroupID: el.animationGroupID,
+                                       mappedFrameRate: el.mappedFrameRate))
             case .stream(let el):
                 // Nothing dropped and nothing resolved: the payload is an address, and
                 // `displayFrame` is runtime-only.
@@ -7692,7 +7721,8 @@ struct VectorCanvasData: Codable {
                     transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
-                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID))
+                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID,
+                    mappedFrameRate: ref.mappedFrameRate))
             case .stream(let ref):
                 // The element needs no file to exist — a resolver answering nil drops nothing. What
                 // it answers is STREAM.md §5.6's last picture: the JPEG the last save wrote, so the

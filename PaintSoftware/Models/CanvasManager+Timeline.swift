@@ -812,11 +812,16 @@ extension CanvasManager {
         var rewritten: Set<UUID> = []
         for index in elements.indices {
             guard case .video(var video) = elements[index] else { continue }
+            // TODO (105): each element's own `resolvedFrameRate`, not the document's live `fps` — a
+            // crop written against a different rate than playback resolves against would set a
+            // boundary the block's last frame never actually reaches. See `VectorVideoElement
+            // .mappedFrameRate`.
             switch anchor {
             case .head:
                 var end = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceStart,
                                                             elapsedDocumentFrames: length,
-                                                            speed: video.speed, documentFPS: fps)
+                                                            speed: video.speed,
+                                                            documentFPS: video.resolvedFrameRate)
                 if let duration = VideoFrameSource.shared.info(for: video.assetURL)?.duration,
                    duration < end {
                     end = duration
@@ -826,7 +831,8 @@ extension CanvasManager {
             case .tail:
                 var start = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceEnd,
                                                               elapsedDocumentFrames: -length,
-                                                              speed: video.speed, documentFPS: fps)
+                                                              speed: video.speed,
+                                                              documentFPS: video.resolvedFrameRate)
                 if start < .zero { start = .zero }
                 guard start < video.sourceEnd, start != video.sourceStart else { continue }
                 video.sourceStart = start
@@ -883,7 +889,11 @@ extension CanvasManager {
               let video = layers[layerIndex].cels[celIndex].vector?.videos.first,
               let info = VideoFrameSource.shared.info(for: video.assetURL),
               info.nominalFrameRate > 0 else { return nil }
-        return VideoFrameMap.frameForFrameSpeed(sourceFPS: info.nominalFrameRate, documentFPS: fps)
+        // TODO (105): the rate this element is mapped at, not the document's live fps — see
+        // `writeVideoCrop`'s identical note. A speed computed against the wrong rate would not
+        // actually play frame-for-frame once `setVideoSpeed` applies it.
+        return VideoFrameMap.frameForFrameSpeed(sourceFPS: info.nominalFrameRate,
+                                                documentFPS: video.resolvedFrameRate)
     }
 
     /// **§2.5: setting a speed changes the block's length, and later cels do not move.**
@@ -923,7 +933,9 @@ extension CanvasManager {
                 video.speed = speed
                 elements[index] = .video(video)
                 rewritten.insert(video.id)
-                wanted = VideoFrameMap.frameCount(of: video, documentFPS: fps)
+                // TODO (105): this element's own resolved rate, not the document's live fps —
+                // `writeVideoCrop`'s note applies here too.
+                wanted = VideoFrameMap.frameCount(of: video, documentFPS: video.resolvedFrameRate)
                 changed = true
             }
             guard changed else { return }

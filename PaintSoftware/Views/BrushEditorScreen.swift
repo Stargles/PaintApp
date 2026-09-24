@@ -958,23 +958,21 @@ struct BrushEditorScreen: View {
             // a branch rather than a defaulted argument because SwiftUI's stepped and continuous
             // sliders are two initialisers, and a step small enough to stand in for "none" is a
             // quantisation nobody asked for.
+            //
+            // Neither branch wires up `onEditingChanged` any more — TODO (79)(c) moved the real-size
+            // preview's touch tracking into `.sizePreviewSlider` itself (a `@GestureState`, which
+            // catches a cancelled touch that `onEditingChanged` could miss), so a second, redundant
+            // wire here would be dead weight at best.
             Group {
                 if let step {
-                    Slider(value: value, in: range, step: step,
-                           onEditingChanged: { editingChanged($0, preview) })
+                    Slider(value: value, in: range, step: step)
                 } else {
-                    Slider(value: value, in: range,
-                           onEditingChanged: { editingChanged($0, preview) })
+                    Slider(value: value, in: range)
                 }
             }
             .accessibilityIdentifier(identifier)
             .sizePreviewSlider(preview, canvasManager: canvasManager)
         }
-    }
-
-    private func editingChanged(_ isEditing: Bool, _ preview: SizePreviewRequest?) {
-        guard let preview else { return }
-        canvasManager.sizePreview.editingChanged(isEditing, for: preview)
     }
 
     // MARK: - Writing

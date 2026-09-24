@@ -27,8 +27,14 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         return String(field.dropFirst("xform:".count))
     }
 
-    private func readBadge(_ app: XCUIApplication, _ identifier: String) -> String {
-        app.otherElements[identifier].value as? String ?? "?"
+    /// **TODO (79)(b) removed the permanent percentage badge this used to read.** A plain SwiftUI
+    /// `Slider` reports its own current value as its accessibility value with no configuration
+    /// needed — `BrushEditorUITests`' `brushPanel.base.hardness` already relies on the same fact —
+    /// so the slider itself is a strictly more direct reading than a derived badge ever was, and one
+    /// this round trip can still take before, during and after the drag regardless of whether
+    /// anything is being held at the instant it reads.
+    private func readSliderValue(_ slider: XCUIElement) -> String {
+        slider.value as? String ?? "?"
     }
 
     func testBrushSizeOpacityFrameAndZoomAreWhatTheyWereAfterTheGalleryRoundTrip() throws {
@@ -42,20 +48,20 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         let opacitySlider = app.sliders["sideToolbar.brushOpacitySlider"]
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "PREMISE: the brush tool is the default, so its rail is up")
         XCTAssertTrue(opacitySlider.exists, "PREMISE: and the opacity slider beside it")
-        let defaultSize = readBadge(app, "sideToolbar.brushSizeReadout")
-        let defaultOpacity = readBadge(app, "sideToolbar.brushOpacityReadout")
+        let defaultSize = readSliderValue(sizeSlider)
+        let defaultOpacity = readSliderValue(opacitySlider)
         let defaultTransform = readTransform(app)
-        XCTAssertEqual(defaultOpacity, "100%", "PREMISE: a fresh launch starts from the default tools")
+        XCTAssertNotEqual(defaultOpacity, "?", "PREMISE: a fresh launch's opacity slider reports a value")
 
         // 1. Size: the default sits at the bottom of the rail; drag the thumb up to the middle.
         dragVerticalSlider(sizeSlider, fromNormalizedDy: 1.0, toNormalizedDy: 0.5)
-        let size = readBadge(app, "sideToolbar.brushSizeReadout")
+        let size = readSliderValue(sizeSlider)
         XCTAssertNotEqual(size, defaultSize, "PREMISE: the size slider moved (\(size))")
 
         // 2. Opacity: 100% sits at the top; drag the thumb down to the middle.
         dragVerticalSlider(opacitySlider, fromNormalizedDy: 0.02, toNormalizedDy: 0.5)
-        let opacity = readBadge(app, "sideToolbar.brushOpacityReadout")
-        XCTAssertNotEqual(opacity, "100%", "PREMISE: the opacity slider moved (\(opacity))")
+        let opacity = readSliderValue(opacitySlider)
+        XCTAssertNotEqual(opacity, defaultOpacity, "PREMISE: the opacity slider moved (\(opacity))")
 
         // 3. Frame: scrub the ruler a few frames to the right.
         let ruler = app.otherElements["timeline.ruler"]
@@ -83,9 +89,9 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
                       "Tapping the tile reopens the document in the editor")
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "The brush tool comes back with its rail")
 
-        XCTAssertEqual(readBadge(app, "sideToolbar.brushSizeReadout"), size,
+        XCTAssertEqual(readSliderValue(sizeSlider), size,
                        "The brush size is what the artist left it at, not the preset's")
-        XCTAssertEqual(readBadge(app, "sideToolbar.brushOpacityReadout"), opacity,
+        XCTAssertEqual(readSliderValue(opacitySlider), opacity,
                        "The brush opacity too")
         XCTAssertEqual(readFrameLabel(app)?.current, frame,
                        "The document reopens on the frame the artist was on")

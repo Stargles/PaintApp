@@ -940,6 +940,29 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(brush.opacity(brushOpacity: 1, eraserOpacity: 0.4), 1, accuracy: 0.0001)
     }
 
+    /// **TODO (79)(b)'s pop-up percentage** reads the same tool split `toolSize`/`opacity` already
+    /// do — the eraser's own percent, never the brush's, and the other way round.
+    func testSizePreviewSizePercentReadsTheRequestsOwnToolNotTheOther() {
+        let eraser = SizePreviewRequest(sliderID: "eraserPanel.sizeSlider", tool: .eraser, side: .leading)
+        let brush = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        XCTAssertEqual(eraser.sizePercent(brushSizePercent: 0.2, eraserSizePercent: 0.05), 0.05,
+                       accuracy: 0.0001)
+        XCTAssertEqual(brush.sizePercent(brushSizePercent: 0.2, eraserSizePercent: 0.05), 0.2,
+                       accuracy: 0.0001)
+    }
+
+    /// **`SizePreviewPercentFormat` is the one place either the rail's Opacity caption or the Size
+    /// pop-up rounds a fraction** — TODO (79)(b). Below 1% keeps a decimal so it never reads as "the
+    /// tool has no size at all"; everywhere else is a whole number.
+    func testSizePreviewPercentFormatKeepsADecimalOnlyBelowOnePercent() {
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 0), "0%")
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 0.001), "0.1%", "0.1% of the reference extent")
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 0.005), "0.5%")
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 0.01), "1%", "exactly 1% has no decimal")
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 0.2), "20%")
+        XCTAssertEqual(SizePreviewPercentFormat.string(for: 1), "100%")
+    }
+
     /// Past the ceiling the window stops growing and the stamp is **not** scaled down to fit —
     /// scaling to fit would destroy the only thing the preview communicates, so it is clipped
     /// instead, and `isClipped` is what tells the view to make the crop look deliberate.
@@ -973,8 +996,10 @@ final class BrushEngineLogicTests: XCTestCase {
 
     // MARK: Visibility
 
-    /// Down shows, lift hides. The owner asked for touch-down specifically, so this is driven by
-    /// `Slider.onEditingChanged` and not by a value change.
+    /// Down shows, lift hides. The owner asked for touch-down specifically, which is why the view
+    /// layer feeds this from a `@GestureState`-backed touch tracker (`View.trackingTouch`,
+    /// `minimumDistance: 0`) rather than from `Slider.onEditingChanged` alone — see
+    /// `SizePreviewVisibility`'s own doc comment for TODO (79)(c), the bug that mattered to.
     func testSizePreviewShowsOnTouchDownAndHidesOnLift() {
         let request = SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider", tool: .brush, side: .above)
         var visibility = SizePreviewVisibility()
@@ -1024,6 +1049,29 @@ final class BrushEngineLogicTests: XCTestCase {
 
         visibility.editingChanged(false, for: rail)
         XCTAssertFalse(visibility.isVisible)
+    }
+
+    /// **TODO (79)(c): the state machine's own half of the fix, and why it needed no change here.**
+    /// The stuck-indicator bug was never in `SizePreviewVisibility` — `editingChanged(false, for:)`
+    /// has always cleared `active` unconditionally — it was that nothing reliably *called* it when a
+    /// Pencil stroke on the canvas interrupted a held rail slider, because the old touch tracker
+    /// (`DragGesture.onEnded` plus `Slider.onEditingChanged`, both requiring UIKit to deliver this
+    /// view's own end-of-touch) simply never fired. The fix replaced that tracker with a
+    /// `@GestureState`, which SwiftUI resets whether the gesture it backs ends cleanly or is cut off
+    /// from underneath — so from *this* type's point of view a cancellation and a clean lift are the
+    /// same call. This pins that a bare `false`, with no drag and no repeated `true` first, is
+    /// sufficient on its own: the shape a cancellation collapses to. (The tracker itself lives in
+    /// `SizePreviewWindow.swift`, a `View` file this target does not compile, so the fix's other half
+    /// is provable only by driving the app — see `BrushSizeSliderUITests` and its own report.)
+    func testSizePreviewClearsOnABareFalseWithNoPrecedingDragOrRepeatedTrue() {
+        let request = SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider", tool: .brush, side: .above)
+        var visibility = SizePreviewVisibility()
+        visibility.editingChanged(true, for: request)
+        XCTAssertTrue(visibility.isVisible, "PREMISE: raised")
+
+        visibility.editingChanged(false, for: request)
+        XCTAssertFalse(visibility.isVisible,
+                       "a single false must clear it — a cancellation and a clean lift report the same call")
     }
 
     // MARK: Placement

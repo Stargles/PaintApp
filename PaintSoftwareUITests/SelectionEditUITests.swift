@@ -198,8 +198,9 @@ final class SelectionEditUITests: PaintUITestCase {
 
         // 4. Dismiss the picker — a tap on the rail's Size badge, outside the popover — and that is
         //    the one undo step. What the artist does next: tap away, press undo.
-        // TODO (79) replaced the plain "Size" caption with a percentage badge; same spot, same job.
-        app.otherElements["sideToolbar.brushSizeReadout"].tap()
+        // TODO (79)(b) removed the permanent percentage badge this used to tap; the plain "Size"
+        // caption underneath the slider is back, with its own identifier, and serves the same job.
+        app.staticTexts["sideToolbar.brushSizeSlider.caption"].tap()
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker")
         XCTAssertTrue(isBlue(rgba(canvas, l1Mid)), "the line keeps the picked colour after the picker closes")
         let undo = app.buttons["sideToolbar.undoButton"]

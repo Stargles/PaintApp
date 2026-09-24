@@ -160,4 +160,105 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, 1, "undo removes the layer")
         XCTAssertGreaterThan(try alpha(0, at: inside), 200, "…and gives the source its pixels back")
     }
+
+    // MARK: - TODO (108): the new layer's cel matches the source cel it was lifted from
+
+    /// **The owner's own example**: a source cel spanning frames 3–5 in a 12-frame scene — the new
+    /// layer gets one cel at 3–5, not a cel spanning the whole scene (`newLayerBlockLength`'s old
+    /// answer, right for a genuinely new layer and wrong here, where there is a source cel to match).
+    func testNewLayersCelSpansExactlyTheSourceCelOnAVectorLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let layerIndex = manager.currentLayerIndex
+        XCTAssertEqual(manager.contentEndFrame, 12, "PREMISE: the default 12-frame scene")
+        manager.splitCel(layerIndex: layerIndex, celIndex: 0, atFrame: 3)
+        manager.splitCel(layerIndex: layerIndex, celIndex: 1, atFrame: 6)
+        let spans = manager.layers[layerIndex].cels.map { ($0.startFrame, $0.frameCount) }
+        XCTAssertEqual(spans.map(\.0), [0, 3, 6], "PREMISE: three cels")
+        XCTAssertEqual(spans.map(\.1), [3, 3, 6], "PREMISE: the middle one spans exactly 3–5")
+
+        manager.currentFrame = 4
+        let sourceVector = try XCTUnwrap(manager.layers[layerIndex].cels[1].vector)
+        sourceVector.addStroke(stroke(from: CGPoint(x: 8, y: 32), to: CGPoint(x: 24, y: 32)))
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        select(manager, aroundLeft)
+        XCTAssertNotNil(manager.selection, "PREMISE: the loop caught the stroke")
+
+        manager.moveSelectionToNewLayer()
+
+        let added = manager.layers[layerIndex + 1]
+        XCTAssertEqual(added.cels.count, 1, "one cel, and nothing elsewhere")
+        XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
+        XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
+    }
+
+    /// The raster arm's twin.
+    func testNewLayersCelSpansExactlyTheSourceCelOnARasterLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let size = CanvasFixture.canvasSize
+        manager.layers[0].cels[0].raster = RasterLayerTexture(
+            size: size, image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
+            strokeCount: 1)
+        manager.splitCel(layerIndex: 0, celIndex: 0, atFrame: 3)
+        manager.splitCel(layerIndex: 0, celIndex: 1, atFrame: 6)
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        manager.currentFrame = 4
+        select(manager, aroundLeft)
+        XCTAssertNotNil(manager.selection, "PREMISE: the loop caught the painted pixels")
+
+        manager.moveSelectionToNewLayer()
+
+        let added = manager.layers[1]
+        XCTAssertEqual(added.cels.count, 1, "one cel, and nothing elsewhere")
+        XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
+        XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
+    }
+
+    // MARK: - Duplicate had the identical defect
+
+    /// **Duplicate shared `moveSelectionToNewLayer`'s bug and got the same fix** — both arms.
+    func testDuplicateOnAVectorLayerAlsoSpansExactlyTheSourceCel() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let layerIndex = manager.currentLayerIndex
+        manager.splitCel(layerIndex: layerIndex, celIndex: 0, atFrame: 3)
+        manager.splitCel(layerIndex: layerIndex, celIndex: 1, atFrame: 6)
+        manager.currentFrame = 4
+        let sourceVector = try XCTUnwrap(manager.layers[layerIndex].cels[1].vector)
+        sourceVector.addStroke(stroke(from: CGPoint(x: 8, y: 32), to: CGPoint(x: 24, y: 32)))
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        select(manager, aroundLeft)
+
+        manager.beginDuplicate()
+
+        let added = manager.layers[layerIndex + 1]
+        XCTAssertEqual(added.cels.count, 1, "one cel, and nothing elsewhere")
+        XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
+        XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
+    }
+
+    /// The raster arm's twin.
+    func testDuplicateOnARasterLayerAlsoSpansExactlyTheSourceCel() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let size = CanvasFixture.canvasSize
+        manager.layers[0].cels[0].raster = RasterLayerTexture(
+            size: size, image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
+            strokeCount: 1)
+        manager.splitCel(layerIndex: 0, celIndex: 0, atFrame: 3)
+        manager.splitCel(layerIndex: 0, celIndex: 1, atFrame: 6)
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        manager.currentFrame = 4
+        select(manager, aroundLeft)
+
+        manager.beginDuplicate()
+
+        let added = manager.layers[1]
+        XCTAssertEqual(added.cels.count, 1, "one cel, and nothing elsewhere")
+        XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
+        XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
+    }
 }

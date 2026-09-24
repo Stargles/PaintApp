@@ -1428,7 +1428,6 @@ extension CanvasManager {
         let elements = suppressed.isEmpty ? vector.elements
                                           : vector.elements.filter { !suppressed.contains($0.id) }
         let carried = vector.transform
-        let documentFPS = fps
 
         // One cut per video still on the display list. A cel whose only video is suppressed under a
         // live lasso float has nothing to resolve, and answering nil hands it back to the pose arm
@@ -1437,9 +1436,11 @@ extension CanvasManager {
         var times: [UUID: SourceTime] = [:]
         for element in elements {
             guard case .video(let video) = element else { continue }
+            // TODO (105): `video.resolvedFrameRate`, not the document's live `fps` — see
+            // `VectorVideoElement.mappedFrameRate`'s doc comment for why the live rate was the bug.
             let time = VideoFrameMap.sourceTime(of: video, atDocumentFrame: frame,
                                                 celStartFrame: cel.startFrame,
-                                                documentFPS: documentFPS)
+                                                documentFPS: video.resolvedFrameRate)
             times[video.id] = time
             cuts[video.id.uuidString] = VideoCut(assetFileName: video.assetFileName, at: time)
         }

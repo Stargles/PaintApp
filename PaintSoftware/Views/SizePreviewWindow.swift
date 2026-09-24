@@ -37,12 +37,26 @@ struct SizePreviewWindow: View {
                         eraserOpacity: canvasManager.eraserOpacity)
     }
 
+    /// **TODO (79)(b): the permanent % badge over the rail's size icon is gone; this is where its
+    /// number lives now** — beside the pop-up, and only while the pop-up itself is up, since
+    /// `SizePreviewWindow` only exists on screen while a size slider is held.
+    private var sizePercentText: String {
+        SizePreviewPercentFormat.string(for: request.sizePercent(brushSizePercent: canvasManager.brushSizePercent,
+                                                                  eraserSizePercent: canvasManager.eraserSizePercent))
+    }
+
     var body: some View {
         let geometry = self.geometry
         let side = geometry.windowSide
         let origin = SizePreviewGeometry.windowOrigin(sliderFrame: sliderFrame, side: request.side,
                                                       windowSide: side, within: bounds)
         return VStack(spacing: 4) {
+            Text(sizePercentText)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.white)
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                .accessibilityIdentifier("\(request.sliderID).percent")
+                .accessibilityValue(sizePercentText)
             ZStack {
                 // What the mark lands on. Paper for the brush; transparency, drawn as a
                 // checkerboard, for the eraser — whose stamp is a hole in the ink above it.
@@ -105,6 +119,40 @@ struct SizePreviewAnchorKey: PreferenceKey {
     }
 }
 
+/// **TODO (79)(c).** Reports "a touch is down on this view", backed by `@GestureState` — which
+/// SwiftUI resets to its initial value the moment the gesture it backs stops being active for *any*
+/// reason, a normal lift or a cancellation alike. That is not true of `DragGesture.onEnded` or
+/// `Slider.onEditingChanged(false)`, both of which fire only when UIKit delivers the touch's own end
+/// back to *this* view — which does not happen when a second touch (a Pencil stroke beginning on the
+/// canvas while a finger still holds this slider) is claimed by a gesture recognizer on a different
+/// view entirely. `SizePreviewVisibility`'s doc comment has the fuller account of the bug this
+/// replaced.
+///
+/// `minimumDistance: 0` is what makes the touch-**down** itself register with no movement required —
+/// measured 2026-08-22, a press that never moves produces no `Slider.onEditingChanged` at all, which
+/// is precisely the case the owner named ("when the sliders are pressed down"). `.simultaneousGesture`
+/// at the call site keeps the slider's own drag intact — this only observes the touch.
+private struct TouchTrackingModifier: ViewModifier {
+    @GestureState private var isTouched = false
+    let onChanged: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isTouched) { _, isTouched, _ in isTouched = true }
+            )
+            .onChange(of: isTouched) { _, touched in onChanged(touched) }
+    }
+}
+
+extension View {
+    /// See `TouchTrackingModifier`.
+    func trackingTouch(_ onChanged: @escaping (Bool) -> Void) -> some View {
+        modifier(TouchTrackingModifier(onChanged: onChanged))
+    }
+}
+
 extension View {
     /// Marks this view as a size slider that raises the preview.
     ///
@@ -113,18 +161,6 @@ extension View {
     /// panel's) and at most one of them ever has a finger on it. `request` is `nil` for the sliders
     /// that are not size sliders, so the shared slider-row helpers in `StrokeSettingsPanel` and
     /// `SideToolbar` can apply this unconditionally instead of branching at every call site.
-    ///
-    /// **The zero-distance gesture is what makes touch-down work, and `onEditingChanged` alone is
-    /// not enough.** Measured 2026-08-22 against the real panel: `XCUIElement.press(forDuration:)` on
-    /// the thumb, with the thumb parked dead centre so it cannot have missed, left the raise count at
-    /// 1 instead of 2 — SwiftUI's `Slider` only reports editing once a drag actually *begins*, so a
-    /// press that never moves reports nothing at all. That is precisely the case the owner named
-    /// ("when the sliders are pressed down"), so it is served by a `DragGesture(minimumDistance: 0)`,
-    /// whose `onChanged` fires on the first touch.
-    ///
-    /// `.simultaneousGesture`, so the slider keeps its own drag — this observes the touch, it does
-    /// not claim it. `onEditingChanged` stays wired up alongside as the belt-and-braces *lift*: if
-    /// this gesture is ever cancelled rather than ended, that one still lowers the window.
     ///
     /// A slider that is not a size slider comes back completely untouched — no preference, no
     /// gesture. The fill rail's three sliders and both opacity sliders go through the same helpers,
@@ -136,18 +172,9 @@ extension View {
             anchorPreference(key: SizePreviewAnchorKey.self, value: .bounds) { anchor in
                 canvasManager.sizePreview.active?.sliderID == request.sliderID ? anchor : nil
             }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        // `onChanged` fires on every frame of a drag; the equality guard keeps that
-                        // from republishing `CanvasManager` once per frame for an unchanged value.
-                        guard canvasManager.sizePreview.active != request else { return }
-                        canvasManager.sizePreview.editingChanged(true, for: request)
-                    }
-                    .onEnded { _ in
-                        canvasManager.sizePreview.editingChanged(false, for: request)
-                    }
-            )
+            .trackingTouch { touched in
+                canvasManager.sizePreview.editingChanged(touched, for: request)
+            }
         } else {
             self
         }

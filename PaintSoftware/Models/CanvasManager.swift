@@ -631,7 +631,10 @@ final class CanvasManager: ObservableObject {
             transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2,
                                                         y: canvasSize.height / 2),
                                       scale: fit, rotation: info.rotation),
-            mirrored: transform.a * transform.d - transform.b * transform.c < 0)
+            mirrored: transform.a * transform.d - transform.b * transform.c < 0,
+            // TODO (105): frozen at insertion, so a later fps change plays this clip slower or
+            // faster instead of always at real wall-clock speed — see the field's own doc comment.
+            mappedFrameRate: fps)
 
         let layerIndex = currentLayerIndex
         let before = vector.elements
@@ -2710,13 +2713,19 @@ final class CanvasManager: ObservableObject {
     /// size. Every later layer is sized by `newLayerBlockLength` to the scene that already exists.
     static let defaultNewSceneFrameCount = 12
 
-    /// The length of the single block a newly added layer's cel gets: **the scene**, or
-    /// `defaultNewSceneFrameCount` when there is no scene yet.
+    /// The length of the single block a genuinely **new** layer's cel gets — one with no source cel to
+    /// match — is **the scene**, or `defaultNewSceneFrameCount` when there is no scene yet.
     ///
-    /// One accessor because there are five constructors — `addLayer`, `addVectorLayer`,
-    /// `addValueLayer`, `SelectionModels`' duplicate-to-new-layer and `CanvasManager+LassoMove`'s —
-    /// and they used to spell `max(sceneFrameCount, 1)` five times. A new layer that did not span the
-    /// scene would be undrawable at frames the rest of the document has.
+    /// One accessor because there are three constructors that mint a layer out of nothing —
+    /// `addLayer`, `addVectorLayer`, `addValueLayer` — and they used to spell `max(sceneFrameCount, 1)`
+    /// three times. A new layer that did not span the scene would be undrawable at frames the rest of
+    /// the document has.
+    ///
+    /// **`SelectionModels`' duplicate/move-to-new-layer and `CanvasManager+LassoMove`'s vector twins do
+    /// not read this any more** — TODO (108). Those four each lift a *source* cel onto a new layer, and
+    /// a source cel to match is exactly the case this accessor's own doc used to lump in with "nothing
+    /// to match": they now span the source cel's own `startFrame`/`frameCount` instead, and keep this
+    /// as their fallback only for the case a source cel could not be resolved at all.
     var newLayerBlockLength: Int {
         max(contentEndFrame, layers.isEmpty ? Self.defaultNewSceneFrameCount : 1)
     }

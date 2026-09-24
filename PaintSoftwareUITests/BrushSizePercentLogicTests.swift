@@ -150,4 +150,51 @@ final class BrushSizePercentLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.brushSize, 51.2, accuracy: 1e-6)
     }
+
+    // MARK: - TODO (79)(a): the eraser goes through the same curve
+
+    func testEraserSizePercentIsEraserSizeOverTheReferenceExtent() {
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 200, height: 200)
+        manager.eraserSize = 40
+        XCTAssertEqual(manager.eraserSizePercent, 0.2, accuracy: 1e-9)
+    }
+
+    func testDraggingTheEraserSliderToTheTopSetsEraserSizeToTheFullReferenceExtent() {
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 400, height: 400)
+        manager.eraserSizeSliderPosition = 1.0
+        XCTAssertEqual(manager.eraserSize, 400, accuracy: 1e-6)
+    }
+
+    func testDraggingTheEraserSliderToTheBottomSetsEraserSizeToPointOneOfAPercent() {
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 1000, height: 1000)
+        manager.eraserSizeSliderPosition = 0.0
+        XCTAssertEqual(manager.eraserSize, 1.0, accuracy: 1e-6, "0.1% of a 1000pt canvas is 1pt")
+    }
+
+    func testReadingTheEraserSliderPositionBackAfterSettingEraserSizeDirectlyRoundTrips() {
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 512, height: 512)
+        manager.eraserSize = 51.2   // 10%
+
+        let t = manager.eraserSizeSliderPosition
+        manager.eraserSize = 0     // disturb it
+        manager.eraserSizeSliderPosition = t
+
+        XCTAssertEqual(manager.eraserSize, 51.2, accuracy: 1e-6)
+    }
+
+    /// **The eraser and the brush read the same curve independently** — dragging one slider's position
+    /// to a given `t` must set the same percent-of-canvas the other slider would at that same `t`,
+    /// since both now go through `BrushSizeCurve` and nothing else differs between the two tools' own
+    /// size state.
+    func testTheEraserAndTheBrushAgreeOnPercentAtTheSameSliderPosition() {
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 300, height: 300)
+        manager.brushSizeSliderPosition = 0.37
+        manager.eraserSizeSliderPosition = 0.37
+        XCTAssertEqual(manager.brushSizePercent, manager.eraserSizePercent, accuracy: 1e-9)
+    }
 }

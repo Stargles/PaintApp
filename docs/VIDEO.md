@@ -208,6 +208,20 @@ document frames rather than 24 — which is what "every source frame shown" cost
 makes real time the default and this the setting. `VideoFrameMapLogicTests.testFrameForFrameShowsEvery
 SourceFrameExactlyOnce` is the pin, and at the documented 1.25 it lands on `0, 1, 3, 3, 4, 5, 6, 8, 8, …`.
 
+**`documentFPS` in the formula above is the rate this *element* was mapped at, not whatever the
+document's fps happens to be right now — TODO (105), filed after this section shipped.** The owner:
+*"When the fps is set to 12fps instead of 24 and it has an inserted video, then that video should play
+twice as slow, not the same speed regardless of what fps you set."* Every call site used to read the
+document's live fps, and because a document frame is itself reached by a playback clock advancing at
+that same live fps, `elapsed / documentFPS` collapsed to `elapsed`'s own wall-clock seconds by
+construction — the map answered "the same real-world instant this many seconds in" whatever the scene's
+fps was set to, which is a video that always plays at real time and never at the artist's chosen
+speed. The fix is `VectorVideoElement.mappedFrameRate`: the document's fps captured once, at import,
+and read back by every §4.3 call site (`resolvedFrameRate`, defaulting to 24 for a video with none
+stored) instead of the live rate. A crop's boundaries and Adjust Speed's frame-for-frame offer are
+computed against the same frozen rate as playback, so they keep agreeing with each other after an fps
+change even though none of the three read the live fps any more.
+
 **The map is exact at `speed == 1` and the working timescale is what makes it so** — but the obvious
 denominator is not fine enough, and the reason is a property of `SourceTime` rather than of the map.
 `sourceStart.timescale · documentFPS` divides both terms and looks sufficient; `SourceTime` *normalises*,

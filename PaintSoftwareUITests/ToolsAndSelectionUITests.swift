@@ -86,11 +86,12 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // Default tool is the brush. TODO (79) replaced the plain "Size"/"Opacity" captions with
-        // percentage badges, so this checks for those instead — same rows, same tool.
+        // Default tool is the brush: its Size/Opacity sliders and their plain captions are up —
+        // TODO (79)(b) took the permanent percentage badges back off them.
         XCTAssertTrue(app.sliders["sideToolbar.brushSizeSlider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.otherElements["sideToolbar.brushSizeReadout"].exists)
-        XCTAssertTrue(app.otherElements["sideToolbar.brushOpacityReadout"].exists)
+        XCTAssertTrue(app.sliders["sideToolbar.brushOpacitySlider"].exists)
+        XCTAssertTrue(app.staticTexts["sideToolbar.brushSizeSlider.caption"].exists)
+        XCTAssertTrue(app.staticTexts["sideToolbar.brushOpacitySlider.caption"].exists)
         XCTAssertFalse(app.sliders["sideToolbar.gapClosingSlider"].exists)
 
         app.buttons["toolbar.fillButton"].tap() // select fill

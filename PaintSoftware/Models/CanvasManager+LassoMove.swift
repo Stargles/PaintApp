@@ -617,12 +617,17 @@ extension CanvasManager {
 
         let sourceIndex = currentLayerIndex
         let size = source.size
+        // TODO (108): the new layer's cel spans exactly the source cel it was lifted from, not the
+        // whole scene — `SelectionModels`' raster arm had the identical defect.
+        let sourceCel = layers[sourceIndex].cels.first(where: { $0.id == target.celID })
+        let sourceStartFrame = sourceCel?.startFrame ?? 0
+        let sourceFrameCount = sourceCel?.frameCount ?? newLayerBlockLength
         withStructureUndo(label: .duplicatePiece) {
             // **The source canvas's own `transform`**, so the copy sits exactly over the ink it was
             // taken from: the elements are in the source's local space and would land somewhere else
             // under an identity.
             let canvas = VectorCanvas(size: size, elements: copies, transform: source.transform)
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+            let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
                           raster: .empty(size: canvasSize ?? size), vector: canvas)
             let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
                               isVisible: true, kind: .vector,
@@ -690,10 +695,15 @@ extension CanvasManager {
         let sourceLayerID = target.layerID
         let sourceCelID = target.celID
         let insertAt = sourceIndex + 1
+        // TODO (108): span exactly the source cel, not the whole scene — see the identical note on
+        // `beginVectorLassoDuplicate` above.
+        let sourceCel = layers[sourceIndex].cels.first(where: { $0.id == sourceCelID })
+        let sourceStartFrame = sourceCel?.startFrame ?? 0
+        let sourceFrameCount = sourceCel?.frameCount ?? newLayerBlockLength
         // The source canvas's own `transform`, so the ink sits exactly over where it was taken from —
         // `beginVectorLassoDuplicate`'s reason.
         let canvas = VectorCanvas(size: source.size, elements: moved, transform: source.transform)
-        let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+        let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
                       raster: .empty(size: canvasSize ?? source.size), vector: canvas)
         let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
                           isVisible: true, kind: .vector,

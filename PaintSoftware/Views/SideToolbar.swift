@@ -13,6 +13,13 @@ struct SideToolbar: View {
     /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
     private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
 
+    /// **TODO (79)(b): true for the length of a touch on whichever Opacity slider is showing.** Size
+    /// sliders show their percentage beside the real-size pop-up instead (`SizePreviewWindow`), which
+    /// already only exists while held; Opacity has no pop-up of its own, so its percentage borrows
+    /// this slider's own caption spot instead, and only for as long as this is true. One flag serves
+    /// both the brush's and the eraser's Opacity slider because the two are never on screen together.
+    @State private var isAdjustingOpacityPercent = false
+
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyToolbars`.
     /// The split is a wrapper around the unchanged body below it, so nothing about what is
@@ -51,10 +58,15 @@ struct SideToolbar: View {
                         identifier: "sideToolbar.edgeOverlapSlider"
                     )
                 } else if isEraserMode {
+                    // TODO (79)(a): the same `BrushSizeCurve` the brush's slider uses, via
+                    // `eraserSizeSliderPosition` — see `CanvasManager+BrushSize.swift`. The eraser's
+                    // slider used to bind `eraserSize` directly (a linear 1...50), which is why it
+                    // never felt like the brush's.
                     labeledSlider(
                         title: "Size",
-                        value: Binding(get: { Double(canvasManager.eraserSize) }, set: { canvasManager.eraserSize = CGFloat($0) }),
-                        range: 1...50,
+                        value: Binding(get: { canvasManager.eraserSizeSliderPosition },
+                                       set: { canvasManager.eraserSizeSliderPosition = $0 }),
+                        range: 0...1,
                         identifier: "sideToolbar.eraserSizeSlider",
                         // `.above`, not beside: a hand on a vertical slider covers the track and
                         // everything below-and-right of the contact point, and that point travels
@@ -74,7 +86,8 @@ struct SideToolbar: View {
                         title: "Opacity",
                         value: $canvasManager.eraserOpacity,
                         range: 0...1,
-                        identifier: "sideToolbar.eraserOpacitySlider"
+                        identifier: "sideToolbar.eraserOpacitySlider",
+                        showsPercentWhileAdjusting: true
                     )
                 } else {
                     // TODO (79): the slider drags `brushSizeSliderPosition` (0...1, logarithmic —
@@ -90,9 +103,7 @@ struct SideToolbar: View {
                         // See the eraser's twin above for why the window goes above the rail rather
                         // than level with it.
                         preview: SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider",
-                                                    tool: .brush, side: .above),
-                        badge: (icon: "circle.fill", percent: canvasManager.brushSizePercent,
-                                identifier: "sideToolbar.brushSizeReadout")
+                                                    tool: .brush, side: .above)
                     )
                     Button(action: resetSettings) {
                         Image(systemName: "arrow.counterclockwise")
@@ -107,8 +118,7 @@ struct SideToolbar: View {
                         value: $canvasManager.brushOpacity,
                         range: 0...1,
                         identifier: "sideToolbar.brushOpacitySlider",
-                        badge: (icon: "circle.lefthalf.filled", percent: canvasManager.brushOpacity,
-                                identifier: "sideToolbar.brushOpacityReadout")
+                        showsPercentWhileAdjusting: true
                     )
                 }
                 // The Apple Pencil / finger-drawing gate used to live here. It moved to the Actions
@@ -195,31 +205,54 @@ struct SideToolbar: View {
         .accessibilityAddTraits(canvasManager.selectedTool == .eyedropper ? [.isSelected] : [])
     }
 
-    /// A vertical slider with a small caption (or, for the brush's own Size/Opacity, a percentage
-    /// badge — TODO (79)) beneath it. The caption/badge is what makes the rail readable once its two
-    /// sliders change meaning between brush, eraser and fill modes.
-    /// `preview` non-nil marks this as a *size* slider: holding it raises the real-size stamp window
-    /// beside the rail. This hook only covers the **lift** — a press that never moves produces no
-    /// `onEditingChanged` at all, so the touch-down half lives in `.sizePreviewSlider` below, which
-    /// carries the measurement.
+    /// A vertical slider with a small caption beneath it. `preview` non-nil marks this as a *size*
+    /// slider: holding it raises the real-size stamp window beside the rail, which is also where its
+    /// percentage now lives (`SizePreviewWindow`) — see the file-level note on `showsPercentWhileAdjusting`
+    /// below for why a Size slider passes neither that flag nor needs one.
     ///
-    /// `badge`, when given, replaces the plain `Text(title)` caption with `percentBadge` — the owner's
-    /// *"The % should be displayed on top of the size logo so you know what it is. Same for
-    /// opacity."* Only the brush's own two sliders pass one; the eraser and fill sliders keep their
-    /// plain text captions, which TODO (79) never asked to change.
+    /// **TODO (79)(b): there is no permanent percentage badge here any more.** The rail used to
+    /// overlay one on the brush's own Size and Opacity icons at rest; the owner: *"the % of screen
+    /// size icon should not be there, it should only display the % when the user is actively
+    /// adjusting it."* A Size slider's percentage moved to the pop-up (`SizePreviewWindow`), which
+    /// already only exists while held. `showsPercentWhileAdjusting` is Opacity's own equivalent: it
+    /// has no pop-up to borrow, so its percentage replaces this slider's own caption instead, and
+    /// only for as long as `isAdjustingOpacityPercent` says a finger is on it — tracked by
+    /// `.trackingTouch`, the same `@GestureState`-backed mechanism `.sizePreviewSlider` uses, and for
+    /// the same reason: TODO (79)(c) found that a hand-rolled "lift" signal can miss a cancellation.
     private func labeledSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>,
                                identifier: String, preview: SizePreviewRequest? = nil,
-                               badge: (icon: String, percent: Double, identifier: String)? = nil) -> some View {
-        VStack(spacing: 4) {
-            VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier,
-                           onEditingChanged: { isEditing in
-                               guard let preview else { return }
-                               canvasManager.sizePreview.editingChanged(isEditing, for: preview)
-                           })
-                .frame(height: sliderHeight)
-                .sizePreviewSlider(preview, canvasManager: canvasManager)
-            if let badge {
-                percentBadge(icon: badge.icon, percent: badge.percent, identifier: badge.identifier)
+                               showsPercentWhileAdjusting: Bool = false) -> some View {
+        let slider = VerticalSlider(value: value, range: range, accessibilityIdentifier: identifier)
+            .frame(height: sliderHeight)
+            .sizePreviewSlider(preview, canvasManager: canvasManager)
+            // Belt-and-braces, `StrokeSettingsPanel`'s own reason applied to the rail: a second touch
+            // on the top toolbar switching brush/eraser/fill mode out from under the finger holding
+            // this slider removes it from the tree without the touch tracker ever reporting a clean
+            // lift, which would otherwise strand the real-size pop-up showing the mode this rail just
+            // left. A no-op when this is not a size slider (`preview == nil`) or nothing is showing.
+            .onDisappear { canvasManager.sizePreview.dismiss() }
+        return VStack(spacing: 4) {
+            if showsPercentWhileAdjusting {
+                slider
+                    .trackingTouch { isAdjustingOpacityPercent = $0 }
+                    // Belt-and-braces, `StrokeSettingsPanel`'s own reason: switching tools out from
+                    // under a held finger (a second touch on the top toolbar while this one holds the
+                    // slider) removes this branch from the tree without the gesture ever reporting a
+                    // clean lift, which would otherwise stick the caption on "37%" forever.
+                    .onDisappear { isAdjustingOpacityPercent = false }
+            } else {
+                slider
+            }
+            if showsPercentWhileAdjusting, isAdjustingOpacityPercent {
+                let percentText = SizePreviewPercentFormat.string(for: value.wrappedValue)
+                Text(percentText)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                    .frame(width: 56)
+                    .accessibilityIdentifier("\(identifier).percent")
+                    .accessibilityValue(percentText)
             } else {
                 Text(title)
                     .font(.system(size: 9, weight: .medium))
@@ -228,47 +261,11 @@ struct SideToolbar: View {
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.7)
                     .frame(width: 56)
+                    // A stable, inert tap target outside whatever popover a picker raises — what
+                    // `sideToolbar.brushSizeReadout` served as before TODO (79)(b) removed it.
+                    .accessibilityIdentifier("\(identifier).caption")
             }
         }
-    }
-
-    /// An icon with the slider's current value overlaid as a rounded percentage — TODO (79). Same
-    /// 30×30 footprint as the reset/eyedropper icon boxes elsewhere on this rail, so the three read
-    /// as one family rather than the badge looking like a fourth kind of control.
-    ///
-    /// The percentage is also the button's `accessibilityValue`, not just its drawn text — the same
-    /// convention `eyedropperButton` already uses for its hex swatch — so a test (or VoiceOver) reads
-    /// the number without OCR-ing the label.
-    private func percentBadge(icon: String, percent: Double, identifier: String) -> some View {
-        // Below 1% a rounded integer reads as "0%" — indistinguishable from the brush having no
-        // size at all, which is exactly the readout the owner asked for so the artist would *not*
-        // have to guess. One decimal only down there; whole numbers everywhere else, where a
-        // fraction would just be clutter in a 30pt badge.
-        let scaled = percent * 100
-        let percentText = scaled < 1 && scaled > 0
-            ? String(format: "%.1f%%", scaled)
-            : "\(Int(scaled.rounded()))%"
-        return ZStack {
-            Image(systemName: icon)
-                .font(.footnote)
-                .foregroundColor(.white.opacity(0.5))
-                .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.15))
-                .cornerRadius(6)
-            Text(percentText)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.white)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-        }
-        // `.ignore` + an explicit identifier/value, exactly as `canvas.host` and the eyedropper's
-        // swatch already do: without it the `Image` and `Text` would surface as two separate
-        // accessibility elements and `.accessibilityIdentifier` on the `ZStack` would not land
-        // reliably on either. This is deliberately not a `Button` — the badge is read-only, and the
-        // owner never asked for tapping it to do anything.
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier(identifier)
-        .accessibilityValue(percentText)
     }
 
     private func resetSettings() {
@@ -296,13 +293,10 @@ private struct VerticalSlider: View {
     // sliders happens to come first in the accessibility tree — a known pre-existing bug that
     // masked a real slider-value bug elsewhere (see BUGS.md, "Fill tool" section).
     var accessibilityIdentifier: String? = nil
-    /// Forwarded straight to `Slider`: `true` on touch-down, `false` on lift. The size sliders use it
-    /// to raise and lower the real-size stamp preview.
-    var onEditingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
         GeometryReader { geo in
-            Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
+            Slider(value: $value, in: range)
                 .frame(width: geo.size.height)
                 .rotationEffect(.degrees(-90))
                 .frame(width: geo.size.width, height: geo.size.height)
