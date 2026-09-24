@@ -15,8 +15,10 @@ struct CanvasSizePickerView: View {
     private let minDimension = 1
     /// TODO.md item (13) raised this 8192 -> 16383; item (31) lowered it again, to 6000, because
     /// 16383 crashes on a brushstroke on a 3 GB device — MEASURED on the owner's own iPad 9, where a
-    /// fresh document dies between 12000 and 13000 and 6000 is half of that. `CanvasManager.maxCanvasExtent`
-    /// is the single named home for this bound — see its doc comment and PERFORMANCE.md §15 for the run.
+    /// fresh document dies between 12000 and 13000 and 6000 is half of that. Item (86) then made the
+    /// bound itself a function of the running device rather than that literal, so this reads whatever
+    /// `CanvasManager.maxCanvasExtent` derives for the machine the app is on — see its doc comment
+    /// and PERFORMANCE.md §15/§22.2 for the run and the fit.
     private let maxDimension = Int(CanvasManager.maxCanvasExtent)
 
     private var width: Int? { Int(widthText) }

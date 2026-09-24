@@ -48,36 +48,56 @@ rather than assuming it still holds.
 
 ---
 
-## (101) Streaming: "did not answer", LAN finds nothing, USB
+## (101) Streaming: Local Network permission and Nearby — proof needed on the owner's iPad
 
-**Status** — filed 2026-09-24. The owner: *"Alot of times like right now, I can see the ipad and the
-computer clearly connected to tailscale, but for some reason it says the computer did not answer. The
-ipad is doing this right now, no idea why. The Ipad also cannot sense the computer over LAN for some
-reason It is also connected to the windows computer via the usb and still cannot see it through that."*
-Found the same day: the laptop had rebooted and the streamer was not running (TODO (99) removed its
-autostart, as asked), and the app declares neither `NSBonjourServices` nor
-`NSLocalNetworkUsageDescription`, so iOS refuses the Nearby browse and any LAN connection silently.
-USB was ruled out on 2026-09-17 (docs/STREAM.md §6).
+**Status** — the Info.plist keys (`NSBonjourServices`, `NSLocalNetworkUsageDescription`) and the
+connect-failure classification (refused / unreachable / Local Network permission denied / the
+existing locked state) are merged — docs/STREAM.md §5.9 has the classification and the built app's
+`Info.plist` was read with `plutil -p` to confirm both keys land in the generated bundle.
+`StreamConnectFailureLogicTests` drives every `NWError` case with no socket, and
+`StreamScreenUITests.testStreamScreenConnectSheetShowsTheRefusedMessageWhenNothingListens` drives
+**refused** end to end on the simulator (127.0.0.1, nothing listening). The simulator does not
+enforce Local Network privacy at all, so the permission prompt itself — the thing that was silently
+never shown, which is most of why this was filed — cannot be proved off the owner's device.
 
-- [ ] The two Info.plist keys; Nearby and a LAN address proved on the owner's iPad.
-- [ ] The iPad says *why* it could not connect — the laptop is up but PaintStreamer is not running
-      (refused) vs the laptop is unreachable (timeout) vs locked — in words the owner can act on.
+- [ ] Owner-verified on their own iPad: Stream Screen (or Nearby) prompts for Local Network
+      permission on first use, and allowing it lets Nearby find the laptop and a typed LAN address
+      connect.
 
 ---
 
-## (86) The canvas-size ceiling comes from the device, not a constant
+## (102) The canvas name leaves the animation bar, and Scribble stays off it
 
-**Status** — the fill half closed 2026-09-17 (`FillWindow`). The 6000 ceiling was MEASURED to be this
-iPad's (docs/PERFORMANCE.md §22.2). The owner, 2026-09-24: *"Is 6k the true upper limit of this ipad
-with no possible way to make it 16k? Like virtual memory or something. If so then that is okay, as a
-limitation of the ipad, but remember: No part of this program should be specifically tuned for this
-ipad only. Anything like this should automatically change based on the specs of the machine. For
-example, running the paint app on a better ipad or another device should not necessarily limit the
-canvas size to 6k, only whatever is best."*
+**Status** — filed 2026-09-24. The owner: *"Currently it displays the canvas name on the bottom left on
+the animation bar. This is ergonomically very bad, as it frequently activates the scribble write mode
+when my apple pencil touches near it. Move it to the top left and disable the scribble feature. Text
+writing has a similar disable scribble feature, I wonder if you can reuse that code."*
 
-- [ ] The ceiling is computed from the running device's memory and a MEASURED per-pixel cost model,
-      not a literal; audit every other device-tuned constant the same way (ring budgets, fill budget,
-      strip heights) and derive each from the machine.
+- [ ] The name at the top left; Scribble cannot start on it (the text tool's mechanism, reused).
+
+---
+
+## (103) Add (+) is its own top-bar icon, with shapes and a gradient
+
+**Status** — filed 2026-09-24. The owner: *"The add button (+) is located under actions. Make it a
+seperate independant icon on the top bar. Additionally, put other things under the add like add
+square/rectangle, circle/ellipse, add linear gradient."*
+
+- [ ] A top-bar + icon holding Insert Photo, Insert Video, Stream Screen, Add Text, Rectangle,
+      Ellipse, Linear Gradient.
+
+---
+
+## (104) A Settings icon; Actions keeps only the actions
+
+**Status** — filed 2026-09-24. The owner: *"Along with the new add icon, there should also be a
+settings icon. Move resize canvas, canvas padding, bake percise strokes, fingers can paint, render
+resolution to it. In actions should be cut, copy, paste, flip horizontal, flip vertical, export in that
+order."*
+
+- [ ] Settings: Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint, Render
+      Resolution (and whatever else in Actions is a setting, e.g. Record My Actions).
+- [ ] Actions: Cut, Copy, Paste, Flip Horizontal, Flip Vertical, Export — in that order.
 
 ---
 

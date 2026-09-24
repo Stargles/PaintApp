@@ -295,6 +295,7 @@
 		8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */; };
 		14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */; };
 		B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */; };
+		AA39A488A7B847076BEB6241 /* StreamConnectFailureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */; };
 		42EF84FD657BFADA355273E3 /* StreamFileTransferLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */; };
 		3F9D5C32A1B26AFA206707D5 /* StreamFileSendLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */; };
 		79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */; };
@@ -793,6 +794,7 @@
 		B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBarStateLogicTests.swift; sourceTree = "<group>"; };
 		448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBakeLogicTests.swift; sourceTree = "<group>"; };
 		E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamDiscoveryLogicTests.swift; sourceTree = "<group>"; };
+		AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamConnectFailureLogicTests.swift; sourceTree = "<group>"; };
 		150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFileTransferLogicTests.swift; sourceTree = "<group>"; };
 		8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFileSendLogicTests.swift; sourceTree = "<group>"; };
 		F58236C42E349FAAF4504EFD /* PaintSoftware/Models/CanvasManager+StreamBake.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+StreamBake.swift"; sourceTree = "<group>"; };
@@ -1164,6 +1166,7 @@
 				B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */,
 				448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */,
 				E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */,
+				AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */,
 				150DB2C51148C0EFBF2D97A9 /* StreamFileTransferLogicTests.swift */,
 				8F95DEA7C7A06089640092D7 /* StreamFileSendLogicTests.swift */,
 				EEF535F046782C964CDB5154 /* StreamScreenUITests.swift */,
@@ -2088,6 +2091,7 @@
 				8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */,
 				14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */,
 				B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */,
+				AA39A488A7B847076BEB6241 /* StreamConnectFailureLogicTests.swift in Sources */,
 				42EF84FD657BFADA355273E3 /* StreamFileTransferLogicTests.swift in Sources */,
 				3F9D5C32A1B26AFA206707D5 /* StreamFileSendLogicTests.swift in Sources */,
 				79E369E88AFBDFB107C16644 /* PaintSoftware/Models/CanvasManager+StreamBake.swift in Sources */,
@@ -2269,6 +2273,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "PaintSoftware-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PaintSoftware finds and connects to PaintStreamer on your computer over the local network.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -2315,6 +2321,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "PaintSoftware-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PaintSoftware finds and connects to PaintStreamer on your computer over the local network.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

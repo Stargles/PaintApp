@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	TODO.md item (101): NSBonjourServices has no INFOPLIST_KEY_ form (it is an array), so it lives
+	here rather than as a generated key. GENERATE_INFOPLIST_FILE stays YES on the app target; Xcode
+	merges this file's keys into the generated Info.plist rather than replacing it — verified by
+	reading the BUILT app's Info.plist with `plutil -p` (see STREAM.md §5.9).
+
+	Without this, iOS refuses NWBrowser's Bonjour browse for "_paintstream._tcp" silently: no error,
+	no permission prompt, just an empty Nearby list forever. NSLocalNetworkUsageDescription is the
+	other half and is a plain string, so it is INFOPLIST_KEY_NSLocalNetworkUsageDescription on the
+	app target's own build settings instead of a second key here.
+	-->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_paintstream._tcp</string>
+	</array>
+</dict>
+</plist>

@@ -512,7 +512,8 @@ Tailscale IP; last used prefilled; port 47301 shown, editable) and Connect. On H
 vector layer with one stream element in one cel **from the current frame to the end of the
 timeline** (§6), fitted to the canvas the way `insertVideo` fits (the laptop's aspect, letterboxed),
 then lifts it into the Move box as `insertImage` does. If the connection fails the sheet says so in
-words and stays open. A second Stream Screen makes a second layer sharing the client.
+words and stays open — classified into what the owner can act on, §5.9. A second Stream Screen makes
+a second layer sharing the client.
 
 **Nearby (TODO (98))**: `StreamDiscoveryBrowser` (`Engine/ScreenStream/StreamDiscovery.swift`)
 browses `_paintstream._tcp` with `NWBrowser` while the sheet is on screen, so a laptop on the same
@@ -588,6 +589,71 @@ stage-2 fix stays exactly where it was needed and stage 4's rule applies everywh
 `StreamBarStateLogicTests.testAConnectionStillBeingConnectedIsNotPausedMidConnect` (the old case,
 narrowed) and `testAConnectionNoElementNamesIsNowPaused` (pause with nothing naming it, resume the
 moment an element does, pause again the moment it stops).
+
+### 5.9 The Info.plist keys, and why it could not connect (TODO (101))
+
+**The app declared neither key, so iOS refused everything silently.** Without
+`NSBonjourServices`/`NSLocalNetworkUsageDescription` the OS refuses `NWBrowser`'s Bonjour browse
+(§5.7's Nearby) and any TCP connect to a LAN address, and — the trap — **never shows the permission
+prompt that would have said so**: the connect sheet just reported "did not answer" for a computer
+that was on, running PaintStreamer, and answering nothing because the artist was never asked. The
+simulator does not enforce Local Network privacy at all, which is how the previous build's own
+XCUITests passed while this was broken on the owner's own iPad.
+
+`GENERATE_INFOPLIST_FILE = YES` (project.pbxproj) has no `INFOPLIST_KEY_` form for an array, so
+`NSBonjourServices` lives in a small `PaintSoftware-Info.plist` at the repo root instead, merged by
+Xcode into the generated plist rather than replacing it (`INFOPLIST_FILE` set alongside
+`GENERATE_INFOPLIST_FILE`) — confirmed by reading the *built* app's `Info.plist` with `plutil -p`,
+not assumed from the project settings. `NSLocalNetworkUsageDescription` is a plain string, so it is
+`INFOPLIST_KEY_NSLocalNetworkUsageDescription` on the app target's own Debug and Release settings
+instead of a second key in the file.
+
+**Classifying the failure — `Engine/ScreenStream/ScreenStreamClient.swift`'s `StreamConnectFailure`.**
+One `classify(_ error: NWError)` reads what the transport actually reported and sorts it into what
+the owner can act on, and `sentence(host:)` is the single rendering both `StreamConnectSheet`'s
+banner and `StreamBarState.reconnecting`'s word read — neither composes its own description of a
+failure the other has already named:
+
+- **refused** (`ECONNREFUSED`) — the host answered with a reset: the computer is on and reachable,
+  PaintStreamer is not running. "Open PaintStreamer on the computer (its desktop icon)."
+- **unreachable** (`ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`) — no answer at all, or the transport
+  says the route itself does not exist: asleep, off, or not on this network or Tailscale.
+- **localNetworkPermissionDenied** — `NWError.dns(-65570)`, `kDNSServiceErr_PolicyDenied`. iOS routes
+  its Local Network privacy check through the mDNSResponder policy layer for *any* local connection,
+  not only Bonjour, so a denied or un-granted permission surfaces on a plain IP connect as a DNS
+  error rather than a POSIX one — the specific `.waiting`-path code TODO.md item (101) asked for by
+  name. The sheet offers a button straight to this app's page in Settings, since retyping the address
+  or waking the computer does not fix a permission the iPad itself is withholding.
+- **locked** — not part of this type. The streamer answers this one over an *already-established*
+  connection, as STATUS's own `reason` string (§4.5, §5.6's `"The laptop is locked"`); it was already
+  correct and needed no change.
+
+Everything else this client fails on (a bad greeting, a protocol version mismatch, a dropped
+connection) already names its own cause precisely at the site that detects it, and is carried as
+`.other(String)` rather than reclassified a second time.
+
+**Proved:** `StreamConnectFailureLogicTests` drives `classify(_:)` against every `NWError` value each
+case is defined to produce, with no socket. `StreamScreenUITests
+.testStreamScreenConnectSheetShowsTheRefusedMessageWhenNothingListens` drives **refused** end to end
+on the simulator — `127.0.0.1` on a port nothing listens on refuses a TCP connect immediately, no
+Tailscale or real laptop required — and is the one case a simulator can prove deterministically.
+**Not provable off the owner's iPad:** the Local Network permission prompt itself (the simulator does
+not enforce the privacy check at all) and Nearby actually finding a laptop on real Wi-Fi (§5.7 already
+carried this note) — both need the owner's own device, on their own network, to exercise for real.
+
+**MEASURED against the real laptop, 2026-09-24 — a stopped streamer times out over Tailscale rather
+than refusing.** `tools/windows/streamer-remote.sh stop` then `nc -zv -w 5 100.104.85.111 47301` from
+this Mac: `Operation timed out`, not `Connection refused` — `start` afterward reopened the port
+immediately (`nc` succeeded), and the task was left running. So **refused** is real and reachable (the
+loopback case above proves the app's own handling of it end to end), but *this specific real-world
+cause* — the streamer not running — surfaces to the iPad as **unreachable** over the actual Tailscale
+path, not **refused**, because something between the two ends (most likely Windows Firewall silently
+dropping rather than resetting a closed port on the Tailscale interface, an OS/network configuration
+question rather than an app one) swallows the reset. The sheet's *unreachable* sentence — "may be
+asleep, off, or not on this network or Tailscale" — is still true and still actionable here, just not
+under the specific word ("refused") the owner's brief guessed for this cause; **refused** stays for
+whatever genuinely does answer with a reset (a firewall on the *iPad's* side of a connection, or a
+service that unbinds its listener without exiting).
 
 ## 6. Defaults taken without a ruling — each reversible, each recorded where the behaviour lives
 

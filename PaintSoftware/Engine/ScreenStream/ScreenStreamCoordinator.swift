@@ -237,7 +237,8 @@ final class ScreenStreamCoordinator: ObservableObject {
         pausedEndpoints.removeAll()
         for (endpoint, continuations) in pendingConnects {
             for continuation in continuations {
-                continuation.resume(throwing: ConnectFailure(sentence: "The document was closed."))
+                continuation.resume(throwing: ConnectFailure(reason: .other("The document was closed."),
+                                                              host: endpoint.host))
             }
             pendingConnects.removeValue(forKey: endpoint)
         }
@@ -245,8 +246,15 @@ final class ScreenStreamCoordinator: ObservableObject {
 
     // MARK: - The connect sheet's question
 
+    /// TODO.md item (101): the sheet's own answer when a connect attempt fails, carrying the
+    /// classification rather than a pre-rendered string — `sentence` renders it against the host the
+    /// artist typed, and `offersLocalNetworkSettingsButton` is what tells the sheet to show the
+    /// Settings button rather than reasoning about the failure a second time.
     struct ConnectFailure: Error, Equatable {
-        let sentence: String
+        let reason: StreamConnectFailure
+        let host: String
+        var sentence: String { reason.sentence(host: host) }
+        var offersLocalNetworkSettingsButton: Bool { reason.offersLocalNetworkSettingsButton }
     }
 
     /// **Connect, and answer with the laptop's first STATUS or the first failure's sentence.** The
@@ -290,8 +298,8 @@ final class ScreenStreamCoordinator: ObservableObject {
         client.onStatus = { [weak self] status in
             self?.statusArrived(status, from: endpoint)
         }
-        client.onFailure = { [weak self] sentence in
-            self?.failureArrived(sentence, from: endpoint)
+        client.onFailure = { [weak self] reason in
+            self?.failureArrived(reason, from: endpoint)
         }
         client.decoder.onFrame = { [weak self] in
             // Decode queue. Hop once; the tick coalesces from there.
@@ -364,10 +372,10 @@ final class ScreenStreamCoordinator: ObservableObject {
         }
     }
 
-    private func failureArrived(_ sentence: String, from endpoint: StreamEndpoint) {
+    private func failureArrived(_ reason: StreamConnectFailure, from endpoint: StreamEndpoint) {
         guard let continuations = pendingConnects.removeValue(forKey: endpoint) else { return }
         for continuation in continuations {
-            continuation.resume(throwing: ConnectFailure(sentence: sentence))
+            continuation.resume(throwing: ConnectFailure(reason: reason, host: endpoint.host))
         }
         // Nothing may name this endpoint yet — the insert happens after a successful connect — so
         // stop the client here rather than leaving it to a `sync()` that would find no element
@@ -540,10 +548,12 @@ final class ScreenStreamCoordinator: ObservableObject {
         if element.isFrozen { return .frozen }
         let endpoint = StreamEndpoint(host: element.host, port: element.port)
         switch connectionStates[endpoint] {
-        case .none, .connecting?:
+        case .none, .connecting?, .stopped?:
             return .connecting
-        case .reconnecting?, .stopped?:
-            return .reconnecting
+        case .reconnecting(let reason)?:
+            // TODO.md item (101): the bar reads the same classification the sheet does, rather than
+            // a bare "Reconnecting…" that says nothing about why.
+            return .reconnecting(detail: reason.sentence(host: element.host))
         case .connected?:
             guard let status = statuses[endpoint] else { return .connecting }
             return status.streaming ? .live : .notStreaming(reason: status.reason ?? "no source is picked")
@@ -657,7 +667,9 @@ enum StreamBarState: Equatable {
     /// The first attempt, before any answer: a fresh insert, or a document just opened.
     case connecting
     /// The connection dropped and the client is retrying on §3's backoff. The last picture stays.
-    case reconnecting
+    /// `detail` is `StreamConnectFailure.sentence(host:)` — TODO.md item (101): the bar says *why*,
+    /// the same classification `StreamConnectSheet`'s own banner reads, rather than a bare ellipsis.
+    case reconnecting(detail: String)
     /// Connected, but STATUS says `streaming:false` — nothing picked, paused, or the window closed.
     case notStreaming(reason: String)
 
@@ -666,7 +678,7 @@ enum StreamBarState: Equatable {
         case .live: return "Live"
         case .frozen: return "Frozen"
         case .connecting: return "Connecting…"
-        case .reconnecting: return "Reconnecting…"
+        case .reconnecting(let detail): return "Reconnecting… \(detail)"
         case .notStreaming(let reason): return "Not streaming — \(reason)"
         }
     }

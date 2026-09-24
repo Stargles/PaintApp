@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import UIKit
+import os
 
 // CanvasManager is decomposed across `CanvasManager+*.swift` files, each an `extension
 // CanvasManager` holding one subsystem's methods. Deliberately NOT split into separate service
@@ -29,52 +30,130 @@ final class CanvasManager: ObservableObject {
     /// The largest coordinate a canvas dimension may reach — **memory-bound, not format-bound.**
     /// TODO.md item (8)'s signed 16-bit quarter-pixel sample coordinate addresses
     /// -8192.0...+8191.75 (a span of 16383.75 pt, not 16384), so the *format* can still carry a
-    /// canvas up to 16383 without clamping a quarter-pixel inside the artwork on two edges. That is
-    /// not this constant's value: a 16383² canvas crashes on a single brushstroke, reported by the
-    /// owner off their own iPad (9th generation, `iPad12,1`, 3 GB) — TODO.md item (31).
+    /// canvas up to `formatExtentCeiling` (16383) without clamping a quarter-pixel inside the
+    /// artwork on two edges. That is not this bound's value on any device seen so far: a 16383²
+    /// canvas crashed on a single brushstroke on the owner's own iPad (9th generation, `iPad12,1`,
+    /// 3 GB) — TODO.md item (31) — which is what first pinned this at a memory-derived number.
     ///
-    /// **MEASURED on that iPad, 2026-09-07, Release, over nineteen labelled launches — PERFORMANCE.md
-    /// §15 carries the whole run.** Three numbers settle this bound:
+    /// **TODO.md item (86): a function of the running device, not a literal.** The owner: *"No part
+    /// of this program should be specifically tuned for this ipad only... running the paint app on a
+    /// better ipad or another device should not necessarily limit the canvas size to 6k, only
+    /// whatever is best."* `6000` was real for the one iPad item (31) measured (PERFORMANCE.md §15),
+    /// but it was still a literal — this reads the *running* device's own memory instead, the same
+    /// way `CompositorBudget.textureBudgetBytes` already does for the GPU scratch pool and
+    /// `UndoHistory.maxCostBytes` already does for undo.
     ///
-    /// - **The process ceiling is 1850 MiB.** `phys_footprint + os_proc_available_memory()` was
-    ///   constant at 1850 in every one of those launches, at every canvas size, which is what makes
-    ///   it the device's answer rather than an estimate. (§9's 1837 MiB is the same figure measured
-    ///   *at rest*, before a document.)
-    /// - **A fresh one-layer document dies between 12000 and 13000.** 12000 survived one
-    ///   canvas-crossing stroke at a peak of 1768.3 MiB — 82 MiB short of the ceiling — and 13000 was
-    ///   killed. 16383 was killed too, which is the owner's own report reproduced.
-    /// - **A document with four inked layers and undo history behind it survived 11000** at a peak of
-    ///   1547.8 MiB, so it is *not* the weaker case the arithmetic assumed; the extra layers cost a
-    ///   roughly fixed transient that the stroke's own S² cost overtakes by ~10000.
+    /// **The cost model — PERFORMANCE.md §22.2's `PlaybackProbe` measurement**, the worst ordinary
+    /// case this bound has to leave room for: a *graded* document (a blend mode, so the sandwich
+    /// engages — `SandwichRecipe.compositeHalves`'s three canvas-sized buffers) mid-stroke,
+    /// `phys_footprint` peak above an at-rest baseline. Three points, all MEASURED:
     ///
-    /// **6000 is half of the smaller measured boundary, and the margin is what the run did not
-    /// cover.** At 6000 the worked-document peak interpolates to ~733 MiB, 40% of the ceiling; the
-    /// documents measured carried no blend mode, adjustment layer, mask or folder, so a graded frame's
-    /// sandwich — three canvas-sized buffers, at `CompositorBudget.hasHeadroom`'s own ×2 — is on top
-    /// of that and is **not** in the figures: 3 · 2 · 4 · 6000² is 824 MiB, and 733 + 824 = 1557 MiB
-    /// still fits. At 6500 the same sum is 1824 against a 1850 ceiling, which is a boundary rather
-    /// than a margin, so 6000 is where the round number falls.
+    /// | extent | graded working set |
+    /// |---|---|
+    /// | 6000² | 1089 MiB |
+    /// | 7000² | 1811 MiB |
+    /// | 8192² | 2363 MiB |
     ///
-    /// The arithmetic this replaces (PERFORMANCE.md §15.3) predicted 538 MiB at 4200. The worked
-    /// document actually spent 573 MiB there — within 6% — and the fresh one spent 196 MiB, **2.7×
-    /// less** than predicted. So the four-buffer count and the ×2 realism factor are close to right
-    /// for a document with layers and history and much too pessimistic for a bare one; what was
-    /// wrong was row D's extra halving of the budget on top of an already conservative cost model.
+    /// `gradedWorkingSetBytes(atExtent:)` is the least-squares line through those three in
+    /// canvas-*pixel-count* (not extent — the cost is areal): **≈42.25 bytes/px − 288.6 MiB.** The
+    /// negative intercept is not a rounding error to fold away: `frameRingByteBudget` switches the
+    /// decoded-frame ring off above ~4900², and all three measured points already sit past that
+    /// line, so the fit is pricing the *post-ring* regime, which grows a little slower than a strict
+    /// `bytes/px` line because a smaller working set's own share of the (now-absent) ring is not
+    /// there to add back in. `CanvasGeometryLogicTests` pins the fit against these three rows
+    /// directly, so the two cannot drift apart.
     ///
-    /// **Not 4096.** 4096 is this codebase's own common texture-size ceiling —
-    /// `TextLayout.maximumWarpTexels`, `PixelOps.maximumFloatingWarpTexels`,
-    /// `TextOverlayView.maximumGlyphTexels` and six others each land on it independently, for reasons
-    /// that have nothing to do with the canvas bound — so a "does the shared constant appear exactly
-    /// once" source scan (`CanvasGeometryLogicTests`) could not tell those apart from a forgotten
-    /// reader if this picked the same number. 6000 was checked against that scan: zero collisions.
+    /// **The margin.** `gradedWorkingSetBudgetFraction` (0.63) is how much of the device's own memory
+    /// budget the fit may predict before the bound backs off — the same shape of decision §15.5 made
+    /// (leave the majority of the ceiling free for whatever the fit does not price: the document's
+    /// other layers, undo history, UIKit, the OS) sized against this fit directly rather than against
+    /// an *un*-graded number with the sandwich bolted on afterward, which is what made the old
+    /// literal's own derivation (PERFORMANCE.md §15.3) 2.7× too pessimistic for a bare document — see
+    /// §15.6. Solved for the extent whose fitted cost is exactly that fraction of the budget, then
+    /// rounded down to `maxCanvasExtentRoundingStep` (250 px) so the number reads like a decision
+    /// rather than a computation, and clamped to `formatExtentCeiling` at the top (no amount of
+    /// memory buys past the coordinate format) and `minimumCanvasExtent` at the bottom (a device
+    /// reporting an implausible budget still gets a canvas that opens).
+    ///
+    /// **On the reference iPad's own MEASURED 1850 MiB ceiling (PERFORMANCE.md §15.5) this reproduces
+    /// 6000 exactly** — the number item (31)/(86) already shipped, not a new one — and a device with
+    /// twice the budget gets 8000, not 12000: the fit's own fixed term means the relationship is not
+    /// linear in the budget. `CanvasGeometryLogicTests` pins both.
+    ///
+    /// **Where the live number comes from** — `deviceMemoryBudgetBytes`, below: `os_proc_available_memory()`
+    /// on a real device (the same call `CompositorBudget.hasHeadroom` already reads), falling back to
+    /// the reference iPad's own 1850 MiB when that reads 0 — the simulator and the fast test tier,
+    /// where the concept does not apply at all (`CompositorBudget`'s own doc comment says why), so a
+    /// document opened there sizes exactly as it does on that iPad rather than on whatever Mac
+    /// happens to be hosting the run. That fallback is *not* "tuned for this iPad" in the sense the
+    /// owner ruled against: on every real device it is never read, because `os_proc_available_memory()`
+    /// never answers 0 there.
     ///
     /// Still nearly 3x the owner's own working canvas in each dimension (2048x1024,
-    /// PERFORMANCE.md §1), so nothing they actually do is bound by it.
+    /// PERFORMANCE.md §1) on the reference iPad, so nothing they actually do is bound by it, and only
+    /// more room opens up on anything better.
     ///
     /// **The single named home for this bound** — TODO.md item (13) asked for one, and this is still
     /// it. `canvasPaddingRange` below and `CanvasSizePickerView.maxDimension` both read this rather
-    /// than spelling the number a second time.
-    static let maxCanvasExtent: CGFloat = 6000
+    /// than spelling a number a second time.
+    static var maxCanvasExtent: CGFloat { maxCanvasExtent(deviceMemoryBudgetBytes: deviceMemoryBudgetBytes) }
+
+    /// The rule above **as a function of its argument, so a test can ask what a device with any given
+    /// budget would get while running on a Mac** — `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s
+    /// split, applied here. `maxCanvasExtent` is this rule applied to the machine it is running on.
+    /// **Non-positive is a floor, not "no signal"** — that substitution belongs to
+    /// `deviceMemoryBudgetBytes` below, which is the one place a real 0 (the simulator's
+    /// `os_proc_available_memory()`) means "ask the reference device instead" rather than "this
+    /// device has no room." A pure function that quietly swapped in a whole other device's number for
+    /// a bogus argument would make its own floor unreachable by construction.
+    static func maxCanvasExtent(deviceMemoryBudgetBytes: Double) -> CGFloat {
+        guard deviceMemoryBudgetBytes > 0 else { return minimumCanvasExtent }
+        let allowance = gradedWorkingSetBudgetFraction * deviceMemoryBudgetBytes
+        let pixelsSquared = (allowance - gradedWorkingSetFixedBytes) / gradedWorkingSetBytesPerPixel
+        guard pixelsSquared > 0 else { return minimumCanvasExtent }
+        let raw = CGFloat(pixelsSquared.squareRoot())
+        let stepped = (raw / maxCanvasExtentRoundingStep).rounded(.down) * maxCanvasExtentRoundingStep
+        return min(formatExtentCeiling, max(minimumCanvasExtent, stepped))
+    }
+
+    /// The per-pixel term of `gradedWorkingSetBytes(atExtent:)`'s fit — see `maxCanvasExtent`'s own
+    /// doc comment for the three measured points and why the intercept below is negative.
+    static let gradedWorkingSetBytesPerPixel: Double = 42.2487950095
+    /// The fixed term of the same fit, in bytes (≈ −288.6 MiB).
+    static let gradedWorkingSetFixedBytes: Double = -302_586_909
+    /// PERFORMANCE.md §22.2's graded-document `phys_footprint` fit, at `extent²` canvas pixels.
+    static func gradedWorkingSetBytes(atExtent extent: Double) -> Double {
+        gradedWorkingSetBytesPerPixel * extent * extent + gradedWorkingSetFixedBytes
+    }
+    /// How much of the device's own memory budget the fit above may predict before the bound backs
+    /// off — see `maxCanvasExtent`'s own doc comment.
+    static let gradedWorkingSetBudgetFraction: Double = 0.63
+    /// `maxCanvasExtent` rounds down to this so the number reads like a decision.
+    static let maxCanvasExtentRoundingStep: CGFloat = 250
+    /// A device reporting an implausible (or overridden-to-zero) budget still gets a canvas this big.
+    static let minimumCanvasExtent: CGFloat = 1024
+    /// TODO.md item (8)'s own format ceiling — see `maxCanvasExtent`'s own doc comment.
+    static let formatExtentCeiling: CGFloat = 16383
+    /// PERFORMANCE.md §15.5's own MEASURED number for the reference iPad — the fallback used only
+    /// where the running process has no real signal at all (see `deviceMemoryBudgetBytes` below).
+    static let referenceDeviceMemoryBudgetBytes: Double = 1850 * 1024 * 1024
+
+    /// Forces `deviceMemoryBudgetBytes` to a fixed value, for a test. `nil` (the default) reads the
+    /// process's own signal. A dedicated seam rather than reusing
+    /// `CompositorBudget.availableMemoryOverrideBytes`: that one is a live valve, read mid-composite
+    /// and meant to model memory pressure changing *during* a session; this is the device's overall
+    /// ceiling, read once per canvas decision, and a test arming one must not silently perturb the
+    /// other. Restored to `nil` in `tearDown`, exactly as suites already do for `Compositor.backend`.
+    static var deviceMemoryBudgetOverrideBytes: Double?
+
+    /// `os_proc_available_memory()` — the same call `CompositorBudget.hasHeadroom` already reads —
+    /// or the reference iPad's own measured ceiling where that answers 0: the simulator and the fast
+    /// test tier, where the concept does not apply at all.
+    static var deviceMemoryBudgetBytes: Double {
+        if let deviceMemoryBudgetOverrideBytes { return deviceMemoryBudgetOverrideBytes }
+        let available = os_proc_available_memory()
+        return available > 0 ? Double(available) : referenceDeviceMemoryBudgetBytes
+    }
 
     /// Base upper bound for `canvasPadding` on an ordinary canvas — 1024 pt per side, raised from 512
     /// by TODO.md item (13).

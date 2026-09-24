@@ -169,9 +169,11 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertEqual(coordinator.barState(for: live).word, "Not streaming — no source is picked",
                        "a STATUS with no reason still gets a sentence")
 
-        coordinator.stateChanged(.reconnecting(lastFailure: "The computer stopped answering."), at: Self.endpoint)
-        XCTAssertEqual(coordinator.barState(for: live), .reconnecting, "the connection beats the stale STATUS")
-        XCTAssertEqual(StreamBarState.reconnecting.word, "Reconnecting…")
+        coordinator.stateChanged(.reconnecting(lastFailure: .other("The computer stopped answering.")), at: Self.endpoint)
+        XCTAssertEqual(coordinator.barState(for: live), .reconnecting(detail: "The computer stopped answering."),
+                       "the connection beats the stale STATUS")
+        XCTAssertEqual(StreamBarState.reconnecting(detail: "The computer stopped answering.").word,
+                       "Reconnecting… The computer stopped answering.")
 
         // Frozen wins over everything.
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: manager.currentLayerIndex, celIndex: 0,
@@ -198,11 +200,12 @@ final class StreamBarStateLogicTests: XCTestCase {
         coordinator.statusArrived(status(), from: Self.endpoint)
         let version = vector.version
 
-        coordinator.stateChanged(.reconnecting(lastFailure: "The connection was dropped."), at: Self.endpoint)
+        coordinator.stateChanged(.reconnecting(lastFailure: .other("The connection was dropped.")), at: Self.endpoint)
 
         XCTAssertTrue(try XCTUnwrap(vector.streams.first).displayFrame === image, "the picture stays")
         XCTAssertEqual(vector.version, version, "and nothing was invalidated")
-        XCTAssertEqual(coordinator.barState(for: try XCTUnwrap(vector.streams.first)), .reconnecting)
+        XCTAssertEqual(coordinator.barState(for: try XCTUnwrap(vector.streams.first)),
+                       .reconnecting(detail: "The connection was dropped."))
     }
 
     // MARK: - Freeze and the laptop (STREAM.md §5.4)
@@ -249,7 +252,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: secondLayer, celIndex: 0, elementID: second.id, true))
         XCTAssertEqual(coordinator.sentControlCommands.map(\.command).last, .pause)
         let count = coordinator.sentControlCommands.count
-        coordinator.stateChanged(.reconnecting(lastFailure: "dropped"), at: Self.endpoint)
+        coordinator.stateChanged(.reconnecting(lastFailure: .other("dropped")), at: Self.endpoint)
         coordinator.stateChanged(.connected, at: Self.endpoint)
         XCTAssertEqual(coordinator.sentControlCommands.count, count + 1)
         XCTAssertEqual(coordinator.sentControlCommands.last?.command, .pause, "re-sent on reconnect")

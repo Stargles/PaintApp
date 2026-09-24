@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// **Actions → Stream Screen** — STREAM.md §5.7's sheet: the laptop's address, the port, Connect.
 ///
@@ -27,7 +28,27 @@ struct StreamConnectSheet: View {
     @State private var host: String
     @State private var portText: String
     @State private var isConnecting = false
-    @State private var failure: String?
+    @State private var failure: FailureDisplay?
+
+    /// TODO.md item (101): what the failure banner shows — a sentence, classified or not, and
+    /// whether it is worth a direct button to this app's Settings page. A local type rather than
+    /// `ScreenStreamCoordinator.ConnectFailure` itself, because one failure shown here
+    /// (`insertStream` reporting no picture size) is not a connection failure at all and has no
+    /// `StreamConnectFailure` to classify.
+    private struct FailureDisplay {
+        let sentence: String
+        let offersLocalNetworkSettingsButton: Bool
+
+        init(sentence: String, offersLocalNetworkSettingsButton: Bool = false) {
+            self.sentence = sentence
+            self.offersLocalNetworkSettingsButton = offersLocalNetworkSettingsButton
+        }
+
+        init(_ failure: ScreenStreamCoordinator.ConnectFailure) {
+            self.sentence = failure.sentence
+            self.offersLocalNetworkSettingsButton = failure.offersLocalNetworkSettingsButton
+        }
+    }
 
     /// TODO (98): "Nearby" — a laptop on the same Wi-Fi as the iPad, found by DNS-SD, so the
     /// artist can tap it instead of typing an address. The typed-address path below is unchanged
@@ -100,9 +121,24 @@ struct StreamConnectSheet: View {
 
                 if let failure {
                     Section {
-                        Label(failure, systemImage: "exclamationmark.triangle")
+                        Label(failure.sentence, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
+                            // Without `.combine`, the icon (labelled "Warning" by the system) and the
+                            // sentence are two separate accessibility elements that happen to share
+                            // this identifier, so VoiceOver — and an XCUITest reading `.label` — can
+                            // land on either one. One element, one label: the whole sentence.
+                            .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("streamConnect.failureMessage")
+                        // TODO.md item (101): Local Network permission is an iPad setting, not
+                        // something retyping the address or waking the computer fixes — send the
+                        // artist straight to this app's page in Settings rather than just naming it.
+                        if failure.offersLocalNetworkSettingsButton {
+                            Button("Open Settings") {
+                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                UIApplication.shared.open(url)
+                            }
+                            .accessibilityIdentifier("streamConnect.openSettingsButton")
+                        }
                     }
                 }
             }
@@ -164,15 +200,15 @@ struct StreamConnectSheet: View {
                 if placed {
                     dismiss()
                 } else {
-                    failure = "The computer answered, but reported no picture size — pick a "
-                        + "monitor or a window in the streamer and try again."
+                    failure = FailureDisplay(sentence: "The computer answered, but reported no picture size — pick a "
+                        + "monitor or a window in the streamer and try again.")
                 }
             } catch let error as ScreenStreamCoordinator.ConnectFailure {
                 isConnecting = false
-                failure = error.sentence
+                failure = FailureDisplay(error)
             } catch {
                 isConnecting = false
-                failure = "Could not connect."
+                failure = FailureDisplay(sentence: "Could not connect.")
             }
         }
     }

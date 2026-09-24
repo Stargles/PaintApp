@@ -5270,7 +5270,7 @@ The bench prints unconditionally and asserts flatness within 32 MB only under
 `PAINTAPP_FILL_FOOTPRINT=1` (set with `simctl spawn … launchctl setenv` on a simulator, §11.8's
 correction), CLAUDE.md's rule for a number that samples the machine.
 
-### 22.2 The ceiling — MEASURED on a simulator with the iPad's budget, and it stays at 6000
+### 22.2 The ceiling — MEASURED on a simulator with the iPad's budget, now a function of the device (TODO (86))
 
 §15.5 set `maxCanvasExtent` at 6000 for *brush input* on the owner's iPad; BUGS.md then watched a
 6000² document die in the *bake*. Neither run could see the other's working set, so `PlaybackProbe`
@@ -5293,9 +5293,23 @@ The ring is off above ~4900² (`frameRingByteBudget`), so a plain document's wor
 memos, the baked frame on screen and the decode in flight — about five canvas frames — and a plain
 document would survive to roughly 9000². **The first thing to break above 6000 is a graded document
 with a stroke in flight**: the sandwich's two halves and the re-bake they trigger put a 7000² graded
-document at 98% of the iPad's ceiling on this proxy, and 8192² past it. 6000² sits at 59%. So the
-ceiling stays where §15.5 put it, for a reason §15.5 estimated and this run measured: the 40%
-margin it reserved for the sandwich was the right size within a third.
+document at 98% of the iPad's ceiling on this proxy, and 8192² past it. 6000² sits at 59%.
+
+**The owner, 2026-09-24, reopening this item: *"No part of this program should be specifically tuned
+for this ipad only... running the paint app on a better ipad or another device should not necessarily
+limit the canvas size to 6k, only whatever is best."* `CanvasManager.maxCanvasExtent` is now a
+function of the running device rather than the literal this section chose — the graded row above
+(1089/1811/2363 MB at 6000²/7000²/8192²) fit to a line in canvas-pixel count
+(`CanvasManager.gradedWorkingSetBytes(atExtent:)`, ≈42.25 bytes/px − 288.6 MiB), solved for the
+extent whose predicted cost is `gradedWorkingSetBudgetFraction` (0.63) of the device's own memory
+budget (`os_proc_available_memory()`, the same call `CompositorBudget.hasHeadroom` already reads),
+then rounded down to a 250 px step. On the reference iPad's own MEASURED 1850 MiB ceiling this
+reproduces 6000 exactly, so nothing here was thrown away — it is the same number, derived rather than
+declared, and a device with twice the budget gets 8000 (the fit's fixed term keeps the relationship
+areal rather than a flat doubling). `CanvasGeometryLogicTests` pins the fit against this table and
+the reference-budget answer, so the two cannot drift apart. The fill and undo budgets beside it
+(`MetalFillEngine.fillBudgetBytes`, `UndoHistory.maxCostBytes`) were already `physicalMemory`-derived
+before this pass; the canvas ceiling was the one literal left.
 
 **What would move it.** The proxy is a proxy: the honest lift is the graded edit probe run on the
 owner's iPad at 7000² —

@@ -26,6 +26,21 @@ nonisolated struct StreamEndpoint: Hashable, Codable {
         guard port > 0, port <= 65535 else { return nil }
         return StreamEndpoint(host: host, port: UInt16(port))
     }
+
+    /// The launch-argument test hook, `EditorPreferences.forgetIfRequested`'s own shape: an XCUITest
+    /// that actually completes a connect attempt (`StreamScreenUITests
+    /// .testStreamScreenConnectSheetShowsTheRefusedMessageWhenNothingListens`, the one test in the
+    /// suite that does) leaves this pair written on the simulator's disk, where it outlives that
+    /// launch and prefills the *next* test's address/port fields with whatever it typed rather than
+    /// the defaults a cold-start assertion expects. `-resetEditorPreferences` already means "launch
+    /// as if this were the first time" for the brush/tool state; this is the same promise applied to
+    /// the other persistent default in the app.
+    static func forgetLastUsedIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
+                                          defaults: UserDefaults = .standard) {
+        guard arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") else { return }
+        defaults.removeObject(forKey: lastHostDefaultsKey)
+        defaults.removeObject(forKey: lastPortDefaultsKey)
+    }
 }
 
 /// Where an inbound transfer's bytes land while they arrive, and where an outbound one is read
@@ -53,6 +68,87 @@ enum StreamTransferStore {
         let stem = "incoming-\(id)-\(UUID().uuidString)"
         return root.appendingPathComponent(suffix.isEmpty ? stem : "\(stem).\(suffix)")
     }
+}
+
+/// **TODO.md item (101): why the connection failed, classified into what the owner can act on.**
+/// Today's generic "did not answer" came from `NWError` being turned straight into a sentence with
+/// no distinction between causes; this is the one function that reads the transport's own answer and
+/// says which of four things happened, so `StreamConnectSheet`'s banner and `StreamBarState
+/// .reconnecting`'s word cannot describe one failure two different ways — each renders the same
+/// `sentence(host:)`, never composes its own.
+///
+/// The **locked** case (the streamer running but the laptop's screen is locked or off) is not here:
+/// the laptop answers that one over an *established* connection, as a STATUS `reason` string
+/// (`"The laptop is locked"`, STREAM.md §5.6) — `StreamBarState.notStreaming(reason:)` already
+/// renders it verbatim. This type is only for the connection itself never completing.
+nonisolated enum StreamConnectFailure: Equatable {
+    /// The host answered with a TCP reset (`ECONNREFUSED`) — the computer is on and reachable, but
+    /// nothing is listening on the port, i.e. PaintStreamer is not running.
+    case refused
+    /// No answer inside the connect timeout, or the transport reports the route or host itself is
+    /// unreachable (`ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`) — asleep, off, or not on this network
+    /// or Tailscale.
+    case unreachable
+    /// iOS would not let this app reach the address at all — Local Network permission has not been
+    /// granted, or was denied. **Surfaces as a `.waiting` connection carrying `NWError.dns(-65570)`**
+    /// (`kDNSServiceErr_PolicyDenied`) even for a plain IP connect with no Bonjour involved, because
+    /// the local-network privacy check runs through the mDNSResponder policy layer for *any* local
+    /// connection, not only service discovery — this is the specific code TODO.md item (101) named as
+    /// "the `NWError` / `.waiting` path."
+    case localNetworkPermissionDenied
+    /// Anything else: a protocol-level problem this client already names precisely on its own
+    /// (a bad greeting, a version mismatch, a dropped connection) or an uncommon transport error.
+    /// Carries its own sentence verbatim rather than a second classification, since these sites already
+    /// say exactly what happened.
+    case other(String)
+
+    /// Classifies a transport failure — pure, so `StreamConnectFailureLogicTests` can drive every
+    /// `NWError` case with no socket at all.
+    static func classify(_ error: NWError) -> StreamConnectFailure {
+        switch error {
+        case .posix(let code):
+            switch code {
+            case .ECONNREFUSED:
+                return .refused
+            case .ETIMEDOUT, .EHOSTUNREACH, .ENETUNREACH:
+                return .unreachable
+            case .ECONNRESET, .EPIPE:
+                return .other("The connection was dropped.")
+            default:
+                return .other("Could not connect: \(code).")
+            }
+        case .dns(let code):
+            // kDNSServiceErr_PolicyDenied. See the case's own doc comment above for why this is what
+            // a denied Local Network permission looks like here, rather than a POSIX code.
+            if code == -65570 {
+                return .localNetworkPermissionDenied
+            }
+            return .other("That name could not be looked up. Check the address.")
+        case .tls:
+            return .other("Could not connect.")
+        @unknown default:
+            return .other("Could not connect.")
+        }
+    }
+
+    /// The sentence for this failure connecting to `host` — what `StreamConnectSheet`'s banner and
+    /// `StreamBarState.reconnecting`'s word both show verbatim.
+    func sentence(host: String) -> String {
+        switch self {
+        case .refused:
+            return "Nothing is listening at \(host) — open PaintStreamer on the computer (its desktop icon)."
+        case .unreachable:
+            return "\(host) did not answer. It may be asleep, off, or not on this network or Tailscale."
+        case .localNetworkPermissionDenied:
+            return "PaintSoftware needs Local Network permission to reach \(host) — allow it in Settings."
+        case .other(let sentence):
+            return sentence
+        }
+    }
+
+    /// Whether the sheet should offer a button straight to this app's Settings page — only the
+    /// permission case has a setting on the iPad that fixes it; the others are about the computer.
+    var offersLocalNetworkSettingsButton: Bool { self == .localNetworkPermissionDenied }
 }
 
 /// **The iPad's end of `paintstream/1`** — STREAM.md §5.2: one `NWConnection` per laptop, the §3
@@ -91,7 +187,7 @@ nonisolated final class ScreenStreamClient {
     enum State: Equatable {
         case connecting
         case connected
-        case reconnecting(lastFailure: String)
+        case reconnecting(lastFailure: StreamConnectFailure)
         case stopped
     }
 
@@ -103,7 +199,7 @@ nonisolated final class ScreenStreamClient {
     /// Delivered on the main queue.
     var onStatus: ((StreamStatus) -> Void)?
     /// Delivered on the main queue, once per failed connection attempt or dropped connection.
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((StreamConnectFailure) -> Void)?
 
     /// STREAM.md §5.8: a whole inbound file, delivered on the main queue because routing it means
     /// calling into `CanvasManager`. Call `reply` with the outcome — it becomes FILE_RESULT, sent
@@ -291,12 +387,12 @@ nonisolated final class ScreenStreamClient {
                 self.startPinging()
                 self.receive(on: connection, generation: thisGeneration)
             case .failed(let error):
-                self.fail(Self.sentence(for: error))
+                self.fail(StreamConnectFailure.classify(error))
             case .waiting(let error):
                 // `.waiting` is "no route yet" — Tailscale down, the laptop asleep. NWConnection
                 // would sit here indefinitely; treat it as this attempt failing so the backoff
                 // decides when to look again.
-                self.fail(Self.sentence(for: error))
+                self.fail(StreamConnectFailure.classify(error))
             case .cancelled:
                 break
             case .setup, .preparing:
@@ -323,7 +419,7 @@ nonisolated final class ScreenStreamClient {
                 }
             }
             if let error {
-                self.fail(Self.sentence(for: error))
+                self.fail(StreamConnectFailure.classify(error))
                 return
             }
             if isComplete {
@@ -543,11 +639,16 @@ nonisolated final class ScreenStreamClient {
 
     // MARK: - Failure and reconnect (queue-confined)
 
-    private func fail(_ sentence: String) {
+    /// A plain-sentence failure — every site that already names its own cause precisely (a bad
+    /// greeting, a version mismatch, a dropped connection) rather than one `NWError` needs
+    /// classifying. Wraps it as `.other` so `onFailure`/`state` carry one type throughout.
+    private func fail(_ sentence: String) { fail(.other(sentence)) }
+
+    private func fail(_ reason: StreamConnectFailure) {
         guard !stopped else { return }
         tearDownConnection()
-        DispatchQueue.main.async { [weak self] in self?.onFailure?(sentence) }
-        state = .reconnecting(lastFailure: sentence)
+        DispatchQueue.main.async { [weak self] in self?.onFailure?(reason) }
+        state = .reconnecting(lastFailure: reason)
         let delay = Self.reconnectBackoff[min(attempt, Self.reconnectBackoff.count - 1)]
         attempt += 1
         reconnectTimer?.cancel()
@@ -574,25 +675,5 @@ nonisolated final class ScreenStreamClient {
         // §3: no session state survives a reconnect, and that includes a transfer mid-flight —
         // nobody on the other end of a torn-down socket is still writing or reading it.
         abandonTransfers(reason: "The connection was lost.")
-    }
-
-    /// A sentence for the sheet, from whatever the transport said.
-    private static func sentence(for error: NWError) -> String {
-        switch error {
-        case .posix(let code):
-            switch code {
-            case .ECONNREFUSED: return "Nothing is listening at that address — is the streamer running?"
-            case .ETIMEDOUT: return "The computer did not answer. Check the address and that Tailscale is up."
-            case .EHOSTUNREACH, .ENETUNREACH: return "That address cannot be reached from this iPad."
-            case .ECONNRESET, .EPIPE: return "The connection was dropped."
-            default: return "Could not connect: \(code)."
-            }
-        case .dns:
-            return "That name could not be looked up. Check the address."
-        case .tls:
-            return "Could not connect."
-        @unknown default:
-            return "Could not connect."
-        }
     }
 }

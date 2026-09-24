@@ -22,6 +22,7 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         EditorPreferences.forgetIfRequested()
+        StreamEndpoint.forgetLastUsedIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,
         // purge expired trash. The gallery re-lists when it finishes.
