@@ -5352,7 +5352,13 @@ test process's window over the canvas's thirteen named recognizers, three runs:
 | **500-sample stroke, flight on** (median of 5) | **16.24 ms** | **16.27 ms** | **16.30 ms** |
 | delta | +0.06 ms | +0.21 ms | +0.43 ms |
 
-The deltas scatter around what the per-call figures add up to — 500 × ~0.18 µs + 2 × 4.5 µs ≈
+**And in Release**, the same test inside the Release fast tier and then alone (the alone run's stroke
+is a cold first measurement, and it is its own control): an event into the ring 41 / 32 ns (`model`)
+and 167 / 145 ns (`recognizer`), a stroke sample 20 / 18 ns, a sweep 2.5 / 6.5 µs, the gate with both
+sinks off 0 / 1 ns, and the 500-sample stroke **9.90 → 10.01 ms (+0.11 ms)** in the tier and 29.73 →
+30.26 ms (+0.54 ms) alone.
+
+The Debug deltas scatter around what the per-call figures add up to — 500 × ~0.18 µs + 2 × 4.5 µs ≈
 0.1 ms — which is below the run-to-run noise of the stroke itself: **the flight recorder costs a
 stroke nothing measurable**. The first cut swept on every touch event and looked the stroke up
 linearly, and measured +3.2 ms (20%) on the same stroke; the sweep moved to sequence edges and the

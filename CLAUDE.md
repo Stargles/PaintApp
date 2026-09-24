@@ -819,7 +819,7 @@ recognizers each bound, recognizer transitions, `requireFailure`, model changes,
 memory, and saves them as `flight-*.jsonl` beside the recordings when the canvas replaces stranded
 recognizers, when `CanvasWedgeDetector` sees the canvas still wedged, or on Actions → **"Save Last 90
 Seconds"** — so after a device-only glitch the owner does nothing, or taps that one row. Its cost on a
-stroke is PERFORMANCE.md §23 (unmeasurable).
+stroke is PERFORMANCE.md §23 (below the stroke's own run-to-run noise).
 
 **Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl` (and
 `flight-…jsonl`), inside the app container. The Actions menu lists them with Share and Delete, so the owner can AirDrop one straight

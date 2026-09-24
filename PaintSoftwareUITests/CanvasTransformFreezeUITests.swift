@@ -223,6 +223,11 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                                        "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
             }
         }
+        // What is drawn, not only what is stored: the canvas the four drags and eight pinches left.
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "after-two-finger-drags-under-open-menus"
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     /// Opens the active layer's options from the rail and its Blend Mode / Effect `Menu`, and asserts
