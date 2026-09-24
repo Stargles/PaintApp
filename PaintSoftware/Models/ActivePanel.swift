@@ -24,7 +24,17 @@ import Foundation
 enum ActivePanel: Equatable, CaseIterable {
     case none, actions, select, move, layers, brush, color, fill, eraser
     /// The text tool's settings panel. **Not opened from the toolbar** — there is no text icon
-    /// there; the way in is the Actions menu's "Add Text" row, which is why `ActionsMenu` is the one
-    /// panel that had to grow an `activePanel` binding. See `Tool.text`.
+    /// there; the way in is the Add menu's "Add Text" row, which is why `AddMenu` is one of the two
+    /// panels that had to grow an `activePanel` binding (`ActionsMenu` is the other, for its own
+    /// sheets). See `Tool.text`.
     case text
+    /// TODO (104) — Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint, Render
+    /// Resolution and the recorder entries, split out of `ActionsMenu` into `SettingsMenu` so
+    /// "Actions" is left holding only the six actions the owner named. A toolbar icon of its own
+    /// (`gearshape`), same shape as `.actions`.
+    case settings
+    /// TODO (103) — the "Add" submenu TODO (100) had put inside Actions, promoted to a toolbar icon
+    /// of its own (`plus`): Insert Photo, Insert Video, Stream Screen, Add Text, Rectangle, Ellipse,
+    /// Linear Gradient. See `AddMenu`.
+    case add
 }

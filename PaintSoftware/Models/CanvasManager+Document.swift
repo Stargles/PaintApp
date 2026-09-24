@@ -667,7 +667,7 @@ extension CanvasManager {
     /// is what fixes them here for free.
     func setCanvasPadding(_ newPadding: CGFloat) {
         guard let oldSize = canvasSize else { return }
-        // **Rounded, because `ActionsMenu`'s slider has no `step:` and this value is folded into
+        // **Rounded, because `SettingsMenu`'s slider has no `step:` and this value is folded into
         // `canvasSize` two lines down** — so a padding of 8.4 made the whole *canvas* 80.8 px wide,
         // and a fractional canvas is a document the two compositor backends size differently:
         // Metal rounds, UIKit's `UIGraphicsImageRenderer` ceils (MEASURED 2026-08-27, 80.2 → 80 vs

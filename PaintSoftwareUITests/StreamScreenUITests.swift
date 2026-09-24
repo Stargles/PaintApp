@@ -20,13 +20,10 @@ final class StreamScreenUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor")
 
-        app.buttons["toolbar.actionsButton"].tap()
-        // TODO (100): Stream Screen moved under the "Add" submenu.
-        let addRow = app.buttons["actions.addRow"]
-        XCTAssertTrue(addRow.waitForExistence(timeout: 5), "Add is a row in the Actions menu")
-        addRow.tap()
-        let row = app.buttons["actions.streamScreenRow"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "Stream Screen is a row in the Add submenu")
+        // TODO (103): Stream Screen is a row of the "Add" menu, its own top-bar icon since.
+        app.buttons["toolbar.addButton"].tap()
+        let row = app.buttons["add.streamScreenRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Stream Screen is a row in the Add menu")
         XCTAssertTrue(row.isEnabled, "…and a document with a canvas can host a stream")
         row.tap()
 
@@ -65,9 +62,8 @@ final class StreamScreenUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor")
 
-        app.buttons["toolbar.actionsButton"].tap()
-        app.buttons["actions.addRow"].tap()
-        let row = app.buttons["actions.streamScreenRow"]
+        app.buttons["toolbar.addButton"].tap()
+        let row = app.buttons["add.streamScreenRow"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
 

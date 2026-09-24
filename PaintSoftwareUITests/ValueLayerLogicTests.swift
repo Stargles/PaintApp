@@ -99,6 +99,47 @@ final class ValueLayerLogicTests: XCTestCase {
         }
     }
 
+    /// TODO (103) — the owner's *"add linear gradient"*, and the model-level twin of
+    /// `AddMenuUITests.testAddLinearGradientLeavesALayerWhosePixelsRamp`. Proves the pixels actually
+    /// ramp end to end at the default (horizontal) angle, not merely that `ValueFill.gradient` holds a
+    /// value — the two-operands trap CLAUDE.md's own "A green assertion is only as good as its two
+    /// operands" section warns about, applied to this feature: a fixture that only checked the model
+    /// field would still be green if the render call sites had never been wired at all.
+    func testAValueLayerWithAGradientRampsAcrossTheCanvasInsteadOfBeingFlat() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(red))
+        manager.addValueLayer(gradient: .default)
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+
+        let left = pixel(image, 0, side / 2)
+        let middle = pixel(image, side / 2, side / 2)
+        let right = pixel(image, side - 1, side / 2)
+        XCTAssertLessThan(left[0], 20, "the default gradient starts at black on the left")
+        XCTAssertGreaterThan(right[0], 235, "the default gradient ends at white on the right")
+        XCTAssertGreaterThan(middle[0], left[0], "the middle must be brighter than the left")
+        XCTAssertLessThan(middle[0], right[0], "…and dimmer than the right — a ramp, not a step")
+        // Every channel moves together (a grey ramp) and alpha stays opaque throughout.
+        XCTAssertEqual(left[0], left[1]); XCTAssertEqual(left[1], left[2])
+        XCTAssertEqual(right[0], right[1]); XCTAssertEqual(right[1], right[2])
+        XCTAssertEqual(left[3], 255); XCTAssertEqual(right[3], 255)
+    }
+
+    /// The merge-down path — `CanvasManager.mergeContribution` — reads `resolvedGradient` exactly as
+    /// `leafSnapshots` does. A merge that only handled the flat-colour arm would silently flatten a
+    /// gradient value layer into a solid mid-grey square instead of failing loudly, which is exactly
+    /// the "wrong level" hazard CLAUDE.md warns an assertion can hide.
+    func testAGradientValueLayerMergesDownAsItsRampRatherThanAsAFlatColour() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(red))
+        manager.addValueLayer(gradient: .default)
+        XCTAssertTrue(manager.mergeLayers(manager.layers[1].id, manager.layers[0].id),
+                      "PREMISE: the two layers must actually merge")
+        guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
+        let left = pixel(image, 0, side / 2)
+        let right = pixel(image, side - 1, side / 2)
+        XCTAssertNotEqual(left[0], right[0], "a merged-down gradient must still ramp, not have flattened to one colour")
+    }
+
     /// **The premultiply, which is the one place a flat colour can still be got wrong.** The source is
     /// built as premultiplied bytes rather than drawn, so half-alpha teal has to arrive as
     /// `(0x33·128/255, 0x99·128/255, 0xCC·128/255, 128)` and then composite source-over onto opaque
@@ -412,6 +453,38 @@ final class ValueLayerLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ValueFill.self, from: Data("{}".utf8))
         XCTAssertEqual(decoded.color.hex, ValueFill.defaultColor.hex,
                        "An all-defaults fill is mid-grey, not a decode failure")
+    }
+
+    /// TODO (103)'s own instance of this file's `testAFillSurvivesAManifestRoundTripAndItsAbsenceNeedsNoMigration`:
+    /// the gradient round-trips, and a manifest with no `gradient` key — every project saved before
+    /// this phase — decodes to flat colour rather than failing or guessing a gradient into existence.
+    func testAGradientSurvivesAManifestRoundTripAndItsAbsenceNeedsNoMigration() throws {
+        let cel = CelManifest(id: UUID(), startFrame: 0, frameCount: 12, rasterFileName: "r.png")
+        let gradient = LinearGradientFill(start: PaletteColor(hex: "112233"),
+                                          end: PaletteColor(hex: "445566"), angle: .pi / 4)
+        let fill = ValueFill(color: Self.translucentTeal, gradient: gradient)
+        let manifest = LayerManifest(id: UUID(), name: "Value 1", opacity: 1, isVisible: true,
+                                     kind: .value, fill: fill, cels: [cel])
+
+        let data = try JSONEncoder().encode(manifest)
+        let decoded = try JSONDecoder().decode(LayerManifest.self, from: data)
+        XCTAssertEqual(decoded.fill, fill, "The gradient round-trips through the document format")
+        XCTAssertEqual(decoded.fill?.gradient?.start.hex, "112233")
+        XCTAssertEqual(decoded.fill?.gradient?.end.hex, "445566")
+        XCTAssertEqual(decoded.fill?.gradient?.angle, .pi / 4)
+        // The flat colour rides along unread, exactly as `ValueFill.gradient`'s doc says it must —
+        // flipping the gradient off in `LayerOptionsPanel` has to land somewhere.
+        XCTAssertEqual(decoded.fill?.color.hex, "3399CC80")
+
+        // What every project saved before this phase looks like: no `gradient` key at all.
+        let flat = ValueFill(color: Self.translucentTeal)
+        let flatManifest = LayerManifest(id: UUID(), name: "Value 1", opacity: 1, isVisible: true,
+                                         kind: .value, fill: flat, cels: [cel])
+        let flatData = try JSONEncoder().encode(flatManifest)
+        XCTAssertFalse(String(data: flatData, encoding: .utf8)?.contains("\"gradient\"") ?? true,
+                       "A flat-colour fill writes no gradient key, so old manifests stay byte-for-byte")
+        XCTAssertNil(try JSONDecoder().decode(LayerManifest.self, from: flatData).fill?.gradient,
+                     "…and decoding one back finds flat colour, never a gradient guessed into existence")
     }
 
     /// The seam's cache half: a value layer's content is its colour, not its (blank) cel, so

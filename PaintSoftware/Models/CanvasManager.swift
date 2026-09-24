@@ -537,8 +537,9 @@ final class CanvasManager: ObservableObject {
     /// **Here rather than in `addImageToActiveVectorLayer`, and that seam is the decision.** The box
     /// belongs to the artist's *import*, not to "put this image on that layer": the second is a
     /// primitive that a future paste or drop path may want to call several times, and a lift per call
-    /// would settle the previous one at each step. `ActionsMenu`'s photo picker is this method's only
-    /// caller in the app.
+    /// would settle the previous one at each step. **TODO (104) gave this a second caller** —
+    /// `ActionsMenu`'s Paste row, which reads a `UIImage` off `UIPasteboard.general` — beside
+    /// `AddMenu`'s photo picker, which is what this comment used to call the only one.
     ///
     /// **Silent on an in-between**, which is the one frame where Move refuses. `beginVectorMove`
     /// routes through `activeVectorMoveTarget()`, which raises `.cannotMoveDerivedFrame` when it
@@ -2049,8 +2050,12 @@ final class CanvasManager: ObservableObject {
     /// flat-colour mode the fill is resolved into the snapshot's source at `leafSnapshots`, and in
     /// effect mode the snapshot elides the layer's pixels entirely and the compositor reaches the leaf
     /// by its grade before it would look for a source.
-    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, effect: Effect? = nil,
-                       name: String? = nil) {
+    /// - Parameter gradient: TODO (103) — non-nil starts the layer in linear-gradient mode instead of
+    ///   flat colour (`ValueFill.gradient`'s doc explains the either/or). `color` is still stamped
+    ///   alongside it for the same reason a flat layer stamps mid-grey: flipping the gradient off in
+    ///   `LayerOptionsPanel` has to land the layer somewhere, and this is that somewhere.
+    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, gradient: LinearGradientFill? = nil,
+                       effect: Effect? = nil, name: String? = nil) {
         withStructureUndo(label: effect == nil ? .addValueLayer : .addEffectLayer) {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
@@ -2061,7 +2066,7 @@ final class CanvasManager: ObservableObject {
                       // back — see `Layer.hasCustomName`. Every in-app route leaves this nil.
                       hasCustomName: name != nil,
                       opacity: 1.0, isVisible: true, kind: .value, effect: effect,
-                      fill: ValueFill(color: color), parentFolderID: parent, cels: [cel])
+                      fill: ValueFill(color: color, gradient: gradient), parentFolderID: parent, cels: [cel])
             }
         }
         // One constructor, two modes (see the doc above), so one recorder line that names which —

@@ -1,9 +1,10 @@
 import XCTest
 
 /// The flight recorder, from the artist's side: the one thing they may have to do after a freeze the
-/// app did not catch itself is **Actions → Save Last 90 Seconds**, and this is the cold-start proof
-/// that they can — from a brand-new document, with nothing set up first — and that what it saved is
-/// where they already share recordings from.
+/// app did not catch itself is **Settings → Save Last 90 Seconds** (TODO (104) moved the recorder
+/// section out of Actions), and this is the cold-start proof that they can — from a brand-new
+/// document, with nothing set up first — and that what it saved is where they already share
+/// recordings from.
 ///
 /// What the file holds is `FlightRecorderLogicTests`' business; the wedge the app catches by itself
 /// is `CanvasTransformFreezeUITests`'. Its own class for `xcodebuild`'s per-class scheduling, and
@@ -20,10 +21,10 @@ final class FlightRecorderUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.30, dy: 0.50), to: CGVector(dx: 0.50, dy: 0.55))
         canvas.pinch(withScale: 1.5, velocity: 1)
 
-        app.buttons["toolbar.actionsButton"].tap()
+        app.buttons["toolbar.settingsButton"].tap()
         let save = app.buttons["recorder.saveFlight"]
         XCTAssertTrue(save.waitForExistence(timeout: 5),
-                      "Save Last 90 Seconds is in the Actions menu, beside Record My Actions")
+                      "Save Last 90 Seconds is in the Settings menu, beside Record My Actions")
         XCTAssertTrue(save.staticTexts["Save Last 90 Seconds"].exists || save.label.contains("Save Last 90 Seconds"),
                       "…and says what it does: \(save.label)")
         // The list open first, so the count before the save is a count of what is on disk: a file

@@ -444,7 +444,7 @@ extension CanvasTouchInputs {
     /// reason: those overlays own the canvas's single-touch gestures while they are up.
     ///
     /// **This is not the eyedropper's 2026-08-22 bug wearing a different hat, and the reason is a
-    /// call order two files away.** `ActionsMenu.addTextRow` — the only door into text mode —
+    /// call order two files away.** `AddMenu.addTextRow` — the only door into text mode —
     /// follows `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`, so arriving in the
     /// tool is itself what closes the Select panel, and the two clauses of this guard cannot both be
     /// true through it. The asymmetry with the eyedropper is real rather than an oversight: the

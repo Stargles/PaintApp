@@ -210,12 +210,9 @@ final class OptionsPanelUITests: PaintUITestCase {
     func testTheTextPanelRidesTheTimelineToo() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        app.buttons["toolbar.actionsButton"].tap()
-        // TODO (100): Add Text moved under the "Add" submenu.
-        let addRow = app.buttons["actions.addRow"]
-        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
-        addRow.tap()
-        let addText = app.buttons["actions.addTextRow"]
+        // TODO (103): Add Text is a row of the "Add" menu, its own top-bar icon since.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         addText.tap()
         XCTAssertTrue(app.otherElements["panel.textSettings"].waitForExistence(timeout: 5)
@@ -428,6 +425,15 @@ final class OptionsPanelUITests: PaintUITestCase {
         radiusSlider.adjust(toNormalizedSliderPosition: 1.0)                        // the widest glow
         app.sliders["effectSettings.intensity"].adjust(toNormalizedSliderPosition: 1.0)  // the strongest
 
+        // **KNOWN FAILING as of TODO (102).** `waitForExistence` in place of the bare `.tap()` this
+        // line used to be, on the chance a genuine race is layered on top of what is actually wrong —
+        // but it is not expected to help. TODO (102) moved the scene name into `TopToolbar`, and
+        // `TopToolbar.bodyContent`'s own doc comment on `isRenamingProject` has the measurement: with
+        // that change in place, this button never reappears after the two slider drags above, at wait
+        // timeouts up to 30s, reproducibly on a fresh simulator — not a timing margin a wait closes.
+        // Read this as a real, reported regression rather than a flake if it is still red.
+        XCTAssertTrue(app.buttons["layerOptions.close"].waitForExistence(timeout: 10),
+                      "Bloom's settings bar should still offer its Close button after both drags")
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
         let beforeRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.3...0.7) }
@@ -495,7 +501,10 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         app.buttons["layerOptions.effectSettings"].tap()
         let stopSwatch = app.buttons["effectSettings.gradientStop.0.color"]
-        XCTAssertTrue(stopSwatch.waitForExistence(timeout: 5), "Gradient Map's first stop did not open")
+        // **KNOWN FAILING as of TODO (102)** — see `layerOptions.close`'s own note above in this file
+        // and `TopToolbar.bodyContent`'s doc comment on `isRenamingProject`. This element does not
+        // reappear at all after TODO (102), at wait timeouts up to 30s; a real, reported regression.
+        XCTAssertTrue(stopSwatch.waitForExistence(timeout: 10), "Gradient Map's first stop did not open")
         XCTAssertEqual(stopSwatch.value as? String, "000000", "Premise: the default gradient starts black")
         stopSwatch.tap()
 

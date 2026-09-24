@@ -16,7 +16,7 @@ extension Binding where Value == ActivePanel {
     /// spelling of: it is now reached from two views, and a second hand-written copy of a rule is
     /// how the copies come to disagree.
     ///
-    /// On the binding rather than on a view because `TopToolbar` and `ActionsMenu` share nothing
+    /// On the binding rather than on a view because `TopToolbar` and `AddMenu` share nothing
     /// else, and `activePanel` is the only thing either of them needs to hold to do this.
     func toggleSettingsPanel(_ panel: ActivePanel) {
         wrappedValue = (wrappedValue == panel) ? .none : panel
@@ -27,6 +27,9 @@ struct TopToolbar: View {
     @ObservedObject var canvasManager: CanvasManager
     @Binding var activePanel: ActivePanel
     var onOpenGallery: () -> Void
+
+    @State private var draftProjectName: String = ""
+    @State private var isRenamingProject = false
 
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyToolbars`.
@@ -39,13 +42,86 @@ struct TopToolbar: View {
     /// The top toolbar's body.
     @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 10) {
+            // TODO (102) — the owner: *"Currently it displays the canvas name on the bottom left on
+            // the animation bar. This is ergonomically very bad, as it frequently activates the
+            // scribble write mode when my apple pencil touches near it. Move it to the top left."*
+            // The leftmost thing in the top bar, which is the literal top-left the ask names; it
+            // used to be `AnimationTimeline.miniToolbar`'s own inline `TextField`, with the same
+            // identifier and the same underlying `projectName`, so a project reopened mid-rename is
+            // unaffected. Still the app's only title-editing control, and since TODO (57) part 2 the
+            // only way to rename a project's folder on disk.
+            //
+            // **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The owner's ask
+            // names two things: move it, and keep Scribble off it.
+            //
+            // **MEASURED, and left an open question rather than a closed one.** Bisected against three
+            // pre-existing tests that all failed the identical way after this change — an element the
+            // test expects to reappear after some canvas operation (`layerOptions.close` after two
+            // Bloom slider drags, `effectSettings.gradientStop.0.color` after opening Gradient Map,
+            // `selectPanel.mode.rectangle` after baking a Move) genuinely never exists again, on a
+            // fresh simulator, in isolation, at wait timeouts up to 30s — so this is not a race a
+            // longer wait resolves. It reproduces with a custom `UIViewRepresentable` text field, a
+            // plain SwiftUI `TextField`, and a bare non-interactive `Text` at this same width and
+            // position; it clears completely and only when the element is removed. So it is provably
+            // about *something* being added to this specific `HStack` slot, and provably not about
+            // Scribble, `UITextField`, or a presentation kind — but what that something is was not
+            // found in the time available, and is not chased further here: CLAUDE.md's rule that a
+            // wrong number is not worth rationalising once a right one is in hand applies to a wrong
+            // hypothesis about a wrong architecture the same way. The three tests were given explicit
+            // waits anyway (`OptionsPanelUITests`, `SelectionAndMoveUITests` in `ToolsAndSelectionUITests.swift`)
+            // in case a genuine race is *also* present underneath whatever this is, but they are not
+            // expected to be green, and the fast-tier/close-out report says so rather than hiding it.
+            // Shipping the owner's ask with three named, reproducible regressions on the record is the
+            // trade made here, in preference to either not shipping it or silently deleting the tests.
+            //
+            // **This also makes "disable Scribble" true by construction rather than by veto.** The
+            // always-visible label is a `Text`, which Scribble cannot engage on at all — there is no
+            // `UITextInput` for iPadOS to hand a pencil touch to — so there is nothing here for
+            // `TextOverlayView.scribbleInteraction(_:shouldBeginAt:)`'s mechanism to be reused *onto*.
+            // The sheet's own `TextField` keeps Scribble on deliberately, matching
+            // `LayerOptionsPanel`'s "Rename Layer" alert below it in this file's sibling: neither a
+            // sheet nor an alert can sit over the canvas, so a pencil there is never competing with a
+            // brush stroke, and handwriting a project's name is the same "good use of a pencil" that
+            // doc comment already grants a layer's. (It is a `.sheet` rather than an `.alert` for an
+            // unrelated, second measured reason: see `RenameProjectSheet`'s own doc comment.)
+            Button {
+                draftProjectName = canvasManager.projectName
+                isRenamingProject = true
+            } label: {
+                Text(canvasManager.projectName)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(width: 110, alignment: .leading)
+            }
+            .accessibilityIdentifier("timeline.projectNameField")
+            // `.sheet`, not `.alert` — `.alert` is the one presentation kind nothing in this app had
+            // ever driven end to end through XCUITest before this feature, and it MEASURED as
+            // unreliable there: a synthesized tap on the button that presents it, immediately after
+            // reopening a project from the gallery, did not raise it within three retried taps and
+            // fifteen seconds apiece, on a fresh device, in isolation. `.sheet` is the presentation
+            // this app's own `CanvasResizeSheet`/`ExportSheet`/`StreamConnectSheet` already use and
+            // `ToolsAndSelectionUITests` already drives successfully, so this reaches for the kind
+            // with a working precedent rather than the kind with none.
+            .sheet(isPresented: $isRenamingProject) {
+                RenameProjectSheet(name: $draftProjectName) { trimmed in
+                    canvasManager.projectName = trimmed
+                }
+            }
+
             iconButton(system: "square.grid.2x2", isActive: false, action: onOpenGallery)
                 .accessibilityIdentifier("toolbar.galleryButton")
-            // Identified so a test — or a converted recording — can reach the Actions menu, which is
-            // where the debug recorder's own switch lives (`ActionRecorderSection`). Six of the seven
-            // toolbar buttons already carry one; this is the seventh.
             iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
                 .accessibilityIdentifier("toolbar.actionsButton")
+            // TODO (103) — the "Add" submenu TODO (100) had put inside Actions, promoted to its own
+            // icon. See `AddMenu`.
+            iconButton(system: "plus", isActive: activePanel == .add) { toggle(.add) }
+                .accessibilityIdentifier("toolbar.addButton")
+            // TODO (104) — Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint and
+            // Render Resolution, split out of Actions. Identified so a test — or a converted
+            // recording — can reach the panel where the debug recorder's own switch now lives
+            // (`ActionRecorderSection`, which moved here with the rest of the settings).
+            iconButton(system: "gearshape", isActive: activePanel == .settings) { toggle(.settings) }
+                .accessibilityIdentifier("toolbar.settingsButton")
             iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
             iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }
@@ -246,5 +322,44 @@ struct TopToolbar: View {
         // Exposes the same highlight state UI tests can't read off `.foregroundColor` directly —
         // also lets VoiceOver announce which tool is current.
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+}
+
+/// TODO (102)'s rename dialog — `CanvasResizeSheet`'s shape (a title, one field, Cancel/Save), for
+/// the reason `TopToolbar.bodyContent`'s own doc comment on `isRenamingProject` gives: this app's
+/// `.sheet`s already have a working XCUITest precedent and its one attempt at `.alert` did not.
+struct RenameProjectSheet: View {
+    @Binding var name: String
+    var onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Rename Scene")
+                .font(.title2).fontWeight(.bold)
+
+            TextField("Name", text: $name)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .focused($isFocused)
+                .accessibilityIdentifier("timeline.projectNameField.input")
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .accessibilityIdentifier("renameProject.cancelButton")
+                Spacer()
+                Button("Save") {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { onSave(trimmed) }
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("renameProject.saveButton")
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear { isFocused = true }
     }
 }

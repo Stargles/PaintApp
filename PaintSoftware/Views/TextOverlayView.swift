@@ -191,10 +191,15 @@ final class TextOverlayView: UIView, UITextViewDelegate, UIScribbleInteractionDe
     /// be the wrong trade here — a pencil stroke over the canvas is a brush stroke, and one that
     /// silently became a word would be a worse bug than the one this fixes.
     ///
-    /// **Scoped to this text view alone.** The app's other six text inputs are SwiftUI `TextField`s
-    /// in panels and dialogs — palette and layer names, the hex field, the scene name, the canvas
-    /// size — none of them over the artwork and none of them competing with a brush. Handwriting a
-    /// layer name is a good use of a pencil, so they keep it.
+    /// **Scoped to this text view alone.** The app's other text inputs are SwiftUI `TextField`s in
+    /// panels and dialogs — palette and layer names, the hex field, the canvas size, and (TODO (102),
+    /// since the owner's *"it frequently activates the scribble write mode"* report) the scene name,
+    /// now reached through a tap-to-rename alert rather than a `TextField` anchored in the top bar.
+    /// None of the app's other text inputs sit over the artwork and none compete with a brush, so
+    /// handwriting one of them is a good use of a pencil and they keep Scribble — the scene name's
+    /// alert included, since a modal alert cannot sit over the canvas either. `TopToolbar`'s own doc
+    /// comment on `isRenamingProject` has the fuller reasoning, including the measured regression
+    /// that ruled out giving the always-visible label a live `UITextField` of its own to veto.
     ///
     /// Rejected: **`UITextInputContext.current.pencilInputExpected = false`**. It exists, and it is
     /// `readwrite`, which makes it look like the direct switch for "show the keyboard anyway". It is

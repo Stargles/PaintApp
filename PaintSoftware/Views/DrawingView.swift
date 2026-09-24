@@ -828,8 +828,9 @@ struct DrawingView: View {
 
     private var panelAlignment: Alignment {
         switch activePanel {
-        // The Actions menu's icon is on the leading side; brush/fill/layers/colour are trailing.
-        case .actions:
+        // Actions/Add/Settings' icons are on the leading side, next to Gallery/Select/Move;
+        // brush/fill/layers/colour are trailing.
+        case .actions, .add, .settings:
             return .topLeading
         default:
             return .topTrailing
@@ -853,7 +854,11 @@ struct DrawingView: View {
         case .none:
             EmptyView()
         case .actions:
-            ActionsMenu(canvasManager: canvasManager, activePanel: $activePanel)
+            ActionsMenu(canvasManager: canvasManager)
+        case .add:
+            AddMenu(canvasManager: canvasManager, activePanel: $activePanel)
+        case .settings:
+            SettingsMenu(canvasManager: canvasManager)
         case .select:
             EmptyView() // Select's UI is the bottom bar, shown whenever the tool is engaged — see above.
         case .move:

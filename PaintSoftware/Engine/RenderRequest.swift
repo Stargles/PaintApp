@@ -119,6 +119,77 @@ extension LayerRenderSource {
         }
         return CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: width, height: height)
     }
+
+    /// `LinearGradientFill` already collapsed to numbers — `SolidColor`'s twin for TODO (103)'s other
+    /// value-layer content.
+    struct LinearGradient: Hashable {
+        let start: SolidColor
+        let end: SolidColor
+        /// Radians, `LinearGradientFill.angle`'s own convention (0 left-to-right, clockwise in
+        /// canvas/Y-down space).
+        let angle: CGFloat
+
+        init(_ fill: LinearGradientFill) {
+            start = SolidColor(fill.start)
+            end = SolidColor(fill.end)
+            angle = fill.angle
+        }
+    }
+
+    /// Two colour stops blended along a direction across the whole canvas — TODO (103)'s other value-
+    /// layer content, built the same way `solid` above is and for the same reason: pixel bytes computed
+    /// directly rather than drawn through `CGGradient`/`CAGradientLayer`, so the two compositor backends
+    /// receive identical input and cannot disagree about how a gradient rounds.
+    ///
+    /// **Runs edge to edge of the buffer at any angle**, the way a CSS `linear-gradient` does: every
+    /// corner is projected onto the direction vector, and the two extreme projections are where `t`
+    /// is 0 and 1, so turning the direction never crops the gradient into a corner of itself.
+    ///
+    /// **`window` is RENDER.md §3.8's strip**, and it is the one thing `solid` above does not need and
+    /// this cannot do without: a flat colour is the same bytes in every band of itself, but a gradient
+    /// varies across the frame, so a strip has to project against the *frame's* corners and its *own*
+    /// offset within it — exactly what `PixelOps.rasterize`'s own `window` parameter does for a cel —
+    /// or the gradient restarts at every seam instead of running through it.
+    ///
+    /// Returns nil only for a degenerate canvas size, `solid`'s own answer for the same input.
+    static func linearGradient(_ gradient: LinearGradient, canvasSize: CGSize, window: StripWindow? = nil) -> CGImage? {
+        let width = Int(canvasSize.width.rounded()), height = Int(canvasSize.height.rounded())
+        guard width > 0, height > 0 else { return nil }
+
+        func byte(_ value: Double) -> UInt8 {
+            UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
+        }
+
+        let frameSize = window?.frameSize ?? canvasSize
+        let originY = Double(window?.origin.y ?? 0)
+        let frameWidth = Double(frameSize.width), frameHeight = Double(frameSize.height)
+        let dx = cos(Double(gradient.angle)), dy = sin(Double(gradient.angle))
+        let corners = [(0.0, 0.0), (frameWidth, 0.0), (0.0, frameHeight), (frameWidth, frameHeight)]
+        let projections = corners.map { $0.0 * dx + $0.1 * dy }
+        let minProjection = projections.min() ?? 0, maxProjection = projections.max() ?? 0
+        let span = maxProjection - minProjection
+
+        let s = gradient.start, e = gradient.end
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            let frameY = Double(y) + originY + 0.5
+            let rowOffset = frameY * dy
+            for x in 0..<width {
+                let projection = (Double(x) + 0.5) * dx + rowOffset
+                let t = span > 0 ? min(max((projection - minProjection) / span, 0), 1) : 0
+                let r = s.r + (e.r - s.r) * t
+                let g = s.g + (e.g - s.g) * t
+                let b = s.b + (e.b - s.b) * t
+                let a = s.a + (e.a - s.a) * t
+                let offset = (y * width + x) * 4
+                bytes[offset] = byte(r * a)
+                bytes[offset + 1] = byte(g * a)
+                bytes[offset + 2] = byte(b * a)
+                bytes[offset + 3] = byte(a)
+            }
+        }
+        return CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: width, height: height)
+    }
 }
 
 /// One layer's pixels at one frame, **by model identity rather than by rendered result** — the key
@@ -1307,8 +1378,15 @@ extension CanvasManager {
             // layer's block at frame *n* removes its colour at *n*, which is what every other layer
             // does and what the timeline shows.
             if let fill = layer.valueFill {
-                let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: leafFrame))
-                leaves[index] = LeafSnapshot(version: version, content: .solid(colour))
+                // TODO (103): a gradient is this leaf's content instead of the flat colour, under
+                // the same either/or `ValueFill.gradient`'s doc argues — never both at once.
+                if let gradient = fill.resolvedGradient(atFrame: leafFrame) {
+                    leaves[index] = LeafSnapshot(version: version,
+                                                content: .linearGradient(LayerRenderSource.LinearGradient(gradient)))
+                } else {
+                    let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: leafFrame))
+                    leaves[index] = LeafSnapshot(version: version, content: .solid(colour))
+                }
                 continue
             }
             leaves[index] = LeafSnapshot(

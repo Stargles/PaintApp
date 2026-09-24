@@ -892,9 +892,18 @@ extension CanvasManager {
         // `RenderRequest` a merge does not build.
         let mode = layer.blendMode.compositedMode
         if let fill = layer.valueFill {
-            guard let solid = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: frame)),
-                                                      canvasSize: canvasSize) else { return .nothing }
-            return .pixels(UIImage(cgImage: solid, scale: 1, orientation: .up),
+            // TODO (103): a gradient merges exactly as a flat colour does, as one more ordinary
+            // `LayerRenderSource` the compositor cannot tell from a layer somebody painted flat —
+            // `RenderRequest.leafSnapshots`' own comment on why this read belongs here applies to
+            // both of a value layer's contents unchanged.
+            let image: CGImage?
+            if let gradient = fill.resolvedGradient(atFrame: frame) {
+                image = LayerRenderSource.linearGradient(.init(gradient), canvasSize: canvasSize)
+            } else {
+                image = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: frame)), canvasSize: canvasSize)
+            }
+            guard let image else { return .nothing }
+            return .pixels(UIImage(cgImage: image, scale: 1, orientation: .up),
                            mode: mode, opacity: layer.opacity(atFrame: frame))
         }
         // No `ContentProvider` here on purpose: both layers went through `rasterizeLayer` in

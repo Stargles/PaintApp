@@ -34,18 +34,20 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
     /// would leave the next run starting from the wrong state on the same simulator.
     ///
     /// Phrased in the UI as the state the artist chooses ("fingers can paint"), inverted from the
-    /// `pencilOnlyDrawing` flag it sets (see `ActionsMenu.pencilOnlyToggle`'s doc comment) — so
+    /// `pencilOnlyDrawing` flag it sets (see `SettingsMenu.pencilOnlyToggle`'s doc comment) — so
     /// `fingersCanPaint == false` means pencil-only mode is on.
+    ///
+    /// TODO (104): the toggle moved from Actions to its own Settings icon.
     private func setFingersCanPaint(_ app: XCUIApplication, to fingersCanPaint: Bool) {
-        app.buttons["toolbar.actionsButton"].tap()
-        let toggle = app.switches["actions.fingersCanPaintToggle"]
+        app.buttons["toolbar.settingsButton"].tap()
+        let toggle = app.switches["settings.fingersCanPaintToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         let wantValue = fingersCanPaint ? "1" : "0"
         if toggle.value as? String != wantValue {
             toggle.tap()
             XCTAssertEqual(toggle.value as? String, wantValue)
         }
-        app.buttons["toolbar.actionsButton"].tap() // close the panel
+        app.buttons["toolbar.settingsButton"].tap() // close the panel
     }
 
     /// The reported bug, reproduced directly: with pencil-only mode on, a one-finger lasso drag over

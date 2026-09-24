@@ -277,9 +277,19 @@ struct LayerOptionsPanel: View {
     /// complaint that moved the effect knobs does not reach it.
     @State private var showingMaskMenu = false
     @State private var showingValueColorPicker = false
-    /// The fill as it stood when the colour picker opened, so the whole picking session lands as one
-    /// undo step and a picker opened and dismissed unchanged records none. See `valueColorRow`.
+    /// TODO (103) — `valueColorPicker`'s twins for the gradient's two stops. Three flags rather than
+    /// one shared index because `valueColorRow` and `valueGradientRow` are never both on screen at
+    /// once (the mode toggle picks one), so there is no risk of two of these being true together.
+    @State private var showingGradientStartPicker = false
+    @State private var showingGradientEndPicker = false
+    /// The fill as it stood when a picker opened, so the whole picking session lands as one undo step
+    /// and a picker opened and dismissed unchanged records none. Shared by all three swatches above
+    /// for the same reason they share the risk-free assumption: only one is ever open.
     @State private var fillWhenPickerOpened: ValueFill?
+    /// Live slider position for the gradient's direction. TODO (103)'s twin of `paddingControl`'s
+    /// `paddingDraft`: the drag tracks this locally and commits one undo step on release, rather than
+    /// one per tick.
+    @State private var gradientAngleDraft: Double = 0
 
     private var layerIndex: Int? { canvasManager.layers.firstIndex { $0.id == layerID } }
 
@@ -379,13 +389,22 @@ struct LayerOptionsPanel: View {
                 }
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             } else if canvasManager.layers[index].kind == .value {
-                // Flat-colour mode: the colour *is* the layer, so its swatch is the first thing
-                // under the picker that chose it. Absent in effect mode, where the fill is inert
-                // storage the render never reads — a swatch there would be a colour the artist can
-                // pick and never see (`Layer.valueFill` argues the asymmetry, and `setLayerFill`'s
-                // doc points here for where "you cannot pick this right now" belongs). A vector
-                // layer without a grade is ink, and has no colour row: its blend row above is all.
-                valueColorRow(index: index)
+                // Flat colour or linear gradient: the layer's other either/or, right above whichever
+                // of the two rows below answers it — `ValueFill.gradient`'s doc argues why one field
+                // carries the choice rather than a mode enum beside it. Absent in effect mode, where
+                // the fill is inert storage the render never reads — a swatch there would be a colour
+                // the artist can pick and never see (`Layer.valueFill` argues the asymmetry, and
+                // `setLayerFill`'s doc points here for where "you cannot pick this right now" belongs).
+                // A vector layer without a grade is ink, and has no colour row: its blend row above is
+                // all.
+                valueFillModeToggle(index: index)
+                if canvasManager.layers[index].fill?.gradient != nil {
+                    valueGradientRow(index: index)
+                } else {
+                    // Flat-colour mode: the colour *is* the layer, so its swatch is the first thing
+                    // under the picker that chose it.
+                    valueColorRow(index: index)
+                }
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
             }
         }
@@ -645,7 +664,144 @@ struct LayerOptionsPanel: View {
                 // `Equatable` includes it, so a new id would make every write a change and
                 // `setLayerFill`'s "nothing happened" guard could never fire.
                 let existing = canvasManager.layers[index].fill ?? ValueFill()
-                let updated = ValueFill(color: PaletteColor(id: existing.color.id, hex: picked.hexString))
+                // `gradient` carried across rather than defaulted away: this row is only ever shown
+                // while it is already nil (the mode toggle above picks one row or the other), but a
+                // future caller reaching this binding while it is set must not silently clear it —
+                // `Layer.valueFill`'s round-trip argument, spelled at the field this write touches.
+                let updated = ValueFill(color: PaletteColor(id: existing.color.id, hex: picked.hexString),
+                                        gradient: existing.gradient)
+                canvasManager.setLayerFill(layerIndex: index, to: updated)
+            }
+        )
+    }
+
+    /// TODO (103) — flat colour or linear gradient, the layer's other either/or (`ValueFill.gradient`'s
+    /// doc argues why one field carries it rather than a mode enum beside it). Toggling on stamps
+    /// `.default` so there is something to look at immediately; toggling off keeps `color` rather
+    /// than clearing it, matching the effect/flat-colour flip's own round-trip argument one field over.
+    ///
+    /// **The gradient itself is not given the same round trip, and that is a deliberate asymmetry
+    /// rather than an oversight.** `gradient`'s presence *is* the mode (the same either/or `fill`/
+    /// `effect` reads at the layer level), so there is nowhere inert to park a gradient's two stops
+    /// and angle while flat colour is showing without adding a field solely to remember them — unlike
+    /// `color`, which already has exactly that inert slot for free. A flat colour is what every value
+    /// layer is born with, so preserving *it* answers "what does this layer look like if I back out of
+    /// the experiment"; a gradient is something the artist opts into and can re-pick a direction and
+    /// two stops for in a few taps, so losing a bespoke one across a toggle round trip is a real but
+    /// minor cost, not a silent destructive edit on the artist's original content.
+    private func valueFillModeToggle(index: Int) -> some View {
+        Toggle(isOn: Binding(
+            get: { canvasManager.layers[index].fill?.gradient != nil },
+            set: { isGradient in
+                guard canvasManager.layers.indices.contains(index) else { return }
+                var updated = canvasManager.layers[index].fill ?? ValueFill()
+                updated.gradient = isGradient ? (updated.gradient ?? .default) : nil
+                canvasManager.setLayerFill(layerIndex: index, to: updated)
+            })) {
+            HStack {
+                Image(systemName: "square.lefthalf.filled").frame(width: 24)
+                Text("Linear Gradient")
+            }
+            .foregroundColor(.white)
+        }
+        .tint(.blue)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .accessibilityIdentifier("layerOptions.valueGradientToggle")
+    }
+
+    /// TODO (103)'s other content: two colour stops (`valueColorRow`'s shape, one swatch each) and a
+    /// direction slider. Shown instead of `valueColorRow` while `ValueFill.gradient` is set.
+    private func valueGradientRow(index: Int) -> some View {
+        let gradient = canvasManager.layers[index].fill?.gradient ?? .default
+        return VStack(alignment: .leading, spacing: 10) {
+            gradientStopRow(title: "Start", color: gradient.start.color,
+                            presentation: .valueLayerGradientStartColour,
+                            isPresented: $showingGradientStartPicker,
+                            binding: gradientStopBinding(index: index, stop: \.start))
+            gradientStopRow(title: "End", color: gradient.end.color,
+                            presentation: .valueLayerGradientEndColour,
+                            isPresented: $showingGradientEndPicker,
+                            binding: gradientStopBinding(index: index, stop: \.end))
+
+            HStack {
+                Image(systemName: "arrow.left.and.right").frame(width: 24)
+                Text("Direction")
+                Spacer()
+                Text("\(Int((gradient.angle * 180 / .pi).rounded()))°").foregroundColor(.gray)
+            }
+            .foregroundColor(.white)
+
+            Slider(value: $gradientAngleDraft, in: 0...(2 * .pi),
+                  onEditingChanged: { editing in
+                      if !editing {
+                          var updated = canvasManager.layers[index].fill ?? ValueFill()
+                          var g = updated.gradient ?? .default
+                          g.angle = CGFloat(gradientAngleDraft)
+                          updated.gradient = g
+                          canvasManager.setLayerFill(layerIndex: index, to: updated)
+                      }
+                  })
+            .accessibilityIdentifier("layerOptions.valueGradientAngleSlider")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .onAppear { gradientAngleDraft = Double(gradient.angle) }
+    }
+
+    /// One swatch row of `valueGradientRow`'s two — the same shape `valueColorRow` uses for the flat
+    /// swatch, parameterised over which stop and which presentation.
+    private func gradientStopRow(title: String, color: Color, presentation: CanvasPresentation,
+                                 isPresented: Binding<Bool>, binding: Binding<Color>) -> some View {
+        HStack(spacing: 10) {
+            Text(title).foregroundColor(.white)
+            Spacer()
+            Button {
+                isPresented.wrappedValue.toggle()
+            } label: {
+                color
+                    .frame(width: 44, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.25), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layerOptions.valueGradient\(title)Button")
+            .canvasPresentation(presentation, isPresented: isPresented, canvasManager: canvasManager,
+                                onPresent: {
+                                    guard let index = layerIndex,
+                                          canvasManager.layers.indices.contains(index) else { return }
+                                    fillWhenPickerOpened = canvasManager.layers[index].fill
+                                    canvasManager.beginStructureGesture()
+                                },
+                                onDismiss: {
+                                    guard let index = layerIndex,
+                                          canvasManager.layers.indices.contains(index) else { return }
+                                    if canvasManager.layers[index].fill == fillWhenPickerOpened {
+                                        canvasManager.cancelStructureGesture()
+                                    } else {
+                                        canvasManager.commitStructureGesture(label: .valueLayerColor)
+                                    }
+                                    fillWhenPickerOpened = nil
+                                }) {
+                ColorPickerPanel(color: binding)
+                    .frame(width: ColorPickerPanel.popoverSize.width,
+                           height: ColorPickerPanel.popoverSize.height)
+            }
+        }
+    }
+
+    /// A binding onto one of the gradient's two stops, `valueColorBinding`'s shape with a key path
+    /// standing in for "which stop" so the two swatches share one implementation.
+    private func gradientStopBinding(index: Int, stop: WritableKeyPath<LinearGradientFill, PaletteColor>) -> Binding<Color> {
+        Binding(
+            get: { (canvasManager.layers[index].fill?.gradient ?? .default)[keyPath: stop].color },
+            set: { picked in
+                guard canvasManager.layers.indices.contains(index) else { return }
+                var updated = canvasManager.layers[index].fill ?? ValueFill()
+                var g = updated.gradient ?? .default
+                let existingID = g[keyPath: stop].id
+                g[keyPath: stop] = PaletteColor(id: existingID, hex: picked.hexString)
+                updated.gradient = g
                 canvasManager.setLayerFill(layerIndex: index, to: updated)
             }
         )

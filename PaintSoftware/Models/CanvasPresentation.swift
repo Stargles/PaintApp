@@ -57,6 +57,14 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// case an `onDismiss` that runs on host deletion as well as on the flag going false.
     case valueLayerColour
 
+    /// TODO (103) — the start end of a linear-gradient value layer's two stops, in
+    /// `LayerOptionsPanel`. Two cases rather than one shared index (`effectGradientStopColour`'s
+    /// shape) because there are exactly two of these and always will be — `onionPreviousTintColour`/
+    /// `onionNextTintColour` is the precedent for a fixed pair.
+    case valueLayerGradientStartColour
+    /// The end stop — `valueLayerGradientStartColour`'s twin.
+    case valueLayerGradientEndColour
+
     /// An effect's outline colour swatch, in `EffectSettingsBar`. Brackets `onEditBegan`/`onEditEnded`
     /// over its lifetime, same as `valueLayerColour`.
     case effectOutlineColour
@@ -108,6 +116,7 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
             return .onionSkinOptions
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .frameRateOptions, .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
+             .valueLayerGradientStartColour, .valueLayerGradientEndColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
              .effectDuplicateOffsetColour, .effectGuideColour, .selectionColour:
             return nil

@@ -32,6 +32,8 @@ final class CanvasPresentationLogicTests: XCTestCase {
         "layerViewSelector": nil,
         "canvasBackgroundColour": nil,
         "valueLayerColour": nil,
+        "valueLayerGradientStartColour": nil,
+        "valueLayerGradientEndColour": nil,
         "effectOutlineColour": nil,
         "effectGradientStopColour": nil,
         "effectRecolorColour": nil,

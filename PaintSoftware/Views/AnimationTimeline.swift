@@ -1364,15 +1364,6 @@ struct AnimationTimeline: View {
 
                 Spacer()
 
-                TextField("Scene", text: $canvasManager.projectName)
-                    .textFieldStyle(.plain)
-                    .foregroundColor(.white)
-                    .frame(width: 110)
-                    // The app's only title-editing control, and since TODO (57) part 2 the only way
-                    // to rename a project's folder on disk. It had no identifier, so no UI test could
-                    // reach it.
-                    .accessibilityIdentifier("timeline.projectNameField")
-
                 frameLabel
 
                 frameRateButton

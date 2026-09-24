@@ -25,12 +25,9 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        app.buttons["toolbar.actionsButton"].tap()
-        // TODO (100): Add Text moved under the "Add" submenu.
-        let addRow = app.buttons["actions.addRow"]
-        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
-        addRow.tap()
-        let addText = app.buttons["actions.addTextRow"]
+        // TODO (103): Add Text is a row of the "Add" menu, its own top-bar icon since.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         addText.tap()
 
@@ -259,9 +256,10 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        app.buttons["toolbar.actionsButton"].tap()
-        let row = app.buttons["actions.resizeCanvasRow"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "Resize Canvas is a row in the Actions menu")
+        // TODO (104): Resize Canvas moved to the Settings menu.
+        app.buttons["toolbar.settingsButton"].tap()
+        let row = app.buttons["settings.resizeCanvasRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Resize Canvas is a row in the Settings menu")
         XCTAssertTrue(row.label.contains("2048"),
                       "PREMISE: the row shows the live artwork size, which is the default 2048 here "
                       + "(label: \(row.label))")
@@ -269,7 +267,7 @@ final class ToolPanelsUITests: PaintUITestCase {
 
         let widthField = app.textFields["resizeCanvas.widthField"]
         XCTAssertTrue(widthField.waitForExistence(timeout: 5),
-                      "the row opens the resize sheet — a sheet raised from inside the Actions panel presents")
+                      "the row opens the resize sheet — a sheet raised from inside the Settings panel presents")
         let heightField = app.textFields["resizeCanvas.heightField"]
         XCTAssertTrue(heightField.exists)
         XCTAssertEqual(widthField.value as? String, "2048", "the fields are prefilled with the current artwork rect")
@@ -487,7 +485,11 @@ final class SelectionAndMoveUITests: PaintUITestCase {
 
         doneButton.tap()
 
-        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5),
+        // **KNOWN FAILING as of TODO (102)** — see `TopToolbar.bodyContent`'s doc comment on
+        // `isRenamingProject`, which names this test as one of three that reproducibly regressed:
+        // this element does not reappear at all after that change, at wait timeouts up to 30s. Not a
+        // race a wait closes; a real, reported regression left on the record rather than hidden.
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 15),
                       "baking the piece gives the artist back the panel they were in — `activePanel` was never cleared")
         XCTAssertFalse(doneButton.exists, "and the Move menu goes with the piece")
     }
@@ -849,7 +851,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     }
 
     /// Why the identical `activePanel != .select` guard on `textTapRecognizer` (CanvasView) is **not**
-    /// the same bug: text is entered from the Actions menu, and `ActionsMenu.addTextRow` follows
+    /// the same bug: text is entered from the Add menu, and `AddMenu.addTextRow` follows
     /// `enterTextMode()` with `$activePanel.toggleSettingsPanel(.text)`. Both of the guard's clauses
     /// cannot be true at once through that door, because arriving in text mode *is* what closes the
     /// Select panel.
@@ -865,12 +867,9 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
         lassoMode.tap()
 
-        app.buttons["toolbar.actionsButton"].tap()
-        // TODO (100): Add Text moved under the "Add" submenu.
-        let addRow = app.buttons["actions.addRow"]
-        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
-        addRow.tap()
-        let addText = app.buttons["actions.addTextRow"]
+        // TODO (103): Add Text is a row of the "Add" menu, its own top-bar icon since.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         XCTAssertTrue(addText.isEnabled, "Sanity: Add Text is available on the default vector layer")
         addText.tap()

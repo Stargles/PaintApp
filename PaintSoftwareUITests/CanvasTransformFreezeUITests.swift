@@ -378,12 +378,9 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// a plain SwiftUI view that UIKit surfaces as no queryable element at all (see
     /// `ToolsAndSelectionUITests.testEnteringTextModeClosesTheSelectPanel…`).
     private func placeATextBox(_ app: XCUIApplication, on canvas: XCUIElement) {
-        app.buttons["toolbar.actionsButton"].tap()
-        // TODO (100): Add Text moved under the "Add" submenu.
-        let addRow = app.buttons["actions.addRow"]
-        XCTAssertTrue(addRow.waitForExistence(timeout: 5))
-        addRow.tap()
-        let addText = app.buttons["actions.addTextRow"]
+        // TODO (103): Add Text is a row of the "Add" menu, its own top-bar icon since.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5))
         XCTAssertTrue(addText.isEnabled, "PREMISE: Add Text is available on the default layer")
         addText.tap()

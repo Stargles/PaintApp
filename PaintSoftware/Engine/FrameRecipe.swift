@@ -34,6 +34,10 @@ struct LeafSnapshot {
         /// is not worth establishing it for. The memset itself is canvas-sized and runs in
         /// `resolve()` with everything else.
         case solid(LayerRenderSource.SolidColor)
+        /// TODO (103) — `ValueFill.gradient`'s content, resolved the same way and at the same mint
+        /// time as `solid` above; see that case's doc comment for the reasoning, which applies here
+        /// unchanged.
+        case linearGradient(LayerRenderSource.LinearGradient)
         /// An ordinary cel, flattened through `PixelOps.rasterize` — the same memo, the same key.
         case cel(PixelOps.FrozenCel)
     }
@@ -171,6 +175,14 @@ struct FrameRecipe {
                 // is the same bytes as the band of the whole-frame fill it stands for. §4.5's layer
                 // is the one leaf a strip costs nothing at all.
                 if let image = LayerRenderSource.solid(color, canvasSize: canvasSize) {
+                    sources[index] = LayerRenderSource(image: image)
+                }
+            case .linearGradient(let gradient):
+                // **Unlike `solid`, this one does need the window** — TODO (103): the gradient varies
+                // across the frame, so a strip must project against the frame's own corners and its
+                // offset within them, which is exactly what `window` carries. See
+                // `LayerRenderSource.linearGradient`'s doc comment.
+                if let image = LayerRenderSource.linearGradient(gradient, canvasSize: canvasSize, window: window) {
                     sources[index] = LayerRenderSource(image: image)
                 }
             case .cel(let cel):

@@ -2447,7 +2447,7 @@ struct CanvasView: UIViewRepresentable {
             // The reasoning that used to sit on each of the three lines now sits on the property it
             // moved into: `isEyedropperArmed` (why the Select panel is deliberately absent, and the
             // owner's bug of 2026-08-22), `textPressIsEnabled` (why text's Select clause is *not*
-            // that bug in a different hat — `ActionsMenu.addTextRow` closes the panel on the way in,
+            // that bug in a different hat — `AddMenu.addTextRow` closes the panel on the way in,
             // and `SelectionAndMoveUITests.
             // testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` pins the order),
             // and `fillPressIsEnabled` (why lasso mode hands the drag to the selection overlay).

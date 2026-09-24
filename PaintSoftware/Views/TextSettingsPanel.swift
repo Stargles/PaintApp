@@ -4,7 +4,7 @@ import SwiftUI
 /// the scrolling card the other three bottom-docked panels use (`BottomDock`, which owns its width,
 /// its chrome and its height ceiling).
 ///
-/// **Opening it bakes nothing.** The way in is `ActionsMenu`'s "Add Text" row, which calls
+/// **Opening it bakes nothing.** The way in is `AddMenu`'s "Add Text" row, which calls
 /// `enterTextMode()` and `$activePanel.toggleSettingsPanel(.text)` — and that binding method
 /// deliberately omits `commitAllInteractiveState()`. The stake is spelled out at
 /// `CanvasManager.enterTextMode`: from this stage on there is a live text session behind this panel,

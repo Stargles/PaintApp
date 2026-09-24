@@ -332,6 +332,15 @@ private extension BakeKeyEncoder {
         case .some(.solid(let color)):
             tag(0x41)
             double(color.r); double(color.g); double(color.b); double(color.a)
+        case .some(.linearGradient(let gradient)):
+            // TODO (103). A tag of its own rather than folding into 0x41 — a gradient with `start ==
+            // end` would otherwise digest identically to a flat colour, and a digest that can collide
+            // between two different `LeafSnapshot.Content` cases is the exact hazard `encode(leaf:)`'s
+            // own real-state-not-an-absence case above already guards.
+            tag(0x44)
+            double(gradient.start.r); double(gradient.start.g); double(gradient.start.b); double(gradient.start.a)
+            double(gradient.end.r); double(gradient.end.g); double(gradient.end.b); double(gradient.end.a)
+            double(Double(gradient.angle))
         case .some(.cel):
             // `PixelOps.FrozenCel` is named entirely by the `LayerContentVersion` just encoded —
             // the two carry the same identity fields — so there is nothing further to say about it
@@ -364,6 +373,17 @@ private extension BakeKeyEncoder {
         optional(version.valueFill) { e, fill in
             e.uuid(fill.color.id)
             e.string(fill.color.hex)
+            // TODO (103) — `fill.gradient`, absent from this digest until now, which is exactly the
+            // silent-collision shape RENDER §3.8 warns about: two leaves differing only in their
+            // gradient (or a gradient against the flat colour above, both keeping `color` unread but
+            // set) would otherwise hash to one entry and serve the first one's pixels.
+            e.optional(fill.gradient) { e, gradient in
+                e.uuid(gradient.start.id)
+                e.string(gradient.start.hex)
+                e.uuid(gradient.end.id)
+                e.string(gradient.end.hex)
+                e.double(Double(gradient.angle))
+            }
         }
         optional(version.effect) { e, effect in e.encode(effect: effect) }
         // **KEYFRAMES §4.4's container pose, and it is the one field on this key that the "no

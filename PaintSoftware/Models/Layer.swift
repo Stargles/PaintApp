@@ -428,13 +428,25 @@ extension Layer {
 /// bare colour field on `Layer` would have to be found and rewritten at every call site instead.
 struct ValueFill: Equatable, Hashable {
 
-    /// The colour, alpha included.
+    /// The colour, alpha included. **Live only in flat-colour mode** — see `gradient` below for the
+    /// either/or.
     ///
     /// `PaletteColor` rather than a second colour representation: it is already `Codable`, and its hex
     /// round-trips through the same `ColorMath`/`ColorConversion` path every swatch in the app does —
     /// so a fill saved and reloaded is exactly the colour that was picked, including a non-opaque one
     /// (the 8-digit `RRGGBBAA` form).
     var color: PaletteColor = ValueFill.defaultColor
+
+    /// TODO (103) — the owner's *"add linear gradient"*. Non-nil is the layer's other content: two
+    /// colour stops blended across the whole canvas along a direction, in place of the flat `color`
+    /// above. **An either/or on this one field, not a mode enum beside it** — `Layer.layerEffect`'s
+    /// `effect`/`fill` pair already reads the same way (presence *is* the mode), and a second
+    /// discriminant here would be a second place the two fields could disagree about which is live.
+    ///
+    /// `color` is kept, unread, while this is set — `Layer.valueFill`'s own doc argues why keeping an
+    /// inert field beats clearing it: flip to a gradient, flip back, and the flat colour the artist
+    /// mixed is still there.
+    var gradient: LinearGradientFill?
 
     /// **Mid-grey at full alpha.** A value layer at the top of the stack makes the canvas one flat
     /// colour — correct, and what Photoshop's Solid Colour layer does — so the default has to read as
@@ -452,6 +464,29 @@ struct ValueFill: Equatable, Hashable {
     /// the frame is not in scope, and a keyframe phase would then have to cut this seam under a
     /// deadline instead of finding it already cut.
     func resolvedColor(atFrame frame: Int) -> PaletteColor { color }
+
+    /// `gradient`'s own twin of `resolvedColor(atFrame:)`, for the identical reason: constant today,
+    /// stated as a function of the frame so a later keyframe phase has one seam for both of a value
+    /// layer's contents rather than one for colour and a fresh one for the gradient.
+    func resolvedGradient(atFrame frame: Int) -> LinearGradientFill? { gradient }
+}
+
+/// `ValueFill`'s other content — two colour stops and a direction, blended across the whole canvas.
+/// TODO (103).
+struct LinearGradientFill: Equatable, Hashable, Codable {
+    var start: PaletteColor
+    var end: PaletteColor
+
+    /// Radians. `0` runs left to right; positive turns clockwise in canvas (Y-down) space — the same
+    /// convention `ShapeGeometry.rotation` uses, so a number picked here means the same thing it would
+    /// mean on a shape.
+    var angle: CGFloat
+
+    /// Black to white, left to right — a gradient an artist can see the instant the layer appears
+    /// (mid-grey, `ValueFill.defaultColor`'s own choice, would render as a flat field until the stops
+    /// are edited apart).
+    static let `default` = LinearGradientFill(start: PaletteColor(hex: "000000"),
+                                              end: PaletteColor(hex: "FFFFFF"), angle: 0)
 }
 
 // MARK: Persistence
@@ -464,14 +499,18 @@ struct ValueFill: Equatable, Hashable {
 
 extension ValueFill: Codable {
 
-    private enum CodingKeys: String, CodingKey { case color }
+    private enum CodingKeys: String, CodingKey { case color, gradient }
 
     /// Hand-written decode, synthesized encode — the asymmetry every parameter struct in `Effect.swift`
     /// already has, for its reason: a synthesized *decoder* demands every key, so a property's default
     /// is not a fallback for a missing one, and a field added by a later phase (a keyframe track, say)
-    /// must be absent rather than fatal in every document written before it.
+    /// must be absent rather than fatal in every document written before it. `gradient` is TODO (103)'s
+    /// own instance of exactly that: nil, decoded from an absent key, on every project saved before
+    /// this feature existed — which is also the flat-colour default, so nothing about those documents
+    /// changes.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         color = try container.decodeIfPresent(PaletteColor.self, forKey: .color) ?? ValueFill.defaultColor
+        gradient = try container.decodeIfPresent(LinearGradientFill.self, forKey: .gradient)
     }
 }

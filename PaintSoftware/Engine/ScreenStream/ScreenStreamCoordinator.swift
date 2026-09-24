@@ -308,7 +308,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// **Exactly the picker's insert, kind for kind.** `insertImage`/`insertVideo` already do the
     /// layer choice, the fit and the Move-box lift — this function's whole job is picking which one
     /// to call and turning its refusal into a sentence. `consumingSource: true` for
-    /// `ActionsMenu.insertVideo`'s own reason: the temp file is this transfer's own copy, ours to
+    /// `AddMenu.insertVideo`'s own reason: the temp file is this transfer's own copy, ours to
     /// move rather than copy again. The temp file is deleted here regardless of outcome — a video
     /// that inserted has already had it *moved* out from under this path by `insertVideo` itself, so
     /// the `try?` below is a no-op in that case and a real cleanup in every other.
