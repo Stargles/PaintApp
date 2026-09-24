@@ -261,8 +261,11 @@ struct SideToolbar: View {
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.7)
                     .frame(width: 56)
-                    // A stable, inert tap target outside whatever popover a picker raises — what
-                    // `sideToolbar.brushSizeReadout` served as before TODO (79)(b) removed it.
+                    // Named so a test can confirm the plain caption is what is showing at rest,
+                    // the way it once read `sideToolbar.brushSizeReadout`'s permanent badge — not a
+                    // tap target: a tap here reaches the canvas underneath and would discard whatever
+                    // a picker was mid-edit rather than commit it (`tapAway` is the tap target every
+                    // picker-dismissal test already shares).
                     .accessibilityIdentifier("\(identifier).caption")
             }
         }

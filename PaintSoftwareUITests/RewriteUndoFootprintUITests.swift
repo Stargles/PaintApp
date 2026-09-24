@@ -65,10 +65,11 @@ final class RewriteUndoFootprintUITests: PaintUITestCase {
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5), "the swatch opens the colour picker")
         setHexField(app, hexField, to: "0000FF")
-        // TODO (79)(b) removed the permanent percentage badge this used to tap; the plain "Size"
-        // caption underneath the slider is back, with its own identifier, and serves the same
-        // purpose — a tap outside the popover.
-        app.staticTexts["sideToolbar.brushSizeSlider.caption"].tap()
+        // TODO (79)(b) removed the permanent percentage badge this file used to tap for exactly this;
+        // `tapAway` is the shared, already-inert way every other picker-dismissal test does it
+        // (`DuplicateOffsetUITests`, `TimelineAndUndoUITests`) — a tap on the rail's own Size caption
+        // reaches the canvas underneath it and discards the live edit instead of committing it.
+        tapAway(app)
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker, which commits")
         XCTAssertTrue(waitUntil(canvas, l1Mid, isBlue),
                       "Recolour did not turn the lassoed line blue on screen")

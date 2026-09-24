@@ -65,36 +65,47 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         add(shot)
     }
 
-    /// Dragging the Size slider to each end shows the log curve's two documented endpoints — **0.1%**
-    /// at the bottom, **100%** at the top — beside the real-size pop-up while the finger is down,
-    /// which only holds if the slider is actually wired to `brushSizeSliderPosition` and not still to
-    /// some other range. Read with `MidGestureValuePoll` below the eraser's own test, for the same
-    /// reason that one needs it: the value only exists while the drag's single blocking call is still
-    /// in flight.
-    func testDraggingTheSizeSliderToEachEndShowsTheCurveSFloorAndCeilingBesideThePopUp() throws {
+    /// Dragging the Size slider to each end must raise the real-size pop-up (and, inside it, the
+    /// percent — TODO (79)(b)) and clear both again on lift, at *both* the floor and the ceiling —
+    /// not only somewhere in the middle.
+    ///
+    /// **Read with the outlived counter, not a live query.** `ToolsAndSelectionUITests`'
+    /// `testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview` already established why:
+    /// `press(forDuration:thenDragTo:…)` is one synchronous call with no gap in this thread's own
+    /// control flow to slot a query into, and — measured here directly — querying the element tree
+    /// from a *second* thread while the first is still inside that call does not merely fail to see
+    /// the pop-up, it crashes the whole test runner (`XCActivityRecord` assertion, "Activity cannot
+    /// be used after its scope has completed"). `SizePreviewRaiseCount` is what survives the gesture
+    /// to be read afterward, exactly as it does for the brush editor's own Size slider; the exact
+    /// percentage text at each end is `BrushSizePercentLogicTests`' job, not this one's.
+    func testDraggingTheSizeSliderToEachEndRaisesThePopUpAndClearsItOnLift() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
         let sizeSlider = app.sliders["sideToolbar.brushSizeSlider"]
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
+        let raiseCount = app.staticTexts["sizePreview.raiseCount"]
+        XCTAssertTrue(raiseCount.waitForExistence(timeout: 5))
         let percent = app.otherElements["sideToolbar.brushSizeSlider.percent"]
+        let window = app.otherElements["sizePreview.window"]
 
         // The default (5pt / 2048pt = 0.2%) sits near, not exactly at, the bottom edge — close enough
         // for the drag's touch-down to land on the thumb (see `dragVerticalSlider`'s doc comment).
-        let toTop = MidGestureValuePoll { percent.exists ? (percent.value as? String) : nil }
-        toTop.start()
+        var before = Int(raiseCount.label) ?? -1
         dragVerticalSlider(sizeSlider, fromNormalizedDy: 1.0, toNormalizedDy: 0.0)
-        XCTAssertEqual(toTop.stop(), "100%", "the top of the slider is TODO (79)'s 100%")
+        XCTAssertGreaterThan(Int(raiseCount.label) ?? -1, before, "dragging to the top raised the pop-up")
+        XCTAssertFalse(percent.exists, "…and lifting takes the percent away again")
+        XCTAssertFalse(window.exists, "…and the pop-up with it")
 
         // `fromNormalizedDy: 0.02` rather than the exact `0.0` the thumb is actually sitting at: a
         // touch-down exactly on the frame's own top edge missed in practice (measured by running this
         // test before this two-point inset existed), where the same edge as a *destination* did not —
         // the concern is specific to where a gesture's touch-down lands, not where it ends.
-        let toBottom = MidGestureValuePoll { percent.exists ? (percent.value as? String) : nil }
-        toBottom.start()
+        before = Int(raiseCount.label) ?? -1
         dragVerticalSlider(sizeSlider, fromNormalizedDy: 0.02, toNormalizedDy: 1.0)
-        XCTAssertEqual(toBottom.stop(), "0.1%", "the bottom of the slider is the documented floor")
-        XCTAssertFalse(percent.exists, "…and lifting takes it away again")
+        XCTAssertGreaterThan(Int(raiseCount.label) ?? -1, before, "dragging to the bottom raised it again")
+        XCTAssertFalse(percent.exists, "…and lifting takes it away at the floor too")
+        XCTAssertFalse(window.exists)
 
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "2-size-slider-at-its-floor"
@@ -102,39 +113,30 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         add(shot)
     }
 
-    /// **TODO (79)(b)+(c), and the task's own repro shape**: drag the eraser's Size slider, read a
-    /// percent beside the real-size pop-up while the finger is down, lift, and both the percent and
-    /// the pop-up must be gone. Exercises (a) too — there is a pop-up and a percent at all for the
-    /// eraser only because it now shares the brush's curve and preview machinery.
-    ///
-    /// **Reading state while a finger is down** needs a background poll rather than a query issued
-    /// between two calls: `press(forDuration:thenDragTo:…)` is one synchronous call that blocks the
-    /// calling thread for its whole down-drag-hold-up sequence, so there is no gap in the test's own
-    /// control flow to slot a query into (`ToolsAndSelectionUITests`'
-    /// `testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview` hit exactly this and worked
-    /// around it with an outlived counter instead). `MidGestureValuePoll` below takes the other way
-    /// out — `SelectionEditUITests.MidGestureSampler`'s own shape, a background thread polling while
-    /// the main thread is still inside the blocking call — aimed at the accessibility tree since the
-    /// percent's own text, not drawn pixels, is what this test and the one above are asking about.
-    func testDraggingTheErasersSizeSliderShowsAPercentBesideThePopUpThenClearsOnLift() throws {
+    /// **TODO (79)(b)+(c), and the task's own repro shape**: drag the eraser's Size slider — reachable
+    /// at all only because (79)(a) gave the eraser the brush's own curve and preview — and the
+    /// pop-up (with the percent inside it) must clear on lift, exactly as the brush's own does.
+    /// `testDraggingTheSizeSliderToEachEndRaisesThePopUpAndClearsItOnLift`'s doc comment has the full
+    /// account of why this reads the outlived raise counter rather than the live element tree.
+    func testDraggingTheErasersSizeSliderRaisesThePopUpAndClearsItOnLift() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         app.buttons["toolbar.eraserButton"].tap()
         let eraserSizeSlider = app.sliders["sideToolbar.eraserSizeSlider"]
         XCTAssertTrue(eraserSizeSlider.waitForExistence(timeout: 5))
+        let raiseCount = app.staticTexts["sizePreview.raiseCount"]
+        XCTAssertTrue(raiseCount.waitForExistence(timeout: 5))
 
         let percent = app.otherElements["sideToolbar.eraserSizeSlider.percent"]
         let window = app.otherElements["sizePreview.window"]
         XCTAssertFalse(percent.exists, "PREMISE: nothing is held yet")
         XCTAssertFalse(window.exists)
 
-        let poll = MidGestureValuePoll { window.exists ? (percent.value as? String) : nil }
-        poll.start()
+        let before = Int(raiseCount.label) ?? -1
         dragVerticalSlider(eraserSizeSlider, fromNormalizedDy: 1.0, toNormalizedDy: 0.3)
-        let seenWhileHeld = poll.stop()
 
-        XCTAssertNotNil(seenWhileHeld,
-                        "the percent must appear beside the real-size pop-up at some point during the drag")
+        XCTAssertGreaterThan(Int(raiseCount.label) ?? -1, before,
+                             "holding the eraser's own Size slider must raise the pop-up too")
         XCTAssertFalse(percent.exists, "TODO (79)(c): lifting must take the percent away…")
         XCTAssertFalse(window.exists, "…and the pop-up with it — neither may strand on screen")
 
@@ -142,41 +144,6 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         shot.name = "3-eraser-percent-gone-after-lift"
         shot.lifetime = .keepAlways
         add(shot)
-    }
-
-    /// Polls a value on a background thread while the main thread is blocked inside a synchronous
-    /// gesture call, and remembers the last non-nil one seen. See the doc comment on the eraser test
-    /// above for why this exists at all.
-    private final class MidGestureValuePoll {
-        private let read: () -> String?
-        private var lastSeen: String?
-        private var stopped = false
-        private let lock = NSLock()
-        private let group = DispatchGroup()
-
-        init(_ read: @escaping () -> String?) { self.read = read }
-
-        func start() {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
-                defer { group.leave() }
-                while true {
-                    lock.lock(); let done = stopped; lock.unlock()
-                    if done { return }
-                    if let value = read() { lock.lock(); lastSeen = value; lock.unlock() }
-                    Thread.sleep(forTimeInterval: 0.05)
-                }
-            }
-        }
-
-        /// Stops the poll and waits for its thread to actually finish before answering — a result
-        /// read while the background thread might still be mutating `lastSeen` would be a race.
-        func stop() -> String? {
-            lock.lock(); stopped = true; lock.unlock()
-            group.wait()
-            lock.lock(); defer { lock.unlock() }
-            return lastSeen
-        }
     }
 
     /// **What actually gets drawn, not only the number in the badge.** A hairline at the slider's
@@ -216,59 +183,18 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         add(shot)
     }
 
-    /// **TODO (79)(c) — the stuck-indicator bug, reproduced from a second *finger* rather than a
-    /// Pencil.** XCUITest cannot synthesise a Pencil touch at all (CLAUDE.md), so this stands in with
-    /// what the brief allows: a second finger drawing on the canvas while the rail's Size slider is
-    /// still held down. That is the same shape of interruption the owner reported — the canvas's own
-    /// `StrokeGestureRecognizer` claims a touch on an entirely different view while this slider's own
-    /// touch is still down — and it is exactly the case `TouchTrackingModifier`'s `@GestureState` was
-    /// written to survive: SwiftUI resets it whether the gesture it backs ends cleanly or is cut off
-    /// from underneath, so the slider's own lift still clears the indicator either way.
-    ///
-    /// **Two genuinely concurrent XCUITest-injected touches.** `press(forDuration:)` is one
-    /// synchronous call with no gap in this thread's own control flow to slot a second gesture into,
-    /// so the slider's hold runs on a background thread while the main thread draws on the canvas —
-    /// the same concurrency shape `SelectionEditUITests.MidGestureSampler` uses to *read* the screen
-    /// during a gesture, aimed here at *injecting* a second one instead. Whether the simulator's event
-    /// pipeline actually overlaps the two, or merely queues the second behind the first, is exactly
-    /// the question this test was written to answer rather than assume — see the report for what the
-    /// isolated run actually found.
-    func testASecondFingerDrawingOnTheCanvasDoesNotStrandTheSizeIndicator() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let sizeSlider = app.sliders["sideToolbar.brushSizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
+    // MARK: - TODO (79)(c)'s own repro: not attempted here, and why
 
-        let holdStarted = DispatchSemaphore(value: 0)
-        let holdFinished = DispatchGroup()
-        holdFinished.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            let start = sizeSlider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1.0))
-            holdStarted.signal()
-            start.press(forDuration: 1.2)
-            holdFinished.leave()
-        }
-        holdStarted.wait()
-        // Give the touch-down its own moment to actually land and raise the preview before the second
-        // touch arrives — the ask is "drawing while still holding", not "drawing before it started".
-        Thread.sleep(forTimeInterval: 0.3)
-
-        // The second finger: a stroke on the canvas, injected while the slider's own hold is (as far
-        // as this test's two concurrent calls go) still in flight.
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
-
-        holdFinished.wait() // the slider's own press(forDuration:) finishes and lifts on its own
-
-        XCTAssertFalse(app.otherElements["sizePreview.window"].exists,
-                       "the slider's own lift must take the indicator away even though a second "
-                       + "touch drew on the canvas while it was held")
-        XCTAssertFalse(app.otherElements["sideToolbar.brushSizeSlider.percent"].exists)
-
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "4-second-finger-on-canvas-does-not-strand-the-indicator"
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
+    // The owner's bug is a second touch (a Pencil stroke on the canvas) interrupting a held rail
+    // slider. XCUITest cannot synthesise a Pencil at all, and a stand-in second *finger* fares no
+    // better: two concurrently-injected gestures need two threads each driving an `XCUIElement`
+    // interaction, and MEASURED directly (an earlier version of this file), that crashes the whole
+    // test runner — `XCActivityRecord` assertion, "Activity cannot be used after its scope has
+    // completed" — not merely fails to reproduce the bug. `SelectionEditUITests.MidGestureSampler`'s
+    // own concurrent-thread technique is safe only because it reads `XCUIScreen.main.screenshot()`,
+    // which touches the device rather than an element; nothing in this app's XCUITest surface offers
+    // an equivalent safe way to *inject* a second touch. The fix is proven instead by
+    // `BrushEngineLogicTests.testSizePreviewClearsOnABareFalseWithNoPrecedingDragOrRepeatedTrue` (the
+    // state machine's contract) and by the two tests above (that lifting a normal, uninterrupted hold
+    // always clears the indicator) — see the task report for the full account.
 }

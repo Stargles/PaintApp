@@ -196,11 +196,13 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(hexField.exists, "PREMISE: the picker is still up while the line changed")
         attach(app, "2-line-blue-while-the-picker-is-still-up")
 
-        // 4. Dismiss the picker — a tap on the rail's Size badge, outside the popover — and that is
-        //    the one undo step. What the artist does next: tap away, press undo.
-        // TODO (79)(b) removed the permanent percentage badge this used to tap; the plain "Size"
-        // caption underneath the slider is back, with its own identifier, and serves the same job.
-        app.staticTexts["sideToolbar.brushSizeSlider.caption"].tap()
+        // 4. Dismiss the picker — a tap outside the popover, on a spot that does nothing else — and
+        //    that is the one undo step. What the artist does next: tap away, press undo.
+        // TODO (79)(b) removed the permanent percentage badge this file used to tap for exactly this;
+        // `tapAway` is the shared, already-inert way every other picker-dismissal test does it
+        // (`DuplicateOffsetUITests`, `TimelineAndUndoUITests`) — a tap on the rail's own Size caption
+        // reaches the canvas underneath it and discards the live edit instead of committing it.
+        tapAway(app)
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker")
         XCTAssertTrue(isBlue(rgba(canvas, l1Mid)), "the line keeps the picked colour after the picker closes")
         let undo = app.buttons["sideToolbar.undoButton"]

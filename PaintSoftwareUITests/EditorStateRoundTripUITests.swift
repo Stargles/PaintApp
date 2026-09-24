@@ -27,16 +27,15 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         return String(field.dropFirst("xform:".count))
     }
 
-    /// **TODO (79)(b) removed the permanent percentage badge this used to read.** A plain SwiftUI
-    /// `Slider` reports its own current value as its accessibility value with no configuration
-    /// needed — `BrushEditorUITests`' `brushPanel.base.hardness` already relies on the same fact —
-    /// so the slider itself is a strictly more direct reading than a derived badge ever was, and one
-    /// this round trip can still take before, during and after the drag regardless of whether
-    /// anything is being held at the instant it reads.
-    private func readSliderValue(_ slider: XCUIElement) -> String {
-        slider.value as? String ?? "?"
-    }
-
+    /// **TODO (79)(b) removed the permanent percentage badge this used to read**, and the obvious
+    /// replacement does not work: a plain SwiftUI `Slider`'s own accessibility `.value` is usually a
+    /// reliable reading (`BrushEditorUITests`' `brushPanel.base.hardness` relies on exactly that), but
+    /// MEASURED directly against the rail's `VerticalSlider` — rotated `-90°` inside a
+    /// `GeometryReader` — it reported the identical string before *and* after a drag from the bottom
+    /// of the track to its middle, which is a large, unmistakable move on screen. Whatever the rotated
+    /// wrapper does to the accessibility bridge's percentage math, this control's own `.value` cannot
+    /// be trusted, so the round trip is proven the way `BrushSizeSliderUITests` proves the curve
+    /// instead: by what a stroke drawn with the settings actually looks like.
     func testBrushSizeOpacityFrameAndZoomAreWhatTheyWereAfterTheGalleryRoundTrip() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-resetGallery"]
@@ -48,20 +47,24 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         let opacitySlider = app.sliders["sideToolbar.brushOpacitySlider"]
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "PREMISE: the brush tool is the default, so its rail is up")
         XCTAssertTrue(opacitySlider.exists, "PREMISE: and the opacity slider beside it")
-        let defaultSize = readSliderValue(sizeSlider)
-        let defaultOpacity = readSliderValue(opacitySlider)
         let defaultTransform = readTransform(app)
-        XCTAssertNotEqual(defaultOpacity, "?", "PREMISE: a fresh launch's opacity slider reports a value")
 
-        // 1. Size: the default sits at the bottom of the rail; drag the thumb up to the middle.
-        dragVerticalSlider(sizeSlider, fromNormalizedDy: 1.0, toNormalizedDy: 0.5)
-        let size = readSliderValue(sizeSlider)
-        XCTAssertNotEqual(size, defaultSize, "PREMISE: the size slider moved (\(size))")
+        // A point only a near-ceiling brush reaches (size), and the stroke's own centre (opacity) —
+        // `BrushSizeSliderUITests`' probe shape.
+        let nearPoint = CGVector(dx: 0.5, dy: 0.5)
+        let farPoint = CGVector(dx: 0.5, dy: 0.62)
 
+        // 1. Size: the default sits at the bottom of the rail; drag the thumb to the ceiling.
+        dragVerticalSlider(sizeSlider, fromNormalizedDy: 1.0, toNormalizedDy: 0.0)
         // 2. Opacity: 100% sits at the top; drag the thumb down to the middle.
         dragVerticalSlider(opacitySlider, fromNormalizedDy: 0.02, toNormalizedDy: 0.5)
-        let opacity = readSliderValue(opacitySlider)
-        XCTAssertNotEqual(opacity, defaultOpacity, "PREMISE: the opacity slider moved (\(opacity))")
+
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: farPoint.dx, dy: farPoint.dy)),
+                       "PREMISE: the ceiling-sized brush reaches a point 12% of the canvas away")
+        let changedRed = try XCTUnwrap(rgbaPixel(of: canvas, dx: nearPoint.dx, dy: nearPoint.dy)).r
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(waitUntilBlank(canvas, dx: nearPoint.dx, dy: nearPoint.dy), "PREMISE: undo cleared the probe stroke")
 
         // 3. Frame: scrub the ruler a few frames to the right.
         let ruler = app.otherElements["timeline.ruler"]
@@ -89,10 +92,15 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
                       "Tapping the tile reopens the document in the editor")
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "The brush tool comes back with its rail")
 
-        XCTAssertEqual(readSliderValue(sizeSlider), size,
-                       "The brush size is what the artist left it at, not the preset's")
-        XCTAssertEqual(readSliderValue(opacitySlider), opacity,
-                       "The brush opacity too")
+        // A fresh stroke, with no further slider drag: whatever it looks like now is entirely down to
+        // whatever brushSize/brushOpacity the reopened document loaded.
+        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: farPoint.dx, dy: farPoint.dy)),
+                       "The brush size is what the artist left it at, not the preset's — "
+                       + "the far point is still reached")
+        let reopenedRed = try XCTUnwrap(rgbaPixel(of: canvas, dx: nearPoint.dx, dy: nearPoint.dy)).r
+        XCTAssertEqual(Double(reopenedRed), Double(changedRed), accuracy: 12,
+                       "The brush opacity too — the redrawn stroke reads the same lightness as before leaving")
         XCTAssertEqual(readFrameLabel(app)?.current, frame,
                        "The document reopens on the frame the artist was on")
         XCTAssertEqual(readTransform(app), transform,

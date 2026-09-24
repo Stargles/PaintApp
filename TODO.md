@@ -100,41 +100,6 @@ order."*
 
 ---
 
-## (105) A video's speed follows the scene's frame rate
-
-**Status** — filed 2026-09-24. The owner: *"When the fps is set to 12fps instead of 24 and it has an
-inserted video, then that video should play twice as slow, not two times. Right now it plays the same
-speed regardless of what fps you set."*
-
-- [ ] A video advances one step per animation frame, so halving the scene's fps halves its speed.
-
----
-
-## (108) To New Layer's cel spans the cel it was lifted from
-
-**Status** — filed 2026-09-24. The owner: *"When I press to new layer on a selection, it makes a new
-layer but makes the cel cover the entire length of the animation. Make it so the cel is just as long as
-the cel it was lifted from."*
-
-- [ ] The new layer's cel has the source cel's start and length.
-
----
-
-## (79) Brush size and opacity sliders — the follow-ups
-
-**Status** — the log curve is **ruled** (the owner, 2026-09-24: *"the logorithmic brush size changer on
-the ipad feels very nice"*). What is left, in their words: *"I noticed that the eraser does not have
-it. Additionally, the % of screen size icon should not be there, it should only display the % when the
-user is actively adjusting it, and it should display right over or under the brush size pop up
-indicator. There also seems to be a bug where if I start drawing while holding the size indicator, the
-indicator stays on the screen even when i lift my finger off the slider."*
-
-- [ ] The eraser's size slider uses the same `BrushSizeCurve`.
-- [ ] No permanent % badge over the icons; the % shows only while adjusting, beside the size pop-up.
-- [ ] Drawing while a finger holds the slider, then lifting it, leaves no indicator on screen.
-
----
-
 ## (86) The canvas-size ceiling comes from the device, not a constant
 
 **Status** — the fill half closed 2026-09-17 (`FillWindow`). The 6000 ceiling was MEASURED to be this
