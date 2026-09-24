@@ -235,7 +235,7 @@ struct TouchSample {
         var startsSequence = touches.allSatisfy { $0.phase == .began }
         for touch in touches {
             guard recordsInFull || Self.isSequenceEdge(touch.phase),
-                  let sample = sample(touch, in: window, event: event, concurrent: concurrent, recorder: recorder) else { continue }
+                  let sample = sample(touch, in: window, concurrent: concurrent) else { continue }
             recorder.touch(sample)
             if touch.phase == .began, let bound = sample.boundRecognizers {
                 watchNewlyBoundRecognizers(of: touch)
@@ -314,7 +314,7 @@ struct TouchSample {
     private static let moveMinDistance: CGFloat = 2
     private static let moveForceDistance: CGFloat = 24
 
-    private func sample(_ touch: UITouch, in window: UIWindow, event: UIEvent, concurrent: Int, recorder: ActionRecorder) -> TouchSample? {
+    private func sample(_ touch: UITouch, in window: UIWindow, concurrent: Int) -> TouchSample? {
         let key = ObjectIdentifier(touch)
         let phase = touch.phase
         // Hover phases (`regionEntered`/`regionMoved`/`regionExited`, which an Apple Pencil Pro and a
@@ -326,7 +326,7 @@ struct TouchSample {
         let time = touch.timestamp
 
         if phase == .began {
-            let resolved = resolveTarget(for: touch, at: point, in: window, event: event)
+            let resolved = resolveTarget(for: touch, at: point, in: window)
             let track = Track(touchID: nextTouchID, lastPhase: .began, lastEmittedTime: time,
                               lastEmittedPoint: point, skippedSinceEmit: 0,
                               target: resolved.target, targetFrame: resolved.frameInWindow)
@@ -341,7 +341,7 @@ struct TouchSample {
         // never finished when in fact we simply were not watching yet.
         guard var track = tracks[key] else {
             guard phase != .stationary else { return nil }
-            let resolved = resolveTarget(for: touch, at: point, in: window, event: event)
+            let resolved = resolveTarget(for: touch, at: point, in: window)
             let adopted = Track(touchID: nextTouchID, lastPhase: phase, lastEmittedTime: time,
                                 lastEmittedPoint: point, skippedSinceEmit: 0,
                                 target: resolved.target, targetFrame: resolved.frameInWindow)
@@ -509,12 +509,15 @@ struct TouchSample {
     /// carrying the same string in `UIView.accessibilityIdentifier`, found here by a geometric search
     /// over `UIView` frames. That is ~140 edit sites across every view file in the app, for chrome
     /// taps that are already legible from the model events beside them — which is why it was not done.
-    private func resolveTarget(for touch: UITouch, at point: CGPoint, in window: UIWindow, event: UIEvent) -> (target: ResolvedTarget, frameInWindow: CGRect) {
-        // `touch.view` is nil for a `.began` touch here: hit-testing happens *inside* the
-        // `sendEvent` we are wrapping, and we run before it. Doing the hit test ourselves gives the
-        // same answer UIKit is about to compute. Safe to repeat — the two `hitTest` overrides in this
-        // app (`ShapeOverlayView`, `GuideOverlayView`) are pure geometry with no side effects.
-        let hitView = touch.view ?? window.hitTest(point, with: event)
+    private func resolveTarget(for touch: UITouch, at point: CGPoint, in window: UIWindow) -> (target: ResolvedTarget, frameInWindow: CGRect) {
+        // `touch.view` only — **never a hit test of our own**, though one would fill in a touch UIKit
+        // has not bound yet. This app's hit-testing is not side-effect free: MEASURED 2026-09-24, an
+        // extra `window.hitTest(point, with: event)` here made the Move box's rotation knob stop
+        // claiming its own drag, so the touch fell to the container's tap-away and the float baked
+        // (`MoveBoxCommitUITests.testDraggingTheRotationKnobLeavesTheBoxUp` red with it and green
+        // without, alternated against `main`). A recorder that changes what a touch does is
+        // recording something else, so an unbound touch reads `none`.
+        let hitView = touch.view
         let hitClass = hitView.map { String(describing: type(of: $0)) } ?? "none"
         let screenPoint = Self.screenPoint(point, in: window)
 
