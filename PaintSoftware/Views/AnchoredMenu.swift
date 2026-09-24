@@ -229,6 +229,10 @@ struct AnchoredMenu<Content: View>: View {
         }
         .onPreferenceChange(AnchoredMenuSizeKey.self) { measured = $0 }
         .onDisappear { router?.remove(presentation) }
+        // One identity per presentation, so a drawer that swaps which menu it shows in the same slot
+        // (`AnimationTimeline.anchoredMenuLayer`) takes the old one's placement out of the router
+        // rather than leaving it filed under a menu that is gone.
+        .id(presentation)
     }
 }
 
