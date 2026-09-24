@@ -1,30 +1,58 @@
 import SwiftUI
 
-/// TODO (73)'s overhaul: five picker *types* — Disc (Procreate's ring+disc), Triangle (a hue ring
-/// with an HSL triangle inside, Paint Tool SAI/Krita's), Square (the ring+square this picker always
-/// had), Value (H/S/B sliders), and Palettes — switched by a bottom tab bar (icon + label,
+/// TODO (73)'s overhaul, taken further by TODO (106)'s second pass: picker *types* — Triangle (a hue
+/// ring with an HSL triangle inside, Paint Tool SAI/Krita's), Square (the ring+square this picker
+/// always had), Value (H/S/B sliders), and Palettes — switched by a bottom tab bar (icon + label,
 /// Procreate's shape). **Still the app's only colour picker** — the seven call sites (brush, canvas
 /// background, value layer, effect colour, gradient stop, onion tint, selection style) are untouched
-/// by this rewrite: the public surface (`color`, `supportsOpacity`, `.shared` `paletteStore`,
-/// `popoverSize`) is exactly what it was, so none of them changed.
+/// by (106) exactly as they were by (73): the public surface (`color`, `supportsOpacity`, `.shared`
+/// `paletteStore`, `popoverSize`) is unchanged, so none of them changed.
 ///
-/// ## One shared colour model, not five
-/// `hue`/`saturation`/`brightness`/`alpha` (HSB) is the *only* stored colour. Disc/Square read and
-/// write it directly; the Triangle tab converts through `ColorMath.hslToRGB`/`rgbToHSL` using this
-/// same `hue` (never storing a second saturation/lightness pair, and never re-deriving `hue` from the
+/// ## TODO (106), the owner's second pass — what changed and why
+/// - **The Disc type is gone**, whole: the view, the tab, `PickerType.disc`, its tests and the
+///   `ColorMath` square<->disc remap that existed only for it. *"Remove the disc color picker."*
+/// - **The hue phase bug is fixed at its root.** The owner: *"The color picker wheel's color is not
+///   accurate and rotated around 90 degrees out of phase. The red on the wheel is right, but red is
+///   selected at the top."* The ring's `AngularGradient` draws its first colour (`hueRail`'s red) at
+///   3 o'clock and sweeps clockwise; `ColorMath.hueRingAngle`/`hueForRingTouch` used to place the
+///   marker and read the drag as if 0° were the *top* instead — see those functions' own doc
+///   comments for the one convention both now share with the ring's own explicit `startAngle`.
+/// - **The ring is larger, its band thinner, and the inner shape fills what is left** — `ringDiameter`
+///   is just under the panel's own width, `ringThickness` is close to the reference's ~10-12% of the
+///   radius rather than the old quarter of it.
+/// - **The triangle's shading is clipped by its own vector edge, not by a coarse grid's whole cells**
+///   — see `HSLTriangle.trianglePath(in:)` for why that, not the grid's resolution alone, is what was
+///   reading as "very pixelated".
+/// - **The triangle is rotated a further 90° clockwise** — `ColorMath.triangleRotation` — so its
+///   full-hue vertex points at the ring's own red at hue 0, matching the reference, rather than
+///   sitting at the top of its bounding box.
+/// - **The opacity row is `OpacityBar`**, a checkerboard fading into the current colour with a round
+///   thumb, replacing the native `Slider` — *"The opacity slider should also display the color like
+///   in the image."*
+/// - **Current/previous moved to the panel's own top-left corner**, as two small overlapping circles
+///   with no captions, shown once above every tab rather than repeated inside each one — *"the
+///   current and previous color section takes up way too much space. Put it in the top left."*
+/// - **The whole panel is tighter** — less padding, fewer wasted rows — per the owner's *"Try to make
+///   everything compact."*
+///
+/// ## One shared colour model, not four
+/// `hue`/`saturation`/`brightness`/`alpha` (HSB) is the *only* stored colour. Square reads and writes
+/// it directly; the Triangle tab converts through `ColorMath.hslToRGB`/`rgbToHSL` using this same
+/// `hue` (never storing a second saturation/lightness pair, and never re-deriving `hue` from the
 /// round trip — see `applyTriangleSL`, the same achromatic-hue guard `applyHSBA` already needed).
 /// `previousColor` (this file), `ColorHistoryStore.shared` and `PaletteStore.shared` are the other
-/// three things item 1 names as shared rather than per-tab, and every type tab shows all three
-/// (`typeTabBody`) — one previous swatch, one history strip, one palette grid, never a second copy.
+/// three things (73) named as shared rather than per-tab, and every type tab still shows all three
+/// (`header`, `typeTabBody`) — one previous swatch, one history strip, one palette grid, never a
+/// second copy.
 ///
-/// ## Why Square, not Disc, opens first
-/// Item 1's tab bar lists Disc first, and the bar below matches that order. But a dozen *other*
-/// features' XCUITests already reach into this panel assuming its first-shown content is the SV
-/// square (`colorPanel.svSquare`) and the hex field, sight unseen, because that was this picker's one
-/// tab before this overhaul gave it five (`NOTES.md`'s compatibility survey names all of them).
-/// Square is functionally identical to what those tests were written against — a ring instead of a
-/// linear hue bar, everything else the same `SaturationBrightnessSquare` — so making *it* the initial
-/// `pickerType` costs nothing and keeps a dozen unrelated tests honest instead of coincidentally red.
+/// ## Why Square, not Triangle, opens first
+/// The tab bar's first *icon* is Triangle (matching the reference's own left-to-right order), but a
+/// dozen *other* features' XCUITests already reach into this panel assuming its first-shown content
+/// is the SV square (`colorPanel.svSquare`) and the hex field, sight unseen, because that was this
+/// picker's one tab before (73) gave it several. Square is functionally identical to what those tests
+/// were written against — a ring instead of a linear hue bar, everything else the same
+/// `SaturationBrightnessSquare` — so making *it* the initial `pickerType` costs nothing and keeps a
+/// dozen unrelated tests honest instead of coincidentally red.
 struct ColorPickerPanel: View {
     /// The colour this panel edits. Every write goes through here, so the panel has no idea whether
     /// it is driving the brush, the paper, a value layer, an effect or a gradient stop.
@@ -59,22 +87,23 @@ struct ColorPickerPanel: View {
     @State private var previousColor: Color = .black
 
     enum PickerType: String, CaseIterable, Identifiable {
-        case disc, triangle, square, value, palettes
+        case triangle, square, value, palettes
         var id: String { rawValue }
 
+        /// TODO (106): "label them in the reference's spirit" — the reference's own words for these
+        /// four tabs, kept over the rawValue (unchanged, so every existing
+        /// `colorPanel.tab.<rawValue>` identifier still resolves).
         var title: String {
             switch self {
-            case .disc: return "Disc"
-            case .triangle: return "Triangle"
-            case .square: return "Square"
-            case .value: return "Value"
+            case .triangle: return "Wheel"
+            case .square: return "Classic"
+            case .value: return "Values"
             case .palettes: return "Palettes"
             }
         }
 
         var systemImage: String {
             switch self {
-            case .disc: return "circle.fill"
             case .triangle: return "triangle"
             case .square: return "square"
             case .value: return "slider.horizontal.3"
@@ -88,11 +117,20 @@ struct ColorPickerPanel: View {
 
     /// The ring + inner shape's shared bounding box. Fixed rather than `GeometryReader`-sized, so a
     /// drag's normalized offset means the same screen distance in every XCUITest.
-    private static let ringDiameter: CGFloat = 190
-    private static let ringThickness: CGFloat = 24
+    ///
+    /// TODO (106): *"Make the color picker itself as big as possible within the GUI (the diameter of
+    /// the circle is just under the width of the tab)"* — `popoverSize.width` (300) is that width,
+    /// unchanged since (73) so the panel still fits every one of its seven call sites; 280 is "just
+    /// under" it. The band is ~11% of the radius (140), inside the reference's ~10-12% range and much
+    /// thinner than (73)'s quarter of it, so the inner shape gets what the thinner band gives back.
+    private static let ringDiameter: CGFloat = 280
+    private static let ringThickness: CGFloat = 16
     private static var innerDiameter: CGFloat { ringDiameter - ringThickness * 2 - 8 }
     /// The square inscribed in the inner circle (its diagonal, not its side, fills that circle).
     private static var squareSide: CGFloat { innerDiameter / 1.4142135623730951 }
+    /// The opacity bar's fixed width — the panel's content width once `opacityAndHex`'s own
+    /// horizontal padding (16pt a side, `.padding(.horizontal)`'s default) is taken out.
+    private static var opacityBarWidth: CGFloat { popoverSize.width - 32 }
 
     private var currentColor: Color {
         Color.fromHSBA(h: hue, s: saturation, b: brightness, a: alpha)
@@ -108,9 +146,10 @@ struct ColorPickerPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            header
+
             Group {
                 switch pickerType {
-                case .disc: discTab
                 case .triangle: triangleTab
                 case .square: squareTab
                 case .value: valueTab
@@ -172,18 +211,7 @@ struct ColorPickerPanel: View {
         .accessibilityIdentifier("colorPanel.tab.\(type.rawValue)")
     }
 
-    // MARK: - Disc / Triangle / Square tabs
-
-    private var discTab: some View {
-        typeTabBody {
-            shapeArea {
-                HueRing(hue: $hue, diameter: Self.ringDiameter, thickness: Self.ringThickness, onChanged: commitColor)
-                SaturationBrightnessDisc(saturation: $saturation, brightness: $brightness, hue: hue,
-                                         diameter: Self.innerDiameter, onChanged: commitColor)
-            }
-            opacityAndHex
-        }
-    }
+    // MARK: - Triangle / Square tabs
 
     private var triangleTab: some View {
         typeTabBody {
@@ -211,11 +239,13 @@ struct ColorPickerPanel: View {
         ZStack { content() }
             .frame(width: Self.ringDiameter, height: Self.ringDiameter)
             .frame(maxWidth: .infinity)
-            .padding(.top, 4)
     }
 
     /// Wraps a tab's own controls (a shape area + opacity/hex, or the Value tab's sliders) with the
-    /// section every type tab shows below them: current/previous, history, the selected palette.
+    /// section every type tab shows below them: history, the selected palette. Current/previous used
+    /// to repeat here too (73); TODO (106) hoisted it to `header`, shown once above every tab instead
+    /// of once *per* tab, which is most of what made this section "take up way too much space".
+    ///
     /// Scrollable on its own, so it never competes with the shape area's drag gestures for travel —
     /// the same reason the old picker kept its palette library on a separate tab entirely.
     ///
@@ -230,33 +260,31 @@ struct ColorPickerPanel: View {
     /// `ScrollView` is the one flexible piece, and it is the one built to have leftover content
     /// scroll rather than spill.
     private func typeTabBody<Content: View>(@ViewBuilder controls: () -> Content) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             controls()
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    swatchRow
+                VStack(alignment: .leading, spacing: 10) {
                     historySection
                     paletteSection
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 10)
+                .padding(.bottom, 8)
             }
             .frame(maxHeight: .infinity)
         }
-        .padding(.top, 10)
+        .padding(.top, 6)
     }
 
     // MARK: - Value tab
 
     private var valueTab: some View {
         typeTabBody {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 labeledSlider("Hue", value: $hue, id: "colorPanel.value.hueSlider")
                 labeledSlider("Saturation", value: $saturation, id: "colorPanel.value.saturationSlider")
                 labeledSlider("Brightness", value: $brightness, id: "colorPanel.value.brightnessSlider")
             }
             .padding(.horizontal)
-            .padding(.top, 4)
             opacityAndHex
         }
     }
@@ -274,16 +302,21 @@ struct ColorPickerPanel: View {
 
     // MARK: - Opacity + hex (shared by every type tab)
 
+    /// TODO (106): *"The opacity slider should also display the color like in the image"* —
+    /// `OpacityBar` replaces the native `Slider` with a checkerboard fading into the panel's own
+    /// current colour (at full alpha; see the type's own doc comment on why not the live `alpha`)
+    /// and a round thumb. Its own `onChanged` is `commitColor` directly, the same as every other
+    /// shape here, rather than a `Slider`'s `.onChange(of:)` — there is no longer a `Slider` to hang
+    /// that off.
     private var opacityAndHex: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if supportsOpacity {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Opacity: \(Int(alpha * 100))%")
                         .font(.caption)
                         .foregroundColor(.white)
-                    Slider(value: $alpha, in: 0...1)
-                        .accessibilityIdentifier("colorPanel.opacitySlider")
-                        .onChange(of: alpha) { _, _ in commitColor() }
+                    OpacityBar(alpha: $alpha, color: Color.fromHSBA(h: hue, s: saturation, b: brightness, a: 1),
+                              width: Self.opacityBarWidth, onChanged: commitColor)
                 }
             }
             hexRow
@@ -308,47 +341,49 @@ struct ColorPickerPanel: View {
         }
     }
 
-    // MARK: - Current/previous, history, selected palette (item 2 — every type tab)
+    // MARK: - Header: current/previous (TODO (106) — the panel's own top-left corner)
 
-    private var swatchRow: some View {
-        HStack(spacing: 14) {
-            VStack(spacing: 3) {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(currentColor)
-                    .frame(width: 44, height: 32)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.3), lineWidth: 1))
-                    .accessibilityIdentifier("colorPanel.currentSwatch")
-                    .accessibilityValue(currentColor.hexString)
-                Text("Current")
-                    .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
+    /// Two small overlapping circles at the panel's top-left, no captions — TODO (106): *"the
+    /// current and previous color section takes up way too much space. Put it in the top left."*
+    /// Shown once, above every tab (`body`), rather than once per tab the way the old labelled row
+    /// (two 44x32 swatches plus text underneath) was: the app has exactly one current/previous pair
+    /// regardless of which tab is open, and repeating it per tab was most of what made the old row
+    /// expensive. Identifiers are unchanged from (73) — `colorPanel.currentSwatch`/`previousSwatch`
+    /// — only their shape, size and position moved.
+    private var header: some View {
+        ZStack(alignment: .topLeading) {
             Button {
                 swapWithPrevious()
             } label: {
-                VStack(spacing: 3) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(previousColor)
-                        .frame(width: 44, height: 32)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.3), lineWidth: 1))
-                    Text("Previous")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.6))
-                }
+                Circle()
+                    .fill(previousColor)
+                    .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .frame(width: 26, height: 26)
+            .offset(x: 12, y: 12)
             .accessibilityIdentifier("colorPanel.previousSwatch")
             .accessibilityValue(previousColor.hexString)
 
-            Spacer()
+            Circle()
+                .fill(currentColor)
+                .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1.5))
+                .frame(width: 26, height: 26)
+                .accessibilityIdentifier("colorPanel.currentSwatch")
+                .accessibilityValue(currentColor.hexString)
         }
+        .frame(width: 40, height: 40, alignment: .topLeading)
+        .padding(.leading, 10)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    // MARK: - Recent + selected palette (every type tab)
 
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("History")
+                Text("Recent")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                 Spacer()

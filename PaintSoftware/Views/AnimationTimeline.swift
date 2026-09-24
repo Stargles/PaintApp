@@ -351,11 +351,12 @@ struct AnimationTimeline: View {
         case .timelineSlotMenu:
             timelineMenuContent
         case .onionSkinOptions:
-            // ~250 pt wide, the owner's own spec (TODO (70)) — a compact dark panel, not the wide
-            // popover the old layout needed. `OnionSkinPanel` still scrolls internally if a resolution
-            // caution's second line pushes the content past this, so a bad height estimate here clips
-            // nothing silently.
-            OnionSkinPanel(canvasManager: canvasManager).frame(width: 250, height: 500)
+            // 312.5 pt wide — TODO (107), the owner: *"Make it around 0.25x more wider"*, 1.25x the
+            // original 250 (TODO (70)'s own spec) — a compact dark panel, not the wide popover the
+            // old layout needed. `OnionSkinPanel`'s own doc comments carry the fit arithmetic
+            // re-derived at this width; it still scrolls internally if a resolution caution's second
+            // line pushes the content past this, so a bad height estimate here clips nothing silently.
+            OnionSkinPanel(canvasManager: canvasManager).frame(width: 312.5, height: 500)
         case .interpolateOptions:
             InterpolatePanel(canvasManager: canvasManager).frame(width: 260)
         case .graphChannelList:

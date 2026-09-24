@@ -966,17 +966,18 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
         colorButton.tap()
 
-        // Hue ring: drag to the bottom of its bounding box (hue 0.5 == cyan — TODO (73) replaced the
-        // old linear hue bar with a ring, hue 0 straight up and clockwise from there, same
-        // identifier). Deliberately *not* red (the panel's default hue): the ring's hit area is only
-        // its own band (`RingHitArea`), not the whole disc behind it, so the drag must *start* on
-        // that band — well inside the 0.373...0.5 normalized-radius ring, here straight up from
-        // centre — or the touch-down lands on the SV square instead and the whole gesture belongs to
-        // it, never moving the hue; picking a target hue that differs from the default is what makes
-        // that failure mode show up as a wrong colour instead of silently matching by coincidence.
+        // Hue ring: drag to the left of its bounding box (hue 0.5 == cyan — TODO (73) replaced the
+        // old linear hue bar with a ring; TODO (106) fixed its phase, so hue 0 is at 3 o'clock, where
+        // the ring's own red is drawn, and clockwise from there — same identifier throughout). The
+        // ring's hit area is only its own band (`RingHitArea`), not the whole shape behind it, so the
+        // drag must *start* on that band — well inside the ~0.443...0.5 normalized-radius ring, here
+        // straight up from centre — or the touch-down lands on the SV square instead and the whole
+        // gesture belongs to it, never moving the hue; picking a target hue that differs from the
+        // default is what makes that failure mode show up as a wrong colour instead of silently
+        // matching by coincidence.
         let hueSlider = app.otherElements["colorPanel.hueSlider"]
         XCTAssertTrue(hueSlider.waitForExistence(timeout: 5))
-        dragWithinElement(hueSlider, from: CGVector(dx: 0.5, dy: 0.08), to: CGVector(dx: 0.5, dy: 1.0))
+        dragWithinElement(hueSlider, from: CGVector(dx: 0.5, dy: 0.03), to: CGVector(dx: 0.08, dy: 0.5))
 
         // SV square: drag to the top-right corner (saturation 1, brightness 1) so the result is
         // pure, fully-saturated cyan rather than some in-between shade.

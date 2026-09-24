@@ -293,50 +293,46 @@ enum ColorMath {
         return (r1 + m, g1 + m, b1 + m)
     }
 
-    // MARK: - The colour picker's hue ring (Disc/Triangle/Square tabs)
+    // MARK: - The colour picker's hue ring (Triangle/Square tabs)
 
-    /// Where a hue sits on the ring, as radians **clockwise from the top** — the convention
-    /// `AngularGradient`'s default start/direction already use, so the ring drawn with
-    /// `hueRail`'s colours and the marker placed by this function agree with no extra rotation
-    /// fudge either has to apply. `hue == 0` is straight up; `hue` increases clockwise.
+    /// Where a hue sits on the ring, as radians **clockwise from 3 o'clock** — `AngularGradient`'s
+    /// own default `startAngle`/`endAngle` (0°...360°, the ring's own explicit choice in `HueRing`)
+    /// paint their first colour at that same 3-o'clock point and sweep clockwise from there in this
+    /// y-down view, so `hue == 0` (`hueRail`'s first, red, sample) is drawn at 3 o'clock, not at the
+    /// top. TODO (106): this is the fix for the phase bug the owner reported — *"The red on the
+    /// wheel is right, but red is selected at the top"* — which was exactly this function and
+    /// `hueForRingTouch` disagreeing with the gradient about where angle 0 is. `hueRingAngle` and
+    /// `hueForRingTouch` are exact inverses of each other and of this same convention; `HueRing`'s
+    /// marker and drag handler both read only these two functions, never a second copy of "0 is
+    /// where red is drawn".
     static func hueRingAngle(forHue hue: Double) -> Double {
         let wrapped = (hue.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
         return wrapped * 2 * .pi
     }
 
     /// Inverse of `hueRingAngle`: the hue (0...1) for a touch at `(dx, dy)` relative to the ring's
-    /// centre, in the same y-down screen coordinates every gesture here already uses. The centre
+    /// centre, in the same y-down screen coordinates every gesture here already uses — `atan2(dy,
+    /// dx)`, the plain screen-angle convention (0 along +x/3-o'clock, increasing clockwise since y
+    /// grows downward), matching `hueRingAngle` exactly rather than a rotated copy of it. The centre
     /// itself (`dx == dy == 0`) reads as hue 0 rather than NaN — an arbitrary but harmless answer,
     /// since a touch exactly on the centre point has no well-defined angle anyway.
     static func hueForRingTouch(dx: Double, dy: Double) -> Double {
         guard dx != 0 || dy != 0 else { return 0 }
-        let angle = atan2(dx, -dy)
+        let angle = atan2(dy, dx)
         let normalized = angle < 0 ? angle + 2 * .pi : angle
         return normalized / (2 * .pi)
     }
 
-    // MARK: - Square <-> disc (the Disc tab's saturation/brightness area)
-
-    /// Maps a point in the square `[-1, 1] x [-1, 1]` onto the unit disc, preserving the angle from
-    /// the origin and rescaling the radius so the square's edge lands on the disc's edge — the
-    /// "radial"/Chebyshev square-to-disc map. Closed-form and exactly invertible by `discToSquare`
-    /// (down to floating-point error), unlike the elliptical-grid mapping, which needs a
-    /// difference-of-square-roots that is fussier near the edges. `(0, 0)` maps to `(0, 0)`.
-    static func squareToDisc(u: Double, v: Double) -> (x: Double, y: Double) {
-        let m = max(abs(u), abs(v))
-        guard m > 0 else { return (0, 0) }
-        let r = (u * u + v * v).squareRoot()
-        let scale = m / r
-        return (u * scale, v * scale)
-    }
-
-    /// Inverse of `squareToDisc`: a point in the unit disc back to the square `[-1, 1] x [-1, 1]`.
-    static func discToSquare(x: Double, y: Double) -> (u: Double, v: Double) {
-        let m = max(abs(x), abs(y))
-        guard m > 0 else { return (0, 0) }
-        let r = (x * x + y * y).squareRoot()
-        let scale = r / m
-        return (x * scale, y * scale)
+    /// The `HSLTriangle`'s own rotation, on top of tracking the ring's marker — TODO (106): *"the
+    /// triangle also should be rotated 90 degrees clockwise"* so its full-hue vertex points at the
+    /// ring's own red at hue 0, matching the reference, rather than sitting at the top of its
+    /// bounding box. `trianglePureHueVertex` is `(0, -1)` in the triangle's own local frame — screen
+    /// angle 270° (straight up) by `hueRingAngle`'s convention — so reaching `hueRingAngle(forHue:
+    /// hue)` needs exactly a further +90°: `270° + 90° == 360° == 0°` at hue 0, which is
+    /// `hueRingAngle`'s own red. The view applies this once, to both the shading's rotation and the
+    /// marker's, so the two can never disagree about where the corner points.
+    static func triangleRotation(forHue hue: Double) -> Double {
+        hueRingAngle(forHue: hue) + .pi / 2
     }
 
     // MARK: - The HSL triangle (the Triangle tab's saturation/lightness area)

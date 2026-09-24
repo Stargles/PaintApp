@@ -62,16 +62,18 @@ toolset, and a frame-by-frame animation timeline.
 - **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them
   become derived (lattice + ARAP warp), with motion groups, guide strokes, editing at an in-between
   and Commit — see [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md)
-- **Color**: five picker types over one shared colour model, switched by a bottom tab bar —
-  **Disc** (a hue ring with a saturation/brightness disc, Procreate's), **Triangle** (a hue ring with
-  an HSL triangle, Paint Tool SAI/Krita's), **Square** (a hue ring with the SV square), **Value**
-  (H/S/B sliders) and **Palettes** (the multi-palette library: create/rename/delete/set default, each
-  with its own swatch grid). Every type tab also shows the current/previous swatches (tap previous to
-  swap back), a **History** strip of the last colours actually used to paint, and the selected
-  palette's grid — tap a swatch to pick it, long-press an empty cell to add the current colour.
-  **One picker for the whole app** — brush, canvas background, value layer, effect colour, gradient
-  stop, onion tint and selection style all open the same panel, and the only thing that varies
-  between call sites is whether opacity is offered. Plus an **eyedropper** on the side rail: select
+- **Color**: four picker types over one shared colour model, switched by a bottom tab bar — **Wheel**
+  (a hue ring with an HSL triangle, Paint Tool SAI/Krita's, the triangle's full-hue vertex pointing at
+  the ring's own red), **Classic** (a hue ring with the SV square), **Values** (H/S/B sliders) and
+  **Palettes** (the multi-palette library: create/rename/delete/set default, each with its own swatch
+  grid). The ring fills nearly the panel's own width; current/previous sit as two small overlapping
+  circles at the top-left rather than a labelled row, and the opacity control is a checkerboard bar
+  fading into the current colour. Every type tab also shows a **Recent** strip of the last colours
+  actually used to paint and the selected palette's grid — tap a swatch to pick it, long-press an
+  empty cell to add the current colour. **One picker for the whole app** — brush, canvas background,
+  value layer, effect colour, gradient stop, onion tint and selection style all open the same panel,
+  and the only thing that varies between call sites is whether opacity is offered. Plus an
+  **eyedropper** on the side rail: select
   it, tap the canvas, and the colour under the tap becomes the brush colour. It samples the composite
   (what is on screen, paper included) and reverts to the previous tool
 - **Gallery**: a project browser with thumbnails, backed by on-disk project packages
@@ -172,8 +174,8 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 1. Pick Pen/Pencil, Eraser, Fill, or Select/Move from the top toolbar.
 2. Adjust size/opacity (or a tool-specific setting) from the side rail sliders, or open the tool's
    panel for its full settings (shape, stabilization, etc.).
-3. Pick a color from the color picker — Disc, Triangle, Square or Value, whichever tab you're on —
-   or a saved palette swatch, a recent colour from History, or the Palettes tab's library.
+3. Pick a color from the color picker — Wheel, Classic or Values, whichever tab you're on — or a
+   saved palette swatch, a recent colour from the Recent strip, or the Palettes tab's library.
    **There is one picker**: the same panel drives the brush, the canvas background, a value layer's
    colour, an effect's colour, a gradient stop, the onion tint and the selection style, differing
    only in whether it offers opacity.

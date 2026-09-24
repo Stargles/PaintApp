@@ -269,16 +269,20 @@ struct OnionSkinPanel: View {
     /// `OnionSkinOpacityRamp` for exactly what that means, including what a drag to zero does and why
     /// a far slider stops short of full.
     ///
-    /// **Sized to fit `maxSkinsPerSide` (5) slots on both sides inside this panel's fixed 250pt
-    /// width, at every count the count sliders can reach.** Found in review: a slot sized for the old
-    /// 380pt panel (26pt wide, 4pt gaps — see `slotSlider`) fit that container with room to spare, but
-    /// the redesign's 250pt width was not matched by an equivalent shrink, so at Previous=5/Next=5 the
-    /// row demanded ~251pt against 226pt of content width (250 minus the body's 12pt padding each
-    /// side) — 25pt too wide, silently clipped by the enclosing `ScrollView`'s bounds with no
-    /// horizontal scroll to reach the rest. `slotSlider`'s 16pt width and 2pt inter-slot gap (below)
-    /// bring one column's worst case to 5*16+4*2=88pt, so the whole row —
-    /// 88 + 6 (row spacing) + 20 (the link icon's own frame) + 6 + 88 = 208pt — clears 226pt with an
-    /// 18pt margin at the count sliders' own maximum.
+    /// **Sized to fit `maxSkinsPerSide` (5) slots on both sides inside this panel's own width, at
+    /// every count the count sliders can reach.** Found in review: a slot sized for the old 380pt
+    /// panel (26pt wide, 4pt gaps — see `slotSlider`) fit that container with room to spare, but the
+    /// 250pt redesign's width was not matched by an equivalent shrink, so at Previous=5/Next=5 the row
+    /// demanded ~251pt against 226pt of content width — 25pt too wide, silently clipped by the
+    /// enclosing `ScrollView`'s bounds with no horizontal scroll to reach the rest.
+    ///
+    /// **Re-derived, not scaled, at TODO (107)'s 312.5pt width** (1.25x the 250 above) — the owner
+    /// asked for the extra width to go into breathing room, not into the same cramped fit stretched
+    /// proportionally. Content width is 312.5 minus the body's 12pt padding each side = 288.5.
+    /// `slotSlider`'s 20pt width and 4pt inter-slot gap (below) bring one column's worst case to
+    /// 5*20+4*4=116pt, so the whole row — 116 + 6 (row spacing) + 20 (the link icon's own frame) + 6
+    /// + 116 = 264pt — clears 288.5pt with a 24.5pt margin at the count sliders' own maximum, a wider
+    /// margin than the old fit's 18pt as well as wider sliders.
     private var opacitySliders: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Opacity")
@@ -327,7 +331,9 @@ struct OnionSkinPanel: View {
                 // Previous reads right-to-left so the nearest skin of each side sits closest to the
                 // divider — the divider being where the current drawing is.
                 let order = side == .previous ? Array((1...count).reversed()) : Array(1...count)
-                HStack(alignment: .bottom, spacing: 2) {
+                // 4pt, not the pre-(107) 2pt — see the fit arithmetic in `opacitySliders`'s doc
+                // comment, re-derived at TODO (107)'s wider panel rather than left as it was.
+                HStack(alignment: .bottom, spacing: 4) {
                     ForEach(order, id: \.self) { slot in slotSlider(side: side, slot: slot) }
                 }
             }
@@ -344,15 +350,15 @@ struct OnionSkinPanel: View {
             // render transform, so the accessibility identifier and the value are untouched and
             // XCUITest still sees an ordinary slider.
             //
-            // 16pt, not the pre-redesign 26pt: see the fit arithmetic in `opacitySliders`'s doc
-            // comment, sized against `maxSkinsPerSide` slots on each side inside this panel's fixed
-            // width, not against however many happen to be showing right now.
+            // 20pt, not the pre-redesign 26pt or TODO (70)'s 16pt: see the fit arithmetic in
+            // `opacitySliders`'s doc comment, sized against `maxSkinsPerSide` slots on each side
+            // inside this panel's own width, not against however many happen to be showing right now.
             Slider(value: Binding(get: { value },
                                   set: { canvasManager.onionSkin.setOpacity($0, slot: slot, on: side) }),
                    in: 0...1)
                 .frame(width: 88)
                 .rotationEffect(.degrees(-90))
-                .frame(width: 16, height: 88)
+                .frame(width: 20, height: 88)
                 .accessibilityIdentifier("onionPanel.\(side.rawValue).opacity\(slot)")
 
             // ToonSquid's own dot under each slider — its out-of-pegs transform-handle feature stays

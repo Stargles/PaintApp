@@ -1,13 +1,18 @@
 import SwiftUI
 
-/// The gesture areas for TODO (73)'s four picker types — `HueRing` (Disc/Triangle/Square tabs all
-/// share it) plus one shape each: `SaturationBrightnessSquare` (today's, factored out unchanged),
-/// `SaturationBrightnessDisc`, `HSLTriangle`. Every shape here writes into `ColorPickerPanel`'s own
-/// `hue`/`saturation`/`brightness` (HSB) state via bindings — there is no second copy of the colour
-/// anywhere in this file, per the brief: each shape is a pure view over the one state the panel owns.
+/// The gesture areas for TODO (73)/(106)'s picker types — `HueRing` (Triangle/Square tabs share it)
+/// plus one shape each: `SaturationBrightnessSquare` (today's, factored out unchanged), `HSLTriangle`
+/// — and `OpacityBar`, TODO (106)'s checkerboard-and-thumb opacity control. Every shape here writes
+/// into `ColorPickerPanel`'s own `hue`/`saturation`/`brightness`/`alpha` (HSB) state via bindings —
+/// there is no second copy of the colour anywhere in this file, per the brief: each shape is a pure
+/// view over the one state the panel owns.
 ///
-/// All four are fixed-size (`diameter`/`size` passed in) rather than `GeometryReader`-sized, so the
+/// All are fixed-size (`diameter`/`size`/`width` passed in) rather than `GeometryReader`-sized, so the
 /// panel controls layout and a drag's normalized offset means the same thing in every XCUITest.
+///
+/// **The Disc picker type is gone (TODO (106)): "Remove the disc color picker."** Its shape
+/// (`SaturationBrightnessDisc`) and `ColorMath`'s `squareToDisc`/`discToSquare` remap left with it —
+/// nothing else read them.
 
 // MARK: - Hue ring
 
@@ -17,7 +22,7 @@ import SwiftUI
 /// would still count as inside).
 ///
 /// **Why this exists at all, rather than `HueRing` just using `Circle()` for its `contentShape` (the
-/// whole disc).** The Disc/Square/Triangle tabs each centre a *second*, smaller shape inside the same
+/// whole disc).** The Square/Triangle tabs each centre a *second*, smaller shape inside the same
 /// bounding box as the ring. A ring whose hit area is the *whole* disc overlaps that inner shape's
 /// own hit area everywhere the inner shape exists — and since a drag's touch-down decides which
 /// gesture owns the whole gesture, a drag begun at the ring's own centre (which is inside the inner
@@ -37,7 +42,8 @@ private struct RingHitArea: Shape {
 
 /// The hue selector every ring-based tab shares. Reuses `colorPanel.hueSlider`'s identifier even
 /// though the control is no longer a bar — the string is what tests look up, and
-/// `ColorMath.hueRingAngle`/`hueForRingTouch` are the ring's math (0 at top, clockwise).
+/// `ColorMath.hueRingAngle`/`hueForRingTouch` are the ring's math (0 at 3 o'clock, clockwise — see
+/// their own doc comments for TODO (106)'s phase fix).
 struct HueRing: View {
     @Binding var hue: Double
     var diameter: CGFloat
@@ -53,7 +59,13 @@ struct HueRing: View {
         ZStack {
             Circle()
                 .strokeBorder(
-                    AngularGradient(gradient: Gradient(colors: Self.spectrum), center: .center),
+                    // Explicit rather than relying on the default: this **is** the "one convention"
+                    // `ColorMath.hueRingAngle`'s doc comment names — 0° at 3 o'clock, sweeping
+                    // clockwise through `spectrum`'s hue-0-to-1 order — stated here instead of left
+                    // implicit, so the drawing, the marker and the drag handler are reading the same
+                    // fact rather than two of them assuming SwiftUI's default matches the third.
+                    AngularGradient(gradient: Gradient(colors: Self.spectrum), center: .center,
+                                     startAngle: .degrees(0), endAngle: .degrees(360)),
                     lineWidth: thickness
                 )
             marker
@@ -77,8 +89,8 @@ struct HueRing: View {
     private var marker: some View {
         let angle = ColorMath.hueRingAngle(forHue: hue)
         let radius = Double(diameter - thickness) / 2
-        let x = Double(diameter) / 2 + sin(angle) * radius
-        let y = Double(diameter) / 2 - cos(angle) * radius
+        let x = Double(diameter) / 2 + cos(angle) * radius
+        let y = Double(diameter) / 2 + sin(angle) * radius
         return Circle()
             .strokeBorder(Color.white, lineWidth: 2)
             .background(Circle().fill(Color(hue: hue, saturation: 1, brightness: 1)))
@@ -128,86 +140,6 @@ struct SaturationBrightnessSquare: View {
     }
 }
 
-// MARK: - Saturation/brightness disc (Disc tab — Procreate's)
-
-/// The same saturation/brightness pairing the square offers, rendered (and picked) inside a circle
-/// instead — `ColorMath.squareToDisc`/`discToSquare` is what makes that more than a cosmetic crop:
-/// every corner of the square (including full saturation *and* full brightness together) still
-/// lands somewhere on the disc's edge, just redistributed around it by angle, so the disc loses none
-/// of the square's range.
-///
-/// **Rendered with `Canvas`, not a gradient.** `LinearGradient`/`RadialGradient` can't express the
-/// disc<->square remap, and drawing a plain square gradient cropped to a circle would show a colour
-/// at the touch point that disagrees with what `discToSquare` computes there — the dot would sit on
-/// top of the wrong swatch. The grid is coarse (28 cells across) because it only has to look like a
-/// smooth disc from an arm's length away, not be a pixel-accurate colour picker in its own right —
-/// the marker (not the fill) is what the dot is actually checked against.
-struct SaturationBrightnessDisc: View {
-    @Binding var saturation: Double
-    @Binding var brightness: Double
-    var hue: Double
-    var diameter: CGFloat
-    var accessibilityID: String = "colorPanel.disc"
-    var onChanged: () -> Void = {}
-
-    private static let gridSize = 28
-
-    var body: some View {
-        ZStack {
-            Canvas { context, size in
-                let cell = size.width / CGFloat(Self.gridSize)
-                for row in 0..<Self.gridSize {
-                    for col in 0..<Self.gridSize {
-                        let localX = (Double(col) + 0.5) / Double(Self.gridSize) * 2 - 1
-                        let localY = (Double(row) + 0.5) / Double(Self.gridSize) * 2 - 1
-                        guard localX * localX + localY * localY <= 1 else { continue }
-                        let square = ColorMath.discToSquare(x: localX, y: localY)
-                        let s = min(max((square.u + 1) / 2, 0), 1)
-                        let b = min(max(1 - (square.v + 1) / 2, 0), 1)
-                        let rgb = ColorMath.hsbToRGB(h: hue, s: s, v: b)
-                        let rect = CGRect(x: CGFloat(col) * cell, y: CGFloat(row) * cell,
-                                          width: cell + 0.75, height: cell + 0.75)
-                        context.fill(Path(rect), with: .color(Color(red: rgb.r, green: rgb.g, blue: rgb.b)))
-                    }
-                }
-            }
-            .clipShape(Circle())
-
-            marker
-        }
-        .frame(width: diameter, height: diameter)
-        .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    var localX = Double(value.location.x - diameter / 2) / Double(diameter / 2)
-                    var localY = Double(value.location.y - diameter / 2) / Double(diameter / 2)
-                    let r = (localX * localX + localY * localY).squareRoot()
-                    if r > 1, r > 0 { localX /= r; localY /= r }
-                    let square = ColorMath.discToSquare(x: localX, y: localY)
-                    saturation = min(max((square.u + 1) / 2, 0), 1)
-                    brightness = min(max(1 - (square.v + 1) / 2, 0), 1)
-                    onChanged()
-                }
-        )
-        .accessibilityIdentifier(accessibilityID)
-    }
-
-    private var marker: some View {
-        let u = saturation * 2 - 1
-        let v = (1 - brightness) * 2 - 1
-        let point = ColorMath.squareToDisc(u: u, v: v)
-        let x = (point.x + 1) / 2 * Double(diameter)
-        let y = (point.y + 1) / 2 * Double(diameter)
-        return Circle()
-            .strokeBorder(Color.white, lineWidth: 2)
-            .background(Circle().fill(Color.fromHSBA(h: hue, s: saturation, b: brightness, a: 1)))
-            .frame(width: 18, height: 18)
-            .position(x: CGFloat(x), y: CGFloat(y))
-            .allowsHitTesting(false)
-    }
-}
-
 // MARK: - HSL triangle (Triangle tab — Paint Tool SAI / Krita's)
 
 /// A hue ring with an HSL triangle inside: one corner white, one black, one the current hue at full
@@ -216,11 +148,17 @@ struct SaturationBrightnessDisc: View {
 /// only draws the triangle (rotated so its hue corner tracks the ring) and turns a drag into a
 /// local-frame point for that maths to read.
 ///
-/// **Saturation/lightness, not saturation/brightness.** The Disc and Square tabs share the panel's
+/// **Saturation/lightness, not saturation/brightness.** The Square tab shares the panel's
 /// `saturation`/`brightness` (HSB) state directly; this tab reads/writes through
 /// `ColorMath.hslToRGB(h: hue, …)` / `rgbToHSB` using the *same* `hue` (never re-deriving it from the
 /// round trip, which is how `ColorPickerPanel.applyHSBA` already avoids losing hue at an achromatic
 /// point) — so the picker still has exactly one colour, just two ways to parameterize a plane of it.
+///
+/// **The rotation is `ColorMath.triangleRotation`, not just the ring's own angle** — TODO (106)'s
+/// "turned 90° clockwise" on top of tracking the marker, so the full-hue vertex points at the ring's
+/// red at hue 0 instead of sitting at the top of the bounding box. See that function's doc comment
+/// for the arithmetic; the view only applies it, identically for the shading and the marker, so the
+/// two can never disagree about where the corner points.
 struct HSLTriangle: View {
     /// Plain values, not `@Binding` — the panel's canonical state is HSB (`hue`/`saturation`/
     /// `brightness`), and `saturation`/`lightness` here are HSL, *derived* from it each render.
@@ -235,22 +173,32 @@ struct HSLTriangle: View {
     var accessibilityID: String = "colorPanel.triangle"
     var onChanged: (_ saturation: Double, _ lightness: Double) -> Void = { _, _ in }
 
-    private static let gridSize = 26
+    /// TODO (106): "the edges are very pixelated, not smooth" — the fix reads this to size the
+    /// sampling grid against the display's actual pixel density rather than a fixed point count (see
+    /// `sampleCount(for:)`), and the edge itself no longer depends on the grid at all (see
+    /// `trianglePath(in:)`'s doc comment).
+    @Environment(\.displayScale) private var displayScale
 
-    /// Local-frame angle the hue corner should point at, so the triangle visibly tracks the ring's
-    /// own marker rather than sitting still while only its fill colour changes.
-    private var rotation: Double { ColorMath.hueRingAngle(forHue: hue) }
+    private var rotation: Double { ColorMath.triangleRotation(forHue: hue) }
 
     var body: some View {
         ZStack {
             Canvas { context, size in
-                let cell = size.width / CGFloat(Self.gridSize)
-                for row in 0..<Self.gridSize {
-                    for col in 0..<Self.gridSize {
-                        let localX = (Double(col) + 0.5) / Double(Self.gridSize) * 2 - 1
-                        let localY = (Double(row) + 0.5) / Double(Self.gridSize) * 2 - 1
+                // The true vector edge, clipped once before any fill — CoreGraphics antialiases a
+                // path clip, which is what makes the boundary smooth regardless of how coarse the
+                // shading grid below it is. This replaces the old per-cell `triangleContains` guard,
+                // which drew a *staircase* of whole grid cells at the boundary instead: a cell was
+                // either painted in full or skipped in full, so the edge was only ever as smooth as
+                // one cell was small.
+                context.clip(to: trianglePath(in: size))
+
+                let count = Self.sampleCount(for: size.width, displayScale: displayScale)
+                let cell = size.width / CGFloat(count)
+                for row in 0..<count {
+                    for col in 0..<count {
+                        let localX = (Double(col) + 0.5) / Double(count) * 2 - 1
+                        let localY = (Double(row) + 0.5) / Double(count) * 2 - 1
                         let unrotated = rotate(x: localX, y: localY, by: -rotation)
-                        guard ColorMath.triangleContains(x: unrotated.x, y: unrotated.y) else { continue }
                         let sl = ColorMath.triangleSaturationLightness(x: unrotated.x, y: unrotated.y)
                         let rgb = ColorMath.hslToRGB(h: hue, s: sl.s, l: sl.l)
                         let rect = CGRect(x: CGFloat((localX + 1) / 2) * size.width - cell / 2,
@@ -260,7 +208,6 @@ struct HSLTriangle: View {
                     }
                 }
             }
-            .clipShape(Circle())
 
             marker
         }
@@ -277,6 +224,32 @@ struct HSLTriangle: View {
                 }
         )
         .accessibilityIdentifier(accessibilityID)
+    }
+
+    /// The exact triangle the shading is clipped to, built from the same three vertices and the same
+    /// `rotation` the shading and the marker use, in this canvas's own point space — so the boundary
+    /// CoreGraphics draws is the triangle the maths describes, not an approximation of it.
+    private func trianglePath(in size: CGSize) -> Path {
+        let corners = [ColorMath.trianglePureHueVertex, ColorMath.triangleWhiteVertex, ColorMath.triangleBlackVertex]
+        var path = Path()
+        for (index, corner) in corners.enumerated() {
+            let rotated = rotate(x: corner.x, y: corner.y, by: rotation)
+            let point = CGPoint(x: CGFloat((rotated.x + 1) / 2) * size.width,
+                                 y: CGFloat((rotated.y + 1) / 2) * size.height)
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// Samples-per-axis for the shading grid, scaled by the display's own pixel density rather than
+    /// fixed in points — the old constant (26, chosen with no reference to any display) is what made
+    /// the shading itself a coarse mosaic independently of the edge; the edge is `trianglePath`'s
+    /// job now, this is only the interior's. Clamped at both ends: 40 is the old grid's rough order
+    /// of magnitude (a floor so a 1x display is never worse than before), 120 is enough that a finer
+    /// grid stops being visible at arm's length and would only cost render time.
+    private static func sampleCount(for widthPoints: CGFloat, displayScale: CGFloat) -> Int {
+        min(120, max(40, Int((widthPoints * displayScale / 2).rounded())))
     }
 
     private var marker: some View {
@@ -298,5 +271,66 @@ struct HSLTriangle: View {
     private func rotate(x: Double, y: Double, by angle: Double) -> (x: Double, y: Double) {
         let c = cos(angle), s = sin(angle)
         return (x * c - y * s, x * s + y * c)
+    }
+}
+
+// MARK: - Opacity bar (every tab — TODO (106))
+
+/// A horizontal checkerboard-to-colour bar with a round drag thumb — TODO (106): *"The opacity
+/// slider should also display the color like in the image"* — replacing the native `Slider` the
+/// opacity row used before. Built as its own gesture view for the same reason `HueRing` and the
+/// others are: a native `Slider` has no public track-styling API this app's deployment target can
+/// use, so a control whose *track itself* has to carry a picture (a checkerboard fading into the
+/// current colour) is built the way every other custom shape in this file already is.
+///
+/// **Fixed-width, not `GeometryReader`-sized**, for the same reason every other shape here is: a
+/// drag's fraction of `width` has to mean the same screen distance in every XCUITest.
+struct OpacityBar: View {
+    @Binding var alpha: Double
+    /// The picker's current colour at full alpha — the bar fades *into* this, not into whatever
+    /// `alpha` currently is, or the gradient would be describing the colour it is drawn with rather
+    /// than the colour dragging to 1 would produce.
+    var color: Color
+    var width: CGFloat
+    var height: CGFloat = 22
+    var accessibilityID: String = "colorPanel.opacitySlider"
+    var onChanged: () -> Void = {}
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // The track only — clipped to its own rounded-rect shape so the checkerboard doesn't
+            // spill past rounded corners. The thumb is a *sibling* in the outer `ZStack` below,
+            // deliberately outside this clip: it is taller than `height` on purpose (a thumb flush
+            // with a thin bar is hard to grab), and clipping it to the track's own rect would crop
+            // its top and bottom into a lens shape instead of leaving it a full circle.
+            ZStack(alignment: .leading) {
+                CheckerboardPattern()
+                LinearGradient(colors: [color.opacity(0), color.opacity(1)], startPoint: .leading, endPoint: .trailing)
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: height / 2))
+            .overlay(RoundedRectangle(cornerRadius: height / 2).stroke(Color.white.opacity(0.25), lineWidth: 1))
+
+            thumb
+        }
+        .frame(width: width, height: height)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    alpha = min(max(Double(value.location.x / width), 0), 1)
+                    onChanged()
+                }
+        )
+        .accessibilityIdentifier(accessibilityID)
+    }
+
+    private var thumb: some View {
+        Circle()
+            .strokeBorder(Color.white, lineWidth: 2)
+            .background(Circle().fill(color.opacity(alpha)))
+            .frame(width: height + 6, height: height + 6)
+            .position(x: CGFloat(alpha) * width, y: height / 2)
+            .allowsHitTesting(false)
     }
 }

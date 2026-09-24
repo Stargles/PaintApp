@@ -62,6 +62,49 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         attach(app, "edit-band-collapsed")
     }
 
+    /// TODO (109) — the owner: *"The edit button in the select menu should be beside fill and to new
+    /// layer."* Edit now sits directly after Fill in the action row (`SelectPanel.body`), so this
+    /// checks what is actually drawn rather than only the source order: same row as Fill and To New
+    /// Layer (equal `minY`), after Fill rather than before it, and close enough to be read as
+    /// adjacent rather than sitting across the row the way it did before (Fill / Clear / Deselect /
+    /// Edit).
+    func testEditSitsBesideFillAndToNewLayerInTheActionRow() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = visibleCanvasBounds(canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector {
+            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
+                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
+        }
+        drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+
+        let fill = app.buttons["selectPanel.fillButton"]
+        let toNewLayer = app.buttons["selectPanel.moveToNewLayerButton"]
+        let edit = app.buttons["selectPanel.editDisclosure"]
+        XCTAssertTrue(fill.waitForExistence(timeout: 5))
+        XCTAssertTrue(toNewLayer.waitForExistence(timeout: 5))
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+
+        // `accuracy: 8`, not 1: every tab in this row is its own icon+label `VStack`, and a glyph a
+        // point or two taller than its neighbour (compare "paintbrush.fill" to "slider.horizontal.3")
+        // shifts a centred stack's own `minY` by a few points even though all five sit in one
+        // `HStack` with no divider between them — a different *row* is tens of points away, not a
+        // handful, so this still tells the two apart.
+        XCTAssertEqual(edit.frame.minY, fill.frame.minY, accuracy: 8, "Edit sits in Fill's own row")
+        XCTAssertEqual(edit.frame.minY, toNewLayer.frame.minY, accuracy: 8, "…and To New Layer's")
+        XCTAssertGreaterThan(edit.frame.minX, fill.frame.minX, "Edit sits after Fill, not before it")
+        XCTAssertLessThan(edit.frame.minX - fill.frame.maxX, fill.frame.width,
+                          "Edit should sit immediately beside Fill, not across the row from it")
+        attach(app, "edit-beside-fill-and-to-new-layer")
+    }
+
     private func attach(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name

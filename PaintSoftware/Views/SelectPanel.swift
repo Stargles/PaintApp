@@ -173,6 +173,11 @@ struct SelectPanel: View {
                 divider
             }
 
+            // TODO (109) — the owner: *"The edit button in the select menu should be beside fill and
+            // to new layer."* `editDisclosure` sits right after Fill now, so To New Layer / Fill /
+            // Edit — the three verbs that act on the loop's own ink and colour — read as one
+            // consecutive group, rather than Edit sitting alone at the far end of the row past
+            // Clear and Deselect (which act on the *selection*, not its content).
             HStack(spacing: 0) {
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
                     .accessibilityIdentifier("selectPanel.duplicateButton")
@@ -180,11 +185,11 @@ struct SelectPanel: View {
                     .accessibilityIdentifier("selectPanel.moveToNewLayerButton")
                 actionTab(icon: "paintbrush.fill", title: "Fill") { canvasManager.fillSelection() }
                     .accessibilityIdentifier("selectPanel.fillButton")
+                editDisclosure
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
                     .accessibilityIdentifier("selectPanel.deselectButton")
-                editDisclosure
             }
             .padding(.vertical, 6)
 
@@ -202,11 +207,11 @@ struct SelectPanel: View {
 
     // MARK: - The edit band (TODO (42))
 
-    /// **The one icon the edit band folds behind** — TODO (90). The last tab of the action row, lit
-    /// while the band is open, and it reads `expanded`/`collapsed` as its value the way the
-    /// timeline's group chevron does, so a test can tell the two apart without measuring. Disabled
-    /// without a selection like every other tab in the row, since the band it unfolds is up only with
-    /// one.
+    /// **The one icon the edit band folds behind** — TODO (90), placed beside Fill and To New Layer
+    /// in the action row since TODO (109). Lit while the band is open, and it reads
+    /// `expanded`/`collapsed` as its value the way the timeline's group chevron does, so a test can
+    /// tell the two apart without measuring. Disabled without a selection like every other tab in the
+    /// row, since the band it unfolds is up only with one.
     private var editDisclosure: some View {
         let live = hasSelection
         return Button {

@@ -110,40 +110,6 @@ speed regardless of what fps you set."*
 
 ---
 
-## (106) Colour picker, second pass
-
-**Status** — filed 2026-09-24. The owner: *"The color picker wheel's color is not accurate and rotated
-around 90 degrees out of phase. The red on the wheel is right, but red is selected at the top.
-Additionally, The wheel and the square/triangle inside should be a lot bigger, and the width of the ring
-slightly smaller. Make the color picker itself as big as possible within the GUI (the diameter of the
-circle is just under the width of the tab) Remove the disc color picker. If you look at the actual color
-picker for triangle (and disc), the edges are very pixelated, not smooth. Fix. The triangle also should
-be rotated 90 degrees clockwise. The opacity slider should also display the color like in the image.
-Next, the current and previous color section takes up way too much space. Put it in the top left. The
-image I attached is a good reference. Try to get it to look like it. Try to make everything compact."*
-The reference (2026-09-24): a compact dark panel; current and previous colour as two overlapping
-circles at the top left; a large hue ring nearly the panel's width with a triangle inside whose
-full-hue vertex points right; below it an opacity bar drawn as a checkerboard fading into the colour,
-with a round thumb; a **Recent** row of swatches; the palette's name and swatch grid; a bottom tab bar
-(Classic, Wheel, Values, Pick, Palettes).
-
-- [ ] Hue phase: the marker and the drawn ring agree (red picked where red is drawn).
-- [ ] Disc removed; the ring as large as the panel allows, thinner; the inner shape larger; edges
-      antialiased; the triangle turned 90° clockwise.
-- [ ] Opacity bar in the colour over a checkerboard; the swatches compact at the top left; the whole
-      panel compact, to the reference.
-
----
-
-## (107) The onion skin panel is 25% wider
-
-**Status** — filed 2026-09-24. The owner: *"The onion screen seems a bit too horizontally compressed.
-Make it around 0.25x more wider."*
-
-- [ ] 1.25x the width, the layout breathing into it.
-
----
-
 ## (108) To New Layer's cel spans the cel it was lifted from
 
 **Status** — filed 2026-09-24. The owner: *"When I press to new layer on a selection, it makes a new
@@ -151,15 +117,6 @@ layer but makes the cel cover the entire length of the animation. Make it so the
 the cel it was lifted from."*
 
 - [ ] The new layer's cel has the source cel's start and length.
-
----
-
-## (109) Select panel: Edit sits beside Fill and To New Layer
-
-**Status** — filed 2026-09-24. The owner: *"The edit button in the select menu should be beside fill
-and to new layer."*
-
-- [ ] Edit in the same row as Fill and To New Layer.
 
 ---
 

@@ -1,7 +1,7 @@
 import XCTest
 import SwiftUI
 
-/// TODO (73)'s colour picker overhaul — the model, headless: the ring/disc/triangle point<->colour
+/// TODO (73)/(106)'s colour picker overhaul — the model, headless: the ring/triangle point<->colour
 /// maths in `ColorMath` (no UIKit, no simulator gestures needed to check a round trip), then
 /// `ColorHistoryStore` and `PaletteStore` — dedupe/cap/persistence and CRUD/default/persistence —
 /// and one cold-start "migration" test. `ColorPickerUITests` covers reachability (driving each tab
@@ -19,23 +19,24 @@ final class ColorPickerLogicTests: XCTestCase {
 
     // MARK: - Hue ring
 
+    /// TODO (106): the owner's own report — *"The red on the wheel is right, but red is selected at
+    /// the top"* — was exactly `hueRingAngle`/`hueForRingTouch` disagreeing with `AngularGradient`'s
+    /// own convention (0° at 3 o'clock, clockwise) about where angle 0 is. Cardinal points, in the
+    /// corrected convention: 0=right, 0.25=down, 0.5=left, 0.75=up.
     func testHueRingAngleRoundTripsThroughAllFourCardinalHues() {
-        // 0 at top, clockwise: 0=top, 0.25=right, 0.5=bottom, 0.75=left — the convention
-        // `AngularGradient`'s own default start/direction already use.
-        let top = ColorMath.hueRingAngle(forHue: 0)
-        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 0, dy: -1), 0, accuracy: 0.0001, "Straight up is hue 0")
-        XCTAssertEqual(top, 0, accuracy: 0.0001)
+        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 1, dy: 0), 0, accuracy: 0.0001, "Right (3 o'clock) is hue 0")
+        XCTAssertEqual(ColorMath.hueRingAngle(forHue: 0), 0, accuracy: 0.0001)
 
-        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 1, dy: 0), 0.25, accuracy: 0.0001, "Right is a quarter turn clockwise")
-        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 0, dy: 1), 0.5, accuracy: 0.0001, "Down is halfway round")
-        XCTAssertEqual(ColorMath.hueForRingTouch(dx: -1, dy: 0), 0.75, accuracy: 0.0001, "Left is three-quarters round")
+        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 0, dy: 1), 0.25, accuracy: 0.0001, "Down is a quarter turn clockwise")
+        XCTAssertEqual(ColorMath.hueForRingTouch(dx: -1, dy: 0), 0.5, accuracy: 0.0001, "Left is halfway round")
+        XCTAssertEqual(ColorMath.hueForRingTouch(dx: 0, dy: -1), 0.75, accuracy: 0.0001, "Up is three-quarters round")
     }
 
     func testHueRingAngleRoundTripsOverManyHues() {
         for i in 0..<37 {
             let hue = Double(i) / 36
             let angle = ColorMath.hueRingAngle(forHue: hue)
-            let dx = sin(angle), dy = -cos(angle)
+            let dx = cos(angle), dy = sin(angle)
             let recovered = ColorMath.hueForRingTouch(dx: dx, dy: dy)
             // Hue 1.0 and hue 0.0 are the same point on the ring; compare the wrapped distance.
             let delta = min(abs(recovered - hue), abs(recovered - hue + 1), abs(recovered - hue - 1))
@@ -43,43 +44,25 @@ final class ColorPickerLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - Square <-> disc
-
-    func testSquareToDiscRoundTripsForAGridOfPoints() {
-        let samples: [(Double, Double)] = [
-            (0, 0), (1, 0), (-1, 0), (0, 1), (0, -1),
-            (1, 1), (1, -1), (-1, 1), (-1, -1),
-            (0.5, 0.25), (-0.3, 0.9), (0.9, -0.9), (0.1, 0.6)
-        ]
-        for (u, v) in samples {
-            let disc = ColorMath.squareToDisc(u: u, v: v)
-            XCTAssertLessThanOrEqual(disc.x * disc.x + disc.y * disc.y, 1.0001,
-                                     "square (\(u),\(v)) must map inside the unit disc, got \(disc)")
-            let back = ColorMath.discToSquare(x: disc.x, y: disc.y)
-            XCTAssertEqual(back.u, u, accuracy: 0.0005, "u should round-trip for (\(u),\(v))")
-            XCTAssertEqual(back.v, v, accuracy: 0.0005, "v should round-trip for (\(u),\(v))")
+    /// The load-bearing regression test for TODO (106)'s hue-phase bug, pinned against the
+    /// *drawing's own* angle convention rather than a second hard-coded constant: `dx = cos(θ), dy =
+    /// sin(θ)` is where a touch would land at ring-angle θ under `AngularGradient`'s own convention
+    /// (0° at 3 o'clock, clockwise in this y-down view — the same one `HueRing`'s explicit
+    /// `startAngle`/`endAngle` states). Feeding that point to the drag handler and the resulting hue
+    /// back into the marker's own placement function must return to the same angle, for the three
+    /// primaries (0°, 120°, 240°) the owner named — this is `hueForRingTouch` and `hueRingAngle`
+    /// checked against each other and against the gradient's own geometry, not against one another's
+    /// copy of the same magic number.
+    func testHueRingAngleAgreesWithTheGradientsOwnAngleConventionAtTheThreePrimaries() {
+        for degrees in [0.0, 120.0, 240.0] {
+            let gradientAngle = degrees * .pi / 180
+            let dx = cos(gradientAngle), dy = sin(gradientAngle)
+            let hue = ColorMath.hueForRingTouch(dx: dx, dy: dy)
+            let markerAngle = ColorMath.hueRingAngle(forHue: hue)
+            let delta = abs(atan2(sin(markerAngle - gradientAngle), cos(markerAngle - gradientAngle)))
+            XCTAssertLessThan(delta, 0.0005,
+                              "hue ring angle \(degrees)° should round-trip through the drag handler and land back at the same angle the gradient draws it, got \(markerAngle)")
         }
-    }
-
-    func testDiscToSquareRoundTripsForAGridOfPoints() {
-        let samples: [(Double, Double)] = [
-            (0, 0), (0.7071, 0.7071), (-0.7071, 0.7071), (0.7071, -0.7071), (-0.7071, -0.7071),
-            (1, 0), (-1, 0), (0, 1), (0, -1), (0.3, 0.1), (-0.5, -0.2)
-        ]
-        for (x, y) in samples {
-            let square = ColorMath.discToSquare(x: x, y: y)
-            let back = ColorMath.squareToDisc(u: square.u, v: square.v)
-            XCTAssertEqual(back.x, x, accuracy: 0.0005, "x should round-trip for (\(x),\(y))")
-            XCTAssertEqual(back.y, y, accuracy: 0.0005, "y should round-trip for (\(x),\(y))")
-        }
-    }
-
-    /// The corner (full saturation *and* full brightness together) is the case the disc's remap
-    /// exists for: it must land exactly on the disc's edge, not be silently unreachable.
-    func testTheSquaresCornerLandsExactlyOnTheDiscsEdge() {
-        let disc = ColorMath.squareToDisc(u: 1, v: -1)
-        let radius = (disc.x * disc.x + disc.y * disc.y).squareRoot()
-        XCTAssertEqual(radius, 1, accuracy: 0.0005, "A square corner must reach the disc's boundary")
     }
 
     // MARK: - HSL triangle
@@ -140,6 +123,42 @@ final class ColorPickerLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(farOutside.s, 1)
         XCTAssertGreaterThanOrEqual(farOutside.l, 0)
         XCTAssertLessThanOrEqual(farOutside.l, 1)
+    }
+
+    // MARK: - Triangle rotation (TODO (106): "rotated 90 degrees clockwise")
+
+    /// The reference: *"at hue 0 the hue vertex points at the ring's red."* `trianglePureHueVertex`
+    /// is `(0, -1)` in the triangle's own local frame — straight up, screen angle 270° by
+    /// `hueRingAngle`'s convention — so `triangleRotation` has to add exactly +90° to land it on
+    /// `hueRingAngle(forHue: 0)` (0°, the ring's own red after the phase fix above). Rotating the
+    /// vertex by the view's own rotation formula and comparing the result to the ring's angle
+    /// function is the same "test the drawing's angle function against the marker's" shape the hue
+    /// ring test above uses, applied to the triangle's own extra turn.
+    func testTriangleRotationPointsTheHueVertexAtTheRingsRedAtHueZero() {
+        let rotation = ColorMath.triangleRotation(forHue: 0)
+        let vertex = ColorMath.trianglePureHueVertex
+        let rotated = (x: vertex.x * cos(rotation) - vertex.y * sin(rotation),
+                       y: vertex.x * sin(rotation) + vertex.y * cos(rotation))
+        let rotatedAngle = atan2(rotated.y, rotated.x)
+        let ringRedAngle = ColorMath.hueRingAngle(forHue: 0)
+        let delta = abs(atan2(sin(rotatedAngle - ringRedAngle), cos(rotatedAngle - ringRedAngle)))
+        XCTAssertLessThan(delta, 0.0001, "the triangle's hue vertex must land on the ring's own red at hue 0")
+    }
+
+    /// The vertex must keep tracking the ring's own marker at every other hue too, not just at 0 —
+    /// the "turned 90° clockwise" is on top of the existing tracking behaviour, not instead of it.
+    func testTriangleRotationTracksTheRingsMarkerAcrossHues() {
+        let vertex = ColorMath.trianglePureHueVertex
+        for i in 0..<12 {
+            let hue = Double(i) / 12
+            let rotation = ColorMath.triangleRotation(forHue: hue)
+            let rotated = (x: vertex.x * cos(rotation) - vertex.y * sin(rotation),
+                           y: vertex.x * sin(rotation) + vertex.y * cos(rotation))
+            let rotatedAngle = atan2(rotated.y, rotated.x)
+            let ringAngle = ColorMath.hueRingAngle(forHue: hue)
+            let delta = abs(atan2(sin(rotatedAngle - ringAngle), cos(rotatedAngle - ringAngle)))
+            XCTAssertLessThan(delta, 0.0001, "the triangle's hue vertex should track the ring's marker at hue \(hue)")
+        }
     }
 
     // MARK: - HSL <-> RGB

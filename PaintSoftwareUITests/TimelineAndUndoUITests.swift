@@ -60,6 +60,15 @@ final class TimelineGestureUITests: PaintUITestCase {
                           "\(identifier) is on the panel")
         }
 
+        // TODO (107): "Make it around 0.25x more wider" — 1.25x the panel's old 250pt width
+        // (`AnimationTimeline.anchoredMenuContent`'s `.onionSkinOptions` case). The menu's own
+        // container (`AnchoredMenu`'s `.fixedSize()` content) is what is actually drawn, so this
+        // measures the frame XCUITest sees rather than the source literal it came from.
+        let panel = app.descendants(matching: .any)["timeline.anchoredMenu.onionSkinOptions"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), "the panel's own anchored-menu container")
+        XCTAssertEqual(panel.frame.width, 312.5, accuracy: 2,
+                       "the onion panel should be 1.25x its old 250pt width, got \(panel.frame.width)")
+
         // Linked is the owner's default and the panel must say so out loud, since it is the one
         // setting whose effect is invisible until a slider is dragged.
         XCTAssertEqual(app.descendants(matching: .any)["onionPanel.linkOpacityToggle"].value as? String, "on",
