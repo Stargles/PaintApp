@@ -4,6 +4,20 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## A tap on the Effect Settings bar's labels reaches the canvas underneath (2026-09-24)
+
+MEASURED on the simulator: with a value layer's Effect Settings bar docked, a tap on the bar's own
+title (`layerOptions.subMenuTitle`) — or a slider's label — hit-tests to `CanvasContainerView`, not
+to the bar: the catch-all fires, "This layer has no drawing surface" is raised, and
+`canvasInteractionBegan` closes the bar. On a drawable layer the same tap would draw. The card's
+`Color.black.opacity(0.92)` background does not claim the touch; only the bar's controls do. It
+predates TODO (110), but (110) made it easier to meet: the colour pickers the bar raises were
+`.popover`s whose dismiss region swallowed a tap anywhere, and are `AnchoredMenu`s now, whose
+dismissing touch goes on to what it lands on — four UI tests that dismissed a picker by tapping the
+bar's title were moved to `tapAway`. The fix is the dock card claiming touches on its inert area
+(and deciding whether a two-finger pan that *starts* on the bar should still pan the canvas, which
+today it does by the same fall-through).
+
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main

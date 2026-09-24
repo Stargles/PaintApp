@@ -453,9 +453,10 @@ final class OptionsPanelUITests: PaintUITestCase {
         let tintHex = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(tintHex.waitForExistence(timeout: 5), "The swatch must open ColorPickerPanel")
         setHexField(app, tintHex, to: "FF0000")
-        // Dismiss the popover by tapping the panel behind it, away from the swatch it is anchored to
-        // — `LayerPanelControlsUITests.testTheCanvasColourRowOpensTheSamePickerTheBrushUses`'s move.
-        app.staticTexts["layerOptions.subMenuTitle"].tap()
+        // Dismiss the picker with a touch that does nothing else (`tapAway`): the touch that closes
+        // it goes on to whatever is under it, and the bar's title is not hit-testable — a tap there
+        // reaches the canvas and closes the bar with the picker.
+        tapAway(app)
 
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
@@ -505,9 +506,9 @@ final class OptionsPanelUITests: PaintUITestCase {
             with nothing inside it findable.
             """)
         setHexField(app, hex, to: "3366CC")
-        // Dismiss the popover away from the swatch it is anchored to, `testChangingBloomsColoursChanges
-        // WhatIsDrawn`'s move.
-        app.staticTexts["layerOptions.subMenuTitle"].tap()
+        // Dismiss the picker with a touch that does nothing else — `testChangingBloomsColourChanges
+        // WhatIsDrawn` says why not on the bar's title.
+        tapAway(app)
 
         XCTAssertEqual(stopSwatch.value as? String, "3366CC", "the pick reached the model")
     }

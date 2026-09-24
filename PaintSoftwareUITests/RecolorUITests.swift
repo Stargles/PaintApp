@@ -244,7 +244,7 @@ final class RecolorUITests: PaintUITestCase {
             with nothing inside it findable.
             """)
         setHexField(app, hex, to: "3366CC")
-        app.staticTexts["layerOptions.subMenuTitle"].tap()   // dismiss, away from the swatch
+        tapAway(app)   // dismiss with a touch that does nothing else — see `OptionsPanelUITests`' Bloom test
 
         XCTAssertEqual(fromSwatch.value as? String, "3366CC", "the pick reached the model")
     }

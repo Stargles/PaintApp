@@ -106,18 +106,15 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         let hex = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hex.waitForExistence(timeout: 5), "The swatch must open ColorPickerPanel with its own identifiers")
         setHexField(app, hex, to: "FF0000")
-        // Read while the popover is still up: Return wrote through the binding. **Then dismiss on a
-        // label the popover cannot be covering.** The Bloom test dismisses on the bar's centred title,
-        // and here the swatch is the *first* row, so the popover hangs over the title's right half and
-        // that tap landed in the picker's own SV square — the first run of this test read back a grey
-        // `9E9E9E` for a pick of red, off a tap that was meant to be nowhere. The slider labels sit in
-        // the bar's left column, clear of any popover anchored on the right.
+        // Read while the picker is still up: Return wrote through the binding. **Then dismiss with a
+        // touch that does nothing else** (`tapAway`): the touch that closes the picker goes on to
+        // whatever is under it, and the bar's labels are not hit-testable — a tap on one reaches the
+        // canvas and closes the bar along with the picker.
         let picked = NSPredicate(format: "value == %@", "FF0000")
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: picked, evaluatedWith: swatch)], timeout: 3),
                        .completed, "The pick reached the model: swatch reads \(swatch.value ?? "nil")")
-        // A coordinate tap, because XCUITest reports everything behind a popover as not hittable.
-        app.staticTexts["Offset X"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(hex.waitForNonExistence(timeout: 3), "The tap outside took the popover down")
+        tapAway(app)
+        XCTAssertTrue(hex.waitForNonExistence(timeout: 3), "The tap outside took the picker down")
         XCTAssertEqual(swatch.value as? String, "FF0000", "…and changed nothing on the way")
         attach(app, "1-duplicate-offset-settings")
 

@@ -3339,7 +3339,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **Replaces every canvas recognizer UIKit has stranded — the canvas freeze, repaired at the
-        /// moment it happens.** Runs just after the last canvas touch lifts, which is when UIKit has
+        /// moment it happens.** Runs shortly after the last canvas touch lifts, by when UIKit has
         /// reset every recognizer those touches were bound to back to `.possible`. One still out of
         /// `.possible` then will never be offered a touch again: it is stranded, and it stays so
         /// until the project is reopened. MEASURED: once so, no `isEnabled` toggle, `reset()`,
@@ -3349,14 +3349,22 @@ struct CanvasView: UIViewRepresentable {
         /// **What strands them is a UIKit presentation torn down under a live two-finger gesture**,
         /// and the app cannot stop UIKit doing it: a `Menu` or `.contextMenu` over the canvas
         /// dismisses itself when two fingers land outside it, and whatever recognizers it had bound
-        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), is that —
-        /// the Blend Mode / Effect menu open over a value layer, then a two-finger pan
-        /// (`CanvasTransformFreezeUITests`). The editor's own presentations are no longer UIKit ones
+        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), reproduces
+        /// as exactly that — the Blend Mode / Effect menu open over a value layer, then a two-finger
+        /// pan (`CanvasTransformFreezeUITests`). The editor's own presentations are no longer UIKit ones
         /// (`CanvasPresentation`), which removes the commonest cause; this is what makes every cause,
         /// including the ones not yet met, cost the artist nothing.
         ///
         /// Tells the action recorder, which saves its last ninety seconds: a repair is the moment the
         /// freeze *would* have happened, and the ring holds how it came about.
+        /// How long after the lift the repair looks. **Not the next turn of the main queue**: UIKit
+        /// returns a failed or ended recognizer to `.possible` from its own run-loop pass, and a block
+        /// queued at the lift can run before it — MEASURED, an ordinary one-finger tap read
+        /// `canvas.pan` still `.failed` and "repaired" a healthy recognizer. A stranded one is out of
+        /// `.possible` for good, so looking late costs nothing but the look; a touch that lands in
+        /// between defers it to the next lift.
+        private static let strandedCheckDelay: TimeInterval = 0.1
+
         private func replaceStrandedRecognizers() {
             // A touch that landed between the lift and this block is a new sequence in flight, and
             // its recognizers are legitimately out of `.possible`. The next lift asks again.
@@ -3489,12 +3497,15 @@ struct CanvasView: UIViewRepresentable {
             // `refreshShapeConstraint`, alongside the stroke recognizer's own — this is the "and now
             // something changed" edge, not the value.
             //
-            // It is also the edge the stranded-recognizer repair runs on: the last canvas touch
-            // lifting is when every other recognizer here should be back in `.possible`.
+            // It is also the edge the stranded-recognizer repair runs on: soon after the last canvas
+            // touch lifts, every other recognizer here should be back in `.possible` — see
+            // `strandedCheckDelay` for how soon.
             touchCounter.onTouchesChanged = { [weak self] total, _ in
                 self?.refreshShapeConstraint()
                 if total == 0 {
-                    DispatchQueue.main.async { self?.replaceStrandedRecognizers() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.strandedCheckDelay) {
+                        self?.replaceStrandedRecognizers()
+                    }
                 }
             }
             install(touchCounter, on: host)
@@ -3665,10 +3676,9 @@ struct CanvasView: UIViewRepresentable {
         /// KEYFRAMES.md §5's second recordable surface, exactly as `strokeRecognizer.onAnyTouchBegan`
         /// passes true for §7's — the touch that continues a take must not be the one that stops it.
         /// Then the take itself, `beginMoveBoxTake`, which may start one — after the canvas-touch
-        /// rule for the reason `StrokeCanvasView.handleBegin` orders its own take after it: a
-        /// presentation the rule closes may record an undo step on dismissal
-        /// (`CanvasPresentation.selectionColour`), and that step has to land before the take's
-        /// bracket opens. The overlay calls this before its drag's latch and bracket
+        /// rule for the reason `StrokeCanvasView.handleBegin` orders its own take after it: what the
+        /// rule closes may record an undo step on the way out, and that step has to land before the
+        /// take's bracket opens. The overlay calls this before its drag's latch and bracket
         /// (`ObjectTransformOverlayView.touchesBegan`), which keeps the take's the outer one.
         ///
         /// **This used to happen by accident, at the wrong end.** The box's chrome reached
