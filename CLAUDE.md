@@ -811,12 +811,18 @@ greppable JSONL file. **Reach for it before spending runs trying to reproduce so
 saw and you can't** — the fill-tool gesture bug in [BUGS.md](BUGS.md) is exactly that shape.
 
 **Turning it on**: Actions menu → **"Record My Actions"**, in its own section just below the
-pencil-only toggle. Reproduce the bug, then **"Stop Recording"**. Off by default and free when off — the
-`UIWindow.sendEvent` interception is *uninstalled* on stop, not merely flag-checked, so the drawing
-path pays one static `Bool` load per hook site and nothing else.
+pencil-only toggle. Reproduce the bug, then **"Stop Recording"**.
 
-**Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl`, inside the app
-container. The Actions menu lists them with Share and Delete, so the owner can AirDrop one straight
+**The flight recorder is always on and writes nothing until asked.** From the editor's first
+appearance `ActionRecorder` keeps the last 90 s of the cheap events (touch-began/-ended with the
+recognizers each bound, recognizer transitions, `requireFailure`, model changes, presentations) in
+memory, and saves them as `flight-*.jsonl` beside the recordings when the canvas replaces stranded
+recognizers, when `CanvasWedgeDetector` sees the canvas still wedged, or on Actions → **"Save Last 90
+Seconds"** — so after a device-only glitch the owner does nothing, or taps that one row. Its cost on a
+stroke is PERFORMANCE.md §23 (unmeasurable).
+
+**Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl` (and
+`flight-…jsonl`), inside the app container. The Actions menu lists them with Share and Delete, so the owner can AirDrop one straight
 out. To pull one over the cable instead:
 
 ```bash

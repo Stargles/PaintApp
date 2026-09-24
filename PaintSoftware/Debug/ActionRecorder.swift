@@ -20,10 +20,16 @@ import QuartzCore
 ///    that element**, not against screen coordinates. Coordinates do not survive a different device,
 ///    a rotated canvas, or a relaid-out toolbar; `app.buttons["toolbar.selectButton"]` does.
 ///
-/// **Off by default and free when off.** See `isCapturing` for exactly what executes on the drawing
-/// path while recording is off — the answer is one static `Bool` load per hook site, and nothing at
-/// all inside `UIWindow.sendEvent`, because the interception is *uninstalled* rather than switched
-/// off (see `WindowEventTap`).
+/// **Two sinks, one event stream.** A *recording* — Actions → Record My Actions — writes everything,
+/// every touch sample included, to a file. The **flight recorder** is on from the editor's first
+/// appearance and writes nothing at all: it keeps only the cheap, low-rate events (touch-began and
+/// -ended lines with the recognizers each began bound, recognizer transitions, `requireFailure`
+/// answers, model changes, presentations shown and dismissed) in a ring of the last ninety seconds,
+/// and puts the ring on disk only when the canvas wedges (`CanvasWedgeDetector`) or the owner picks
+/// "Save Last 90 Seconds". The owner, on why a file-writing recorder could not simply be left on:
+/// *"constantly recording my actions would produce way too much data space, so that is out of the
+/// question."* Their two freeze recordings both started after the wedge; the ring is how the next one
+/// starts before it.
 ///
 /// Rejected alternative: **screen recording plus a log**. It is what the owner has today in effect,
 /// and it costs a human watching a video frame by frame trying to line "the canvas froze here" up
@@ -37,31 +43,38 @@ import QuartzCore
 final class ActionRecorder: ObservableObject {
     static let shared = ActionRecorder()
 
-    // MARK: - The drawing-path gate
+    // MARK: - The drawing-path gates
 
-    /// The one thing the drawing path reads while recording is off.
-    ///
-    /// A plain stored `Bool`, deliberately **not** the `@Published isRecording` below: reading a
-    /// `@Published` property goes through its property wrapper and drags `ObservableObject` into
-    /// call sites like `StrokeGestureRecognizer.touchesMoved`, which run per touch sample. This is a
-    /// single static load, and every hook in the app is written as
-    /// `ActionRecorder.ifRecording { ... }` so the *arguments* — the interpolated strings, the point
-    /// conversions — are never built either.
-    ///
-    /// **What executes on the drawing path when recording is off, exhaustively:** one load-and-branch
-    /// at each of the hook sites in `StrokeGestureRecognizer.transition(to:)`,
-    /// `CanvasView.Coordinator.applyTransform`, `gestureRecognizer(_:shouldRequireFailureOf:)`, and
-    /// the `didSet`s on `CanvasManager`. Nothing else: `UIWindow.sendEvent` is the app's own
-    /// unmodified implementation (the interception is installed on `start()` and removed on
-    /// `stop()`), no target-actions are attached to any recognizer, no timer is scheduled, no buffer
-    /// is allocated, and this object's `init` runs at most once and stores nothing.
+    /// A recording is running. A plain stored `Bool`, deliberately **not** the `@Published
+    /// isRecording` below: reading a `@Published` property goes through its property wrapper and drags
+    /// `ObservableObject` into call sites like `StrokeGestureRecognizer.touchesMoved`, which run per
+    /// touch sample.
     static var isCapturing = false
 
-    /// Runs `body` only while recording, handing it the recorder. Written as a non-escaping closure
-    /// so that when recording is off the closure body — string interpolation, coordinate conversion,
-    /// dictionary building — is never evaluated and never allocates.
+    /// The flight ring is on — from `startFlight`, i.e. the editor's first appearance, for the rest of
+    /// the process.
+    static var isFlying = false
+
+    /// Runs `body` while either sink is on, handing it the recorder. Every low-rate hook in the app is
+    /// written as `ActionRecorder.ifRecording { ... }`, a non-escaping closure, so when both are off
+    /// the *arguments* — the interpolated strings, the point conversions — are never built.
+    ///
+    /// **What the flight recorder costs the drawing path**, which is what every one of these costs
+    /// while it is on: a stroke's per-sample `.changed` reaches `recognizerTransition`, which finds the
+    /// recognizer in the tap's registry and writes nothing because the state did not change; every
+    /// touch event is swept for recognizer states once after dispatch (`WindowEventTap`). MEASURED in
+    /// PERFORMANCE.md's flight-recorder entry — `PerfBaselineTests.testFlightRecorderCostOnAStroke`.
     @inline(__always)
     static func ifRecording(_ body: (ActionRecorder) -> Void) {
+        guard isCapturing || isFlying else { return }
+        body(shared)
+    }
+
+    /// Runs `body` only while a recording is running — for the hooks that fire per frame or per
+    /// touch sample (`CanvasView.Coordinator.applyTransform`), which the ring must not carry: at 120
+    /// Hz they would push ninety seconds of evidence out of it in under a minute.
+    @inline(__always)
+    static func ifRecordingInFull(_ body: (ActionRecorder) -> Void) {
         guard isCapturing else { return }
         body(shared)
     }
@@ -81,22 +94,119 @@ final class ActionRecorder: ObservableObject {
     /// directory, or a window whose `sendEvent` could not be intercepted. Never fails silently: a
     /// recorder that quietly records nothing is worse than no recorder.
     @Published private(set) var problem: String?
+    /// What the last flight save wrote, for a few seconds after it — the badge that tells the owner a
+    /// freeze was caught without their having done anything (`ActionRecorderIndicator`).
+    @Published private(set) var flightNotice: String?
 
-    // MARK: - Recording session state
+    // MARK: - Session state
 
     private var writer: RecordingWriter?
     /// Internal, not private: `StrokeGestureRecognizer` reports its own transitions through
     /// `recognizerTransition(_:to:source:)` below, which needs the tap's registry to keep the sweep
-    /// from writing the same transition twice.
+    /// from writing the same transition twice. Installed once, by whichever of `startFlight` and
+    /// `start` runs first, and kept for as long as either sink is on.
     private(set) var tap: WindowEventTap?
+    private var tapReport: WindowEventTap.InstallReport?
     private var flushTimer: Timer?
-    /// Monotonic (`CACurrentMediaTime`, i.e. uptime — unaffected by clock changes) start instant.
-    /// Every `t` in the file is seconds since this. `UITouch.timestamp` shares this time base, which
-    /// is why touch events carry the *hardware* time rather than the time we got round to logging.
-    private(set) var startTime: CFTimeInterval = 0
+    /// Monotonic (`CACurrentMediaTime`, i.e. uptime — unaffected by clock changes) start instant of
+    /// the recording. Every `t` in a recording is seconds since this; every `t` in a flight dump is
+    /// seconds since the dump's oldest event. `UITouch.timestamp` shares this time base, which is why
+    /// touch events carry the *hardware* time rather than the time we got round to logging.
+    private var startTime: CFTimeInterval = 0
     private var writtenEvents = 0
 
+    /// The flight recorder's ninety seconds. Five thousand events is an order of magnitude over what a
+    /// minute and a half of ordinary work produces (a touch-began is about a dozen lines, most of them
+    /// `requireFailure` answers), so in practice the window is the bound and the capacity only stops a
+    /// burst from growing it.
+    private var ring = FlightRing<(event: String, fields: [(String, JSONValue)])>(capacity: 5000, window: 90)
+    private var wedge = CanvasWedgeDetector()
+    /// The editor the flight ring is watching, for a dump's header. Updated on every `startFlight`,
+    /// which each editor appearance calls.
+    private var flightContext: (canvasSize: CGSize?, projectName: String) = (nil, "")
+
     private init() {}
+
+    // MARK: - The flight recorder
+
+    /// Turns the flight ring on. Idempotent; called on every editor appearance so a dump names the
+    /// project it came from. A window whose `sendEvent` cannot be intercepted still flies — the model
+    /// events do not need the tap — and says so on `problem`.
+    func startFlight(canvasSize: CGSize?, projectName: String) {
+        flightContext = (canvasSize, projectName)
+        guard !Self.isFlying else { return }
+        ensureTap()
+        Self.isFlying = true
+    }
+
+    /// Puts the ring on disk as a recording of its own, `flight-<date>.jsonl`, beside the others in
+    /// the Actions menu's list. `trigger` goes into the header: `"stranded"` when the canvas
+    /// replaced recognizers UIKit had stranded, `"wedge"` when the detector saw a canvas that stayed
+    /// wedged anyway, `"manual"` for the menu row.
+    ///
+    /// The lines are built and written off the main thread — five thousand of them is milliseconds of
+    /// string building, and a save is usually the moment right after a freeze was repaired. The list
+    /// and the badge catch up when the file is on disk.
+    @discardableResult
+    func saveFlight(trigger: String) -> URL? {
+        let now = CACurrentMediaTime()
+        let entries = ring.elements(asOf: now)
+        let url: URL
+        do {
+            url = try Self.newRecordingURL(prefix: "flight")
+        } catch {
+            problem = "Couldn't create the recordings folder: \(error.localizedDescription)"
+            return nil
+        }
+        let base = entries.first?.time ?? now
+        let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
+                                     tap: tapReport, url: url,
+                                     flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
+                                              ("seconds", .num(now - base))])
+        let notice: String
+        switch trigger {
+        case "wedge": notice = "The canvas froze — saved the last 90 s"
+        case "stranded": notice = "Caught a canvas freeze and fixed it — saved the last 90 s"
+        default: notice = "Saved the last 90 s"
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var text = header + "\n"
+            for entry in entries {
+                text += Self.line(entry.element.event, entry.element.fields, at: entry.time - base) + "\n"
+            }
+            let written = FileManager.default.createFile(atPath: url.path, contents: Data(text.utf8))
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard written else {
+                    self.problem = "Couldn't write \(url.lastPathComponent)."
+                    return
+                }
+                self.refreshRecordings()
+                self.flightNotice = notice
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    if self?.flightNotice == notice { self?.flightNotice = nil }
+                }
+            }
+        }
+        return url
+    }
+
+    /// A touch has begun — fed by `WindowEventTap` for every one, so the wedge detector sees what the
+    /// ring sees. Saves the ring the moment the detector trips.
+    func touchBegan(startsSequence: Bool, boundRecognizers: [String]) {
+        guard wedge.touchBegan(startsSequence: startsSequence, boundRecognizers: boundRecognizers) else { return }
+        emit("note", [("text", .str("canvas wedge detected: \(wedge.strandedSequences) sequences in a row "
+                                    + "began on the canvas bound to none of pan/pinch/rotation"))])
+        saveFlight(trigger: "wedge")
+    }
+
+    /// The canvas found recognizers UIKit had stranded and replaced them
+    /// (`CanvasView.Coordinator.replaceStrandedRecognizers`) — the freeze, repaired as it happened.
+    /// The ring holds how it came about, so it is saved.
+    func canvasRecognizersReplaced(_ names: [String]) {
+        emit("note", [("text", .str("stranded recognizers replaced: \(names.joined(separator: ","))"))])
+        saveFlight(trigger: "stranded")
+    }
 
     // MARK: - Start / stop
 
@@ -108,7 +218,7 @@ final class ActionRecorder: ObservableObject {
 
         let url: URL
         do {
-            url = try Self.newRecordingURL()
+            url = try Self.newRecordingURL(prefix: "recording")
         } catch {
             problem = "Couldn't create the recordings folder: \(error.localizedDescription)"
             return
@@ -127,11 +237,11 @@ final class ActionRecorder: ObservableObject {
         // The tap goes in before the header is written so the header can report which window class
         // was actually intercepted — a detail that matters the day SwiftUI stops handing us a plain
         // `UIWindow` and the file arrives with no touches in it.
-        let tap = WindowEventTap()
-        let tapReport = tap.install()
-        self.tap = tap
+        ensureTap()
+        tap?.recordsInFull = true
 
-        write(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url))
+        writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url))
+        writtenEvents = 1
 
         // **The recording explains itself now, and that is a defect this closed rather than a
         // feature added.** Before 2026-09-09 a file said the playhead moved and nothing about what a
@@ -152,10 +262,6 @@ final class ActionRecorder: ObservableObject {
         Self.isCapturing = true
         isRecording = true
 
-        if tapReport.interceptedClass == nil {
-            problem = "Touches are NOT being recorded — \(tapReport.note). App state still is."
-        }
-
         // Runloop-mode `.common` so the timer keeps ticking while a scroll or a drag is tracking;
         // the default mode would stall exactly during the gestures being recorded.
         let timer = Timer(timeInterval: Self.flushInterval, repeats: true) { [weak self] _ in
@@ -167,28 +273,46 @@ final class ActionRecorder: ObservableObject {
 
     func stop() {
         guard isRecording else { return }
-        // Gate first: every hook in the app becomes a no-op before anything is torn down, so a
-        // touch already in flight cannot reach a half-closed writer.
-        Self.isCapturing = false
-        isRecording = false
-
         // The last window before the summary line, so nothing between the final flush and the stop
         // is lost — that is usually the moment the artist stopped recording *because* of.
         writeMainThreadWindow()
         MainActor.assumeIsolated { PlaybackTrace.shared.stop() }
+        emit("recordingStopped", [("events", .int(writtenEvents + 1)), ("seconds", .num(CACurrentMediaTime() - startTime))],
+             inRing: false)
 
-        write(line("recordingStopped", [("events", .int(writtenEvents + 1)), ("seconds", .num(CACurrentMediaTime() - startTime))]))
+        // Gate after the last line: every hook in the app stops reaching the file before anything is
+        // torn down, so a touch already in flight cannot reach a half-closed writer.
+        Self.isCapturing = false
+        isRecording = false
 
         flushTimer?.invalidate()
         flushTimer = nil
-        tap?.uninstall()
-        tap = nil
+        if Self.isFlying {
+            tap?.recordsInFull = false
+        } else {
+            tap?.uninstall()
+            tap = nil
+            tapReport = nil
+        }
         writer?.close()
         writer = nil
 
         eventCount = writtenEvents
         elapsed = 0
         refreshRecordings()
+    }
+
+    /// Installs the window tap if it is not already in. A window the tap could not intercept is said
+    /// out loud on `problem`, once: the model events still flow, the touches do not.
+    private func ensureTap() {
+        guard tap == nil else { return }
+        let tap = WindowEventTap()
+        let report = tap.install()
+        self.tap = tap
+        tapReport = report
+        if report.interceptedClass == nil {
+            problem = "Touches are NOT being recorded — \(report.note). App state still is."
+        }
     }
 
     /// Flush cadence, and the cadence at which the UI counter catches up. Two seconds is a
@@ -237,7 +361,7 @@ final class ActionRecorder: ObservableObject {
             fields.append(("ringHit", .int(window.ringHits)))
             fields.append(("ringMiss", .int(window.ringMisses)))
         }
-        write(line("mainThread", fields))
+        emit("mainThread", fields, inRing: false)
     }
 
     // MARK: - Event emitters
@@ -246,13 +370,8 @@ final class ActionRecorder: ObservableObject {
     // and none of them may be made cheap-to-call-always, because that is what would put string
     // building back on the drawing path.
 
-    /// Seconds since recording start, the `t` on every line. Takes an explicit instant so touch
-    /// events can carry `UITouch.timestamp` (when the hardware saw it) rather than when we logged it.
-    func stamp(_ absolute: CFTimeInterval) -> Double { absolute - startTime }
-    var now: Double { CACurrentMediaTime() - startTime }
-
     func model(_ key: String, _ value: String) {
-        write(line("model", [("key", .str(key)), ("value", .str(value))], at: now))
+        emit("model", [("key", .str(key)), ("value", .str(value))])
     }
 
     /// A gesture recognizer changed state. **The single most valuable signal in the file**: the bug
@@ -262,13 +381,13 @@ final class ActionRecorder: ObservableObject {
     /// `WindowEventTap.sweepRecognizerStates`), because the three routes have different blind spots
     /// and knowing which one caught a transition tells you whether the ordering is exact.
     func recognizer(_ name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State, to: UIGestureRecognizer.State, source: String) {
-        write(line("recognizer", [
+        emit("recognizer", [
             ("name", .str(name)),
             ("obj", .str(Self.shortObject(object))),
             ("from", .str(Self.stateName(from))),
             ("to", .str(Self.stateName(to))),
             ("src", .str(source))
-        ], at: now))
+        ])
     }
 
     /// The answer `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` gave, and
@@ -276,29 +395,31 @@ final class ActionRecorder: ObservableObject {
     /// so it is recorded on every call rather than only when it changes — the interesting case is a
     /// `true` pointing at a recognizer that the `recognizer` lines show never terminating.
     func failureRequirement(asker: String, other: String, answer: Bool) {
-        write(line("requireFailure", [
+        emit("requireFailure", [
             ("asker", .str(asker)),
             ("other", .str(other)),
             ("answer", .bool(answer))
-        ], at: now))
+        ])
     }
 
+    /// Recording only — see `ifRecordingInFull`.
     func transform(committedScale: CGFloat, committedRotation: CGFloat, committedOffset: CGSize,
                    liveScale: CGFloat, liveRotation: CGFloat, liveOffset: CGSize,
                    appliedScale: CGFloat, appliedRotation: CGFloat, appliedOffset: CGSize) {
-        write(line("transform", [
+        emit("transform", [
             ("scale", .num(appliedScale)), ("rot", .num(appliedRotation)),
             ("dx", .num(appliedOffset.width)), ("dy", .num(appliedOffset.height)),
             ("cScale", .num(committedScale)), ("cRot", .num(committedRotation)),
             ("cdx", .num(committedOffset.width)), ("cdy", .num(committedOffset.height)),
             ("lScale", .num(liveScale)), ("lRot", .num(liveRotation)),
             ("ldx", .num(liveOffset.width)), ("ldy", .num(liveOffset.height))
-        ], at: now))
+        ], inRing: false)
     }
 
     /// One touch sample. Field order is fixed and put the replay-relevant fields first on purpose:
     /// the file is read by eye as often as by a parser, and `phase`/`type`/`target` are what a human
-    /// scans for.
+    /// scans for. The ring takes began/ended/cancelled only; a `.moved` sample exists at all only
+    /// while a recording is running (`WindowEventTap.recordsInFull`).
     func touch(_ s: TouchSample) {
         var fields: [(String, JSONValue)] = [
             ("phase", .str(s.phase)),
@@ -337,7 +458,7 @@ final class ActionRecorder: ObservableObject {
             fields.append(("gr", .int(bound.count)))
             fields.append(("grNames", .str(bound.joined(separator: ","))))
         }
-        write(line("touch", fields, at: s.time))
+        emit("touch", fields, at: s.time, inRing: s.phase != "moved")
     }
 
     /// Reports a transition for a recognizer whose source we own — today only
@@ -354,10 +475,23 @@ final class ActionRecorder: ObservableObject {
         tap?.displayName(for: recognizer) ?? String(describing: type(of: recognizer))
     }
 
-    /// A free-text marker. Not wired to any UI today; kept because the first thing anyone wants when
-    /// reading someone else's recording is "which of these is the moment it went wrong".
+    /// A free-text marker, for the refusals and outcomes nothing else names.
     func note(_ text: String) {
-        write(line("note", [("text", .str(text))], at: now))
+        emit("note", [("text", .str(text))])
+    }
+
+    /// **The one sink.** A recording gets every event as a line; the ring gets the event itself, and
+    /// the line is only ever built if the ring is saved — so the flight recorder's cost per event is
+    /// an array append, not string building.
+    private func emit(_ event: String, _ fields: [(String, JSONValue)],
+                      at time: CFTimeInterval = CACurrentMediaTime(), inRing: Bool = true) {
+        if Self.isCapturing {
+            writtenEvents += 1
+            writer?.append(Self.line(event, fields, at: time - startTime))
+        }
+        if Self.isFlying, inRing {
+            ring.append((event, fields), at: time)
+        }
     }
 
     // MARK: - Line building
@@ -375,9 +509,9 @@ final class ActionRecorder: ObservableObject {
         case null
     }
 
-    private func line(_ event: String, _ fields: [(String, JSONValue)], at t: Double? = nil) -> String {
+    private static func line(_ event: String, _ fields: [(String, JSONValue)], at t: Double) -> String {
         var out = "{\"t\":"
-        out += Self.number(CGFloat(t ?? now))
+        out += Self.number(CGFloat(t))
         out += ",\"event\":\""
         out += event
         out += "\""
@@ -449,14 +583,12 @@ final class ActionRecorder: ObservableObject {
         }
     }
 
-    private func write(_ line: String) {
-        writtenEvents += 1
-        writer?.append(line)
-    }
-
     // MARK: - Header
 
-    private static func headerLine(canvasSize: CGSize?, projectName: String, tap: WindowEventTap.InstallReport, url: URL) -> String {
+    /// The first line of a file. `flight` is present only on a flight dump — its trigger, how many
+    /// events and how many seconds the ring held — and its absence is what says a file is a recording.
+    private static func headerLine(canvasSize: CGSize?, projectName: String, tap: WindowEventTap.InstallReport?,
+                                   url: URL, flight: [(String, JSONValue)] = []) -> String {
         var fields: [(String, JSONValue)] = [
             ("schema", .int(1)),
             ("app", .str(AppVersion.versionString)),
@@ -471,8 +603,9 @@ final class ActionRecorder: ObservableObject {
             ("os", .str(UIDevice.current.systemVersion)),
             ("project", .str(projectName)),
             ("file", .str(url.lastPathComponent)),
-            ("startedAt", .str(ISO8601DateFormatter().string(from: Date())))
-        ]
+            ("startedAt", .str(ISO8601DateFormatter().string(from: Date()))),
+            ("mode", .str(flight.isEmpty ? "recording" : "flight"))
+        ] + flight
         if let canvasSize {
             fields.append(("canvasW", .num(canvasSize.width)))
             fields.append(("canvasH", .num(canvasSize.height)))
@@ -482,9 +615,10 @@ final class ActionRecorder: ObservableObject {
             fields.append(("windowH", .num(window.bounds.height)))
             fields.append(("scale", .num(window.screen.scale)))
         }
-        fields.append(("windowClass", .str(tap.originalClass ?? "none")))
-        fields.append(("touchCapture", .str(tap.interceptedClass == nil ? "OFF — \(tap.note)" : "on")))
-        return ActionRecorder.shared.line("header", fields, at: 0)
+        fields.append(("windowClass", .str(tap?.originalClass ?? "none")))
+        fields.append(("touchCapture", .str(tap.map { $0.interceptedClass == nil ? "OFF — \($0.note)" : "on" }
+                                            ?? "OFF — no tap installed")))
+        return line("header", fields, at: 0)
     }
 
     /// The executable's own modification date — the closest thing to a build stamp available without
@@ -534,11 +668,13 @@ final class ActionRecorder: ObservableObject {
             .appendingPathComponent("Recordings", isDirectory: true)
     }
 
-    private static func newRecordingURL() throws -> URL {
+    /// `<prefix>-yyyyMMdd-HHmmss.jsonl` — `recording-` for Record My Actions, `flight-` for the flight
+    /// recorder, so the list says which is which at a glance.
+    private static func newRecordingURL(prefix: String) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return directory.appendingPathComponent("recording-\(formatter.string(from: Date())).jsonl")
+        return directory.appendingPathComponent("\(prefix)-\(formatter.string(from: Date())).jsonl")
     }
 
     func refreshRecordings() {

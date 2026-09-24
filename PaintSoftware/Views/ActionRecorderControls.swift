@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// The Actions-menu section that drives `ActionRecorder`: start/stop, a live event count, and the
-/// list of past recordings with Share and Delete.
+/// The Actions-menu section that drives `ActionRecorder`: start/stop, a live event count, "Save Last
+/// 90 Seconds" for the flight recorder, and the list of past recordings with Share and Delete.
 ///
-/// Modelled on `PerfHUD`'s precedent — discreet, default OFF, and nothing runs while it is off (see
-/// `ActionRecorder.isCapturing` for the exhaustive statement of what that means on the drawing
-/// path). It lives in the Actions menu because that is already where this app's debugging switches
-/// go: the pencil-only toggle is three rows above it.
+/// It lives in the Actions menu because that is already where this app's debugging switches go: the
+/// pencil-only toggle is three rows above it.
 ///
 /// **Why the button says what it does.** The row is phrased as the state the owner is choosing —
 /// "Record My Actions" / "Stop Recording" — rather than as a toggle labelled with the flag it sets,
@@ -24,6 +22,8 @@ struct ActionRecorderSection: View {
             if recorder.isRecording {
                 liveReadout
             }
+
+            saveFlightButton
 
             if let problem = recorder.problem {
                 Text(problem)
@@ -85,6 +85,26 @@ struct ActionRecorderSection: View {
         .accessibilityLabel(recorder.isRecording ? "Stop recording actions" : "Record my actions")
     }
 
+    /// **The flight recorder's manual trigger** — for a freeze, or anything else odd, that the wedge
+    /// detector did not catch. Writes the last ninety seconds as a `flight-…jsonl` beside the
+    /// recordings and opens the list so the owner sees it land.
+    private var saveFlightButton: some View {
+        Button {
+            if recorder.saveFlight(trigger: "manual") != nil { showRecordings = true }
+        } label: {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath").frame(width: 24)
+                Text("Save Last 90 Seconds")
+                Spacer()
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("recorder.saveFlight")
+    }
+
     private var liveReadout: some View {
         HStack {
             Image(systemName: "waveform").frame(width: 24).foregroundColor(.red)
@@ -121,15 +141,18 @@ struct ActionRecorderSection: View {
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("recorder.recordingsDisclosure")
+        .accessibilityValue(showRecordings ? "expanded" : "collapsed")
     }
 
     private func recordingRow(_ recording: ActionRecorder.Recording) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
+                // Middle, so both ends survive: `flight-` or `recording-` says which kind it is, and
+                // the time says which one.
                 Text(recording.name)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    .truncationMode(.middle)
                 Text(recording.sizeText)
                     .font(.caption2)
                     .foregroundColor(.gray)
@@ -161,17 +184,29 @@ struct ActionRecorderSection: View {
     }
 }
 
-/// The always-visible "you are being recorded" badge.
+/// The always-visible "you are being recorded" badge — and, for a few seconds after the flight
+/// recorder saves, the badge that says so: *"The canvas froze — saved the last 90 s"* is how the owner
+/// learns a freeze was caught without having done anything.
 ///
-/// Sits over the canvas next to the perf HUD and renders **nothing at all** unless a recording is
-/// live, so it costs one `if` in `DrawingView`'s body when off. `allowsHitTesting(false)`: it must
-/// never eat a touch, least of all during the repro it is announcing — a badge that swallowed the
-/// tap the owner was trying to record would be the worst possible bug for this feature to have.
+/// Sits over the canvas next to the perf HUD and renders **nothing at all** otherwise, so it costs
+/// one `if` in `DrawingView`'s body. `allowsHitTesting(false)`: it must never eat a touch, least of
+/// all during the repro it is announcing — a badge that swallowed the tap the owner was trying to
+/// record would be the worst possible bug for this feature to have.
 struct ActionRecorderIndicator: View {
     @ObservedObject private var recorder = ActionRecorder.shared
 
     var body: some View {
-        if recorder.isRecording {
+        if let notice = recorder.flightNotice {
+            Text(notice)
+                .font(.system(.caption2, design: .monospaced).bold())
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.65))
+                .clipShape(Capsule())
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("recorder.flightNotice")
+        } else if recorder.isRecording {
             HStack(spacing: 5) {
                 Circle()
                     .fill(Color.red)

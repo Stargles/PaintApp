@@ -6,6 +6,24 @@ merged 2026-08-20, and the twelve unverifiable ones were measured then too. -->
 
 # Every dismissible presentation, and whether a stroke under it breaks
 
+> **Read this first — 2026-09-24, TODO (110).** This census asked what a *one-finger stroke* does
+> under each presentation, and its "`Menu` is safe" answer holds only for that. **A two-finger touch
+> is a different question with a worse answer**, MEASURED on `cbd248f`: a `Menu` open over the canvas
+> does not swallow a two-finger drag; the drag pans, UIKit dismisses the menu under it, and the
+> recognizers its teardown was bound to — `canvas.pan`, `canvas.pinch`, `canvas.rotation`, the taps,
+> the catch-all — are stranded for good. A `.popover` does the same, whether the app or UIKit closes
+> it. That is the owner's canvas freeze. What stands now:
+>
+> - **No `.popover` exists in the app.** Every `CanvasPresentation` is an `AnchoredMenu` drawn by
+>   `View.canvasPresentationHost`, closed by one `AnchoredMenuRouter`; `tools/presentation-census.sh`
+>   and `CanvasPresentationLogicTests` fail on a `.popover` anywhere.
+> - **`Menu`, `.contextMenu` and `ShareLink` remain UIKit's**, and cannot be stopped from stranding
+>   recognizers under two fingers. `CanvasView.Coordinator.replaceStrandedRecognizers` replaces
+>   whatever they strand as the gesture lifts, so the canvas never stays frozen.
+>
+> Everything below is the 2026-08-18/20 sweep and its follow-ups, kept for the reasoning; where it
+> says `dismissPresentationsOverLiveCanvas` or `overlapsLiveCanvas`, both are gone.
+
 ## The contract, and why it did not hold
 
 *Past tense as of 2026-08-20: `CanvasPresentation` + `View.canvasPresentation` +
@@ -111,7 +129,7 @@ and its nested `Picker` at `:134`, `GuideRow.swift:155`, `LayerPanel.swift:94`, 
 `ColorPickerPanel.swift:356`, `:419`, `EffectSection.swift:369`, `ActionRecorderControls.swift:142`,
 `OnionSkinPanel.swift:326`.
 
-## Why `.popover` is the hazard and `Menu` is not
+## Why `.popover` is the hazard and `Menu` is not — for one finger (see the note at the top)
 
 The repo's own diagnosis (`AnimationTimeline.swift:146-162`, `StrokeGestureRecognizer.swift:270-278`)
 records as observed fact that a `.popover`'s outside-touch **does not swallow the touch**: the stroke
@@ -168,7 +186,7 @@ class**, and the reasoning is the mechanism rather than the geometry:
   a stroke and the teardown lands mid-sequence, and a tap cannot distinguish that. Treat this row as
   UNKNOWN until somebody runs `MenuInterruptionUITests`' shape against it.
 
-## The question the source could not answer — MEASURED 2026-08-20, and the answer is no
+## The question the source could not answer — MEASURED 2026-08-20, and the answer is no (for one finger)
 
 **Does a SwiftUI `Menu`/`.contextMenu` outside-touch pass through to the canvas the way `.popover`
 demonstrably does here?** That single fact separated the twelve UNKNOWNs from BROKEN.

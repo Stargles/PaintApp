@@ -3076,8 +3076,8 @@ measures the next — so it structurally never races a press against a live rend
 
 **MEASURED from their own `ActionRecorder` trace, which is a main-thread latency instrument nobody had
 read it as.** A `touch` line carries the `UITouch`'s hardware timestamp; the `model`/`note`/`recognizer`
-line logged next carries `CACurrentMediaTime()`; `ActionRecorder.stamp` and `.now` share one base, so
-the gap between them is how long the main thread took to notice. Across 62 touches in
+line logged next carries `CACurrentMediaTime()`, on the same base, so the gap between them is how
+long the main thread took to notice. Across 62 touches in
 `recording-20260907-234101.jsonl` the median is **20 ms** and the tail is **110, 130, 170, 180 and
 220 ms**, every one of them around the undo taps.
 
@@ -5323,3 +5323,40 @@ and is a miss, and each signals `MemoryPressure.Level.allocationRefused` — eve
 warning, and `CanvasManager` raises `CanvasNotice.Kind.outOfMemoryToDraw`, because a frame silently
 skipped is CLAUDE.md's refusal with no notice. `MemoryBudgetLogicTests` holds both refusals and the
 notice.
+
+---
+
+## 23. The flight recorder is always on, and what it costs a stroke (2026-09-24)
+
+TODO (110): the owner's freeze recordings both started after the wedge, and *"constantly recording my
+actions would produce way too much data space."* So `ActionRecorder` keeps a ninety-second ring of the
+cheap events — touch-began/-ended with the recognizers each began bound, recognizer transitions,
+`requireFailure` answers, model changes, presentations shown and dismissed — from the editor's first
+appearance, and writes nothing until the canvas repairs stranded recognizers, the wedge detector
+trips, or the owner picks Save Last 90 Seconds. Per touch *move* it does a phase check and returns;
+per stroke sample, one `.changed` action message reaches the tap's registry (a dictionary lookup that
+writes nothing); per touch-began/-ended event, one sweep of the registry's recognizer states.
+
+**MEASURED 2026-09-24**, Debug, the `freeze` iOS 26.5 simulator (iPad Pro 13-inch M4) on the 8-core
+MacBook, 97% idle, `PerfBaselineTests.testFlightRecorderCostOnAStroke` — the real tap installed on the
+test process's window over the canvas's thirteen named recognizers, three runs:
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| an event into the ring (`model`, 2 fields) | 505 ns | 472 ns | 474 ns |
+| an event into the ring (`recognizer`, 5 fields) | 569 ns | 549 ns | 551 ns |
+| **per stroke sample** (`.changed` action → registry lookup, nothing written) | **180 ns** | **187 ns** | **172 ns** |
+| per touch-began/-ended event (sweep of 13 recognizers) | 4.47 µs | 4.48 µs | 4.49 µs |
+| the gate with both sinks off | 115 ns | 115 ns | 115 ns |
+| 500-sample stroke, flight off (median of 5) | 16.18 ms | 16.07 ms | 15.87 ms |
+| **500-sample stroke, flight on** (median of 5) | **16.24 ms** | **16.27 ms** | **16.30 ms** |
+| delta | +0.06 ms | +0.21 ms | +0.43 ms |
+
+The deltas scatter around what the per-call figures add up to — 500 × ~0.18 µs + 2 × 4.5 µs ≈
+0.1 ms — which is below the run-to-run noise of the stroke itself: **the flight recorder costs a
+stroke nothing measurable**. The first cut swept on every touch event and looked the stroke up
+linearly, and measured +3.2 ms (20%) on the same stroke; the sweep moved to sequence edges and the
+lookup to a dictionary before this was merged. Not included, because no headless harness can drive
+it: UIKit's own delivery and the `sendEvent` interception's per-move `contains(where:)`. Memory: the
+ring holds at most 5,000 events, INFERRED at ~1 MB when full.
+

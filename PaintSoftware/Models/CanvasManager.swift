@@ -424,7 +424,7 @@ final class CanvasManager: ObservableObject {
                 // off the folder on the first press of Undo.
                 if selectedFolderID != nil { selectedFolderID = nil }
                 handleActiveContextChanged()
-                // Debug recorder (off by default; see `ActionRecorder.isCapturing`). The *value*, not
+                // The action recorder (see `ActionRecorder.ifRecording`). The *value*, not
                 // just the fact of a change — "which layer was active" is what decides where a stroke
                 // landed and which stroke recognizer the transform gestures were waiting on.
                 ActionRecorder.ifRecording { $0.model("currentLayerIndex", String(currentLayerIndex)) }
@@ -1496,42 +1496,29 @@ final class CanvasManager: ObservableObject {
     /// to auto-dismiss whatever top-bar dropdown is open, so the first touch both closes the menu
     /// and performs the stroke/fill, rather than being swallowed by a dismiss tap first.
     ///
-    /// **Do not send this directly; call `canvasInteractionBegan()`.** The subject is still how the
-    /// two `activePanel`-shaped consumers hear about a canvas touch (`activePanel` is view `@State`
-    /// and cannot live here), but the *presentations* are now closed centrally, and a send that
-    /// bypassed that would be exactly the hand-written half-fix this whole mechanism replaced.
+    /// **Do not send this directly; call `canvasInteractionBegan()`**, which is the one place that
+    /// decides what a canvas touch closes. The presentations over the canvas are not among them: they
+    /// close themselves on any outside touch (`AnchoredMenuRouter`).
     let interactionBegan = PassthroughSubject<Void, Never>()
 
     // MARK: - Open presentations
 
-    /// Which of the app's bindable presentations are on screen right now.
+    /// Which of the editor's presentations are on screen right now.
     ///
-    /// Maintained by `View.canvasPresentation(_:isPresented:)`, which is the only way a presentation
-    /// in `CanvasPresentation` is allowed to be declared. Nothing in the app reads this to decide
-    /// layout — it exists so the *rule* below has something to apply itself to, and so a device
-    /// capture can say which panel was up when a stroke went wrong.
+    /// Maintained by `View.canvasPresentation(_:isPresented:)` and its drawing-less twin, which are
+    /// the only ways a `CanvasPresentation` is declared. Nothing in the app reads this to decide
+    /// layout — it is what a device capture reads to say which presentation was up when the canvas
+    /// stopped, and what a logic test reads to drive the registration with no simulator.
     @Published private(set) var openPresentations: Set<CanvasPresentation> = []
 
     func presentationDidAppear(_ presentation: CanvasPresentation) {
-        openPresentations.insert(presentation)
+        guard openPresentations.insert(presentation).inserted else { return }
+        ActionRecorder.ifRecording { $0.model("presentation.shown", presentation.rawValue) }
     }
 
     func presentationDidDisappear(_ presentation: CanvasPresentation) {
-        openPresentations.remove(presentation)
-    }
-
-    /// **The rule, in one place.** A touch on the canvas closes every open presentation that could be
-    /// sitting over a live canvas, before that touch becomes a stroke.
-    ///
-    /// This is what used to be two hand-written subscribers clearing one named variable each, and
-    /// what `CanvasPresentation.overlapsLiveCanvas` now answers for the whole closed set. Returns
-    /// what it closed so a test can assert on it; the app ignores the value.
-    @discardableResult
-    func dismissPresentationsOverLiveCanvas() -> Set<CanvasPresentation> {
-        let doomed = openPresentations.filter(\.overlapsLiveCanvas)
-        guard !doomed.isEmpty else { return [] }
-        openPresentations.subtract(doomed)
-        return doomed
+        guard openPresentations.remove(presentation) != nil else { return }
+        ActionRecorder.ifRecording { $0.model("presentation.dismissed", presentation.rawValue) }
     }
 
     /// **The touch-agnostic half of a canvas touch, TODO (67).** Ends a take that should not
@@ -1542,30 +1529,11 @@ final class CanvasManager: ObservableObject {
     /// **Split out of what is now `canvasInteractionBegan` because `strokeRecognizer.onAnyTouchBegan`
     /// fires on *every* touch, including the first half of a simultaneous two-finger canvas
     /// pan/pinch/rotate** — indistinguishable, at that instant, from a drawing touch. Routing that
-    /// signal through the *whole* of what `canvasInteractionBegan` used to do closed the bottom-docked
-    /// settings panels (Effect Settings, Text, Select, …) out from under the gesture before the second
-    /// finger ever arrived to say this was never a stroke — the owner's report, naming Colour Wheels.
-    /// This function is that signal's whole contribution now; the panel- **and** presentation-closing
-    /// halves both wait for `canvasInteractionBegan`, called only once
+    /// signal through the *whole* of `canvasInteractionBegan` closed the bottom-docked settings panels
+    /// (Effect Settings, Text, Select, …) out from under the gesture before the second finger ever
+    /// arrived to say this was never a stroke — the owner's report, naming Colour Wheels. The
+    /// panel-closing half waits for `canvasInteractionBegan`, called only once
     /// `strokeRecognizer.onSingleTouchBegan` confirms the touch is not one of a batch.
-    ///
-    /// **`dismissPresentationsOverLiveCanvas()` used to run here, and that was the canvas freeze.**
-    /// (67) moved the panel-closing `interactionBegan.send()` to the single-touch path but left the
-    /// presentation dismissal on this one — the asymmetry the owner met on 2026-09-16 as *"the canvas
-    /// freeze is back."* A `.popover` presents behind a screen-covering
-    /// `_UIPassthroughGateGestureRecognizer` that is bound to the same touches as `canvas.pan`,
-    /// `canvas.pinch` and `canvas.rotation`; tearing the popover down here, on the *first finger* of
-    /// a two-finger gesture, removed that gate mid-recognition and left every transform recognizer
-    /// stranded in a terminal state UIKit never resets — MEASURED on the simulator, and no
-    /// `isEnabled` toggle, `reset()`, `state = .possible` or re-add returns a recognizer from it. The
-    /// next touch then bound only `canvas.touchCounter` (the one recognizer that never leaves
-    /// `.possible`) and the canvas neither panned nor drew until the project was reopened —
-    /// recording #3, `recording-20260916-014412`, line for line. A surround gesture that leaves the
-    /// popover *up* strands nothing, because UIKit resets the recognizers itself once their touches
-    /// lift; only a mid-gesture teardown breaks that. So the dismissal waits for a confirmed single
-    /// touch, which no transform recognizer is ever bound to, and the stroke recognizer a single
-    /// touch *does* strand is `StrokeInterruption`'s job as before. `CanvasTransformFreezeUITests`
-    /// pins it.
     ///
     /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
     ///   from — the drawing canvas (§7), or the Move box (§5). See the `stopPlayback` call below.
@@ -1604,42 +1572,27 @@ final class CanvasManager: ObservableObject {
     }
 
     /// The single entry point for "a touch has landed on the canvas **and it is not part of a
-    /// two-finger transform**": `canvasTouchLanded` above, then tells the `activePanel` subscribers.
+    /// two-finger transform**": `canvasTouchLanded` above, then tells the `activePanel` subscribers,
+    /// which close the bottom-docked panels and the top-bar dropdowns.
     ///
-    /// Order is deliberate but not load-bearing — both halves are SwiftUI state writes that land in
-    /// the same transaction. What *is* load-bearing is that there is one function, called from all
-    /// **seven** canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
-    /// separately-remembered dismissal somewhere else. Named rather than counted, because a number
-    /// on its own cannot be checked against anything:
+    /// What is load-bearing is that there is one function, called from all **seven** canvas-touch
+    /// sites in `CanvasView`, rather than a `.send()` at each of them. Named rather than counted,
+    /// because a number on its own cannot be checked against anything:
     ///
     /// `strokeRecognizer.onSingleTouchBegan`, `handleMoveBoxCommit`, `moveBoxTouchDown`,
     /// `handleTextPress`, `handleCatchAllTap`, `handleFillPress`, `handleEyedropperPress`.
     ///
-    /// **The seventh is the Move box's own touch-down, both overlays' `onBoxTouchDown`.** Until
-    /// 2026-09-16 a touch on the box's chrome reached `handleMoveBoxCommit` as a tap and was counted
-    /// under that site; the tap refuses the chrome at touch-down now (it is what stopped a knob
-    /// drag baking the float), so the box has a site of its own.
-    ///
-    /// **This said "four" until 2026-08-26, and the miscount was itself a live defect.** The commit
-    /// that wrote the contract above counted the sites on the base it was cut from, then rebased
-    /// onto a `main` that had meanwhile gained `handleTextPress` — a fifth site, with a bare
-    /// `.send()` of its own. It converted the four it knew about, git reported the merge clean
-    /// because the two changes touched different lines, and a canvas text press went on signalling
-    /// the top-bar dropdowns while closing no presentation for six days. Anyone auditing the sites
-    /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
-    /// sixth, added 2026-08-22 and correct from the start. **The first was `strokeRecognizer
-    /// .onAnyTouchBegan` until TODO (67) split it into this and `canvasTouchLanded` above — see that
-    /// function's own doc for why.**
+    /// **"Not part of a two-finger transform" is the best the sites can say, not a guarantee.** A hand
+    /// lands its two fingers 10–20 ms apart, in two events (`recording-20260923-200911`), so the first
+    /// finger of a pan reaches the stroke recognizer alone and the catch-all's zero-duration press
+    /// begins on it. What that closes is SwiftUI chrome, which strands nothing when it goes
+    /// mid-gesture — MEASURED with the layer rail closing under a staggered two-finger drag. The
+    /// stranding was a UIKit presentation's gate, and the editor has none (`CanvasPresentation`).
     ///
     /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
     ///   from — the drawing canvas (§7), or the Move box (§5). See `canvasTouchLanded`.
     func canvasInteractionBegan(mayContinueTake: Bool = false) {
         canvasTouchLanded(mayContinueTake: mayContinueTake)
-        // Both closings live here rather than in `canvasTouchLanded`: a two-finger gesture reaches
-        // that method (via `onAnyTouchBegan`) and this one only on a confirmed single touch, and
-        // neither a presentation nor a panel may be torn down mid-two-finger-gesture — see
-        // `canvasTouchLanded`'s own doc for the freeze the presentation half caused when it did.
-        dismissPresentationsOverLiveCanvas()
         interactionBegan.send()
     }
 
@@ -1986,7 +1939,7 @@ final class CanvasManager: ObservableObject {
     /// split across extension files (see the note at the top of this file) and `addCel` calls this
     /// from `CanvasManager+Timeline`.
     ///
-    /// Costs one static `Bool` load when nothing is recording; the string is never built.
+    /// The string is built only while the recorder is on — a recording, or the flight ring.
     func recordLayerStackChange(_ what: String) {
         ActionRecorder.ifRecording {
             $0.model("layers", "\(what) — now \(layers.count) layers, active \(currentLayerIndex)")

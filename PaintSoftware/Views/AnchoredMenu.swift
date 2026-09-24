@@ -9,18 +9,20 @@ import UIKit
 /// A gesture recognizer that recognises nothing, ever, and exists only to be told when a touch
 /// begins.
 ///
-/// **This is the whole answer to TODO (39).** A `.popover` dismisses itself by covering the screen
-/// with `_UIPassthroughGateGestureRecognizer`, which swallows every drag whole — the timeline did not
-/// scroll, the ruler did not scrub, and the popover did not even go away. This does the opposite: it
-/// fails immediately, so it delays nothing, cancels nothing and competes with nothing, and the touch
-/// it reported goes on to reach whatever was under it. One drag dismisses the menu **and** scrolls
-/// the track, which is what the owner asked for.
+/// **This is the whole answer to TODO (39) and to the canvas freeze.** A `.popover` dismisses itself
+/// by covering the screen with `_UIPassthroughGateGestureRecognizer`, which swallows drags whole and
+/// — worse — strands every canvas recognizer bound alongside it when it goes away under a live
+/// two-finger gesture (`CanvasPresentation`'s header). This does the opposite: it fails immediately,
+/// so it delays nothing, cancels nothing and competes with nothing, and the touch it reported goes on
+/// to reach whatever was under it. One drag dismisses the menu **and** scrolls the track, which is
+/// what the owner asked for.
 ///
 /// `cancelsTouchesInView = false` is what makes it passive rather than merely quiet: without it, a
 /// recognizer that reaches a terminal state cancels the touches it saw.
 final class PassiveTouchDownObserver: UIGestureRecognizer {
 
-    var onTouchDown: ((CGPoint) -> Void)?
+    /// The touch's location in the recognizer's view, and the view UIKit bound it to.
+    var onTouchDown: ((CGPoint, UIView?) -> Void)?
 
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
@@ -32,7 +34,7 @@ final class PassiveTouchDownObserver: UIGestureRecognizer {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
         if let touch = touches.first, let host = view {
-            onTouchDown?(touch.location(in: host))
+            onTouchDown?(touch.location(in: host), touch.view)
         }
         // Terminal on the first touch of every sequence: this is an observer, and a recognizer that
         // stays `.possible` is one that other recognizers can be made to wait on.
@@ -40,40 +42,79 @@ final class PassiveTouchDownObserver: UIGestureRecognizer {
     }
 }
 
-/// Installs a `PassiveTouchDownObserver` on the window for as long as it is in the hierarchy.
+/// **The one place that decides whether an open presentation closes.** Every `AnchoredMenu` in the
+/// editor — the timeline's own and every `CanvasPresentation` `View.canvasPresentationHost` draws —
+/// tells this where it is while it is on screen, and one `PassiveTouchDownObserver` on the window
+/// asks `AnchoredMenuDismissal.presentationsToDismiss` which of them each new touch has left.
+///
+/// **One observer for the editor's lifetime, never one per menu**, because the observer is itself a
+/// recognizer bound to the canvas touches, and a menu that took its observer down with it would be
+/// removing a recognizer from under the very two-finger gesture whose first finger closed it — the
+/// shape of the freeze this replaced. This one is installed when the editor reaches a window and is
+/// removed only when the editor leaves it.
+///
+/// **Touches outside the app's own content are not "outside the menu".** A `Menu` raised from inside
+/// a presented picker (the palette menu in `ColorPickerPanel`), an alert, a sheet and the keyboard
+/// are all drawn by UIKit outside the root view controller's view; a touch on one of them is a touch
+/// on something the presentation raised or sits under, and closing the presentation for it would
+/// tear down the picker the artist is still using.
+final class AnchoredMenuRouter {
+    private var open: [CanvasPresentation: (placement: AnchoredMenuDismissal.Placement, dismiss: () -> Void)] = [:]
+
+    func place(_ presentation: CanvasPresentation, _ placement: AnchoredMenuDismissal.Placement,
+               dismiss: @escaping () -> Void) {
+        open[presentation] = (placement, dismiss)
+    }
+
+    func remove(_ presentation: CanvasPresentation) {
+        open.removeValue(forKey: presentation)
+    }
+
+    fileprivate func touchDown(at point: CGPoint) {
+        guard !open.isEmpty else { return }
+        let doomed = AnchoredMenuDismissal.presentationsToDismiss(touchAt: point,
+                                                                  open: open.mapValues(\.placement))
+        for presentation in doomed { open[presentation]?.dismiss() }
+    }
+}
+
+extension EnvironmentValues {
+    /// The editor's `AnchoredMenuRouter`, provided once by `View.canvasPresentationHost`. Nil outside
+    /// the editor, where there is no canvas and no anchored menu.
+    @Entry var anchoredMenuRouter: AnchoredMenuRouter?
+}
+
+/// Hangs the router's one observer on the window for as long as it is in the hierarchy.
 ///
 /// **On the window rather than on a view of its own**, because the point is to hear about touches
-/// the menu does *not* cover — a view can only be told about touches that hit-test into it, and one
-/// big enough to hear everything would be the screen-covering gate this bug is about.
+/// no menu covers — a view can only be told about touches that hit-test into it, and one big enough
+/// to hear everything would be the screen-covering gate this replaced.
 ///
 /// Coordinates are reported in the window's space, which is what `.frame(in: .global)` measures, so
 /// the two are directly comparable.
-struct WindowTouchObserver: UIViewRepresentable {
+struct AnchoredMenuRouterHost: UIViewRepresentable {
 
-    let onTouchDown: (CGPoint) -> Void
+    let router: AnchoredMenuRouter
 
     func makeUIView(context: Context) -> ObserverHost {
-        let host = ObserverHost()
-        host.onTouchDown = onTouchDown
-        return host
+        ObserverHost(router: router)
     }
 
-    func updateUIView(_ host: ObserverHost, context: Context) {
-        host.onTouchDown = onTouchDown
-    }
+    func updateUIView(_ host: ObserverHost, context: Context) {}
 
     static func dismantleUIView(_ host: ObserverHost, coordinator: ()) {
         host.uninstall()
     }
 
     /// Takes no touches itself (`isUserInteractionEnabled = false`) and draws nothing. It is here
-    /// only to have a window to hang the recognizer on and a lifetime to match the menu's.
+    /// only to have a window to hang the recognizer on and a lifetime to match the editor's.
     final class ObserverHost: UIView {
-        var onTouchDown: ((CGPoint) -> Void)?
+        private let router: AnchoredMenuRouter
         private var observer: PassiveTouchDownObserver?
 
-        override init(frame: CGRect) {
-            super.init(frame: frame)
+        init(router: AnchoredMenuRouter) {
+            self.router = router
+            super.init(frame: .zero)
             isUserInteractionEnabled = false
             backgroundColor = .clear
         }
@@ -86,7 +127,11 @@ struct WindowTouchObserver: UIViewRepresentable {
             uninstall()
             guard let window else { return }
             let recognizer = PassiveTouchDownObserver(target: nil, action: nil)
-            recognizer.onTouchDown = { [weak self] point in self?.onTouchDown?(point) }
+            recognizer.onTouchDown = { [weak self, weak window] point, touched in
+                guard let self, let content = window?.rootViewController?.view,
+                      let touched, touched.isDescendant(of: content) else { return }
+                self.router.touchDown(at: point)
+            }
             window.addGestureRecognizer(recognizer)
             observer = recognizer
         }
@@ -102,15 +147,19 @@ struct WindowTouchObserver: UIViewRepresentable {
 
 /// A menu drawn **inside the app's own view hierarchy**, hung off `anchor`.
 ///
-/// This is what TODO (39) replaced the timeline's four `.popover`s with, and the owner's ruling on
-/// 2026-09-06 is the reason it is this rather than `UIPopoverPresentationController.passthroughViews`:
-/// passthrough would have let the drag through while leaving the menu standing over a track that had
-/// scrolled out from under it, and a cel menu names a *specific block*.
+/// Every presentation over the canvas is one of these: the timeline's menus since TODO (39), and
+/// every other `CanvasPresentation` since TODO (110) (`View.canvasPresentationHost`). The owner's
+/// ruling on 2026-09-06 is why it is this rather than `UIPopoverPresentationController
+/// .passthroughViews`: passthrough would have let the drag through while leaving the menu standing
+/// over a track that had scrolled out from under it, and a cel menu names a *specific block*.
 ///
 /// What it captures is exactly what it covers. There is no dismiss region, no gate, and no
-/// presentation — a touch that lands anywhere else reaches whatever is there, and separately tells
-/// this to close.
+/// presentation — a touch that lands anywhere else reaches whatever is there, and the editor's
+/// `AnchoredMenuRouter` separately decides whether it closes this.
 struct AnchoredMenu<Content: View>: View {
+
+    /// Which presentation this is — what the router files its placement under.
+    let presentation: CanvasPresentation
 
     /// The control or block this hangs off, in global coordinates.
     let anchor: CGRect
@@ -132,6 +181,8 @@ struct AnchoredMenu<Content: View>: View {
     /// `AnchoredMenuDismissal` reads as "not laid out yet".
     @State private var measured: CGSize = .zero
 
+    @Environment(\.anchoredMenuRouter) private var router
+
     var body: some View {
         GeometryReader { proxy in
             let bounds = proxy.frame(in: .global)
@@ -144,10 +195,10 @@ struct AnchoredMenu<Content: View>: View {
                         Color.clear.preference(key: AnchoredMenuSizeKey.self, value: menu.size)
                     }
                 )
-                // **Drawn, rather than inherited from a presentation.** These four menus used to get
-                // a popover's chrome for free; three of their content views are written in white
-                // labels and one in `.primary`, and the app is `.preferredColorScheme(.dark)`, so a
-                // near-black card is what all four were being shown on and what all four still need.
+                // **Drawn, rather than inherited from a presentation.** Every one of these used to get
+                // a popover's chrome for free; their content is written in white labels (or
+                // `.primary`) and the app is `.preferredColorScheme(.dark)`, so a near-black card is
+                // what they were being shown on and what they still need.
                 .background(
                     RoundedRectangle(cornerRadius: 13, style: .continuous)
                         .fill(Color(white: 0.11).opacity(0.98))
@@ -169,17 +220,15 @@ struct AnchoredMenu<Content: View>: View {
                 // that shipped three unusable features on 2026-09-05.
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(identifier)
-                .background(
-                    WindowTouchObserver { point in
-                        if AnchoredMenuDismissal.shouldDismiss(touchAt: point,
-                                                               menuFrame: placed,
-                                                               toggleControlFrame: toggleControl) {
-                            onDismiss()
-                        }
-                    }
-                )
+                // Measured before placed: `placed` is empty-sized until `measured` arrives, which is
+                // the state `AnchoredMenuDismissal` reads as "not laid out yet".
+                .onChange(of: AnchoredMenuDismissal.Placement(menuFrame: placed, toggleControlFrame: toggleControl),
+                          initial: true) { _, placement in
+                    router?.place(presentation, placement, dismiss: onDismiss)
+                }
         }
         .onPreferenceChange(AnchoredMenuSizeKey.self) { measured = $0 }
+        .onDisappear { router?.remove(presentation) }
     }
 }
 

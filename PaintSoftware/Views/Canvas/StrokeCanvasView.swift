@@ -119,7 +119,9 @@ final class StrokeCanvasView: UIView {
     /// the pen-plus-finger snap's entire fix — provably runs. Swift only inherits a superclass
     /// initialiser under conditions this class's override changes; passing the arguments removes the
     /// question. The recognizer reports through closures, so both arguments are nil by design.
-    let strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
+    ///
+    /// Replaced only by `replaceStrokeRecognizerIfStranded`, and wired by `wire(_:)` either way.
+    private(set) var strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
     private let imageView = UIImageView()
 
     /// The live vector-stroke preview, in a layer of its own directly above `imageView` — item 11's
@@ -546,11 +548,34 @@ final class StrokeCanvasView: UIView {
             heldInkView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
-        strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
-        strokeRecognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
-        strokeRecognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
-        strokeRecognizer.onGiveUp = { [weak self] reason in self?.handleGiveUp(reason) }
-        addGestureRecognizer(strokeRecognizer)
+        wire(strokeRecognizer)
+    }
+
+    /// Installs a stroke recognizer on this view, wired to its four callbacks.
+    private func wire(_ recognizer: StrokeGestureRecognizer) {
+        recognizer.requiresPencilOnly = pencilOnlyDrawing
+        recognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
+        recognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
+        recognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
+        recognizer.onGiveUp = { [weak self] reason in self?.handleGiveUp(reason) }
+        addGestureRecognizer(recognizer)
+    }
+
+    /// **Swaps in a fresh stroke recognizer if UIKit has stranded this one** — out of `.possible`
+    /// with no canvas touch down, which is a state it never leaves (`CanvasView.Coordinator
+    /// .replaceStrandedRecognizers` has the measurement). A stroke it was still tracking is handed to
+    /// `handleGiveUp` as `.interrupted` first, so its ink commits rather than hanging half-drawn.
+    ///
+    /// Returns the new recognizer for the caller to configure the way it configured the old one,
+    /// or nil when there was nothing to replace.
+    func replaceStrokeRecognizerIfStranded() -> StrokeGestureRecognizer? {
+        guard strokeRecognizer.state != .possible else { return nil }
+        strokeRecognizer.relinquishStrandedStroke()
+        removeGestureRecognizer(strokeRecognizer)
+        let fresh = StrokeGestureRecognizer(target: nil, action: nil)
+        wire(fresh)
+        strokeRecognizer = fresh
+        return fresh
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

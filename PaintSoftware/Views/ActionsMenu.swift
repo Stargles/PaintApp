@@ -115,8 +115,9 @@ struct ActionsMenu: View {
                 .frame(height: 1)
                 .padding(.vertical, 4)
 
-            // Debug capture: record what the artist actually did, hand us the file. Default OFF and
-            // inert while off — see `ActionRecorder.isCapturing`.
+            // Debug capture: record what the artist actually did, hand us the file — or save the
+            // flight recorder's last ninety seconds, which is always on and writes nothing until
+            // asked. See `ActionRecorder`.
             ActionRecorderSection(canvasManager: canvasManager)
 
             Rectangle()

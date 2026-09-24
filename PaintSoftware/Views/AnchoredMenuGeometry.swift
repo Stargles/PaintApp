@@ -91,4 +91,35 @@ enum AnchoredMenuDismissal {
         if let toggle = toggleControlFrame, !toggle.isEmpty, toggle.contains(point) { return false }
         return true
     }
+
+    /// Where one open menu is, for the rule below.
+    struct Placement: Equatable {
+        var menuFrame: CGRect
+        var toggleControlFrame: CGRect?
+    }
+
+    /// **Which of the open menus a touch that has just landed takes down** — `shouldDismiss` applied
+    /// to every one of them at once, which is what lets it answer the one question a single menu
+    /// cannot: nesting.
+    ///
+    /// A menu survives the touch if `shouldDismiss` says so for it, **or if any menu raised from
+    /// inside it survives** (`CanvasPresentation.parent`, followed all the way up). The onion tint
+    /// picker is the case that needs it: it is wider than the onion menu it hangs off, so a touch on
+    /// the picker lands outside the menu's frame, and asked alone the menu would close — taking the
+    /// picker down mid-pick.
+    static func presentationsToDismiss(touchAt point: CGPoint,
+                                       open: [CanvasPresentation: Placement]) -> Set<CanvasPresentation> {
+        var kept = Set(open.compactMap { presentation, placement in
+            shouldDismiss(touchAt: point, menuFrame: placement.menuFrame,
+                          toggleControlFrame: placement.toggleControlFrame) ? nil : presentation
+        })
+        for survivor in kept {
+            var ancestor = survivor.parent
+            while let next = ancestor {
+                kept.insert(next)
+                ancestor = next.parent
+            }
+        }
+        return Set(open.keys).subtracting(kept)
+    }
 }

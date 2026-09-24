@@ -241,21 +241,8 @@ struct AnimationTimeline: View {
         } message: {
             Text(pendingPoseBake.map { CanvasManager.poseBakeConfirmationMessage(cels: $0.cels) } ?? "")
         }
-        // **There is deliberately no `.onReceive(canvasManager.interactionBegan)` here any more.**
-        //
-        // There used to be, clearing `timelineMenu` by name. It was right about the mechanism — a
-        // popover left to its own dismissal is dismissed *by* the touch that lands outside it, and
-        // when that touch starts a stroke the presentation comes down in the middle of the touch
-        // sequence — and it was the wrong shape of fix twice over. It covered one of the three
-        // popovers in this file, leaving the two declared a few lines above it (onion skin,
-        // interpolate) broken in the way the owner reported on 2026-08-18. And closing the popover
-        // *earlier* does not stop the teardown landing mid-sequence, it only moves it a frame: the
-        // canvas stopped freezing and the artist's ink started disappearing instead.
-        //
-        // Both halves now live outside this file. `View.canvasPresentation` registers each of the
-        // three popovers below, `CanvasManager.dismissPresentationsOverLiveCanvas()` closes them
-        // from one place, and `StrokeGiveUp.interrupted` is what makes a mid-sequence teardown cost
-        // the artist nothing worse than a short stroke they can undo.
+        // **There is deliberately no `.onReceive(canvasManager.interactionBegan)` here.** The menus
+        // below close through `AnchoredMenuRouter`, like every presentation over the canvas.
         .onDisappear { canvasManager.stopPlayback() }
     }
 
@@ -304,29 +291,17 @@ struct AnimationTimeline: View {
     /// **One layer for four menus rather than a modifier at each of the four sites**, because the
     /// menus have to be drawn over the canvas above this panel, and an overlay sized to the whole
     /// screen once is clearer than four views each escaping their own container. Each site keeps its
-    /// own binding and its own `canvasPresentationRegistration`, so every rule those already carried
-    /// — the central canvas-touch dismissal, `onDismiss` on host deletion, the `ActionRecorder`
-    /// capture — is untouched. Only who draws the thing has changed.
+    /// own binding and its own `canvasPresentationRegistration`, so every rule those carry — the
+    /// router's dismissal, `onDismiss` on host deletion, the `ActionRecorder` capture — is the same as
+    /// for a presentation `View.canvasPresentationHost` draws. Only who draws the thing differs.
     @ViewBuilder
     private var anchoredMenuLayer: some View {
         if let open = openAnchoredMenu {
-            AnchoredMenu(anchor: open.anchor,
+            AnchoredMenu(presentation: open.presentation,
+                         anchor: open.anchor,
                          toggleControl: open.toggleControl,
                          identifier: "timeline.anchoredMenu.\(open.presentation.rawValue)",
-                         onDismiss: {
-                // TODO (72): `OnionSkinPanel`'s two tint swatches open `ColorPickerPanel` as a
-                // `.popover` — 300pt wide — nested inside this ~250pt-wide menu. A touch on that
-                // popover's own content (the hex field, the hue slider) necessarily falls outside
-                // `menuFrame`, so `AnchoredMenuDismissal.shouldDismiss` cannot tell "outside the
-                // onion menu" from "inside the picker the onion menu itself raised" and closes this
-                // menu — tearing the picker down with it, mid-interaction, found live. The picker's
-                // own native outside-touch dismissal is untouched by skipping this: it still closes
-                // itself correctly on a genuinely outside touch. This only stops the *outer* menu
-                // from also tearing itself (and the picker) down while one of its own nested
-                // presentations is legitimately still open.
-                guard !nestedOnionTintPickerIsOpen else { return }
-                closeAnchoredMenu(open.presentation)
-            }) {
+                         onDismiss: { closeAnchoredMenu(open.presentation) }) {
                 anchoredMenuContent(open.presentation)
             }
             // As tall as the screen and bottom-aligned to this panel, so a menu can be drawn above
@@ -392,15 +367,7 @@ struct AnimationTimeline: View {
         }
     }
 
-    /// Writes the site's own binding, which is what the registration observes — so closing an
-    /// anchored menu goes through exactly the path a popover's own dismissal went through.
-    /// See `anchoredMenuLayer`'s `onDismiss` — the guard that keeps a touch on the onion panel's own
-    /// nested colour picker from tearing down the panel underneath it.
-    private var nestedOnionTintPickerIsOpen: Bool {
-        canvasManager.openPresentations.contains(.onionPreviousTintColour)
-            || canvasManager.openPresentations.contains(.onionNextTintColour)
-    }
-
+    /// Writes the site's own binding, which is what the registration observes.
     private func closeAnchoredMenu(_ presentation: CanvasPresentation) {
         switch presentation {
         case .timelineSlotMenu:   timelineMenu = nil

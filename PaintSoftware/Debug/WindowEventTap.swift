@@ -66,7 +66,14 @@ struct TouchSample {
     let boundRecognizers: [String]?
 }
 
-/// Intercepts `UIWindow.sendEvent(_:)` for the length of a recording, and nothing outside it.
+/// Intercepts `UIWindow.sendEvent(_:)` for as long as either of `ActionRecorder`'s sinks is on — the
+/// flight recorder, from the editor's first appearance, and a recording on top of it.
+///
+/// **Two depths.** While a recording runs (`recordsInFull`) every touch sample is written and a
+/// touch-began's target is resolved against the accessibility tree too. For the flight recorder alone
+/// a `.moved` or `.stationary` touch is skipped before anything is looked up, and a touch-began is
+/// resolved by the cheap `UIView` walk only — so the per-event cost is a phase check per touch and the
+/// post-dispatch recognizer sweep.
 ///
 /// **Why `sendEvent`.** It is the single funnel every touch in the app passes through, before
 /// hit-testing, before any gesture recognizer, before any view's `touchesBegan`. Tapping it once
@@ -98,8 +105,8 @@ struct TouchSample {
 /// because the swizzled `UIWindow` implementation is then never reached. It is also process-wide,
 /// which is a poor fit for something that must be provably inert when off.
 ///
-/// **Cost when off: zero.** `uninstall()` restores the original class, so the app's own unmodified
-/// `sendEvent` is what runs, with no branch of ours in it.
+/// **Cost when uninstalled: zero.** `uninstall()` restores the original class, so the app's own
+/// unmodified `sendEvent` is what runs, with no branch of ours in it.
 @objc final class WindowEventTap: NSObject {
     /// Found by the synthesised `sendEvent:` override, which has no other way to reach `self`.
     /// Weak: `ActionRecorder` owns the tap for the length of a recording.
@@ -113,6 +120,9 @@ struct TouchSample {
 
     private weak var window: UIWindow?
     private var originalClass: AnyClass?
+
+    /// A recording is running: sample every move, and resolve targets thoroughly. See the type's doc.
+    var recordsInFull = false
 
     // MARK: - Install / uninstall
 
@@ -154,6 +164,7 @@ struct TouchSample {
             entry.recognizer?.removeTarget(self, action: #selector(recognizerFired(_:)))
         }
         registry.removeAll()
+        registryByID.removeAll()
         targeted.removeAll()
         tracks.removeAll()
         window = nil
@@ -206,6 +217,8 @@ struct TouchSample {
 
     private func willSend(_ event: UIEvent, window: UIWindow?) {
         guard event.type == .touches, let window, let touches = event.allTouches else { return }
+        // The flight recorder's whole saving: a move is skipped here, before anything is looked up.
+        guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return }
         let recorder = ActionRecorder.shared
         // Counted from the whole event, not from the touches we end up writing: "how many fingers
         // are down" is the thing that separates a two-finger pan from a one-finger draw, and it has
@@ -216,14 +229,51 @@ struct TouchSample {
             default: break
             }
         }
+        // Whether this event starts a touch sequence: every touch in it has only just begun. For
+        // `CanvasWedgeDetector`, which counts sequences — so only the first began touch of such an
+        // event is reported as starting one.
+        var startsSequence = touches.allSatisfy { $0.phase == .began }
         for touch in touches {
-            guard let sample = sample(touch, in: window, event: event, concurrent: concurrent, recorder: recorder) else { continue }
+            guard recordsInFull || Self.isSequenceEdge(touch.phase),
+                  let sample = sample(touch, in: window, event: event, concurrent: concurrent, recorder: recorder) else { continue }
             recorder.touch(sample)
+            if touch.phase == .began, let bound = sample.boundRecognizers {
+                watchNewlyBoundRecognizers(of: touch)
+                recorder.touchBegan(startsSequence: startsSequence, boundRecognizers: bound)
+                startsSequence = false
+            }
         }
     }
 
+    private static func isSequenceEdge(_ phase: UITouch.Phase) -> Bool {
+        phase == .began || phase == .ended || phase == .cancelled
+    }
+
+    /// Rescans when a touch is bound to a named recognizer the registry is not watching yet — a new
+    /// layer's `StrokeGestureRecognizer`, or the fresh set `CanvasView.Coordinator
+    /// .replaceStrandedRecognizers` installs. The recording also rescans on its two-second tick; the
+    /// flight recorder has no tick, and this is the moment such a recognizer starts to matter.
+    ///
+    /// At most once every two seconds, the tick's cadence: a named recognizer the walk cannot reach
+    /// (one of UIKit's, hung outside this window's tree) would otherwise send every touch-began on a
+    /// whole-window walk.
+    private func watchNewlyBoundRecognizers(of touch: UITouch) {
+        let unwatched = (touch.gestureRecognizers ?? []).contains { recognizer in
+            recognizer.name?.isEmpty == false && !targeted.contains(ObjectIdentifier(recognizer))
+        }
+        guard unwatched, touch.timestamp - lastRescan >= 2 else { return }
+        rescanRecognizers()
+    }
+    private var lastRescan: TimeInterval = 0
+
+    /// The sweep follows every touch event while recording, and only a touch-began, -ended or
+    /// -cancelled event for the flight recorder alone: a transition a move produces reaches the
+    /// registry as an action message anyway, and the two a move can produce without one — `.failed`
+    /// and the reset to `.possible` — are caught by the next sequence edge, which in a stroke or a
+    /// pan is never more than the lift away.
     private func didSend(_ event: UIEvent) {
         guard event.type == .touches else { return }
+        guard recordsInFull || (event.allTouches?.contains(where: { Self.isSequenceEdge($0.phase) }) ?? false) else { return }
         sweepRecognizerStates()
     }
 
@@ -273,7 +323,7 @@ struct TouchSample {
         guard phase == .began || phase == .moved || phase == .ended || phase == .cancelled || phase == .stationary else { return nil }
 
         let point = touch.location(in: window)
-        let time = recorder.stamp(touch.timestamp)
+        let time = touch.timestamp
 
         if phase == .began {
             let resolved = resolveTarget(for: touch, at: point, in: window, event: event)
@@ -468,7 +518,7 @@ struct TouchSample {
         let hitClass = hitView.map { String(describing: type(of: $0)) } ?? "none"
         let screenPoint = Self.screenPoint(point, in: window)
 
-        if let hit = hitView,
+        if recordsInFull, let hit = hitView,
            let found = Self.accessibilityElement(at: screenPoint, under: hit, depth: 0) {
             return (ResolvedTarget(identifier: found.identifier,
                                    identifierClass: String(describing: type(of: found.element)),
@@ -501,7 +551,7 @@ struct TouchSample {
         // walk) but it only runs on `began`/`ended`, only while recording, and only when the two
         // cheap searches failed — and coming back with an identifier is the difference between a
         // replayable line and a dead one.
-        if let found = Self.accessibilityElement(at: screenPoint, under: window, depth: 0) {
+        if recordsInFull, let found = Self.accessibilityElement(at: screenPoint, under: window, depth: 0) {
             return (ResolvedTarget(identifier: found.identifier,
                                    identifierClass: String(describing: type(of: found.element)),
                                    hitClass: hitClass,
@@ -642,6 +692,9 @@ struct TouchSample {
     }
 
     private var registry: [Entry] = []
+    /// `registry` by recognizer, for `noteTransition`, which runs on every action message — every
+    /// `.changed` of a stroke or a pan — and must not search.
+    private var registryByID: [ObjectIdentifier: Entry] = [:]
     private var targeted: Set<ObjectIdentifier> = []
 
     /// Discovers every named recognizer under the window and starts watching it.
@@ -656,6 +709,7 @@ struct TouchSample {
     /// vanish while recording.
     func rescanRecognizers() {
         guard let window else { return }
+        lastRescan = CACurrentMediaTime()
         var found: [Entry] = []
         var seen: Set<ObjectIdentifier> = []
         collect(from: window, into: &found, seen: &seen)
@@ -675,6 +729,7 @@ struct TouchSample {
             }
         }
         registry = found
+        registryByID = Dictionary(uniqueKeysWithValues: found.map { ($0.objectID, $0) })
     }
 
     private func collect(from view: UIView, into entries: inout [Entry], seen: inout Set<ObjectIdentifier>) {
@@ -694,7 +749,7 @@ struct TouchSample {
     /// a long-press's timer firing, a `require(toFail:)` relationship resolving — which the post-event
     /// sweep would not see until the next touch, if ever.
     @objc private func recognizerFired(_ recognizer: UIGestureRecognizer) {
-        guard ActionRecorder.isCapturing else { return }
+        guard ActionRecorder.isCapturing || ActionRecorder.isFlying else { return }
         note(recognizer, source: "action")
     }
 
@@ -708,9 +763,13 @@ struct TouchSample {
     /// `require(toFail:)`, so a stroke recognizer that never reaches it is the deadlock. The sweep
     /// catches it, along with UIKit's own reset back to `.possible`.
     ///
+    /// Internal rather than private for one reader outside `didSend`:
+    /// `PerfBaselineTests.testFlightRecorderCostOnAStroke`, which times it, since it is half of what
+    /// the flight recorder costs every touch event.
+    ///
     /// The two routes compose rather than duplicate: both update `lastState`, so whichever notices a
     /// transition first is the one that writes it, and `src` on the line says which that was.
-    private func sweepRecognizerStates() {
+    func sweepRecognizerStates() {
         for entry in registry {
             guard let recognizer = entry.recognizer else { continue }
             let state = recognizer.state
@@ -724,7 +783,7 @@ struct TouchSample {
     /// Records a transition for a recognizer we own the source of (`StrokeGestureRecognizer`), keeping
     /// the registry's `lastState` in step so the sweep doesn't write it a second time.
     func noteTransition(_ recognizer: UIGestureRecognizer, to newState: UIGestureRecognizer.State, source: String) {
-        guard let entry = registry.first(where: { $0.objectID == ObjectIdentifier(recognizer) }) else {
+        guard let entry = registryByID[ObjectIdentifier(recognizer)] else {
             // Not discovered yet (created since the last rescan). Still worth writing — a nameless
             // line is better than a missing transition — and the name falls back to the class.
             ActionRecorder.shared.recognizer(recognizer.name ?? String(describing: type(of: recognizer)),

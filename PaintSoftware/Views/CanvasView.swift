@@ -674,10 +674,7 @@ struct CanvasView: UIViewRepresentable {
                 let host = LayerHostView()
                 host.strokeView.layerID = layer.id
                 host.strokeView.canvasManager = canvasManager
-                // Debug-recorder name only (see `setUpGestures`). Per-layer rather than a bare
-                // "stroke": every layer has one of these, and `shouldRequireFailureOf` names exactly
-                // one of them, so a recording has to be able to tell them apart.
-                host.strokeView.strokeRecognizer.name = "stroke.\(layer.id.uuidString.prefix(8))"
+                configure(host.strokeView.strokeRecognizer, forLayer: layer.id)
                 // Live guide feedback goes straight to the overlay, not through SwiftUI state — a
                 // `@Published` write per touch sample would re-run every view body for the drag.
                 host.strokeView.guideOverlayNeedsUpdate = { [weak self] samples in
@@ -756,20 +753,6 @@ struct CanvasView: UIViewRepresentable {
                     }
                     self.canvasManager.refreshUndoRedoState()
                 }
-                // A second finger during shape following means "snap", not "pan" — keep the pen.
-                host.strokeView.strokeRecognizer.shouldIgnoreAdditionalTouches = { [weak self] in
-                    self?.canvasManager.isShapeFollowingFinger ?? false
-                }
-                // ...and having kept it, say so: this is the second source for "a finger joined the
-                // pen", read off the recognizer the pen is already driving rather than off the
-                // container four views up. See `onAccompanyingFingersChanged`. Only one stroke can be
-                // live at a time, so one counter serves every host; `reset()` reports 0, which is
-                // what keeps a torn-down host from leaving the snap latched on.
-                host.strokeView.strokeRecognizer.onAccompanyingFingersChanged = { [weak self] fingers in
-                    guard let self else { return }
-                    self.strokeAccompanyingFingers = fingers
-                    self.refreshShapeConstraint()
-                }
                 host.strokeView.onStrokeMoved = { [weak self, weak host] sample, penTime in
                     guard let self else { return }
                     if self.canvasManager.isShapeFollowingFinger {
@@ -791,25 +774,6 @@ struct CanvasView: UIViewRepresentable {
                 }
                 host.strokeView.onLiveInkChanged = { [weak self] image, rect, alpha in
                     self?.updateTimingInk(image: image, rect: rect, alpha: alpha)
-                }
-                host.strokeView.strokeRecognizer.onAnyTouchBegan = { [weak self] in
-                    // Touching the canvas at all — any finger count — ends a live take and drops
-                    // whatever sits over it. Closing the bottom-docked panels (Effect Settings
-                    // included) waits for `onSingleTouchBegan` below, so a two-finger pan/pinch/
-                    // rotate's first finger does not take them down before the second arrives to say
-                    // this was never a stroke — TODO (67), the owner's report naming Colour Wheels.
-                    //
-                    // **`mayContinueTake` is true here and nowhere else** — KEYFRAMES.md §7 stage 10.
-                    // This is the one entry point that can become a timing stroke, so it is the one
-                    // that must not end the take it is part of. A take is stopped by playback
-                    // stopping, and every other caller of this method still stops it.
-                    self?.canvasManager.canvasTouchLanded(mayContinueTake: true)
-                }
-                host.strokeView.strokeRecognizer.onSingleTouchBegan = { [weak self] in
-                    // The panel-closing half — see `canvasInteractionBegan`'s own doc. Same
-                    // `mayContinueTake` reasoning as `onAnyTouchBegan` above: this can still be the
-                    // touch that becomes a timing stroke.
-                    self?.canvasManager.canvasInteractionBegan(mayContinueTake: true)
                 }
                 host.strokeView.onStrokeEnded = { [weak self, weak host] in
                     guard let self else { return }
@@ -3305,8 +3269,9 @@ struct CanvasView: UIViewRepresentable {
             // reader cares about. Both halves go in: the committed baseline and the live gesture
             // contribution are folded together only when every one of pan/pinch/rotation has ended
             // (`commitLiveTransformIfAllEnded`), so a recording that shows `live` never returning to
-            // identity is showing a gesture that never finished.
-            ActionRecorder.ifRecording {
+            // identity is showing a gesture that never finished. A recording only: one per frame of a
+            // pan is the rate `ifRecordingInFull` exists to keep out of the flight ring.
+            ActionRecorder.ifRecordingInFull {
                 $0.transform(committedScale: committedScale, committedRotation: committedRotation,
                              committedOffset: committedOffset,
                              liveScale: liveScale, liveRotation: liveRotation, liveOffset: liveOffset,
@@ -3319,6 +3284,105 @@ struct CanvasView: UIViewRepresentable {
         }
 
         // MARK: - Gestures
+
+        /// **Everything this coordinator hangs on a layer's stroke recognizer**, in one place, because
+        /// there are two moments it happens: when the layer's host is built, and when
+        /// `replaceStrandedRecognizers` swaps in a fresh recognizer for one UIKit has stranded. The
+        /// stroke view wires its own four callbacks (`StrokeCanvasView.wire`).
+        private func configure(_ recognizer: StrokeGestureRecognizer, forLayer id: UUID) {
+            // Debug-recorder name only (see `setUpGestures`). Per-layer rather than a bare "stroke":
+            // every layer has one of these, and `shouldRequireFailureOf` names exactly one of them,
+            // so a recording has to be able to tell them apart.
+            recognizer.name = "stroke.\(id.uuidString.prefix(8))"
+            // A second finger during shape following means "snap", not "pan" — keep the pen.
+            recognizer.shouldIgnoreAdditionalTouches = { [weak self] in
+                self?.canvasManager.isShapeFollowingFinger ?? false
+            }
+            // ...and having kept it, say so: this is the second source for "a finger joined the pen",
+            // read off the recognizer the pen is already driving rather than off the container four
+            // views up. See `onAccompanyingFingersChanged`. Only one stroke can be live at a time, so
+            // one counter serves every host; `reset()` reports 0, which is what keeps a torn-down host
+            // from leaving the snap latched on.
+            recognizer.onAccompanyingFingersChanged = { [weak self] fingers in
+                guard let self else { return }
+                self.strokeAccompanyingFingers = fingers
+                self.refreshShapeConstraint()
+            }
+            recognizer.onAnyTouchBegan = { [weak self] in
+                // Touching the canvas at all — any finger count — ends a live take. Closing the
+                // bottom-docked panels (Effect Settings included) waits for `onSingleTouchBegan`
+                // below, so a two-finger pan/pinch/rotate's first finger does not take them down
+                // before the second arrives to say this was never a stroke — TODO (67), the owner's
+                // report naming Colour Wheels.
+                //
+                // **`mayContinueTake` is true here and nowhere else** — KEYFRAMES.md §7 stage 10.
+                // This is the one entry point that can become a timing stroke, so it is the one that
+                // must not end the take it is part of. A take is stopped by playback stopping, and
+                // every other caller of this method still stops it.
+                self?.canvasManager.canvasTouchLanded(mayContinueTake: true)
+            }
+            recognizer.onSingleTouchBegan = { [weak self] in
+                // The panel-closing half — see `canvasInteractionBegan`'s own doc. Same
+                // `mayContinueTake` reasoning as `onAnyTouchBegan` above: this can still be the touch
+                // that becomes a timing stroke.
+                self?.canvasManager.canvasInteractionBegan(mayContinueTake: true)
+            }
+        }
+
+        /// Every recognizer `setUpGestures` installed, so `replaceStrandedRecognizers` can take the
+        /// whole set down and build it again from the one function that knows how.
+        private var canvasGestures: [UIGestureRecognizer] = []
+
+        private func install(_ recognizer: UIGestureRecognizer, on view: UIView) {
+            view.addGestureRecognizer(recognizer)
+            canvasGestures.append(recognizer)
+        }
+
+        /// **Replaces every canvas recognizer UIKit has stranded — the canvas freeze, repaired at the
+        /// moment it happens.** Runs just after the last canvas touch lifts, which is when UIKit has
+        /// reset every recognizer those touches were bound to back to `.possible`. One still out of
+        /// `.possible` then will never be offered a touch again: it is stranded, and it stays so
+        /// until the project is reopened. MEASURED: once so, no `isEnabled` toggle, `reset()`,
+        /// `state = .possible` or re-add returns the *same* instance to service — but a fresh
+        /// instance, built by the same code, works on the very next touch.
+        ///
+        /// **What strands them is a UIKit presentation torn down under a live two-finger gesture**,
+        /// and the app cannot stop UIKit doing it: a `Menu` or `.contextMenu` over the canvas
+        /// dismisses itself when two fingers land outside it, and whatever recognizers it had bound
+        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), is that —
+        /// the Blend Mode / Effect menu open over a value layer, then a two-finger pan
+        /// (`CanvasTransformFreezeUITests`). The editor's own presentations are no longer UIKit ones
+        /// (`CanvasPresentation`), which removes the commonest cause; this is what makes every cause,
+        /// including the ones not yet met, cost the artist nothing.
+        ///
+        /// Tells the action recorder, which saves its last ninety seconds: a repair is the moment the
+        /// freeze *would* have happened, and the ring holds how it came about.
+        private func replaceStrandedRecognizers() {
+            // A touch that landed between the lift and this block is a new sequence in flight, and
+            // its recognizers are legitimately out of `.possible`. The next lift asks again.
+            guard touchCountRecognizer?.activeCount == 0 else { return }
+            var stranded: [String] = []
+            let strandedOwn = canvasGestures.filter { $0.isEnabled && $0.state != .possible }
+            if !strandedOwn.isEmpty, let host = hostView, let container = containerView {
+                stranded += strandedOwn.map { $0.name ?? String(describing: type(of: $0)) }
+                for recognizer in canvasGestures { recognizer.view?.removeGestureRecognizer(recognizer) }
+                canvasGestures.removeAll()
+                setUpGestures(host: host, container: container)
+                // The five that are off unless a tool or layer wants them come back off; put them
+                // where the current state says, now rather than on the next SwiftUI pass.
+                updateActiveLayerAndTool()
+                catchAllTapRecognizer?.isEnabled = canvasTouchInputs().catchAllIsEnabled
+            }
+            for (layerID, host) in layerHosts {
+                let old = host.strokeView.strokeRecognizer.name
+                guard let fresh = host.strokeView.replaceStrokeRecognizerIfStranded() else { continue }
+                configure(fresh, forLayer: layerID)
+                stranded.append(old ?? "stroke")
+            }
+            guard !stranded.isEmpty else { return }
+            ActionRecorder.ifRecording { $0.canvasRecognizersReplaced(stranded) }
+        }
+
 
         /// **Which of these reject a finger while pencil-only drawing is on, and which must not.**
         /// The preference is `CanvasManager.pencilOnlyDrawing`, and the question is not "is this a
@@ -3390,28 +3454,28 @@ struct CanvasView: UIViewRepresentable {
             pan.delegate = self
             pan.cancelsTouchesInView = false
             pan.name = "canvas.pan"
-            host.addGestureRecognizer(pan)
+            install(pan, on: host)
             panRecognizer = pan
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             pinch.cancelsTouchesInView = false
             pinch.name = "canvas.pinch"
-            host.addGestureRecognizer(pinch)
+            install(pinch, on: host)
             pinchRecognizer = pinch
 
             let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
             rotation.delegate = self
             rotation.cancelsTouchesInView = false
             rotation.name = "canvas.rotation"
-            host.addGestureRecognizer(rotation)
+            install(rotation, on: host)
             rotationRecognizer = rotation
 
             let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
             twoFingerTap.numberOfTouchesRequired = 2
             twoFingerTap.cancelsTouchesInView = false
             twoFingerTap.name = "canvas.twoFingerTap"
-            host.addGestureRecognizer(twoFingerTap)
+            install(twoFingerTap, on: host)
 
             // Drives the shape constraint snap: reports the live canvas touches split by type, and a
             // finger joining a pen-held shape engages the snap after a short delay (see
@@ -3424,17 +3488,23 @@ struct CanvasView: UIViewRepresentable {
             // The counts themselves are read back off the recognizer inside
             // `refreshShapeConstraint`, alongside the stroke recognizer's own — this is the "and now
             // something changed" edge, not the value.
-            touchCounter.onTouchesChanged = { [weak self] _, _ in
+            //
+            // It is also the edge the stranded-recognizer repair runs on: the last canvas touch
+            // lifting is when every other recognizer here should be back in `.possible`.
+            touchCounter.onTouchesChanged = { [weak self] total, _ in
                 self?.refreshShapeConstraint()
+                if total == 0 {
+                    DispatchQueue.main.async { self?.replaceStrandedRecognizers() }
+                }
             }
-            host.addGestureRecognizer(touchCounter)
+            install(touchCounter, on: host)
             touchCountRecognizer = touchCounter
 
             let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
             threeFingerTap.numberOfTouchesRequired = 3
             threeFingerTap.cancelsTouchesInView = false
             threeFingerTap.name = "canvas.threeFingerTap"
-            host.addGestureRecognizer(threeFingerTap)
+            install(threeFingerTap, on: host)
 
             twoFingerTap.require(toFail: threeFingerTap)
 
@@ -3452,7 +3522,7 @@ struct CanvasView: UIViewRepresentable {
             fillPress.cancelsTouchesInView = false
             fillPress.isEnabled = false
             fillPress.name = "canvas.fillPress"
-            view.addGestureRecognizer(fillPress)
+            install(fillPress, on: view)
             fillTapRecognizer = fillPress
 
             // Catch-all for when no layers or the active layer is hidden: fires on any single touch
@@ -3471,7 +3541,7 @@ struct CanvasView: UIViewRepresentable {
             catchAll.cancelsTouchesInView = false
             catchAll.isEnabled = false
             catchAll.name = "canvas.catchAll"
-            view.addGestureRecognizer(catchAll)
+            install(catchAll, on: view)
             catchAllTapRecognizer = catchAll
 
             // The eyedropper's tap. Disabled except while the eyedropper is selected, exactly as the
@@ -3492,7 +3562,7 @@ struct CanvasView: UIViewRepresentable {
             eyedropperPress.cancelsTouchesInView = false
             eyedropperPress.isEnabled = false
             eyedropperPress.name = "canvas.eyedropperPress"
-            view.addGestureRecognizer(eyedropperPress)
+            install(eyedropperPress, on: view)
             eyedropperTapRecognizer = eyedropperPress
 
             // The text tool's placement tap. A fourth `TouchTypePressRecognizer` for the reason the
@@ -3510,7 +3580,7 @@ struct CanvasView: UIViewRepresentable {
             textPress.cancelsTouchesInView = false
             textPress.isEnabled = false
             textPress.name = "canvas.textPress"
-            view.addGestureRecognizer(textPress)
+            install(textPress, on: view)
             textTapRecognizer = textPress
 
             // The tap **away** from the vector Move box, which puts the box down — the vector half of
@@ -3545,7 +3615,7 @@ struct CanvasView: UIViewRepresentable {
             moveBoxCommit.delaysTouchesEnded = false
             moveBoxCommit.isEnabled = false
             moveBoxCommit.name = "canvas.moveBoxCommit"
-            view.addGestureRecognizer(moveBoxCommit)
+            install(moveBoxCommit, on: view)
             moveBoxCommitRecognizer = moveBoxCommit
         }
 
@@ -3972,7 +4042,7 @@ struct CanvasView: UIViewRepresentable {
             let counterTotal = touchCountRecognizer?.activeCount ?? 0
             let counterFingers = touchCountRecognizer?.fingerCount ?? 0
             let fingers = currentAccompanyingFingers()
-            // Not debug cruft; it costs one static `Bool` load when off. Both sources are named
+            // Not debug cruft; it is one of the flight recorder's low-rate lines. Both sources are named
             // separately on purpose — `counter:2/1 stroke:0` and `counter:1/0 stroke:1` are the two
             // answers to "is the host's recognizer being starved", and they differ in one line.
             ActionRecorder.ifRecording {

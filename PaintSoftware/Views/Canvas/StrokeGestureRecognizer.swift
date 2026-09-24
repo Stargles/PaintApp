@@ -137,9 +137,12 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// simply not be in the file. The recorder deduplicates the two routes, so this costs one extra
     /// line here and no duplicates there.
     ///
-    /// Cost when not recording: one static `Bool` load. Nothing else in this function runs.
+    /// Cost per stroke sample: one state compare. `.changed` to `.changed` is not a transition, so
+    /// only the stroke's handful of real ones reach the recorder.
     private func transition(to newState: UIGestureRecognizer.State) {
-        ActionRecorder.ifRecording { $0.recognizerTransition(self, to: newState, source: "inline") }
+        if newState != state {
+            ActionRecorder.ifRecording { $0.recognizerTransition(self, to: newState, source: "inline") }
+        }
         state = newState
     }
 
@@ -327,14 +330,9 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// that the function is now reachable from a *first* touch — the one that finds a corpse — which
     /// is a sequence a real hand produces constantly and a synthesised gesture never does.
     ///
-    /// **On the reported freeze, corrected.** An older version of this comment said the freeze was
-    /// not this function's business at all: the trigger was a stroke begun under a timeline popover,
-    /// the popover's teardown stranded this recognizer without a `reset()`, and the fix lived in
-    /// `AnimationTimeline`. The diagnosis was right and the fix was in the wrong place. It covered
-    /// one popover of the eight that can sit over a live canvas, and closing a popover *earlier* only
-    /// moves the teardown a frame — the canvas stopped freezing and the ink started disappearing.
-    /// The dismissal now lives in `CanvasManager.dismissPresentationsOverLiveCanvas()` over the
-    /// closed set `CanvasPresentation`, and this file's contribution to the same bug is the
+    /// **On the reported freeze.** A UIKit popover torn down mid-sequence stranded this recognizer
+    /// without a `reset()`; the editor has no UIKit presentations over the canvas any more
+    /// (`CanvasPresentation`'s header), and this file's contribution to that class of bug is the
     /// `.interrupted` arm below.
     ///
     /// **What this does not fix, stated so nobody re-derives it.** The touch that *discovered* the
@@ -345,6 +343,16 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// `.ended` back to `.began`, which is not a documented transition, and getting that wrong breaks
     /// drawing outright rather than delaying it by one touch. `StrokeInterruptionLogicTests` records
     /// the limit as a test so that it stays a known cost rather than becoming a new surprise.
+    /// **This recognizer has been stranded and is about to be replaced** (`StrokeCanvasView
+    /// .replaceStrokeRecognizerIfStranded`): a stroke it was still tracking ends here, as
+    /// `.interrupted`, because no touch will ever reach this instance again to end it. Its own state is
+    /// left alone — UIKit no longer resets it, which is the whole problem.
+    func relinquishStrandedStroke() {
+        guard trackedTouch != nil else { return }
+        trackedTouch = nil
+        onGiveUp?(.interrupted)
+    }
+
     private func giveUpTrackedStroke(_ reason: StrokeGiveUp) {
         trackedTouch = nil
         transition(to: .failed)

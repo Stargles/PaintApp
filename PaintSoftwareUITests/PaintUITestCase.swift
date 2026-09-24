@@ -939,4 +939,117 @@ class PaintUITestCase: XCTestCase {
         XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
     }
 
+    // MARK: - Staggered multi-touch
+
+    /// **A two-finger drag whose fingers land in two separate touch events, `stagger` seconds apart —
+    /// the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.**
+    ///
+    /// XCUITest's public multi-touch gestures deliver both touches in a *single* `touchesBegan`
+    /// (`CanvasTransformFreezeUITests`' header has the measurement), so every recognizer that asks
+    /// "is this touch one of a batch?" answers yes and the first finger is never seen alone. The
+    /// owner's recordings say a real hand never does that: `recording-20260923-200911` puts its two
+    /// fingers down 10–20 ms apart, in two events, on every gesture in the file. This drives the
+    /// event synthesiser XCUITest's own gestures are built on (`XCPointerEventPath`,
+    /// `XCSynthesizedEventRecord` in XCUIAutomation), reached by selector because it is not public
+    /// API; a missing class or selector is an `XCTSkip` naming it rather than a crash.
+    ///
+    /// - Parameters:
+    ///   - a, b: where each finger lands, normalised within `element`; `a` lands first.
+    ///   - delta: how far both fingers travel together, in points.
+    func staggeredTwoFingerDrag(_ element: XCUIElement, a: CGVector, b: CGVector,
+                                stagger: TimeInterval = 0.02, delta: CGVector,
+                                duration: TimeInterval = 0.4) throws {
+        var paths: [AnyObject] = []
+        let steps = 8
+        for (origin, down) in [(element.coordinate(withNormalizedOffset: a).screenPoint, 0.0),
+                               (element.coordinate(withNormalizedOffset: b).screenPoint, stagger)] {
+            let path = try SynthesizedTouch.path(at: origin, offset: down)
+            for step in 1...steps {
+                let t = Double(step) / Double(steps)
+                try SynthesizedTouch.move(path, to: CGPoint(x: origin.x + delta.dx * t, y: origin.y + delta.dy * t),
+                                          at: stagger + duration * t)
+            }
+            try SynthesizedTouch.lift(path, at: stagger + duration + 0.02)
+            paths.append(path)
+        }
+        try SynthesizedTouch.synthesize(paths)
+    }
+
+    /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the
+    /// top toolbar, which has no control under it.
+    ///
+    /// Every presentation over the canvas is an `AnchoredMenu`, and the touch that closes one goes on
+    /// to do what it was aimed at (`AnchoredMenuRouter`), so a tap on a tool button would close the
+    /// menu *and* switch the tool, and a tap on the canvas would draw.
+    func tapAway(_ app: XCUIApplication) {
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)).tap()
+    }
+}
+
+/// The selector-level plumbing behind `staggeredTwoFingerDrag`. Every object here is created through
+/// `alloc`/`init…` read off the runtime and handed back `Unmanaged` so ARC makes no assumption about
+/// ownership it cannot see; the few objects it leaks per gesture are a test process's to lose.
+private enum SynthesizedTouch {
+    static func path(at point: CGPoint, offset: Double) throws -> AnyObject {
+        let object = try allocate("XCPointerEventPath")
+        let selector = NSSelectorFromString("initForTouchAtPoint:offset:")
+        typealias Init = @convention(c) (AnyObject, Selector, CGPoint, Double) -> Unmanaged<AnyObject>
+        return unsafeBitCast(try implementation(object, selector), to: Init.self)(object, selector, point, offset)
+            .takeUnretainedValue()
+    }
+
+    static func move(_ path: AnyObject, to point: CGPoint, at offset: Double) throws {
+        let selector = NSSelectorFromString("moveToPoint:atOffset:")
+        typealias Move = @convention(c) (AnyObject, Selector, CGPoint, Double) -> Void
+        unsafeBitCast(try implementation(path, selector), to: Move.self)(path, selector, point, offset)
+    }
+
+    static func lift(_ path: AnyObject, at offset: Double) throws {
+        let selector = NSSelectorFromString("liftUpAtOffset:")
+        typealias Lift = @convention(c) (AnyObject, Selector, Double) -> Void
+        unsafeBitCast(try implementation(path, selector), to: Lift.self)(path, selector, offset)
+    }
+
+    /// One record carrying every path, synthesised synchronously: the call returns once the last
+    /// touch has lifted, so the caller reads the app's state after the whole gesture.
+    static func synthesize(_ paths: [AnyObject]) throws {
+        let record = try allocate("XCSynthesizedEventRecord")
+        let initSelector = NSSelectorFromString("initWithName:interfaceOrientation:")
+        typealias Init = @convention(c) (AnyObject, Selector, NSString, Int) -> Unmanaged<AnyObject>
+        let orientation = XCUIDevice.shared.orientation.isLandscape
+            ? (XCUIDevice.shared.orientation == .landscapeLeft ? 3 : 4) : 1
+        let made = unsafeBitCast(try implementation(record, initSelector), to: Init.self)(
+            record, initSelector, "staggered two-finger drag" as NSString, orientation).takeUnretainedValue()
+
+        let addSelector = NSSelectorFromString("addPointerEventPath:")
+        typealias Add = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        let add = unsafeBitCast(try implementation(made, addSelector), to: Add.self)
+        for path in paths { add(made, addSelector, path) }
+
+        let runSelector = NSSelectorFromString("synthesizeWithError:")
+        typealias Run = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<Unmanaged<NSError>?>?) -> Bool
+        var error: Unmanaged<NSError>?
+        guard unsafeBitCast(try implementation(made, runSelector), to: Run.self)(made, runSelector, &error) else {
+            XCTFail("the event synthesiser refused the gesture: \(error?.takeUnretainedValue().localizedDescription ?? "no error given")")
+            return
+        }
+    }
+
+    private static func allocate(_ className: String) throws -> AnyObject {
+        guard let cls = NSClassFromString(className),
+              let method = class_getClassMethod(cls, NSSelectorFromString("alloc")) else {
+            throw XCTSkip("\(className) is not available in this XCUIAutomation")
+        }
+        typealias Alloc = @convention(c) (AnyClass, Selector) -> Unmanaged<AnyObject>
+        return unsafeBitCast(method_getImplementation(method), to: Alloc.self)(cls, NSSelectorFromString("alloc"))
+            .takeUnretainedValue()
+    }
+
+    private static func implementation(_ object: AnyObject, _ selector: Selector) throws -> IMP {
+        guard let cls = object_getClass(object), class_respondsToSelector(cls, selector),
+              let imp = class_getMethodImplementation(cls, selector) else {
+            throw XCTSkip("\(String(describing: object_getClass(object))) does not answer \(selector)")
+        }
+        return imp
+    }
 }

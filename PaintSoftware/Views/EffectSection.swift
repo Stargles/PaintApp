@@ -872,7 +872,7 @@ struct EffectSettingsBar: View {
             Text(label).font(.system(size: 12)).foregroundColor(.white.opacity(0.85))
             Spacer()
             Button {
-                showingColorPicker = true
+                showingColorPicker.toggle()
             } label: {
                 color.color
                     .frame(width: 44, height: 22)
@@ -1333,7 +1333,7 @@ struct GradientStopsEditor: View {
     private func stopRow(_ index: Int) -> some View {
         HStack(spacing: 8) {
             Button {
-                colorPickerIndex = index
+                colorPickerIndex = colorPickerIndex == index ? nil : index
             } label: {
                 stops[index].color.color
                     .frame(width: 30, height: 22)
@@ -1513,7 +1513,8 @@ struct RecolorEntriesEditor: View {
     private func swatch(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> some View {
         let colour = color(index, end)
         return Button {
-            colorPicker = (index, end)
+            let isOpen = colorPicker.map { $0.index == index && $0.end == end } ?? false
+            colorPicker = isOpen ? nil : (index, end)
         } label: {
             colour.color
                 .frame(width: 30, height: 22)

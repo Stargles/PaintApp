@@ -409,6 +409,9 @@
 		F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */; };
 		3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */; };
 		0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */; };
+		9F3524FADD635E4C6590A1C3 /* PaintSoftwareUITests/FlightRecorderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */; };
+		11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */; };
+		159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */; };
 		D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */; };
 		057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */; };
 		04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */; };
@@ -903,6 +906,9 @@
 		98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeMetalLogicTests.swift; sourceTree = "<group>"; };
 		3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeKey.swift; sourceTree = "<group>"; };
 		97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/PlaybackTrace.swift; sourceTree = "<group>"; };
+		D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/FlightRecorderUITests.swift; sourceTree = "<group>"; };
+		C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/FlightRecorderLogicTests.swift; sourceTree = "<group>"; };
+		2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/FlightRecorder.swift; sourceTree = "<group>"; };
 		924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeStore.swift; sourceTree = "<group>"; };
 		A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBaker.swift; sourceTree = "<group>"; };
 		1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeKeyLogicTests.swift; sourceTree = "<group>"; };
@@ -1384,6 +1390,9 @@
 				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */,
 				97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */,
+				D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */,
+				C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */,
+				2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */,
 				924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */,
 				A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */,
 				3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */,
@@ -1888,6 +1897,9 @@
 				F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */,
 				3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */,
 				0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */,
+				9F3524FADD635E4C6590A1C3 /* PaintSoftwareUITests/FlightRecorderUITests.swift in Sources */,
+				11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */,
+				159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */,
 				D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */,
 				057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */,
 				04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */,

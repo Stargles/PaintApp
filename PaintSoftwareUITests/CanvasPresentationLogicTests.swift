@@ -1,87 +1,63 @@
 import XCTest
 import Combine
 
-/// `CanvasPresentation` as a closed set of answers, and the rule that applies them: **a touch on the
-/// canvas closes every open presentation that could be sitting over a live canvas, before that touch
-/// becomes a stroke.**
+/// `CanvasPresentation` as a closed set, and the two rules that keep it safe: **no presentation over
+/// the canvas is a UIKit presentation**, and **a canvas touch closes the panels, not the
+/// presentations** — those close through `AnchoredMenuRouter`, on any outside touch.
 ///
-/// **This file is written to fail on omission**, the way `ToolLogicTests` is. The defect it guards is
-/// the one `MENU_PRESENTATION_CENSUS.md` counted: `CanvasManager.interactionBegan` used to be a bare
-/// signal with two hand-written subscribers, each clearing one variable *by name*, so a presentation
-/// was broken by default and became safe only if whoever added it happened to know there was a line
-/// to write. Seven of them did not get that line — including two declared nine lines below the sink
-/// written to fix exactly this class of bug.
+/// **This file is written to fail on omission**, the way `ToolLogicTests` is. `parent` is an
+/// exhaustive `switch` with no `default:`, so a case added later cannot compile without stating
+/// whether it is nested; `testEveryPresentationStatesItsParent` closes the other half — the compiler
+/// accepts any answer, and a nested picker answered `nil` would close its own parent mid-pick.
 ///
-/// The enum closes the implementation half: `overlapsLiveCanvas` is an exhaustive `switch` with no
-/// `default:`, so a case added later cannot compile without stating an answer.
-/// `testEveryPresentationStatesWhetherItOverlapsTheLiveCanvas` closes the other half — the compiler
-/// will accept any answer, and a new case quietly answered `false` is the same bug again.
-///
-/// **And `testNoBarePopoverIsDeclaredOutsideTheModifier` closes as much of the third half as can be
-/// closed.** Neither of the two above can stop somebody writing a raw `.popover` and adding no case
-/// at all; that is the honest limit of the design, stated in `CanvasPresentationModifier`'s own doc
-/// comment. Swift cannot forbid a standard-library modifier, so the guarantee there is a *test-time*
-/// one rather than a compile-time one: the test reads the app's real source files off the host
-/// filesystem, located from `#filePath`, and fails naming the file and line. It is the shell script
-/// `tools/presentation-census.sh` promoted into the suite, so it runs whether or not anybody
-/// remembers to run it.
+/// **And `testNoPopoverIsDeclaredAnywhereInTheApp` closes what the type cannot.** Swift cannot forbid
+/// a standard-library modifier, so the guarantee is a test-time one: the test reads the app's real
+/// source files off the host filesystem, located from `#filePath`, and fails naming the file and
+/// line. A `.popover` over this canvas is the canvas freeze — `CanvasPresentation`'s header — and it
+/// is `tools/presentation-census.sh` promoted into the suite, so it runs whether or not anybody
+/// remembers to run that.
 final class CanvasPresentationLogicTests: XCTestCase {
 
     // MARK: - The closed set
 
-    /// Every case's answer, stated once, here — keyed by `rawValue` rather than by the case, because
-    /// the raw values are what `ActionRecorder` writes into a capture and a table keyed by them
-    /// fails loudly if one is renamed.
-    ///
-    /// Adding a case to `CanvasPresentation` without adding it below fails the count assertion, and
-    /// the message is addressed to whoever is reading it in that moment.
-    private let expectedOverlapsLiveCanvas: [String: Bool] = [
-        // The thirteen presentations raised from chrome that sits over a mounted, touchable
-        // `CanvasView`. Such a presentation left to its own dismissal is dismissed *by* the touch
-        // that lands outside it, and this repo has twice observed that the touch is not swallowed:
-        // the stroke begins and the teardown lands mid-sequence.
-        "timelineSlotMenu": true,          // the original reported freeze
-        "onionSkinOptions": true,          // symptom 2 of the 2026-08-18 report
-        "interpolateOptions": true,        // never reported, identical line for line
-        "graphChannelList": true,          // §11.5, and the same shape as the two above it
-        "frameRateOptions": true,          // KEYFRAMES §2.7, and the same shape again
-        "layerViewSelector": true,
-        "canvasBackgroundColour": true,
-        "valueLayerColour": true,          // also closes an undo bracket on the way out
-        "effectOutlineColour": true,       // ditto
-        "effectGradientStopColour": true,
-        "effectRecolorColour": true,
-        "effectBloomColour": true,         // ditto — TODO (60)
-        "effectDuplicateOffsetColour": true, // ditto — TODO (61) stage 6
-        "effectGuideColour": true,         // ditto — TODO (88)
-        "selectionColour": true,           // ditto — TODO (42); closes a selection edit on the way out
-        "onionPreviousTintColour": true,   // the red end of the onion panel's gradient bar — TODO (72)
-        "onionNextTintColour": true,       // the green end — TODO (72)
-        // The gallery screen mounts no `DrawingView`, so there is no canvas, no `LayerHostView` and
-        // no `StrokeGestureRecognizer` for a teardown to strand. `false` here is a fact about
-        // `ContentView`'s `switch screen`, not about these two sheets — move the gallery into a sheet
-        // over the editor and both become `true` overnight.
-        "galleryProjectVersions": false,
-        "galleryRecentlyDeleted": false,
+    /// Every case's parent, stated once, here — keyed by `rawValue` because the raw values are what
+    /// the action recorder writes into a capture, and a table keyed by them fails loudly if one is
+    /// renamed. Adding a case without adding it below fails the count assertion.
+    private let expectedParent: [String: String?] = [
+        "timelineSlotMenu": nil,
+        "onionSkinOptions": nil,
+        "interpolateOptions": nil,
+        "graphChannelList": nil,
+        "frameRateOptions": nil,
+        "layerViewSelector": nil,
+        "canvasBackgroundColour": nil,
+        "valueLayerColour": nil,
+        "effectOutlineColour": nil,
+        "effectGradientStopColour": nil,
+        "effectRecolorColour": nil,
+        "effectBloomColour": nil,
+        "effectDuplicateOffsetColour": nil,
+        "effectGuideColour": nil,
+        "selectionColour": nil,
+        // The only nesting: `ColorPickerPanel` hung off a swatch inside the ~250 pt onion menu.
+        "onionPreviousTintColour": "onionSkinOptions",
+        "onionNextTintColour": "onionSkinOptions",
     ]
 
-    func testEveryPresentationStatesWhetherItOverlapsTheLiveCanvas() {
-        XCTAssertEqual(CanvasPresentation.allCases.count, expectedOverlapsLiveCanvas.count, """
-            A case has been added to `CanvasPresentation` without an entry in \
-            `expectedOverlapsLiveCanvas`. Decide whether the new presentation can be on screen at a \
-            moment when a touch on the canvas would become a stroke — and therefore whether a canvas \
-            touch has to close it first — then say so in `CanvasPresentation.overlapsLiveCanvas` and \
-            in the table above. Defaulting to `false` is how seven popovers shipped tearing down in \
-            the middle of a stroke.
+    func testEveryPresentationStatesItsParent() {
+        XCTAssertEqual(CanvasPresentation.allCases.count, expectedParent.count, """
+            A case has been added to `CanvasPresentation` without an entry in `expectedParent`. \
+            Decide whether the new presentation is raised from inside another one — a touch on it \
+            must not close the one it sits in — then say so in `CanvasPresentation.parent` and in \
+            the table above.
             """)
-
         for presentation in CanvasPresentation.allCases {
-            guard let expected = expectedOverlapsLiveCanvas[presentation.rawValue] else {
-                XCTFail("\(presentation.rawValue) has no stated answer — see the message on the count assertion")
+            guard let expected = expectedParent[presentation.rawValue] else {
+                XCTFail("\(presentation.rawValue) has no stated parent — see the message on the count assertion")
                 continue
             }
-            XCTAssertEqual(presentation.overlapsLiveCanvas, expected,
-                           "\(presentation.rawValue).overlapsLiveCanvas must be \(expected)")
+            XCTAssertEqual(presentation.parent?.rawValue, expected,
+                           "\(presentation.rawValue).parent must be \(expected ?? "nil")")
         }
     }
 
@@ -95,70 +71,11 @@ final class CanvasPresentationLogicTests: XCTestCase {
         }
     }
 
-    /// The assertion that stops the answer being "return true for everything". A blanket `true`
-    /// would pass the sweep above only if the table were rewritten to match, but it would also make
-    /// the rule below a blanket rather than a filter — which is the thing the gallery cases exist to
-    /// keep honest.
-    func testTheSetIsSplitRatherThanUniform() {
-        XCTAssertTrue(CanvasPresentation.allCases.contains { $0.overlapsLiveCanvas },
-                      "If nothing overlaps the live canvas the rule closes nothing and the bug is back")
-        XCTAssertTrue(CanvasPresentation.allCases.contains { !$0.overlapsLiveCanvas },
-                      "If everything overlaps, `dismissPresentationsOverLiveCanvas` is a blanket, not a filter")
-    }
-
-    // MARK: - The rule, driven end to end
-
-    /// The whole registry cycle on a real `CanvasManager`: register every case, fire the rule, and
-    /// check exactly the right ones came down.
-    ///
-    /// **The gallery cases are registered by hand here on purpose.** Nothing in the app registers
-    /// them — `GalleryView` holds no `CanvasManager` — so this is the only place the `false` arm is
-    /// ever exercised, and without it "closes everything registered" and "closes what the enum says"
-    /// are indistinguishable.
-    func testDismissingOverTheLiveCanvasIsAFilterAndNotABlanket() {
-        let manager = CanvasFixture.manager()
-        XCTAssertTrue(manager.openPresentations.isEmpty, "fixture precondition: nothing open")
-
-        for presentation in CanvasPresentation.allCases {
-            manager.presentationDidAppear(presentation)
-        }
-        XCTAssertEqual(manager.openPresentations.count, CanvasPresentation.allCases.count,
-                       "fixture precondition: every case has to be registered for the filter to have anything to reject")
-
-        let closed = manager.dismissPresentationsOverLiveCanvas()
-
-        XCTAssertEqual(closed, Set(CanvasPresentation.allCases.filter(\.overlapsLiveCanvas)),
-                       "The rule closes exactly what `overlapsLiveCanvas` names")
-        XCTAssertEqual(manager.openPresentations,
-                       Set(CanvasPresentation.allCases.filter { !$0.overlapsLiveCanvas }), """
-                       The presentations that do not overlap a live canvas have to survive a canvas \
-                       touch. A registry emptied wholesale would pass every other assertion in this \
-                       file and would be a blanket wearing a filter's name.
-                       """)
-        XCTAssertTrue(manager.openPresentations.contains(.galleryProjectVersions),
-                      "Named, so rewriting the sweep above cannot take the filter's proof with it")
-    }
-
-    /// Nothing open, nothing closed — and specifically, no notification storm for a canvas touch
-    /// made with no menu up, which is the overwhelmingly common case.
-    func testDismissingWithNothingOpenClosesNothing() {
-        let manager = CanvasFixture.manager()
-        XCTAssertEqual(manager.dismissPresentationsOverLiveCanvas(), [])
-        XCTAssertTrue(manager.openPresentations.isEmpty)
-    }
-
-    /// A second canvas touch while only gallery-side cases are registered must also be a no-op —
-    /// the early-return path, distinct from the one above because the registry is *not* empty.
-    func testDismissingClosesNothingWhenOnlyNonOverlappingPresentationsAreOpen() {
-        let manager = CanvasFixture.manager()
-        manager.presentationDidAppear(.galleryRecentlyDeleted)
-        XCTAssertEqual(manager.dismissPresentationsOverLiveCanvas(), [])
-        XCTAssertEqual(manager.openPresentations, [.galleryRecentlyDeleted])
-    }
+    // MARK: - The registry
 
     /// Registering and unregistering is the modifier's whole contract with the manager, and
-    /// `onDisappear` can run for a presentation the rule has already taken out of the registry — so
-    /// removing something absent has to be harmless rather than an underflow.
+    /// `onDisappear` can run for a presentation that is already gone — so removing something absent
+    /// has to be harmless rather than an underflow.
     func testRegistrationRoundTrips() {
         let manager = CanvasFixture.manager()
         manager.presentationDidAppear(.onionSkinOptions)
@@ -174,141 +91,103 @@ final class CanvasPresentationLogicTests: XCTestCase {
         XCTAssertTrue(manager.openPresentations.isEmpty, "Removing what is already gone is a no-op, not an error")
     }
 
-    /// **`canvasInteractionBegan()` has to do both halves.** It is the single entry point the seven
-    /// canvas-touch sites in `CanvasView` call — the count read "four" here too until 2026-08-26,
-    /// and `CanvasManager.canvasInteractionBegan`'s own comment names them and says what the
-    /// miscount cost. Each half was somebody's whole fix at some point:
-    /// dropping the dismissal brings back the seven broken popovers, dropping the `send()` breaks the
-    /// top-bar dropdowns (`DrawingView`'s `activePanel`, which is view `@State` and cannot live on
-    /// the manager). Nothing else in the app would notice either loss until an artist did.
-    func testCanvasInteractionBeganBothDismissesAndSignals() {
+    // MARK: - What a canvas touch closes
+
+    /// **`canvasInteractionBegan()` closes the panels and nothing else.** It is the single entry point
+    /// the seven canvas-touch sites in `CanvasView` call, and its `send()` is what closes the
+    /// bottom-docked panels and the top-bar dropdowns (`DrawingView`'s `activePanel`, which is view
+    /// `@State` and cannot live on the manager).
+    ///
+    /// **It must not close a presentation**, and not because that would be redundant. A hand lands
+    /// its two fingers in two events, so this runs on the first finger of a two-finger pan; closing
+    /// from here is closing under a live gesture, which is exactly the shape of the freeze. The
+    /// presentations close through `AnchoredMenuRouter`, on the touch itself, with nothing a canvas
+    /// recognizer is bound to going with them.
+    func testCanvasInteractionBeganSignalsOnceAndClosesNoPresentation() {
         let manager = CanvasFixture.manager()
         var signals = 0
         let subscription = manager.interactionBegan.sink { signals += 1 }
         defer { subscription.cancel() }
 
-        manager.presentationDidAppear(.timelineSlotMenu)
-        manager.presentationDidAppear(.galleryProjectVersions)
-
+        manager.presentationDidAppear(.layerViewSelector)
         manager.canvasInteractionBegan()
 
-        XCTAssertEqual(signals, 1, "`interactionBegan` still has to fire — it is what closes the top-bar dropdowns")
-        XCTAssertEqual(manager.openPresentations, [.galleryProjectVersions],
-                       "…and the overlapping presentation has to have come down with it")
+        XCTAssertEqual(signals, 1, "`interactionBegan` has to fire — it is what closes the panels")
+        XCTAssertEqual(manager.openPresentations, [.layerViewSelector],
+                       "…and a canvas touch closes no presentation; the router does that")
     }
 
     /// **`canvasTouchLanded` runs on *every* canvas touch — the first finger of a two-finger
-    /// pan/pinch/rotate included — and must therefore close nothing: neither a bottom-docked panel
-    /// (via `interactionBegan`) nor a presentation over the canvas (via
-    /// `dismissPresentationsOverLiveCanvas`).** Both closings live in `canvasInteractionBegan`,
-    /// which only a confirmed single touch reaches (`StrokeGestureRecognizer.onSingleTouchBegan`).
-    ///
-    /// **The presentation half was the canvas freeze (owner, 2026-09-16).** TODO (67) moved the
-    /// panel-closing `send()` to the single-touch path but left the presentation dismissal here, on
-    /// the any-touch path — so a two-finger pinch's first finger tore an open `.popover` down
-    /// mid-gesture, and the popover's `_UIPassthroughGateGestureRecognizer` going with it stranded
-    /// pan/pinch/rotate and the stroke recognizer in a terminal state UIKit never resets. Moving the
-    /// dismissal to `canvasInteractionBegan` (below) is the fix; this pins that
-    /// `canvasTouchLanded` no longer dismisses. It could only be pinned by an XCUITest before
-    /// (`CanvasTransformFreezeUITests`), because the seam `onSingleTouchBegan` is unreachable from
-    /// this target (a real `UITouch`/`UIEvent` cannot be constructed here) — but the *split itself*
-    /// is a model fact, and this is the model-level half.
-    func testCanvasTouchLandedNeitherDismissesNorSignals() {
+    /// pan/pinch/rotate included — and must therefore close nothing** (TODO (67)): the panel-closing
+    /// `send()` lives in `canvasInteractionBegan`, which only a single touch reaches. The seam
+    /// `onSingleTouchBegan` is unreachable from this target (a real `UITouch`/`UIEvent` cannot be
+    /// constructed here), but the split itself is a model fact, and this is its model-level half.
+    func testCanvasTouchLandedDoesNotSignal() {
         let manager = CanvasFixture.manager()
         var signals = 0
         let subscription = manager.interactionBegan.sink { signals += 1 }
         defer { subscription.cancel() }
 
-        manager.presentationDidAppear(.timelineSlotMenu)
-        manager.presentationDidAppear(.galleryProjectVersions)
-
         manager.canvasTouchLanded()
-
         XCTAssertEqual(signals, 0, """
             `canvasTouchLanded` must not send `interactionBegan` — a two-finger canvas transform's \
             first finger reaches only this, and must not close the bottom-docked panels a stroke would.
             """)
-        XCTAssertEqual(manager.openPresentations, [.timelineSlotMenu, .galleryProjectVersions],
-                       """
-                       …and it must NOT dismiss a presentation either — that dismissal on the \
-                       any-touch path is the canvas freeze: it tore a popover's gate recognizer down \
-                       mid-two-finger-gesture and stranded the transform recognizers.
-                       """)
-
-        // The full function, which a confirmed single touch reaches, does both.
-        manager.canvasInteractionBegan()
-        XCTAssertEqual(signals, 1, "`canvasInteractionBegan` must send `interactionBegan` once")
-        XCTAssertEqual(manager.openPresentations, [.galleryProjectVersions],
-                       "…and drop the overlapping presentation — `.galleryProjectVersions` never overlapped")
     }
 
     // MARK: - The half the compiler cannot check
 
-    /// **No `.popover` may be declared anywhere in the app except inside `CanvasPresentationModifier`.**
+    /// **No `.popover` may be declared anywhere in the app.**
     ///
-    /// This is the gap the enum cannot close and says so itself: adding a *case* forces you to answer,
-    /// but nothing forces you to add a case when you write a raw `.popover`. Swift has no way to
-    /// forbid a standard-library modifier, so this is a test-time gate rather than a compile-time one
-    /// — a real one nonetheless, since it runs in the fast tier on every branch, which
-    /// `tools/presentation-census.sh` only does when somebody remembers.
+    /// A popover over this canvas presents behind a `_UIPassthroughGateGestureRecognizer` bound to
+    /// the canvas's own touches, and when that gate goes away under a live two-finger gesture the
+    /// transform recognizers strand for good — the owner's canvas freeze, twice. Every presentation
+    /// the editor raises goes through `View.canvasPresentation`, which draws an `AnchoredMenu`
+    /// instead; this is the gate that keeps it that way. Swift has no way to forbid a standard-library
+    /// modifier, so this is a test-time gate rather than a compile-time one — a real one nonetheless,
+    /// since it runs in the fast tier on every branch.
     ///
     /// **How it reaches the source.** `#filePath` is a compile-time literal holding this file's path
     /// on the machine that built it, and a simulator process can read the host filesystem, so the
     /// test walks the real `PaintSoftware/` tree two directories up. Comment lines are skipped — the
-    /// string `.popover(isPresented:)` appears in two doc comments that are *documenting* this very
-    /// rule, and a checker that flagged its own explanation would be uninhabitable.
+    /// string appears in doc comments *documenting* this very rule, and a checker that flagged its own
+    /// explanation would be uninhabitable.
     ///
     /// Skipped, loudly, when the tree is not there — a run on a physical device, or a binary carried
     /// to another machine. That is the one case where "cannot read it" is not a finding.
-    func testNoBarePopoverIsDeclaredOutsideTheModifier() throws {
+    func testNoPopoverIsDeclaredAnywhereInTheApp() throws {
         let appSources = try repositoryRoot().appendingPathComponent("PaintSoftware", isDirectory: true)
-
-        var offenders: [String] = []
-        for file in try swiftFiles(under: appSources) {
-            if file.lastPathComponent == "CanvasPresentationModifier.swift" { continue }
-            let contents = try String(contentsOf: file, encoding: .utf8)
-            for (offset, line) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("//") || trimmed.hasPrefix("*") { continue }
-                guard trimmed.contains(".popover(") else { continue }
-                offenders.append("\(file.lastPathComponent):\(offset + 1): \(trimmed)")
-            }
-        }
+        let offenders = try codeLines(under: appSources, containing: ".popover(")
 
         XCTAssertEqual(offenders, [], """
-            A `.popover` is declared outside `CanvasPresentationModifier.swift`:
+            A `.popover` is declared in the app:
 
             \(offenders.joined(separator: "\n"))
 
-            Every presentation that can sit over a live canvas must be declared through \
-            `View.canvasPresentation(_:isPresented:canvasManager:)` with a case in \
-            `CanvasPresentation`, or a touch that starts a stroke will tear it down in the middle of \
-            the touch sequence. That is the defect `MENU_PRESENTATION_CENSUS.md` counted seven times. \
-            If the new popover genuinely cannot sit over a canvas — a gallery-screen presentation, \
-            say — add a case anyway and answer `false`: the census is the type, and a decision that \
-            lives only in a comment is one the next person re-derives.
+            Declare it through `View.canvasPresentation(_:isPresented:canvasManager:)` with a case in \
+            `CanvasPresentation` instead. A UIKit popover over the canvas is torn down under a live \
+            two-finger gesture — by the app on the gesture's first finger, or by UIKit itself when two \
+            fingers land outside it — and takes the canvas's pan, pinch and rotation with it until the \
+            project is reopened.
             """)
     }
 
     /// The assertion that stops the test above passing because it read nothing. A path typo, a moved
     /// directory or a sandbox that silently returns an empty enumerator all produce an empty offender
-    /// list, which is indistinguishable from a clean tree — the green-sweep trap, exactly.
+    /// list, which is indistinguishable from a clean tree — the green-sweep trap, exactly. So the same
+    /// scan, comment-skipping included, has to find a needle that is known to be there in code.
     func testTheSourceScanIsActuallyReadingTheApp() throws {
         let appSources = try repositoryRoot().appendingPathComponent("PaintSoftware", isDirectory: true)
         let files = try swiftFiles(under: appSources)
-
         XCTAssertGreaterThan(files.count, 50,
                              "The app has far more than 50 Swift files; \(files.count) means the walk is not reaching them")
-        XCTAssertTrue(files.contains { $0.lastPathComponent == "CanvasPresentationModifier.swift" },
-                      "The one file the scan excludes has to be a file the scan can actually see")
 
-        // And that the needle is findable at all: the modifier really does declare a `.popover`, so a
-        // scan including it would find exactly one. If this stops being true the checker above is
-        // looking for a string that no longer exists and passes for the wrong reason.
-        let modifier = try XCTUnwrap(files.first { $0.lastPathComponent == "CanvasPresentationModifier.swift" })
-        let contents = try String(contentsOf: modifier, encoding: .utf8)
-        XCTAssertTrue(contents.contains(".popover(isPresented: $isPresented)"),
-                      "`CanvasPresentationModifier` is supposed to be the one place a `.popover` is written")
+        let declarations = try codeLines(under: appSources, containing: ".canvasPresentation(")
+        XCTAssertTrue(declarations.contains { $0.hasPrefix("LayerPanel.swift:") }, """
+            The scan found no `.canvasPresentation(` declaration in `LayerPanel.swift`, where the Views \
+            menu and two colour pickers are declared — so it is not reading code lines at all, and the \
+            test above passes for the wrong reason. Found: \(declarations)
+            """)
     }
 
     // MARK: - Source-tree helpers
@@ -327,6 +206,21 @@ final class CanvasPresentationLogicTests: XCTestCase {
                 """)
         }
         return root
+    }
+
+    /// `file:line: text` for every non-comment line under `directory` containing `needle`.
+    private func codeLines(under directory: URL, containing needle: String) throws -> [String] {
+        var found: [String] = []
+        for file in try swiftFiles(under: directory) {
+            let contents = try String(contentsOf: file, encoding: .utf8)
+            for (offset, line) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("//") || trimmed.hasPrefix("*") { continue }
+                guard trimmed.contains(needle) else { continue }
+                found.append("\(file.lastPathComponent):\(offset + 1): \(trimmed)")
+            }
+        }
+        return found
     }
 
     private func swiftFiles(under directory: URL) throws -> [URL] {

@@ -169,31 +169,21 @@ final class TimelineGestureUITests: PaintUITestCase {
     /// reopening the panel from scratch afterward and reading the swatch's own exposed value, rather
     /// than reading the model directly.
     ///
-    /// **This test is what found `anchoredMenuLayer`'s dismiss bug**, not just what pins the fix.
-    /// `ColorPickerPanel`'s popover (300pt) is wider than the onion panel that hosts it (~250pt), so
-    /// its own content — the hex field especially — necessarily draws outside the onion menu's own
-    /// `menuFrame`. Typing into that field used to tear the whole onion menu down mid-edit, on the
-    /// *second* swatch only (position-dependent: which of the panel's own controls the wider popover
-    /// happens to still cover varies by which end of the bar it hangs from). See
-    /// `AnimationTimeline.nestedOnionTintPickerIsOpen` for the fix, and below for what the fix costs:
-    /// closing the picker and closing the onion panel underneath it are now two taps, not one — the
-    /// first is ordinary popover behaviour (an outside tap dismisses the popover; the control it
-    /// covered needs a second, separate tap), and the second is the fix itself, deliberately: the
-    /// onion menu no longer tears down on a touch that only reads as "outside" because the picker
-    /// covering it is wider than it is.
+    /// **This test is what found the nested-picker dismiss bug**, not just what pins the fix.
+    /// `ColorPickerPanel` (300 pt) is wider than the onion panel that hosts it (~250 pt), so its own
+    /// content — the hex field especially — necessarily draws outside the onion menu's frame, and
+    /// typing into that field used to tear the whole onion menu down mid-edit.
+    /// `CanvasPresentation.parent` is the fix: the router keeps a menu up while a touch lands on a
+    /// picker raised from inside it, and one tap outside both closes both.
     ///
-    /// **Dismissed with a tap on a tool button, not on the onion toggle**, for the same swallowed-
-    /// touch reason the two-taps note above states generally: the toggle's own tap was found, live,
-    /// to be the dismissing touch, leaving onion skin's on/off state untouched by that same gesture.
-    /// A plain system-button tap elsewhere has no second job riding on the same touch to lose.
+    /// **Dismissed with `tapAway`, not a tool button**: the touch that closes a presentation goes on
+    /// to do what it was aimed at, so a tool button would switch the tool as well.
     func testTheOnionTintSwatchesOpenTheSamePickerTheBrushUses() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
         let button = app.buttons["timeline.onionSkinToggle"]
-        let selectTool = app.buttons["toolbar.selectButton"]
         XCTAssertTrue(button.waitForExistence(timeout: 5))
-        XCTAssertTrue(selectTool.waitForExistence(timeout: 5), "PREMISE: a neutral tap target exists")
 
         button.press(forDuration: 0.6)
         XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].waitForExistence(timeout: 5),
@@ -203,19 +193,17 @@ final class TimelineGestureUITests: PaintUITestCase {
         app.buttons["onionPanel.previousTint"].tap()
         XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
                       "the previous-tint swatch opens ColorPickerPanel, not a second colour UI")
-        Thread.sleep(forTimeInterval: 0.3) // let the popover's presentation animation settle
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.exists, "…and its hex field")
         setHexField(app, hexField, to: "336699")
-
-        selectTool.tap()
-        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5),
-                      "a tap elsewhere closes the picker")
         XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].exists,
-                      "…without tearing the onion panel down with it — the bug this test found")
-        selectTool.tap()
+                      "typing into the picker, which overhangs the onion menu, left the menu up — the bug this test found")
+
+        tapAway(app)
+        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5),
+                      "a tap outside closes the picker")
         XCTAssertTrue(waitForDisappearance(of: app.segmentedControls["onionPanel.placementPicker"], timeout: 5),
-                      "a second tap, with nothing nested open now, closes the onion panel too")
+                      "…and the onion panel it was raised from, in the same tap")
 
         button.press(forDuration: 0.6)
         XCTAssertTrue(app.buttons["onionPanel.previousTint"].waitForExistence(timeout: 5),
@@ -228,13 +216,11 @@ final class TimelineGestureUITests: PaintUITestCase {
         app.buttons["onionPanel.nextTint"].tap()
         XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
                       "the next-tint swatch opens the same picker")
-        Thread.sleep(forTimeInterval: 0.3)
         setHexField(app, app.textFields["colorPanel.hexField"], to: "996633")
-        selectTool.tap()
-        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5))
         XCTAssertTrue(app.segmentedControls["onionPanel.placementPicker"].exists,
-                      "…the onion panel survives this swatch's picker closing too")
-        selectTool.tap()
+                      "…the onion panel survives typing into this swatch's picker too")
+        tapAway(app)
+        XCTAssertTrue(waitForDisappearance(of: app.otherElements["colorPanel.svSquare"], timeout: 5))
         XCTAssertTrue(waitForDisappearance(of: app.segmentedControls["onionPanel.placementPicker"], timeout: 5))
 
         button.press(forDuration: 0.6)

@@ -212,4 +212,75 @@ final class AnchoredMenuLogicTests: XCTestCase {
                                                            toggleControlFrame: nil),
                        "an unmeasured menu answers 'not yet', not 'anywhere is outside me'")
     }
+
+    // MARK: - Every open menu at once (`presentationsToDismiss`)
+
+    private typealias Placement = AnchoredMenuDismissal.Placement
+
+    /// The onion menu, ~250 pt wide, and the 300 pt tint picker hung off a swatch inside it — so the
+    /// picker overhangs the menu's frame on both sides, the geometry that makes nesting a question.
+    private let onionMenu = CGRect(x: 600, y: 700, width: 250, height: 500)
+    private let tintPicker = CGRect(x: 575, y: 380, width: 300, height: 420)
+
+    /// **A touch on a nested picker does not close the menu it was raised from**, though it lands
+    /// outside that menu's frame — the case `CanvasPresentation.parent` exists for. Before the router
+    /// asked about every open menu at once, the timeline carried a hand-written guard for exactly
+    /// this pair, and the next nested presentation would have needed another.
+    func testATouchOnANestedPickerKeepsTheMenuItHangsOff() {
+        let open: [CanvasPresentation: Placement] = [
+            .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
+            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+        ]
+        let onThePickerOnly = CGPoint(x: 590, y: 400)
+        XCTAssertFalse(onionMenu.contains(onThePickerOnly), "PREMISE: the point is outside the onion menu")
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: onThePickerOnly, open: open), [],
+                       "a touch on the picker closes neither the picker nor the menu it was raised from")
+    }
+
+    /// The other direction: a touch on the menu itself, outside the picker, closes the picker and
+    /// keeps the menu — a parent does not shelter its child.
+    func testATouchOnTheParentClosesOnlyTheNestedPicker() {
+        let open: [CanvasPresentation: Placement] = [
+            .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
+            .onionNextTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+        ]
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: 700, y: 1100), open: open),
+                       [.onionNextTintColour])
+    }
+
+    /// A touch outside everything — a stroke, a pan, a toolbar tap — closes every open menu in one
+    /// go, nested ones and their parents alike.
+    func testATouchOutsideEverythingClosesEveryOpenMenu() {
+        let open: [CanvasPresentation: Placement] = [
+            .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
+            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+            .layerViewSelector: Placement(menuFrame: CGRect(x: 800, y: 80, width: 260, height: 300),
+                                          toggleControlFrame: CGRect(x: 900, y: 40, width: 80, height: 30)),
+        ]
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: 200, y: 500), open: open),
+                       Set(open.keys))
+    }
+
+    /// Unrelated menus do not shelter each other: a touch inside one closes the other.
+    func testATouchInsideOneUnrelatedMenuClosesTheOther() {
+        let views = CGRect(x: 800, y: 80, width: 260, height: 300)
+        let open: [CanvasPresentation: Placement] = [
+            .layerViewSelector: Placement(menuFrame: views, toggleControlFrame: nil),
+            .frameRateOptions: Placement(menuFrame: CGRect(x: 100, y: 900, width: 250, height: 200), toggleControlFrame: nil),
+        ]
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: views.midX, y: views.midY), open: open),
+                       [.frameRateOptions])
+    }
+
+    /// Each menu keeps `shouldDismiss`'s own exemptions — the toggle control and "not laid out yet" —
+    /// when asked alongside others.
+    func testTheSingleMenuExemptionsStillHold() {
+        let toggle = CGRect(x: 900, y: 40, width: 80, height: 30)
+        let open: [CanvasPresentation: Placement] = [
+            .layerViewSelector: Placement(menuFrame: CGRect(x: 800, y: 80, width: 260, height: 300), toggleControlFrame: toggle),
+            .selectionColour: Placement(menuFrame: .zero, toggleControlFrame: nil),
+        ]
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: toggle.midX, y: toggle.midY), open: open), [],
+                       "the toggle's own tap is left to the toggle, and an unmeasured menu is not yet dismissable")
+    }
 }

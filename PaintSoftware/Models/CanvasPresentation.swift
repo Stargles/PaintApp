@@ -1,87 +1,47 @@
 import Foundation
 
-/// Every presentation in this app whose openness is held in a binding — one case each, so that
-/// "what happens to this when the artist puts a pen on the canvas?" has a place to be **answered**
-/// instead of a place to be forgotten.
+/// Every presentation the editor raises over the live canvas — one case each, a closed set.
 ///
-/// **This type exists because forgetting was the bug, three times.** `CanvasManager.interactionBegan`
-/// used to be a bare signal with two hand-written subscribers, each clearing one variable by name:
-/// `DrawingView` cleared `activePanel`, `AnimationTimeline` cleared `timelineMenu`. Nothing cleared
-/// the two popovers declared nine lines above that second sink, or the five hanging off the layer
-/// rail. A presentation was therefore **broken by default** and became safe only if whoever added it
-/// happened to know there was a line to write — and the author of the sink written to fix exactly
-/// this class of bug did not write it for the two popovers in their own file.
+/// **None of them is a UIKit presentation, and that is the whole reason the type exists.** They are
+/// all drawn inside the app's own view hierarchy as `AnchoredMenu`s — the timeline's five by
+/// `AnimationTimeline`'s menu layer, the rest by `View.canvasPresentationHost` — and all of them are
+/// dismissed by one rule applied in one place: `AnchoredMenuRouter`, a single window-level observer
+/// that lives as long as the editor does and asks `AnchoredMenuDismissal.presentationsToDismiss`
+/// which of the open ones a touch just left.
 ///
-/// So the answer is not a third hand-written line. It is this enum plus `CanvasManager
-/// .dismissPresentationsOverLiveCanvas()` plus `View.canvasPresentation(_:isPresented:)`: one closed
-/// set, one exhaustive `switch` with no `default:`, and one modifier that is the only way to declare
-/// a presentation at all. A case added here cannot compile until it states its answer below, and
-/// `CanvasPresentationLogicTests` walks `allCases` against a table written by hand so a case added
-/// without an entry fails rather than defaults. `Tool.paintsOnCanvas` is the precedent, and it is the
-/// precedent for the same reason: it replaced a hand-maintained exclusion list that a newly added
-/// tool was not added to.
+/// A `.popover` cannot sit over this canvas. It presents behind a screen-covering
+/// `_UIPassthroughGateGestureRecognizer` that UIKit binds to the same touches as `canvas.pan`,
+/// `canvas.pinch` and `canvas.rotation`, and whenever that gate is removed while a two-finger gesture
+/// is live — by the app closing the popover on the gesture's first finger, or by UIKit closing it on
+/// its own because two fingers landed outside it — every recognizer bound alongside it is stranded
+/// in a terminal state UIKit never resets. The canvas then binds only `canvas.touchCounter` to every
+/// later touch and never pans, pinches or draws again until the project is reopened. MEASURED on the
+/// simulator, both ways, and it is the owner's canvas freeze (TODO (110), and before it 2026-09-16);
+/// `CanvasTransformFreezeUITests` drives it. `CanvasPresentationLogicTests` fails if a `.popover` is
+/// written anywhere in the app.
 ///
-/// **What is deliberately not in here, and why the guarantee is narrower than it looks.** A case
-/// needs a binding for the modifier to observe. `Menu`, `.contextMenu`, the stock `ColorPicker` and
-/// `ShareLink` present themselves and expose no `isPresented`, so the twelve of those listed in
-/// `MENU_PRESENTATION_CENSUS.md` are outside this type and outside its protection. Whether they even
-/// need it is the census's open question — they present through `UIContextMenuInteraction`/`UIMenu`
-/// rather than `UIPopoverPresentationController`, and nothing in this repo has verified that an
-/// outside touch reaches the canvas through them the way it demonstrably does through a `.popover`.
-/// `ActionsMenu`'s `PhotosPicker` is out for the same mechanical reason (no binding) and needs
-/// nothing anyway: it is a full-screen system modal, so no touch can reach the canvas beneath it.
-///
-/// Raw values are stable strings because `ActionRecorder` writes them into a capture — a recording
-/// that says which presentation was on screen when a stroke went wrong is the evidence three
-/// sessions of reading did not have.
+/// Raw values are stable strings because the action recorder writes them into a capture — a
+/// recording that says which presentation was on screen when the canvas stopped is the evidence two
+/// freeze reports did not have.
 enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
 
     // MARK: - The timeline
 
     /// The one menu behind `AnimationTimeline.timelineMenu`, whichever of its three cases
-    /// (block / gap / loop) is showing. **This is the presentation the owner's original freeze report
-    /// was about**, and the one 8ae8613 fixed by hand.
-    ///
-    /// **This and the three below are `AnchoredMenu`s rather than `.popover`s as of 2026-09-06 —
-    /// TODO (39).** A `.popover` presents behind a screen-covering
-    /// `_UIPassthroughGateGestureRecognizer` that swallowed every drag on the timeline whole: the
-    /// track did not scroll, the ruler did not scrub, and the popover did not dismiss. They are still
-    /// cases here, and still `true` below, because everything this type promises is unchanged — only
-    /// who draws them moved. `View.canvasPresentationRegistration` is the modifier they use.
+    /// (block / gap / loop) is showing.
     case timelineSlotMenu
 
-    /// `OnionSkinPanel`, hung off the timeline's onion-skin button. Symptom 2 of the 2026-08-18
-    /// report: nothing cleared it, so the stroke ran to completion and the teardown landed on the
-    /// *lift* instead — a recognizer stranded in `.ended` with no `reset()`, which receives no
-    /// further touches at all. That is why the artist could not paint again until they quit to the
-    /// gallery: the recognizer is per-`LayerHostView`, and re-entering the project is what rebuilds it.
+    /// `OnionSkinPanel`, hung off the timeline's onion-skin button.
     case onionSkinOptions
 
-    /// `InterpolatePanel`, hung off the timeline's interpolate button. Never reported, because
-    /// interpolate mode is used less — but it is `onionSkinOptions` line for line, declared five
-    /// lines below it, and it was broken in exactly the same way.
+    /// `InterpolatePanel`, hung off the timeline's interpolate button.
     case interpolateOptions
 
-    /// The graph editor's channel list, hung off the button that appears beside the graph editor
-    /// toggle while the band is open — KEYFRAMES.md §11.5.
-    ///
-    /// **A registered presentation and therefore a case here, rather than an inline docked panel or
-    /// an `ActivePanel`.** It is `onionSkinOptions` and `interpolateOptions` line for line: a list of
-    /// controls raised from the timeline's own toolbar over a mounted, touchable `CanvasView`, with
-    /// its openness held in a `Binding`. (It is drawn inline *within the timeline's own hierarchy*
-    /// since TODO (39), which is a different thing from being docked: it still floats over the canvas
-    /// and still closes on a canvas touch.) An inline docked panel would not be a presentation at all and a case for one
-    /// would be wrong; `ActivePanel` is the canvas's settings rail and answers a different question
-    /// (`CanvasTouchOwner` reads it to decide who owns a touch), which this list has no part in.
+    /// The graph editor's channel list, hung off the button beside the graph editor toggle —
+    /// KEYFRAMES.md §11.5.
     case graphChannelList
 
     /// The frame-rate panel, hung off the timeline's fps readout — KEYFRAMES.md §2.7 and §5.
-    ///
-    /// **A panel rather than a stepper inlined in the bar.** The readout has to stay legible in the
-    /// collapsed bar, which is 48 points tall and already carries five buttons and the transport
-    /// group; two arrows and five preset chips do not fit there and would not be reachable if they
-    /// did. It is `onionSkinOptions` line for line otherwise — a list of controls raised from the
-    /// timeline's own strip over a mounted, touchable `CanvasView`.
     case frameRateOptions
 
     // MARK: - The layer rail and its options panels
@@ -93,8 +53,8 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     case canvasBackgroundColour
 
     /// A value layer's fill colour picker, in `LayerOptionsPanel`. Brackets an undo gesture over its
-    /// own lifetime (`CanvasManager.beginStructureGesture`), which is why the modifier below gives
-    /// every case an `onDismiss` that runs on host deletion as well as on the flag going false.
+    /// own lifetime (`CanvasManager.beginStructureGesture`), which is why the modifier gives every
+    /// case an `onDismiss` that runs on host deletion as well as on the flag going false.
     case valueLayerColour
 
     /// An effect's outline colour swatch, in `EffectSettingsBar`. Brackets `onEditBegan`/`onEditEnded`
@@ -108,107 +68,49 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// to a colour; the eyedropper beside it is a tool, not a presentation, and closes nothing.
     case effectRecolorColour
 
-    /// A bloom's glow-tint swatch, in `EffectSettingsBar` — TODO (60). `effectOutlineColour`'s twin
-    /// rather than a shared case with it: the two can never be on screen together (the bar shows one
-    /// effect's rows at a time) so nothing would break by reusing one, but the raw value is what
-    /// `ActionRecorder` writes into a capture, and a recording that said "outline" while the artist was
-    /// tinting a bloom would be the exact evidence-quality loss this type's own header argues against.
+    /// A bloom's glow-tint swatch, in `EffectSettingsBar` — TODO (60). A case of its own rather than
+    /// sharing `effectOutlineColour`'s: the raw value is what a capture says was open.
     case effectBloomColour
 
-    /// A duplicate offset's colour swatch, in `EffectSettingsBar` — TODO (61) stage 6. A case of its
-    /// own for `effectBloomColour`'s reason: the raw value is what a capture says was open.
+    /// A duplicate offset's colour swatch, in `EffectSettingsBar` — TODO (61) stage 6.
     case effectDuplicateOffsetColour
 
-    /// A guide's line-colour swatch, in `EffectSettingsBar` — TODO (88). The same reason again.
+    /// A guide's line-colour swatch, in `EffectSettingsBar` — TODO (88).
     case effectGuideColour
 
     // MARK: - Onion skin
 
     /// The previous-drawings tint swatch, the red end of `OnionSkinPanel`'s gradient bar — TODO (72).
-    /// A case of its own rather than sharing `onionNextTintColour`, for `effectBloomColour`'s reason:
-    /// the raw value is what a capture says was open, and "next" while the artist was picking
-    /// "previous" is exactly the evidence-quality loss that argument is against.
     case onionPreviousTintColour
 
-    /// The next-drawings tint swatch, the green end of the same bar. `onionPreviousTintColour`'s twin.
+    /// The next-drawings tint swatch, the green end of the same bar.
     case onionNextTintColour
 
     // MARK: - The Select panel
 
-    /// The Select panel's Colour swatch — TODO (42)'s picker, defaulting to the selection's own colour.
-    /// Brackets a selection edit over its lifetime (`CanvasManager.beginSelectionEdit` on present,
-    /// `commitSelectionEdit` on dismiss), which is `valueLayerColour`'s shape: the picker writes
-    /// through its binding on every drag tick, so the popover's life is the drag and its dismissal is
-    /// the one undo step. A canvas touch closes it *first*, so the step is recorded before the stroke
-    /// that follows begins.
+    /// The Select panel's Colour swatch — TODO (42)'s picker. Brackets a selection edit over its
+    /// lifetime (`CanvasManager.beginSelectionEdit` on present, `commitSelectionEdit` on dismiss), so
+    /// the picker's life is the drag and its dismissal is the one undo step.
     case selectionColour
-
-    // MARK: - The gallery
-    //
-    // **Neither of these registers itself, and that is correct.** `GalleryView` holds no
-    // `CanvasManager` — it mints one when a project is opened — so there is nothing for
-    // `View.canvasPresentation` to register *into*, and nothing would be gained if there were: the
-    // central rule only ever fires from a canvas touch, and on this screen there is no canvas. They
-    // are cases here because the type is the census, and a decision that lives only in a Markdown
-    // file is a decision the next person re-derives. `CanvasPresentationLogicTests` registers them
-    // by hand to prove the rule is a filter rather than a blanket.
-
-    /// The version-history sheet, `GalleryView`.
-    case galleryProjectVersions
-
-    /// The Recently Deleted sheet, `GalleryView`.
-    case galleryRecentlyDeleted
 
     var id: String { rawValue }
 
-    /// Whether this presentation can be on screen at a moment when a touch on the canvas would
-    /// become a stroke — and therefore whether a canvas touch has to close it *first*.
+    /// **The presentation this one is raised from inside, if any** — so a touch on it does not also
+    /// close the one it sits in.
     ///
-    /// **Exhaustive, with no `default:`, and that is the whole point of the type.** The alternative
-    /// is what this replaced: a list of variables to clear, maintained by hand, which a
-    /// newly-declared popover is not added to. A presentation added after this cannot repeat that —
-    /// it will not compile until it says which side it is on.
-    ///
-    /// **`true` does not mean "this is the fix".** Closing a popover on `interactionBegan` is what
-    /// 8ae8613 did for `timelineSlotMenu`, and it converted a permanent canvas freeze into a
-    /// truncated stroke that vanished when the next one started: the presentation still comes down
-    /// mid-sequence, one frame later, and the ink painted so far was still discarded. Doing this to
-    /// seven more popovers without `StrokeGiveUp.interrupted`'s ink rule would have converted seven
-    /// freezes into seven lost strokes. The two halves ship together and neither is sufficient: this
-    /// one decides *when* the teardown lands, and `StrokeInterruption` decides what the teardown is
-    /// allowed to cost.
-    ///
-    /// **`false` is not "safe by accident" either** — each false case is false for its own stated
-    /// reason, and a case that cannot say which reason applies to it probably belongs on the true
-    /// side.
-    var overlapsLiveCanvas: Bool {
+    /// Exhaustive with no `default:`: a case added later cannot compile until it says whether it is
+    /// nested. The two onion tint pickers are the only nested ones — `ColorPickerPanel` is 300 pt
+    /// wide and hangs off a swatch in the ~250 pt onion menu, so a touch on the picker necessarily
+    /// falls outside the menu's own frame and would close it, and the picker with it, mid-pick.
+    var parent: CanvasPresentation? {
         switch self {
+        case .onionPreviousTintColour, .onionNextTintColour:
+            return .onionSkinOptions
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
-             .frameRateOptions,
-             .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
+             .frameRateOptions, .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour, .effectGuideColour, .selectionColour,
-             .onionPreviousTintColour, .onionNextTintColour:
-            // All seventeen are raised from chrome that sits over a mounted, touchable `CanvasView` —
-            // the two tint swatches are `.popover`s hung off `OnionSkinPanel`, itself one of the
-            // timeline's `AnchoredMenu`s — nested exactly as `EffectSection`'s swatches sit inside a
-            // rail panel that is not itself a `.popover`.
-            // **The rule is the same for both and that is the point of the type**: a presentation
-            // left to its own dismissal is dismissed *by* the touch that lands outside it, and this
-            // repo has observed twice that the touch is not swallowed:
-            // the stroke begins, and the presentation's teardown lands in the middle of the touch
-            // sequence. The five hung off the layer rail look protected because `activePanel = .none`
-            // deletes their host — but deleting the host *is* a teardown, caused by the same touch
-            // one layer up, which is the identical hazard with a different name.
-            return true
-        case .galleryProjectVersions, .galleryRecentlyDeleted:
-            // `ContentView` is a `switch screen`: on the gallery screen `DrawingView` is not mounted,
-            // so there is no canvas, no `LayerHostView` and no `StrokeGestureRecognizer` for a
-            // teardown to strand. These are cases here rather than absent from the type because the
-            // reason they are safe is a fact about `ContentView` that could change — moving the
-            // gallery into a sheet over the editor would make both of these `true` overnight, and a
-            // reviewer of that change should find this line rather than nothing.
-            return false
+             .effectDuplicateOffsetColour, .effectGuideColour, .selectionColour:
+            return nil
         }
     }
 }

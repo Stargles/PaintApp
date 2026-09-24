@@ -184,7 +184,7 @@ struct OnionSkinPanel: View {
 
     private func tintTapTarget(side: OnionSkinSettings.Side) -> some View {
         Button {
-            if side == .previous { showPreviousTintPicker = true } else { showNextTintPicker = true }
+            if side == .previous { showPreviousTintPicker.toggle() } else { showNextTintPicker.toggle() }
         } label: {
             // Not `Color.clear`: a fully transparent label can render with no backing content for
             // UIKit's popover-anchor search to find, which is what silently swallowed the presentation

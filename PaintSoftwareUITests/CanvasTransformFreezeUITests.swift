@@ -119,27 +119,24 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                                "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
     }
 
-    // MARK: - The popover torn down under a two-finger gesture (owner report, 2026-09-16)
+    // MARK: - A presentation torn down under a two-finger gesture (2026-09-16, TODO (110))
 
     /// The owner, 2026-09-16: *"The canvas freeze is back. I again cant find the combination of
     /// inputs which caused it."* Their recording of the frozen canvas (`recording-20260916-014412`)
     /// shows every two-finger touch binding only `canvas.touchCounter` and none of `canvas.pan`,
     /// `canvas.pinch`, `canvas.rotation` or the two taps — recognizers UIKit had left in a terminal
-    /// state with no `reset()`. MEASURED on the simulator: a `.popover` is up, a two-finger pinch
-    /// begins on the paper, its first finger tears the popover down (`dismissPresentationsOverLive-
-    /// Canvas`, as it then ran on *any* touch) — and the popover's screen-covering
-    /// `_UIPassthroughGateGestureRecognizer`, bound to those same touches, goes with it mid-gesture.
-    /// UIKit resets nothing that was bound alongside it, so pan/pinch/rotation *and* the stroke
-    /// recognizer strand, and no toggle un-sticks them. The fix is that a two-finger gesture no
-    /// longer tears a popover down at all: the dismissal waits for a confirmed single touch
-    /// (`CanvasManager.canvasInteractionBegan`), which no transform recognizer is bound to, so the
-    /// popover stays up during the pinch and is closed by a later tap. Both halves of the last
-    /// assertion matter — the same gesture stranded the stroke recognizer, so the stroke after it
-    /// has to draw.
+    /// state with no `reset()`. MEASURED on the simulator then: a `.popover` is up, a pinch begins on
+    /// the paper, the popover goes away mid-gesture, and its screen-covering
+    /// `_UIPassthroughGateGestureRecognizer`, bound to those same touches, goes with it — stranding
+    /// pan/pinch/rotation *and* the stroke recognizer, for good.
     ///
-    /// The Views popover because it is the one `CanvasPresentation` reachable in two taps from a
-    /// fresh document; any `.popover` in the closed set stranded the same way.
-    func testCanvasStillTransformsAndDrawsAfterAPinchUnderAPopover() throws {
+    /// No presentation over the canvas is a UIKit presentation any more (`CanvasPresentation`), so
+    /// there is no gate to take away. Both halves of the last assertion matter — the same gesture
+    /// stranded the stroke recognizer, so the stroke after it has to draw.
+    ///
+    /// The Views menu because it is the one presentation reachable in two taps from a fresh document;
+    /// every `.popover` stranded the same way.
+    func testCanvasStillTransformsAndDrawsAfterAPinchUnderAPresentation() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -150,35 +147,139 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         // than off undo state, which a fresh document already leaves enabled.
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
-        let views = app.buttons["layerPanel.viewsButton"]
-        XCTAssertTrue(views.waitForExistence(timeout: 5))
-        views.tap()
-        let dismissRegion = app.otherElements["PopoverDismissRegion"]
-        XCTAssertTrue(dismissRegion.waitForExistence(timeout: 5), "PREMISE: the Views popover has to be up")
+        openViewsMenu(app)
 
-        // The stranding gesture. On the unfixed code its first finger tore the popover down mid-pinch
-        // and left every transform recognizer dead; with the fix the popover stays up and the pinch
-        // is swallowed by its gate. Either way, what matters is what the canvas does *after*.
+        // The stranding gesture. What matters is what the canvas does *after*.
         canvas.pinch(withScale: 2.0, velocity: 1.5)
 
-        // Close the popover with a single tap — the way that never strands — whether the pinch left
-        // it up (fixed) or already closed it (unfixed). This also closes the layer panel behind it.
-        if dismissRegion.exists { dismissRegion.tap() }
-        XCTAssertFalse(dismissRegion.waitForExistence(timeout: 1),
-                       "PREMISE: the popover has to be gone before the discriminating pinch")
-        if app.buttons["toolbar.layersButton"].isSelected { app.buttons["toolbar.layersButton"].tap() }
-
+        closeMenusAndRail(app)
         assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: the canvas stopped transforming after a two-finger pinch under a popover")
+                               "THE BUG: the canvas stopped transforming after a two-finger pinch under a presentation")
 
-        // The stroke half: the same gesture stranded the stroke recognizer too, so a stroke after it
-        // has to still draw. `lastVectorGestureTrace` stays "none,0" if the recognizer never fed a
+        // The stroke half: `lastVectorGestureTrace` stays "none,0" if the recognizer never fed a
         // vector stroke, and reads a live scratch role once one lands.
         XCTAssertEqual(canvas.value as? String, "none,0",
                        "PREMISE: no vector stroke before this one")
         drawShortStroke(on: canvas)
         XCTAssertNotEqual(canvas.value as? String, "none,0",
                           "THE BUG (other half): the stroke recognizer was stranded by the same gesture, so the stroke drew nothing")
+    }
+
+    /// **TODO (110), the owner's words:** *"i changed a dither layer to a lens blur layer and then
+    /// tried to move the screen and thats when the canvas move froze."* Their recording
+    /// (`recording-20260923-200911`, on a build that carried the 2026-09-16 fix) starts after the
+    /// wedge and is that report's signature exactly: every canvas touch lands on
+    /// `CanvasContainerView` — a value layer is active, so there is no stroke view to hit — and binds
+    /// `canvas.touchCounter` and none of pan, pinch, rotation, the two taps or the catch-all.
+    ///
+    /// **Reproduced on the owner's own path:** the Blend Mode / Effect menu the change was made in,
+    /// open over a value layer grading Lens Blur, and a two-finger drag on the canvas beside it. The
+    /// menu does not swallow a two-finger touch the way it swallows one finger's stroke
+    /// (`MENU_PRESENTATION_CENSUS.md` measured only the stroke): the drag pans, UIKit dismisses the
+    /// menu under it, and nothing transforms the canvas again. A `.popover` — the Views menu, before
+    /// it became an `AnchoredMenu` — did the same, whether UIKit dismissed it because two fingers
+    /// landed together outside it, or the catch-all's zero-duration press closed it on the first of
+    /// two fingers landing 20 ms apart. MEASURED red on `cbd248f` for both.
+    ///
+    /// What makes it pass is `CanvasView.Coordinator.replaceStrandedRecognizers`, which swaps fresh
+    /// recognizers in for stranded ones as the drag lifts, and — for the Views menu — there being no
+    /// UIKit presentation to strand anything at all.
+    func testCanvasStillTransformsAfterATwoFingerDragUnderAnOpenMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        pickLayerEffect(app, "dither")
+        pickLayerEffect(app, "lensblur")
+        XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "lensblur",
+                       "PREMISE: the active layer is a value layer grading Lens Blur, as the owner's was")
+
+        // Left of the rail, the options panel and every menu that hangs off them.
+        let first = CGVector(dx: 0.10, dy: 0.45), second = CGVector(dx: 0.22, dy: 0.60)
+        let menus: [(name: String, open: (XCUIApplication) -> Void)] = [
+            ("the Blend Mode / Effect menu", openEffectMenu),
+            ("the Views menu", openViewsMenu),
+        ]
+        for menu in menus {
+            for (stagger, fingers) in [(0.0, "two fingers landing together"),
+                                       (0.02, "two fingers landing 20 ms apart")] {
+                let shape = "\(menu.name), \(fingers)"
+                menu.open(app)
+                let before = readTransform(app)
+                try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
+                                           delta: CGVector(dx: 60, dy: 40))
+                XCTAssertNotEqual(readTransform(app), before, "PREMISE (\(shape)): the drag under the menu pans the canvas")
+
+                closeMenusAndRail(app)
+                assertPinchMovesCanvas(app, canvas,
+                                       "THE BUG (\(shape)): nothing transforms the canvas after a two-finger drag under an open menu")
+                // The same drag with nothing open is the control: it has to leave the canvas alive.
+                try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
+                                           delta: CGVector(dx: -30, dy: -20))
+                assertPinchMovesCanvas(app, canvas,
+                                       "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
+            }
+        }
+    }
+
+    /// Opens the active layer's options from the rail and its Blend Mode / Effect `Menu`, and asserts
+    /// the menu is up by one of its entries.
+    private func openEffectMenu(_ app: XCUIApplication) {
+        let modeButton = app.buttons["layerOptions.blendModeButton"]
+        if !modeButton.exists {
+            if !app.buttons["layerPanel.viewsButton"].exists { openLayerPanel(app) }
+            let row = app.staticTexts["layerPanel.row.1"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "PREMISE: the value layer's row is in the rail")
+            row.tap()   // it is the active layer, so one tap opens its options
+        }
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "PREMISE: the options panel's Blend Mode row is on screen")
+        modeButton.tap()
+        XCTAssertTrue(app.buttons["layerOptions.blendMode.multiply"].waitForExistence(timeout: 5),
+                      "PREMISE: the Blend Mode / Effect menu has to be up")
+    }
+
+    /// Opens the layer rail if it is shut and the Views menu off its header, and asserts the menu is
+    /// on screen by its own content — which is the same whether the menu is drawn by the app or by
+    /// UIKit, so this reads the premise on either side of the fix.
+    private func openViewsMenu(_ app: XCUIApplication) {
+        let views = app.buttons["layerPanel.viewsButton"]
+        if !views.exists { openLayerPanel(app) }
+        XCTAssertTrue(views.waitForExistence(timeout: 5), "PREMISE: the layer rail's Views button is on screen")
+        views.tap()
+        XCTAssertTrue(app.buttons["viewMenu.addButton"].waitForExistence(timeout: 5),
+                      "PREMISE: the Views menu has to be up")
+    }
+
+    /// Whatever the gesture left, shut it with a touch that does nothing else, so the next reading is
+    /// taken against a bare canvas: the menus, the options panel and the rail.
+    private func closeMenusAndRail(_ app: XCUIApplication) {
+        let menuEntries = [app.buttons["viewMenu.addButton"], app.buttons["layerOptions.blendMode.multiply"]]
+        if menuEntries.contains(where: \.exists) { tapAway(app) }
+        for entry in menuEntries {
+            XCTAssertTrue(entry.waitForNonExistence(timeout: 3),
+                          "PREMISE: \(entry) has to be gone before the discriminating gesture")
+        }
+        if app.buttons["layerOptions.close"].exists { app.buttons["layerOptions.close"].tap() }
+        if app.buttons["toolbar.layersButton"].isSelected { app.buttons["toolbar.layersButton"].tap() }
+    }
+
+    /// Picks an effect from the open options panel's Blend Mode / Effect menu, scrolling the menu
+    /// until the entry is on screen — the catalogue sits below every blend mode.
+    private func pickLayerEffect(_ app: XCUIApplication, _ slug: String) {
+        let modeButton = app.buttons["layerOptions.blendModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "PREMISE: the options panel's Blend Mode row is on screen")
+        modeButton.tap()
+        let item = app.buttons["layerOptions.blendMode.\(slug)"]
+        let menu = app.collectionViews.firstMatch
+        for _ in 0..<12 where !(item.exists && item.isHittable) {
+            guard menu.exists else { break }
+            menu.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(item.isHittable, "PREMISE: the \(slug) entry is reachable in the effect menu")
+        item.tap()
     }
 
     // MARK: - The text path (owner report (6), 2026-08-27)
@@ -481,16 +582,10 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         return "\(parts[2]),\(parts[3])"
     }
 
-    /// Closes an open popover without activating anything in it. UIKit puts a full-screen dismiss
-    /// region behind every popover; tapping it is the only way to decline the menu, since any tap
-    /// aimed at the app itself would land on whatever is underneath once the popover goes away.
+    /// Closes the slot menu without activating anything in it: a tap on the far end of the ruler,
+    /// clear of every block, which the router reads as outside the menu.
     private func dismissPopover(_ app: XCUIApplication) {
-        let dismissRegion = app.otherElements["PopoverDismissRegion"]
-        if dismissRegion.waitForExistence(timeout: 2) {
-            dismissRegion.tap()
-        } else {
-            app.otherElements["timeline.ruler"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        }
+        app.otherElements["timeline.ruler"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
     }
 
     /// A short stroke across the middle of the canvas — short and quick, so the smart-shape hold

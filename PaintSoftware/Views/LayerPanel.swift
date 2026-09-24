@@ -78,7 +78,7 @@ struct LayerPanel: View {
             // View selector: a dropdown listing every saved view, with its own add button and
             // always-visible rename/delete controls on each row (see ViewSelectorMenu).
             Button {
-                showViewSelector = true
+                showViewSelector.toggle()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "square.3.layers.3d")
@@ -209,7 +209,7 @@ struct LayerPanel: View {
             }
             .buttonStyle(.plain)
 
-            Button(action: { showBackgroundColorPicker = true }) {
+            Button(action: { showBackgroundColorPicker.toggle() }) {
                 canvasManager.canvasBackgroundColor
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -574,7 +574,7 @@ struct LayerOptionsPanel: View {
             Text("Color").foregroundColor(.white)
             Spacer()
             Button {
-                showingValueColorPicker = true
+                showingValueColorPicker.toggle()
             } label: {
                 fillColor(index: index)
                     .frame(width: 44, height: 26)
@@ -1939,7 +1939,6 @@ struct ViewSelectorMenu: View {
         }
         .background(Color.black.opacity(0.95))
         .frame(width: 260, height: 300)
-        .presentationCompactAdaptation(.popover)
         // The layer/folder rename alert verbatim — same title shape, same field identifier suffix,
         // same Cancel/Save pair — so a view's rename looks like every other rename in the app rather
         // than inventing a fourth spelling of "type a new name".

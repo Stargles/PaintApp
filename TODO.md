@@ -48,20 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (110) The canvas freeze, again — after changing Dither to Lens Blur
-
-**Status** — filed 2026-09-24. The owner: *"Canvas freeze happened again, The recording is listed on
-the ipad but only captures the wedged state with me trying to move the canvas around. Due to the random
-and infrequent nature of this canvas freeze bug, constantly recording my actions would produce way too
-much data space, so that is out of the question. To guide you however, i changed a dither layer to a
-lens blur layer and then tried to move the screen and thats when the canvas move froze. I tried to
-recreate it but I cant."* Recording: `recording-20260923-200911.jsonl` (build 2026-09-18, `6f3c691`).
-
-- [ ] Root cause from the recording and the effect-change path; fix; a test that fails without it.
-- [ ] A way to catch the *transition* next time that costs no disk until it is wanted.
-
----
-
 ## (101) Streaming: "did not answer", LAN finds nothing, USB
 
 **Status** — filed 2026-09-24. The owner: *"Alot of times like right now, I can see the ipad and the

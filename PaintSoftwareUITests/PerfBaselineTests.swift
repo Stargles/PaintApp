@@ -5690,6 +5690,108 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertTrue(anyMeasured, "The filter comparison must have run on something")
     }
 
+    // MARK: - The flight recorder
+
+    /// **What the always-on flight recorder costs a stroke** — its per-event cost, and a whole
+    /// 500-sample stroke with and without it.
+    ///
+    /// The flight recorder adds three things to the drawing path, and this times the real code for
+    /// each: every event the ring keeps is an `emit` (here `model`, a two-field event, and
+    /// `recognizer`, a five-field one); every stroke sample delivers the tap one `.changed` action
+    /// message, which finds the recognizer in the registry and writes nothing because the state did
+    /// not change (`noteTransition`); and the touch-began and -ended events each end in one
+    /// `sweepRecognizerStates` over the registry. The registry is populated the way the app's is,
+    /// from a view carrying the canvas's own named recognizers, on the test process's real window
+    /// with the real tap installed.
+    ///
+    /// **What it does not include** is UIKit's touch delivery and the `sendEvent` interception's own
+    /// phase check on a move, which no headless harness can drive — a `contains(where:)` over the
+    /// event's touches and an early return (`WindowEventTap.willSend`/`didSend`).
+    ///
+    /// The ceilings are generous, per this file's note: the numbers are the output.
+    func testFlightRecorderCostOnAStroke() throws {
+        guard let window = WindowEventTap.activeWindow() else {
+            throw XCTSkip("no window in the test process to install the tap on")
+        }
+        let tap = WindowEventTap()
+        let wasFlying = ActionRecorder.isFlying
+        let canvasStandIn = UIView(frame: window.bounds)
+        defer {
+            tap.uninstall()
+            canvasStandIn.removeFromSuperview()
+            ActionRecorder.isFlying = wasFlying
+        }
+
+        // The canvas's named recognizer set, as `setUpGestures` and a layer host install it. The
+        // stroke recognizer stands in as a plain one: `noteTransition` asks nothing of its class.
+        let stroke = UIGestureRecognizer(target: nil, action: nil)
+        stroke.name = "stroke.perf"
+        let names = ["canvas.pan", "canvas.pinch", "canvas.rotation", "canvas.twoFingerTap",
+                     "canvas.touchCounter", "canvas.threeFingerTap", "canvas.fillPress", "canvas.catchAll",
+                     "canvas.eyedropperPress", "canvas.textPress", "canvas.moveBoxCommit"]
+        for name in names {
+            let recognizer = UIGestureRecognizer(target: nil, action: nil)
+            recognizer.name = name
+            canvasStandIn.addGestureRecognizer(recognizer)
+        }
+        canvasStandIn.addGestureRecognizer(stroke)
+        window.addSubview(canvasStandIn)
+        guard tap.install().interceptedClass != nil else { throw XCTSkip("the tap could not intercept this window") }
+        tap.rescanRecognizers()
+
+        func perCall(_ iterations: Int, _ body: () -> Void) -> Double {
+            let start = CFAbsoluteTimeGetCurrent()
+            for _ in 0..<iterations { body() }
+            return (CFAbsoluteTimeGetCurrent() - start) / Double(iterations)
+        }
+        let iterations = 100_000
+        ActionRecorder.isFlying = true
+        let emitModel = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
+        let emitRecognizer = perCall(iterations) {
+            ActionRecorder.ifRecording {
+                $0.recognizer("canvas.pan", object: ObjectIdentifier(stroke), from: .possible, to: .began, source: "sweep")
+            }
+        }
+        let sampleHook = perCall(iterations) { tap.noteTransition(stroke, to: .changed, source: "action") }
+        let sweep = perCall(iterations) { tap.sweepRecognizerStates() }
+        ActionRecorder.isFlying = false
+        let gateOff = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
+
+        // The whole stroke: the pipeline `testSyntheticStrokeBaseline` times, with the flight
+        // recorder's work for it — an action message per sample and a sweep at each end — beside it
+        // or not. Alternated, five of each, and the medians compared, so a slow first stroke or a
+        // noisy second cannot land on one side.
+        let manager = perfManager()
+        let samples = syntheticStroke(sampleCount: Self.sampleCount)
+        stamp(samples, into: manager)
+        var off: [Double] = [], on: [Double] = []
+        for _ in 0..<5 {
+            off.append(measuringPeakMemory { stamp(samples, into: manager) }.seconds)
+            on.append(measuringPeakMemory {
+                stamp(samples, into: manager)
+                tap.sweepRecognizerStates()
+                for _ in 0..<Self.sampleCount { tap.noteTransition(stroke, to: .changed, source: "action") }
+                tap.sweepRecognizerStates()
+            }.seconds)
+        }
+        let median = { (values: [Double]) in values.sorted()[values.count / 2] }
+        let nanoseconds = { (seconds: Double) in String(format: "%.0f ns", seconds * 1e9) }
+        report("flight recorder", [
+            ("emitModel", nanoseconds(emitModel)),
+            ("emitRecognizer", nanoseconds(emitRecognizer)),
+            ("strokeSampleHook", nanoseconds(sampleHook)),
+            ("sweep\(names.count + 1)", nanoseconds(sweep)),
+            ("gateOff", nanoseconds(gateOff)),
+            ("strokeOff", preciseMilliseconds(median(off))),
+            ("strokeOn", preciseMilliseconds(median(on))),
+            ("strokeDelta", preciseMilliseconds(median(on) - median(off))),
+            ("samples", "\(Self.sampleCount)"),
+        ])
+
+        XCTAssertLessThan(emitRecognizer, 50e-6, "an event into the ring costing 50 µs would be a regression, not noise")
+        XCTAssertLessThan(sampleHook, 50e-6, "a stroke sample's flight work costing 50 µs would be a regression, not noise")
+    }
+
     /// PNG's Up (`back == bytesPerRow`) and Sub (`back == 4`) filters, over the same code. The first
     /// `back` bytes are left alone because they have no predecessor, which is what makes the inverse
     /// below able to start.

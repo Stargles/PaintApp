@@ -193,8 +193,9 @@ struct DrawingView: View {
                     .padding(.top, 64)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                // "You are being recorded" (see ActionRecorderControls.swift). Renders nothing at
-                // all unless a recording is live, and never hit-tests. Tucked under the perf HUD's
+                // "You are being recorded", and "the last 90 s were saved" (see
+                // ActionRecorderControls.swift). Renders nothing at all unless one of those is true,
+                // and never hit-tests. Tucked under the perf HUD's
                 // toggle on the leading side rather than trailing: the trailing edge is where the
                 // layer rail and every dropdown live, and a badge sitting on top of the panel the
                 // artist is trying to photograph for a bug report is worse than useless.
@@ -245,6 +246,9 @@ struct DrawingView: View {
         // own `cornerRadius(16)` and the settings panel by its `cornerRadius(12)`, so a window
         // overlaid inside either one would be cut off at that container's edge.
         .sizePreviewOverlay(canvasManager: canvasManager)
+        // Every picker and menu raised over the canvas is drawn here, and closed by the one router
+        // this installs — never as a UIKit `.popover` (`CanvasPresentation`'s header says why).
+        .canvasPresentationHost()
         .animation(.easeInOut(duration: 0.2), value: activePanel)
         // One flag drives both docked bars now — the Move menu arriving and the Select menu standing
         // down are the same transition, so they have to be keyed on the same value or they cross.
@@ -259,6 +263,12 @@ struct DrawingView: View {
         // swaps the value rather than crossing nil, and only the full value is different enough for
         // SwiftUI to re-run the transition.
         .animation(.easeInOut(duration: 0.22), value: canvasManager.notice)
+        // The flight recorder: always on from here, writing nothing until the canvas wedges or the
+        // owner asks (`ActionRecorder`). Re-called on every appearance so a dump names this project.
+        .onAppear {
+            ActionRecorder.shared.startFlight(canvasSize: canvasManager.canvasSize,
+                                              projectName: canvasManager.projectName)
+        }
         // Continuing to draw or fill dismisses whatever top-bar dropdown is open instead of the first
         // touch being swallowed by a tap-to-dismiss catcher — see CanvasManager.interactionBegan.
         //

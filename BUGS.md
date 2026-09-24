@@ -1838,8 +1838,10 @@ ink away — they made in their 2026-08-18 report, and it is answered by splitti
 path in two. `StrokeGiveUp.handedOver` still rolls back, so a two-finger pan begun mid-stroke still
 leaves no permanent mark; `StrokeGiveUp.interrupted` commits, with an undo step, exactly as a lift
 would have. The stub therefore no longer survives the lift and no longer vanishes when the next stroke
-starts. Seven popovers also now close *before* the touch becomes a stroke, centrally
-(`CanvasManager.dismissPresentationsOverLiveCanvas()`).
+starts. Since TODO (110) no presentation over the canvas is a UIKit popover at all
+(`CanvasPresentation`), so the teardown this entry is about has no popover left to come from; and a
+stroke recognizer still out of `.possible` once the canvas touches lift is replaced then, its stroke
+committed as `.interrupted` (`CanvasView.Coordinator.replaceStrandedRecognizers`).
 
 **Two costs remain, both known and both deliberate:**
 

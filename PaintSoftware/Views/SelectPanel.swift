@@ -284,7 +284,7 @@ struct SelectPanel: View {
         let enabled = live && style.color != nil
         let shown = style.color.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
         return Button {
-            showingColourPicker = true
+            showingColourPicker.toggle()
         } label: {
             VStack(spacing: 4) {
                 RoundedRectangle(cornerRadius: 5)
