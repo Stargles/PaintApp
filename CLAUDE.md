@@ -46,40 +46,39 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-09-13 at `103d540`**, fresh device, idle machine (97.7% idle before start), no clone
-debris: **4332 tests, 4268 passed, 5 failed, 59 skipped, 46.2 min** — the second full run of the
-session, since `8e2ffff` carrying five merged features (the folder graph band, Glare, Bake Animation,
-Colour Wheels, and a coverage sweep). **9,909.8 class-seconds across 247 classes**, so four clones hold
-**41.3 min** of ideal work against 46.2 of wall clock — a 10.6% scheduling gap, in line with the two
-runs before it (10%, 16%). All five failures were triaged in isolation (the one timing-named assertion
-warm and un-erased, the other four erased and run serial together) and passed clean on the first
-attempt — none is a confirmed regression, and **none repeats a failure from `8e2ffff`**
-(that run's `Mode1UITests`/`VectorLayerContentUITests` cluster, `CRTScreenUITests`, `ToolPanelsUITests`
-did not recur here), so the cross-run comparison finds no fails-twice signal.
+**MEASURED 2026-09-25 at `f509d39`**, fresh device, idle machine (97.5% idle before start), no clone
+debris: **4679 tests, 4609 passed, 10 failed, 60 skipped, 53.6 min** — the first full run since
+`103d540`, 132 commits and two sessions later. **11,965.7 class-seconds across 295 classes**, so four
+clones hold **49.9 min** of ideal work against 53.6 of wall clock — a 7.1% scheduling gap, in line with
+the runs before it (10.6%, 10%, 16%). Of the ten reds, five passed clean in a serial batch on an erased
+device (`CRTScreenUITests`, `ColorWheelsUITests`, `TransformLayerModesUITests`' Rotate,
+`BrushSizeSliderUITests`, and `OptionsPanelUITests`' Bloom on a keyboard-focus refusal) and five were
+real: a leak between tests (three, below), a palette test left behind by TODO (106), and a logic test
+whose own premise search failed 1.5% of the time. **`CRTScreenUITests` and the
+`VectorLayerContentUITests` held-stroke split repeat from `8e2ffff`** — and this time the second
+has a demonstrated cause, the brush-library leak below.
 
 | class | seconds | tests |
 |---|---|---|
-| **`BrushEditorUITests`** | **578.9** | 11 |
-| `TransformLayerModesUITests` | 423.9 | 4 |
-| `OptionsPanelUITests` | 418.6 | 12 |
-| `SandwichCompositingUITests` | 363.3 | 10 |
-| `LayerPanelControlsUITests` | 349.5 | 11 |
-| `PerfBaselineTests` | 324.8 | 57 |
-| `SelectionAndMoveUITests` | 290.0 | 10 |
-| `LayerFolderAndMaskMenuUITests` | 279.4 | 9 |
-| `GraphEditorGestureUITests` | 247.8 | 5 |
-| `BrushMenuUITests` | 239.2 | 8 |
+| **`OptionsPanelUITests`** | **663.3** | 13 |
+| `BrushEditorUITests` | 555.6 | 11 |
+| `TransformLayerModesUITests` | 516.9 | 4 |
+| `LayerPanelControlsUITests` | 368.5 | 12 |
+| `SandwichCompositingUITests` | 343.7 | 10 |
+| `GraphEditorGestureUITests` | 304.6 | 5 |
+| `PerfBaselineTests` | 299.2 | 59 |
+| `SelectionAndMoveUITests` | 289.9 | 10 |
+| `BrushMenuUITests` | 289.7 | 8 |
+| `CanvasTransformFreezeUITests` | 280.9 | 8 |
 
-**`BrushEditorUITests` is the one to watch and it just fell for the first time**: 586 s → 711 s →
-812.6 s → **578.9 s**, 2026-09-09 → 2026-09-10 → 2026-09-12 → 2026-09-13, on the same eleven tests
-every time. It is 23% of a clone's 41.3 min share here, down from 31% two days ago — the class was not
-touched, so this is the "only the total is worth trending" conclusion arriving from the other
-direction: `DistortUITests` fell the same way on its own unchanged two tests (290.0 s → 76.0 s), and
-`TransformLayerModesUITests` fell more modestly (453.5 s → 423.9 s) on its unchanged four. **Read a
-drop as noise exactly as readily as a rise** — none of the three was touched this pass. The four newly
-named classes from this pass's merges — `GlareUITests` (94.4 s), `ColorWheelsUITests` (90.3 s),
-`PoseBakeUITests` (77.8 s) and `FolderGraphBandUITests` (75.1 s), each contributing its one test — landed
-in the 40s-to-50s rank of 247 classes, nowhere near the top ten or a clone's share.
+**`OptionsPanelUITests` is the new top, and one test is why**: 418.6 s → 663.3 s for one added test,
+`testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes` (TODO (67)),
+which measured **212.0 s on its own** — a third of its class, and second only to
+`DuplicateOffsetUITests`' 223.8 s among single tests.
+The class is 22% of a clone's 49.9 min share, so it sets no floor yet; it is the "a class grows past the
+floor while nobody is looking" conclusion caught one step early, and a 212 s test is worth reading for
+a wait that runs to its timeout before it is worth splitting. `BrushEditorUITests` (578.9 → 555.6 s)
+and `TransformLayerModesUITests` (423.9 → 516.9 s) moved on unchanged tests — noise, both ways.
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
@@ -148,6 +147,15 @@ tables themselves are in `git log`, and only these conclusions survived them:
   **"Fresh" rules out stale simulator state; it says nothing about clone-vs-clone timing contention** —
   different failure modes, same fix (an isolated serial re-run), and this run needed the fix for the
   second reason, not the first.
+- **"Passes alone" rules out the machine, not the test that ran before it.** Three of 2026-09-25's
+  reds failed in the full run *and* in a serial batch of the ten, then passed alone on an erased device
+  — the environmental signature, and wrong. `setBrushSize` edits a preset through the brush editor, the
+  library is a file, the next launch adopts the edited default (`adoptLibrarySelections`), and
+  `launchIntoEditor` reset the preferences but not the library: every later test on that simulator drew
+  with the last editor test's brush. MEASURED: `ColorWheelsUITests` then the three, on an erased device,
+  turns all three red; `launchIntoEditor` now passes `-resetBrushLibrary` on each test's first launch.
+  **A failure that repeats in a serial batch but not alone is a leak between tests** — ask what the
+  test before it persisted. The tell here was that every one of them was sensitive to brush size.
 
 - Use the dedicated simulator by UDID: `eraser-mutex-test`,
   `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
@@ -608,7 +616,8 @@ duration, run it warm first and erase only if it still fails. Better, do not put
 in the fast tier at all — the bench files are excluded by filename and exist for exactly this.
 
 Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
-finding and does not need a fix. Fails clean → now it is yours, and you have a 30-second loop to
+finding and does not need a fix — **unless it also failed in a serial batch with the other failures**,
+which is a leak between tests rather than the machine (see "Passes alone" above). Fails clean → now it is yours, and you have a 30-second loop to
 debug it in instead of a 22-minute one.
 
 The erase is the whole trick: session 23 watched `testDroppingFolderOntoFolderNestsIt` fail twice

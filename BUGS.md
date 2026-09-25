@@ -4,6 +4,17 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Since TODO (106) the colour panel shows one row of the palette (2026-09-25)
+
+MEASURED from the accessibility tree on the 13-inch simulator, colour panel open on the Classic tab:
+the scroll view holding the Recent strip and the selected palette is **94 pt tall** (`{{720, 474.5},
+{300, 94}}`), so it shows the palette's name and its first row of ten swatches, with the first row's
+bottom 2 pt from the fold. `f77df00` grew the ring 190 → 280 pt and the section below it is the one
+flexible piece of `typeTabBody`, so it took the loss. Everything is still reachable by scrolling —
+`VectorLayerContentUITests.testPaletteBuilderAddAndSelectSwatch` now scrolls to Spectrum's "+" on the
+third row, which the `LazyVGrid` had not even realized — but nobody has asked the owner whether one
+visible row is what they meant the bigger ring to cost.
+
 ## A tap on the Effect Settings bar's labels reaches the canvas underneath (2026-09-24)
 
 MEASURED on the simulator: with a value layer's Effect Settings bar docked, a tap on the bar's own
