@@ -485,11 +485,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
 
         doneButton.tap()
 
-        // **KNOWN FAILING as of TODO (102)** — see `TopToolbar.bodyContent`'s doc comment on
-        // `isRenamingProject`, which names this test as one of three that reproducibly regressed:
-        // this element does not reappear at all after that change, at wait timeouts up to 30s. Not a
-        // race a wait closes; a real, reported regression left on the record rather than hidden.
-        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 15),
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5),
                       "baking the piece gives the artist back the panel they were in — `activePanel` was never cleared")
         XCTAssertFalse(doneButton.exists, "and the Move menu goes with the piece")
     }

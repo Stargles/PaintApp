@@ -54,26 +54,6 @@ struct TopToolbar: View {
             // **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The owner's ask
             // names two things: move it, and keep Scribble off it.
             //
-            // **MEASURED, and left an open question rather than a closed one.** Bisected against three
-            // pre-existing tests that all failed the identical way after this change — an element the
-            // test expects to reappear after some canvas operation (`layerOptions.close` after two
-            // Bloom slider drags, `effectSettings.gradientStop.0.color` after opening Gradient Map,
-            // `selectPanel.mode.rectangle` after baking a Move) genuinely never exists again, on a
-            // fresh simulator, in isolation, at wait timeouts up to 30s — so this is not a race a
-            // longer wait resolves. It reproduces with a custom `UIViewRepresentable` text field, a
-            // plain SwiftUI `TextField`, and a bare non-interactive `Text` at this same width and
-            // position; it clears completely and only when the element is removed. So it is provably
-            // about *something* being added to this specific `HStack` slot, and provably not about
-            // Scribble, `UITextField`, or a presentation kind — but what that something is was not
-            // found in the time available, and is not chased further here: CLAUDE.md's rule that a
-            // wrong number is not worth rationalising once a right one is in hand applies to a wrong
-            // hypothesis about a wrong architecture the same way. The three tests were given explicit
-            // waits anyway (`OptionsPanelUITests`, `SelectionAndMoveUITests` in `ToolsAndSelectionUITests.swift`)
-            // in case a genuine race is *also* present underneath whatever this is, but they are not
-            // expected to be green, and the fast-tier/close-out report says so rather than hiding it.
-            // Shipping the owner's ask with three named, reproducible regressions on the record is the
-            // trade made here, in preference to either not shipping it or silently deleting the tests.
-            //
             // **This also makes "disable Scribble" true by construction rather than by veto.** The
             // always-visible label is a `Text`, which Scribble cannot engage on at all — there is no
             // `UITextInput` for iPadOS to hand a pencil touch to — so there is nothing here for

@@ -139,10 +139,20 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done takes the box down")
-        // The first touch on the box closed the layer rail (every canvas touch does), so the canvas
-        // is clear; if it is not, close it.
-        if app.buttons["layerPanel.addButton"].exists { openLayerPanel(app) }
-        attach(app, "3-after-the-drag")
+
+        // What is exposed: the settings bar comes back by itself with the same grade — it stood down
+        // behind the box, so the touches on the box had nothing of it to close
+        // (`DrawingView.openPanelIsStandingDown`) — and the box wrote Offset X, which its slider says.
+        let offsetX = app.sliders["effectSettings.offsetX"]
+        XCTAssertTrue(offsetX.waitForExistence(timeout: 5), "Done gives the settings bar back with the same grade")
+        let written = sliderNumericValue(offsetX)
+        XCTAssertGreaterThan(written, 100, "The drag moved the copy right by a good way, in canvas pixels: \(written)")
+        attach(app, "3-offset-x-written")
+
+        // The bar's Close hands back the rail, and the rail's own button puts it away: a clear canvas.
+        app.buttons["layerOptions.close"].tap()
+        openLayerPanel(app)
+        attach(app, "4-after-the-drag")
 
         // What is drawn. Left half of the bar: the copy moved away, so it is the rim — red.
         let rim = settled { probe(canvas, dx: 0.4, dy: 0.5) }
@@ -156,15 +166,5 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         // Beside the bar: paper, untouched — nothing is painted outside the drawing.
         let paper = settled { probe(canvas, dx: 0.5, dy: 0.25) }
         XCTAssertGreaterThan(paper.r + paper.g + paper.b, 700, "The paper beside the bar is untouched: \(paper)")
-
-        // What is exposed: the box wrote Offset X, and the reopened slider says so.
-        openLayerPanel(app)
-        app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
-        let offsetX = app.sliders["effectSettings.offsetX"]
-        XCTAssertTrue(offsetX.waitForExistence(timeout: 5), "The settings bar is back with the same grade")
-        let written = sliderNumericValue(offsetX)
-        XCTAssertGreaterThan(written, 100, "The drag moved the copy right by a good way, in canvas pixels: \(written)")
-        attach(app, "4-offset-x-written")
     }
 }

@@ -976,14 +976,53 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the
-    /// top toolbar, which has no control under it.
+    /// widest empty stretch of the top toolbar, measured from the bar as it is laid out.
     ///
     /// Every presentation over the canvas is an `AnchoredMenu`, and the touch that closes one goes on
     /// to do what it was aimed at (`AnchoredMenuRouter`), so a tap on a tool button would close the
     /// menu *and* switch the tool, and a tap on the canvas would draw.
-    func tapAway(_ app: XCUIApplication) {
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)).tap()
+    ///
+    /// **Measured rather than a fixed point, because "empty" is a fact about the bar's layout and
+    /// SwiftUI hit-tests a finger with a radius.** This tapped the window's top centre until TODO
+    /// (102)-(104) widened the bar's leading group, which left the Move icon's edge 20 pt from that
+    /// point — inside the radius. Every "tap away" became a Move: the lift stood the effect bar down
+    /// (`bottomDock`), and the tests calling this lost a swatch or a Close button a mile from the bar.
+    /// The clearance assertion turns the next layout change that crowds the gap into a sentence.
+    func tapAway(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        guard let tree = try? app.snapshot() else {
+            XCTFail("tapAway: could not snapshot the app to find the top toolbar", file: file, line: line)
+            return
+        }
+        func flattened(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            [node] + node.children.flatMap(flattened)
+        }
+        let nodes = flattened(tree)
+        guard let anchor = nodes.first(where: { $0.identifier == "toolbar.galleryButton" })?.frame else {
+            XCTFail("tapAway: no `toolbar.galleryButton` on screen, so there is no top toolbar to tap", file: file, line: line)
+            return
+        }
+        let rowButtons = nodes
+            .filter { $0.elementType == .button && $0.frame.midY > anchor.minY && $0.frame.midY < anchor.maxY }
+            .map(\.frame)
+            .sorted { $0.minX < $1.minX }
+        let gaps = zip(rowButtons, rowButtons.dropFirst()).map { (from: $0.maxX, to: $1.minX) }
+        guard let widest = gaps.max(by: { $0.to - $0.from < $1.to - $1.from }) else {
+            XCTFail("tapAway: the top toolbar row holds fewer than two buttons", file: file, line: line)
+            return
+        }
+        let clearance = (widest.to - widest.from) / 2
+        XCTAssertGreaterThanOrEqual(clearance, Self.tapAwayClearance, """
+            tapAway: the top toolbar's widest gap (x \(widest.from)–\(widest.to)) leaves only \(clearance) pt \
+            to the nearest icon, inside SwiftUI's touch radius — a tap there would press that icon
+            """, file: file, line: line)
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: (widest.from + widest.to) / 2, dy: anchor.midY))
+            .tap()
     }
+
+    /// How far `tapAway`'s touch must land from any top-toolbar icon: a touch 20 pt off the Move
+    /// icon's edge MEASURED as a Move press, so the margin is the 44 pt minimum touch target.
+    private static let tapAwayClearance: CGFloat = 44
 }
 
 /// The selector-level plumbing behind `staggeredTwoFingerDrag`. Every object here is created through

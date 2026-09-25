@@ -292,11 +292,15 @@ struct DrawingView: View {
         // `layerOptionsID` and with it the effect bar, so every pair would cost a trip back in. The
         // owner: *"assigning four pairs must not cost four trips back into the panel."*
         // `EyedropperDestination.picksIntoAnOpenPanel` is the model's word on which picks these are.
+        //
+        // **And a panel standing down behind a floating piece is not on screen, so there is nothing
+        // for the touch to close** — see `openPanelIsStandingDown`.
         .onReceive(canvasManager.interactionBegan) {
             if canvasManager.selectedTool == .eyedropper
                 && (activePanel == .select || canvasManager.eyedropperDestination.picksIntoAnOpenPanel) {
                 return
             }
+            if openPanelIsStandingDown { return }
             if activePanel != .none { activePanel = .none }
         }
         // The layer options menu belongs to the layer panel — it can't outlive it.
@@ -688,6 +692,28 @@ struct DrawingView: View {
     private struct TransformEditing {
         let target: KeyframeTarget
         let mode: TransformLayerMode
+    }
+
+    /// **Whether the open panel is off screen only because a piece is floating** — the Select menu,
+    /// or the effect or transform bar the layer options raised. Each stands down while the Move bar
+    /// has the dock (`bottomDock`'s three `isAnyPieceFloating` gates) and comes back by itself when
+    /// the piece bakes, because `activePanel` — and with it `layerOptionsID` — was left alone
+    /// (`SelectionAndMoveUITests.testTheMoveMenuReplacesTheSelectMenuWhileAPieceFloatsAndGivesItBack`,
+    /// and `DuplicateOffsetUITests` for the effect bar's Adjust Box).
+    ///
+    /// A canvas touch must leave such a panel alone, and every touch on the Move box is one:
+    /// `Coordinator.moveBoxTouchDown` sends `canvasInteractionBegan` so that a grip closes a
+    /// top-bar dropdown still standing over the box (`c8b93c9`). Clearing `activePanel` there as well
+    /// closed a panel the artist could not see, so the first drag of a lassoed piece silently cost
+    /// them the Select menu they were in. What stays on screen during a float — a top-bar dropdown,
+    /// the layer rail, the Text panel — still closes.
+    private var openPanelIsStandingDown: Bool {
+        guard canvasManager.isAnyPieceFloating else { return false }
+        switch activePanel {
+        case .select: return true
+        case .layers: return effectBeingEdited != nil || transformBeingEdited != nil
+        default: return false
+        }
     }
 
     /// Runs a notice's one-tap fix. These are the actions the modal alerts carried, kept verbatim:
