@@ -20,8 +20,10 @@ folder (CLAUDE.md "Build and test", first paragraph), so every worktree lives at
 end this by granting Xcode Full Disk Access; nobody has yet. `~/PaintWork/deploy` is a detached
 worktree kept for device builds — `git -C ~/PaintWork/deploy checkout --detach origin/main` and build.
 
-**No branches, stash empty, no simulator debris.** Session 45 closed with everything merged and
-pushed.
+**One branch in flight: `tmp/pingpong`** (worktree `~/PaintWork/PaintApp-pingpong`), a sonnet
+worker fixing TODO (101)'s reconnect loop and Nearby; it merges, then installs on the iPad. Check it
+before starting anything that touches `Engine/ScreenStream/` or `streamer/`. Stash empty, no simulator
+debris.
 
 **Full suite at `f509d39`** (fresh erased device, 97.5% idle): **4679 / 4609 passed / 10 failed / 60
 skipped, 53.6 min**, 295 classes. Five failures were real and are fixed (a brush-library leak between
@@ -44,14 +46,19 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
+**First: TODO (101)** — the owner's iPad loops between "Reconnecting — the computer closed the
+connection" and "Not streaming — Paused", and Nearby finds nothing although the iPad is on the
+laptop's Wi-Fi with Local Network allowed. TODO (101) has the laptop-log evidence and the two
+hypotheses; `tmp/pingpong` is the fix in flight. If that branch is gone and (101) is still in TODO,
+the worker did not finish — read its commits, not its worktree.
+
 **Owner-side, in queue order:**
 
 1. **Feel `0e20568`**: the freeze (a two-finger drag with the Effect menu open now recovers by itself —
    and if the canvas ever repairs a freeze, a badge says so and a `flight-…jsonl` lands in Settings →
    Recordings; send it), the colour picker against the reference, the + and gear icons, Cut/Copy/Paste,
    the rename sheet, the slider % beside the size pop-up, a video at 12 fps, To New Layer's cel span.
-2. **(101)**: allow Local Network when iOS asks, then Nearby should list the laptop; a LAN address
-   should connect.
+2. **(101)** once the fix is installed: a stream that stays Live, and Nearby listing the laptop.
 3. **BUGS.md's newest entry**: since `f77df00` the colour panel shows one palette row above the fold;
    is that what the owner wants?
 4. **(27) stage 5** — unchanged: stream Blender, measure latency, the device tick, Ctrl+V, the
@@ -86,6 +93,7 @@ decisions most likely to be tripped over:
 
 ## Waiting on the owner
 
-- The device checks above; the palette-row question in BUGS.md.
+- The device checks above; the palette-row question in BUGS.md. (Answered 2026-09-25: same Wi-Fi, Local
+  Network allowed.)
 - Granting Xcode Full Disk Access would let builds run from `~/Desktop` again.
 - **XCUITest cannot synthesise a Pencil**; the owner has granted device build and deploy.

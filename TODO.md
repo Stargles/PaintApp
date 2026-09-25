@@ -48,21 +48,27 @@ rather than assuming it still holds.
 
 ---
 
-## (101) Streaming: Local Network permission and Nearby — proof needed on the owner's iPad
+## (101) Streaming: the reconnect loop, and Nearby finds nothing on the iPad
 
-**Status** — the Info.plist keys (`NSBonjourServices`, `NSLocalNetworkUsageDescription`) and the
-connect-failure classification (refused / unreachable / Local Network permission denied / the
-existing locked state) are merged — docs/STREAM.md §5.9 has the classification and the built app's
-`Info.plist` was read with `plutil -p` to confirm both keys land in the generated bundle.
-`StreamConnectFailureLogicTests` drives every `NWError` case with no socket, and
-`StreamScreenUITests.testStreamScreenConnectSheetShowsTheRefusedMessageWhenNothingListens` drives
-**refused** end to end on the simulator (127.0.0.1, nothing listening). The simulator does not
-enforce Local Network privacy at all, so the permission prompt itself — the thing that was silently
-never shown, which is most of why this was filed — cannot be proved off the owner's device.
+**Status** — **in flight on `tmp/pingpong`** (2026-09-25). The Info.plist keys and the connect-failure
+classification are merged (`84647c3`; docs/STREAM.md §5.9). On the owner's iPad at `0e20568`, the
+owner, 2026-09-25: *"it keeps switching between reconnecting - the computer closed the..., and not
+streaming - paused. Next, the computer does not appear on the LAN."* They confirmed the iPad **is on
+the same Wi-Fi** as the laptop and **Local Network is allowed** for PaintSoftware — so the LAN failure
+is ours, not the device's.
 
-- [ ] Owner-verified on their own iPad: Stream Screen (or Nearby) prompts for Local Network
-      permission on first use, and allowing it lets Nearby find the laptop and a typed LAN address
-      connect.
+**The loop, from the laptop's log**: a new connection from `100.70.220.4` every ~1 s, each logged
+`new connection replaces previous client` — the iPad holds two live clients to one laptop and the
+single-client server makes them evict each other for ever. Clients are keyed by `StreamEndpoint`'s
+host *string*, so one laptop reached as `100.104.85.111`, `desktop-cbr0fl6` or `DESKTOP-CBR0FL6.local`
+is two endpoints (the ambient last-used address plus a stream element that stored another spelling);
+a second live `CanvasManager` is the other hypothesis. **Workaround until the fix ships**: delete the
+stream layer and re-add it through Stream Screen with the address normally typed.
+
+- [ ] One client per laptop (a stable machine id from the server, clients deduped on it), and an
+      evicted client told why and not retrying — so nothing ping-pongs.
+- [ ] Nearby lists the laptop on the owner's iPad (same Wi-Fi, permission on), and a LAN address
+      connects.
 
 ---
 
