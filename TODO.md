@@ -66,41 +66,6 @@ never shown, which is most of why this was filed — cannot be proved off the ow
 
 ---
 
-## (102) The canvas name leaves the animation bar, and Scribble stays off it
-
-**Status** — filed 2026-09-24. The owner: *"Currently it displays the canvas name on the bottom left on
-the animation bar. This is ergonomically very bad, as it frequently activates the scribble write mode
-when my apple pencil touches near it. Move it to the top left and disable the scribble feature. Text
-writing has a similar disable scribble feature, I wonder if you can reuse that code."*
-
-- [ ] The name at the top left; Scribble cannot start on it (the text tool's mechanism, reused).
-
----
-
-## (103) Add (+) is its own top-bar icon, with shapes and a gradient
-
-**Status** — filed 2026-09-24. The owner: *"The add button (+) is located under actions. Make it a
-seperate independant icon on the top bar. Additionally, put other things under the add like add
-square/rectangle, circle/ellipse, add linear gradient."*
-
-- [ ] A top-bar + icon holding Insert Photo, Insert Video, Stream Screen, Add Text, Rectangle,
-      Ellipse, Linear Gradient.
-
----
-
-## (104) A Settings icon; Actions keeps only the actions
-
-**Status** — filed 2026-09-24. The owner: *"Along with the new add icon, there should also be a
-settings icon. Move resize canvas, canvas padding, bake percise strokes, fingers can paint, render
-resolution to it. In actions should be cut, copy, paste, flip horizontal, flip vertical, export in that
-order."*
-
-- [ ] Settings: Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint, Render
-      Resolution (and whatever else in Actions is a setting, e.g. Record My Actions).
-- [ ] Actions: Cut, Copy, Paste, Flip Horizontal, Flip Vertical, Export — in that order.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
