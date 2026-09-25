@@ -12,6 +12,10 @@ class PaintUITestCase: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Whether this test has launched the app through `launchIntoEditor` yet — XCTest makes a fresh
+    /// instance per test method, so this is per test. See `launchIntoEditor` for what it gates.
+    private var hasLaunchedIntoEditor = false
+
     /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
     /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
     ///
@@ -87,6 +91,16 @@ class PaintUITestCase: XCTestCase {
         if !app.launchArguments.contains("-resetEditorPreferences") {
             app.launchArguments.append("-resetEditorPreferences")
         }
+        // **And so does the brush library, which is a file the brush editor writes** — `setBrushSize`
+        // does, from fourteen suites — and whose edited default the next launch adopts
+        // (`CanvasManager.adoptLibrarySelections`). Without this, every later test on the simulator
+        // draws with the last editor test's brush: MEASURED 2026-09-25, `ColorWheelsUITests`' 0.9
+        // size turned three unrelated tests red that each pass alone. Only a test's *first* launch:
+        // relaunching inside one test is how `BrushEditorUITests` proves an edit outlives the process.
+        if !hasLaunchedIntoEditor && !app.launchArguments.contains("-resetBrushLibrary") {
+            app.launchArguments.append("-resetBrushLibrary")
+        }
+        hasLaunchedIntoEditor = true
         app.launch()
 
         let newCanvas = app.buttons["gallery.newCanvasButton"]

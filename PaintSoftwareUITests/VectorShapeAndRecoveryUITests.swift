@@ -247,19 +247,25 @@ final class VectorLayerContentUITests: PaintUITestCase {
         setHexField(app, hexField, to: "0000FF")
 
         // Append the current color. The seeded "Spectrum" preset has 20 colors, so the new swatch
-        // lands at index 20.
+        // lands at index 20 — on the grid's third row, below the fold: since TODO (106) the section
+        // under the picker is a short scroll view showing about one row, and its `LazyVGrid` does not
+        // realize a row it has not scrolled to. The artist scrolls to reach it, and so does this.
+        let paletteSection = app.scrollViews.containing(.staticText, identifier: "Spectrum").firstMatch
+        paletteSection.swipeUp()
         let addButton = app.buttons["colorPanel.addSwatchButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5), "The palette's + cell should scroll into reach below Spectrum's two rows")
         addButton.tap()
 
         let addedSwatch = app.otherElements["colorPanel.swatch.20"]
         XCTAssertTrue(addedSwatch.waitForExistence(timeout: 5), "Adding the current color should append a swatch at index 20 of the Spectrum preset")
 
         // Move the picker to a different color by tapping an existing preset swatch (Spectrum[0] is
-        // black), so re-selecting the added swatch is a real change.
+        // black, back at the top of the section), so re-selecting the added swatch is a real change.
+        paletteSection.swipeDown()
         app.otherElements["colorPanel.swatch.0"].tap()
 
         // Tap the saved swatch; the picker should snap back to the stored blue.
+        paletteSection.swipeUp()
         addedSwatch.tap()
 
         let hexAfterSelect = hexField.value as? String
