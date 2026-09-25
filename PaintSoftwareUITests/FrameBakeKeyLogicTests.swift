@@ -162,22 +162,23 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
         let entries = Array(recipe.maskStacks)
         let order = Array(recipe.maskStacks.keys)
-        var reordered: [MaskSource: [RenderNode]]?
         // A decoy key inserted and removed under a range of capacities perturbs the bucket layout.
-        // Each attempt is about even money, so sixty-four of them make a false negative vanishing
-        // and the `guard` below makes one loud rather than silent.
-        for attempt in 0..<64 {
+        // Each attempt is about even money **only if each has its own storage**: a native dictionary
+        // seeds its hashing from its storage's address, and a candidate freed at the end of one pass
+        // handed the next pass the same address, so the attempts were nowhere near independent —
+        // MEASURED 2026-09-25 in a standalone `swiftc` copy of the old loop, 308 of 20,000 searches
+        // found no second order (a 1.5% red, one of which landed in a full run), against 0 of 20,000
+        // with every candidate alive at once. Hence all sixty-four are built before any is read, and
+        // the `guard` below keeps a false negative loud rather than silent.
+        let candidates = (0..<64).map { attempt -> [MaskSource: [RenderNode]] in
             var candidate = [MaskSource: [RenderNode]](minimumCapacity: 2 + attempt)
             let decoy = MaskSource.layer(UUID())
             candidate[decoy] = []
             for (source, stack) in entries.reversed() { candidate[source] = stack }
             candidate[decoy] = nil
-            if Array(candidate.keys) != order {
-                reordered = candidate
-                break
-            }
+            return candidate
         }
-        guard let reordered else {
+        guard let reordered = candidates.first(where: { Array($0.keys) != order }) else {
             return XCTFail("No second iteration order was found, so this test would prove nothing.")
         }
 
