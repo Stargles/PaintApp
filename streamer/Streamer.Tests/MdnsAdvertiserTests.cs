@@ -104,6 +104,35 @@ public class MdnsAdvertiserTests
         Assert.True(MdnsAdvertiser.IsPaintstreamQuery(query, MdnsAdvertiser.ServiceType, MdnsAdvertiser.ServiceDomain));
     }
 
+    // ---- The ping-pong fix's LAN half: RFC 6762 §5.4's "QU" bit (STREAM.md §6) ----
+
+    [Fact]
+    public void AnOrdinaryQuestionDoesNotRequestUnicastResponse()
+    {
+        byte[] query = BuildQuery("_paintstream._tcp.local", qtype: 12, unicastResponseRequested: false);
+        Assert.True(MdnsAdvertiser.IsPaintstreamQuery(query, MdnsAdvertiser.ServiceType, MdnsAdvertiser.ServiceDomain,
+            out bool requestedUnicast));
+        Assert.False(requestedUnicast);
+    }
+
+    [Fact]
+    public void AQuQuestionSetsTheTopBitOfQclassAndIsReportedAsRequestingUnicast()
+    {
+        byte[] query = BuildQuery("_paintstream._tcp.local", qtype: 12, unicastResponseRequested: true);
+        Assert.True(MdnsAdvertiser.IsPaintstreamQuery(query, MdnsAdvertiser.ServiceType, MdnsAdvertiser.ServiceDomain,
+            out bool requestedUnicast));
+        Assert.True(requestedUnicast);
+    }
+
+    [Fact]
+    public void TheThreeArgOverloadStillAnswersTheYesNoQuestionForAQuQuery()
+    {
+        // The additive overload must not change what every existing caller (this class's own
+        // fixtures included) already asks.
+        byte[] query = BuildQuery("_paintstream._tcp.local", qtype: 12, unicastResponseRequested: true);
+        Assert.True(MdnsAdvertiser.IsPaintstreamQuery(query, MdnsAdvertiser.ServiceType, MdnsAdvertiser.ServiceDomain));
+    }
+
     [Theory]
     [InlineData(new byte[0])]
     [InlineData(new byte[] { 1, 2, 3 })]
@@ -125,9 +154,10 @@ public class MdnsAdvertiserTests
     /// question's name/QTYPE/QCLASS. Hand-built rather than reusing <c>DnsMessageWriter</c> (an
     /// answer writer, not a query writer) so this test fixture does not depend on the very code
     /// under test to construct its own input.</summary>
-    private static byte[] BuildQuery(string name, ushort qtype) => BuildQuery(new[] { (name, qtype) });
+    private static byte[] BuildQuery(string name, ushort qtype, bool unicastResponseRequested = false) =>
+        BuildQuery(new[] { (name, qtype) }, unicastResponseRequested);
 
-    private static byte[] BuildQuery((string Name, ushort QType)[] questions)
+    private static byte[] BuildQuery((string Name, ushort QType)[] questions, bool unicastResponseRequested = false)
     {
         var bytes = new List<byte>();
         void U16(int v) { bytes.Add((byte)(v >> 8)); bytes.Add((byte)(v & 0xFF)); }
@@ -135,6 +165,9 @@ public class MdnsAdvertiserTests
         U16(0);                     // flags
         U16(questions.Length);      // QDCOUNT
         U16(0); U16(0); U16(0);     // ANCOUNT, NSCOUNT, ARCOUNT
+        // RFC 6762 §5.4: the top bit of QCLASS is the "QU" unicast-response request, on top of
+        // the ordinary QCLASS IN (1) below every other test here already used.
+        int qclass = 1 | (unicastResponseRequested ? 0x8000 : 0);
         foreach (var (name, qtype) in questions)
         {
             foreach (string label in name.Split('.'))
@@ -145,7 +178,7 @@ public class MdnsAdvertiserTests
             }
             bytes.Add(0);
             U16(qtype);
-            U16(1); // QCLASS IN
+            U16(qclass);
         }
         return bytes.ToArray();
     }

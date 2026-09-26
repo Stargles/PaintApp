@@ -142,7 +142,8 @@ public partial class App : System.Windows.Application
         }
 
         _fileInbox = new FileInbox(_settings, Log);
-        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, _fileInbox, Log);
+        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName,
+            _settings.GetOrCreateMachineId(), _fileInbox, Log);
         _session.AddSink(_server);
         _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
         _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
@@ -261,7 +262,8 @@ public partial class App : System.Windows.Application
         }
 
         _fileInbox = new FileInbox(_settings!, log);
-        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName, _fileInbox, log);
+        _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName,
+            _settings!.GetOrCreateMachineId(), _fileInbox, log);
         _session.AddSink(_server);
         _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
         _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();

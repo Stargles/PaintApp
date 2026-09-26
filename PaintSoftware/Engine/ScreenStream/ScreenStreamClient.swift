@@ -188,11 +188,25 @@ nonisolated final class ScreenStreamClient {
         case connecting
         case connected
         case reconnecting(lastFailure: StreamConnectFailure)
+        /// **The ping-pong fix.** The server evicted this client for another connection and said so
+        /// (STATUS, `reason == replacedByAnotherConnectionReason`) before closing the socket — unlike
+        /// `.reconnecting`, nothing here arms a retry: an evicted client does not fight back. Terminal
+        /// until `start()` is called again deliberately (STREAM.md §5.7's address button, or
+        /// `ScreenStreamCoordinator.connect(to:)` reviving a parked client).
+        case replaced(reason: String)
         case stopped
     }
 
     let endpoint: StreamEndpoint
     let decoder = H264StreamDecoder()
+
+    /// STREAM.md's ping-pong fix: the exact string `ProtocolServer` sends over an ordinary STATUS
+    /// the instant it evicts this client for a new connection, before closing the socket
+    /// (`ProtocolServer.ReplacedByAnotherConnectionReason` — kept as matching literals on both
+    /// sides, proven by a conformance test on each, rather than a shared file, since the wire has
+    /// no notion of a shared constant). Matched verbatim rather than by pattern, so an unrelated
+    /// STATUS whose `reason` happens to mention being replaced does not trip this.
+    static let replacedByAnotherConnectionReason = "Replaced by another connection"
 
     /// Delivered on the main queue.
     var onStateChange: ((State) -> Void)?
@@ -218,6 +232,10 @@ nonisolated final class ScreenStreamClient {
     /// The name the *other* side's own HELLO carried — `"desktop-cbr0fl6"`, for "Saved on
     /// desktop-cbr0fl6" after a Send to Computer.
     private(set) var remoteName: String?
+
+    /// The other side's own machine id, if its HELLO carried one — STREAM.md's ping-pong fix.
+    /// `ScreenStreamCoordinator.collapseIfSameMachine` is the only reader.
+    private(set) var remoteMachineID: String?
 
     private let queue = DispatchQueue(label: "PaintSoftware.ScreenStream.client", qos: .userInitiated)
     private var connection: NWConnection?
@@ -306,9 +324,19 @@ nonisolated final class ScreenStreamClient {
 
     func start() {
         queue.async { [weak self] in
-            guard let self, self.state == .stopped, !self.stopped else { return }
-            self.attempt = 0
-            self.connect()
+            guard let self, !self.stopped else { return }
+            switch self.state {
+            case .stopped, .replaced:
+                // `.replaced` is the ping-pong fix's terminal state: `stop()`-like in that nothing
+                // here retries on its own, but — unlike `.stopped` — revivable by a deliberate
+                // caller (STREAM.md §5.7's address button, or `connect(to:)` on a client already
+                // parked here), which is exactly the difference between "gave up" and "was told to
+                // give up and might be asked again."
+                self.attempt = 0
+                self.connect()
+            case .connecting, .connected, .reconnecting:
+                break   // already trying or live — a no-op, same as before this case existed
+            }
         }
     }
 
@@ -450,9 +478,20 @@ nonisolated final class ScreenStreamClient {
             }
             helloReceived = true
             remoteName = hello.name
+            remoteMachineID = hello.machineID
             state = .connected
         case .status:
             guard let status = StreamJSON.decode(StreamStatus.self, from: frame.payload) else { return }
+            // **The ping-pong fix.** The server sends this exact reason, over an ordinary STATUS,
+            // the instant it evicts this client for a new connection — moments before it closes the
+            // socket. Recognized here, before the close arrives as an ordinary drop, so this client
+            // parks itself deliberately instead of discovering the close as a plain disconnect and
+            // fighting to reclaim the slot (which is the reported bug: two clients to the one
+            // laptop evicting each other every second, forever).
+            guard status.reason != Self.replacedByAnotherConnectionReason else {
+                replaced(reason: status.reason ?? Self.replacedByAnotherConnectionReason)
+                return
+            }
             lastStatus = status
             DispatchQueue.main.async { [weak self] in self?.onStatus?(status) }
         case .video:
@@ -643,6 +682,20 @@ nonisolated final class ScreenStreamClient {
     /// greeting, a version mismatch, a dropped connection) rather than one `NWError` needs
     /// classifying. Wraps it as `.other` so `onFailure`/`state` carry one type throughout.
     private func fail(_ sentence: String) { fail(.other(sentence)) }
+
+    /// **An evicted client does not fight back.** Unlike `fail(_:)`, this arms no reconnect timer —
+    /// reconnecting would just re-open the exact contention the server just resolved, which is
+    /// STREAM.md's reported bug (two clients to one laptop evicting each other every second,
+    /// forever). `tearDownConnection()` bumps `generation`, so the ordinary socket close that
+    /// follows moments later lands on a stale generation and is silently ignored rather than
+    /// calling `fail` a second time and overwriting this state with `.reconnecting`.
+    private func replaced(reason: String) {
+        guard !stopped else { return }
+        tearDownConnection()
+        reconnectTimer?.cancel()
+        reconnectTimer = nil
+        state = .replaced(reason: reason)
+    }
 
     private func fail(_ reason: StreamConnectFailure) {
         guard !stopped else { return }

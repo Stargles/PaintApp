@@ -50,25 +50,41 @@ rather than assuming it still holds.
 
 ## (101) Streaming: the reconnect loop, and Nearby finds nothing on the iPad
 
-**Status** — **in flight on `tmp/pingpong`** (2026-09-25). The Info.plist keys and the connect-failure
-classification are merged (`84647c3`; docs/STREAM.md §5.9). On the owner's iPad at `0e20568`, the
-owner, 2026-09-25: *"it keeps switching between reconnecting - the computer closed the..., and not
-streaming - paused. Next, the computer does not appear on the LAN."* They confirmed the iPad **is on
-the same Wi-Fi** as the laptop and **Local Network is allowed** for PaintSoftware — so the LAN failure
-is ours, not the device's.
+**Status** — **fixed on `tmp/pingpong` (2026-09-25), merged; the LAN half awaits the owner's iPad.**
+The Info.plist keys and the connect-failure classification are merged (`84647c3`; docs/STREAM.md
+§5.9). On the owner's iPad at `0e20568`, the owner, 2026-09-25: *"it keeps switching between
+reconnecting - the computer closed the..., and not streaming - paused. Next, the computer does not
+appear on the LAN."* They confirmed the iPad **is on the same Wi-Fi** as the laptop and **Local
+Network is allowed** for PaintSoftware — so the LAN failure was ours, not the device's.
 
 **The loop, from the laptop's log**: a new connection from `100.70.220.4` every ~1 s, each logged
-`new connection replaces previous client` — the iPad holds two live clients to one laptop and the
-single-client server makes them evict each other for ever. Clients are keyed by `StreamEndpoint`'s
+`new connection replaces previous client` — the iPad held two live clients to one laptop and the
+single-client server made them evict each other forever. Clients are keyed by `StreamEndpoint`'s
 host *string*, so one laptop reached as `100.104.85.111`, `desktop-cbr0fl6` or `DESKTOP-CBR0FL6.local`
-is two endpoints (the ambient last-used address plus a stream element that stored another spelling);
-a second live `CanvasManager` is the other hypothesis. **Workaround until the fix ships**: delete the
-stream layer and re-add it through Stream Screen with the address normally typed.
+was two endpoints (the ambient last-used address plus a stream element that stored another
+spelling). A second live `CanvasManager` was the other hypothesis, read out of the code and ruled
+out: `closeFrameBaker()`/`stopAll()` has one call site and runs before every reassignment of
+`@State canvasManager`. **Fixed** (docs/STREAM.md §5.10/§6): the laptop's HELLO now carries a
+stable machine id, the coordinator collapses two spellings onto one client once both agree, and
+`ProtocolServer` tells an evicted client why before closing its socket so it parks instead of
+fighting back — MEASURED live against the laptop while the owner's own (then-unpatched) iPad was
+mid-loop.
 
-- [ ] One client per laptop (a stable machine id from the server, clients deduped on it), and an
-      evicted client told why and not retrying — so nothing ping-pongs.
-- [ ] Nearby lists the laptop on the owner's iPad (same Wi-Fi, permission on), and a LAN address
-      connects.
+**LAN**: three bugs found and fixed on the laptop side (STREAM.md §5.10/§6) — the mDNS advertiser
+had joined the multicast group on only the OS's default-route interface rather than the laptop's
+actual Wi-Fi NIC, the A record could carry the laptop's Tailscale address instead of its LAN one,
+and neither `ExclusiveAddressUse=false` nor RFC 6762's unicast-response ("QU") replies were
+handled. Confirmed at the network layer on the laptop itself (multicast group membership per NIC,
+the advertised address, coexistence with Windows' own Dnscache responder on UDP 5353) — **not yet
+confirmed by Nearby actually listing the laptop on the owner's own iPad**, which needs their device
+on their Wi-Fi to exercise for real.
+
+- [x] One client per laptop (a stable machine id from the server, clients deduped on it), and an
+      evicted client told why and not retrying — so nothing ping-pongs. Pinned:
+      `ProtocolServerReplacementTests` (real sockets), `StreamBarStateLogicTests`; MEASURED against
+      the real laptop. Needs the iPad's own build updated to observe the client half directly.
+- [ ] Owner-verified on their own iPad: Nearby lists the laptop (same Wi-Fi, permission on), and a
+      typed LAN address connects.
 
 ---
 

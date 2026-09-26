@@ -13,6 +13,16 @@ public sealed class HelloMessage
     [JsonPropertyName("app")] public string App { get; set; } = "";
     [JsonPropertyName("version")] public string Version { get; set; } = "";
     [JsonPropertyName("name")] public string Name { get; set; } = "";
+
+    /// <summary>The ping-pong fix (STREAM.md §3/§6): this machine's stable identity, independent of
+    /// which address a connection reached it through — see <see cref="Settings.GetOrCreateMachineId"/>.
+    /// Additive: a HELLO from a build that predates this field simply omits the key, and the iPad's
+    /// own JSON decoder (Swift's synthesized `Decodable`, which uses `decodeIfPresent` for an
+    /// `Optional` property) reads that as nil rather than failing to parse. Only <c>ProtocolServer</c>
+    /// populates this; the iPad's own HELLO to the laptop does not need one.</summary>
+    [JsonPropertyName("machineId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; set; }
 }
 
 public sealed class SourceDescriptor

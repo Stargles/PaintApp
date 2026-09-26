@@ -220,10 +220,15 @@ final class ScreenStreamCoordinator: ObservableObject {
             startClient(for: endpoint)
         }
         for (endpoint, client) in clients where !wanted.contains(endpoint) && pendingConnects[endpoint] == nil {
-            client.stop()
             clients.removeValue(forKey: endpoint)
             connectionStates.removeValue(forKey: endpoint)
             pausedEndpoints.remove(endpoint)
+            // The ping-pong fix's collapse can leave two keys pointing at one client; stop the
+            // socket only once nothing wanted still shares it, or an ambient connection and a
+            // stream element naming the same laptop differently would have one of them silently
+            // kill the other's only live connection.
+            let stillWanted = wanted.contains { clients[$0] === client }
+            if !stillWanted { client.stop() }
         }
         syncPauseState()
     }
@@ -275,7 +280,18 @@ final class ScreenStreamCoordinator: ObservableObject {
         }
         return try await withCheckedThrowingContinuation { continuation in
             pendingConnects[endpoint, default: []].append(continuation)
-            if clients[endpoint] == nil { startClient(for: endpoint) }
+            if let client = clients[endpoint] {
+                // Revives a client parked in `.replaced` (the ping-pong fix's "an evicted client
+                // does not fight back" state) or `.stopped` — a no-op on anything already trying or
+                // live. Without this, tapping the address button to reconnect an endpoint the
+                // server had evicted would register a continuation nothing ever resolves.
+                // `startsClients` gate matches `startClient(for:)`'s own: nothing here opens a real
+                // socket under `CanvasFixture`, which drives this same window with
+                // `stateChanged`/`statusArrived` instead (see that property's own doc comment).
+                if startsClients { client.start() }
+            } else {
+                startClient(for: endpoint)
+            }
         }
     }
 
@@ -365,10 +381,69 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// Internal rather than private so `StreamInsertLogicTests` can hand the coordinator a STATUS
     /// with no socket; the app reaches it only through a client's `onStatus`.
     func statusArrived(_ status: StreamStatus, from endpoint: StreamEndpoint) {
-        statuses[endpoint] = status
-        applyStatusToElements(status, endpoint: endpoint)
+        // Broadcast to every spelling collapsed onto the same client (the ping-pong fix): the
+        // client's own callback always reports under whichever endpoint it was originally started
+        // for, so without this an element naming the *other* spelling would read this connection's
+        // last STATUS forever once the two folded together.
+        for alias in aliasedEndpoints(sharing: endpoint) {
+            statuses[alias] = status
+            applyStatusToElements(status, endpoint: alias)
+        }
         if let continuations = pendingConnects.removeValue(forKey: endpoint) {
             for continuation in continuations { continuation.resume(returning: status) }
+        }
+    }
+
+    /// Every endpoint spelling currently sharing `endpoint`'s client — always at least `[endpoint]`
+    /// itself. **The ping-pong fix's bookkeeping seam**: once `collapseIfSameMachine` folds a second
+    /// spelling of one laptop onto the first client that reached it (§6: the document's ambient
+    /// connection and a stream element naming the same machine differently), `clients` holds two
+    /// keys pointing at one `ScreenStreamClient` instance — every reader keyed by endpoint
+    /// (`statusArrived`, `stateChanged`, `syncPauseState`) must resolve through every alias, not
+    /// just the one the client's own callback happens to report under, or the *other* spelling's
+    /// bar/pause state would freeze at whatever it last was the moment before the fold.
+    private func aliasedEndpoints(sharing endpoint: StreamEndpoint) -> [StreamEndpoint] {
+        guard let client = clients[endpoint] else { return [endpoint] }
+        let aliases = clients.compactMap { $0.value === client ? $0.key : nil }
+        return aliases.isEmpty ? [endpoint] : aliases
+    }
+
+    /// **The ping-pong fix's root cause, STREAM.md §3/§6.** The laptop is one machine reachable
+    /// under several `StreamEndpoint` spellings (its Tailscale IP, its MagicDNS name, its `.ts.net`
+    /// FQDN, its mDNS `.local` name) that the model cannot tell apart before a HELLO answers — so a
+    /// document naming two of them (its ambient last-used connection and a stream element spelled
+    /// differently, say) used to open two sockets to the one laptop, and a single-client server
+    /// (`ProtocolServer`) answers that by evicting whichever it already had, forever: each eviction
+    /// is an ordinary-looking disconnect to the loser, which reconnects and evicts the winner right
+    /// back. Run every time a client reaches `.connected` (so a HELLO's `machineID` is known):
+    /// if another live client already claims the same id under a different spelling, that other
+    /// spelling is folded onto *this* one — the client that just connected survives, matching what
+    /// the server itself just did (`ProtocolServer.AcceptLoopAsync`: "new connection replaces
+    /// previous client", the newest always wins) — and the older socket is stopped outright, not
+    /// merely marked unwanted, so its own reconnect loop cannot fire on the close the server is
+    /// about to send it anyway.
+    ///
+    /// Endpoints that fail to collapse pre-connect (no way to know two spellings are one machine
+    /// before *something* answers) still converge here within one HELLO round trip — the defect
+    /// this fixes is a forever loop, not a single extra connection attempt.
+    private func collapseIfSameMachine(newEndpoint: StreamEndpoint) {
+        guard let newClient = clients[newEndpoint], let machineID = newClient.remoteMachineID else { return }
+        for (otherEndpoint, otherClient) in clients {
+            guard otherEndpoint != newEndpoint, otherClient !== newClient,
+                  otherClient.remoteMachineID == machineID else { continue }
+            otherClient.stop()
+            clients[otherEndpoint] = newClient
+            connectionStates[otherEndpoint] = connectionStates[newEndpoint]
+            statuses[otherEndpoint] = statuses[newEndpoint]
+            pausedEndpoints.remove(otherEndpoint)
+            // A `connect(to: otherEndpoint)` in flight (the sheet's own narrow window, §6) would
+            // otherwise wait on a continuation nothing can ever resolve: `otherClient` is stopped
+            // and will not call back again, and `newClient`'s own callbacks only ever report under
+            // `newEndpoint`. Migrating it here means the very next STATUS answers it, exactly as
+            // if it had been registered under `newEndpoint` from the start.
+            if let migrated = pendingConnects.removeValue(forKey: otherEndpoint) {
+                pendingConnects[newEndpoint, default: []].append(contentsOf: migrated)
+            }
         }
     }
 
@@ -424,16 +499,22 @@ final class ScreenStreamCoordinator: ObservableObject {
     ///
     /// Internal rather than private so a logic test can drive the bar's state with no socket.
     func stateChanged(_ state: ScreenStreamClient.State, at endpoint: StreamEndpoint) {
-        if state == .stopped {
-            connectionStates.removeValue(forKey: endpoint)
-        } else {
-            connectionStates[endpoint] = state
+        // Broadcast before collapsing: pre-collapse, `endpoint` is its own only alias, so this sets
+        // exactly the one entry the transition is actually about. `collapseIfSameMachine` below
+        // handles copying `.connected` onto whatever it folds in.
+        for alias in aliasedEndpoints(sharing: endpoint) {
+            if state == .stopped {
+                connectionStates.removeValue(forKey: alias)
+            } else {
+                connectionStates[alias] = state
+            }
         }
         switch state {
         case .connected:
+            collapseIfSameMachine(newEndpoint: endpoint)
             syncPauseState()
-        case .reconnecting, .connecting, .stopped:
-            pausedEndpoints.remove(endpoint)
+        case .reconnecting, .connecting, .stopped, .replaced:
+            for alias in aliasedEndpoints(sharing: endpoint) { pausedEndpoints.remove(alias) }
         }
     }
 
@@ -447,12 +528,22 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// A hidden layer's element still counts as wanting frames: the tick writes them into it, so the
     /// artist can show the layer again and see the newest picture without a round trip to the laptop.
     private func everyElementIsFrozen(at endpoint: StreamEndpoint) -> Bool? {
+        everyElementIsFrozen(atAnyOf: [endpoint])
+    }
+
+    /// As above, but true of an element naming *any* of `endpoints` — the ping-pong fix's
+    /// `syncPauseState` calls this with every alias of one client, because a stream element can
+    /// name the machine under a different spelling than the client's own endpoint (the one its
+    /// callback happens to report under) once two spellings have collapsed onto it; asking only
+    /// about the client's own spelling would silently miss that element's own frozen flag.
+    private func everyElementIsFrozen(atAnyOf endpoints: [StreamEndpoint]) -> Bool? {
         guard let manager else { return nil }
         var sawOne = false
         for layer in manager.layers where layer.kind == .vector {
             for cel in layer.cels {
                 guard let vector = cel.vector, vector.holdsStream else { continue }
-                for stream in vector.streams where stream.host == endpoint.host && stream.port == endpoint.port {
+                for stream in vector.streams
+                where endpoints.contains(StreamEndpoint(host: stream.host, port: stream.port)) {
                     sawOne = true
                     if !stream.isFrozen { return false }
                 }
@@ -484,36 +575,49 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// `connect(to:)` for. So the four-millisecond flap stays fixed and the ambient connection is now
     /// paused, by asking a narrower question of `everyElementIsFrozen`'s nil.
     private func syncPauseState() {
+        // **Per unique client, not per dictionary key.** Once the ping-pong fix's
+        // `collapseIfSameMachine` has folded two spellings of one laptop onto one client, `clients`
+        // holds two keys for that one instance — iterating keys directly would ask
+        // `everyElementIsFrozen` two different (and possibly contradictory) questions about the
+        // very same socket and could send it a `pause` immediately followed by a `resume` in the
+        // same pass. Ask once per client, over the union of every endpoint naming it.
+        var handled = Set<ObjectIdentifier>()
         for (endpoint, client) in clients {
+            let id = ObjectIdentifier(client)
+            guard !handled.contains(id) else { continue }
+            handled.insert(id)
+            let aliases = aliasedEndpoints(sharing: endpoint)
+
             // Paused for the background, for the artist having frozen everything on it, or for
             // nothing naming it at all. The one exception is the moment between the connect sheet's
             // own `connect()` and the element it is about to insert — see the doc comment above.
             let wanted: Bool
             if isInBackground {
                 wanted = false
-            } else if let allFrozen = everyElementIsFrozen(at: endpoint) {
+            } else if let allFrozen = everyElementIsFrozen(atAnyOf: aliases) {
                 wanted = !allFrozen
-            } else if pendingConnects[endpoint] != nil {
-                wanted = !pausedEndpoints.contains(endpoint)   // about to be claimed — do not flap
+            } else if aliases.contains(where: { pendingConnects[$0] != nil }) {
+                // about to be claimed — do not flap
+                wanted = !aliases.contains(where: { pausedEndpoints.contains($0) })
             } else {
                 wanted = false                                  // §6: nothing names it, so: paused
             }
-            let paused = pausedEndpoints.contains(endpoint)
+            let paused = aliases.contains(where: { pausedEndpoints.contains($0) })
             if !wanted, !paused {
                 client.pause()
-                pausedEndpoints.insert(endpoint)
+                for alias in aliases { pausedEndpoints.insert(alias) }
                 sentControlCommands.append((endpoint, .pause))
             } else if wanted, paused {
                 client.decoder.reset()
                 client.resume()
-                pausedEndpoints.remove(endpoint)
+                for alias in aliases { pausedEndpoints.remove(alias) }
                 sentControlCommands.append((endpoint, .resume))
                 // The laptop's STATUS after `resume` is on its way; until it lands the stored one
                 // still says "Paused by client", which is a pause this end has just lifted. Say so.
                 if var status = statuses[endpoint], !status.streaming {
                     status.streaming = true
                     status.reason = nil
-                    statuses[endpoint] = status
+                    for alias in aliases { statuses[alias] = status }
                 }
             }
         }
@@ -554,6 +658,11 @@ final class ScreenStreamCoordinator: ObservableObject {
             // TODO.md item (101): the bar reads the same classification the sheet does, rather than
             // a bare "Reconnecting…" that says nothing about why.
             return .reconnecting(detail: reason.sentence(host: element.host))
+        case .replaced?:
+            // The ping-pong fix: the server evicted this connection for another one and said so —
+            // the artist did not do this, and unlike `.reconnecting` nothing here is retrying on
+            // its own, so the word must not read like an ordinary drop.
+            return .pausedByOther
         case .connected?:
             guard let status = statuses[endpoint] else { return .connecting }
             return status.streaming ? .live : .notStreaming(reason: status.reason ?? "no source is picked")
@@ -672,6 +781,12 @@ enum StreamBarState: Equatable {
     case reconnecting(detail: String)
     /// Connected, but STATUS says `streaming:false` — nothing picked, paused, or the window closed.
     case notStreaming(reason: String)
+    /// **The ping-pong fix.** The server evicted this connection for another one — a different
+    /// device, or (before `collapseIfSameMachine` catches it) this same document's own other
+    /// spelling of the laptop — and said so before closing the socket. Unlike `.reconnecting`, this
+    /// is not retrying: the artist must reconnect deliberately (the address button), or the two
+    /// would just trade the eviction back and forth forever, which is the bug this fixes.
+    case pausedByOther
 
     var word: String {
         switch self {
@@ -680,6 +795,7 @@ enum StreamBarState: Equatable {
         case .connecting: return "Connecting…"
         case .reconnecting(let detail): return "Reconnecting… \(detail)"
         case .notStreaming(let reason): return "Not streaming — \(reason)"
+        case .pausedByOther: return "Paused — another connection took the stream"
         }
     }
 

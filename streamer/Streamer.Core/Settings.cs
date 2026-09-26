@@ -10,6 +10,11 @@ public sealed class SettingsData
     [JsonPropertyName("lastSource")] public string? LastSource { get; set; }
 
     [JsonPropertyName("saveFolder")] public string? SaveFolder { get; set; }
+
+    /// <summary>The ping-pong fix (STREAM.md §3/§6): a GUID minted once, the first time this
+    /// laptop's HELLO reply needs one, and kept from then on — <see cref="Settings.GetOrCreateMachineId"/>
+    /// is the only writer.</summary>
+    [JsonPropertyName("machineId")] public string? MachineId { get; set; }
 }
 
 /// <summary>
@@ -56,6 +61,25 @@ public sealed class Settings
             File.WriteAllText(tmp, json);
             File.Move(tmp, _path, overwrite: true);
         }
+    }
+
+    /// <summary>
+    /// **The ping-pong fix.** The laptop is one physical machine reachable under several
+    /// `StreamEndpoint` spellings on the iPad's side (its Tailscale IP, its MagicDNS name, its
+    /// `.ts.net` FQDN, its mDNS `.local` name) — this id is how the iPad recognizes that two of
+    /// them are the same laptop rather than opening a second, redundant connection under each one
+    /// (which the single-client `ProtocolServer` used to answer by evicting whichever it already
+    /// had, forever). Minted once, on first use, and persisted — a fresh id on every launch would
+    /// defeat the whole point, since the iPad compares HELLO to HELLO across reconnects.
+    /// </summary>
+    public string GetOrCreateMachineId()
+    {
+        var data = Load();
+        if (!string.IsNullOrWhiteSpace(data.MachineId)) return data.MachineId;
+        var id = Guid.NewGuid().ToString();
+        data.MachineId = id;
+        Save(data);
+        return id;
     }
 
     /// <summary>%USERPROFILE%\Pictures\PaintApp (STREAM.md §4.4's default, chosen once).</summary>

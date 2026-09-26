@@ -114,8 +114,8 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 
 | type | name | dir | payload |
 |---|---|---|---|
-| 0x01 | HELLO | both | JSON `{"proto":1,"app":"PaintStreamer"\|"PaintApp","version":"…","name":"desktop-cbr0fl6"\|"Kevin's iPad"}` — first message each way |
-| 0x02 | STATUS | L→I | JSON `{"source":{"kind":"monitor"\|"window"\|"none","name":"Blender","id":"…"},"width":1920,"height":1080,"fps":30,"codec":"h264","streaming":true}` — on connect, on every source change, on pause/resume |
+| 0x01 | HELLO | both | JSON `{"proto":1,"app":"PaintStreamer"\|"PaintApp","version":"…","name":"desktop-cbr0fl6"\|"Kevin's iPad","machineId":"…"}` — first message each way. `machineId` (2026-09-25, the ping-pong fix) is additive and laptop-only: a GUID `Streamer.Core.Settings.GetOrCreateMachineId` mints once and keeps beside the other settings, so the iPad can tell that two `StreamEndpoint`s (a Tailscale IP, a MagicDNS name, its `.ts.net` FQDN, an mDNS `.local` name) are the *same* laptop. Missing on an older build of either side; a Swift `Optional`/C# `string?` decodes that as absent, not a parse failure |
+| 0x02 | STATUS | L→I | JSON `{"source":{"kind":"monitor"\|"window"\|"none","name":"Blender","id":"…"},"width":1920,"height":1080,"fps":30,"codec":"h264","streaming":true}` — on connect, on every source change, on pause/resume. `{"streaming":false,"reason":"Replaced by another connection"}` (2026-09-25) is sent to a client the instant `ProtocolServer` accepts a new one that replaces it, before its socket actually closes — `ScreenStreamClient` matches this exact string and parks (`.replaced`) rather than treating the close that follows as an ordinary drop to reconnect from |
 | 0x03 | VIDEO | L→I | `u8 flags` (bit0 = keyframe) `u64 pts_us` then **one H.264 access unit, Annex-B byte stream**. Every keyframe is preceded by SPS and PPS inside the same payload |
 | 0x04 | CONTROL | I→L | JSON `{"cmd":"pause"\|"resume"\|"keyframe"}` — pause stops encoding server-side; resume restarts it with a keyframe |
 | 0x10 | FILE_BEGIN | both | JSON `{"id":7,"name":"ref.mp4","size":1234567,"kind":"image"\|"video"\|"other"}` |
@@ -154,7 +154,18 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 - **Reconnect is the client's job** (2.8): 1 s → 2 s → 5 s backoff, forever, while the open document
   holds at least one stream element. The laptop's listener is always up while the app runs. No
   session state survives a reconnect except the source selection, which lives on the laptop.
-- Three missed PINGs (6 s) is a dead connection on either side.
+- **One client only (§6), and an evicted client does not fight back — the 2026-09-25 ping-pong
+  fix.** `ProtocolServer` accepts a new connection and evicts whichever it already had — but now
+  tells the loser why first, over the STATUS above, before closing its socket. `ScreenStreamClient`
+  reads that exact reason and parks in a terminal `.replaced` state: no reconnect timer, so two
+  clients (this document's own ambient connection and a stream element naming the same laptop
+  under a different spelling, or two genuinely different devices) cannot evict each other forever
+  the way they used to — each cycle every ~1 s, the evicted side discovering the close as an
+  ordinary drop and reconnecting to reclaim the slot, which evicted the other, endlessly. The
+  parked state shows "Paused — another connection took the stream" and only a deliberate
+  reconnect (the address button) revives it. Independently, `machineId` above lets the coordinator
+  collapse two spellings of the *same* laptop onto one client before this contention can happen at
+  all — see §5's discussion and §6.
 - Files: one transfer in flight per direction; a FILE_BEGIN while one is active is answered
   `ok:false`. The iPad answers FILE_END after `insertImage` / `insertVideo` returns (so `ok` means
   *inserted*, not *received*). The laptop answers after the file is closed in the save folder.
@@ -655,16 +666,83 @@ under the specific word ("refused") the owner's brief guessed for this cause; **
 whatever genuinely does answer with a reset (a firewall on the *iPad's* side of a connection, or a
 service that unbinds its listener without exiting).
 
+### 5.10 One client per laptop, and an evicted client does not fight back — 2026-09-25
+
+**The bug**: the owner's laptop log showed a connection every ~1 s, forever, each replacing the
+last (`ProtocolServer`: "new connection replaces previous client"), the ephemeral port
+incrementing by one each time — the shape of two `ScreenStreamClient`s to the *same* laptop
+evicting each other, not one client cycling on its own backoff. **Confirmed**: the document's
+ambient connection (`ScreenStreamCoordinator.documentEndpoint`, §6) and a stream element can name
+the one physical laptop under two different `StreamEndpoint`s — its Tailscale IP, its MagicDNS
+name, its `.ts.net` FQDN, or (§5.7) an mDNS `.local` name from Nearby — and nothing before this
+fix could tell that two spellings meant one machine. Each spelling got its own socket; the
+single-client server evicted whichever it already had; the loser's `fail("computer closed the
+connection.")` armed an ordinary reconnect timer, which evicted the winner right back. A second
+hypothesis — a previous document's `CanvasManager`/`ScreenStreamCoordinator` never torn down —
+was read out of the code and ruled out: `closeFrameBaker()` (`CanvasManager.swift`, which calls
+`streamCoordinator.stopAll()`) has exactly one call site, `ContentView.returnToGallery`, and every
+place `@State private var canvasManager` is reassigned (`startNewProject`, `openProject`) runs only
+while `screen == .gallery` — reachable only *after* `returnToGallery` has already closed the
+outgoing manager's coordinator. No leak found.
+
+**The fix, two independent halves — root cause and defense in depth:**
+
+1. **One client per machine, not per spelling.** The laptop's own HELLO now carries `machineId`
+   (§3), a GUID `Streamer.Core.Settings.GetOrCreateMachineId` mints once and keeps beside its other
+   settings. `ScreenStreamCoordinator.collapseIfSameMachine` runs on every `.connected` transition:
+   if another live client already reports the same machine id under a different endpoint, the
+   *older* one is stopped outright and its endpoint key repointed onto the *newer* client (matching
+   what the server itself just did — newest connection wins) — `aliasedEndpoints(sharing:)` then
+   makes every endpoint-keyed read (`statusArrived`, `stateChanged`, `syncPauseState`,
+   `everyElementIsFrozen`) resolve through every alias a collapsed client answers to, not just the
+   one its own callback happens to report under, or the *other* spelling's bar/pause state would
+   freeze the moment before the fold. **Not implemented**: canonicalizing an endpoint by resolving
+   its address *before* connecting (which would catch the Tailscale-IP/MagicDNS-name/`.ts.net`
+   cases — all one numeric address — without ever opening two sockets at all). The post-HELLO
+   collapse alone fully closes the reported loop, converging within one HELLO round trip; address
+   pre-resolution is a possible follow-up, not required for this fix.
+2. **An evicted client does not fight back.** `ProtocolServer.AcceptLoopAsync` now enqueues a
+   STATUS naming `ReplacedByAnotherConnectionReason` on the client it is about to evict — flushed
+   before the socket actually closes, which needed its own fix: the writer loop was tied to the same
+   cancellation token `DisposeAsync` fired, so `_cts.Cancel()` could (and, before the fix, would)
+   abort the write of an already-queued frame. It now drains the queue (bounded to 2 s, so a
+   genuinely dead peer cannot hang a disposal forever) before cancelling anything.
+   `ScreenStreamClient` recognizes the exact reason string and moves to a new terminal state,
+   `.replaced(reason:)`, instead of running it through `fail(_:)` — no reconnect timer is armed.
+   The bar reads this as `StreamBarState.pausedByOther`, "Paused — another connection took the
+   stream," distinct from `.reconnecting`'s wording precisely because nothing is retrying. Only a
+   deliberate reconnect (the address button, `ScreenStreamCoordinator.connect(to:)`, which now
+   calls `client.start()` on a parked client rather than silently registering a continuation
+   nothing would ever resolve) revives it. This half is what stops the ping-pong even between two
+   *genuinely different* devices contending for the server's one client slot, which machine-id
+   collapse cannot help with, since they are not the same machine.
+
+**Proved**: `ProtocolServerReplacementTests` (Streamer.Tests, real loopback sockets against a real
+`ProtocolServer`) — a replaced client receives the STATUS with the exact reason before the socket
+reaches EOF, in a chain of three connections, and the HELLO reply carries the configured machine
+id. `StreamBarStateLogicTests` — two endpoints resolving to one machine id collapse onto one
+client and the *other* spelling's bar still reads live status through it; a `.replaced` STATUS
+parks a client at that exact state rather than `.reconnecting`; an unrelated STATUS reason does
+not; the bar's word. **MEASURED against the real laptop, 2026-09-25**: `stream-client-check.py`
+connecting while the owner's own (still-unpatched-client) iPad was mid-ping-pong was itself
+evicted and received `STATUS {"streaming":false,"reason":"Replaced by another connection"}` before
+the socket closed — the server half confirmed live, on the network, against real contention, not
+only in a test. The client half (parking rather than reconnecting) needs the iPad's own build
+updated to observe directly; §7's deploy step is that.
+
 ## 6. Defaults taken without a ruling — each reversible, each recorded where the behaviour lives
 
 - The stream cel runs **from the current frame to the end of the timeline** (a video is clipped to
   its length; a stream has none).
-- One connection per `host:port` per document, shared by all its stream layers; one **source** per
-  laptop at a time (the laptop's picker is global). **And a document keeps a connection to the
-  last-used laptop open even with no stream layer in it** (stage 4), held `pause`d unless a stream
-  element needs pictures — so the drop box lands files and Send to Computer is enabled whenever a
-  document is open, not only after Stream Screen. The laptop encodes nothing for a paused client, and
-  a laptop that is off costs the iPad one connection attempt every 5 s.
+- **One client per laptop** (revised 2026-09-25, §5.10 — was "one connection per `host:port` per
+  document," which is exactly what let two spellings of one laptop fight the single-client server
+  forever), shared by all its stream layers regardless of which `StreamEndpoint` spelling named it,
+  once a shared `machineId` is known; one **source** per laptop at a time (the laptop's picker is
+  global). **And a document keeps a connection to the last-used laptop open even with no stream
+  layer in it** (stage 4), held `pause`d unless a stream element needs pictures — so the drop box
+  lands files and Send to Computer is enabled whenever a document is open, not only after Stream
+  Screen. The laptop encodes nothing for a paused client, and a laptop that is off costs the iPad
+  one connection attempt every 5 s.
 - Port **47301**; the firewall rule admits Tailscale addresses **or the laptop's own local
   subnets** (TODO (98), widened from Tailscale-only). `AdmissionPolicy.cs` is the one place the
   rule is actually spelled out and the only thing that checks it precisely (live NIC data, per
@@ -673,6 +751,39 @@ service that unbinds its listener without exiting).
   advertises `_paintstream._tcp` on the LAN so the iPad's connect sheet can offer the laptop under
   "Nearby" (§5.7) instead of the artist typing an address — no new port or protocol, purely how
   the address gets into the sheet.
+
+  **Found broken on the owner's own laptop, 2026-09-25, and fixed — three independent causes, all
+  ours, none the device's** (the owner had already confirmed the iPad on the same Wi-Fi with Local
+  Network permission granted, so the failure could not be explained away as theirs): the laptop has
+  two live NICs at once, Wi-Fi (`10.0.0.242`, RFC1918) and Tailscale (`100.104.85.111`) — confirmed
+  with `Get-NetIPConfiguration` over SSH. (1) `JoinMulticastGroup(IPAddress)`, the single-argument
+  overload this used to call, joins the multicast group on whichever interface the OS treats as the
+  default route for 224.0.0.251 — not necessarily Wi-Fi, where the iPad's query actually arrives —
+  so the advertiser could be listening on the wrong NIC entirely and never see the query at all.
+  Fixed by joining explicitly on every "Up" IPv4 interface's own local address
+  (`MdnsAdvertiser.JoinMulticastOnEveryInterface`; confirmed after the fix with
+  `netsh interface ipv4 show joins` on the laptop — both Wi-Fi and Tailscale now hold
+  `224.0.0.251`). (2) The A record advertised whichever NIC `AdmissionPolicy.LocalIPv4Subnets()`
+  happened to enumerate first, unordered by design there (that method checks a *remote* address
+  against every subnet the laptop might be reached on) — which could just as easily hand the iPad
+  the Tailscale address as the Wi-Fi one, defeating LAN-only discovery even when it otherwise
+  works. Fixed by `MdnsAdvertiser.LocalIPv4Address`, which prefers an RFC1918 address on a real
+  Ethernet/Wi-Fi adapter and explicitly skips anything named "Tailscale"; confirmed live —
+  the laptop's own log now reads `MdnsAdvertiser: A record will carry 10.0.0.242`, not the
+  Tailscale address. (3) Neither `SO_REUSEADDR` nor `ExclusiveAddressUse=false` was set before
+  `Bind()`, needed to coexist with Windows' own mDNS responder (`svchost`, Dnscache) already bound
+  to UDP 5353 — confirmed both processes hold the port simultaneously
+  (`Get-NetUDPEndpoint -LocalPort 5353`) only once this was set correctly. **Also added, not
+  strictly a bug**: RFC 6762 §5.4 "QU" unicast-response queries (`NWBrowser`'s first query after a
+  browse starts is commonly one) are now answered directly to the querier rather than only via the
+  multicast group, which some networks throttle or convert unreliably.
+  **The firewall and the app-level admission rule were already correct** — `PaintStreamer-Mdns-UDP`
+  is enabled and allowing, and `PaintStreamer-In-TCP` likewise — confirmed with
+  `Get-NetFirewallRule` on the laptop, so neither was the cause. **Not verified end to end from a
+  real iPad on the same Wi-Fi as the laptop** (this Mac is not on that network) — the fixes are
+  confirmed at the network layer (multicast membership, the advertised address, the port
+  coexisting with Dnscache) but Nearby actually listing the laptop still wants a run on the
+  owner's own device, which §5.7 already flagged as unverified live for the same reason.
 - **USB, investigated and declined (TODO (98)).** The iPad is the client and the laptop is the
   server (§3: "the laptop listening ... the iPad connecting"), and USB reaches an iPad only through
   `usbmuxd` — a multiplexer that lets a *host* dial a port the *device* listens on, the opposite

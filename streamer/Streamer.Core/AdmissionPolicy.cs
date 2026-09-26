@@ -68,7 +68,10 @@ public static class AdmissionPolicy
         }
     }
 
-    private static bool IsRfc1918(IPAddress address)
+    /// <summary>Internal rather than private: <see cref="Discovery.MdnsAdvertiser"/> needs the same
+    /// "is this a private LAN address" test when picking which of the laptop's several addresses to
+    /// put in its mDNS A record, rather than duplicating the byte-pattern check a second place.</summary>
+    internal static bool IsRfc1918(IPAddress address)
     {
         byte[] b = address.GetAddressBytes();
         if (b[0] == 10) return true;

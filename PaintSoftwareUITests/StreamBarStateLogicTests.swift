@@ -421,4 +421,108 @@ final class StreamBarStateLogicTests: XCTestCase {
         let restAfterEdit = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
         XCTAssertGreaterThan(Int(restAfterEdit.r), Int(restAfterEdit.g) + 100, "and the rest picture follows it")
     }
+
+    // MARK: - The ping-pong fix (STREAM.md §3/§6): one client per laptop
+
+    /// **The reported bug's own shape**: the document's ambient last-used connection and a stream
+    /// element name the same physical laptop under two different `StreamEndpoint` spellings — one
+    /// the Tailscale IP, the other the MagicDNS name a Nearby row or a typed address gave it. Before
+    /// either HELLO lands, that is genuinely two sockets (nothing can tell them apart yet); once
+    /// both reveal the same machine id, they must collapse onto one client, or the single-client
+    /// server evicts one of them forever.
+    func testTwoEndpointsResolvingToOneMachineIdShareOneClient() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)   // startsClients == false: no real socket
+        let coordinator = manager.streamCoordinator
+        let ambient = StreamEndpoint(host: "desktop-cbr0fl6", port: 47301)
+        let spelled = StreamEndpoint(host: "100.104.85.111", port: 47301)
+        coordinator.documentEndpointOverride = ambient
+        coordinator.sync()
+        manager.currentFrame = 0
+        _ = try XCTUnwrap(manager.insertStream(host: spelled.host, port: spelled.port, status: status()))
+        manager.commitVectorFloatIfNeeded()
+        coordinator.sync()
+
+        let ambientClient = try XCTUnwrap(coordinator.client(for: ambient))
+        let spelledClient = try XCTUnwrap(coordinator.client(for: spelled))
+        XCTAssertFalse(ambientClient === spelledClient, "Setup: two sockets — neither HELLO has arrived yet")
+
+        let machineID = "MACHINE-GUID-1"
+        func hello() -> StreamFrame {
+            StreamFrame(.hello, payload: StreamJSON.encode(
+                StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0",
+                           name: "desktop-cbr0fl6", machineID: machineID)))
+        }
+        ambientClient.handle(hello())
+        coordinator.stateChanged(.connected, at: ambient)
+        XCTAssertFalse(try XCTUnwrap(coordinator.client(for: spelled)) === ambientClient,
+                      "Setup: the other spelling has not connected yet — nothing to collapse onto it")
+
+        spelledClient.handle(hello())
+        coordinator.stateChanged(.connected, at: spelled)
+
+        let survivor = try XCTUnwrap(coordinator.client(for: spelled))
+        XCTAssertTrue(survivor === (try XCTUnwrap(coordinator.client(for: ambient))),
+                     "both spellings now share the one client the second HELLO's machine id matched")
+
+        // The shared client's own callback always reports under whichever endpoint it was
+        // started for (here, `spelled`) — the *other* spelling's bar must still read it, or it
+        // would freeze at whatever it last showed the moment before the fold.
+        coordinator.statusArrived(status(), from: spelled)
+        let element = try XCTUnwrap(manager.activeStreamCel?.element)
+        XCTAssertEqual(element.host, spelled.host, "Setup: the stream element names the spelled endpoint")
+        XCTAssertEqual(coordinator.barState(for: element), .live)
+    }
+
+    // MARK: - The ping-pong fix: an evicted client does not fight back
+
+    /// The server evicts a client by sending this exact STATUS reason over the wire before
+    /// closing the socket (`ProtocolServer.ReplacedByAnotherConnectionReason`). The client must
+    /// recognize it as distinct from an ordinary drop: state lands on `.replaced`, never
+    /// `.reconnecting` — the only way to know `fail(_:)`, which always arms a retry timer, was
+    /// not the path taken.
+    func testAReplacedStatusParksTheClientRatherThanReconnecting() {
+        let client = ScreenStreamClient(endpoint: StreamEndpoint(host: "laptop", port: 47301),
+                                        appVersion: "1.0", deviceName: "iPad")
+        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))))
+        XCTAssertEqual(client.state, .connected, "Setup")
+
+        client.handle(StreamFrame(.status, payload: StreamJSON.encode(
+            StreamStatus(source: StreamStatus.Source(kind: "none", name: ""), width: 0, height: 0, fps: 0,
+                        streaming: false, reason: ScreenStreamClient.replacedByAnotherConnectionReason))))
+
+        XCTAssertEqual(client.state, .replaced(reason: ScreenStreamClient.replacedByAnotherConnectionReason))
+    }
+
+    /// An ordinary STATUS whose `reason` merely happens to mention being replaced (a coincidence,
+    /// or a future unrelated wording) must not trip this — matched verbatim, not by pattern.
+    func testAnUnrelatedStatusReasonDoesNotParkTheClient() {
+        let client = ScreenStreamClient(endpoint: StreamEndpoint(host: "laptop", port: 47301),
+                                        appVersion: "1.0", deviceName: "iPad")
+        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))))
+
+        client.handle(StreamFrame(.status, payload: StreamJSON.encode(
+            StreamStatus(source: StreamStatus.Source(kind: "none", name: ""), width: 0, height: 0, fps: 0,
+                        streaming: false, reason: "The window was closed"))))
+
+        XCTAssertEqual(client.state, .connected, "an ordinary STATUS never moves the connection state")
+    }
+
+    /// The bar reads a replaced connection as "Paused — another connection took the stream,"
+    /// never as an ordinary reconnect: the artist did not cause this, and the word must not
+    /// suggest the client is about to retry on its own, because it is not (STREAM.md's fix for
+    /// "even two real devices never ping-pong").
+    func testTheBarReadsAReplacedConnectionAsPausedByOtherNotReconnecting() throws {
+        let (manager, element) = streaming()
+        let coordinator = manager.streamCoordinator
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        coordinator.statusArrived(status(), from: Self.endpoint)
+        XCTAssertEqual(coordinator.barState(for: element), .live, "Setup")
+
+        coordinator.stateChanged(.replaced(reason: ScreenStreamClient.replacedByAnotherConnectionReason),
+                                 at: Self.endpoint)
+        XCTAssertEqual(coordinator.barState(for: element), .pausedByOther)
+        XCTAssertEqual(StreamBarState.pausedByOther.word, "Paused — another connection took the stream")
+    }
 }

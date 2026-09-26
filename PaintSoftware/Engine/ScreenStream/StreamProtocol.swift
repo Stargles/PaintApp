@@ -125,6 +125,19 @@ nonisolated struct StreamHello: Codable, Equatable {
     var app: String
     var version: String
     var name: String
+    /// **The ping-pong fix (STREAM.md §3/§6).** The sender's stable identity, independent of which
+    /// address this connection reached it through: the laptop reached as its Tailscale IP, its
+    /// MagicDNS name, its `.ts.net` FQDN, or its mDNS `.local` name are four different
+    /// `StreamEndpoint`s the model cannot otherwise tell apart, and a document that names two of
+    /// them (its ambient last-used connection, say, and a stream element spelled differently) used
+    /// to open two sockets to the one laptop — which a single-client server (`ProtocolServer`)
+    /// answers by evicting whichever it already had, forever. Only the laptop populates this today
+    /// (a GUID minted once and stored beside its settings, `Streamer.Core.Settings
+    /// .GetOrCreateMachineId`); `ScreenStreamCoordinator.collapseIfSameMachine` is the only reader.
+    /// **Additive**: a build on either side that predates this field decodes it as nil (Swift's
+    /// synthesized `Decodable` uses `decodeIfPresent` for an `Optional` property) rather than
+    /// failing to parse, so `proto` stays 1.
+    var machineID: String? = nil
 
     /// This app's own greeting.
     static func fromThisApp(version: String, deviceName: String) -> StreamHello {

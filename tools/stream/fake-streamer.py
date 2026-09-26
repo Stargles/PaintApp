@@ -28,6 +28,7 @@ import socket
 import struct
 import sys
 import time
+import uuid
 from pathlib import Path
 
 # --------------------------------------------------------------------------------------
@@ -50,6 +51,15 @@ T_PING = 0x20
 T_PONG = 0x21
 
 FILE_CHUNK_MAX = 256 * 1024  # 256 KiB, per §3
+
+# The ping-pong fix (STREAM.md §3/§6): a stable per-run identity, mirroring
+# Streamer.Core.Settings.GetOrCreateMachineId on the real laptop, and the exact reason
+# string ScreenStreamClient.replacedByAnotherConnectionReason matches verbatim. Minted
+# once per process rather than persisted — this is a reference server for testing the
+# iPad against, not the real laptop, so a fresh id every run is fine (nothing on the iPad
+# compares it across restarts of *this* script).
+SERVER_MACHINE_ID = str(uuid.uuid4())
+REPLACED_BY_ANOTHER_CONNECTION_REASON = "Replaced by another connection"
 
 DEFAULT_PORT = 47301
 DEFAULT_BIND = "0.0.0.0"
@@ -400,13 +410,19 @@ class ClientSession:
         self.rate_keyframes = 0
 
     async def send_status(self, reason=None):
+        # The ping-pong fix's reason overrides whatever the engine says: being replaced is not a
+        # fact about the video pipeline (which may well have been streaming happily a moment
+        # ago), so `streaming` must read false here regardless, or the client never sees `reason`
+        # at all (guarded below on `not streaming`) and the notice is silently lost for the most
+        # common case — an evicted session that *was* live.
+        replaced = reason == REPLACED_BY_ANOTHER_CONNECTION_REASON
         d = {
             "source": self.engine.source_desc if self.engine else {"kind": "none", "name": "", "id": ""},
             "width": self.engine.width if self.engine else 0,
             "height": self.engine.height if self.engine else 0,
             "fps": 30,
             "codec": "h264",
-            "streaming": bool(self.engine and self.engine.streaming),
+            "streaming": False if replaced else bool(self.engine and self.engine.streaming),
         }
         if reason and not d["streaming"]:
             d["reason"] = reason
@@ -428,6 +444,7 @@ class ClientSession:
         await send_frame(self.writer, T_HELLO, jpayload({
             "proto": PROTO_VERSION, "app": SERVER_APP_NAME,
             "version": SERVER_APP_VERSION, "name": self.hostname,
+            "machineId": SERVER_MACHINE_ID,
         }))
         log("sent HELLO reply")
 
@@ -683,21 +700,38 @@ class ClientSession:
 # --------------------------------------------------------------------------------------
 
 current_client_task = None
+current_client_session = None  # the ping-pong fix: needs the *session*, not just its task
 stop_event = None  # set for --once
 
 
 async def handle_client(reader, writer, args, hostname):
-    global current_client_task
+    global current_client_task, current_client_session
     peer = writer.get_extra_info("peername")
     my_task = asyncio.current_task()
     prev_task = current_client_task
+    prev_session = current_client_session
     current_client_task = my_task
+
+    session = ClientSession(reader, writer, args, hostname)
+    current_client_session = session
+
     if prev_task is not None and not prev_task.done():
         log(f"new connection from {peer}, replacing previous client")
+        # The ping-pong fix (STREAM.md §3/§6): tell the old session *why* over an ordinary
+        # STATUS, on its own writer, before cancelling its task — without this the old
+        # client discovers the close as an unexplained drop and reconnects to reclaim the
+        # slot, which used to evict whichever connection came next, forever. Bounded and
+        # best-effort: a session that never got past HELLO has no live writer to reach.
+        if prev_session is not None:
+            try:
+                await asyncio.wait_for(
+                    prev_session.send_status(reason=REPLACED_BY_ANOTHER_CONNECTION_REASON),
+                    timeout=1.0)
+            except Exception as e:
+                log(f"could not notify the replaced client: {e!r}")
         prev_task.cancel()
 
     log(f"connect from {peer}")
-    session = ClientSession(reader, writer, args, hostname)
     try:
         await session.run()
     except asyncio.CancelledError:
@@ -712,6 +746,8 @@ async def handle_client(reader, writer, args, hostname):
         await session.cleanup()
         if current_client_task is my_task:
             current_client_task = None
+        if current_client_session is session:
+            current_client_session = None
         log(f"disconnect {peer}")
         if args.once and stop_event is not None:
             stop_event.set()

@@ -24,10 +24,22 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
     private const int PingMissedLimit = 3;
     private static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>The ping-pong fix (STREAM.md §3/§6): the exact reason string sent to a client this
+    /// server is about to evict, over an ordinary STATUS, before its socket closes — matched
+    /// verbatim by the iPad's `ScreenStreamClient.replacedByAnotherConnectionReason` so it stops
+    /// trying to reclaim a slot the server has already given to someone else, instead of
+    /// discovering the close as an ordinary drop and fighting to reclaim it (which is the reported
+    /// bug: two connections to the one laptop evicting each other every second, forever). Kept as
+    /// an explicit constant on both sides rather than inferred from any other STATUS text, since
+    /// STATUS's `reason` is otherwise free text a person reads, not a wire contract a client
+    /// branches on.</summary>
+    public const string ReplacedByAnotherConnectionReason = "Replaced by another connection";
+
     private readonly int _port;
     private readonly string _appName;
     private readonly string _version;
     private readonly string _hostName;
+    private readonly string _machineId;
     private readonly FileInbox _fileInbox;
     private readonly Action<string> _log;
 
@@ -47,6 +59,15 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
         get { lock (_clientGate) { return _current != null; } }
     }
 
+    /// <summary>The port actually bound, once `StartAsync` has run — tests ask for port 0 (an
+    /// OS-assigned ephemeral port) so parallel runs never collide on 47301.</summary>
+    public int BoundPort => (_listener?.LocalEndpoint as IPEndPoint)?.Port ?? _port;
+
+    /// <summary>Test seam, false in the app always: a loopback `TcpClient` in a test is neither
+    /// Tailscale nor an RFC1918 address, so the real `AdmissionPolicy` check would refuse it before
+    /// HELLO, same shape as the iPad coordinator's `startsClients`.</summary>
+    public bool SkipAdmissionCheckForTests { get; set; }
+
     /// <summary>IFileTransport: enqueues a frame to the current client, or does nothing
     /// and reports failure when there is none. FileOutbox is the caller.</summary>
     public bool TrySend(Frame frame)
@@ -59,13 +80,14 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
 
     internal void RaiseFileResultReceived(FileResultMessage result) => FileResultReceived?.Invoke(result);
 
-    public ProtocolServer(int port, string appName, string version, string hostName,
+    public ProtocolServer(int port, string appName, string version, string hostName, string machineId,
         FileInbox fileInbox, Action<string>? log = null)
     {
         _port = port;
         _appName = appName;
         _version = version;
         _hostName = hostName;
+        _machineId = machineId;
         _fileInbox = fileInbox;
         _log = log ?? (_ => { });
     }
@@ -112,8 +134,9 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
             // allow-list (it cannot know which subnet this NIC is actually on), so this is
             // where the precise "is it actually on one of MY subnets right now" check lives.
             // Refused before HELLO, so a non-admitted caller gets nothing but a closed socket.
-            if (endpoint is not IPEndPoint remote ||
-                !AdmissionPolicy.IsAdmitted(remote.Address, AdmissionPolicy.LocalIPv4Subnets()))
+            bool admitted = SkipAdmissionCheckForTests || (endpoint is IPEndPoint remote &&
+                AdmissionPolicy.IsAdmitted(remote.Address, AdmissionPolicy.LocalIPv4Subnets()));
+            if (!admitted)
             {
                 _log($"ProtocolServer: refused connection from {endpoint} — not Tailscale or a local subnet");
                 tcp.Close();
@@ -132,6 +155,15 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
             if (previous != null)
             {
                 _log($"ProtocolServer: new connection replaces previous client");
+                // The ping-pong fix: tell the old client *why* before its socket closes, over an
+                // ordinary STATUS its own writer queue already carries — so it can park itself
+                // instead of discovering the close as an unexplained drop and reconnecting to
+                // reclaim the slot, which used to evict whichever connection came next, forever.
+                previous.EnqueueStatus(new StatusMessage
+                {
+                    Streaming = false,
+                    Reason = ReplacedByAnotherConnectionReason,
+                });
                 _ = previous.DisposeAsync().AsTask();
             }
 
@@ -241,14 +273,15 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
                 await WriteFrameAsync(Frame.Of(MessageType.Hello, Json.Encode(new HelloMessage
                 {
                     Proto = 1, App = appName, Version = $"{version} (rejected proto {hello.Proto})", Name = hostName,
+                    MachineId = _owner._machineId,
                 }))).ConfigureAwait(false);
                 return false;
             }
             await WriteFrameAsync(Frame.Of(MessageType.Hello, Json.Encode(new HelloMessage
             {
-                Proto = 1, App = appName, Version = version, Name = hostName,
+                Proto = 1, App = appName, Version = version, Name = hostName, MachineId = _owner._machineId,
             }))).ConfigureAwait(false);
-            _writerTask = Task.Run(() => WriterLoopAsync(_cts.Token));
+            _writerTask = Task.Run(() => WriterLoopAsync());
             return true;
         }
 
@@ -383,16 +416,22 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
         /// inside this class already reaches the same queue through EnqueueRaw.</summary>
         public bool TryEnqueue(byte[] bytes) => _writeQueue.Writer.TryWrite(bytes);
 
-        private async Task WriterLoopAsync(CancellationToken ct)
+        // **Not keyed to `_cts` any more — the ping-pong fix needs this.** The old version passed
+        // `_cts.Token` to `ReadAllAsync`/`WriteAsync`, so `DisposeAsync`'s `_cts.Cancel()` aborted
+        // this loop immediately, dropping whatever was already queued but not yet on the wire —
+        // in particular `AcceptLoopAsync`'s own "you have been replaced" STATUS, enqueued a moment
+        // before disposal. This loop now ends only when the channel completes *and* drains
+        // (`_writeQueue.Writer.TryComplete()`, called first in `DisposeAsync` below), so anything
+        // enqueued before disposal begins is guaranteed to reach the wire.
+        private async Task WriterLoopAsync()
         {
             try
             {
-                await foreach (var bytes in _writeQueue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                await foreach (var bytes in _writeQueue.Reader.ReadAllAsync().ConfigureAwait(false))
                 {
-                    await _stream.WriteAsync(bytes, ct).ConfigureAwait(false);
+                    await _stream.WriteAsync(bytes).ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) { }
             catch (Exception e)
             {
                 _log($"ProtocolServer: write failed, dropping connection: {e.Message}");
@@ -407,12 +446,16 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
 
         public async ValueTask DisposeAsync()
         {
-            _cts.Cancel();
             _writeQueue.Writer.TryComplete();
             if (_writerTask != null)
             {
-                try { await _writerTask.ConfigureAwait(false); } catch { }
+                // Bounded, not unconditional: a genuinely dead peer whose TCP send buffer never
+                // drains must not hang a disposal forever. In the overwhelmingly common case (a
+                // STATUS is a few dozen bytes) this resolves in microseconds; if it does not, the
+                // socket close just below aborts the stuck write anyway.
+                await Task.WhenAny(_writerTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
             }
+            _cts.Cancel();
             try { _stream.Close(); } catch { }
             try { _tcp.Close(); } catch { }
         }

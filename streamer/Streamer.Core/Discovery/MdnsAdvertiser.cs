@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
 namespace Streamer.Core.Discovery;
@@ -48,9 +49,16 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
     public async Task StartAsync()
     {
         _socket = new UdpClient();
+        // **Found live on the laptop, 2026-09-25: Windows already runs its own mDNS responder
+        // (Dnscache) bound to UDP 5353.** `ExclusiveAddressUse` must be false *before* `Bind()` —
+        // setting it after throws — or that bind can fail outright, or (worse, and observed)
+        // silently succeed while `SO_EXCLUSIVEADDRUSE` still blocks this socket from ever seeing
+        // multicast datagrams another socket on the same port already claimed. Both this and
+        // `ReuseAddress` are needed; Windows treats them as a pair, not either-or.
+        _socket.ExclusiveAddressUse = false;
         _socket.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _socket.Client.Bind(new IPEndPoint(IPAddress.Any, MulticastEndPoint.Port));
-        _socket.JoinMulticastGroup(MulticastEndPoint.Address);
+        JoinMulticastOnEveryInterface();
         _cts = new CancellationTokenSource();
         _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token));
         _log($"MdnsAdvertiser: advertising {_instanceName}.{ServiceType}.{ServiceDomain} on port {_port}");
@@ -58,7 +66,67 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
         await AnnounceAsync().ConfigureAwait(false);
     }
 
-    private async Task AnnounceAsync()
+    /// <summary>**Found live on the laptop, 2026-09-25.** `JoinMulticastGroup(IPAddress)` — the
+    /// single-argument overload this used to call — joins on whichever interface the OS treats as
+    /// the *default route* for that address family, which is not necessarily the Wi-Fi/Ethernet NIC
+    /// the iPad's query actually arrives on: a laptop running the Tailscale client has at least one
+    /// extra virtual adapter, and either it or an unrelated one can hold the lower route metric.
+    /// Joining on every "Up" IPv4-capable interface, by its own local address, is what makes this
+    /// socket receive a multicast query regardless of which physical or virtual NIC it lands on —
+    /// an interface that cannot join (some virtual adapters refuse `IP_ADD_MEMBERSHIP` outright)
+    /// just logs and is skipped, since one NIC's own limitation must not stop advertising on every
+    /// other one.
+    ///
+    /// **`JoinMulticastGroup(int ifindex, IPAddress)` — tried first and reverted — is IPv6-only**:
+    /// against this laptop's own two live NICs (Wi-Fi, Tailscale) it failed both with "The attempted
+    /// operation is not supported for the type of object referenced," on an IPv4 `UdpClient`, every
+    /// time, which is .NET's own message for calling an IPv6-shaped socket option on an IPv4 socket.
+    /// `JoinMulticastGroup(IPAddress multicastAddr, IPAddress localAddress)` is the IPv4 overload
+    /// that names a specific interface — by its local address, not an index.</summary>
+    private void JoinMulticastOnEveryInterface()
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up) continue;
+            if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+            if (!nic.Supports(NetworkInterfaceComponent.IPv4)) continue;
+            foreach (var unicast in SafeUnicastAddresses(nic))
+            {
+                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                try
+                {
+                    _socket!.JoinMulticastGroup(MulticastEndPoint.Address, unicast.Address);
+                }
+                catch (Exception e)
+                {
+                    _log($"MdnsAdvertiser: could not join the multicast group on '{nic.Name}' " +
+                         $"({unicast.Address}): {e.Message}");
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<UnicastIPAddressInformation> SafeUnicastAddresses(NetworkInterface nic)
+    {
+        try
+        {
+            return nic.GetIPProperties().UnicastAddresses;
+        }
+        catch (Exception)
+        {
+            // Some virtual adapters throw reading IP properties at all rather than answering an
+            // empty list — same as an interface with nothing to offer, just discovered the hard way.
+            return Array.Empty<UnicastIPAddressInformation>();
+        }
+    }
+
+    /// <summary>Sends the announcement to <paramref name="unicastTo"/> when given — RFC 6762 §5.4's
+    /// "QU" reply, for a querier that asked for one directly rather than waiting on the multicast
+    /// group — or to the multicast group otherwise (an unsolicited announcement, or an ordinary
+    /// query that did not request unicast).</summary>
+    private bool _loggedChosenAddress;
+
+    private async Task AnnounceAsync(IPEndPoint? unicastTo = null)
     {
         var ipv4 = LocalIPv4Address();
         if (ipv4 == null)
@@ -66,9 +134,18 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
             _log("MdnsAdvertiser: no local IPv4 address to advertise yet — skipping announcement");
             return;
         }
+        if (!_loggedChosenAddress)
+        {
+            // Once, not per-announcement: this is exactly the fact 2026-09-25's LAN investigation
+            // needed and could not previously read off anything — which address this laptop is
+            // telling the iPad to connect to, distinct from the port-listening log line above,
+            // which never named it.
+            _log($"MdnsAdvertiser: A record will carry {ipv4}");
+            _loggedChosenAddress = true;
+        }
         byte[] announcement = BuildAnnouncement(_instanceName, ServiceType, ServiceDomain,
             Environment.MachineName, _port, ipv4);
-        await SendAsync(announcement).ConfigureAwait(false);
+        await SendAsync(announcement, unicastTo).ConfigureAwait(false);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -88,10 +165,14 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
                 continue;
             }
 
-            if (!IsPaintstreamQuery(result.Buffer, ServiceType, ServiceDomain)) continue;
+            if (!IsPaintstreamQuery(result.Buffer, ServiceType, ServiceDomain, out bool requestedUnicast)) continue;
             try
             {
-                await AnnounceAsync().ConfigureAwait(false);
+                // RFC 6762 §5.4: a "QU" question asks to be answered directly, unicast, rather than
+                // through the multicast group — `NWBrowser`'s first query after a browse starts is
+                // commonly one, wanting a fast answer rather than whatever suppression/aggregation
+                // delay a multicast responder might apply.
+                await AnnounceAsync(requestedUnicast ? result.RemoteEndPoint : null).ConfigureAwait(false);
             }
             catch (Exception e)
             {
@@ -100,14 +181,43 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
         }
     }
 
-    private Task SendAsync(byte[] datagram) =>
-        _socket!.SendAsync(datagram, datagram.Length, MulticastEndPoint);
+    private Task SendAsync(byte[] datagram, IPEndPoint? unicastTo = null) =>
+        _socket!.SendAsync(datagram, datagram.Length, unicastTo ?? MulticastEndPoint);
 
-    /// <summary>The laptop's first live IPv4 address — <see cref="AdmissionPolicy.LocalIPv4Subnets"/>
-    /// is the one place that already enumerates NICs (TODO (98)'s other half); reusing it here
-    /// keeps "what counts as a usable local address" answered in one place too.</summary>
-    private static IPAddress? LocalIPv4Address() =>
-        AdmissionPolicy.LocalIPv4Subnets().Select(s => s.Address).FirstOrDefault();
+    /// <summary>**Found live on the laptop, 2026-09-25: the address that used to land in the A
+    /// record was whichever NIC `AdmissionPolicy.LocalIPv4Subnets()` happened to enumerate first**
+    /// — deliberately unordered there, because that method exists to check a *remote* address
+    /// against every subnet the laptop might be reached on, Tailscale-adjacent adapters included.
+    /// Here the requirement is the opposite: one specific address a plain-Wi-Fi iPad, with no
+    /// Tailscale involved, can actually route to. Prefers a private (RFC1918) address on a real
+    /// Ethernet/Wi-Fi adapter, explicitly skipping Tailscale's own virtual adapter by name — advertising
+    /// its address would hand back the one address this LAN-only discovery path is not using
+    /// Tailscale to reach in the first place — and falls back to whatever is left rather than
+    /// advertising nothing, the same tolerance the admission check gives itself.</summary>
+    internal static IPAddress? LocalIPv4Address()
+    {
+        IPAddress? fallback = null;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up) continue;
+            if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
+            if (nic.Name.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)) continue;
+            if (nic.Description.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)) continue;
+            bool isOrdinaryLanAdapter = nic.NetworkInterfaceType is NetworkInterfaceType.Ethernet
+                or NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.GigabitEthernet
+                or NetworkInterfaceType.FastEthernetT or NetworkInterfaceType.FastEthernetFx;
+            foreach (var unicast in SafeUnicastAddresses(nic))
+            {
+                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                if (isOrdinaryLanAdapter && AdmissionPolicy.IsRfc1918(unicast.Address))
+                {
+                    return unicast.Address; // exactly what a Wi-Fi-only iPad needs
+                }
+                fallback ??= unicast.Address;
+            }
+        }
+        return fallback;
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -129,8 +239,19 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
     /// resolver's own TXT/SRV probe of an instance it already found). Malformed or unrelated
     /// input answers false rather than throwing — a stray multicast packet on this socket, of
     /// which there are many on a real LAN, is not this class's problem.</summary>
-    public static bool IsPaintstreamQuery(byte[] datagram, string serviceType, string serviceDomain)
+    public static bool IsPaintstreamQuery(byte[] datagram, string serviceType, string serviceDomain) =>
+        IsPaintstreamQuery(datagram, serviceType, serviceDomain, out _);
+
+    /// <summary>As above, and also reports whether the matching question requested a unicast
+    /// reply — RFC 6762 §5.4's "QU" bit, the top bit of the QCLASS field. `NWBrowser`'s first query
+    /// after starting a browse is commonly QU, wanting one fast direct answer rather than whatever
+    /// timing a multicast responder applies. A second overload rather than changing the existing
+    /// signature, since <c>MdnsAdvertiserTests</c> and every other caller ask only the yes/no
+    /// question.</summary>
+    public static bool IsPaintstreamQuery(byte[] datagram, string serviceType, string serviceDomain,
+        out bool requestedUnicastResponse)
     {
+        requestedUnicastResponse = false;
         try
         {
             if (datagram.Length < 12) return false;
@@ -141,8 +262,14 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
             for (int i = 0; i < questionCount; i++)
             {
                 var (name, consumed) = DnsName.Decode(datagram, offset);
-                offset += consumed + 4; // + QTYPE(2) + QCLASS(2)
-                if (name.Equals(wanted, StringComparison.OrdinalIgnoreCase)) return true;
+                offset += consumed;
+                ushort qclass = BinaryPrimitives.ReadUInt16BigEndian(datagram.AsSpan(offset + 2, 2));
+                offset += 4; // QTYPE(2) + QCLASS(2)
+                if (name.Equals(wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    requestedUnicastResponse = (qclass & 0x8000) != 0;
+                    return true;
+                }
             }
             return false;
         }
@@ -150,6 +277,7 @@ public sealed class MdnsAdvertiser : IAsyncDisposable
         {
             // Any malformed shape (a truncated packet, a bad pointer, a corrupt length byte) is
             // "not a query we recognize", not this class's problem to throw about.
+            requestedUnicastResponse = false;
             return false;
         }
     }
