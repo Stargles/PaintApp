@@ -39,7 +39,8 @@ runs to its timeout. **Fast tier at close: 4331 / 4327 passed / 0 failed / 4 ski
 Release, reconciled against a static `func test` count — the full UI suite has not been run since
 `tmp/pingpong` merged.
 
-**The owner's iPad has `0e20568`** (Release, installed 2026-09-25; profile to 2026-10-01T01:27Z).
+**The owner's iPad has `01b4fcc`** (Release, installed 2026-09-25 with the (101) fix; profile to
+2026-10-01T01:27Z — unchanged, the build reused the existing profile rather than minting a new one).
 **Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
 slept 2026-09-20 → 23, the profile lapsed, and iOS asked the owner to re-trust the developer. The
 certificate itself has not changed since 2026-07-20.
