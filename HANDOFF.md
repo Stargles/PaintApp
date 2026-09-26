@@ -20,10 +20,13 @@ folder (CLAUDE.md "Build and test", first paragraph), so every worktree lives at
 end this by granting Xcode Full Disk Access; nobody has yet. `~/PaintWork/deploy` is a detached
 worktree kept for device builds — `git -C ~/PaintWork/deploy checkout --detach origin/main` and build.
 
-**One branch in flight: `tmp/pingpong`** (worktree `~/PaintWork/PaintApp-pingpong`), a sonnet
-worker fixing TODO (101)'s reconnect loop and Nearby; it merges, then installs on the iPad. Check it
-before starting anything that touches `Engine/ScreenStream/` or `streamer/`. Stash empty, no simulator
-debris.
+**TODO (101)'s reconnect loop is fixed, merged from `tmp/pingpong`** — one client per laptop by a
+server-minted machine id, and an evicted client parks instead of fighting back (docs/STREAM.md
+§5.10/§6). MEASURED against the real laptop while the owner's own (then-unpatched) iPad was
+mid-loop. Three LAN mDNS bugs on our own side fixed too (multicast joined the wrong interface, the
+A record could carry the Tailscale address, `ExclusiveAddressUse`), confirmed at the network layer
+on the laptop — **not yet confirmed by Nearby actually listing the laptop on the owner's iPad**,
+which needs a build on the device. Stash empty, no simulator debris left behind.
 
 **Full suite at `f509d39`** (fresh erased device, 97.5% idle): **4679 / 4609 passed / 10 failed / 60
 skipped, 53.6 min**, 295 classes. Five failures were real and are fixed (a brush-library leak between
@@ -32,8 +35,9 @@ UI tests — `-resetBrushLibrary` on each test's first launch; a palette row bel
 passed in isolation. **The two test-helper commits after it (`87851ca`, `fd1d287`) have not had a full
 run** — `87851ca` changes every UI test's first launch, so the next full run is its proof.
 `OptionsPanelUITests` is now the heaviest class at 663 s, 212 s of it one test — look for a wait that
-runs to its timeout. **Fast tier at close: 4327 / 4323 passed / 0 failed / 4 skipped**, Debug and
-Release.
+runs to its timeout. **Fast tier at close: 4331 / 4327 passed / 0 failed / 4 skipped**, Debug and
+Release, reconciled against a static `func test` count — the full UI suite has not been run since
+`tmp/pingpong` merged.
 
 **The owner's iPad has `0e20568`** (Release, installed 2026-09-25; profile to 2026-10-01T01:27Z).
 **Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
@@ -46,22 +50,20 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**First: TODO (101)** — the owner's iPad loops between "Reconnecting — the computer closed the
-connection" and "Not streaming — Paused", and Nearby finds nothing although the iPad is on the
-laptop's Wi-Fi with Local Network allowed. TODO (101) has the laptop-log evidence and the two
-hypotheses; `tmp/pingpong` is the fix in flight. If that branch is gone and (101) is still in TODO,
-the worker did not finish — read its commits, not its worktree.
+**First: install the merged (101) fix on the owner's iPad** and have them feel it — a stream that
+stays Live instead of looping "Reconnecting…"/"Paused", and whether Nearby now lists the laptop.
+TODO (101) has the fix's own detail and what is still owner-verification-only.
 
 **Owner-side, in queue order:**
 
-1. **Feel `0e20568`**: the freeze (a two-finger drag with the Effect menu open now recovers by itself —
-   and if the canvas ever repairs a freeze, a badge says so and a `flight-…jsonl` lands in Settings →
-   Recordings; send it), the colour picker against the reference, the + and gear icons, Cut/Copy/Paste,
-   the rename sheet, the slider % beside the size pop-up, a video at 12 fps, To New Layer's cel span.
-2. **(101)** once the fix is installed: a stream that stays Live, and Nearby listing the laptop.
-3. **BUGS.md's newest entry**: since `f77df00` the colour panel shows one palette row above the fold;
+1. **Feel the new build**: (101) above, plus the freeze (a two-finger drag with the Effect menu open
+   now recovers by itself — and if the canvas ever repairs a freeze, a badge says so and a
+   `flight-…jsonl` lands in Settings → Recordings; send it), the colour picker against the
+   reference, the + and gear icons, Cut/Copy/Paste, the rename sheet, the slider % beside the size
+   pop-up, a video at 12 fps, To New Layer's cel span.
+2. **BUGS.md's newest entry**: since `f77df00` the colour panel shows one palette row above the fold;
    is that what the owner wants?
-4. **(27) stage 5** — unchanged: stream Blender, measure latency, the device tick, Ctrl+V, the
+3. **(27) stage 5** — unchanged: stream Blender, measure latency, the device tick, Ctrl+V, the
    blend-mode limitation.
 
 **Then ask the owner what to pick up** — the queue is the "Later" features and the deprioritised three.
