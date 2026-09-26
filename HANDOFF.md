@@ -51,9 +51,10 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**First: install the merged (101) fix on the owner's iPad** and have them feel it — a stream that
-stays Live instead of looping "Reconnecting…"/"Paused", and whether Nearby now lists the laptop.
-TODO (101) has the fix's own detail and what is still owner-verification-only.
+**First: (101)'s last check** — the fix is installed (`01b4fcc`) and the owner confirmed Nearby/LAN
+works on 2026-09-25 (*"LAN works"*). What is left is their word that a stream now stays Live instead
+of alternating "Reconnecting — the computer closed the connection" / "Not streaming — Paused"; then
+(101) leaves TODO whole.
 
 **Owner-side, in queue order:**
 

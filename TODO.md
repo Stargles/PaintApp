@@ -50,7 +50,7 @@ rather than assuming it still holds.
 
 ## (101) Streaming: the reconnect loop, and Nearby finds nothing on the iPad
 
-**Status** — **fixed on `tmp/pingpong` (2026-09-25), merged; the LAN half awaits the owner's iPad.**
+**Status** — **fixed and merged (`4b0da3c`, installed at `01b4fcc`); the LAN half is owner-confirmed** (2026-09-25: *"LAN works"*).
 The Info.plist keys and the connect-failure classification are merged (`84647c3`; docs/STREAM.md
 §5.9). On the owner's iPad at `0e20568`, the owner, 2026-09-25: *"it keeps switching between
 reconnecting - the computer closed the..., and not streaming - paused. Next, the computer does not
@@ -83,8 +83,8 @@ on their Wi-Fi to exercise for real.
       evicted client told why and not retrying — so nothing ping-pongs. Pinned:
       `ProtocolServerReplacementTests` (real sockets), `StreamBarStateLogicTests`; MEASURED against
       the real laptop. Needs the iPad's own build updated to observe the client half directly.
-- [ ] Owner-verified on their own iPad: Nearby lists the laptop (same Wi-Fi, permission on), and a
-      typed LAN address connects.
+- [ ] Owner-confirmed on the iPad: a stream stays **Live** — no more alternating "Reconnecting — the
+      computer closed the connection" / "Not streaming — Paused". Then (101) leaves whole.
 
 ---
 
