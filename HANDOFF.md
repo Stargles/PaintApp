@@ -56,8 +56,9 @@ the order this pass works them (number = 110 + the owner's ask number). Session 
 lanes under a cap of one Opus or two Sonnet workers at once; **check `git worktree list` and the
 `tmp/*` branches for what is in flight** — this file names lanes only when they merge.
 
-- **Needs owner rulings before a build**: (139) keys-not-keyframes, (131) Bake. Their questions go to
-  the owner through the question tool, not prose.
+- **(139), (131) and (128) were ruled 2026-10-01** (the rulings are in their TODO entries). A
+  read-only design survey for them and for (124) is at `~/PaintWork/design/survey-1001.md` — read it
+  before building any of the four.
 - **Evidence on disk**: the two recordings the brief cites, `recording-20261001-002122.jsonl` ((132))
   and `-002226.jsonl` ((145)), were pulled off the iPad into `~/PaintWork/evidence/`.
 - **(101) is folded into (112)**: the reconnect loop and LAN are fixed and confirmed; the owner's

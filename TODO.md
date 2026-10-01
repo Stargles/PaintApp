@@ -163,26 +163,47 @@ stays Live instead of reading "Paused", and this report is that word.
 
 ## (139) Keys, not keyframes — every channel component independent
 
-**Status** — needs owner rulings before a build. *"An update has to be done to the graph editor and key
+**Status** — ruled, not started. *"An update has to be done to the graph editor and key
 framing. First off, remove all notion of keyframes, everything should just be keys. Lets say we have a
 move option. The X and Y and rotation etc components keys should be fully independent from each
 other."* KEYFRAMES.md §2.26–§2.28 (the keyframe-mark workflow) and §2.5 (a transform key stores a quad)
 are what this reverses.
 
-- [ ] Rulings: what replaces the mark-then-edit workflow; what Distort's corners become.
-- [ ] Separate X / Y / rotation / scale channels with their own keys; `keyframeMarks` gone.
+**Ruled 2026-10-01:**
+- **Priming replaces keyframes.** *"you select 'add keys' which primes it, then when you move a slider
+  or transform, only the keys of thingd that changed are added. Note, if you prime this in two frames
+  and then change something, then it should put down two keys like the behaviour today, but only the
+  things that changed"* — so a primed frame is still a bare mark in time (today's mark workflow,
+  renamed "Add Keys"), but what it commits is per component: only the channels that changed get keys.
+- **Distort is two more independent curves**, Perspective X and Perspective Y, beside X / Y / rotation /
+  scale / skew — no corner keys, and the graph editor's "declined" state goes.
+- **The in-between feature's "keyframe" drawings keep their name** — a different feature.
+
+- [ ] One curve per pose component (`TransformTrack`'s whole-quad keys replaced); a Move keys only the
+      components it changed; the graph editor edits each independently.
+- [ ] "Add Keyframe" becomes "Add Keys" (priming); commits key only changed components, at every
+      primed frame as today.
 
 ## (131) Bake an effect, blend or transform layer into the layers below
 
-**Status** — needs owner rulings before a build. *"Right now, there is the option to merge down effects
+**Status** — ruled, not started. *"Right now, there is the option to merge down effects
 layers with the layer below them. This is an incomplete implementation. Instead, replace that buttons
 function with baking: lets say you have 2 layers and a blend mode value layer or effect layer above it.
 When that layer bakes, it should adjust the color of all the strokes/objects etc affected below it. In
 this case, it is both the layers below. Add the same feature for transform layers."*
 
-- [ ] Rulings: what a spatial effect (blur, bloom, glow, outline) does to a vector stroke; how an
-      animated transform layer bakes (per frame, like Bake Animation?).
-- [ ] Merge Down's effect arm replaced by Bake; the same for transform layers.
+**Ruled 2026-10-01:**
+- Colour effects and blend-mode value layers bake into each element's colour, over every layer beneath
+  in the baking layer's scope.
+- **Shape-changing effects** (blur, bloom, glare, outline, sharpen, sobel, CRT, lens blur) **turn each
+  affected layer into a raster layer** with the effect applied, after a confirm prompt.
+- **Animated effects and moving transforms bake one drawing per frame** the bar covers (unchanged runs
+  stay one cel), count and save cost shown first — Bake Animation's rule.
+- **What cannot take a colour** (video, stream) **or is only partly covered** (a mask, a stencilled
+  effect) **is left as it was, the rest bakes, and a notice says so.**
+- **The paper stays white** — Bake changes the drawings only.
+
+- [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
 ## (128) The gradient is an object in a vector layer, not a layer property
 
@@ -190,8 +211,15 @@ this case, it is both the layers below. Add the same feature for transform layer
 layer. Remove all that and make sure nothing is left. It is supposed to be an object in the vector
 layer."* (103) shipped it as `ValueFill.gradient`; that goes whole.
 
-- [ ] A gradient element in `VectorCanvas`, movable and selectable; `ValueFill.gradient` and every
-      path that reads it deleted.
+**Ruled 2026-10-01:** a gradient is a fill element painted with a gradient (the fill tool's own
+element type), selected and moved like any fill. **Its colours and direction are edited in a settings
+panel** (two swatches and an angle, like the Text panel), *"Note that if a gradient is selected, there
+should be an edit gradient button like the edit text button."* — the same Select-tool Edit entry as
+(116)'s text.
+
+- [ ] `VectorFillElement` carries a solid-or-gradient paint; Add → Linear Gradient lays one down;
+      `ValueFill.gradient` and every path that reads it deleted.
+- [ ] Select → Edit Gradient opens the panel, live.
 
 ## (129) Rectangle and Ellipse are solid shapes, not smart shapes
 
