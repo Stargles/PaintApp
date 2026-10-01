@@ -20,6 +20,21 @@ import CoreGraphics
 /// the point that call already returns.
 enum Eyedropper {
 
+    /// **What the eyedropper reads under the finger** — TODO (119), the owner's *"a small switch on
+    /// the top right which switches the eyedropper between two modes."* Persisted with the document
+    /// (`EditorStateManifest.eyedropperMode`), because how a drawing is being worked on goes with it.
+    enum Mode: String, Codable, CaseIterable, Equatable {
+        /// **The thing under the finger in the layer it is in** — that layer's own pixels, with no
+        /// paper under them and none of the grading above them: an adjustment or blend layer on top,
+        /// a folder's effect or blend mode around it, and the layer's own opacity, blend mode, effect
+        /// and masks all stand aside. It is the colour the artist painted, whatever the picture
+        /// currently does to it. The default, and the owner's.
+        case layer
+        /// Today's pick: the finished composite — the paper, every layer, every blend and effect, as
+        /// the artist sees it.
+        case composite
+    }
+
     /// The pixel containing `point`, which is in canvas space (top-left origin, one unit per pixel),
     /// or nil when the point is outside the canvas.
     ///

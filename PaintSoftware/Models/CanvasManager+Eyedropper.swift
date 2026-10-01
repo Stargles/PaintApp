@@ -141,7 +141,10 @@ extension CanvasManager {
     func eyedropperRecipe(for destination: EyedropperDestination) -> FrameRecipe? {
         guard let full = makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
         else { return nil }
-        guard case .recolorEntry(let target, _, .from) = destination else { return full }
+        guard case .recolorEntry(let target, _, .from) = destination else {
+            if destination == .brushColor, eyedropperMode == .layer { return activeLayerRecipe(from: full) }
+            return full
+        }
 
         switch target {
         case .layer(let id):
@@ -160,6 +163,38 @@ extension CanvasManager {
                                frame: full.frame, canvasSize: full.canvasSize,
                                background: nil, quality: full.quality)
         }
+    }
+
+    /// **The active layer alone, as its own pixels** — what a brush-colour pick reads in
+    /// `Eyedropper.Mode.layer` (TODO (119)).
+    ///
+    /// It is the same cut (60)'s `from` end makes — a node's own composite, with the grading taken
+    /// off — and **`RenderNode.asInkLeaf(forOwnMask: true)` is that cut for a leaf**: opacity 1,
+    /// blend mode Normal, no masks and no effect. Four things stand aside, each for a reason the
+    /// owner's *"if I add an effect or blend mode on top, it does not affect it"* implies:
+    ///
+    /// - **everything above the layer** — it is the only node in the tree, so no adjustment layer,
+    ///   Multiply value layer or folder grade has anything to act on;
+    /// - **the paper** (`background: nil`), which is not on any layer — a tap on a patch this layer
+    ///   has not painted is a miss and says so, rather than reading white off the sheet;
+    /// - **the layer's own opacity, blend mode and masks** — the colour is the artist's paint, not
+    ///   what a 30% layer or a clip made of it. (The sampled alpha is dropped regardless — see
+    ///   `sampledColor` — so opacity could never have changed the colour, only whether a faint layer
+    ///   read as transparent and missed.)
+    /// - **its own effect**, for a layer that grades: the ink is what it has to give, as it is for a
+    ///   mask that names it.
+    ///
+    /// **What stays is where the layer is *shown*.** The leaf snapshots carry a layer's pose, so a
+    /// layer a transformation layer above it has moved is sampled where the artist sees it, not where
+    /// it is stored — the grade stands aside and the geometry does not. Nil when the active layer is
+    /// not in the tree at all.
+    @MainActor
+    private func activeLayerRecipe(from full: FrameRecipe) -> FrameRecipe? {
+        guard layers.indices.contains(currentLayerIndex),
+              let node = RenderNode.find(layers[currentLayerIndex].id, in: full.tree) else { return nil }
+        return FrameRecipe(tree: [node.asInkLeaf(forOwnMask: true)], leaves: full.leaves,
+                           maskStacks: full.maskStacks, frame: full.frame, canvasSize: full.canvasSize,
+                           background: nil, quality: full.quality)
     }
 
     /// Step 2, pure and safe from any thread — the same contract `Compositor.composite` states, and
@@ -230,7 +265,8 @@ extension CanvasManager {
     func applyEyedropperResult(_ picked: Color?, revertTool: Bool = true) -> Bool {
         defer { if revertTool { leaveEyedropper() } }
         guard let picked else {
-            raise(.nothingToPick)
+            raise(eyedropperDestination == .brushColor && eyedropperMode == .layer
+                  ? .nothingToPickOnLayer : .nothingToPick)
             return false
         }
         switch eyedropperDestination {

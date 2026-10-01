@@ -386,6 +386,7 @@
 		060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */; };
 		1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACD68660078E6C48908F501 /* DistortUITests.swift */; };
 		9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */; };
+		3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */; };
 		D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */; };
 		688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */; };
 		4AD39F72E6111FD987EC2DAD /* InkDistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */; };
@@ -904,6 +905,7 @@
 		060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomographyLogicTests.swift; sourceTree = "<group>"; };
 		1ACD68660078E6C48908F501 /* DistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortUITests.swift; sourceTree = "<group>"; };
 		7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ImageMoveBoxUITests.swift"; sourceTree = "<group>"; };
+		05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EyedropperModeUITests.swift"; sourceTree = "<group>"; };
 		51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimatedDistortUITests.swift; sourceTree = "<group>"; };
 		688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortLogicTests.swift; sourceTree = "<group>"; };
 		B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InkDistortLogicTests.swift; sourceTree = "<group>"; };
@@ -1129,6 +1131,7 @@
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
 				1ACD68660078E6C48908F501 /* DistortUITests.swift */,
 				7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */,
+				05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */,
 				51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */,
 				688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */,
 				B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */,
@@ -1759,6 +1762,7 @@
 				060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */,
 				1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */,
 				9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */,
+				3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */,
 				D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */,
 				688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */,
 				4AD39F72E6111FD987EC2DAD /* InkDistortLogicTests.swift in Sources */,

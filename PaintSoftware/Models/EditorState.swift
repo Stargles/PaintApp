@@ -47,6 +47,10 @@ struct EditorStateManifest: Codable, Equatable {
     var loopStartFrame: Int? = nil
     var loopEndFrame: Int? = nil
     var view: CanvasViewTransform? = nil
+    /// What the eyedropper reads under the finger — TODO (119). A way of working on *this* drawing
+    /// (the owner: *"one of the things the canvas should remember so if the user exits and enters
+    /// back, it sticks"*), so it travels with the document and not with the app's tools.
+    var eyedropperMode: Eyedropper.Mode = .layer
 
     init() {}
 
@@ -61,11 +65,12 @@ struct EditorStateManifest: Codable, Equatable {
         loopStartFrame = try c.decodeIfPresent(Int.self, forKey: .loopStartFrame)
         loopEndFrame = try c.decodeIfPresent(Int.self, forKey: .loopEndFrame)
         view = try c.decodeIfPresent(CanvasViewTransform.self, forKey: .view)
+        eyedropperMode = (try? c.decodeIfPresent(Eyedropper.Mode.self, forKey: .eyedropperMode)) ?? .layer
     }
 
     private enum CodingKeys: String, CodingKey {
         case currentFrame, selectedLayerID, selectedFolderID, isOnionSkinEnabled, onionSkin,
-             isLoopEnabled, loopStartFrame, loopEndFrame, view
+             isLoopEnabled, loopStartFrame, loopEndFrame, view, eyedropperMode
     }
 }
 
@@ -144,6 +149,7 @@ extension CanvasManager {
         state.loopStartFrame = loopStartFrame
         state.loopEndFrame = loopEndFrame
         state.view = viewTransform
+        state.eyedropperMode = eyedropperMode
         return state
     }
 
@@ -161,6 +167,7 @@ extension CanvasManager {
         loopStartFrame = state.loopStartFrame
         loopEndFrame = state.loopEndFrame
         viewTransform = state.view
+        eyedropperMode = state.eyedropperMode
     }
 
     /// The app half, read for `UserDefaults`. The eyedropper reports the tool it will hand back to.

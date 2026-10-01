@@ -403,6 +403,7 @@ final class RecolorEffectLogicTests: XCTestCase {
         let (manager, target) = gradedManager()
 
         manager.brushColor = .black
+        manager.eyedropperMode = .composite
         manager.selectEyedropper()
         XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)))
         let seen = manager.brushColor.rgbaComponents
@@ -449,6 +450,7 @@ final class RecolorEffectLogicTests: XCTestCase {
     /// recolour's leaf, paper included, at native size — not the full tree with the effect in it.
     func testTheFromEndsRecipeIsTheTreeBelowTheRecolourWithThePaper() throws {
         let (manager, target) = gradedManager()
+        manager.eyedropperMode = .composite
         let recipe = try XCTUnwrap(manager.eyedropperRecipe(for: .recolorEntry(target: target, index: 0, end: .from)))
         let full = try XCTUnwrap(manager.eyedropperRecipe(for: .brushColor))
         XCTAssertNotNil(recipe.background, "The paper is in the backdrop a recolour grades")
@@ -457,7 +459,7 @@ final class RecolorEffectLogicTests: XCTestCase {
                      "The recolour's own node is not in what it grades")
         XCTAssertNotNil(RenderNode.find(manager.layers[0].id, in: recipe.tree), "…and the layer below it is")
         XCTAssertNotNil(RenderNode.find(manager.layers[1].id, in: full.tree),
-                        "…whereas the brush's recipe is the whole picture, recolour included")
+                        "…whereas the brush's recipe in the composite mode is the whole picture, recolour included")
         XCTAssertEqual(recipe.tree, full.tree.split(atLeaf: 1)?.below,
                        "…which is the sandwich's own cut below the recolour's leaf")
     }

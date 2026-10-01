@@ -787,7 +787,7 @@ struct DrawingView: View {
             for folder in canvasManager.ancestorFolders(ofLayer: index) where !folder.isVisible {
                 canvasManager.toggleFolderVisibility(folder.id)
             }
-        case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
+        case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingToPickOnLayer, .nothingEnclosed,
              .nothingWhollyInside, .nothingToSubtractFrom, .cannotMoveDerivedFrame,
              .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
@@ -967,7 +967,8 @@ struct DrawingView: View {
             // `activeEditColor`, not `brushColor`: while a text session is live this panel is that
             // session's colour picker, which is what makes `TopToolbar.toggle`'s no-bake conditional
             // mean anything. See `CanvasManager.activeEditColor`.
-            ColorPickerPanel(color: $canvasManager.activeEditColor)
+            ColorPickerPanel(color: $canvasManager.activeEditColor,
+                             eyedropperMode: $canvasManager.eyedropperMode)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         case .text:

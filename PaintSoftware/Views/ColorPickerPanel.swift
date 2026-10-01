@@ -56,6 +56,13 @@ struct ColorPickerPanel: View {
     /// it is driving the brush, the paper, a value layer, an effect or a gradient stop.
     @Binding var color: Color
 
+    /// **The eyedropper's mode, when this panel is the brush's** — TODO (119). A small switch at the
+    /// header's top right, *"between two modes: the first is its current behaviour, and the second
+    /// the colour of the thing it is over in the layer that it is in."* Nil hides it, and every call
+    /// site but the brush colour's leaves it nil: a canvas background or a gradient stop is not
+    /// something the eyedropper picks into, so a switch there would be a control about nothing.
+    var eyedropperMode: Binding<Eyedropper.Mode>? = nil
+
     /// Whether the alpha channel is the artist's to set — false hides the opacity row *and* forces
     /// every inbound colour opaque. See `applyHSBA`.
     var supportsOpacity: Bool = true
@@ -349,6 +356,45 @@ struct ColorPickerPanel: View {
         .padding(.leading, 10)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topTrailing) { eyedropperModeSwitch }
+    }
+
+    // MARK: - Header: the eyedropper's mode (TODO (119) — the panel's own top-right corner)
+
+    /// The eyedropper glyph, then the two modes as a capsule — the glyph says what the pair is *for*,
+    /// so the two words need no caption of their own. Absent unless the call site handed the panel a
+    /// binding (`eyedropperMode`).
+    @ViewBuilder
+    private var eyedropperModeSwitch: some View {
+        if let mode = eyedropperMode {
+            HStack(spacing: 6) {
+                Image(systemName: "eyedropper")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.6))
+                HStack(spacing: 0) {
+                    ForEach(Eyedropper.Mode.allCases, id: \.self) { option in
+                        Button {
+                            mode.wrappedValue = option
+                        } label: {
+                            Text(option.title)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(mode.wrappedValue == option ? .white : .white.opacity(0.5))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(mode.wrappedValue == option ? Color.white.opacity(0.22) : Color.clear)
+                                .clipShape(Capsule())
+                        }
+                        .accessibilityIdentifier("colorPanel.eyedropperMode.\(option.rawValue)")
+                        .accessibilityValue(mode.wrappedValue == option ? "selected" : "")
+                        .accessibilityHint(option.hint)
+                        .accessibilityAddTraits(mode.wrappedValue == option ? [.isSelected] : [])
+                    }
+                }
+                .background(Color.white.opacity(0.08), in: Capsule())
+            }
+            .padding(.trailing, 10)
+            .padding(.top, 10)
+        }
     }
 
     // MARK: - Recent + selected palette (every type tab)
@@ -474,6 +520,24 @@ struct ColorPickerPanel: View {
         color = currentColor
         if !hexFieldFocused {
             hexText = currentColor.hexString
+        }
+    }
+}
+
+extension Eyedropper.Mode {
+    /// The word on the panel's switch — the owner's own two: the layer it is in, and the picture.
+    var title: String {
+        switch self {
+        case .layer: return "Layer"
+        case .composite: return "Canvas"
+        }
+    }
+
+    /// What reading it hands the artist, for VoiceOver — the sentence the two words stand for.
+    var hint: String {
+        switch self {
+        case .layer: return "The eyedropper picks the colour of the active layer alone, ignoring effects and blend modes above it."
+        case .composite: return "The eyedropper picks the colour you see on the canvas, effects and blend modes included."
         }
     }
 }

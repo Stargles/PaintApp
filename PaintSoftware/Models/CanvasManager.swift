@@ -1014,6 +1014,10 @@ final class CanvasManager: ObservableObject {
     /// eyedropper button beside the swatch that is armed is highlighted so the artist can see which
     /// swatch their next canvas tap will fill. See `CanvasManager+Eyedropper.swift`.
     @Published var eyedropperDestination: EyedropperDestination = .brushColor
+    /// **What a brush-colour pick reads** — this layer's own pixels or the finished composite. Saved
+    /// with the document (`EditorStateManifest`) and switched from the colour panel's top right
+    /// (`ColorPickerPanel.eyedropperMode`). `@Published` because that switch renders it.
+    @Published var eyedropperMode: Eyedropper.Mode = .layer
     /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
     /// belongs to the app rather than a project's manifest.
     static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"

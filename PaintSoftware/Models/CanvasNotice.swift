@@ -43,6 +43,11 @@ struct CanvasNotice: Identifiable, Equatable {
         /// because the tool reverts on a miss as well as a hit (`applyEyedropperResult`), so without
         /// a word the artist sees only their tool changing under them for no stated reason.
         case nothingToPick
+        /// `nothingToPick` in `Eyedropper.Mode.layer`, where the miss has a second cause the first
+        /// sentence cannot name: the point may be plainly painted — on another layer. Said apart so
+        /// the artist is pointed at the switch that would read it, rather than left to wonder why a
+        /// visible colour is "nothing".
+        case nothingToPickOnLayer
         /// A lasso fill's loop held nothing out: the collar leaked through a gap in the line art,
         /// there was no enclosed shape inside the loop at all, or Edge Overlap ate what little there
         /// was.
@@ -340,6 +345,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyUndo(let label):  return "Undid \(label.phrase)."
         case .historyRedo(let label):  return "Redid \(label.phrase)."
         case .nothingToPick:    return "Nothing to pick up there."
+        case .nothingToPickOnLayer:
+            return "Nothing on this layer there. The colour panel's switch picks from the whole picture instead."
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .nothingToSubtractFrom: return "There is no selection to subtract from — switch to Add, or draw a selection first."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
@@ -445,6 +452,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, for the same reason: the fix is to tap somewhere with paint on it, which the
         // artist can already see and do behind the banner.
         case .nothingToPick:    return nil
+        case .nothingToPickOnLayer: return nil
         // Nor this one, and here the reason is that the fix is a *choice* the artist has to make with
         // the canvas in front of them — patch the gap, redraw the loop, or raise Gap Closing on the
         // slider that is already on screen. None of the three is a button this banner could press.
@@ -528,6 +536,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyUndo:      return "historyUndo"
         case .historyRedo:      return "historyRedo"
         case .nothingToPick:    return "nothingToPick"
+        case .nothingToPickOnLayer: return "nothingToPickOnLayer"
         case .nothingEnclosed:  return "nothingEnclosed"
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .nothingToSubtractFrom: return "nothingToSubtractFrom"

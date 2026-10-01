@@ -49,6 +49,7 @@ final class EditorStateLogicTests: XCTestCase {
         manager.loopStartFrame = 2
         manager.loopEndFrame = 9
         manager.viewTransform = CanvasViewTransform(scale: 2.5, rotation: 0.4, offsetX: -30, offsetY: 12)
+        manager.eyedropperMode = .composite
         let written = manager.editorState
         XCTAssertNotEqual(written, defaults, "Setup: every field is away from its default")
 
@@ -67,6 +68,8 @@ final class EditorStateLogicTests: XCTestCase {
         XCTAssertEqual(reopened.loopStartFrame, 2)
         XCTAssertEqual(reopened.loopEndFrame, 9)
         XCTAssertEqual(reopened.viewTransform, CanvasViewTransform(scale: 2.5, rotation: 0.4, offsetX: -30, offsetY: 12))
+        XCTAssertEqual(reopened.eyedropperMode, .composite,
+                       "TODO (119): the eyedropper's mode is the document's, away from its `.layer` default here")
         XCTAssertEqual(reopened.editorState, written, "The whole record, field for field")
     }
 
@@ -119,6 +122,14 @@ final class EditorStateLogicTests: XCTestCase {
         XCTAssertTrue(state.isOnionSkinEnabled, "Absent means the default, not a failure")
         XCTAssertEqual(state.onionSkin, OnionSkinSettings())
         XCTAssertNil(state.view)
+        XCTAssertEqual(state.eyedropperMode, .layer, "A package from before (119) opens in the layer mode")
+    }
+
+    func testAnEyedropperModeThisBuildCannotReadIsTheDefaultRatherThanTheWholeRecordLost() throws {
+        let json = #"{"currentFrame": 4, "eyedropperMode": "somethingNewer"}"#.data(using: .utf8)!
+        let state = try JSONDecoder().decode(EditorStateManifest.self, from: json)
+        XCTAssertEqual(state.currentFrame, 4, "The rest of the record survives an unreadable field")
+        XCTAssertEqual(state.eyedropperMode, .layer)
     }
 
     func testALayerOrFolderTheDocumentNoLongerHasFallsBackRatherThanIndexingPastTheEnd() {
