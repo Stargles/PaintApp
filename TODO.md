@@ -56,25 +56,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## (121) Outside the canvas is still canvas — one root fix
-
-**Status** — not started. *"If you make a line half inside the canvas half outside, make that into a
-smart shape, then try to move the node sitting outside the canvas, it does not let you. This is
-concerning, because that problem originally was fixed for move box nodes. The fact that it missed
-smartshape line nodes means that whatever fix was implemented was tagged on rather than a complete fix
-to the root cause which breaks the priority of keeping the architecture clean. Starting a brushstroke
-outside of canvas also does not work. Additionally, there was another fix in the past which made it
-possible to move the canvas using fingers outside the canvas. All these have a related point: whatever
-is outside the canvas still should be counted, as if the canvas does extend further, with the only
-difference being the stuff outside the border just isnt rendered. There is probably a lot of code which
-needs to be pruned and refactored for this to be a clean fix."*
-
-- [ ] One input surface that covers the whole editor area and maps every touch into unbounded document
-      space; the per-feature outside-the-canvas patches (Move box nodes, the surround pan) deleted, not
-      kept beside it.
-- [ ] Smart-shape nodes, Move nodes, a stroke started outside, and a pan from the grey all work by the
-      same path; cold-start XCUITests for each.
-
 ## (125) Realtime feedback for every transform edit — with (136) and (140)
 
 **Status** — not started. The owner names these as one task:

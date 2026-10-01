@@ -122,6 +122,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedPlainAnimation` — the owner's `Test1`, and the
         // one seed here whose whole point is that Core Animation *can* draw it.
         UITestSeeds.seedPlainAnimationIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedPendingLine` — TODO (121)'s smart-shape line
+        // with one end off the canvas, which a synthetic touch cannot hold still long enough to make.
+        UITestSeeds.seedPendingLineIfRequested(into: canvasManager)
         onCreated()
     }
 }

@@ -529,9 +529,6 @@ struct ObjectTransformFrame: Equatable {
             case .rotation, .boxRotation, .body: return nil
             }
         }
-
-        /// True for the six drawn as a dot, i.e. everything except the move band.
-        var isDrawn: Bool { self != .body }
     }
 
     /// Where every drawn handle sits in canvas space — **the single source of truth that both the

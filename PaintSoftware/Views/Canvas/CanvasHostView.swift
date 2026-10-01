@@ -1,12 +1,9 @@
 import UIKit
 
 /// Fills the SwiftUI container and reports layout changes so the coordinator can refit the canvas
-/// when the window/split-view size changes.
-///
-/// **The surface the navigation transform lives on** — `CanvasView.Coordinator.setUpGestures`
-/// mounts pan, pinch, rotation, the undo and redo taps and the touch counter here rather than on
-/// the document-sized container, so a two-finger gesture that begins on the surround moves the
-/// canvas exactly as one that begins on the paper does.
+/// when the window/split-view size changes. Its bounds are the canvas area, and its clip is the
+/// only edge the canvas plane has (`CanvasPlaneView`): every touch inside it is hit-tested into the
+/// container, which is where the canvas's recognizers live.
 final class CanvasHostView: UIView {
     var onLayout: (() -> Void)?
     /// Set once by `CanvasView.makeUIView`. `UndoManager` no longer backs undo/redo (see

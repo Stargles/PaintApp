@@ -9,11 +9,10 @@ struct CanvasView: UIViewRepresentable {
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView()
         host.backgroundColor = .black
+        // **The clip is the canvas area's edge, and it is the only edge the canvas plane has** —
+        // `CanvasPlaneView`. Everything inside the host is the plane, and every touch on it is
+        // hit-tested into the container below, on the paper or off it.
         host.clipsToBounds = true
-        // See `StrokeCanvasView.init` for the argument. Every view a canvas touch can be hit-tested
-        // into needs it, and the two below are the ones that take the touch when the layer hosts are
-        // interaction-disabled — which `reconcileLayers` does in five separate states.
-        host.isMultipleTouchEnabled = true
         host.isAccessibilityElement = true
         host.accessibilityIdentifier = "canvas.host"
         // Which rendering path the canvas is on, and how many times the mid-stroke one has been
@@ -23,10 +22,15 @@ struct CanvasView: UIViewRepresentable {
         host.accessibilityLabel = "sandwich:off entries:0 shape:none text:none"
         host.canvasManager = canvasManager
 
-        // **`CanvasContainerView`, not a bare `UIView`** — its bounds are the document exactly
-        // (`hostBoundsDidChange`), and the subclass is what lets a transform grip drawn past the
-        // canvas edge still receive a touch. See its doc comment for the whole of it.
-        let container = CanvasContainerView()
+        // **The canvas plane's root, and the view every canvas recognizer lives on.** Its bounds are
+        // the document (`hostBoundsDidChange`) and its transform is the artist's zoom, so a point in
+        // it is a canvas point; being a `CanvasPlaneView`, it takes a touch anywhere the host shows,
+        // not only on the paper. See `CanvasPlaneView` for the rule.
+        //
+        // `isMultipleTouchEnabled` for `StrokeCanvasView.init`'s argument: every view a canvas touch
+        // can be hit-tested into needs it, and this is the one that takes the touch when the layer
+        // hosts are interaction-disabled — which `reconcileLayers` does in five separate states.
+        let container = CanvasPlaneView()
         container.backgroundColor = .clear
         container.isMultipleTouchEnabled = true
         host.addSubview(container)
@@ -276,7 +280,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.transformOverlay = transformOverlay
         context.coordinator.selectionOverlay = selectionOverlay
         context.coordinator.floatingOverlay = floatingOverlay
-        context.coordinator.setUpGestures(host: host, container: container)
+        context.coordinator.setUpGestures(on: container)
 
         // KEYFRAMES.md §7 stage 10: the playhead moving under a live timing stroke has to reach the
         // stroke view *now*, not on the SwiftUI pass that follows — see
@@ -3361,11 +3365,11 @@ struct CanvasView: UIViewRepresentable {
             guard touchCountRecognizer?.activeCount == 0 else { return }
             var stranded: [String] = []
             let strandedOwn = canvasGestures.filter { $0.isEnabled && $0.state != .possible }
-            if !strandedOwn.isEmpty, let host = hostView, let container = containerView {
+            if !strandedOwn.isEmpty, let container = containerView {
                 stranded += strandedOwn.map { $0.name ?? String(describing: type(of: $0)) }
                 for recognizer in canvasGestures { recognizer.view?.removeGestureRecognizer(recognizer) }
                 canvasGestures.removeAll()
-                setUpGestures(host: host, container: container)
+                setUpGestures(on: container)
                 // The five that are off unless a tool or layer wants them come back off; put them
                 // where the current state says, now rather than on the next SwiftUI pass.
                 updateActiveLayerAndTool()
@@ -3432,48 +3436,41 @@ struct CanvasView: UIViewRepresentable {
         /// it free when off (see `WindowEventTap.rescanRecognizers`). `name` is a debugging-only
         /// property; nothing in the app reads it, and setting it changes no behaviour.
         ///
-        /// **Two views, and which recognizer goes on which is the whole of one owner report.** The
-        /// navigation transform — pan, pinch, rotation, the undo and redo taps and the touch counter
-        /// that serves the shape snap — goes on the **host**, the view that fills the canvas area;
-        /// the five that act on a *point of the artwork* — the fill press, the catch-all, the
-        /// eyedropper, the text placement and the Move box's tap-away — go on the **container**,
-        /// whose bounds are the document exactly. The owner, 2026-09-16: *"I cant move the canvas
-        /// when by touching outside the canvas."* Every one of these used to sit on the container,
-        /// and `UIView.hitTest` never reaches a subview for a point outside the receiver's bounds,
-        /// so a two-finger pan that began on the surround reached no recognizer at all
-        /// (`CanvasContainerView`'s doc records the measurement from the grip side). The transform
-        /// handlers already read `location(in: host)`, so nothing about the arithmetic moved — only
-        /// the surface that offers them a touch, which is now the same surface the artist sees the
-        /// canvas move within.
-        func setUpGestures(host: UIView, container view: UIView) {
+        /// **Every one of them goes on the container**, the root of the canvas plane, which takes a
+        /// touch anywhere the host shows (`CanvasPlaneView`) — so a two-finger pan, a fill tap or the
+        /// Move box's tap-away that begins on the surround reaches exactly the recognizers it would
+        /// have reached on the paper. The transform handlers read `location(in: host)`, the view
+        /// that does not move under them; the rest read `location(in: container)`, which is canvas
+        /// points at any zoom.
+        func setUpGestures(on view: UIView) {
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
             pan.maximumNumberOfTouches = 2
             pan.delegate = self
             pan.cancelsTouchesInView = false
             pan.name = "canvas.pan"
-            install(pan, on: host)
+            install(pan, on: view)
             panRecognizer = pan
 
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             pinch.cancelsTouchesInView = false
             pinch.name = "canvas.pinch"
-            install(pinch, on: host)
+            install(pinch, on: view)
             pinchRecognizer = pinch
 
             let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
             rotation.delegate = self
             rotation.cancelsTouchesInView = false
             rotation.name = "canvas.rotation"
-            install(rotation, on: host)
+            install(rotation, on: view)
             rotationRecognizer = rotation
 
             let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
             twoFingerTap.numberOfTouchesRequired = 2
             twoFingerTap.cancelsTouchesInView = false
             twoFingerTap.name = "canvas.twoFingerTap"
-            install(twoFingerTap, on: host)
+            install(twoFingerTap, on: view)
 
             // Drives the shape constraint snap: reports the live canvas touches split by type, and a
             // finger joining a pen-held shape engages the snap after a short delay (see
@@ -3499,7 +3496,7 @@ struct CanvasView: UIViewRepresentable {
                     }
                 }
             }
-            install(touchCounter, on: host)
+            install(touchCounter, on: view)
             touchCountRecognizer = touchCounter
             // A new counter starts at zero, so the count the manager last heard (from a counter this
             // one replaces) is stale — and a stale two would make every finger look like a companion.
@@ -3509,7 +3506,7 @@ struct CanvasView: UIViewRepresentable {
             threeFingerTap.numberOfTouchesRequired = 3
             threeFingerTap.cancelsTouchesInView = false
             threeFingerTap.name = "canvas.threeFingerTap"
-            install(threeFingerTap, on: host)
+            install(threeFingerTap, on: view)
 
             twoFingerTap.require(toFail: threeFingerTap)
 
@@ -3983,7 +3980,7 @@ struct CanvasView: UIViewRepresentable {
         /// apart — `releaseShapeConstraintAfterCurrentEvent` needs the exact negation of the engage
         /// test and used to restate it by hand.
         ///
-        /// **Why the host's count is baselined and the stroke recognizer's is not.** Now that
+        /// **Why the container's count is baselined and the stroke recognizer's is not.** Now that
         /// `TouchCountRecognizer.requiresExclusiveTouchType` is off, the counter finally sees fingers
         /// during a pencil stroke — *all* of them, including a hand that was already resting when the
         /// shape formed. That hand is not the gesture; the gesture is "add a finger". Subtracting the
@@ -4009,7 +4006,7 @@ struct CanvasView: UIViewRepresentable {
         /// The owner states the gesture as "keep the pen held down and put a finger on the canvas",
         /// and the old predicate — an undifferentiated `count >= 2` — could not express that. It was
         /// wrong in both directions at once: too strict, because pen-plus-one-finger never reaches
-        /// two if the pencil's `UITouch` is not delivered to this host-level recognizer, so the
+        /// two if the pencil's `UITouch` is not delivered to this container-level recognizer, so the
         /// snap simply never engaged while the pen was down; and too loose, because any two contacts
         /// qualified, including the two fingers of an ordinary canvas pan. The second half is why the
         /// owner saw it snap only *after* lifting the pen and pinching — that pinch was the first
@@ -4022,14 +4019,14 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// **Splitting the count by type did not fix it on the owner's iPad, and the reason the first
         /// diagnosis missed is worth keeping.** It assumed the pencil's `UITouch` never reaches a
-        /// host-level recognizer; the owner's own recording falsifies that — with the pen the
+        /// container-level recognizer; the owner's own recording falsifies that — with the pen the
         /// only contact on the glass, `canvas.pan`, `canvas.pinch` and `canvas.rotation` are all
         /// consulted about failure requirements and all transition to `.failed`, which they can only
         /// do having received that touch. So the pencil is delivered, the old `total >= 2` predicate
         /// was satisfiable by pen-plus-finger, and it still never fired. What both predicates have in
         /// common is that they read **one** recognizer, four views above where the touch lands.
         ///
-        /// Hence two sources, folded here. `TouchCountRecognizer` on the host is the one that
+        /// Hence two sources, folded here. `TouchCountRecognizer` on the container is the one that
         /// can see touches no stroke is involved in; the active stroke's own recognizer is the one
         /// that cannot be starved while the pen is drawing, because it is the thing the pen is
         /// driving. The snap engages if either sees a finger. Which of them did is recorded, so one
@@ -4048,7 +4045,7 @@ struct CanvasView: UIViewRepresentable {
             let fingers = currentAccompanyingFingers()
             // Not debug cruft; it is one of the flight recorder's low-rate lines. Both sources are named
             // separately on purpose — `counter:2/1 stroke:0` and `counter:1/0 stroke:1` are the two
-            // answers to "is the host's recognizer being starved", and they differ in one line.
+            // answers to "is the container's recognizer being starved", and they differ in one line.
             ActionRecorder.ifRecording {
                 $0.model("shape.touches",
                          "counter:\(counterTotal)/\(counterFingers) base:\(shapeFingerBaseline) "
@@ -4082,7 +4079,7 @@ struct CanvasView: UIViewRepresentable {
         /// The re-read predicate has to be the exact negation of `refreshShapeConstraint`'s engage
         /// predicate — **both sources included**. When the two disagree the snap either sticks after
         /// the gesture is over or drops a frame early, and with two sources the failure mode is
-        /// sharper: reading only the host's counter here would release a snap the *stroke's*
+        /// sharper: reading only the container's counter here would release a snap the *stroke's*
         /// recognizer is still reporting a finger for, one run-loop turn after it engaged.
         private func releaseShapeConstraintAfterCurrentEvent() {
             guard isShapeConstraintEngaged else { return }

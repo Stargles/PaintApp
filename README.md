@@ -190,6 +190,10 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 6. If a touch cannot draw — no layers, the active layer hidden, or a layer with no drawing surface —
    a banner appears under the top toolbar saying which, with the fix as a button. It dismisses itself
    and never interrupts the stroke.
+7. **Outside the paper is still canvas, only not drawn.** A stroke, a lasso or a two-finger pan can
+   start on the black around the paper, and a Move box grip, a smart-shape node or a text handle out
+   there takes a drag exactly as it would on the paper — one rule, `CanvasPlaneView`. A fill tapped
+   out there floods from the nearest edge of the canvas; the eyedropper finds nothing to pick.
 
 ### Fill
 1. Select the Fill tool and tap inside a region bounded by content on the current layer's fill

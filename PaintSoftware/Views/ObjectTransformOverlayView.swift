@@ -6,8 +6,8 @@ import UIKit
 /// the box alone** and leaves the drawing exactly where it is (LASSO_MOVE.md §5.19–21, stage 3b).
 ///
 /// **The second knob cost this file nothing in hit testing**, which is the property that made it
-/// cheap and is worth stating because it is easy to assume rather than check: `claimsTouch`,
-/// `point(inside:)` and `target(at:)` all delegate to `ObjectTransformFrame.target(at:reach:rotationOffset:)`,
+/// cheap and is worth stating because it is easy to assume rather than check: `claimsTouch` and
+/// `target(at:)` both delegate to `ObjectTransformFrame.target(at:reach:rotationOffset:)`,
 /// which reads `handleLayout` — the one function that grew the entry. Both knobs take the same
 /// `rotationOffset`, so not even the signature moved.
 ///
@@ -47,7 +47,7 @@ import UIKit
 /// `CanvasTouchOwner`: a touch on a grip is `.objectTransformOverlay` and a touch away from it is
 /// `.moveBoxCommit`. Owner's ruling, 2026-08-22 — before it, a touch away from a vector Move box did
 /// nothing at all.
-final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
+final class ObjectTransformOverlayView: CanvasPlaneView {
 
     // MARK: - Callbacks
 
@@ -277,12 +277,11 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
 
     // MARK: - Hit testing
 
-    /// Claims **only** its own targets — the five grips and the box's interior. Everywhere else this
-    /// view is transparent to touch, so the canvas's pan and pinch keep receiving everything they did
-    /// before instead of being swallowed by a container-sized overlay.
-    ///
-    /// A grip can sit outside this view's bounds (the knob, on a layer at the top of the canvas), so
-    /// containment in `bounds` is deliberately not consulted; `target(at:)` is the whole test.
+    /// Claims **only** its own targets — the five grips and the box's interior — wherever they are in
+    /// the canvas plane, on the paper or past its edge (`CanvasPlaneView`). Everywhere else this view
+    /// is transparent to touch, so the canvas's pan and pinch keep receiving everything they did
+    /// before instead of being swallowed by a container-sized overlay. `bounds` is never consulted;
+    /// `target(at:)` is the whole test.
     ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the
@@ -297,23 +296,6 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard claimsTouch(at: point) else { return nil }
         return self
-    }
-
-    /// The grip half of `claimsTouch`, for a point the canvas container would otherwise never pass
-    /// on — see `CanvasContainerView`. **The move band is deliberately excluded**: a box scaled
-    /// larger than the document has a body covering the whole surround, and claiming that would take
-    /// every off-canvas touch instead of the five knobs the owner asked to be able to reach.
-    /// Through `claimsTouch` rather than beside it, so the three live-ness gates are stated once.
-    func offCanvasHandle(at point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard claimsTouch(at: point), target(at: point)?.isDrawn == true else { return nil }
-        return self
-    }
-
-    /// Deliberately **not** `claimsTouch`: `point(inside:)` is asked about geometry alone, by
-    /// callers that have already decided the view is live, and folding the activation state in here
-    /// would change what a superview's own hit-testing sees.
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        target(at: point) != nil
     }
 
     /// The **nearest** grip within reach, else the move band, delegated to `ObjectTransformFrame` so

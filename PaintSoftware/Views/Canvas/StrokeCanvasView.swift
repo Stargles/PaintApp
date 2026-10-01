@@ -24,7 +24,7 @@ import UIKit
 /// at a shaky 0.8pt. That residue is a stabilizer question, not a sampling one, and it is a *raster*
 /// number: on a vector layer the stored path is a refit at a fixed tolerance (`StrokePathFit`), so
 /// the walk no longer follows the tremor that produced it.
-final class StrokeCanvasView: UIView {
+final class StrokeCanvasView: CanvasPlaneView {
     /// Undo/redo registrations go through the single global `CanvasManager.history`, not a
     /// per-view stack.
     weak var canvasManager: CanvasManager?

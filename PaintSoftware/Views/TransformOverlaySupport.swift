@@ -89,14 +89,9 @@ final class TransformHandleView: UIView {
 /// Base for `FloatingPieceOverlayView`, the one on-canvas transform overlay still built this way.
 /// `ObjectTransformOverlayView` no longer inherits from it: it hit-tests through
 /// `ObjectTransformFrame` instead, which is what lets it decline the touches it has no target for
-/// rather than swallowing every touch on the canvas the way `point(inside:)` below makes this one.
-class TransformOverlayView: UIView {
-    /// Handles can end up positioned outside this view's own bounds (e.g. the rotate handle, or a
-    /// corner/edge handle, when the object sits near the edge of the canvas) — without this
-    /// override those touches would never reach them, since UIKit only recurses into subviews once
-    /// the point is inside the hit-testing view's own bounds.
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { true }
-
+/// rather than swallowing every touch in the plane the way `CanvasPlaneView`'s `point(inside:)`
+/// makes this one — a handle wherever it is drawn, and the overlay itself everywhere else.
+class TransformOverlayView: CanvasPlaneView {
     /// Positions a rotate handle above `topCenter` (the projected top-center of the transformed
     /// object) and the connecting line between them, both rotated to match `rotation`.
     func placeRotateHandle(_ handle: UIView, line: UIView, topCenter: CGPoint, rotation: CGFloat, distance: CGFloat = 32) {

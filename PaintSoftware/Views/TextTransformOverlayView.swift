@@ -33,7 +33,7 @@ import UIKit
 /// layers and touches. `ShapeOverlayView`'s own header records why that split exists — the drag
 /// arithmetic used to be written inline in `CanvasView`'s callbacks, "where nothing could unit-test
 /// it" — and `TextTransformLogicTests` is what it buys.
-final class TextTransformOverlayView: UIView {
+final class TextTransformOverlayView: CanvasPlaneView {
 
     // MARK: - Callbacks
 

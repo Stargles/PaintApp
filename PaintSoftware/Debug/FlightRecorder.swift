@@ -43,8 +43,8 @@ struct FlightRing<Element> {
 ///
 /// The evidence is the owner's recording of the frozen canvas, `recording-20260923-200911`, and the
 /// 2026-09-16 one before it: every touch on the canvas bound `canvas.touchCounter` — so it reached the
-/// canvas host — and none of `canvas.pan`, `canvas.pinch` or `canvas.rotation`. Those three live on
-/// the same host, are never disabled, and are back in `.possible` at the start of every touch
+/// canvas container — and none of `canvas.pan`, `canvas.pinch` or `canvas.rotation`. Those three live
+/// on the same container, are never disabled, and are back in `.possible` at the start of every touch
 /// sequence on a healthy canvas, so a sequence that *starts* without them is a canvas whose transform
 /// recognizers UIKit has stranded.
 ///
@@ -52,7 +52,7 @@ struct FlightRing<Element> {
 /// healthy canvas. A second finger landing on a live stroke legitimately binds none of the three —
 /// the stroke's `.began` already failed them, and they reset when the sequence ends — which is the
 /// shape of every ordinary "draw, then put a second finger down" and is ignored here. A touch that
-/// misses the canvas host (no `canvas.touchCounter`) is ignored too. A starting touch that binds
+/// misses the canvas (no `canvas.touchCounter`) is ignored too. A starting touch that binds
 /// any of the three is a healthy canvas, and re-arms the detector.
 ///
 /// **Two stranded sequences in a row**, not one: the owner's recording crosses that on its second

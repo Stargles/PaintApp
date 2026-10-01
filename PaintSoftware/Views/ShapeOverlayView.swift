@@ -40,7 +40,7 @@ import UIKit
 /// slop. The two-finger snap constraint is *not* tracked here either — `CanvasView.Coordinator`
 /// counts canvas touches for that, because the second finger usually lands somewhere this view has
 /// deliberately made itself transparent to.
-final class ShapeOverlayView: UIView {
+final class ShapeOverlayView: CanvasPlaneView {
 
     var isActive: Bool = false {
         didSet {

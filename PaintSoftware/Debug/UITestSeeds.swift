@@ -295,6 +295,37 @@ enum UITestSeeds {
         canvasManager.currentFrame = 0
     }
 
+    /// **TODO (121)'s first repro: a smart-shape line whose far end is off the canvas**, pending and
+    /// adjustable, on a fresh document — `-uiTestSeedPendingLine`.
+    ///
+    /// The owner: *"If you make a line half inside the canvas half outside, make that into a smart
+    /// shape, then try to move the node sitting outside the canvas, it does not let you."* The shape
+    /// itself is the one thing a test cannot make the artist's way: a smart shape fires on the pen
+    /// holding still, `ShapeHoldClock` measures that on `UITouch.timestamp`, and XCUITest's synthetic
+    /// touch reports nothing while it is stationary (`PaintUITestCase.drawAndHoldShape` carries the
+    /// measurement). So this calls the two verbs the hold and the lift call —
+    /// `beginInteractiveShape` with the line the detector would hand it, then `endInteractiveShape` —
+    /// and everything after, the handles, the preview ink and the drag the test makes, is the app's.
+    ///
+    /// A vertical line from the paper's upper middle to 6% of the paper above its top edge, so the
+    /// far endpoint sits in the surround above the paper where a portrait iPad has room for it. The
+    /// brush is widened to a sixty-fourth of the canvas so a pixel probe at fit zoom finds the ink.
+    static func seedPendingLineIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedPendingLine"),
+              let size = canvasManager.canvasSize else { return }
+        let start = CGPoint(x: size.width * 0.5, y: size.height * 0.4)
+        let end = CGPoint(x: size.width * 0.5, y: -size.height * 0.06)
+        let samples = (0...24).map { step -> VectorSample in
+            let t = CGFloat(step) / 24
+            return VectorSample(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t,
+                                pressure: 1)
+        }
+        canvasManager.brushSize = size.width / 64
+        canvasManager.beginInteractiveShape(ShapeGeometry(kind: .line, startPoint: start, endPoint: end),
+                                            samples: samples)
+        canvasManager.endInteractiveShape()
+    }
+
     /// One flat frame in `DecodedFrame`'s own layout (BGRA, premultiplied, opaque) — the same
     /// construction `PaintSoftwareUITests/CanvasManagerTestSupport.swift`'s `writeGreyClip` uses for
     /// the logic tier, duplicated rather than shared because that file is test-only and this one

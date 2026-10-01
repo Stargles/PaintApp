@@ -23,7 +23,7 @@ import UIKit
 /// **One editor at a time**, `Editing` says which. Shape handles and spacing dots both live on the
 /// same polyline, so offering both at once would put two different meanings under one touch; they
 /// are separate controls, and the bar is where the artist picks.
-final class GuideOverlayView: UIView {
+final class GuideOverlayView: CanvasPlaneView {
 
     /// Which editor the grips belong to — and therefore what dragging one means.
     enum Editing: Equatable {

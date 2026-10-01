@@ -4,7 +4,7 @@ import UIKit
 /// a new one. Lives inside `CanvasView`'s transformed `container`, so its own coordinate space
 /// matches canvas points exactly (same placement pattern as the object-layer work's
 /// `ObjectTransformOverlayView`).
-final class SelectionOverlayView: UIView {
+final class SelectionOverlayView: CanvasPlaneView {
     var onFinishPath: ((CGPath) -> Void)?
     var onAutomaticTap: ((CGPoint) -> Void)?
 

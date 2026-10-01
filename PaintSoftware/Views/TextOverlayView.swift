@@ -23,7 +23,7 @@ import UIKit
 /// `scribbleInteraction(_:shouldBeginAt:)` — on a drawing canvas the pencil is the brush, and iPadOS
 /// handing a pencil touch to handwriting instead is what ADD_TEXT.md:208 predicted and the owner
 /// reported.
-final class TextOverlayView: UIView, UITextViewDelegate, UIScribbleInteractionDelegate {
+final class TextOverlayView: CanvasPlaneView, UITextViewDelegate, UIScribbleInteractionDelegate {
 
     // MARK: - Callbacks
 

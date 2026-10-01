@@ -5,7 +5,7 @@ import UIKit
 /// layer, including that layer's own ink (LASSO_FILL.md §2a). (Inserted photos are vector-layer
 /// content — see `VectorCanvas` — and render as part of `strokeView`'s vector display, not a
 /// dedicated image view here.)
-final class LayerHostView: UIView {
+final class LayerHostView: CanvasPlaneView {
     let fillImageView = UIImageView()
     /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
