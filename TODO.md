@@ -165,21 +165,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (119) The eyedropper can sample the layer itself, ignoring what is composited over it
-
-**Status** — not started. *"In the colour picker menu, add a small switch on the top right which
-switches the eyedropper between two modes: the first is its current behaviour, and the second should be
-that the eyedropper choses the colour of the thing it is over in the layer that it is in. For example if
-I add an effect or blend mode on top, it does not affect it. This should be the default. This is also
-one of the things the canvas should remember so if the user exits and enters back, it sticks."*
-
-- [ ] The switch, layer mode the default, persisted per document.
-
-## (120) An image's Move box is far bigger than the image
-
-**Status** — not started. *"When moving an image, right now the move box is vastly bigger than the
-actual bounding box of the image itself. Fix that."*
-
 ## (146) A second finger makes a Move precise
 
 **Status** — not started. *"When in the move menu, add a thing where if the user presses a finger onto
