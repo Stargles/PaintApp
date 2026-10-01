@@ -159,8 +159,10 @@ final class OptionsPanelUITests: PaintUITestCase {
     /// `assertPanelIsDockedAndFlat` measures and is why that helper could not answer this ask.
     ///
     /// MEASURED on an iPad Pro 13-inch (M4) at `BottomDock.preferredWidth`: **261.5 points before
-    /// the compaction and 162.5 after**. The cap below is the measured number with a
-    /// little headroom, so a row added back without a thought goes red here rather than in a month.
+    /// the compaction and 162.5 after**, and **117.5 once TODO (137) took the rule's heading and the
+    /// no-selection hint out** — the owner's *"takes too much vertical space"*, answered by a number.
+    /// The cap below is the measured number with a little headroom, so a row added back without a
+    /// thought goes red here rather than in a month.
     ///
     /// **It also asserts what the compaction *is*, not only that a number came down**: the
     /// paint-outside switch is on the first row beside the mode tabs rather than owning one, and the
@@ -181,9 +183,9 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         let height = floor.frame.maxY - cardTop.frame.minY
         XCTAssertGreaterThan(height, 0, "the panel measured no height at all")
-        XCTAssertLessThanOrEqual(height, 175,
+        XCTAssertLessThanOrEqual(height, 125,
                                  String(format: "the Select panel is %.0f points tall against a card %.0f wide "
-                                        + "— it was 262 before TODO (59)",
+                                        + "— it was 262 before TODO (59) and 163 before TODO (137)",
                                         height, BottomDock.preferredWidth))
 
         // The switch shares the rule row: same row as the mode tabs, to the right of them.

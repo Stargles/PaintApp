@@ -256,7 +256,7 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
   bake precise strokes, fingers-can-paint, render resolution.
 - **Add menu**: insert a photo/video, stream a computer's screen, add text, or add a rectangle,
   ellipse or linear-gradient layer.
-- The document name is editable at the top left of the top bar.
+- The document name is editable in the middle of the top bar.
 - **Pinch** to zoom, **two-finger rotate/drag** to rotate/pan the canvas.
 
 ## Troubleshooting

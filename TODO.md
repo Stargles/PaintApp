@@ -328,24 +328,6 @@ the drawings."*
 and end of those brushes are messy. I have left a recording to prove this ending in 02122, 50kb."* The
 recording is `recording-20261001-002122.jsonl`, pulled to `~/PaintWork/evidence/`.
 
-## (143) Top bar order: gallery, settings, actions, add, select, move — then the name
-
-**Status** — not started. *"In the top menu, rearrange the icons into this order from left to right:
-gallery, settings, actions, add, select, move. Then in the middle top should be the canvas name (to the
-right of all those icons)."*
-
-## (142) New layers are "Layer N" (vector) and "Raster N"
-
-**Status** — not started. *"Instead of the default title for vector layers being "Vector 1, 2, etc",
-just change it into "Layer 1, 2, etc.". For raster layers make them "Raster 1, 2, etc."*
-
-## (137) Shorter Move and Select menus
-
-**Status** — not started. *"In the move menu, remove the text "strokes you move are stored exactly...",
-it takes up way too much space, especially vertical space. In the selection menu, remove "what the loop
-catches", and "draw a selection on the canvas with the mode above...". Same issue, takes too much
-vertical space."*
-
 ## (141) The colour wheel type is remembered
 
 **Status** — not started. *"The color wheel type resets to classic (square) every time the canvas is
