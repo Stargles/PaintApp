@@ -75,6 +75,11 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 - [ ] One live-preview mechanism for a transform being edited — transform-layer Move, folder Move,
       graph-editor node drag — measured before and after on the device-sized document.
 - [ ] The frame baker holds off while a transform edit is live and re-bakes once on release.
+- [ ] **Ruled 2026-10-01 — an edit on a blended layer is fast, then exact.** (145) (`746948d`) made an
+      undo under transform layers show at once through `SandwichPresentation.live`, but only where
+      `liveCutIsExact` holds (a plain normal layer); a layer with a blend mode, effect or mask still
+      waits ~0.4 s for the bake. The owner chose *"Fast, briefly approximate"*: show the live picture at
+      once there too, as a stroke already does, and let the exact bake replace it.
 
 ## (124) follow-up: raster selections and Move under a transform layer
 
@@ -85,6 +90,14 @@ layer do not yet — the same defect class as (124), so it is finished rather th
 
 - [ ] Raster lasso loops and the raster floating piece map through `inkPose`; a cold-start UI test
       lassoes and moves raster ink under a Move layer and asserts the pixels land under the pen.
+
+## (116)/(128) follow-up: one Edit button per object kind
+
+**Status** — not started. Select → Edit (`d1dd0dd`, `EditableObject` / `editSelectedObject()`) opens the
+topmost object when a loop catches both a text box and a gradient. The owner, 2026-10-01: **one button
+each** — "Edit Text" and "Edit Gradient" side by side, each opening its own panel.
+
+- [ ] The Select panel lists one Edit button per editable kind the loop caught.
 
 ## (112) The stream says "paused" and stops updating until the artist draws
 

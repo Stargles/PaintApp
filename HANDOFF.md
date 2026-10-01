@@ -73,16 +73,9 @@ Sonnet lanes — (119) (120) (146), (134) (135), (122) (123), (126) (127) (133),
   `~/PaintWork/evidence/`.
 - **(101) is folded into (112)**.
 
-**Questions queued for the owner** (they asked not to be asked before 11am EST 2026-10-01; use the
-question tool):
-1. Select → Edit when a loop catches both a text box and a gradient: topmost wins (shipped), one button
-   per object, or refuse and ask for a tighter loop?
-2. Fill Mend's reach is twice Gap Closing: keep, a separate Mend Reach slider, or a fixed small reach?
-3. While typing, the editor shrinks so the Text panel rides above the keyboard: keep, lift only the
-   dock above the keyboard, or let the keyboard cover the panel?
-
 **Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
-an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line.
+an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
+Fill Mend's reach stays twice Gap Closing; the editor keeps shrinking above the keyboard while typing.
 
 **Owner-side, unchanged**: (27) stage 5 and BUGS.md's palette-row question.
 
