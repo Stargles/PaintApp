@@ -78,8 +78,10 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 - [ ] **Ruled 2026-10-01 — an edit on a blended layer is fast, then exact.** (145) (`746948d`) made an
       undo under transform layers show at once through `SandwichPresentation.live`, but only where
       `liveCutIsExact` holds (a plain normal layer); a layer with a blend mode, effect or mask still
-      waits ~0.4 s for the bake. The owner chose *"Fast, briefly approximate"*: show the live picture at
-      once there too, as a stroke already does, and let the exact bake replace it.
+      waits ~0.4 s for the bake. The owner chose *"Fast, briefly approximate"*, and then: *"for the fast one
+      it can be just the layer without any effects added, no need to try and approximate"* — so the
+      instant picture draws the active layer plain (no blend mode, effect or mask), and the exact
+      bake replaces it when it lands.
 
 ## (124) follow-up: raster selections and Move under a transform layer
 
