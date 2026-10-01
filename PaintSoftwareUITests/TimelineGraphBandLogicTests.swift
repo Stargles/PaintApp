@@ -573,7 +573,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // band, so a row minted with a fresh `UUID()` is a row no band can find.
         let rows: [LayerStackRow] = (0..<2).map { .layer(id: manager.layers[$0].id, index: $0, depth: 0) }
         func y(ofRow row: Int) -> CGFloat {
-            TimelineRowLayout.make(rows: rows, rulerHeight: 18, rowHeight: 34,
+            TimelineRowLayout.make(rows: rows, rowHeight: 34,
                                    expansion: manager.graphBandExpansion).y(ofRow: row)
         }
         let grabbed = 1

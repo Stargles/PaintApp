@@ -88,10 +88,9 @@ final class GraphEditorUITests: PaintUITestCase {
             XCTAssertTrue(element.waitForExistence(timeout: 5))
         }
 
-        /// The two columns are 2 pt out of register by inheritance — the name column's ruler spacer
-        /// plus one `VStack` step is `rulerHeight + 6` where the track's row 0 is `rulerHeight + 4`,
-        /// and the cel block is inset 2 pt inside its row, which happens to cancel it. 6 pt of
-        /// tolerance covers both without admitting a row's worth of drift.
+        /// The two columns share one origin (`TimelineRowLayout.verticalInset` above row 0), and the cel
+        /// block is inset 2 pt inside its row. 6 pt of tolerance covers that without admitting a row's
+        /// worth of drift.
         func startsTogether(_ name: XCUIElement, _ track: XCUIElement, _ what: String) {
             XCTAssertEqual(name.frame.minY, track.frame.minY, accuracy: 6,
                            "\(what): name at \(name.frame.minY), track at \(track.frame.minY)")

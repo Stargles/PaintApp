@@ -46,11 +46,11 @@ enum TimelineBakeBar {
     /// The bar's thickness in points.
     ///
     /// **It overlays the ruler's bottom edge rather than growing anything**, which is
-    /// `TimelineKeyMarkers.bandHeight`'s decision reached for the same reason: `rulerHeight` feeds
-    /// `TimelineRowLayout`, `contentHeight` and the pinned name column's ruler spacer in
-    /// `AnimationTimeline`, so a bar that needed its own room would have to move all four in step
-    /// for a document that, at rest, has nothing to draw. The ruler's numbers are 9 pt drawn at
-    /// y = 2, so they end around y = 13 of an 18 pt ruler and this sits clear of them.
+    /// `TimelineKeyMarkers.bandHeight`'s decision reached for the same reason: the ruler's height sizes
+    /// the pinned strip and comes out of the panel's budget for rows, so a bar that needed its own room
+    /// would take it from every document's rows for one that, at rest, has nothing to draw. The ruler's
+    /// numbers are 9 pt drawn at y = 2, so they end around y = 13 of an 18 pt ruler and this sits clear
+    /// of them.
     static let height: CGFloat = 3
 
     /// How often the bar may be recomputed while the baker is running. See `RefreshThrottle`.

@@ -27,21 +27,6 @@ final class OptionsPanelUITests: PaintUITestCase {
                       "Move raised no menu")
     }
 
-    /// Drags the timeline's grab handle up by `points`, and answers how far the timeline's own top
-    /// edge actually travelled — which is not `points`, because XCUITest's synthetic drags undershoot
-    /// (`PaintUITestCase.performDrag`'s note) and because the height is clamped.
-    @discardableResult
-    private func growTimeline(_ app: XCUIApplication, by points: CGFloat) -> CGFloat {
-        let handle = app.buttons["timeline.collapseButton"]
-        XCTAssertTrue(handle.waitForExistence(timeout: 5))
-        let before = handle.frame.minY
-        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: -1.6, dy: 0.5))
-        start.press(forDuration: 0.2,
-                    thenDragTo: start.withOffset(CGVector(dx: 0, dy: -points)),
-                    withVelocity: .slow, thenHoldForDuration: 0.2)
-        return before - app.buttons["timeline.collapseButton"].frame.minY
-    }
-
     private func attach(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
@@ -72,7 +57,7 @@ final class OptionsPanelUITests: PaintUITestCase {
                                  String(format: "the Move menu is inside the timeline by %.0f points",
                                         restingFloor - restingTop))
 
-        let grew = growTimeline(app, by: 220)
+        let grew = dragTimelineGrabHandle(app, by: 220)
         XCTAssertGreaterThan(grew, 60, "the grab handle drag did not grow the timeline")
         attach(app, "02-move-panel-timeline-expanded")
 
@@ -100,7 +85,7 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         let floor = app.otherElements["bottomDock.floor"]
         XCTAssertTrue(floor.waitForExistence(timeout: 5))
-        growTimeline(app, by: 400)
+        dragTimelineGrabHandle(app, by: 400)
         attach(app, "03-move-panel-graph-editor-full-height")
 
         let top = app.buttons["timeline.collapseButton"].frame.minY

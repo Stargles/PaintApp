@@ -28,54 +28,18 @@ enum TimelineKeyMarkers {
 
     // MARK: - The timeline's zoom limits, declared here so the threshold below is a relationship
 
-    /// `TimelineTrackView.Coordinator`'s unzoomed scale, and the two ends of its pinch range —
-    /// **moved out of that file rather than copied**, because that file is not compiled into
-    /// `PaintSoftwareUITests`. The collapse threshold below is only meaningful *relative to* these numbers:
-    /// too small and no zoom the artist can reach ever collapses anything, too large and the default
-    /// zoom collapses keys that had room. A test asserting either relationship against a `10.5`
-    /// re-typed into this file would be comparing a constant to a copy of a constant — green forever,
-    /// including on the day somebody widens the pinch range. The coordinator reads these.
+    /// The track's unzoomed scale, and the two ends of its pinch range — declared in a file the test
+    /// target compiles, rather than in `TimelineTrackView`, which it does not. The collapse threshold
+    /// below is only meaningful *relative to* these numbers: too small and no zoom the artist can
+    /// reach ever collapses anything, too large and the default zoom collapses keys that had room. A
+    /// test asserting either relationship against a `10.5` re-typed into the test would be comparing
+    /// a constant to a copy of a constant — green forever, including on the day somebody widens the
+    /// pinch range. `TimelineZoomGesture` holds the zoom inside this range, and the track starts at
+    /// the base.
     static let basePixelsPerFrame: CGFloat = 30
     /// 0.35…4.0 of the base: 10.5 pt per frame fully pinched out, 120 pt fully in.
     static let pixelsPerFrameRange: ClosedRange<CGFloat> =
         (basePixelsPerFrame * 0.35)...(basePixelsPerFrame * 4.0)
-
-    /// **What a pinch holds fixed: the frame that was under the fingers when it began.**
-    ///
-    /// Two quantities, and the whole defect this type exists to remove was writing one of them down
-    /// in the other's units. A scroll view's coordinate system *is* its content — `bounds.origin` is
-    /// `contentOffset` — so `UIGestureRecognizer.location(in: scrollView).x` is already content
-    /// space, and adding `contentOffset.x` to it counts the scroll twice. Subtracting it again at
-    /// the far end then leaves the anchor `contentOffset.x · (scale − 1)` points out: exact at frame
-    /// 0, and wrong by a whole screenful once the artist has scrolled a screenful. Naming the two
-    /// fields for the spaces they are in is what stops the arithmetic re-crossing them.
-    ///
-    /// Lives here rather than in `TimelineTrackView.Coordinator` for this file's standing reason:
-    /// that file is not compiled into `PaintSoftwareUITests`, so the same arithmetic written there
-    /// is a pin against nothing.
-    struct PinchAnchor: Equatable {
-        /// The frame the fingers were over, in content space. Fractional — it is a position on the
-        /// track, not a cel index.
-        let frame: CGFloat
-        /// Where the fingers sat measured from the scroll view's **left edge**, which is the thing
-        /// that has to stay put as `pixelsPerFrame` changes.
-        let viewportX: CGFloat
-
-        /// - Parameter locationInContent: `gr.location(in: scrollView).x` — content space, as above.
-        init(locationInContent: CGFloat, contentOffsetX: CGFloat, pixelsPerFrame: CGFloat) {
-            frame = pixelsPerFrame > 0 ? locationInContent / pixelsPerFrame : 0
-            viewportX = locationInContent - contentOffsetX
-        }
-
-        /// The content offset that puts `frame` back under the fingers at a new scale, clamped to
-        /// what the track can actually scroll to.
-        func contentOffsetX(pixelsPerFrame: CGFloat,
-                            contentWidth: CGFloat,
-                            viewportWidth: CGFloat) -> CGFloat {
-            let wanted = frame * pixelsPerFrame - viewportX
-            return min(max(wanted, 0), max(0, contentWidth - viewportWidth))
-        }
-    }
 
     // MARK: - How big a marker is
 
@@ -121,8 +85,7 @@ enum TimelineKeyMarkers {
     ///
     /// **Not growing the row is a decision, not a shortcut.** `rowHeight` feeds `contentHeight`
     /// (`AnimationTimeline.swift`), `totalHeight` (`TimelineTrackView.relayout`) *and* the pinned name
-    /// column's per-row frame, and the ruler spacer above it is a hard-coded `Color.clear`. Growing
-    /// rows would be correct only if every document wanted the room, and the overwhelming majority
+    /// column's per-row frame. Growing rows would be correct only if every document wanted the room, and the overwhelming majority
     /// have no keys at all — so the band is hidden outright when a row has none, and an un-animated
     /// document looks exactly as it did.
     static let bandHeight: CGFloat = 12

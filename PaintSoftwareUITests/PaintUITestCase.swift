@@ -1059,19 +1059,71 @@ class PaintUITestCase: XCTestCase {
         XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
     }
 
+    // MARK: - The timeline's size
+
+    /// Drags the timeline's grab handle up by `points` — down for a negative number — and answers how far
+    /// the timeline's own top edge actually travelled, which is not `points`, because XCUITest's
+    /// synthetic drags undershoot (`performDrag`'s note) and because the height is clamped.
+    @discardableResult
+    func dragTimelineGrabHandle(_ app: XCUIApplication, by points: CGFloat) -> CGFloat {
+        let handle = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 5))
+        let before = handle.frame.minY
+        // An empty stretch of the top bar, between the left group of buttons and the transport: the whole
+        // bar is the grab handle, and a drag that began on a button was seen to *press* it — one started
+        // beside the collapse chevron opened the frame-rate panel, one at the bar's centre started playback.
+        let panel = app.otherElements["timeline.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.width * 0.32, dy: panel.frame.minY + 34))
+        start.press(forDuration: 0.2,
+                    thenDragTo: start.withOffset(CGVector(dx: 0, dy: -points)),
+                    withVelocity: .slow, thenHoldForDuration: 0.2)
+        return before - app.buttons["timeline.collapseButton"].frame.minY
+    }
+
     // MARK: - Staggered multi-touch
 
-    /// **A two-finger drag whose fingers land in two separate touch events, `stagger` seconds apart —
-    /// the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.**
+    /// **Two fingers, each travelling from where it lands to its own end point** — a pinch, a drag, or
+    /// both at once, which is the one shape XCUITest's public `pinch` cannot make (it holds the
+    /// centroid still).
     ///
+    /// Both touches go through the event synthesiser XCUITest's own gestures are built on
+    /// (`XCPointerEventPath`, `XCSynthesizedEventRecord` in XCUIAutomation), reached by selector
+    /// because it is not public API; a missing class or selector is an `XCTSkip` naming it rather than
+    /// a crash. `a` lands first and `b` lands `stagger` seconds later, in a separate touch event —
     /// XCUITest's public multi-touch gestures deliver both touches in a *single* `touchesBegan`
     /// (`CanvasTransformFreezeUITests`' header has the measurement), so every recognizer that asks
     /// "is this touch one of a batch?" answers yes and the first finger is never seen alone. The
     /// owner's recordings say a real hand never does that: `recording-20260923-200911` puts its two
-    /// fingers down 10–20 ms apart, in two events, on every gesture in the file. This drives the
-    /// event synthesiser XCUITest's own gestures are built on (`XCPointerEventPath`,
-    /// `XCSynthesizedEventRecord` in XCUIAutomation), reached by selector because it is not public
-    /// API; a missing class or selector is an `XCTSkip` naming it rather than a crash.
+    /// fingers down 10–20 ms apart, in two events, on every gesture in the file.
+    ///
+    /// - Parameters:
+    ///   - from, to: where each finger lands and where it lifts, in screen points.
+    ///   - stagger: how long after `a` the second finger lands.
+    ///   - duration: how long the travel takes, after the second finger is down.
+    ///   - steps: how many intermediate positions each finger reports on the way.
+    func twoFingerGesture(from: (a: CGPoint, b: CGPoint), to: (a: CGPoint, b: CGPoint),
+                          stagger: TimeInterval = 0.02, duration: TimeInterval = 0.6,
+                          steps: Int = 12) throws {
+        var paths: [AnyObject] = []
+        for (origin, destination, down) in [(from.a, to.a, 0.0), (from.b, to.b, stagger)] {
+            let path = try SynthesizedTouch.path(at: origin, offset: down)
+            for step in 1...steps {
+                let t = Double(step) / Double(steps)
+                try SynthesizedTouch.move(path, to: CGPoint(x: origin.x + (destination.x - origin.x) * t,
+                                                            y: origin.y + (destination.y - origin.y) * t),
+                                          at: stagger + duration * t)
+            }
+            try SynthesizedTouch.lift(path, at: stagger + duration + 0.02)
+            paths.append(path)
+        }
+        try SynthesizedTouch.synthesize(paths, named: "two-finger gesture")
+    }
+
+    /// **A two-finger drag whose fingers land in two separate touch events, `stagger` seconds apart —
+    /// the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.**
     ///
     /// - Parameters:
     ///   - a, b: where each finger lands, normalised within `element`; `a` lands first.
@@ -1079,20 +1131,11 @@ class PaintUITestCase: XCTestCase {
     func staggeredTwoFingerDrag(_ element: XCUIElement, a: CGVector, b: CGVector,
                                 stagger: TimeInterval = 0.02, delta: CGVector,
                                 duration: TimeInterval = 0.4) throws {
-        var paths: [AnyObject] = []
-        let steps = 8
-        for (origin, down) in [(element.coordinate(withNormalizedOffset: a).screenPoint, 0.0),
-                               (element.coordinate(withNormalizedOffset: b).screenPoint, stagger)] {
-            let path = try SynthesizedTouch.path(at: origin, offset: down)
-            for step in 1...steps {
-                let t = Double(step) / Double(steps)
-                try SynthesizedTouch.move(path, to: CGPoint(x: origin.x + delta.dx * t, y: origin.y + delta.dy * t),
-                                          at: stagger + duration * t)
-            }
-            try SynthesizedTouch.lift(path, at: stagger + duration + 0.02)
-            paths.append(path)
-        }
-        try SynthesizedTouch.synthesize(paths)
+        func end(_ start: CGPoint) -> CGPoint { CGPoint(x: start.x + delta.dx, y: start.y + delta.dy) }
+        let start = (a: element.coordinate(withNormalizedOffset: a).screenPoint,
+                     b: element.coordinate(withNormalizedOffset: b).screenPoint)
+        try twoFingerGesture(from: start, to: (end(start.a), end(start.b)), stagger: stagger, duration: duration,
+                             steps: 8)
     }
 
     /// **One finger drags while a second lands on the glass beside it** — the shape of TODO (146)'s
@@ -1130,7 +1173,7 @@ class PaintUITestCase: XCTestCase {
         let heldLifts = begin + travel + 0.05
         guard let holding else {
             try SynthesizedTouch.lift(dragging, at: heldLifts)
-            try SynthesizedTouch.synthesize([dragging])
+            try SynthesizedTouch.synthesize([dragging], named: "one-finger drag")
             return
         }
         let rest = element.coordinate(withNormalizedOffset: holding).screenPoint
@@ -1142,7 +1185,7 @@ class PaintUITestCase: XCTestCase {
         }
         try SynthesizedTouch.lift(held, at: heldLifts)
         try SynthesizedTouch.lift(dragging, at: heldLifts + 0.2)
-        try SynthesizedTouch.synthesize([dragging, held])
+        try SynthesizedTouch.synthesize([dragging, held], named: "drag with a finger held beside")
     }
 
     /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the
@@ -1221,14 +1264,14 @@ private enum SynthesizedTouch {
 
     /// One record carrying every path, synthesised synchronously: the call returns once the last
     /// touch has lifted, so the caller reads the app's state after the whole gesture.
-    static func synthesize(_ paths: [AnyObject]) throws {
+    static func synthesize(_ paths: [AnyObject], named name: String) throws {
         let record = try allocate("XCSynthesizedEventRecord")
         let initSelector = NSSelectorFromString("initWithName:interfaceOrientation:")
         typealias Init = @convention(c) (AnyObject, Selector, NSString, Int) -> Unmanaged<AnyObject>
         let orientation = XCUIDevice.shared.orientation.isLandscape
             ? (XCUIDevice.shared.orientation == .landscapeLeft ? 3 : 4) : 1
         let made = unsafeBitCast(try implementation(record, initSelector), to: Init.self)(
-            record, initSelector, "staggered two-finger drag" as NSString, orientation).takeUnretainedValue()
+            record, initSelector, name as NSString, orientation).takeUnretainedValue()
 
         let addSelector = NSSelectorFromString("addPointerEventPath:")
         typealias Add = @convention(c) (AnyObject, Selector, AnyObject) -> Void

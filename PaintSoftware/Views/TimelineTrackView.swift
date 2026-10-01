@@ -2,7 +2,8 @@ import Combine
 import SwiftUI
 import UIKit
 
-/// The scrollable ruler + per-layer cel rows, built in UIKit rather than pure SwiftUI gestures.
+/// The scrollable per-layer cel rows, built in UIKit rather than pure SwiftUI gestures. The ruler above
+/// them is `TimelineRulerStripView`, pinned outside the vertical scroll and driven from here.
 ///
 /// SwiftUI's declarative `DragGesture`/`.exclusively`/`.highPriorityGesture` composition proved
 /// unreliable here: gestures on small sibling views (the resize handles) sitting directly beside
@@ -19,7 +20,12 @@ import UIKit
 struct TimelineTrackView: UIViewRepresentable {
     @ObservedObject var canvasManager: CanvasManager
     var rowHeight: CGFloat
-    var rulerHeight: CGFloat
+    /// The ruler pinned above these rows. It scrolls horizontally with them and not vertically, which is
+    /// why it is a view of its own and not the top row of this one — see `TimelineRulerStripView`.
+    /// Created by `AnimationTimeline` (through `TimelineRulerStripHost`) because SwiftUI places it, and
+    /// driven from here because everything it shows — the zoom, the offset, the frame count — is this
+    /// track's.
+    let rulerStrip: TimelineRulerStripView
     /// What a tap resolved to: which of the timeline's three menus, and the values needed to build
     /// it, so `AnimationTimeline` never has to re-derive anything from raw indices.
     ///
@@ -88,9 +94,11 @@ struct TimelineTrackView: UIViewRepresentable {
         context.coordinator.scrollView = scrollView
         context.coordinator.contentView = content
 
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleZoomPan(_:)))
         pinch.name = "timeline.pinch"
+        pinch.delegate = context.coordinator
         content.addGestureRecognizer(pinch)
+        context.coordinator.pinchRecognizer = pinch
 
         context.coordinator.relayout()
         return scrollView
@@ -99,7 +107,6 @@ struct TimelineTrackView: UIViewRepresentable {
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.canvasManager = canvasManager
         context.coordinator.rowHeight = rowHeight
-        context.coordinator.rulerHeight = rulerHeight
         context.coordinator.onRequestMenu = onRequestMenu
         context.coordinator.onRequestRasterizeConfirm = onRequestRasterizeConfirm
         // **The second `UIViewRepresentable` a canvas pass drives, and the first one nobody had
@@ -110,7 +117,7 @@ struct TimelineTrackView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(canvasManager: canvasManager)
+        Coordinator(canvasManager: canvasManager, rulerStrip: rulerStrip)
     }
 
     @MainActor
@@ -127,35 +134,29 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
         var rowHeight: CGFloat = 34
-        var rulerHeight: CGFloat = 18
         var onRequestMenu: ((MenuRequest, CGRect) -> Void)?
         var onRequestRasterizeConfirm: ((CanvasManager.CelDropRequest) -> Void)?
 
         weak var scrollView: UIScrollView?
         weak var contentView: UIView?
+        /// The track's pinch, kept so a gesture's end can ask whether *every* zoom recognizer —
+        /// this one and the strip's — has finished (`endZoomGestureIfAllEnded`).
+        weak var pinchRecognizer: UIPinchGestureRecognizer?
 
-        /// **The zoom scale and its limits live in `TimelineKeyMarkers`, not here.** The key-marker
-        /// collapse threshold is a *relationship* to the floor of this range — set below it and no
-        /// reachable zoom ever collapses anything, set above the base and the default zoom collapses
-        /// keys that had room — and this file is not compiled into `PaintSoftwareUITests`, so a test
-        /// asserting either against a `10.5` re-typed on the test's side would be green forever.
-        private let zoomRange: ClosedRange<CGFloat> = TimelineKeyMarkers.pixelsPerFrameRange
+        /// **The zoom and its limits: `TimelineZoomGesture` holds the zoom inside
+        /// `TimelineKeyMarkers.pixelsPerFrameRange`, and the range lives there, not here.** The
+        /// key-marker collapse threshold is a *relationship* to the floor of that range, and this file
+        /// is not compiled into `PaintSoftwareUITests`, so a test asserting the relationship against
+        /// a `10.5` re-typed on the test's side would be green forever.
         private(set) var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-        private var pinchStartPixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-        /// The frame under the fingers at pinch-began and where those fingers sat in the viewport,
-        /// held fixed for the gesture's life so the content under the pinch stays put as
-        /// `pixelsPerFrame` changes. See `TimelineKeyMarkers.PinchAnchor`, which is where the
-        /// arithmetic lives and is testable.
-        private var pinchAnchor = TimelineKeyMarkers.PinchAnchor(locationInContent: 0,
-                                                                 contentOffsetX: 0,
-                                                                 pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame)
 
-        private let rulerView = TimelineRulerView()
+        /// The ruler pinned above the rows. Driven from `relayout`, `movePlayhead`,
+        /// `refreshBakeIndication` and `scrollViewDidScroll`, which are the four places this track's
+        /// zoom, extent, playhead, bake state and scroll offset change.
+        private let rulerStrip: TimelineRulerStripView
         /// TODO (38)(a)'s frame gridlines. `contentView`'s first subview — see its own doc for why
         /// that ordering is the point.
         private let gridlinesView = TimelineGridlinesView()
-        /// RENDER §3.7's baked-frame indication, hung over the ruler's bottom edge.
-        private let bakeBarView = TimelineBakeBarView()
         private var rowViews: [TimelineRowView] = []
         private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
@@ -180,10 +181,19 @@ struct TimelineTrackView: UIViewRepresentable {
         private let dragGhostView = CelBlockView()
         private let dropIndicatorView = TimelineDropIndicatorView()
 
-        init(canvasManager: CanvasManager) {
+        init(canvasManager: CanvasManager, rulerStrip: TimelineRulerStripView) {
             self.canvasManager = canvasManager
+            self.rulerStrip = rulerStrip
             super.init()
             observeThumbnailInstalls()
+            // The strip outlives this coordinator (it belongs to `AnimationTimeline`, which rebuilds the
+            // track whenever the panel is collapsed and expanded again), so every closure is assigned
+            // afresh here rather than added to: a second coordinator replaces the first's wiring.
+            rulerStrip.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
+            rulerStrip.onNumberTap = { [weak self] frame, columnRect in
+                self?.onRequestMenu?(.loop(frame: frame), columnRect)
+            }
+            rulerStrip.zoomHandler = { [weak self] recognizer in self?.handleZoomPan(recognizer) }
         }
 
         /// Holds the `thumbnailInstalled` subscription. One, replaced rather than added to, so a
@@ -223,27 +233,85 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        @objc func handlePinch(_ gr: UIPinchGestureRecognizer) {
+        // MARK: - Two-finger zoom and pan
+
+        /// Non-nil from the first of this gesture's recognizers beginning until the last has ended: the
+        /// frame that was under the fingers when they landed, and the zoom they landed at. Held for the
+        /// gesture's life so it is *one* gesture however many recognizers speak for it.
+        private var zoomGesture: TimelineZoomGesture?
+        /// The pinch's scale since the fingers landed; 1 while only a pan is speaking.
+        private var zoomScale: CGFloat = 1
+
+        /// **Every recognizer that zooms or pans the track — this track's pinch, and the pinch and
+        /// two-finger pan on the ruler strip — comes through here**, and what it does is the canvas's own
+        /// rule (`ViewportAnchor`): the frame under the fingers when they landed stays under their
+        /// *centroid* as it travels and as they spread, so a pinch that also moves sideways zooms and
+        /// pans at once. The arithmetic is `TimelineZoomGesture`'s; this is the recognizers and the
+        /// scroll view.
+        ///
+        /// **The track's scroll view stands down while a gesture is live**, because two writers of one
+        /// scroll offset is a fight: its own pan sets the offset from where *it* began, this sets it
+        /// from the frame under the fingers, and whichever ran last in an event would win. The pinch
+        /// recognises alongside the scroll view's pan (`shouldRecognizeSimultaneouslyWith` below) so a
+        /// pinch that begins after the fingers have already started scrolling is not refused, and is
+        /// the only writer from then on.
+        @objc func handleZoomPan(_ recognizer: UIGestureRecognizer) {
             guard let scrollView else { return }
-            switch gr.state {
+            switch recognizer.state {
             case .began:
-                pinchStartPixelsPerFrame = pixelsPerFrame
-                // `location(in:)` on a scroll view answers in the scroll view's own bounds, whose
-                // origin *is* `contentOffset` — so this is content space already.
-                pinchAnchor = TimelineKeyMarkers.PinchAnchor(
-                    locationInContent: gr.location(in: scrollView).x,
-                    contentOffsetX: scrollView.contentOffset.x,
-                    pixelsPerFrame: pixelsPerFrame)
+                if zoomGesture == nil {
+                    zoomGesture = TimelineZoomGesture(fingersInViewportX: fingersInViewportX(recognizer, in: scrollView),
+                                                      contentOffsetX: scrollView.contentOffset.x,
+                                                      pixelsPerFrame: pixelsPerFrame)
+                    updateScrollEnabled()
+                }
             case .changed:
-                pixelsPerFrame = min(max(pinchStartPixelsPerFrame * gr.scale, zoomRange.lowerBound), zoomRange.upperBound)
-                relayout()
-                scrollView.contentOffset.x = pinchAnchor.contentOffsetX(
-                    pixelsPerFrame: pixelsPerFrame,
+                // A lifting finger can still produce one more `.changed` as the recogniser collapses
+                // from two touches to one, and that frame is not an intentional move.
+                guard recognizer.numberOfTouches >= 2, let gesture = zoomGesture else { return }
+                // Read before anything moves: `location(in:)` on the scroll view answers in its own
+                // bounds, which are the offset we are about to change.
+                let fingers = fingersInViewportX(recognizer, in: scrollView)
+                if let pinch = recognizer as? UIPinchGestureRecognizer { zoomScale = pinch.scale }
+                let zoom = gesture.pixelsPerFrame(scale: zoomScale)
+                if zoom != pixelsPerFrame {
+                    pixelsPerFrame = zoom
+                    relayout()
+                }
+                scrollView.contentOffset.x = gesture.contentOffsetX(
+                    pixelsPerFrame: zoom,
+                    fingersInViewportX: fingers,
                     contentWidth: scrollView.contentSize.width,
                     viewportWidth: scrollView.bounds.width)
+            case .ended, .cancelled:
+                endZoomGestureIfAllEnded()
             default:
                 break
             }
+        }
+
+        /// Where the fingers are measured from the track's visible left edge — the space
+        /// `TimelineZoomGesture` works in. `location(in:)` answers in the scroll view's own coordinates
+        /// whichever view the recogniser is on (the ruler strip's included), and a scroll view's origin
+        /// *is* its content offset, so the offset comes off.
+        private func fingersInViewportX(_ recognizer: UIGestureRecognizer, in scrollView: UIScrollView) -> CGFloat {
+            recognizer.location(in: scrollView).x - scrollView.contentOffset.x
+        }
+
+        /// The gesture is over when no zoom recognizer is mid-gesture: fingers rarely lift in step, and
+        /// the pan and the pinch each end on their own event.
+        private func endZoomGestureIfAllEnded() {
+            let recognizers: [UIGestureRecognizer] = [pinchRecognizer].compactMap { $0 } + rulerStrip.zoomRecognizers
+            guard !recognizers.contains(where: { $0.state == .began || $0.state == .changed }) else { return }
+            zoomGesture = nil
+            zoomScale = 1
+            updateScrollEnabled()
+        }
+
+        /// **The one place the scroll view is switched on and off**, so a pinch ending cannot re-enable
+        /// scrolling under a block the artist still has in hand, nor a block drag ending under a pinch.
+        private func updateScrollEnabled() {
+            scrollView?.isScrollEnabled = blockDrag == nil && zoomGesture == nil
         }
 
         /// **How many frames the track lays out, which is deliberately more than the scene holds**: at
@@ -300,7 +368,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // the rows, which is what stops the pinned name column and this track disagreeing about
             // where the row below it starts — `TimelineRowLayout.make`'s whole reason, and
             // KEYFRAMES.md §11.2's seam. Both halves ask `CanvasManager.graphBandExpansion`.
-            let layout = TimelineRowLayout.make(rows: stackRows, rulerHeight: rulerHeight,
+            let layout = TimelineRowLayout.make(rows: stackRows,
                                                 rowHeight: rowHeight,
                                                 expansion: canvasManager.graphBandExpansion)
             // **The content fills the viewport when the rows do not reach the bottom of it**, and
@@ -324,7 +392,6 @@ struct TimelineTrackView: UIViewRepresentable {
                     contentWidth: totalWidth,
                     contentHeight: totalHeight,
                     rowHeight: rowHeight,
-                    rulerHeight: rulerHeight,
                     drag: blockDrag.map {
                         TimelineLayoutKey.DragKey(celID: $0.celID,
                                                   sourceLayerIndex: $0.sourceLayerIndex,
@@ -363,9 +430,8 @@ struct TimelineTrackView: UIViewRepresentable {
                 }
 
                 // **Inserted at index 0, ahead of every other subview added below**, so it is the one
-                // thing every one of them — the ruler, the bake bar, every row, the graph band — is
-                // drawn over rather than under. See the view's own doc for why it spans the ruler as
-                // well as the rows.
+                // thing every one of them — every row, the graph band — is drawn over rather than
+                // under. The ruler strip rules its own copy at its own height.
                 if gridlinesView.superview == nil {
                     contentView.insertSubview(gridlinesView, at: 0)
                 }
@@ -374,36 +440,12 @@ struct TimelineTrackView: UIViewRepresentable {
                 gridlinesView.pixelsPerFrame = pixelsPerFrame
                 gridlinesView.setNeedsDisplay()
 
-                if rulerView.superview == nil {
-                    rulerView.isAccessibilityElement = true
-                    rulerView.accessibilityIdentifier = "timeline.ruler"
-                    rulerView.onScrub = { [weak self] frame in self?.canvasManager.goToFrame(frame) }
-                    rulerView.onNumberTap = { [weak self] frame, columnRect in
-                        self?.onRequestMenu?(.loop(frame: frame), columnRect)
-                    }
-                    rulerView.panRecognizer.name = "timeline.rulerScrub"
-                    contentView.addSubview(rulerView)
-                    scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
-                }
-                rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
-                rulerView.frameCount = laidOutCount
-                rulerView.pixelsPerFrame = pixelsPerFrame
-                // `currentFrame` is set by `movePlayhead` at the end of this function, and on the scrub
-                // fast path that skips it — one writer, so the two paths cannot disagree.
-                rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
-                rulerView.setNeedsDisplay()
-
-                // **A sibling above the ruler rather than something the ruler draws**, which is the
-                // whole reason it can be refreshed at bake rate: invalidating the ruler relays out one
-                // `NSAttributedString` per visible frame, and the layout gate exists to stop exactly
-                // that happening often. The bar's own `draw` is a handful of `UIRectFill`s.
-                //
-                // It also earns its own accessibility element that way — `timeline.ruler` already is
-                // one, and hanging a second value off it would conflate the frame numbers with the
-                // bake state.
-                if bakeBarView.superview == nil { contentView.addSubview(bakeBarView) }
-                bakeBarView.frame = CGRect(x: 0, y: rulerHeight - TimelineBakeBar.height,
-                                           width: totalWidth, height: TimelineBakeBar.height)
+                // The ruler is the strip pinned above these rows, and it is drawn from the same key: it
+                // changes exactly when the zoom, the extent, the loop range or the frame rate does.
+                rulerStrip.layout(contentWidth: totalWidth, frameCount: laidOutCount,
+                                  pixelsPerFrame: pixelsPerFrame, framesPerSecond: built.framesPerSecond,
+                                  loopRange: built.loopRange)
+                rulerStrip.setContentOffsetX(scrollView.contentOffset.x)
 
                 // Split the presented rows into the two kinds of track, each drawn from its own pool.
                 let layerEntries = stackRows.enumerated().compactMap { position, row in
@@ -575,7 +617,7 @@ struct TimelineTrackView: UIViewRepresentable {
             let spans = TimelineBakeBar.unbakedSpans(frameCount: canvasManager.contentEndFrame) {
                 baker.isBaked(atFrame: $0)
             }
-            bakeBarView.update(spans: spans, pixelsPerFrame: pixelsPerFrame)
+            rulerStrip.updateBake(spans: spans, pixelsPerFrame: pixelsPerFrame)
         }
 
         /// Adopts whichever baker the manager currently holds.
@@ -1197,18 +1239,18 @@ struct TimelineTrackView: UIViewRepresentable {
 
         /// The scrub fast path: everything a `currentFrame` change actually moves.
         ///
-        /// Two view frames and one scalar. The ruler is **not** invalidated — it draws frame numbers
-        /// and the loop band, neither of which depends on the playhead, and `rulerView.currentFrame`
-        /// exists only so a tap can recognise "the number I tapped was already selected". A
-        /// `setNeedsDisplay()` here would put the scene-length CoreText loop back on every scrub
-        /// sample, which is most of what the gate was added to remove.
+        /// Two view frames and one scalar. The ruler is **not** invalidated — it draws its labels and
+        /// the loop band, neither of which depends on the playhead, and its `currentFrame` exists only
+        /// so a tap can recognise "the number I tapped was already selected". A `setNeedsDisplay()`
+        /// here would put the scene-length CoreText loop back on every scrub sample, which is most of
+        /// what the gate was added to remove.
         private func movePlayhead(totalHeight: CGFloat) {
             guard let contentView else { return }
             if playheadView.superview == nil {
                 playheadView.isUserInteractionEnabled = false
                 contentView.addSubview(playheadView)
             }
-            rulerView.currentFrame = canvasManager.currentFrame
+            rulerStrip.setCurrentFrame(canvasManager.currentFrame)
             playheadView.frame = CGRect(
                 x: TimelineKeyMarkers.columnX(frame: canvasManager.currentFrame, pixelsPerFrame: pixelsPerFrame),
                 y: 0,
@@ -1313,7 +1355,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // A block in hand owns the gesture outright. The long press has no `require(toFail:)`
             // relationship with the scroll view's pan (only the row's resize pan does), so without
             // this a drag that drifts sideways scrolls the track out from under itself.
-            scrollView?.isScrollEnabled = false
+            updateScrollEnabled()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
             // No separate `relayout()` call here: `updateBlockDrag` now issues one itself (see its
@@ -1345,7 +1387,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // rather than animating a one-shot delta. It does not, on its own, move the ghost or the
             // drop indicator (it only reorders their z-position), which is why `layoutDragChrome`
             // still runs right after it, same as before this call existed. Calling `relayout()` on
-            // every `.changed` event isn't a new cost class for this view: `handlePinch`'s `.changed`
+            // every `.changed` event isn't a new cost class for this view: `handleZoomPan`'s `.changed`
             // case already does exactly this, unconditionally, for the same reason — a live gesture
             // whose visual result depends on values that change every touch-move has nowhere cheaper
             // to recompute them from. (`scrollViewDidScroll`'s call is the odd one out, gated behind
@@ -1368,7 +1410,7 @@ struct TimelineTrackView: UIViewRepresentable {
             dragGhostView.setLifted(false)
             dragGhostView.isHidden = true
             dropIndicatorView.isHidden = true
-            scrollView?.isScrollEnabled = true
+            updateScrollEnabled()
 
             defer { relayout() }
             guard !cancelled else { return }
@@ -1507,19 +1549,31 @@ struct TimelineTrackView: UIViewRepresentable {
 }
 
 extension TimelineTrackView.Coordinator: UIScrollViewDelegate {
-    /// Grows the laid-out track as the user scrolls toward its right edge, which is what makes the
-    /// timeline read as endless rather than stopping at the last drawing — and redraws the graph
-    /// editor band, which samples only what is on screen and would otherwise be left blank past the
-    /// window it was last drawn for.
+    /// Carries the ruler strip along, grows the laid-out track as the user scrolls toward its right
+    /// edge — which is what makes the timeline read as endless rather than stopping at the last
+    /// drawing — and redraws the graph editor band, which samples only what is on screen and would
+    /// otherwise be left blank past the window it was last drawn for.
     ///
-    /// The band's half is **before** the growth gate and outside it: the gate is "the track has to
-    /// get longer", which is false on the overwhelming majority of scroll ticks and has nothing to
-    /// do with what the band has to redraw. Ordering them the other way would leave the band showing
-    /// the curves of wherever the artist last stopped.
+    /// The strip and the band are **before** the growth gate and outside it: the gate is "the track
+    /// has to get longer", which is false on the overwhelming majority of scroll ticks and has nothing
+    /// to do with what the strip has to shift or the band has to redraw. Ordering them the other way
+    /// would leave the ruler showing wherever the artist last stopped.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        rulerStrip.setContentOffsetX(scrollView.contentOffset.x)
         updateGraphBandViewport()
         guard displayedFrameCount(for: scrollView) > laidOutFrameCount else { return }
         relayout()
+    }
+}
+
+extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
+    /// **The track's pinch recognises alongside the scroll view's own pan**, so a pinch that begins
+    /// after the fingers have already started scrolling is not refused — which is what zooming while
+    /// panning sideways is, since the pan reaches its threshold first. `handleZoomPan` then makes the
+    /// pinch the only writer of the scroll offset.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === pinchRecognizer && other === scrollView?.panGestureRecognizer
     }
 }
 
@@ -1534,184 +1588,6 @@ private final class TimelineScrollView: UIScrollView {
         guard bounds.size != lastSize else { return }
         lastSize = bounds.size
         onSizeChange?()
-    }
-}
-
-/// Frame-number ruler: tapping/dragging anywhere on it scrubs the playhead. Uses a 0-duration
-/// long-press recognizer rather than a pan so it responds on first touch, not after ~10pt of
-/// movement — matching how a scrub bar should feel.
-private final class TimelineRulerView: UIView {
-    /// How many frame columns are drawn. More than the scene holds — see the coordinator's
-    /// `displayedFrameCount`.
-    var frameCount: Int = 12
-    var pixelsPerFrame: CGFloat = 30
-    var onScrub: ((Int) -> Void)?
-    /// Fired when a tap (not a scrub drag) lands on the frame number that was *already* the current
-    /// playhead position before this touch began — ToonSquid-style start/end loop menu trigger.
-    /// Carries that column's rect in window coordinates so the menu can be anchored to it.
-    var onNumberTap: ((Int, CGRect) -> Void)?
-    /// The playhead frame as of the last `relayout`, used only to recognize "tapped the already-
-    /// selected frame's number" at touch-down, before this touch's own scrub moves it.
-    var currentFrame: Int = 0
-    /// Non-nil once a loop range has been set via the number-tap menu — drawn as a blue band
-    /// regardless of whether `isLoopEnabled` currently gates playback.
-    var loopRange: ClosedRange<Int>?
-
-    let panRecognizer: UILongPressGestureRecognizer = {
-        let gr = UILongPressGestureRecognizer()
-        gr.minimumPressDuration = 0
-        gr.numberOfTouchesRequired = 1
-        return gr
-    }()
-
-    private var touchDownLocation: CGPoint = .zero
-    private var touchMoved = false
-    private var tappedFrameWasCurrent = false
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
-        contentMode = .redraw
-        panRecognizer.addTarget(self, action: #selector(handleTouch(_:)))
-        addGestureRecognizer(panRecognizer)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    @objc private func handleTouch(_ gr: UILongPressGestureRecognizer) {
-        switch gr.state {
-        case .began:
-            touchDownLocation = gr.location(in: self)
-            touchMoved = false
-            let frame = Int(touchDownLocation.x / pixelsPerFrame)
-            tappedFrameWasCurrent = (frame == currentFrame)
-            onScrub?(frame)
-        case .changed:
-            let loc = gr.location(in: self)
-            if hypot(loc.x - touchDownLocation.x, loc.y - touchDownLocation.y) > 4 { touchMoved = true }
-            onScrub?(Int(loc.x / pixelsPerFrame))
-        case .ended, .cancelled:
-            if !touchMoved, tappedFrameWasCurrent {
-                onNumberTap?(currentFrame, columnRectInWindow(frame: currentFrame))
-            }
-        default:
-            break
-        }
-    }
-
-    /// The tapped frame's column, in window coordinates — the anchor the loop menu hangs off, so it
-    /// appears over that column rather than centred on the timeline panel.
-    private func columnRectInWindow(frame: Int) -> CGRect {
-        let rect = CGRect(x: TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame), y: 0, width: pixelsPerFrame, height: bounds.height)
-        return convert(rect, to: nil)
-    }
-
-    /// **Draws the frames in `rect`, not all of them.** This used to loop `0..<frameCount` and lay
-    /// out an `NSAttributedString` per frame of the whole scene regardless of how much of the ruler
-    /// was actually being asked for — O(scene length) CoreText work, and one of the two costs
-    /// `PERFORMANCE.md` classifies as area-independent: it is identical at 2048×1024 and at 4096²,
-    /// which is exactly why no canvas-scaled benchmark ever saw it.
-    ///
-    /// **Two things this does and does not buy, stated plainly so the next reader does not
-    /// over-credit it.** UIKit hands a full-bounds `rect` when the whole view is invalidated, which
-    /// is the common case today, so on its own this is not the saving — the `TimelineLayoutKey` gate
-    /// is, by cutting how *often* the invalidation happens. What clipping buys is that the cost is
-    /// now proportional to what is being redrawn: a partial invalidation (a tiled backing store on a
-    /// long track, or a future `setNeedsDisplay(_:)` scoped to one column) becomes cheap instead of
-    /// silently costing the whole scene.
-    ///
-    /// The band is clipped by CoreGraphics anyway; the loop is what had to be told.
-    override func draw(_ rect: CGRect) {
-        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
-        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
-        // display happens, and this is the only `draw(_:)` on the editing path.
-        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
-    }
-
-    private func drawNow(_ rect: CGRect) {
-        if let loopRange {
-            let bandRect = CGRect(x: CGFloat(loopRange.lowerBound) * pixelsPerFrame,
-                                  y: 0,
-                                  width: CGFloat(loopRange.upperBound - loopRange.lowerBound + 1) * pixelsPerFrame,
-                                  height: bounds.height)
-            if bandRect.intersects(rect) {
-                UIColor.systemBlue.withAlphaComponent(0.25).setFill()
-                UIRectFill(bandRect)
-            }
-        }
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 9),
-            .foregroundColor: UIColor.gray
-        ]
-        for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
-            let x = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame) + 2
-            let text = "\(frame + 1)" as NSString
-            text.draw(at: CGPoint(x: x, y: 2), withAttributes: attrs)
-        }
-    }
-}
-
-/// **Frame gridlines — TODO (38)(a): "add vertical grey lines to segment the timeline so that I can
-/// see which frame is which."**
-///
-/// A sibling spanning the whole content height rather than something the ruler or each row draws
-/// for itself, because the ask covers the ruler strip *and* the track beneath it: one rule for the
-/// full height reads as one thing, where a rule drawn separately at ruler height and at row height
-/// would seam at the boundary between them. Inserted as `contentView`'s **first** subview — behind
-/// the ruler, the bake bar, every row and the graph band, all of which are added after it — so a
-/// line never sits on top of a cel's picture, only behind it.
-///
-/// **Every frame, at every zoom — density needed no decision beyond the one the pinch already
-/// makes.** `TimelineKeyMarkers.pixelsPerFrameRange` floors `pixelsPerFrame` at 10.5 pt — the same
-/// floor `minimumSeparation` (12 pt) is measured against to decide when two 9 pt *marker* diamonds
-/// start to crowd. A gridline is a 1 pt hairline, not a 9 pt diamond, so at that same floor it still
-/// has ~9.5 pt of daylight either side and never approaches a wash. Below the pinch floor there is
-/// no reachable zoom to thin lines *at*, so an every-Nth-frame rule would be answering a question
-/// this geometry does not ask — unlike the marker collapse, which exists because diamonds really do
-/// touch at that floor.
-///
-/// **The graph editor draws its own copy of this rather than being drawn on by this view.** The band
-/// sits above this view in `contentView`'s z-order and paints its own near-opaque backdrop
-/// (`TimelineGraphBand.backgroundWhite`) over it, so a line only this view drew would be washed out
-/// exactly where the ask most wants it kept — "Same with the graph editor." `TimelineGraphBandView.draw`
-/// draws the identical line, at the identical x, behind its curves instead.
-private final class TimelineGridlinesView: UIView {
-    /// Shared with `TimelineGraphBandView`, so the timeline and the graph editor rule off the same
-    /// grey — the TODO heading's "should read as one thing" made literal for this one property.
-    /// Width is `TimelineKeyMarkers.gridlineWidth`, not a second constant here — see its own doc for
-    /// why it lives on the geometry side of the split instead.
-    static let lineColor = UIColor.gray.withAlphaComponent(0.22)
-
-    var frameCount: Int = 0
-    var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
-        isUserInteractionEnabled = false
-        contentMode = .redraw
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// Clipped to `rect` by `TimelineRulerClip`, for the reason its own doc gives: partial
-    /// invalidation should cost what is redrawn, not the whole scene.
-    override func draw(_ rect: CGRect) {
-        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
-        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
-        // display happens, and this is the only `draw(_:)` on the editing path.
-        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
-    }
-
-    private func drawNow(_ rect: CGRect) {
-        guard pixelsPerFrame > 0, frameCount > 0 else { return }
-        Self.lineColor.setFill()
-        for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
-            let x = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame)
-            UIRectFill(CGRect(x: x, y: 0, width: TimelineKeyMarkers.gridlineWidth, height: bounds.height))
-        }
     }
 }
 
@@ -1807,9 +1683,8 @@ private final class TimelineDropIndicatorView: UIView {
 /// targets, one apiece, in the same order as the layer panel. A shared strip under the ruler would put
 /// every target's keys on one line and lose the one fact the artist most needs, which is *whose* key
 /// it is; and §2.1's channel panel opens on a target, so a marker you cannot attribute is a marker you
-/// cannot act on. It also costs nothing structurally: no new row height, so `contentHeight`,
-/// `totalHeight` and the name column's hard-coded ruler spacer all stay as they are, and §10's three
-/// height traps are simply not entered.
+/// cannot act on. It also costs nothing structurally: no new row height, so `contentHeight` and
+/// `totalHeight` stay as they are, and §10's three height traps are simply not entered.
 ///
 /// **Hidden outright when the row has no keyframes**, which is almost every row of almost every
 /// document — so an un-animated timeline looks exactly as it did, and the band is also absent from the
@@ -1970,77 +1845,6 @@ private final class TimelineRepeatGhostBand: UIView {
             path.lineWidth = 1
             path.setLineDash([4, 3], count: 2, phase: 0)
             path.stroke()
-        }
-    }
-}
-
-/// **The bake bar** — which stretches of the scene are not ready to play (RENDER.md §3.7).
-///
-/// One view for the whole document rather than one per row, because a baked frame is a property of
-/// the *frame* and not of a layer: the bake key is the whole resolved tree with `frame` left out
-/// (§3.3), so there is no per-layer answer to give. It therefore hangs off the ruler, which is the
-/// timeline's only other document-wide furniture.
-///
-/// **Every decision it makes is `TimelineBakeBar`'s**, for that type's stated reason — this file is
-/// not compiled into `PaintSoftwareUITests`, so anything decided here is decided where no fast-tier
-/// test can see it. What is left here is one `UIColor` and one `UIRectFill`.
-private final class TimelineBakeBarView: UIView {
-    private var spans: [TimelineBakeBar.Span] = []
-    private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
-        contentMode = .redraw
-        // Sits over the ruler's bottom edge, which is a scrub target. Touches have to reach it.
-        isUserInteractionEnabled = false
-        isAccessibilityElement = true
-        accessibilityTraits = .none
-        accessibilityIdentifier = "timeline.bakeBar"
-        accessibilityValue = ""
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// - Parameter spans: `TimelineBakeBar.unbakedSpans`' output, ascending and disjoint.
-    func update(spans: [TimelineBakeBar.Span], pixelsPerFrame: CGFloat) {
-        // `TimelineKeyMarkerBand`'s gate, and here it is load-bearing rather than a saving: this is
-        // refreshed on a timer while the baker runs (`TimelineBakeBar.RefreshThrottle`), so without
-        // it every tick of a bake that changed nothing visible would invalidate the bar. A pinch
-        // moves `pixelsPerFrame` without moving a single span, so both halves gate.
-        let changed = spans != self.spans || pixelsPerFrame != self.pixelsPerFrame
-        self.spans = spans
-        self.pixelsPerFrame = pixelsPerFrame
-        // **Not hidden when empty**, unlike the key-marker band. Empty is this view's most
-        // informative state — it is *"the whole scene is ready to play"* — and hiding it would take
-        // the one assertion a UI test most wants off the accessibility tree with it.
-        accessibilityValue = TimelineBakeBar.encode(spans)
-        if changed { setNeedsDisplay() }
-    }
-
-    override func draw(_ rect: CGRect) {
-        // Timed because `PlaybackTrace` measured a stall that runs entirely in the runloop's
-        // source half, *after* the last `updateUIView` returns — which is where `CALayer`
-        // display happens, and this is the only `draw(_:)` on the editing path.
-        PlaybackTrace.span(.viewDraw) { drawNow(rect) }
-    }
-
-    private func drawNow(_ rect: CGRect) {
-        guard pixelsPerFrame > 0 else { return }
-        // **Amber, not red.** §2.10 rules that playback may be visibly stale while the bake catches
-        // up, so an unbaked stretch is the expected transient state of a document being drawn in and
-        // not an error. Red would say something is wrong; this says *not yet*. It also has to be
-        // distinguishable from everything else already living in these 18 points — the loop band and
-        // the playhead are both `systemBlue`, and the key markers are white — which rules out most
-        // of the rest of the palette on contrast grounds alone.
-        UIColor.systemOrange.withAlphaComponent(0.85).setFill()
-        for span in spans {
-            let spanRect = TimelineBakeBar.rect(for: span,
-                                                pixelsPerFrame: pixelsPerFrame,
-                                                barHeight: bounds.height)
-            guard spanRect.intersects(rect) else { continue }
-            UIRectFill(spanRect)
         }
     }
 }
@@ -2521,36 +2325,6 @@ private final class TimelineGraphBandView: UIView {
         plate.fill()
         text.draw(at: CGPoint(x: origin.x + inset.width, y: origin.y + inset.height))
     }
-}
-
-/// Non-interactive playhead indicator.
-private final class TimelinePlayheadView: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = UIColor.systemBlue.withAlphaComponent(0.35)
-        isUserInteractionEnabled = false
-
-        let leading = UIView()
-        leading.backgroundColor = .systemBlue
-        leading.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(leading)
-        let trailing = UIView()
-        trailing.backgroundColor = .systemBlue
-        trailing.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(trailing)
-        NSLayoutConstraint.activate([
-            leading.leadingAnchor.constraint(equalTo: leadingAnchor),
-            leading.topAnchor.constraint(equalTo: topAnchor),
-            leading.bottomAnchor.constraint(equalTo: bottomAnchor),
-            leading.widthAnchor.constraint(equalToConstant: 1.5),
-            trailing.trailingAnchor.constraint(equalTo: trailingAnchor),
-            trailing.topAnchor.constraint(equalTo: topAnchor),
-            trailing.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailing.widthAnchor.constraint(equalToConstant: 1.5)
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
 /// One layer's row of cel blocks. Owns a single pan + tap recognizer for the whole row rather

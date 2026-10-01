@@ -582,11 +582,12 @@ struct CanvasView: UIViewRepresentable {
         private var liveRotation: CGFloat = 0
         private var liveOffset: CGSize = .zero
 
-        // The screen point + container center captured when the first of pan/pinch/rotation begins,
-        // used to keep whatever content point is under the fingers fixed on screen as scale/rotation
-        // change (rather than always zooming/rotating around the canvas's own center).
-        private var gestureAnchorHost0: CGPoint?
-        private var gestureAnchorCenter0: CGPoint?
+        // The fingers' centroid and the container's centre, captured when the first of
+        // pan/pinch/rotation begins and held as one `ViewportAnchor` — which keeps whatever content
+        // point is under the fingers fixed under them as scale/rotation change (rather than always
+        // zooming/rotating around the canvas's own centre). The centre rides along because
+        // `liveOffset` is how far it has moved from there.
+        private var gestureAnchor: (anchor: ViewportAnchor, center0: CGPoint)?
 
         // Rotation snaps to the nearest right angle when close to one, like Procreate, but releases
         // the snap if the user holds within the snap zone for more than a second.
@@ -4052,33 +4053,24 @@ struct CanvasView: UIViewRepresentable {
         /// the canvas", and the only thing that then seeded the anchor was
         /// `commitSnappedShapeIfTransforming` — the same call that baked the shape the owner wanted
         /// left alone. Delete that bake without this and `updateLiveOffset` bails on a nil
-        /// `gestureAnchorHost0`, so the canvas silently refuses to move at all whenever a shape is
+        /// `gestureAnchor`, so the canvas silently refuses to move at all whenever a shape is
         /// pending: a dead-canvas symptom that looks nothing like the change that caused it. The old
         /// rule now lives on the snap itself, gated to `isShapeFollowingFinger` in
         /// `canvasTouchesChanged`, which is the more precise place for it.
         private func beginAnchorIfNeeded(at location: CGPoint) {
             canvasManager.cancelInteractiveFillDrag()
-            guard gestureAnchorCenter0 == nil, let container = containerView else { return }
-            gestureAnchorHost0 = location
-            gestureAnchorCenter0 = container.center
+            guard gestureAnchor == nil, let container = containerView else { return }
+            gestureAnchor = (ViewportAnchor(fingers: location, contentOrigin: container.center), container.center)
         }
 
         /// Keeps the content point that was under the fingers at gesture-start pinned under the
         /// fingers' *current* location as scale/rotation change, and also carries plain panning
         /// (when scale/rotation are unchanged, this reduces to "offset by however far fingers moved").
         private func updateLiveOffset(currentLocation: CGPoint) {
-            guard let host0 = gestureAnchorHost0, let center0 = gestureAnchorCenter0 else { return }
-            let d0 = CGPoint(x: host0.x - center0.x, y: host0.y - center0.y)
-            let theta = effectiveRotation() - committedRotation // this gesture's contribution only
-            let s = liveScale
-            let rotatedScaled = CGPoint(
-                x: s * (d0.x * cos(theta) - d0.y * sin(theta)),
-                y: s * (d0.x * sin(theta) + d0.y * cos(theta))
-            )
-            liveOffset = CGSize(
-                width: currentLocation.x - rotatedScaled.x - center0.x,
-                height: currentLocation.y - rotatedScaled.y - center0.y
-            )
+            guard let (anchor, center0) = gestureAnchor else { return }
+            let origin = anchor.contentOrigin(fingersAt: currentLocation, scale: liveScale,
+                                              rotation: effectiveRotation() - committedRotation) // this gesture's contribution only
+            liveOffset = CGSize(width: origin.x - center0.x, height: origin.y - center0.y)
         }
 
         /// Folds live scale/rotation/offset into the committed baseline once all of pan/pinch/rotation
@@ -4101,8 +4093,7 @@ struct CanvasView: UIViewRepresentable {
             liveScale = 1
             liveRotation = 0
             liveOffset = .zero
-            gestureAnchorHost0 = nil
-            gestureAnchorCenter0 = nil
+            gestureAnchor = nil
             snapEngagedAt = nil
             // The shape snap isn't released here: it follows the touches themselves (see
             // `canvasTouchesChanged`), letting the pen lift out of a snapped shape while the

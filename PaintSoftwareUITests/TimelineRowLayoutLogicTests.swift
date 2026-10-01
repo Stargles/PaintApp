@@ -6,9 +6,10 @@ import CoreGraphics
 /// Two things are being pinned here and they pull in opposite directions.
 ///
 /// **That nothing moved.** Every row is still 34 pt with a 2 pt gap, so the first tests assert the
-/// layout reproduces, exactly, the closed-form arithmetic it replaced — `rulerHeight + position *
-/// (rowHeight + 2) + 4` for a row's origin and `rulerHeight + count * (rowHeight + 2) + 8` for the
-/// content. If those drift, the claim that this stage is behaviour-neutral is false.
+/// layout reproduces, exactly, the closed-form arithmetic it replaced — `position * (rowHeight + 2) +
+/// 4` for a row's origin and `count * (rowHeight + 2) + 8` for the content (the ruler is not in the
+/// rows' layout: it is the strip pinned above them). If those drift, the claim that this stage is
+/// behaviour-neutral is false.
 ///
 /// **That it will still be right when they differ.** Nothing produces a non-uniform height array
 /// yet — the graph editor's band is a later stage — and the whole reason this ships alone is so that
@@ -22,7 +23,6 @@ import CoreGraphics
 /// `testCountingRowsCrossedDependsOnWhichWayTheDragWent` is that fact.
 final class TimelineRowLayoutLogicTests: XCTestCase {
 
-    private let rulerHeight: CGFloat = 18
     private let rowHeight: CGFloat = 34
 
     private func stackRows(_ count: Int) -> [LayerStackRow] {
@@ -30,11 +30,11 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     }
 
     private func uniform(_ count: Int) -> TimelineRowLayout {
-        TimelineRowLayout.make(rows: stackRows(count), rulerHeight: rulerHeight, rowHeight: rowHeight)
+        TimelineRowLayout.make(rows: stackRows(count), rowHeight: rowHeight)
     }
 
     private func layout(_ heights: [CGFloat]) -> TimelineRowLayout {
-        TimelineRowLayout(rulerHeight: rulerHeight, rowHeights: heights, placeholderRowHeight: rowHeight)
+        TimelineRowLayout(rowHeights: heights, placeholderRowHeight: rowHeight)
     }
 
     /// The band under the row presenting layer `layerIndex` — an expansion is addressed by
@@ -52,7 +52,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         let layout = uniform(6)
         for position in 0..<6 {
             XCTAssertEqual(layout.y(ofRow: position),
-                           rulerHeight + CGFloat(position) * (rowHeight + 2) + 4,
+                           CGFloat(position) * (rowHeight + 2) + 4,
                            "row \(position) moved")
             XCTAssertEqual(layout.height(ofRow: position), rowHeight)
         }
@@ -61,7 +61,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     func testUniformContentHeightMatchesTheFormulaItReplaced() {
         for count in 1...8 {
             XCTAssertEqual(uniform(count).contentHeight,
-                           rulerHeight + CGFloat(count) * (rowHeight + 2) + 8,
+                           CGFloat(count) * (rowHeight + 2) + 8,
                            "content height moved at \(count) rows")
         }
     }
@@ -70,7 +70,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     func testAnEmptyStackStillReservesOneRow() {
         let layout = uniform(0)
         XCTAssertEqual(layout.rowCount, 0)
-        XCTAssertEqual(layout.contentHeight, rulerHeight + (rowHeight + 2) + 8)
+        XCTAssertEqual(layout.contentHeight, (rowHeight + 2) + 8)
     }
 
     /// True with the graph editor open as well as closed — the band moves where two strips meet, not
@@ -91,7 +91,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         // …and with the graph editor open under the middle row, where the strips meet inside the
         // band rather than at the row boundary.
         let four = stackRows(4)
-        let expanded = TimelineRowLayout.make(rows: four, rulerHeight: rulerHeight,
+        let expanded = TimelineRowLayout.make(rows: four,
                                               rowHeight: rowHeight,
                                               expansion: band(under: 1, in: four))
         for position in 0..<3 {
@@ -105,11 +105,11 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
 
     func testRowOriginsAreAPrefixSumOfTheHeightsAboveThem() {
         let layout = self.layout([34, 100, 34])
-        XCTAssertEqual(layout.y(ofRow: 0), rulerHeight + 4)
-        XCTAssertEqual(layout.y(ofRow: 1), rulerHeight + 4 + 36)
-        XCTAssertEqual(layout.y(ofRow: 2), rulerHeight + 4 + 36 + 102)
+        XCTAssertEqual(layout.y(ofRow: 0), 4)
+        XCTAssertEqual(layout.y(ofRow: 1), 4 + 36)
+        XCTAssertEqual(layout.y(ofRow: 2), 4 + 36 + 102)
         // One past the last row is legal and is the edge the bottom inset sits below.
-        XCTAssertEqual(layout.y(ofRow: 3), rulerHeight + 4 + 36 + 102 + 36)
+        XCTAssertEqual(layout.y(ofRow: 3), 4 + 36 + 102 + 36)
         XCTAssertEqual(layout.contentHeight, layout.y(ofRow: layout.rowCount) + 4)
     }
 
@@ -245,8 +245,8 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     /// (`TimelineTrackView.relayout`'s `totalHeight`) agreeing, since both read this one number.
     func testOpeningTheBandGrowsOneRowAndTheContentByTheSameAmount() {
         let rows = stackRows(4)
-        let closed = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight)
-        let open = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+        let closed = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight)
+        let open = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight,
                                           expansion: band(under: 2, in: rows))
 
         XCTAssertEqual(open.height(ofRow: 2), rowHeight + 96)
@@ -274,9 +274,9 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     /// What is left here is the half that was doing work: which rows move, and by how much.
     func testOnlyTheRowsBelowTheBandMoveAndTheyMoveByTheBand() {
         let rows = stackRows(5)
-        let open = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+        let open = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight,
                                           expansion: band(under: 1, in: rows))
-        let closed = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight)
+        let closed = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight)
         XCTAssertEqual(open.expandedRow, 1, "Fixture: layer 1 is row 1 in a stack with no folders")
         for position in 0...1 {
             XCTAssertEqual(open.y(ofRow: position), closed.y(ofRow: position),
@@ -294,7 +294,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     /// the key diamonds to the bottom of the band. The track asks for this instead.
     func testTheBlockHalfOfAnExpandedRowIsStillAnOrdinaryRow() {
         let three = stackRows(3)
-        let layout = TimelineRowLayout.make(rows: three, rulerHeight: rulerHeight,
+        let layout = TimelineRowLayout.make(rows: three,
                                             rowHeight: rowHeight,
                                             expansion: band(under: 0, in: three))
         XCTAssertEqual(layout.blockHeight(ofRow: 0), rowHeight,
@@ -310,11 +310,11 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     func testABandOnALayerThatIsNotOnScreenExpandsNothing() {
         let rows: [LayerStackRow] = [.folder(id: UUID(), depth: 0, kind: .group),
                                      .layer(id: UUID(), index: 4, depth: 1)]
-        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+        let layout = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight,
                                             expansion: band(under: 9, in: rows))
         XCTAssertNil(layout.expandedRow)
         XCTAssertEqual(layout.contentHeight,
-                       TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
+                       TimelineRowLayout.make(rows: rows,
                                               rowHeight: rowHeight).contentHeight)
     }
 
@@ -325,7 +325,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         let rows: [LayerStackRow] = [.folder(id: UUID(), depth: 0, kind: .group),
                                      .layer(id: UUID(), index: 1, depth: 1),
                                      .layer(id: UUID(), index: 0, depth: 0)]
-        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+        let layout = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight,
                                             expansion: band(under: 1, in: rows))
         XCTAssertEqual(layout.expandedRow, 1, "The layer, not the folder header above it")
         XCTAssertEqual(layout.height(ofRow: 0), rowHeight)
@@ -340,7 +340,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         let rows: [LayerStackRow] = [.folder(id: folder, depth: 0, kind: .group),
                                      .layer(id: UUID(), index: 1, depth: 1),
                                      .layer(id: UUID(), index: 0, depth: 0)]
-        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+        let layout = TimelineRowLayout.make(rows: rows, rowHeight: rowHeight,
                                             expansion: .init(target: .folder(id: folder), height: 96))
         XCTAssertEqual(layout.expandedRow, 0, "The folder header, not the layer under it")
         XCTAssertEqual(layout.height(ofRow: 0), rowHeight + 96)
@@ -362,7 +362,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     /// unlike leaving the band uncovered it is a decision this file can see.
     func testTheOpenBandIsHalvedBetweenTheTwoLayersItLiesBetween() {
         let three = stackRows(3)
-        let layout = TimelineRowLayout.make(rows: three, rulerHeight: rulerHeight,
+        let layout = TimelineRowLayout.make(rows: three,
                                             rowHeight: rowHeight,
                                             expansion: band(under: 1, in: three))
         let strip = layout.dropBand(ofRow: 1)
@@ -405,7 +405,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         XCTAssertGreaterThan(filled, layout.contentHeight)
         for position in 0...layout.rowCount {
             XCTAssertEqual(layout.y(ofRow: position),
-                           rulerHeight + CGFloat(min(position, layout.rowCount)) * (rowHeight + 2) + 4,
+                           CGFloat(min(position, layout.rowCount)) * (rowHeight + 2) + 4,
                            "row \(position) moved when the track filled its viewport")
         }
         XCTAssertLessThan(layout.y(ofRow: layout.rowCount), filled,
@@ -416,7 +416,7 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
     /// `rowsCrossed` was written for, now with the input that actually produces it.
     func testADragPastTheOpenBandCountsItsRealHeight() {
         let four = stackRows(4)
-        let layout = TimelineRowLayout.make(rows: four, rulerHeight: rulerHeight,
+        let layout = TimelineRowLayout.make(rows: four,
                                             rowHeight: rowHeight,
                                             expansion: band(under: 1, in: four))
         // Row 1 is 130 pt plus the 2 pt gap. Half way over it is 66; a 60 pt drag has not crossed it.

@@ -206,7 +206,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
         let position = try? XCTUnwrap(rows.firstIndex { $0.folderID == folder })
         XCTAssertEqual(position, 0, "PREMISE: the folder is the top row and its layer sits under it")
 
-        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: 18, rowHeight: 34,
+        let layout = TimelineRowLayout.make(rows: rows, rowHeight: 34,
                                             expansion: manager.graphBandExpansion)
         XCTAssertEqual(layout.expandedRow, 0, "The folder's row is the expanded one")
         XCTAssertEqual(layout.expansion(ofRow: 0), band)
@@ -214,7 +214,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
                        "The folder's bar and diamonds keep the block half — the band hangs below")
         XCTAssertEqual(layout.height(ofRow: 0), 34 + band)
         XCTAssertEqual(layout.expansion(ofRow: 1), 0, "The layer inside it is not expanded")
-        XCTAssertEqual(layout.y(ofRow: 1), 18 + TimelineRowLayout.verticalInset + 34 + band
+        XCTAssertEqual(layout.y(ofRow: 1), TimelineRowLayout.verticalInset + 34 + band
                        + TimelineRowLayout.gap,
                        "…and it moved down by exactly one band, because the band arrived above it")
 
@@ -225,8 +225,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
         manager.toggleFolderExpanded(parent)
         XCTAssertFalse(manager.layerStackRows.contains { $0.folderID == folder },
                        "PREMISE: the picked folder is hidden inside its collapsed parent")
-        let hidden = TimelineRowLayout.make(rows: manager.layerStackRows, rulerHeight: 18,
-                                            rowHeight: 34, expansion: manager.graphBandExpansion)
+        let hidden = TimelineRowLayout.make(rows: manager.layerStackRows, rowHeight: 34,
+                                            expansion: manager.graphBandExpansion)
         XCTAssertNil(hidden.expandedRow, "A row that is not on screen is not expanded")
         XCTAssertEqual(manager.graphBandExpansion?.target, target,
                        "…though the pick itself is untouched, so expanding the parent shows the band")

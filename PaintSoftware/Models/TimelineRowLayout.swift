@@ -5,7 +5,7 @@ import CoreGraphics
 /// The timeline draws its rows twice — the pinned name column in `Views/AnimationTimeline.swift` and
 /// the scrolling track in `Views/TimelineTrackView.swift` — from two separate reads of
 /// `CanvasManager.layerStackRows`. The two must agree row for row or a name labels the wrong track,
-/// so the heights are derived **once**, by `make(rows:rulerHeight:rowHeight:expansion:)`, and both
+/// so the heights are derived **once**, by `make(rows:rowHeight:expansion:)`, and both
 /// sides ask this value for the same answers rather than each re-typing the same multiplication.
 ///
 /// **Why this is a type and not arithmetic inside the two views.** Neither view file is compiled into
@@ -41,7 +41,6 @@ struct TimelineRowLayout {
         let height: CGFloat
     }
 
-    let rulerHeight: CGFloat
     /// Top to bottom, one entry per presented row, **including any expansion**. Empty for a stack
     /// with no rows at all.
     let rowHeights: [CGFloat]
@@ -55,14 +54,12 @@ struct TimelineRowLayout {
     let expansionHeight: CGFloat
 
     /// Defaulted so a caller that has no expansion — every test that pins D1's behaviour-neutrality,
-    /// and the layout of a timeline with the band closed — spells the same three arguments it
+    /// and the layout of a timeline with the band closed — spells the same arguments it
     /// always did.
-    init(rulerHeight: CGFloat,
-         rowHeights: [CGFloat],
+    init(rowHeights: [CGFloat],
          placeholderRowHeight: CGFloat,
          expandedRow: Int? = nil,
          expansionHeight: CGFloat = 0) {
-        self.rulerHeight = rulerHeight
         self.rowHeights = rowHeights
         self.placeholderRowHeight = placeholderRowHeight
         self.expandedRow = expandedRow
@@ -78,7 +75,6 @@ struct TimelineRowLayout {
     /// folder — resolves to no row and is ignored, which is the right answer: there is nothing to
     /// open the band under.
     static func make(rows: [LayerStackRow],
-                     rulerHeight: CGFloat,
                      rowHeight: CGFloat,
                      expansion: Expansion? = nil) -> TimelineRowLayout {
         let expandedRow = expansion.flatMap { wanted in
@@ -86,7 +82,6 @@ struct TimelineRowLayout {
         }
         let extra = expandedRow == nil ? 0 : (expansion?.height ?? 0)
         return TimelineRowLayout(
-            rulerHeight: rulerHeight,
             rowHeights: rows.indices.map { $0 == expandedRow ? rowHeight + extra : rowHeight },
             placeholderRowHeight: rowHeight,
             expandedRow: expandedRow,
@@ -122,7 +117,7 @@ struct TimelineRowLayout {
     /// gives the edge just past the last row.
     func y(ofRow position: Int) -> CGFloat {
         let clamped = min(max(position, 0), rowCount)
-        var y = rulerHeight + Self.verticalInset
+        var y = Self.verticalInset
         for index in 0..<clamped { y += rowHeights[index] + Self.gap }
         return y
     }
@@ -157,11 +152,12 @@ struct TimelineRowLayout {
                 top + blockHeight(ofRow: position) + expansion(ofRow: position) / 2 + Self.gap / 2)
     }
 
-    /// The full height of the scrollable content — the ruler, every row and its gap, and the inset
-    /// above the first row and below the last.
+    /// The full height of the scrollable content — every row and its gap, and the inset above the
+    /// first row and below the last. The ruler is not in it: it is the strip pinned above the
+    /// scrolling rows (`TimelineRulerStripView`), so the rows scroll under nothing.
     var contentHeight: CGFloat {
         let heights = rowHeights.isEmpty ? [placeholderRowHeight] : rowHeights
-        return rulerHeight + Self.verticalInset * 2 + heights.reduce(0) { $0 + $1 + Self.gap }
+        return Self.verticalInset * 2 + heights.reduce(0) { $0 + $1 + Self.gap }
     }
 
     /// **The height the track's host takes inside a viewport of `viewportHeight`** — its own content,

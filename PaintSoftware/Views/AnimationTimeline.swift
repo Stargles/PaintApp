@@ -5,7 +5,7 @@ struct AnimationTimeline: View {
     /// How tall the panel is right now. The user sets this by dragging the top bar; it does *not*
     /// grow on its own when layers are added (the tracks scroll instead), so the timeline never
     /// takes canvas space back without being asked.
-    @State private var timelineHeight: CGFloat = 250
+    @State private var timelineHeight: CGFloat = AnimationTimeline.defaultHeight
     /// Height at the start of the current resize drag, so the drag tracks its own translation
     /// rather than accumulating rounding from each `onChanged`.
     @State private var resizeStartHeight: CGFloat?
@@ -14,8 +14,18 @@ struct AnimationTimeline: View {
     /// respects Split View instead of assuming the whole screen.
     var availableHeight: CGFloat = 1024
 
+    /// **How tall the panel opens** — TODO (122), the owner: *"make it around 1.5x taller."* It was 250
+    /// and is 375 with the same chrome above it (grab handle, toolbar, ruler), so the whole of the
+    /// extra 125 pt is rows: about four more layers in view before the tracks scroll. The artist can
+    /// still drag it to anywhere between the collapsed bar and `maxTimelineHeight`.
+    static let defaultHeight: CGFloat = 375
+
     private let rowHeight: CGFloat = 34
+    /// The pinned ruler strip's height, above the scrolling rows.
     private let rulerHeight: CGFloat = 18
+    /// How wide the pinned layer-name column is — which is also how far right the ruler strip starts,
+    /// so a frame's number sits above the frame's column.
+    private let nameColumnWidth: CGFloat = 110
     private let collapsedHeight: CGFloat = 48
     private let minExpandedHeight: CGFloat = 130
     private let dragHandleHeight: CGFloat = 12
@@ -99,6 +109,10 @@ struct AnimationTimeline: View {
     /// anchor is the tapped block, which arrives with the menu request.
     @State private var menuAnchors: [CanvasPresentation: CGRect] = [:]
 
+    /// The ruler pinned above the rows. Held here because SwiftUI places it (`TimelineRulerStrip`) and
+    /// the track drives it (`TimelineTrackView`), and neither can own what the other is handed.
+    @StateObject private var rulerStrip = TimelineRulerStripHost()
+
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyTimeline`.
     /// The split is a wrapper around the unchanged body below it, so nothing about what is
@@ -141,13 +155,22 @@ struct AnimationTimeline: View {
 
             if !isCollapsed {
                 Rectangle().fill(Color.white.opacity(0.15)).frame(height: dividerHeight)
+                // **The ruler is above the vertical scroll, not in it** — TODO (122): with many layers the
+                // frame row has to stay on top while the rows scroll under where it would have been. The
+                // corner above the name column is empty so the strip's first column sits over the
+                // track's.
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: nameColumnWidth)
+                    TimelineRulerStrip(host: rulerStrip)
+                }
+                .frame(height: rulerHeight)
                 ScrollView(.vertical, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 0) {
                         layerNameColumn
                         TimelineTrackView(
                             canvasManager: canvasManager,
                             rowHeight: rowHeight,
-                            rulerHeight: rulerHeight,
+                            rulerStrip: rulerStrip.view,
                             onRequestMenu: { request, anchor in
                                 timelineMenu = (request, anchor)
                             },
@@ -168,8 +191,9 @@ struct AnimationTimeline: View {
                 .frame(height: trackViewportHeight)
             }
         }
-        .frame(height: timelineHeight)
+        .frame(height: panelHeight)
         .background(Color.black)
+        .background(panelFrameProbe)
         // Collected from the controls themselves rather than computed here, so a menu cannot end up
         // hanging off a position layout no longer agrees with.
         .onPreferenceChange(AnchoredMenuAnchorKey.self) { menuAnchors = $0 }
@@ -256,7 +280,6 @@ struct AnimationTimeline: View {
     /// where a row starts or how tall it is.
     private var rowLayout: TimelineRowLayout {
         TimelineRowLayout.make(rows: canvasManager.layerStackRows,
-                               rulerHeight: rulerHeight,
                                rowHeight: rowHeight,
                                // The graph editor band grows the row it opens under, so this column
                                // has to take the same growth or every name below it would label the
@@ -265,9 +288,28 @@ struct AnimationTimeline: View {
                                expansion: canvasManager.graphBandExpansion)
     }
 
-    /// How much of the panel is left for the tracks once the chrome above them has taken its share.
+    /// How tall the panel is drawn: what the artist has dragged it to, and never taller than the canvas
+    /// can spare. The larger default (`defaultHeight`) can exceed that in a short window, and the
+    /// window can shrink under a panel that was already open, so the bound is applied where the height
+    /// is *used* and not only while a drag is in flight (`clampedHeight`).
+    private var panelHeight: CGFloat {
+        isCollapsed ? timelineHeight : min(timelineHeight, maxTimelineHeight)
+    }
+
+    /// The panel's own frame, for a test to read — `BottomDock`'s `bottomDock.card` device, for its
+    /// reason: a container identifier would report the union of its children's frames and stamp itself
+    /// onto them, so this is a separate, empty, untouchable element the panel's own size.
+    private var panelFrameProbe: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityIdentifier("timeline.panel")
+    }
+
+    /// How much of the panel is left for the rows once the chrome above them — the grab handle, the
+    /// toolbar, the pinned ruler — has taken its share.
     private var trackViewportHeight: CGFloat {
-        max(0, timelineHeight - topBarHeight - dividerHeight)
+        max(0, panelHeight - topBarHeight - dividerHeight - rulerHeight)
     }
 
     // MARK: - Menus
@@ -1392,7 +1434,6 @@ struct AnimationTimeline: View {
         let layout = rowLayout
         let liftedFrom = draggingRowID.flatMap { id in rows.firstIndex { $0.id == id } }
         return VStack(alignment: .leading, spacing: TimelineRowLayout.gap) {
-            Color.clear.frame(height: rulerHeight)
             ForEach(Array(rows.enumerated()), id: \.element.id) { position, row in
                 let isLifted = draggingRowID == row.id
                 nameRow(row)
@@ -1425,7 +1466,7 @@ struct AnimationTimeline: View {
                     .gesture(reorderGesture(for: row, at: position, in: layout))
             }
         }
-        .frame(width: 110)
+        .frame(width: nameColumnWidth)
         .padding(.vertical, TimelineRowLayout.verticalInset)
     }
 

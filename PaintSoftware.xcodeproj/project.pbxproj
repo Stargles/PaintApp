@@ -514,6 +514,14 @@
 		9380BCFCF1D23885509B796E /* CanvasTouchSettleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */; };
 		7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */; };
 		2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */; };
+		7448FF7B2B8CF5BAF87B8257 /* TimelineZoomPanUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5760D363254C97661D9A8DD2 /* TimelineZoomPanUITests.swift */; };
+		165452FDC5824EFE48B88308 /* ViewportAnchorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45EB6D54AEC6AE783758CE2C /* ViewportAnchorLogicTests.swift */; };
+		AED8CB35A259338AC7B45B4C /* TimelineZoomGestureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CFB81E1328C8D7E76CA1979 /* TimelineZoomGestureLogicTests.swift */; };
+		BCDD705786E9F0A1CA26661B /* TimelineRulerLabelsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C473FA2125063A61CF4DD9 /* TimelineRulerLabelsLogicTests.swift */; };
+		54E531892C876112F81D857E /* PaintSoftware/Models/ViewportAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F1EED14F4D2B0F7BBDDFE3 /* PaintSoftware/Models/ViewportAnchor.swift */; };
+		5AA5F5A6E53AFF6DFE806BDA /* PaintSoftware/Models/TimelineZoomGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6ED26E0C5533935A0873132 /* PaintSoftware/Models/TimelineZoomGesture.swift */; };
+		EC6A1FF0CBC7C61944BDB78C /* PaintSoftware/Models/TimelineRulerLabels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD832AEB6F3C908553BEA9C /* PaintSoftware/Models/TimelineRulerLabels.swift */; };
+		B75C30A58272ECFCF4AB6451 /* TimelineRulerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1036,6 +1044,14 @@
 		DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchSettleLogicTests.swift; sourceTree = "<group>"; };
 		560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchSettle.swift; sourceTree = "<group>"; };
 		BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PrecisionDrag.swift; sourceTree = "<group>"; };
+		5760D363254C97661D9A8DD2 /* TimelineZoomPanUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineZoomPanUITests.swift; sourceTree = "<group>"; };
+		45EB6D54AEC6AE783758CE2C /* ViewportAnchorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewportAnchorLogicTests.swift; sourceTree = "<group>"; };
+		3CFB81E1328C8D7E76CA1979 /* TimelineZoomGestureLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineZoomGestureLogicTests.swift; sourceTree = "<group>"; };
+		25C473FA2125063A61CF4DD9 /* TimelineRulerLabelsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRulerLabelsLogicTests.swift; sourceTree = "<group>"; };
+		E5F1EED14F4D2B0F7BBDDFE3 /* PaintSoftware/Models/ViewportAnchor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ViewportAnchor.swift; sourceTree = "<group>"; };
+		D6ED26E0C5533935A0873132 /* PaintSoftware/Models/TimelineZoomGesture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineZoomGesture.swift; sourceTree = "<group>"; };
+		5FD832AEB6F3C908553BEA9C /* PaintSoftware/Models/TimelineRulerLabels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineRulerLabels.swift; sourceTree = "<group>"; };
+		9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRulerUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1311,6 +1327,11 @@
 				79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */,
 				59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */,
 				D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */,
+				9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */,
+				25C473FA2125063A61CF4DD9 /* TimelineRulerLabelsLogicTests.swift */,
+				3CFB81E1328C8D7E76CA1979 /* TimelineZoomGestureLogicTests.swift */,
+				45EB6D54AEC6AE783758CE2C /* ViewportAnchorLogicTests.swift */,
+				5760D363254C97661D9A8DD2 /* TimelineZoomPanUITests.swift */,
 				CA475F6560EC749C93FEA97B /* FrameRateLogicTests.swift */,
 				B4CD6ABDB7096FF3A9B09CBB /* FrameRateUITests.swift */,
 				B339843FABBE705385008EA5 /* RecordingUITests.swift */,
@@ -1548,6 +1569,9 @@
 				DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */,
 				DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */,
 				0C56EB43F3D9DC0479334BA0 /* PaintSoftware/Models/TimelineTrackExtent.swift */,
+				5FD832AEB6F3C908553BEA9C /* PaintSoftware/Models/TimelineRulerLabels.swift */,
+				D6ED26E0C5533935A0873132 /* PaintSoftware/Models/TimelineZoomGesture.swift */,
+				E5F1EED14F4D2B0F7BBDDFE3 /* PaintSoftware/Models/ViewportAnchor.swift */,
 				DEC0DE000000000000000038 /* PaintSoftware/Models/Cel.swift */,
 				DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */,
 				DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */,
@@ -1958,7 +1982,15 @@
 				5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */,
 				7F7DD44DF253A841FA517F3C /* PaintSoftware/Models/TimelineRowLayout.swift in Sources */,
 				E87773AFEF75BC5112E34D93 /* PaintSoftware/Models/TimelineTrackExtent.swift in Sources */,
+				EC6A1FF0CBC7C61944BDB78C /* PaintSoftware/Models/TimelineRulerLabels.swift in Sources */,
+				5AA5F5A6E53AFF6DFE806BDA /* PaintSoftware/Models/TimelineZoomGesture.swift in Sources */,
+				54E531892C876112F81D857E /* PaintSoftware/Models/ViewportAnchor.swift in Sources */,
 				AF2241D8EDE8331362C8AA0A /* TimelineKeyMarkersLogicTests.swift in Sources */,
+				B75C30A58272ECFCF4AB6451 /* TimelineRulerUITests.swift in Sources */,
+				BCDD705786E9F0A1CA26661B /* TimelineRulerLabelsLogicTests.swift in Sources */,
+				AED8CB35A259338AC7B45B4C /* TimelineZoomGestureLogicTests.swift in Sources */,
+				165452FDC5824EFE48B88308 /* ViewportAnchorLogicTests.swift in Sources */,
+				7448FF7B2B8CF5BAF87B8257 /* TimelineZoomPanUITests.swift in Sources */,
 				D4131E5DBCF5534AAE2EE064 /* FrameRateLogicTests.swift in Sources */,
 				E5990596B38859687E6F2808 /* FrameRateUITests.swift in Sources */,
 				2F5EAEC5FF24B3D506A56028 /* RecordingUITests.swift in Sources */,

@@ -68,7 +68,6 @@ final class TimelineGraphChannelListLogicTests: XCTestCase {
                                contentWidth: 720,
                                contentHeight: 200,
                                rowHeight: 34,
-                               rulerHeight: 18,
                                drag: nil)
     }
 

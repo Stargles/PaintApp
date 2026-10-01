@@ -26,7 +26,6 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                      contentWidth: CGFloat = 720,
                      contentHeight: CGFloat = 200,
                      rowHeight: CGFloat = 34,
-                     rulerHeight: CGFloat = 18,
                      drag: TimelineLayoutKey.DragKey? = nil) -> TimelineLayoutKey {
         TimelineLayoutKey.make(canvasManager: manager,
                                stackRows: manager.layerStackRows,
@@ -35,7 +34,6 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                                contentWidth: contentWidth,
                                contentHeight: contentHeight,
                                rowHeight: rowHeight,
-                               rulerHeight: rulerHeight,
                                drag: drag)
     }
 
@@ -172,6 +170,13 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         XCTAssertNotEqual(before, key(m), "The loop band is drawn on the ruler")
     }
 
+    func testChangingTheFrameRateMovesTheKey() {
+        let m = manager()
+        let before = key(m)
+        m.fps = before.framesPerSecond == 12 ? 24 : 12
+        XCTAssertNotEqual(before, key(m), "A zoomed-out ruler labels seconds, and a second is `fps` frames")
+    }
+
     func testZoomingTheTrackMovesTheKey() {
         let m = manager()
         XCTAssertNotEqual(key(m, pixelsPerFrame: 30), key(m, pixelsPerFrame: 45),
@@ -191,7 +196,6 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         XCTAssertNotEqual(key(m, contentHeight: 200), key(m, contentHeight: 260),
                           "Dragging the panel's grab handle changes how far the content fills, and nothing else moves with it")
         XCTAssertNotEqual(key(m, rowHeight: 34), key(m, rowHeight: 40))
-        XCTAssertNotEqual(key(m, rulerHeight: 18), key(m, rulerHeight: 24))
     }
 
     /// A drag repositions every *other* block in the row to preview the gap, so the whole preview

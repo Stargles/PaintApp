@@ -146,8 +146,11 @@ struct TimelineLayoutKey: Equatable {
     /// already in the key; `graphBand` below is the input that broke that, and it is in the key for
     /// exactly this reason (KEYFRAMES.md §11.2).
     let rowHeight: CGFloat
-    let rulerHeight: CGFloat
     let loopRange: ClosedRange<Int>?
+    /// **The ruler labels seconds from this when it is zoomed out** (`TimelineRulerLabels`), so a frame
+    /// rate change moves what it draws without moving a single block — and the gate would otherwise
+    /// leave the ruler writing the old seconds.
+    let framesPerSecond: Int
 
     /// **The graph editor band: which row it expands, by how much, and every curve it draws.**
     ///
@@ -201,7 +204,6 @@ extension TimelineLayoutKey {
                      contentWidth: CGFloat,
                      contentHeight: CGFloat,
                      rowHeight: CGFloat,
-                     rulerHeight: CGFloat,
                      drag: DragKey?) -> TimelineLayoutKey {
         var tracks: [[CelKey]] = []
         var trackMarkers: [[Int]] = []
@@ -253,8 +255,8 @@ extension TimelineLayoutKey {
             contentWidth: contentWidth,
             contentHeight: contentHeight,
             rowHeight: rowHeight,
-            rulerHeight: rulerHeight,
             loopRange: loopRange,
+            framesPerSecond: canvasManager.fps,
             graphBand: canvasManager.graphBandContent,
             isInterpolateMode: canvasManager.isInterpolateMode,
             interpolationReferences: canvasManager.isInterpolateMode ? canvasManager.interpolationReferences : [],
