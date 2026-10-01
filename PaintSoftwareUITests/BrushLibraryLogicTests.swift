@@ -39,17 +39,146 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// because §8.3 gates CC0 sourcing on a per-file licence check; §13 asked whether the generator
     /// made that unnecessary and round four's contact sheet answered yes, so the four are generated
     /// like every other tip and the count is four rather than zero.
+    ///
+    /// **Favourites heads the list and owns none of them** (TODO (111)): it is a reference group, so
+    /// the twenty are still twenty and each is still in the group it was authored into.
     func testAFreshLibrarySeedsTheShippedGroupsAndTheirBrushes() {
         let store = makeStore()
         XCTAssertEqual(store.groups.map(\.name),
-                       ["Basics", "Sketching", "Inking", "Painting", "Texture"])
-        XCTAssertEqual(store.groups.map(\.brushes.count), [5, 4, 4, 3, 4])
+                       ["Favourites", "Basics", "Sketching", "Inking", "Painting", "Texture"])
+        XCTAssertEqual(store.groups.map(\.brushes.count), [0, 5, 4, 4, 3, 4])
         XCTAssertEqual(store.allBrushes.count, 20)
         XCTAssertEqual(store.allBrushes.count, BrushLibrary.defaults.count)
         XCTAssertEqual(Set(store.allBrushes.map(\.id)).count, 20,
                        "twenty written-down ids, and no two the same — a collision makes the "
                        + "picker highlight two rows and `update(_:)` write to one of them")
-        XCTAssertEqual(Set(store.groups.map(\.id)).count, 5)
+        XCTAssertEqual(Set(store.groups.map(\.id)).count, 6)
+    }
+
+    // MARK: - Favourites (TODO (111))
+
+    private var favouriteNames: [String] { ["Rough Ink", "Technical Pen — Fine", "Round Soft", "Opaque Round", "Round Hard"] }
+
+    private func favourites(_ store: BrushLibraryStore) throws -> BrushGroup {
+        try XCTUnwrap(store.groups.first { $0.id == BrushLibrary.GroupID.favourites }, "the library has no Favourites group")
+    }
+
+    /// **The owner's five, in the order they named them** — *"favorite Rough Ink, Technical Pen - Fine,
+    /// round soft, opaque round, and round hard."* Spelled out as names rather than derived from
+    /// `BrushLibrary.favouritesGroup`, which would be the seed compared with itself.
+    func testAFreshLibraryHasTheOwnersFiveFavouritesInTheirOrder() throws {
+        let store = makeStore()
+        let group = try favourites(store)
+        XCTAssertEqual(store.brushes(in: group).map(\.name), favouriteNames)
+        XCTAssertTrue(group.brushes.isEmpty, "Favourites owns nothing")
+        XCTAssertTrue(group.isReferenceGroup)
+        XCTAssertEqual(store.group(containingBrush: BrushLibrary.roughInk.id)?.name, "Inking",
+                       "a favourite is still owned by the group it was authored into")
+    }
+
+    /// **A favourite is the brush itself, not a copy** — the reason Favourites lists ids. Tune Rough
+    /// Ink and the one in Favourites is the tuned one, with nothing to keep in step; and what the
+    /// library holds of it is still one brush.
+    func testEditingABrushIsEditingItsFavourite() throws {
+        let store = makeStore()
+        var tuned = BrushLibrary.roughInk
+        tuned.size = 7.5
+        store.update(tuned)
+
+        let shown = try XCTUnwrap(store.brushes(in: try favourites(store)).first)
+        XCTAssertEqual(shown.id, BrushLibrary.roughInk.id)
+        XCTAssertEqual(shown.size, 7.5, "the favourite shows the edited brush")
+        XCTAssertEqual(store.allBrushes.filter { $0.id == tuned.id }.count, 1)
+    }
+
+    /// Favouriting is a membership edit and nothing else: the brush does not move, the order is the
+    /// order they were added in, and the list survives a relaunch.
+    func testFavouritingAndUnfavouritingEditOnlyTheList() throws {
+        let store = makeStore()
+        XCTAssertFalse(store.isFavourite(BrushLibrary.square.id))
+
+        store.setFavourite(BrushLibrary.square.id, true)
+        store.setFavourite(BrushLibrary.square.id, true)
+        XCTAssertTrue(store.isFavourite(BrushLibrary.square.id))
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name), favouriteNames + ["Square"],
+                       "added at the end, and once however many times it is asked for")
+        XCTAssertEqual(store.group(containingBrush: BrushLibrary.square.id)?.name, "Basics")
+
+        store.setFavourite(BrushLibrary.roundSoft.id, false)
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name),
+                       ["Rough Ink", "Technical Pen — Fine", "Opaque Round", "Round Hard", "Square"])
+        XCTAssertNotNil(store.brush(withID: BrushLibrary.roundSoft.id), "unfavourited is not deleted")
+
+        store.setFavourite(UUID(), true)
+        XCTAssertEqual(try favourites(store).memberIDs?.count, 5, "a brush the library does not hold is refused")
+
+        XCTAssertEqual(store.brushes(in: try favourites(makeStore())).map(\.name),
+                       ["Rough Ink", "Technical Pen — Fine", "Opaque Round", "Round Hard", "Square"],
+                       "…and the list is what a relaunch reads")
+    }
+
+    /// Deleting a brush takes it off the list; *moving* one between groups does not, because a move is
+    /// the same brush in another place.
+    func testDeletingABrushLeavesFavouritesAndMovingItDoesNot() throws {
+        let store = makeStore()
+        let comics = store.addGroup(name: "Comics")
+        store.add(BrushLibrary.roughInk, toGroup: comics.id)
+        XCTAssertTrue(store.isFavourite(BrushLibrary.roughInk.id), "a move leaves the favourite where it was")
+
+        XCTAssertTrue(store.remove(brushID: BrushLibrary.roughInk.id))
+        XCTAssertFalse(store.isFavourite(BrushLibrary.roughInk.id))
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name), Array(favouriteNames.dropFirst()))
+    }
+
+    /// A brush "added" to Favourites lands in a group that can own it — the last that can — and the
+    /// reference group stays a list.
+    func testAddingABrushNamingFavouritesLandsInAGroupThatCanOwnIt() throws {
+        let store = makeStore()
+        let newBrush = Brush(name: "Fresh", tip: .round, size: 12)
+        let landed = store.add(newBrush, toGroup: BrushLibrary.GroupID.favourites)
+
+        XCTAssertEqual(store.groups.first { $0.id == landed }?.name, "Texture")
+        XCTAssertTrue(try favourites(store).brushes.isEmpty)
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name), favouriteNames)
+    }
+
+    /// **A library saved before Favourites gets the folder once, and keeps it only if the artist does.**
+    /// The bytes are typed, version 1, with one of the five brushes in it under the id the shipped
+    /// set gave it and one of their own. Favourites names only what the library holds.
+    func testAVersionOneLibraryGainsFavouritesOnceAndADeletedOneStaysDeleted() throws {
+        let json = """
+        {
+          "version" : 1,
+          "groups" : [
+            {
+              "id" : "88888888-0000-4000-B000-000000000001",
+              "name" : "Mine",
+              "brushes" : [
+                { "id" : "B7051000-0000-4000-A000-000000000011", "name" : "Round Soft",
+                  "tip" : { "kind" : "round" }, "size" : 20, "opacity" : 1 },
+                { "id" : "88888888-0000-4000-A000-000000000002", "name" : "My Nib",
+                  "tip" : { "kind" : "round" }, "size" : 9, "opacity" : 1 }
+              ]
+            }
+          ]
+        }
+        """
+        try Data(json.utf8).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
+
+        let store = makeStore()
+        XCTAssertEqual(store.groups.map(\.name), ["Favourites", "Mine"])
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name), ["Round Soft"],
+                       "only the shipped favourites this library holds — the four it lacks are not brought back")
+
+        // The artist deletes it; the write is a version-2 file, which is not given Favourites again.
+        XCTAssertTrue(store.removeGroup(BrushLibrary.GroupID.favourites))
+        XCTAssertEqual(makeStore().groups.map(\.name), ["Mine"], "a deleted Favourites stays deleted")
+
+        // …and favouriting something makes it again, at the head.
+        let again = makeStore()
+        again.setFavourite(BrushLibrary.roundSoft.id, true)
+        XCTAssertEqual(again.groups.map(\.name), ["Favourites", "Mine"])
+        XCTAssertEqual(again.brushes(in: try favourites(again)).map(\.name), ["Round Soft"])
     }
 
     /// **Every shipped preset's tip resolves to a mask that is actually in the bundle.**
@@ -136,19 +265,19 @@ final class BrushLibraryLogicTests: XCTestCase {
 
     func testRenamingAGroupKeepsItsIdentityAndItsBrushes() throws {
         let store = makeStore()
-        let id = try XCTUnwrap(store.groups.first).id
+        let id = BrushLibrary.GroupID.basics
         store.renameGroup(id, to: "Everyday")
-        XCTAssertEqual(store.groups.first?.name, "Everyday")
-        XCTAssertEqual(store.groups.first?.id, id, "A rename is not a new group")
-        XCTAssertEqual(store.groups.first?.brushes.count, 5)
+        let renamed = try XCTUnwrap(store.groups.first { $0.id == id }, "A rename is not a new group")
+        XCTAssertEqual(renamed.name, "Everyday")
+        XCTAssertEqual(renamed.brushes.count, 5)
     }
 
     /// An empty rename is refused rather than applied: a group with no name is a row an artist cannot
     /// aim at, and the alert's Cancel is already the way to change nothing.
     func testAnEmptyRenameIsRefused() throws {
         let store = makeStore()
-        store.renameGroup(try XCTUnwrap(store.groups.first).id, to: "   ")
-        XCTAssertEqual(store.groups.first?.name, "Basics")
+        store.renameGroup(BrushLibrary.GroupID.basics, to: "   ")
+        XCTAssertEqual(store.groups.first { $0.id == BrushLibrary.GroupID.basics }?.name, "Basics")
     }
 
     /// The last group cannot be deleted. With no groups there is no column, and the `+` that would
@@ -199,7 +328,7 @@ final class BrushLibraryLogicTests: XCTestCase {
     func testALibraryWrittenDownInThisSourceDecodesToTheGroupsItNames() throws {
         let json = """
         {
-          "version" : 1,
+          "version" : 2,
           "groups" : [
             {
               "id" : "B7051000-0000-4000-B000-000000000001",
@@ -262,7 +391,7 @@ final class BrushLibraryLogicTests: XCTestCase {
     func testALibraryInTodaysFormatIsUntouchedByTheTwoMigrations() throws {
         let json = """
         {
-          "version" : 1,
+          "version" : 2,
           "groups" : [
             {
               "id" : "77777777-0000-4000-B000-000000000001",
@@ -322,7 +451,7 @@ final class BrushLibraryLogicTests: XCTestCase {
         var expected: [String] = []
         do {
             let first = makeStore()
-            first.renameGroup(try XCTUnwrap(first.groups.first).id, to: "Everyday")
+            first.renameGroup(BrushLibrary.GroupID.basics, to: "Everyday")
             let comics = first.addGroup(name: "Comics")
             first.add(custom, toGroup: comics.id)
             expected = first.groups.map(\.name)
@@ -330,7 +459,8 @@ final class BrushLibraryLogicTests: XCTestCase {
 
         let relaunched = makeStore()
         XCTAssertEqual(relaunched.groups.map(\.name), expected)
-        XCTAssertEqual(expected.first, "Everyday")
+        XCTAssertEqual(expected.first, "Favourites")
+        XCTAssertEqual(expected.dropFirst().first, "Everyday")
         XCTAssertEqual(expected.last, "Comics")
         // `dropFirst().first`, not `[1]`: when this test caught a mutation that stopped the store
         // writing, an index would have trapped and taken the whole class down with it — a red test
@@ -439,7 +569,11 @@ final class BrushLibraryLogicTests: XCTestCase {
         try Data(contentsOf: url).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
 
         let store = makeStore()
-        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Sketching", "Inking", "Painting", "Texture"])
+        XCTAssertEqual(store.groups.map(\.name),
+                       ["Favourites", "Basics", "Sketching", "Inking", "Painting", "Texture"],
+                       "their file predates Favourites, so it is given the folder, ahead of their five")
+        XCTAssertEqual(store.brushes(in: try favourites(store)).map(\.name), favouriteNames,
+                       "…holding all five of the brushes they have, tuned Rough Ink included")
         XCTAssertEqual(store.allBrushes.count, 16,
                        "their sixteen, not §8.6's twenty — their file predates the Texture group, and "
                        + "an empty Texture group is how you tell the two apart")

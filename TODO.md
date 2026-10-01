@@ -300,11 +300,6 @@ the drawings."*
 and end of those brushes are messy. I have left a recording to prove this ending in 02122, 50kb."* The
 recording is `recording-20261001-002122.jsonl`, pulled to `~/PaintWork/evidence/`.
 
-## (111) A Favourites brush folder
-
-**Status** — not started. *"Add a brush favorites folder and favorite Rough Ink, Technical Pen - Fine,
-round soft, opaque round, and round hard."*
-
 ---
 
 ## (27) Stream the computer's screen as a layer

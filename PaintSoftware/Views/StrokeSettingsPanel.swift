@@ -221,7 +221,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
             openGroupID = group.id
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "folder")
+                Image(systemName: group.isReferenceGroup ? "star" : "folder")
                     .font(.caption)
                     .foregroundColor(isOpen ? .blue : .white.opacity(0.7))
                 Text(group.name)
@@ -246,11 +246,14 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
             // synchronously on open is a defect"*. `BrushPreviewRow` then takes its own render off
             // the main thread; the two together are what keep opening the menu free.
             LazyVStack(spacing: 0) {
-                ForEach(openGroup?.brushes ?? []) { candidate in
+                let shown = openGroup.map(library.brushes(in:)) ?? []
+                ForEach(shown) { candidate in
                     brushRow(candidate)
                 }
-                if openGroup?.brushes.isEmpty ?? true {
-                    Text("No brushes in this group yet — add one with +")
+                if shown.isEmpty {
+                    Text(openGroup?.isReferenceGroup == true
+                         ? "No favourites yet — press and hold a brush to add it"
+                         : "No brushes in this group yet — add one with +")
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.leading)
@@ -292,6 +295,18 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
         }
         .accessibilityIdentifier("\(spec.idPrefix).brush.\(candidate.name)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        // **Press and hold, because a tap is already two verbs** (select, then edit — §2.20). The one
+        // action on the menu is the Favourites list's own: it is the same brush from a second place
+        // (`BrushGroup`'s doc), so there is nothing to confirm and nothing it can lose.
+        .contextMenu {
+            let isFavourite = library.isFavourite(candidate.id)
+            Button {
+                library.setFavourite(candidate.id, !isFavourite)
+            } label: {
+                Label(isFavourite ? "Remove from Favourites" : "Add to Favourites",
+                      systemImage: isFavourite ? "star.slash" : "star")
+            }
+        }
     }
 }
 

@@ -69,7 +69,7 @@ final class BrushLibraryStore: ObservableObject {
             let decoded = try JSONDecoder().decode(BrushLibraryDocument.self, from: data)
             // An empty file is a library the artist could not add to and could not pick from, so it
             // is treated as absent rather than honoured.
-            return decoded.groups.isEmpty ? BrushLibraryDocument.seeded.groups : decoded.groups
+            return decoded.groups.isEmpty ? BrushLibraryDocument.seeded.groups : decoded.groupsAtCurrentVersion
         } catch {
             let kept = preserve(data, in: storage)
             log.error("The brush library could not be read and was reseeded; the bytes were kept as \(kept ?? "nothing — the copy failed", privacy: .public): \(String(describing: error), privacy: .public)")
@@ -162,6 +162,14 @@ final class BrushLibraryStore: ObservableObject {
         groups.first { $0.brushes.contains { $0.id == id } }
     }
 
+    /// The brushes a group shows, in its own order: the ones it owns, or — for a reference group —
+    /// each listed id resolved to the library's current value of that brush. An id the library no
+    /// longer holds shows nothing rather than a hole.
+    func brushes(in group: BrushGroup) -> [Brush] {
+        guard let memberIDs = group.memberIDs else { return group.brushes }
+        return memberIDs.compactMap(brush(withID:))
+    }
+
     /// The group the menu should open on for a given selection: the one holding it, else the first.
     func groupToOpen(forSelected id: UUID?) -> BrushGroup? {
         if let id, let owner = group(containingBrush: id) { return owner }
@@ -216,23 +224,25 @@ final class BrushLibraryStore: ObservableObject {
 
     // MARK: - Brushes
 
-    /// Adds a brush to a group — the named one, else the last, else a freshly made one.
+    /// Adds a brush to a group — the named one, else the last that owns brushes, else a freshly made
+    /// one. A reference group cannot be named: it owns nothing, so a brush "added" to Favourites lands
+    /// where an unnamed add would, and the menu opens onto wherever that is.
     ///
     /// Returns the group it landed in, which is what the menu opens onto so the artist sees what
     /// they just imported instead of having to find it.
     @discardableResult
     func add(_ brush: Brush, toGroup groupID: UUID? = nil) -> UUID {
         let index: Int
-        if let groupID, let found = groups.firstIndex(where: { $0.id == groupID }) {
+        if let groupID, let found = groups.firstIndex(where: { $0.id == groupID && !$0.isReferenceGroup }) {
             index = found
-        } else if !groups.isEmpty {
-            index = groups.count - 1
+        } else if let last = groups.lastIndex(where: { !$0.isReferenceGroup }) {
+            index = last
         } else {
             groups.append(BrushGroup(name: "Brushes"))
-            index = 0
+            index = groups.count - 1
         }
         // A brush id lives in at most one group, so an add of something already held is a move.
-        remove(brushID: brush.id)
+        detach(brushID: brush.id)
         let landing = groups.indices.contains(index) ? index : groups.count - 1
         groups[landing].brushes.append(brush)
         return groups[landing].id
@@ -283,8 +293,20 @@ final class BrushLibraryStore: ObservableObject {
         return "\(name) \(suffix)"
     }
 
+    /// Deletes a brush from the library — from the group that owns it and from every reference group
+    /// that listed it.
     @discardableResult
     func remove(brushID: UUID) -> Bool {
+        for index in groups.indices where groups[index].isReferenceGroup {
+            groups[index].memberIDs?.removeAll { $0 == brushID }
+        }
+        return detach(brushID: brushID)
+    }
+
+    /// Takes a brush out of the group that owns it and leaves every reference to it alone — what a
+    /// move is, as opposed to a deletion.
+    @discardableResult
+    private func detach(brushID: UUID) -> Bool {
         for groupIndex in groups.indices {
             if let brushIndex = groups[groupIndex].brushes.firstIndex(where: { $0.id == brushID }) {
                 groups[groupIndex].brushes.remove(at: brushIndex)
@@ -292,6 +314,33 @@ final class BrushLibraryStore: ObservableObject {
             }
         }
         return false
+    }
+
+    // MARK: - Favourites
+
+    /// Whether a brush is listed in the Favourites group.
+    func isFavourite(_ brushID: UUID) -> Bool {
+        groups.first { $0.id == BrushLibrary.GroupID.favourites }?.memberIDs?.contains(brushID) ?? false
+    }
+
+    /// Lists a brush in Favourites, or takes it off the list — the brush itself is untouched either
+    /// way. A brush the library does not hold is refused, so a list never names something with no row
+    /// to show. If the artist has deleted the Favourites group, favouriting makes a fresh one at the
+    /// head of the menu.
+    func setFavourite(_ brushID: UUID, _ isFavourite: Bool) {
+        if isFavourite {
+            guard brush(withID: brushID) != nil else { return }
+            if let index = groups.firstIndex(where: { $0.id == BrushLibrary.GroupID.favourites }) {
+                guard groups[index].memberIDs?.contains(brushID) != true else { return }
+                groups[index].memberIDs = (groups[index].memberIDs ?? []) + [brushID]
+            } else {
+                groups.insert(BrushGroup(id: BrushLibrary.GroupID.favourites,
+                                         name: uniqueGroupName(from: BrushLibrary.favouritesGroup.name),
+                                         memberIDs: [brushID]), at: 0)
+            }
+        } else if let index = groups.firstIndex(where: { $0.id == BrushLibrary.GroupID.favourites }) {
+            groups[index].memberIDs?.removeAll { $0 == brushID }
+        }
     }
 
     /// Takes in brushes a project restored that this device's library has never seen — a file made
@@ -302,7 +351,7 @@ final class BrushLibraryStore: ObservableObject {
     func adopt(_ brushes: [Brush], intoGroupNamed name: String) {
         let unknown = brushes.filter { brush in !groups.contains { $0.brushes.contains { $0.id == brush.id } } }
         guard !unknown.isEmpty else { return }
-        if let index = groups.firstIndex(where: { $0.name == name }) {
+        if let index = groups.firstIndex(where: { $0.name == name && !$0.isReferenceGroup }) {
             groups[index].brushes.append(contentsOf: unknown)
         } else {
             groups.append(BrushGroup(name: name, brushes: unknown))

@@ -492,6 +492,7 @@ enum BrushLibrary {
     /// moment the library is first saved, so a minted one would make the seeded groups' identity
     /// depend on which launch happened to write the file.
     enum GroupID {
+        static let favourites = UUID(uuidString: "B7051000-0000-4000-B000-000000000006")!
         static let basics = UUID(uuidString: "B7051000-0000-4000-B000-000000000001")!
         static let sketching = UUID(uuidString: "B7051000-0000-4000-B000-000000000002")!
         static let inking = UUID(uuidString: "B7051000-0000-4000-B000-000000000003")!
@@ -499,7 +500,7 @@ enum BrushLibrary {
         static let texture = UUID(uuidString: "B7051000-0000-4000-B000-000000000005")!
     }
 
-    /// **§8.6's five groups, in the owner's own order.**
+    /// **§8.6's five groups, in the owner's own order, under the Favourites folder.**
     ///
     /// **Texture is full now, and it cost no licence.** It shipped empty at §12 stage 9 because §8.3
     /// gates CC0 sourcing on a per-file check nobody had done; §13 asked whether the generator could
@@ -509,6 +510,7 @@ enum BrushLibrary {
     /// Erasers are not a group: the eraser **is** a brush (§11), so every one of these erases
     /// already.
     static let groups: [BrushGroup] = [
+        favouritesGroup,
         BrushGroup(id: GroupID.basics, name: "Basics",
                    brushes: [roundSoft, opaqueRound, roundHard, square, messyFlat]),
         BrushGroup(id: GroupID.sketching, name: "Sketching",
@@ -520,6 +522,14 @@ enum BrushLibrary {
         BrushGroup(id: GroupID.texture, name: "Texture",
                    brushes: [grunge, splatter, stipple, chalk])
     ]
+
+    /// **The Favourites folder, first in the menu, and the owner's five** — TODO (111): *"favorite Rough
+    /// Ink, Technical Pen - Fine, round soft, opaque round, and round hard."* In their order. A
+    /// reference group (`BrushGroup`'s doc): it lists these brushes by id and owns none of them, so the
+    /// twenty above are still twenty and each is still in the group it was authored into.
+    static let favouritesGroup = BrushGroup(
+        id: GroupID.favourites, name: "Favourites",
+        memberIDs: [roughInk.id, technicalPenFine.id, roundSoft.id, opaqueRound.id, roundHard.id])
 
     /// Every shipped brush, in menu order. Derived from `groups` rather than written twice — a
     /// second list is how a brush ends up pickable and ungrouped, or grouped and unpickable.

@@ -2152,6 +2152,17 @@ brush id lives in at most one group**, so adding a brush to a second group moves
 duplicating it. TODO (30)'s document-organising observation is untouched by this — it may still want the
 layer tree, and it should be checked against the code the same way.
 
+**Favourites is a *reference group*, and that leaves the invariant above standing** (TODO (111), the
+owner: *"Add a brush favorites folder and favorite Rough Ink, Technical Pen - Fine, round soft, opaque
+round, and round hard"*). `BrushGroup.memberIDs`, non-nil, makes a group list brushes by id instead of
+owning them; `BrushLibraryStore.brushes(in:)` resolves them. A copy in an ordinary group would have put
+one id in two groups — breaking the add-is-a-move rule, `update(_:)` and `group(containingBrush:)` — and
+would have gone stale the first time either copy was tuned; a reference is the brush itself seen from a
+second place, so tuning Rough Ink in the editor *is* tuning the favourite. The folder is the first group
+of the seeded library, and a library file written before it (`version` 1) is given it once on load —
+by version, so deleting it sticks — naming whichever of the five the artist still holds. Press and hold
+a brush's row adds or removes it.
+
 **And the library is persisted as JSON, not in `UserDefaults`** — `Documents/Brushes/library.json`,
 beside the imported tip PNGs a group's `.stamp(.imported(fileName:))` entries name. It is
 `PaletteStore`'s shape with a file instead of a defaults key, and `-resetBrushLibrary` is

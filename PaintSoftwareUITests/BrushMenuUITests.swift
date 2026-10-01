@@ -215,6 +215,65 @@ final class BrushMenuUITests: PaintUITestCase {
         cancel.tap()
     }
 
+    /// **TODO (111) — a Favourites folder holding the owner's five**, from a cold start with nothing
+    /// but taps: *"Add a brush favorites folder and favorite Rough Ink, Technical Pen - Fine, round
+    /// soft, opaque round, and round hard."*
+    ///
+    /// The folder is the first row of the left column, opens to the five in the order the owner named
+    /// them, and a row there is the real brush — selecting it highlights it, and the menu still opens
+    /// on the group that owns the selected brush rather than on Favourites. The second half is the
+    /// artist's way to add one of their own, which is what makes the folder a feature rather than a
+    /// fixed list: press and hold a brush, and it is listed.
+    func testFavouritesIsTheFirstFolderAndHoldsTheOwnersFiveInTheirOrder() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openBrushMenu(app)
+
+        let favourites = app.buttons["brushPanel.group.Favourites"]
+        let basics = app.buttons["brushPanel.group.Basics"]
+        XCTAssertTrue(favourites.waitForExistence(timeout: 5), "A fresh library must show a Favourites folder")
+        XCTAssertLessThan(favourites.frame.minY, basics.frame.minY, "…at the head of the left column")
+        XCTAssertTrue(basics.isSelected, "The menu still opens on the group that owns the selected brush")
+
+        tapWhenHittable(favourites, "The Favourites folder")
+        XCTAssertTrue(favourites.isSelected)
+        let names = ["Rough Ink", "Technical Pen — Fine", "Round Soft", "Opaque Round", "Round Hard"]
+        var previousY = -CGFloat.infinity
+        for name in names {
+            let row = app.buttons["brushPanel.brush.\(name)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name) is a favourite")
+            XCTAssertGreaterThan(row.frame.minY, previousY, "\(name) is listed after the one the owner named before it")
+            previousY = row.frame.minY
+        }
+        XCTAssertFalse(app.buttons["brushPanel.brush.Square"].exists, "…and only those five")
+        XCTAssertTrue(app.buttons["brushPanel.brush.Round Soft"].isSelected,
+                      "Round Soft is the brush in hand, and its row in Favourites says so")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "favourites-folder"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        // A favourite is the real brush: one tap selects it.
+        tapWhenHittable(app.buttons["brushPanel.brush.Rough Ink"], "Rough Ink's favourite row")
+        XCTAssertTrue(app.buttons["brushPanel.brush.Rough Ink"].isSelected)
+        XCTAssertFalse(app.buttons["brushPanel.brush.Round Soft"].isSelected)
+
+        // The artist's own: Square, from Basics, by press and hold.
+        tapWhenHittable(basics, "The Basics group row")
+        let square = app.buttons["brushPanel.brush.Square"]
+        XCTAssertTrue(square.waitForExistence(timeout: 5))
+        square.press(forDuration: 1.2)
+        let add = app.buttons["Add to Favourites"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "Press and hold on a brush offers Add to Favourites")
+        add.tap()
+
+        tapWhenHittable(favourites, "The Favourites folder")
+        XCTAssertTrue(app.buttons["brushPanel.brush.Square"].waitForExistence(timeout: 5),
+                      "Square is listed once it has been favourited")
+        XCTAssertGreaterThan(app.buttons["brushPanel.brush.Square"].frame.minY,
+                             app.buttons["brushPanel.brush.Round Hard"].frame.minY, "…after the five, where it was added")
+    }
+
     /// **The eraser shows the same library** — BRUSH.md §11, *the eraser is a brush*. It used to be
     /// offered the five built-ins with imports excluded; one library, two selections.
     func testTheEraserOpensTheSameLibraryWithItsOwnSelection() throws {

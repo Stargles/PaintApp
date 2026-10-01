@@ -26,16 +26,36 @@ import Foundation
 ///
 /// So this is a flat `[BrushGroup]`, each holding `[Brush]`, and it is ~40 lines rather than a
 /// generalisation of the layer stack. BRUSH.md §8.2 is corrected to say so.
+///
+/// ## A group either owns its brushes or lists someone else's
+///
+/// **`brushes` are the brushes the group owns, and a brush is owned by exactly one group.** The
+/// library's whole bookkeeping rests on that — `BrushLibraryStore.add` of a held brush is a move,
+/// `update` writes the one copy, `group(containingBrush:)` has one answer.
+///
+/// **`memberIDs` makes a group a *reference group*, and Favourites is the one there is** (TODO (111)).
+/// It owns nothing and lists brushes by id, in the artist's order; the menu resolves each id against
+/// the library (`BrushLibraryStore.brushes(in:)`). A favourite is therefore **the brush itself seen
+/// from a second place**, not a copy of it: editing Rough Ink in the editor is editing the Rough Ink
+/// in Favourites, with nothing to keep in step, and the one-owner invariant above still holds. A copy
+/// would have broken it — two groups holding one id — and would have gone stale the first time either
+/// was tuned.
 struct BrushGroup: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
     var brushes: [Brush]
+    /// Non-nil for a reference group: the ids of the brushes it shows, which other groups own.
+    var memberIDs: [UUID]?
 
-    init(id: UUID = UUID(), name: String, brushes: [Brush] = []) {
+    init(id: UUID = UUID(), name: String, brushes: [Brush] = [], memberIDs: [UUID]? = nil) {
         self.id = id
         self.name = name
         self.brushes = brushes
+        self.memberIDs = memberIDs
     }
+
+    /// Whether this group lists brushes owned elsewhere rather than owning any.
+    var isReferenceGroup: Bool { memberIDs != nil }
 }
 
 /// **The app-level library, as it sits on disk** — BRUSH.md §8.1's first collection.
@@ -44,11 +64,13 @@ struct BrushGroup: Identifiable, Codable, Hashable {
 /// this is *the brushes the artist can pick*, that one is *the brushes this file's ink was made
 /// with*. §8.1 is the argument; the two are separate types in separate files for the same reason.
 ///
-/// `version` is written and read but nothing branches on it yet. It costs two bytes and it is the
-/// difference between a later format change being a migration and being a lost library — BRUSH.md
-/// §2.14 makes *documents* expendable, and says nothing about the artist's own brushes.
+/// `version` costs two bytes and it is the difference between a format change being a migration and
+/// being a lost library — BRUSH.md §2.14 makes *documents* expendable, and says nothing about the
+/// artist's own brushes. **Version 2 is the Favourites group** (TODO (111)): a version-1 file has none,
+/// and `groupsAtCurrentVersion` gives it one **once** — by version rather than by "is there a group
+/// with that id", so an artist who deletes Favourites is not handed it back by the next launch.
 struct BrushLibraryDocument: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     var version: Int
     var groups: [BrushGroup]
@@ -73,6 +95,18 @@ struct BrushLibraryDocument: Codable, Equatable {
 }
 
 extension BrushLibraryDocument {
+    /// This document's groups as the current version has them. A file written before Favourites gets
+    /// the shipped Favourites group at the head of the list, naming whichever of its five brushes the
+    /// artist's library still holds — their own library is theirs, so a brush they deleted is not
+    /// brought back to fill a slot.
+    var groupsAtCurrentVersion: [BrushGroup] {
+        guard version < 2 else { return groups }
+        var favourites = BrushLibrary.favouritesGroup
+        let held = Set(allBrushes.map(\.id))
+        favourites.memberIDs = favourites.memberIDs?.filter(held.contains)
+        return [favourites] + groups
+    }
+
     /// Every brush in the library, in menu order. What `CanvasManager.availableBrushes` answers.
     var allBrushes: [Brush] { groups.flatMap(\.brushes) }
 
