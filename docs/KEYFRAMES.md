@@ -1425,6 +1425,17 @@ composes onto that same rest on every tick — so a box left up would overwrite 
 next touch or the next tap-away. A take that wrote nothing leaves the box alone, because what the artist
 then has is the ordinary Move they were making.
 
+**A touch beside the pen makes the drag a fifth as fast, and the take records the slowed path** (owner,
+2026-10-01, TODO (146): *"if the user presses a finger onto the canvas while moving the box with their
+pen, it makes the move more precise, like 5x less than the pen's movement. This should work with
+recording movement too."*). The slowing is in the point both Move overlays hand to a drag
+(`PrecisionDrag`), upstream of every handle, so the poses `updateFloatingPose` reports — and this
+section's samples are exactly those — are the slowed ones with nothing for the recorder to know. Two
+things the recording needed that the move did not: a finger landing beside the pen is already inert to
+`canvasInteractionBegan` (a second touch is `CanvasTouchSettle`'s `.transform`, never an edit), so the
+take keeps running; and the canvas's own two-finger pan, pinch and rotation do not *begin* while a Move
+box is being dragged, which a pen plus a finger would otherwise satisfy.
+
 ---
 
 ## 6. Bake
