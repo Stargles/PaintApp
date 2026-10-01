@@ -40,11 +40,6 @@ final class ImageMoveBoxUITests: PaintUITestCase {
     }
 
     /// The black rectangle's bounds in the host's unit square, measured off a screenshot of `window`.
-    ///
-    /// **A window rather than the whole host**, because the host extends under the toolbar, the Move
-    /// bar and the timeline, whose dark glyphs would read as ink. The caller names the box's own
-    /// rectangle grown by a margin, so a picture that stuck out of its box would still be found —
-    /// and one far smaller than its box is measured as it is.
     private func inkBounds(_ probe: (Double, Double) -> Bool, in window: CGRect) throws -> CGRect {
         var minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0
         let columns = 800, rows = 800
@@ -85,9 +80,11 @@ final class ImageMoveBoxUITests: PaintUITestCase {
         let box = try XCTUnwrap(settledMoveBox(app), "the import lifts the picture into a Move box — "
                                 + "canvas.host says \(canvas.label)")
 
-        let margin = 0.06
-        let window = box.insetBy(dx: -margin, dy: -margin)
-            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        // **A window of its own, not the box's.** The picture is fitted to the paper's middle, so a
+        // band across the host's centre holds all of it and none of the toolbar above or the Move bar
+        // and timeline below — and it does not move with the box, so a box that is wrong cannot take
+        // the measurement of the picture with it.
+        let window = CGRect(x: 0.02, y: 0.25, width: 0.96, height: 0.43)
         let probe = try settledProbe(canvas, window: window)
         let picture = try inkBounds(probe, in: window)
         attachScreen("image-move-box")
@@ -98,7 +95,7 @@ final class ImageMoveBoxUITests: PaintUITestCase {
 
         XCTAssertGreaterThan(picture.width / picture.height, 3.5,
                              "setup: the seeded picture is 4:1 and is drawn that shape")
-        let tolerance = 0.012
+        let tolerance = 0.005
         XCTAssertEqual(box.minX, picture.minX, accuracy: tolerance, "left edge: box \(box) picture \(picture)")
         XCTAssertEqual(box.maxX, picture.maxX, accuracy: tolerance, "right edge: box \(box) picture \(picture)")
         XCTAssertEqual(box.minY, picture.minY, accuracy: tolerance, "top edge: box \(box) picture \(picture)")
