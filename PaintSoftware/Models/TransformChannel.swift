@@ -148,9 +148,17 @@ extension CanvasManager {
     private static func composedPose(of element: VectorElement,
                                      through mappings: [(TransformChannelID, PoseMap)],
                                      inheriting inherited: PoseMap?) -> PoseMap? {
+        composedPose(movedBy: element.isMoved(by:), through: mappings, inheriting: inherited)
+    }
+
+    /// `composedPose(of:)` for whatever `moves` says the channels claim — an element's membership, or
+    /// the membership of ink not drawn yet (`inkPose`), which only the cel channel claims.
+    private static func composedPose(movedBy moves: (TransformChannelID) -> Bool,
+                                     through mappings: [(TransformChannelID, PoseMap)],
+                                     inheriting inherited: PoseMap?) -> PoseMap? {
         var composed = PoseMap.identity
         var carried = false
-        for (channel, map) in mappings where element.isMoved(by: channel) {
+        for (channel, map) in mappings where moves(channel) {
             composed = composed.concatenating(map)
             carried = true
         }
@@ -169,10 +177,10 @@ extension CanvasManager {
     /// **No `inheriting` parameter, and that is the scope §6 settles for now.** A bake consumes the
     /// cel's *own* channels — what the bake then clears from the cel. A container pose above it (a
     /// folder's, a transformation layer's) is not consumed and keeps posing the baked cels exactly as
-    /// it posed the animated one, so the picture at every frame is unchanged by the bake; what the
-    /// artist cannot do is draw *in the container's posed space*, since their new ink lands at rest
-    /// under a pose that is still live. Baking the composed pose instead would have to lift the cel
-    /// out from under its container, which is a restructure this verb does not make.
+    /// it posed the animated one, so the picture at every frame is unchanged by the bake — and new
+    /// ink keeps landing where it is drawn, because every input surface reads that live pose
+    /// (`inkPose(forLayerID:)`). Baking the composed pose instead would have to lift the cel out
+    /// from under its container, which is a restructure this verb does not make.
     static func baked(_ elements: [VectorElement],
                       through mappings: [(TransformChannelID, PoseMap)]) -> [VectorElement] {
         elements.map { element in
@@ -205,19 +213,19 @@ extension CanvasManager {
     /// float. `TransformTrack.mapping` already drops a channel whose quad is degenerate, so this is
     /// reachable only through a *composition* of two channels that is singular without either being
     /// so.
+    ///
+    /// **`inherited` is §4.4's container pose, composed last exactly as `posed` composes it** — TODO
+    /// (124). Without it every one of the three consumers above was blind to a transformation layer:
+    /// a loop drawn round ink a Move layer had carried selected what was *stored* there, and the box
+    /// stood where the ink would have been with no Move layer at all.
     static func poseMaps(_ elements: [VectorElement],
-                         through mappings: [(TransformChannelID, PoseMap)])
-        -> [UUID: PoseMap] {
-        guard !mappings.isEmpty else { return [:] }
+                         through mappings: [(TransformChannelID, PoseMap)],
+                         inheriting inherited: PoseMap? = nil) -> [UUID: PoseMap] {
+        guard !mappings.isEmpty || inherited != nil else { return [:] }
         var maps: [UUID: PoseMap] = [:]
         for element in elements {
-            var composed = PoseMap.identity
-            var carried = false
-            for (channel, map) in mappings where element.isMoved(by: channel) {
-                composed = composed.concatenating(map)
-                carried = true
-            }
-            guard carried, !composed.isIdentity, composed.inverse != nil else { continue }
+            guard let composed = composedPose(of: element, through: mappings, inheriting: inherited),
+                  composed.inverse != nil else { continue }
             maps[element.id] = composed
         }
         return maps
@@ -236,9 +244,64 @@ extension CanvasManager {
                      atFrame frame: Int) -> [UUID: PoseMap] {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return [:] }
         let cel = layers[at.layer].cels[at.cel]
-        guard !cel.transformTracks.isEmpty else { return [:] }
-        return Self.poseMaps(elements, through: Self.poseMappings(cel.transformTracks,
-                                                                  atCelLocalFrame: frame - cel.startFrame))
+        return Self.poseMaps(elements,
+                             through: Self.poseMappings(cel.transformTracks,
+                                                        atCelLocalFrame: frame - cel.startFrame),
+                             inheriting: containerPose(ofLayerAt: at.layer, atFrame: frame))
+    }
+
+    /// **§4.4's container pose for one layer at a document frame** — the product of every
+    /// transformation layer and posed folder above it, exactly the map `renderNodes` hands that leaf,
+    /// or nil where none reaches it. Read off the render walk rather than recomputed, so input cannot
+    /// disagree with the picture.
+    func containerPose(ofLayerAt index: Int, atFrame frame: Int) -> PoseMap? {
+        layerPoses(atFrame: frame)[index]
+    }
+
+    /// **The map a mark made on this layer now is shown through** — TODO (124): *"Make it so the
+    /// stroke the user lays down is properly transformed so whatever they draw accurately reflects
+    /// the position the stroke gets set in."*
+    ///
+    /// Ink is stored in the layer's own space and the canvas shows it through its cel's channels and
+    /// then the transformation layers above it (`posed(_:through:inheriting:)`), so a mark landed
+    /// where the pen was is shown somewhere else by exactly this map. Every input surface that writes
+    /// into a layer therefore takes the artist's canvas point through its **inverse** first, and
+    /// shows its live preview through the map itself — `StrokeCanvasView`'s pose space, a smart
+    /// shape's commit, a fill's seed and a text box's placement. One answer, so no two of them can
+    /// disagree about where the layer is.
+    ///
+    /// It is the composition `posed` gives an element no group claims: the cel channel, then the
+    /// container pose — at the frame the layer is *showing*, so under a Repeat it is the source
+    /// frame's. **Nil for an in-between**, which `derivedCelContent` draws where its cel drew it
+    /// whatever poses it, and nil wherever the composition is the identity, which is every layer of
+    /// every document that has never been posed.
+    func inkPose(forLayerID id: UUID) -> PoseMap? {
+        guard let index = layers.firstIndex(where: { $0.id == id }) else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        return inkPose(ofLayerAt: index, showing: walk.frames[index] ?? currentFrame,
+                       inheriting: walk.poses[index])
+    }
+
+    /// **Geometry the artist made in canvas points, written into a layer the canvas shows through
+    /// `pose`** — mapped through the pose's inverse, so the layer's render puts it back exactly where
+    /// it was made. The element itself where nothing poses the layer; nil only where a keystone
+    /// cannot carry the kind (`VectorCanvas.mapping(_:through:)`).
+    static func inLayerSpace(_ element: VectorElement, shownThrough pose: PoseMap?) -> VectorElement? {
+        guard let inverse = pose?.inverse else { return element }
+        return VectorCanvas.mapping(element, through: inverse)
+    }
+
+    /// `inkPose(forLayerID:)` from a render walk the caller already holds — `frame` is the frame the
+    /// layer is showing and `container` its container pose, both read off that walk — so a caller
+    /// asking for every layer at once pays one walk rather than one per layer.
+    func inkPose(ofLayerAt index: Int, showing frame: Int, inheriting container: PoseMap?) -> PoseMap? {
+        var mappings: [(TransformChannelID, PoseMap)] = []
+        if let celIndex = activeCelIndex(inLayer: index, atFrame: frame) {
+            let cel = layers[index].cels[celIndex]
+            guard cel.interpolation == nil else { return nil }
+            mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
+        }
+        return Self.composedPose(movedBy: { $0 == .cel }, through: mappings, inheriting: container)
     }
 
     /// `elements` with each one carried by its own pose — `posed(_:through:)`'s answer, addressed by
@@ -320,18 +383,21 @@ extension CanvasManager {
     /// which is *after* `C`, so keying it onto a channel means conjugating: the cel channel takes
     /// `C·D` and a group takes `G·C·D·C⁻¹`, and both are `M·O·D·O⁻¹` for this function's `O`.
     ///
-    /// Identity for `.cel`, which has nothing outside it, and identity for a group on a cel with no
-    /// cel channel — so on a document nobody has keyframed the whole expression reduces to `D` and the
-    /// commit is byte-for-byte what it was.
+    /// The container pose (`containerPose(ofLayerAt:atFrame:)`) is outside both and is composed last,
+    /// as `posed` composes it. So it is the identity for `.cel` on a layer no transformation layer
+    /// reaches, and the cel channel for a group there — on a document nobody has keyframed or posed
+    /// the whole expression reduces to `D` and the commit is byte-for-byte what it was.
     func outerPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
                       atFrame frame: Int) -> PoseMap {
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
+        let container = containerPose(ofLayerAt: at.layer, atFrame: frame) ?? .identity
         switch channel {
-        case .cel: return .identity
+        case .cel: return container
         case .group:
-            guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
             let cel = layers[at.layer].cels[at.cel]
-            return cel.transformTracks[TransformChannelID.cel.id]?
+            let celMap = cel.transformTracks[TransformChannelID.cel.id]?
                 .mapping(atCelLocalFrame: frame - cel.startFrame) ?? .identity
+            return celMap.concatenating(container)
         }
     }
 

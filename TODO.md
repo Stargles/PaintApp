@@ -76,22 +76,16 @@ the owner left the order to us. Every entry is the owner's words, then what is l
       graph-editor node drag — measured before and after on the device-sized document.
 - [ ] The frame baker holds off while a transform edit is live and re-bakes once on release.
 
-## (124) A stroke drawn under a transform layer lands where it was drawn — with (145)
+## (145) Undo under transformation layers: the undone stroke flashes back, and the undo is ~400 ms late
 
-**Status** — not started.
+**Status** — not started. (124), which the owner hoped would fix it, is merged.
 
-- **(124)** *"Right now, put a move layer on top of a normal vector layer. When the user lays down a
-  stroke, that stroke does not get put down where the user wants it, because the move layer on top
-  moves it in compositing. Make it so the stroke the user lays down is properly transformed so whatever
-  they draw accurately reflects the position the stroke gets set in."*
 - **(145)** *"In the recording 02226 (42kb), I place a stroke, then undo, then place a stroke and undo
   again. The first stroke briefly appears the second time I undo. Also, the undos are latent. I'd
   estimate around 400ms. I suspect it is because it has two transform layers above it. With ask 14, I
   hope this issue gets fixed."* The recording is `recording-20261001-002226.jsonl`, pulled to
   `~/PaintWork/evidence/`.
 
-- [ ] Input under a transform stack is mapped through the inverse of the stack's pose at the playhead,
-      live stroke included.
 - [ ] (145) re-checked after (124); if the flash or the ~400 ms undo survive it, root-caused separately.
 
 ## (112) The stream says "paused" and stops updating until the artist draws

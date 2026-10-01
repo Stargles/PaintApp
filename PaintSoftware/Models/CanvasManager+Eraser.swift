@@ -21,6 +21,25 @@ extension CanvasManager {
         let layerID: UUID
         let celID: UUID
         let canvas: VectorCanvas
+        /// The pose the canvas shows this cel through (`inkPose`) — TODO (124). A universal gesture
+        /// is drawn in canvas points because it reaches every layer at once and each is shown through
+        /// its own pose, so each target takes the gesture through its own pose's inverse.
+        let pose: PoseMap?
+
+        /// An eraser footprint drawn in canvas points — its spine and the size it erases at — in
+        /// this cel's own space: the spine through the pose's inverse, and the size by that map's
+        /// area root, the largest along the spine under a keystone so the footprint never shrinks.
+        /// Nil where a keystone sends the spine to the vanishing line.
+        func inOwnSpace(_ run: StrokeSamples, size: CGFloat) -> (run: StrokeSamples, size: CGFloat)? {
+            guard let inverse = pose?.inverse else { return (run, size) }
+            switch inverse {
+            case .affine(let t):
+                return (run.transformed(by: t), size * abs(t.a * t.d - t.b * t.c).squareRoot())
+            case .projective(let h):
+                guard let mapped = run.mapped(through: h) else { return nil }
+                return (mapped, size * (run.positions.compactMap(h.localScale(at:)).max() ?? 1))
+            }
+        }
     }
 
     /// What one universal gesture did to one cel: `TimingStrokeEdit`'s shape, one layer per edit.
@@ -42,11 +61,15 @@ extension CanvasManager {
     /// §5.5), exactly as a single-layer stroke lands on the drawing it repeats.
     func universalEraseTargets() -> [UniversalEraseTarget] {
         var targets: [UniversalEraseTarget] = []
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
         for index in layers.indices where layers[index].kind == .vector && isLayerEffectivelyVisible(index) {
-            guard let celIndex = displayedCelIndex(inLayer: index, atFrame: currentFrame) else { continue }
+            let shown = walk.frames[index] ?? currentFrame
+            guard let celIndex = activeCelIndex(inLayer: index, atFrame: shown) else { continue }
             let cel = layers[index].cels[celIndex]
             guard cel.interpolation == nil, let canvas = cel.vector else { continue }
-            targets.append(UniversalEraseTarget(layerID: layers[index].id, celID: cel.id, canvas: canvas))
+            targets.append(UniversalEraseTarget(
+                layerID: layers[index].id, celID: cel.id, canvas: canvas,
+                pose: inkPose(ofLayerAt: index, showing: shown, inheriting: walk.poses[index])))
         }
         return targets
     }
@@ -65,8 +88,9 @@ extension CanvasManager {
             let before = target.canvas.elements
             var changedInk: CGRect? = .null
             var changed = false
-            for run in runs where !run.isEmpty {
-                guard target.canvas.erase(alongPath: run, brush: brush, size: size,
+            for drawn in runs where !drawn.isEmpty {
+                guard let own = target.inOwnSpace(drawn, size: size),
+                      target.canvas.erase(alongPath: own.run, brush: brush, size: own.size,
                                           opacity: opacity, mode: mode) else { continue }
                 changed = true
                 changedInk = Self.folded(changedInk, with: target.canvas.lastDamage)
@@ -105,8 +129,11 @@ extension CanvasManager {
                                          sessions: inout [UniversalCutSession]) -> [VectorCanvas] {
         var cut: [VectorCanvas] = []
         for index in sessions.indices {
-            let canvas = sessions[index].target.canvas
-            let resolved = canvas.cutToIntersection(atCanvasPoint: point, brush: brush, size: size,
+            let target = sessions[index].target
+            guard let own = target.inOwnSpace(StrokeSamples(points: [point]), size: size),
+                  let ownPoint = own.run.positions.first else { continue }
+            let canvas = target.canvas
+            let resolved = canvas.cutToIntersection(atCanvasPoint: ownPoint, brush: brush, size: own.size,
                                                     suppressing: sessions[index].driver.suppressed)
             sessions[index].driver.accept(resolved.outcome, underTip: resolved.underTip)
             guard resolved.outcome == .cut else { continue }

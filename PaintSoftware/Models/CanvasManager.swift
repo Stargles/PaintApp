@@ -4241,6 +4241,10 @@ final class CanvasManager: ObservableObject {
     /// may shift array positions before it commits (same reasoning as `fillGestureLayerID`).
     var shapeGestureLayerID: UUID?
     var shapeGestureCelID: UUID?
+    /// The pose the shape's layer was shown through when the shape was drawn (`inkPose`) — the
+    /// outline is in canvas points, and the commit, which can come a frame change later, writes it
+    /// through this pose's inverse.
+    var shapeGestureInkPose: PoseMap?
     var shapeGestureColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)
     var shapeGestureStrokeWidth: CGFloat = 5
     var shapeGestureOpacity: Double = 1.0
@@ -4287,6 +4291,10 @@ final class CanvasManager: ObservableObject {
     /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
     var textGestureLayerID: UUID?
     var textGestureCelID: UUID?
+    /// The pose the session's layer is shown through (`inkPose`), read when the session binds — the
+    /// box is edited in canvas points, where the artist sees it, and is written into the layer
+    /// through this pose's inverse (TODO (124)).
+    var textGestureInkPose: PoseMap?
     /// The handle drag in flight, or nil. Holds the **whole starting quad and the anchor**, latched
     /// at touch-down, so a mid-drag pinch-zoom cannot move the reference frame under the gesture
     /// (`ADD_TEXT.md` §1, and `TextFrameDrag`'s own doc for the second half of the argument).

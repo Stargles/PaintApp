@@ -74,10 +74,12 @@ extension CanvasManager {
 
         // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
         // reopens the same object rather than dropping a second one on top. `topmostText` hits the
-        // *box*, not the glyphs — tapping the hole in an "O" is tapping the text.
+        // *box*, not the glyphs — tapping the hole in an "O" is tapping the text — and it hits it
+        // where it is stored, so the tap is taken into the layer's own space first.
         if layers[layerIndex].kind == .vector,
            let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
-           let existing = vectorCanvas.topmostText(atCanvasPoint: canvasPoint) {
+           let existing = vectorCanvas.topmostText(
+               atCanvasPoint: textGestureInkPose?.inverse?.applied(to: canvasPoint) ?? canvasPoint) {
             reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
             return
         }
@@ -131,6 +133,7 @@ extension CanvasManager {
     private func bindTextSession(toLayer layerID: UUID, cel celID: UUID) {
         textGestureLayerID = layerID
         textGestureCelID = celID
+        textGestureInkPose = inkPose(forLayerID: layerID)
         textEditingElementID = nil
         textHandleDrag = nil
     }
@@ -140,7 +143,9 @@ extension CanvasManager {
     /// is the session's **first and only** invalidation until it commits.
     private func reopenText(_ existing: VectorTextElement, in vectorCanvas: VectorCanvas,
                             layerID: UUID, celID: UUID) {
-        let draft = vectorCanvas.canvasText(fromLocal: existing)
+        // Shown where the canvas shows it: the stored box through the layer's pose.
+        let stored = vectorCanvas.canvasText(fromLocal: existing)
+        let draft = textGestureInkPose.flatMap { VectorCanvas.mapping(.text(stored), through: $0)?.text } ?? stored
         textRecipe = draft.recipe
         textFrame = draft.frame
         textEditingElementID = existing.id
@@ -366,18 +371,24 @@ extension CanvasManager {
         textFingerDown = false
         textIsFocused = false
         textHandleDrag = nil
-        let recipe = textRecipe
-        let frame = textFrame
         let layerID = textGestureLayerID
         let celID = textGestureCelID
         let editingID = textEditingElementID
+        let shown = VectorTextElement(id: editingID ?? UUID(), recipe: textRecipe, frame: textFrame)
+        let drawnUnder = textGestureInkPose
         defer {
             textGestureLayerID = nil
             textGestureCelID = nil
+            textGestureInkPose = nil
             textEditingElementID = nil
             objectWillChange.send()
             refreshUndoRedoState()
         }
+        // The session's box and type in the layer's own space, so the layer's render puts them back
+        // where the artist set them.
+        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: drawnUnder)?.text else { return }
+        let recipe = drawn.recipe
+        let frame = drawn.frame
         guard let layerID, let celID, let canvasSize,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
@@ -588,6 +599,7 @@ extension CanvasManager {
         textEditingElementID = nil
         textGestureLayerID = nil
         textGestureCelID = nil
+        textGestureInkPose = nil
         objectWillChange.send()
         refreshUndoRedoState()
     }

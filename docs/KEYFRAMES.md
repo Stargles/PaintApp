@@ -1490,7 +1490,8 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   drawing pays the vector sidecar. The video bake's sentence moved beside it and shares the phrase.
 - **A bake consumes the cel's *own* channels and nothing above it.** A folder's or a transformation
   layer's pose keeps posing the baked cels exactly as it posed the animated one, so every frame is
-  unchanged by the bake; what the artist cannot then do is draw in the container's posed space.
+  unchanged by the bake, and new ink still lands where it is drawn because every input surface reads
+  the live pose (`CanvasManager.inkPose(forLayerID:)`, TODO (124)).
   Baking the *composed* pose would have to lift the cel out from under its container — not done, and
   not asked. A Repeat above the cel needs nothing: the cel's channels are numbered in its own frames,
   which are the source frames the repeat reads (TRANSFORM_LAYER §7), pinned on the loop's frames.

@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+#if canImport(QuartzCore)
+import QuartzCore
+#endif
 
 /// **A pose: the rectangle a drawing rests in, and the four corners it is currently shown at** —
 /// KEYFRAMES.md §2.14's *"four corners plus a box size, from day one"*, and the whole currency of the
@@ -247,6 +250,20 @@ enum PoseMap: Equatable {
         }
     }
 }
+
+#if canImport(QuartzCore)
+extension PoseMap {
+    /// This map as a layer transform, for a layer whose `anchorPoint` and `position` are both zero —
+    /// `Homography.catransform3D`'s convention, and `CGAffineTransform`'s own row-vector one for the
+    /// affine arm.
+    var layerTransform: CATransform3D {
+        switch self {
+        case .affine(let t): return CATransform3DMakeAffineTransform(t)
+        case .projective(let h): return h.catransform3D
+        }
+    }
+}
+#endif
 
 /// `CanvasManager.invertedAffine`'s arithmetic, spelled where `Engine/Deform` can reach it. The two
 /// are deliberately the same four lines and the same `Quad.epsilon` floor: this file compiles

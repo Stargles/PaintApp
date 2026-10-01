@@ -2562,6 +2562,10 @@ struct CanvasView: UIViewRepresentable {
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 let shownFrame = walk.frames[layerIndex] ?? canvasManager.currentFrame
+                // TODO (124): the pose the layer's own space is shown through, off the same walk, so
+                // the live stroke and a raster layer's pixels sit where the composite puts them.
+                host.shownPose = canvasManager.inkPose(ofLayerAt: layerIndex, showing: shownFrame,
+                                                       inheriting: poses[layerIndex])
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: shownFrame) else {
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.setInterpolationImage(nil)

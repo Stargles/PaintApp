@@ -4978,6 +4978,17 @@ final class VectorCanvas {
         }
     }
 
+    /// **`mapping`'s two arms behind one argument** — `posing(_:through: PoseMap)`'s commit form, and
+    /// what writes geometry the artist made in canvas points into a layer the canvas shows through a
+    /// pose: mapped through the pose's inverse, it lands where it was drawn (TODO (124)). Nil only
+    /// on the projective arm, for the kinds a homography cannot carry.
+    static func mapping(_ element: VectorElement, through map: PoseMap) -> VectorElement? {
+        switch map {
+        case .affine(let t): return mapping(element, throughStretch: t)
+        case .projective(let h): return mapping(element, through: h)
+        }
+    }
+
     /// **`posing(_:through:)`'s *persisted* form** — the same picture, written so that it survives a
     /// save. KEYFRAMES.md §6's bake writes this into the artist's own cels.
     ///

@@ -28,6 +28,9 @@ final class LayerHostView: CanvasPlaneView {
         // already accepted.
         fillImageView.contentMode = .scaleToFill
         fillImageView.isHidden = true
+        // Placed by hand (`placeFillPreview`) with its anchor at the origin, so a pose is the
+        // preview's transform and not the pose conjugated about its centre.
+        fillImageView.layer.anchorPoint = .zero
 
         bakedImageView.isUserInteractionEnabled = false
         bakedImageView.isHidden = true
@@ -88,12 +91,38 @@ final class LayerHostView: CanvasPlaneView {
 
     /// Shows the live fill preview over its own window of the canvas, or nothing. The host's points
     /// are canvas pixels — the stack is magnified by a transform on the container — so the preview's
-    /// rect is the view's frame directly.
+    /// rect is placed in them directly, through the layer's pose (`shownPose`).
     func showFillPreview(_ preview: FillPreview?) {
         fillImageView.image = preview?.image
-        fillImageView.frame = preview?.rect ?? .zero
+        fillPreviewRect = preview?.rect ?? .zero
+        placeFillPreview()
         fillImageView.isHidden = preview == nil
         alignContentMasks()
+    }
+
+    /// **The pose the canvas shows this layer through** (`CanvasManager.inkPose`), pushed by
+    /// `CanvasView.Coordinator` on every pass — TODO (124). The stroke view takes it for the live
+    /// stroke and a raster layer's pixels; the fill preview here takes it because a fill is worked
+    /// out in the layer's own space and has to be shown where it will land.
+    var shownPose: PoseMap? {
+        get { strokeView.shownPose }
+        set {
+            guard newValue != strokeView.shownPose else { return }
+            strokeView.shownPose = newValue
+            placeFillPreview()
+        }
+    }
+
+    /// The window the preview covers, in the layer's own space.
+    private var fillPreviewRect: CGRect = .zero
+
+    private func placeFillPreview() {
+        let rect = fillPreviewRect
+        fillImageView.bounds = CGRect(origin: .zero, size: rect.size)
+        fillImageView.layer.position = .zero
+        let window = CATransform3DMakeTranslation(rect.minX, rect.minY, 0)
+        let pose = shownPose.flatMap { $0.inverse == nil ? nil : $0 }
+        fillImageView.layer.transform = pose.map { CATransform3DConcat(window, $0.layerTransform) } ?? window
     }
 
     // MARK: - Blanking, for §5.2's sandwich

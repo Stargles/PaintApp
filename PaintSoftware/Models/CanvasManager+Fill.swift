@@ -219,8 +219,11 @@ extension CanvasManager {
         let neighbours = [(layer: layers[layerIndex], cel: layers[layerIndex].cels[celIndex])]
         let width = Int(canvasSize.width.rounded())
         let height = Int(canvasSize.height.rounded())
-        let seedX = min(max(Int(point.x.rounded(.down)), 0), width - 1)
-        let seedY = min(max(Int(point.y.rounded(.down)), 0), height - 1)
+        // The tap is in canvas points and the flood runs in the layer's own space, where its
+        // references are drawn and where the fill lands — TODO (124).
+        let seed = inkPose(forLayerID: layers[layerIndex].id)?.inverse?.applied(to: point) ?? point
+        let seedX = min(max(Int(seed.x.rounded(.down)), 0), width - 1)
+        let seedY = min(max(Int(seed.y.rounded(.down)), 0), height - 1)
         let window = FillWindow.bucket(around: CGPoint(x: seedX, y: seedY), in: canvasSize,
                                        pixelBudget: MetalFillEngine.workingPixelBudget(isLasso: false))
 
@@ -508,7 +511,10 @@ extension CanvasManager {
     /// pixel can be 1/255 opaque and still be *outside* the shape the artist sees. Against a bare
     /// `> 0` test the whole soft edge of the drawing would count as "inside the fill", and a tap
     /// there would resume adjusting instead of starting a new one.
-    func isPointInPendingFill(at point: CGPoint) -> Bool {
+    func isPointInPendingFill(at canvasPoint: CGPoint) -> Bool {
+        // The fill lives in its layer's own space — `beginInteractiveFill`'s pull-back.
+        let point = fillGestureLayerID.flatMap { inkPose(forLayerID: $0) }?.inverse?.applied(to: canvasPoint)
+            ?? canvasPoint
         guard fillGestureActive, let render = fillLastRender, render.window.rect.contains(point) else { return false }
         let pixel = render.window.workingPixel(of: point)
         return render.bytes[(pixel.y * render.window.workingWidth + pixel.x) * 4 + 3] >= fillHalfCoverageAlpha
@@ -786,12 +792,15 @@ extension CanvasManager {
     /// `endInteractiveFill()`, the preview stays live, and moving a slider re-runs this same loop.
     /// That matters most on the empty result, where nudging Threshold or Gap Closing can recover a
     /// near-miss without redrawing the loop.
-    func beginInteractiveLassoFill(path: CGPath) {
+    func beginInteractiveLassoFill(path drawnPath: CGPath) {
         guard !fillFingerDown else { return }
         beginCanvasEdit()
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
+        // The loop was drawn in canvas points and the fill is worked out in the layer's own space,
+        // which is where its references are drawn and where it lands — TODO (124).
+        let path = inkPose(forLayerID: layers[layerIndex].id)?.inverse?.mapped(drawnPath) ?? drawnPath
 
         // The loop plus its halo is the whole of what a lasso fill can touch (`FillWindow`), so the
         // stencil, the reference and the session are all cut to it.

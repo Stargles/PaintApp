@@ -520,6 +520,7 @@ hold a rotation, key the speed to 0; to hold a shake, key its amplitudes.
 | `movesItsContents` frame-invariant | must read the mode and the scalars' *tracks*, not one frame | rotate, shake |
 | (62) crop, reversed for a transform layer's own tracks (2026-09-11, txcrop) | its `transform.track`, mode scalars and `keyframeMarks` crop to the union of its own blocks; every *other* layer-level track (opacity, `effectTracks`) stays uncropped, ungated | all, under §4 |
 | hidden layer contributes nothing | the accumulator reads `isVisible`; a hidden repeat does not remap | all (BUGS.md) |
+| ink lands where it is drawn (TODO (124)) | every input surface takes the canvas point through the inverse of `CanvasManager.inkPose(forLayerID:)` — the cel channel then this walk's container pose, at the frame the layer shows — and shows its live preview through the pose itself: `StrokeCanvasView`'s pose space (every brush and eraser, both tiers), a smart shape's and a text box's commit, a fill's seed and lasso, the vector lasso and Move (`celPoseMaps` carries the container pose). `InkPoseLogicTests` drives each through the render's own composition; `InkUnderTransformUITests` draws under a moved layer | all; parallax per item |
 
 ## 8. Build order
 

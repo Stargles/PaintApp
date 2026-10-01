@@ -100,6 +100,7 @@ extension CanvasManager {
         shapePreviewCache = nil
         shapeGestureLayerID = layers[layerIndex].id
         shapeGestureCelID = layers[layerIndex].cels[celIndex].id
+        shapeGestureInkPose = inkPose(forLayerID: layers[layerIndex].id)
         shapeGestureSamples = samples
         // Shape detection only ever runs for the pen/pencil (see `startShapeDetection`), so the
         // paint brush's settings are always the right ones to snapshot here.
@@ -154,9 +155,11 @@ extension CanvasManager {
         let collapsed = collapsedShapeSamples(for: shape)
         let layerID = shapeGestureLayerID
         let celID = shapeGestureCelID
+        let drawnUnder = shapeGestureInkPose
         defer {
             shapeGestureLayerID = nil
             shapeGestureCelID = nil
+            shapeGestureInkPose = nil
             shapeGestureSamples = []
             shapePreviewCache = nil
             shapePreviewTexture = nil
@@ -175,13 +178,12 @@ extension CanvasManager {
                 layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
             }
             if let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
-                let stroke = VectorStroke(brush: savedBrush, color: shapeGestureColor,
-                                          size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
-                                          samples: collapsed, seed: shapeGestureSeed)
+                guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
+                                                                    shownThrough: drawnUnder) else { return }
                 let elementsBefore = vectorCanvas.elements
-                // The shape outline is in canvas space (it was dragged there) — same mapping the
-                // live vector-stroke path uses, so a shape drawn on a moved layer lands where the
-                // preview showed it.
+                // The shape outline is in canvas points (it was dragged there), pulled into the
+                // layer's own space through the pose it was drawn under — so a shape drawn on a
+                // posed layer lands where the preview showed it.
                 vectorCanvas.addStroke(canvasSpaceStroke: stroke)
                 // **The whole display list, not the `strokes` bucket**, which is
                 // `registerVectorElementsUndo`'s own argument: `addFill` and `upsertText` append, so
@@ -212,21 +214,31 @@ extension CanvasManager {
             }
         }
 
-        stampShapeIntoRaster(collapsed, raster: layers[layerIndex].cels[celIndex].raster,
-                             brush: savedBrush, layerID: layerID, celID: celID)
+        // The raster tier takes the same pull-back as the vector one: its pixels are the layer's own.
+        guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
+                                                            shownThrough: drawnUnder) else { return }
+        stampShapeIntoRaster(stroke, raster: layers[layerIndex].cels[celIndex].raster,
+                             layerID: layerID, celID: celID)
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
+    }
+
+    /// The collapsed outline as the stroke the artist's settings at detection make of it, in canvas
+    /// points.
+    private func drawnShape(_ samples: StrokeSamples, brush: Brush) -> VectorStroke {
+        VectorStroke(brush: brush, color: shapeGestureColor, size: shapeGestureStrokeWidth,
+                     opacity: shapeGestureOpacity, samples: samples, seed: shapeGestureSeed)
     }
 
     /// Stamps a collapsed shape stroke into a raster cel and registers its undo step. Kept separate
     /// so the vector and raster commit paths share one collapse and one set of brush settings.
-    private func stampShapeIntoRaster(_ samples: StrokeSamples, raster: RasterLayerTexture,
-                                      brush: Brush, layerID: UUID, celID: UUID) {
+    private func stampShapeIntoRaster(_ stroke: VectorStroke, raster: RasterLayerTexture,
+                                      layerID: UUID, celID: UUID) {
         let before = raster.renderToUIImage()
         let strokeCountBefore = raster.strokeCount
         // stampStroke brackets itself in beginStroke/endStroke, so this is one undoable unit.
-        BrushStamper.stampStroke(into: raster, samples: samples,
-                                 brush: brush, color: shapeGestureColor.uiColor,
-                                 brushSize: shapeGestureStrokeWidth, brushOpacity: shapeGestureOpacity,
+        BrushStamper.stampStroke(into: raster, samples: stroke.samples,
+                                 brush: stroke.brush, color: shapeGestureColor.uiColor,
+                                 brushSize: stroke.size, brushOpacity: shapeGestureOpacity,
                                  random: DabRandom(seed: shapeGestureSeed))
         let after = raster.renderToUIImage()
         let strokeCountAfter = raster.strokeCount
@@ -249,6 +261,7 @@ extension CanvasManager {
         shapeFingerDown = false
         shapeGestureLayerID = nil
         shapeGestureCelID = nil
+        shapeGestureInkPose = nil
         shapeGestureSamples = []
         shapePreviewCache = nil
         shapePreviewTexture = nil

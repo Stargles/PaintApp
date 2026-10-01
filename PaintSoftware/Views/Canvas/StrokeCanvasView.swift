@@ -67,7 +67,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// interrupted stroke commits instead and reports through `onStrokeEnded`, so this stays what it
     /// always was: "the layer is back where it started".
     var onStrokeCancelled: (() -> Void)?
-    /// Called for each coalesced touch sample during a stroke, in canvas coordinates.
+    /// Called for each coalesced touch sample during a stroke, in canvas coordinates — where a smart
+    /// shape is detected and shown, which is not the layer's own space when a pose carries it.
     ///
     /// The second argument is `UITouch.timestamp` — the pen's own hardware clock, which a
     /// main-thread stall cannot affect. Carried alongside the sample rather than inside it for the
@@ -168,6 +169,47 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// and below every layer stacked on top of this one — which is z-correct by construction, and is
     /// the thing `CanvasView.updateFloatingOverlay` has to do by hand for the raster piece.
     private let floatView = UIImageView()
+
+    /// **This layer's own space, shown through the pose the canvas draws the layer with** — TODO
+    /// (124): *"Make it so the stroke the user lays down is properly transformed so whatever they
+    /// draw accurately reflects the position the stroke gets set in."*
+    ///
+    /// Ink is stored in the layer's space and shown through its cel's channels and the
+    /// transformation layers above it (`CanvasManager.inkPose(forLayerID:)`), so a gesture read in
+    /// canvas points stored every mark where the pen was and showed it a pose away. This view is the
+    /// layer's space with that pose as its Core Animation transform, which makes the whole fix two
+    /// facts UIKit already keeps: a touch read *in* it is in the layer's space, by the same inverse
+    /// the container's zoom gets, and what the gesture draws *into* it — the live scratch, the ink
+    /// held until the render lands, Mode 3's ring — is shown through the pose, under the pen. Every
+    /// tool this view runs (paint and all four eraser modes, on either tier) therefore works in the
+    /// space its geometry is stored in, and nothing downstream needed to learn about poses.
+    ///
+    /// The identity for every layer nothing poses, which is every layer of most documents. Laid out
+    /// by hand with its anchor at the origin, so the transform is the pose and not the pose
+    /// conjugated about the view's centre.
+    private let poseSpace = UIView()
+    /// **The pose the canvas shows this layer through now**, pushed by `CanvasView.Coordinator` on
+    /// every pass — what `poseSpace` and a raster layer's own pixels carry between gestures, so the
+    /// layer is drawn where the composite draws it whenever the host is the thing on screen. A
+    /// gesture reads the model itself at touch-down instead (`beginGesture(in:at:)`), because a take
+    /// moves the playhead in the same turn the pen lands.
+    var shownPose: PoseMap? {
+        didSet {
+            guard shownPose != oldValue, !gestureIsLive else { return }
+            applyPose(shownPose)
+        }
+    }
+    /// Whether a gesture holds `poseSpace` — from `beginGesture` to `endGesture`, which `endScratch`
+    /// calls on every exit from a stroke.
+    private var gestureIsLive = false
+    /// The pose `poseSpace` is showing — `shownPose`, or the gesture's own while one is live. What
+    /// the base's hole is mapped through (`setBaseHole`).
+    private var poseSpacePose: PoseMap?
+    /// `brushSize`, which is in canvas points, in the layer's space: divided by the pose's local
+    /// scale where the gesture lands, so the mark comes out at the size the artist chose.
+    private var gestureBrushSize: CGFloat = 5
+    /// `selectionClipPath`, which is in canvas points, in the layer's space.
+    private var gestureClipPath: CGPath?
 
     /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
     /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
@@ -489,19 +531,26 @@ final class StrokeCanvasView: CanvasPlaneView {
         // finished ink reaches the screen through, so it is the one that decides whether a stroke
         // on a 4096² canvas seen at fit zoom exists at all.
         imageView.layer.minificationFilter = .trilinear
-        imageView.translatesAutoresizingMaskIntoConstraints = false
+        // Laid out by hand with `poseSpace`, for its reason: on a raster layer this *is* the
+        // layer's own pixels, and they are shown through the pose exactly as the scratch over them
+        // is (`adoptPose`).
+        imageView.layer.anchorPoint = .zero
         addSubview(imageView)
+        poseSpace.isUserInteractionEnabled = false
+        poseSpace.layer.anchorPoint = .zero
+        addSubview(poseSpace)
         // **Above the base and below the live stroke**, which is the z-order the two things mean:
         // held ink is finished ink the base does not have yet, and the stroke under the pen is
-        // newer than all of it. Pinned to the edges like `imageView` so its own coordinate space is
-        // canvas points and a held picture's frame is the `windowRect` it was drawn at.
+        // newer than all of it. Pinned to `poseSpace`'s edges so its own coordinate space is the
+        // layer's and a held picture's frame is the `windowRect` it was drawn at.
         heldInkView.isUserInteractionEnabled = false
         heldInkView.isHidden = true
         heldInkView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(heldInkView)
+        poseSpace.addSubview(heldInkView)
         // `.scaleToFill` with a frame set to the scratch's own window rect — which is integral in
-        // canvas points, and this view's coordinates *are* canvas points — puts the window on the
-        // same sample grid as `imageView`, which is what makes "filter each, then composite" agree
+        // the layer's points, and `poseSpace`'s coordinates *are* the layer's points — puts the
+        // window on the same sample grid as the layer's pixels, which is what makes "filter each,
+        // then composite" agree
         // with "composite, then filter" under magnification. `.nearest` is the same crispness
         // contract the rest of the canvas keeps (see `LayerHostView`) — a bilinear scratch over a
         // nearest base would show the live stroke softening at high zoom and then snapping sharp on
@@ -522,7 +571,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // and it is a third on top of an upload this view was already doing every frame.
         scratchView.layer.minificationFilter = .trilinear
         scratchView.isHidden = true
-        addSubview(scratchView)
+        poseSpace.addSubview(scratchView)
         // Identical to `scratchView` in every respect and for every one of its reasons — same sample
         // grid, same crispness contract — added after it so the lifted piece floats over the hole it
         // came out of.
@@ -538,17 +587,68 @@ final class StrokeCanvasView: CanvasPlaneView {
             floatView.bottomAnchor.constraint(equalTo: bottomAnchor),
             floatView.leadingAnchor.constraint(equalTo: leadingAnchor),
             floatView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            imageView.topAnchor.constraint(equalTo: topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            heldInkView.topAnchor.constraint(equalTo: topAnchor),
-            heldInkView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heldInkView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            heldInkView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            heldInkView.topAnchor.constraint(equalTo: poseSpace.topAnchor),
+            heldInkView.bottomAnchor.constraint(equalTo: poseSpace.bottomAnchor),
+            heldInkView.leadingAnchor.constraint(equalTo: poseSpace.leadingAnchor),
+            heldInkView.trailingAnchor.constraint(equalTo: poseSpace.trailingAnchor)
         ])
 
         wire(strokeRecognizer)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for view in [imageView, poseSpace] {
+            view.bounds = bounds
+            view.layer.position = .zero
+        }
+    }
+
+    /// `poseSpace` shown through `pose`, and a raster layer's own pixels with it. A vector layer's
+    /// base is not: it is the cel's posed render (`setInterpolationImage`), already in canvas points.
+    /// A pose with no inverse is shown as the identity — it has collapsed the layer to a line, and
+    /// there is nothing under the pen to read into.
+    private func applyPose(_ pose: PoseMap?) {
+        let pose = pose.flatMap { $0.inverse == nil ? nil : $0 }
+        poseSpacePose = pose
+        let transform = pose?.layerTransform ?? CATransform3DIdentity
+        if !CATransform3DEqualToTransform(poseSpace.layer.transform, transform) {
+            poseSpace.layer.transform = transform
+        }
+        let base = vectorCanvas == nil ? transform : CATransform3DIdentity
+        if !CATransform3DEqualToTransform(imageView.layer.transform, base) {
+            imageView.layer.transform = base
+        }
+    }
+
+    /// **Puts the gesture about to start in the space it draws in** — the layer's own, through the
+    /// model's `inkPose(forLayerID:)` at this instant, or canvas points when `inCanvasPoints` (a
+    /// universal erase, which reaches every layer each through its own pose, and a take, whose runs
+    /// each land at their own frame's) — and converts the two canvas-point settings the gesture
+    /// reads once, so no sample has to be.
+    ///
+    /// `canvasPoint` is where the gesture lands, which is where a keystoned pose's local scale is
+    /// read for the brush size: a projective pose magnifies differently across the plane, and the
+    /// size the artist chose is the size they see under the pen.
+    private func beginGesture(inCanvasPoints: Bool, at canvasPoint: CGPoint) {
+        let pose = inCanvasPoints ? nil
+            : layerID.flatMap { canvasManager?.inkPose(forLayerID: $0) }.flatMap { $0.inverse == nil ? nil : $0 }
+        gestureIsLive = true
+        applyPose(pose)
+        let scale = pose.flatMap { pose in
+            pose.inverse?.applied(to: canvasPoint).flatMap { pose.homography.localScale(at: $0) }
+        } ?? 1
+        gestureBrushSize = scale > 0 ? brushSize / scale : brushSize
+        gestureClipPath = selectionClipPath.flatMap { clip in
+            pose.flatMap { $0.inverse?.mapped(clip) } ?? clip
+        }
+    }
+
+    /// The gesture is over: the space goes back to the one the canvas shows the layer in.
+    private func endGesture() {
+        guard gestureIsLive else { return }
+        gestureIsLive = false
+        applyPose(shownPose)
     }
 
     /// Installs a stroke recognizer on this view, wired to its four callbacks.
@@ -1136,7 +1236,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         let canvas = CGRect(origin: .zero, size: vectorCanvas?.size ?? raster?.size ?? bounds.size)
         let path = CGMutablePath()
         path.addRect(canvas)
-        path.addRect(rect)
+        // The window is in `poseSpace`; a raster base is shown through the same pose and takes it
+        // as it is, and a vector base is the posed picture in canvas points and takes it mapped.
+        let window = CGPath(rect: rect, transform: nil)
+        let posedBase = vectorCanvas != nil ? poseSpacePose : nil
+        path.addPath(posedBase.flatMap { $0.mapped(window) } ?? window)
         let mask = (imageView.layer.mask as? CAShapeLayer) ?? {
             let created = CAShapeLayer()
             created.fillRule = .evenOdd
@@ -1280,7 +1384,8 @@ final class StrokeCanvasView: CanvasPlaneView {
                                     // the scratch's and is applied where the window merges.
                                     texture: brush.texture)
         self.scratch = scratch
-        let input = StrokeInput(touch: touch, in: self)
+        beginGesture(inCanvasPoints: false, at: touch.location(in: self))
+        let input = StrokeInput(touch: touch, in: poseSpace)
         stabilizer.reset(to: input.position)
         stampPath(to: liveSample(input, at: input.position), into: scratch)
         refreshDisplay()
@@ -1310,10 +1415,12 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
         guard let scratch else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
-            let input = StrokeInput(touch: sample, in: self)
+            let input = StrokeInput(touch: sample, in: poseSpace)
             let smoothed = stabilizer.update(rawPoint: input.position)
             stampPath(to: liveSample(input, at: smoothed), into: scratch)
-            onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure), input.timestamp)
+            // Canvas points, not the layer's: a smart shape is detected and shown on the canvas.
+            let shown = StrokeInput(touch: sample, in: self)
+            onStrokeMoved?(VectorSample(x: shown.position.x, y: shown.position.y, pressure: shown.pressure), shown.timestamp)
         }
         refreshDisplay()
     }
@@ -1328,7 +1435,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             onStrokeEnded?()
             return
         }
-        let input = StrokeInput(touch: touch, in: self)
+        let input = StrokeInput(touch: touch, in: poseSpace)
         commitRasterStroke(finalSample: liveSample(input, at: input.position))
     }
 
@@ -1346,8 +1453,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             stampPath(to: finalSample, into: scratch)
         }
         // A tap's one dab — `LiveWalk.finish`.
-        liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: brushSize)
-        if let clipPath = selectionClipPath {
+        liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: gestureBrushSize)
+        if let clipPath = gestureClipPath {
             // Drop what the stroke put outside the selection before it reaches the cel, so undo/redo
             // only ever sees the already-clipped result — in the scratch's own window, since the
             // clip cannot reach anything the stroke did not touch.
@@ -1499,7 +1606,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// Lays down stamps from the previous sample up to `sample` into `target` — `liveWalk`, the
     /// engine's own walk, so live drawing and the vector replay are compared against the real thing.
     private func stampPath(to sample: VectorSample, into target: DabTarget) {
-        liveWalk.stamp(to: sample, into: target, brush: brush, color: brushColor, brushSize: brushSize)
+        liveWalk.stamp(to: sample, into: target, brush: brush, color: brushColor, brushSize: gestureBrushSize)
     }
 
     /// One `StrokeInput` as a stored-shape sample, with its interval taken off the shared clock.
@@ -1540,6 +1647,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         /// The seed the live walk used for each run, so the stored stroke replays the field the
         /// artist watched — BRUSH.md §4, applied per run because each run is its own stroke.
         var seeds: [UInt64]
+        /// The pose each run's frame shows the layer through (`CanvasManager.inkPose`), read when the
+        /// run opens. A take is drawn in canvas points across frames a keyed pose may move the layer
+        /// between, so each run is pulled back through its own frame's pose as it is committed.
+        var poses: [PoseMap?]
     }
 
     private var timingStroke: TimingStroke?
@@ -1622,6 +1733,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         timing.befores.append(surface.canvas.elements)
         strokeSeed = DabRandom.freshSeed()
         timing.seeds.append(strokeSeed)
+        timing.poses.append(manager.inkPose(forLayerID: timing.layerID))
         timingStroke = timing
         restartTimingScratch(at: shared, canvasSize: surface.canvas.size)
         // Last, because its `didSet` refreshes the display and the scratch above is what that refresh
@@ -1661,7 +1773,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             guard timing.canvases.indices.contains(run.slot) else { continue }
             let canvas = timing.canvases[run.slot]
             let pieces: [StrokeSamples]
-            if let clipPath = selectionClipPath {
+            if let clipPath = gestureClipPath {
                 pieces = StrokeGeometry.splitRuns(run.samples) { clipPath.contains($0) }
                     .map { run.samples.replacingSamples($0) }
             } else {
@@ -1670,9 +1782,12 @@ final class StrokeCanvasView: CanvasPlaneView {
             var damage: CGRect? = .null
             var changed = false
             for piece in pieces where !piece.isEmpty {
-                let stroke = VectorStroke(brush: brush, color: colour, size: brushSize,
-                                          opacity: brushOpacity, samples: piece,
-                                          seed: timing.seeds[run.slot])
+                let drawn = VectorStroke(brush: brush, color: colour, size: gestureBrushSize,
+                                         opacity: brushOpacity, samples: piece,
+                                         seed: timing.seeds[run.slot])
+                guard case .stroke(let stroke)? = CanvasManager.inLayerSpace(.stroke(drawn),
+                                                                             shownThrough: timing.poses[run.slot])
+                else { continue }
                 canvas.addStroke(canvasSpaceStroke: stroke)
                 changed = true
                 // `foldGestureDamage`'s rule against this run's own accumulator rather than the
@@ -1778,7 +1893,8 @@ final class StrokeCanvasView: CanvasPlaneView {
                                             canvases: [vectorCanvas],
                                             celIDs: [celID ?? UUID()],
                                             befores: [vectorCanvas.elements],
-                                            seeds: [strokeSeed])
+                                            seeds: [strokeSeed],
+                                            poses: [manager.inkPose(forLayerID: layerID)])
             } else {
                 // The arm set the flag before this state existed — see `handleBegin`. Nothing here
                 // can be recovered, so the latch goes rather than outliving the touch.
@@ -1793,6 +1909,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         gestureIsUniversal = isEraser && universalEraser && inBetweenCelID == nil
         universalCutSessions = gestureIsUniversal && vectorEraserMode == .cutToIntersection
             ? (canvasManager?.beginUniversalIntersectionCut() ?? []) : []
+        beginGesture(inCanvasPoints: gestureIsUniversal || timingStroke != nil, at: touch.location(in: self))
         // At an in-between the eraser is always Mode 1: Modes 2/3 edit stored geometry, and an
         // in-between has none (it's derived). Mode 1 is itself a stroke, so it rides `localEdits`
         // like any other.
@@ -1805,7 +1922,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         // buffers at touch-down, 2 GiB at 16383².
         scratch = {
             if case .replacement = vectorScratchRole {
-                let backdrop = interpolationImage ?? vectorCanvas.renderIfNonEmpty()
+                // The picture of the layer *in the space this gesture draws in*: under a pose that is
+                // the cel's own render, which `poseSpace` shows posed, and not the posed picture in
+                // the base slot, which is already in canvas points.
+                let shown = poseSpacePose == nil ? interpolationImage : nil
+                let backdrop = shown ?? vectorCanvas.renderIfNonEmpty()
                 // **That render was synchronous and it is a picture of everything committed**, so
                 // every held picture's ink is inside it — both in this window and, because
                 // `renderIfNonEmpty` memoizes, in the base the `refreshDisplay` at the end of this
@@ -1835,7 +1956,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         previewDoomed = []
         livePreviewFrames = 0
         pathFit.reset()
-        let input = StrokeInput(touch: touch, in: self)
+        let input = StrokeInput(touch: touch, in: poseSpace)
         stabilizer.reset(to: input.position)
         recordVectorSample(input, at: input.position)
         refreshDisplay()
@@ -1863,14 +1984,16 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func moveVectorStroke(_ touch: UITouch, _ event: UIEvent) {
         guard scratch != nil else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
-            let input = StrokeInput(touch: sample, in: self)
+            let input = StrokeInput(touch: sample, in: poseSpace)
             // Smoothing is per mode, not per tool: a cut belongs exactly where the finger passed,
             // but Mode 1 is a brush stroke and wants the same smoothing paint gets. See
             // `VectorEraserMode.isStabilized`.
             let raw = isEraser && !vectorEraserMode.isStabilized
             let point = raw ? input.position : stabilizer.update(rawPoint: input.position)
             recordVectorSample(input, at: point)
-            onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure), input.timestamp)
+            // Canvas points, not the layer's: a smart shape is detected and shown on the canvas.
+            let shown = poseSpacePose.flatMap { $0.applied(to: point) } ?? point
+            onStrokeMoved?(VectorSample(x: shown.x, y: shown.y, pressure: input.pressure), input.timestamp)
         }
         refreshDisplay()
     }
@@ -1883,7 +2006,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// dab that thins under a light pencil — see `VectorCanvas.cutToIntersection(atCanvasPoint:…)`.
     private func resolveIntersectionCut(at point: CGPoint, in canvas: VectorCanvas) {
         let resolved = canvas.cutToIntersection(atCanvasPoint: point, brush: brush,
-                                                size: brushSize,
+                                                size: gestureBrushSize,
                                                 suppressing: intersectionDriver.suppressed)
         intersectionDriver.accept(resolved.outcome, underTip: resolved.underTip)
         if case .cut = resolved.outcome {
@@ -1898,7 +2021,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// and so is the undo.
     private func resolveUniversalIntersectionCut(at point: CGPoint, own canvas: VectorCanvas) {
         guard let canvasManager else { return }
-        let cut = canvasManager.resolveUniversalIntersectionCut(at: point, brush: brush, size: brushSize,
+        let cut = canvasManager.resolveUniversalIntersectionCut(at: point, brush: brush, size: gestureBrushSize,
                                                                 sessions: &universalCutSessions)
         if cut.contains(where: { $0 === canvas }) { vectorContentChanged = true }
     }
@@ -1921,7 +2044,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func endVectorStroke(_ touch: UITouch) {
-        commitVectorStroke(finalSample: StrokeInput(touch: touch, in: self))
+        commitVectorStroke(finalSample: StrokeInput(touch: touch, in: poseSpace))
     }
 
     /// The vector half of `commitRasterStroke`, and split out for the same reason: `finalSample` is
@@ -1958,7 +2081,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Mode 1, which an in-between forces whatever the picker says (`beginVectorStroke`).
         let modeInForce = inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode
         if let scratch, !isEraser || modeInForce == .erase {
-            liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: brushSize)
+            liveWalk.finish(into: scratch, brush: brush, color: brushColor, brushSize: gestureBrushSize)
         }
         // BRUSH.md §5.5: a channel that turned out to hold nothing but its neutral is dropped, because
         // the funnel answers the same value for an absent channel and an absent one costs no bytes.
@@ -1989,7 +2112,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // `replacingSamples` puts the gesture's own channel set back on each clipped run — the split
         // hands back `VectorSample`s, which carry every channel, and the *set* is this gesture's.
         let sampleRuns: [StrokeSamples]
-        if let clipPath = selectionClipPath {
+        if let clipPath = gestureClipPath {
             sampleRuns = StrokeGeometry.splitRuns(currentVectorSamples) { clipPath.contains($0) }
                 .map { currentVectorSamples.replacingSamples($0) }
         } else {
@@ -2012,7 +2135,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 universalCutSessions = []
             } else {
                 changed = canvasManager?.commitUniversalErase(runs: sampleRuns, brush: brush,
-                                                              size: brushSize, opacity: brushOpacity,
+                                                              size: gestureBrushSize, opacity: brushOpacity,
                                                               mode: vectorEraserMode) ?? []
             }
             vectorContentChanged = changed.contains { $0 === vectorCanvas }
@@ -2023,7 +2146,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 for run in sampleRuns where !run.isEmpty {
                     // Samples and brush, not bare points/radius: the eraser's footprint is the same
                     // pressure-driven capsule chain `BrushStamper` would stamp.
-                    if vectorCanvas.erase(alongPath: run, brush: brush, size: brushSize,
+                    if vectorCanvas.erase(alongPath: run, brush: brush, size: gestureBrushSize,
                                           opacity: brushOpacity, mode: vectorEraserMode) {
                         vectorContentChanged = true
                         foldGestureDamage(vectorCanvas)
@@ -2040,7 +2163,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // gesture clipped into several runs hands the same seed to each: only the first can
                 // match the preview, and the rest are at least stable across renders.
                 let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
-                                          size: brushSize, opacity: brushOpacity, samples: run,
+                                          size: gestureBrushSize, opacity: brushOpacity, samples: run,
                                           seed: strokeSeed)
                 // Samples are in canvas space; this overload maps them into layer-local space so a
                 // stroke on an already-moved layer lands under the finger.
@@ -2107,7 +2230,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             brush: brush,
             color: isEraser ? CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
                             : CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
-            size: brushSize, opacity: brushOpacity, samples: samples,
+            size: gestureBrushSize, opacity: brushOpacity, samples: samples,
             composite: isEraser ? .erase : .paint, seed: strokeSeed)
         canvasManager.recordLocalEdit(canvasSpaceStroke: stroke, forCel: celID, inLayer: layerID)
     }
@@ -2122,6 +2245,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         previewCuts = [:]
         previewDoomed = []
         updateEraserFootprint(at: nil)
+        endGesture()
     }
 
     /// Shows Mode 3's footprint ring at `point` in canvas space, or hides it.
@@ -2135,11 +2259,11 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// 2026-08-22 — see `previewCutSpans`), and only Mode 3 acts at a distance from its own
     /// footprint.
     ///
-    /// Drawn in this view's own coordinates, which *are* canvas coordinates — `StrokeInput` takes
-    /// `touch.location(in:)` on this view, and that same point is what `cutToIntersection` resolves
-    /// against — so the canvas transform scales the ring with the artwork and the circle shown is
-    /// exactly the circle used. Only the outline width is divided back out, measured against the
-    /// window rather than read off a transform, so it stays a hairline at any zoom.
+    /// Drawn in `poseSpace`, the space the gesture is read in — `StrokeInput` takes
+    /// `touch.location(in:)` there, and that same point is what `cutToIntersection` resolves
+    /// against — so the canvas transform and the layer's pose scale the ring with the artwork and the
+    /// circle shown is exactly the circle used. Only the outline width is divided back out, measured
+    /// against the window rather than read off a transform, so it stays a hairline at any zoom.
     ///
     /// Drawn at full size, and the cut is resolved at full size to match: Mode 3's radius is the brush
     /// size and does not thin under a light pencil, which is what lets this ring be an exact promise
@@ -2153,17 +2277,17 @@ final class StrokeCanvasView: CanvasPlaneView {
             let created = CAShapeLayer()
             created.fillColor = nil
             created.strokeColor = UIColor.systemBlue.withAlphaComponent(0.85).cgColor
-            // Above `imageView`'s layer whatever order they were added in.
+            // Above the live stroke's own layers whatever order they were added in.
             created.zPosition = 1_000
             // No implicit animation: the ring must sit under the finger, not chase it.
             created.actions = ["path": NSNull(), "hidden": NSNull(), "lineWidth": NSNull()]
-            layer.addSublayer(created)
+            poseSpace.layer.addSublayer(created)
             eraserFootprintLayer = created
             return created
         }()
-        let radius = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: brushSize)
-        let origin = convert(CGPoint.zero, to: nil)
-        let unit = convert(CGPoint(x: 1, y: 0), to: nil)
+        let radius = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: gestureBrushSize)
+        let origin = poseSpace.convert(CGPoint.zero, to: nil)
+        let unit = poseSpace.convert(CGPoint(x: 1, y: 0), to: nil)
         let scale = max(hypot(unit.x - origin.x, unit.y - origin.y), 0.01)
         ring.lineWidth = 1 / scale
         ring.path = CGPath(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
@@ -2236,7 +2360,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let previous = lastPreviewSample
         lastPreviewSample = sample
         let increment: [VectorSample]
-        if let clipPath = selectionClipPath {
+        if let clipPath = gestureClipPath {
             guard clipPath.contains(point) else { return nil }
             increment = previous.map { clipPath.contains($0.point) ? [$0, sample] : [sample] } ?? [sample]
         } else {
@@ -2252,7 +2376,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func previewWholeStrokes(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
                                      into scratch: StrokeScratch) {
         guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
-        for stroke in canvas.wholeStrokePreviewEdits(alongPath: increment, brush: brush, size: brushSize,
+        for stroke in canvas.wholeStrokePreviewEdits(alongPath: increment, brush: brush, size: gestureBrushSize,
                                                      accumulating: &previewDoomed) {
             VectorCanvas.applyPreview(erasing: stroke, into: scratch)
         }
@@ -2280,7 +2404,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func previewCutSpans(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
                                  into scratch: StrokeScratch) {
         guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
-        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: brushSize,
+        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: gestureBrushSize,
                                            accumulating: &previewCuts) {
             VectorCanvas.applyPreview(edit, into: scratch)
         }
