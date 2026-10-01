@@ -165,12 +165,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (146) A second finger makes a Move precise
-
-**Status** — not started. *"When in the move menu, add a thing where if the user presses a finger onto
-the canvas while moving the box with their pen, it makes the move more precise, like 5x less than the
-pen's movement. This should work with recording movement too."*
-
 ## (135) Folder Move: every frame or this cel
 
 **Status** — not started. *"If you click on edit on a folder and then click on move, you can move
