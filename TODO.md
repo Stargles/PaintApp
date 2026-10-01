@@ -83,16 +83,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
       instant picture draws the active layer plain (no blend mode, effect or mask), and the exact
       bake replaces it when it lands.
 
-## (124) follow-up: raster selections and Move under a transform layer
-
-**Status** — not started. (124) merged (`dbd53b0`): every brush, eraser, smart shape, text box, fill and
-the **vector** lasso/Move now read the pen through the inverse of the pose a layer is shown through
-(`CanvasManager.inkPose(forLayerID:)`). The **raster** lasso and raster Move under a transformation
-layer do not yet — the same defect class as (124), so it is finished rather than asked about.
-
-- [ ] Raster lasso loops and the raster floating piece map through `inkPose`; a cold-start UI test
-      lassoes and moves raster ink under a Move layer and asserts the pixels land under the pen.
-
 ## (116)/(128) follow-up: one Edit button per object kind
 
 **Status** — not started. Select → Edit (`d1dd0dd`, `EditableObject` / `editSelectedObject()`) opens the

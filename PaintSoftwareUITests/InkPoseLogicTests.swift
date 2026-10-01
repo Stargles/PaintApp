@@ -253,4 +253,149 @@ final class InkPoseLogicTests: XCTestCase {
         XCTAssertTrue(red(60, 60), "the box the tap is shown in was not filled")
         XCTAssertFalse(red(160, 60), "the paper beside the box was filled instead")
     }
+
+    // MARK: - Pixels: a raster lasso and its Move, asked where the canvas shows them
+
+    /// **A pixel layer holding a 40-point black square at (20, 100), under a Move layer that slides it
+    /// 80 points right** — so the artist sees it at (100, 100), and a loop drawn round it there is
+    /// round pixels that are stored 80 points to the left of the loop. A bystander square at (100, 20)
+    /// is shown at (180, 20), outside any loop drawn round the first.
+    private func pixelsUnderMove() -> CanvasManager {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.size
+        manager.addLayer(name: "ink")
+        manager.addTransformLayer(name: "move")
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(box: Self.box,
+                                                               mappedBy: CGAffineTransform(translationX: 80, y: 0)),
+                                                mode: .move)
+        manager.currentLayerIndex = 0
+        let ink = UIGraphicsImageRenderer(size: Self.size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.black.setFill()
+            context.cgContext.fill(CGRect(x: 20, y: 100, width: 40, height: 40))
+            context.cgContext.fill(CGRect(x: 100, y: 20, width: 30, height: 30))
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, ink)
+        return manager
+    }
+
+    /// A loop round the square **as the artist sees it**, on the layer's current cel.
+    private func selectShownSquare(_ manager: CanvasManager) {
+        let loop = CGRect(x: 90, y: 90, width: 60, height: 60)
+        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
+                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+    }
+
+    /// Whether a pixel of a layer's *stored* picture is inked.
+    private func storedInk(_ manager: CanvasManager, layer: Int = 0, _ x: Int, _ y: Int) -> Bool {
+        let image = PixelOps.rasterize(cel: manager.layers[layer].cels[0], canvasSize: Self.size)
+        guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
+        return bytes[(y * cg.width + x) * 4 + 3] > 200
+    }
+
+    private func nudgeFloat(_ manager: CanvasManager, dx: CGFloat) throws {
+        var transform = try XCTUnwrap(manager.floatingPiece?.transform, "nothing floats")
+        transform.position.x += dx
+        manager.updateFloatingPose(transform: transform, distortQuad: nil)
+    }
+
+    /// **The raster Move lifts what the loop is round and puts it down where it is dropped.** Lifted
+    /// from the stored pixels the loop catches nothing (the ink is 80 points to its left), and set
+    /// down by writing the piece's canvas position into the layer it lands 80 points from where it was
+    /// let go — both halves of that are what the pose-aware lift and landing exist to prevent.
+    func testARasterMoveUnderAMoveLayerLiftsWhatIsShownAndLandsWhereItIsDropped() throws {
+        let manager = pixelsUnderMove()
+        selectShownSquare(manager)
+
+        manager.beginMove()
+        let piece = try XCTUnwrap(manager.floatingPiece, "Move lifted nothing")
+        XCTAssertNotNil(PixelOps.opaqueContentBounds(piece.pieceImage),
+                        "the loop is round the shown ink and the piece it lifted is empty")
+        let hole = try XCTUnwrap(piece.remainderPreview)
+        XCTAssertEqual(PixelOps.opaqueContentBounds(hole), CGRect(x: 100, y: 20, width: 30, height: 30),
+                       "the hole is not the lifted ink and nothing else: the cel should keep only the bystander, where it is stored")
+
+        try nudgeFloat(manager, dx: 30)
+        manager.commitFloatingPieceIfNeeded()
+
+        XCTAssertFalse(storedInk(manager, 30, 120), "the square is still where it was stored")
+        XCTAssertTrue(storedInk(manager, 70, 120),
+                      "dropped 30 points right of where it was shown, the square is not stored 30 right of where it was")
+        XCTAssertFalse(storedInk(manager, 150, 120), "the drop was written at the pen's own coordinates, a pose away")
+        XCTAssertTrue(storedInk(manager, 110, 30), "what the loop was not round moved: it is no longer stored where it was")
+        XCTAssertFalse(storedInk(manager, 190, 30), "what the loop was not round was carried a pose along with the cel's remainder")
+    }
+
+    /// **Duplicate copies what the loop is round onto a new layer, and the new layer is shown under
+    /// the same Move layer** — so a copy let go in place is shown exactly over the original.
+    func testADuplicateUnderAMoveLayerLandsOverTheOriginal() throws {
+        let manager = pixelsUnderMove()
+        selectShownSquare(manager)
+
+        manager.beginDuplicate()
+        XCTAssertEqual(manager.layers.count, 3, "the copy's layer was not added")
+        manager.commitFloatingPieceIfNeeded()
+
+        let copy = try XCTUnwrap(manager.layers.firstIndex { $0.id != manager.layers[0].id && $0.kind == .raster })
+        XCTAssertTrue(storedInk(manager, layer: copy, 30, 120), "the copy is not stored where the original is")
+        XCTAssertFalse(storedInk(manager, layer: copy, 110, 120), "the copy was written at the pen's own coordinates")
+        XCTAssertTrue(storedInk(manager, layer: 0, 30, 120), "a copy took the original with it")
+    }
+
+    /// **To New Layer cuts in the layer's own space**: the piece leaves the source and arrives where it
+    /// was stored, and so is shown where it was.
+    func testToNewLayerUnderAMoveLayerCutsWhatTheLoopIsRoundAndNothingElse() throws {
+        let manager = pixelsUnderMove()
+        selectShownSquare(manager)
+
+        manager.moveSelectionToNewLayer()
+
+        let source = try XCTUnwrap(manager.layers.firstIndex { $0.name == "ink" })
+        let moved = try XCTUnwrap(manager.layers.firstIndex { $0.kind == .raster && $0.name != "ink" })
+        XCTAssertFalse(storedInk(manager, layer: source, 30, 120), "the source kept what the loop is round")
+        XCTAssertTrue(storedInk(manager, layer: moved, 30, 120), "the new layer did not get it")
+    }
+
+    /// **Clear and Fill reach the stored pixels through the loop pulled back**, not through the loop as
+    /// drawn, which is 80 points from them.
+    func testClearAndFillOnARasterSelectionUnderAMoveLayerActWhereTheLoopIsShown() throws {
+        let cleared = pixelsUnderMove()
+        selectShownSquare(cleared)
+        cleared.clearSelectionPixels()
+        XCTAssertFalse(storedInk(cleared, 30, 120), "Clear missed the ink the loop is round")
+
+        let filled = pixelsUnderMove()
+        filled.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+        filled.brushOpacity = 1
+        selectShownSquare(filled)
+        filled.fillSelection()
+        XCTAssertTrue(storedInk(filled, 40, 95), "Fill painted nowhere the loop is shown")
+        XCTAssertFalse(storedInk(filled, 140, 95), "Fill painted at the pen's own coordinates, a pose away")
+    }
+
+    /// **Fill on a vector selection** goes through the same pull-back: the element it lays down is
+    /// shown where the loop was drawn, not a pose away from it.
+    func testFillOnAVectorSelectionUnderAMoveLayerIsShownInsideTheLoop() throws {
+        let fx = layerUnderMove(CGAffineTransform(translationX: 80, y: 0))
+        let loop = CGRect(x: 110, y: 30, width: 40, height: 20)
+        fx.manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
+                                         layerID: fx.manager.layers[fx.ink].id,
+                                         celID: fx.manager.layers[fx.ink].cels[0].id)
+        fx.manager.fillSelection()
+        let element = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.elements.last, "Fill laid nothing down")
+        let onScreen = try XCTUnwrap(shown(element, in: fx.manager, layer: fx.ink).fill?.cgPath)
+        let box = onScreen.boundingBoxOfPath
+        XCTAssertEqual(box.minX, loop.minX, accuracy: 1, "the fill is not shown inside the loop")
+        XCTAssertEqual(box.width, loop.width, accuracy: 1)
+        XCTAssertEqual(box.minY, loop.minY, accuracy: 1)
+    }
+
+    /// **The wand reads what is shown**, so the region it selects is where the artist tapped.
+    func testTheMagicWandUnderAMoveLayerSelectsTheShownSquare() throws {
+        let manager = pixelsUnderMove()
+        manager.finishAutomaticSelection(at: CGPoint(x: 120, y: 120))
+        let bounds = try XCTUnwrap(manager.selection?.bounds, "the wand selected nothing")
+        XCTAssertEqual(bounds.minX, 100, accuracy: 1.5, "the selection is not where the square is shown")
+        XCTAssertEqual(bounds.width, 40, accuracy: 1.5)
+    }
 }

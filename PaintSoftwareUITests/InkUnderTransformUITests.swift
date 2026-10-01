@@ -202,4 +202,49 @@ final class InkUnderTransformUITests: PaintUITestCase {
         try moveATransformLayerAboveTheDrawing(app, canvas, drawing: 1)
         try assertStrokeLandsUnderThePen(app, canvas)
     }
+
+    /// **A raster lasso and its Move under a moved transformation layer** — TODO (124)'s follow-up,
+    /// driven the way the artist gets there: a mark on a pixel layer, a Move layer above that carries
+    /// it a fifth of the paper right, a rectangle drawn round the mark *where it is shown*, Move, a
+    /// drag, Done. `InkPoseLogicTests` owns the lift, the hole and the landing; what only this can say
+    /// is that the loop, the box and the dropped piece the artist handles are in the picture they are
+    /// looking at, and that the piece is on the paper under the pen when it is let go.
+    ///
+    /// Asserted on what is drawn: the mark is where the piece was dropped, is gone from where it was
+    /// shown, and the Move layer has not carried it a second fifth along.
+    func testALassoAndMoveOnARasterLayerUnderAMovedTransformLayerSetsThePieceDownUnderThePen() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        addRasterLayer(app)
+        try moveATransformLayerAboveTheDrawing(app, canvas, drawing: 1)
+
+        let paper = paperRect(in: canvas)
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
+        rectangle.tap()
+        dragOnCanvas(app, from: onHost(paper, 0.33, 0.50), to: onHost(paper, 0.57, 0.70))
+
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "Move raised no box over the selection")
+        dragOnCanvas(app, from: onHost(paper, 0.45, 0.60), to: onHost(paper, 0.65, 0.60))
+        attach(canvas, "raster-piece-dragged-under-the-transform-layer")
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done must put the box down")
+        if app.buttons["selectPanel.deselectButton"].exists { app.buttons["selectPanel.deselectButton"].tap() }
+
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.5,
+                                                            width: paper.width, height: paper.height * 0.2))
+        attach(canvas, "raster-piece-set-down")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.6, span: 0.61...0.69).count, 100,
+                             "the piece is not under the pen: the loop was drawn round the mark where it is "
+                             + "shown, so the mark should be shown a fifth of the paper right of there")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.6, span: 0.41...0.49).isEmpty,
+                      "the mark is still where it was shown — Move lifted nothing, or left a copy")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.6, span: 0.81...0.89).isEmpty,
+                      "the Move layer carried the dropped piece a second fifth of the paper right")
+    }
 }

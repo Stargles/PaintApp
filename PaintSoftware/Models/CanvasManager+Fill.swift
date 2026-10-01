@@ -800,7 +800,7 @@ extension CanvasManager {
         let layerIndex = currentLayerIndex
         // The loop was drawn in canvas points and the fill is worked out in the layer's own space,
         // which is where its references are drawn and where it lands — TODO (124).
-        let path = inkPose(forLayerID: layers[layerIndex].id)?.inverse?.mapped(drawnPath) ?? drawnPath
+        let path = layerSpacePath(drawnPath, forLayerID: layers[layerIndex].id)
 
         // The loop plus its halo is the whole of what a lasso fill can touch (`FillWindow`), so the
         // stencil, the reference and the session are all cut to it.

@@ -282,6 +282,15 @@ extension CanvasManager {
                        inheriting: walk.poses[index])
     }
 
+    /// **A path the artist made on the canvas, in the layer's own space** — `inLayerSpace`'s answer for
+    /// a loop: pulled back through the inverse of the pose the layer is shown through, so whatever
+    /// is cut, cleared or filled inside it in the layer's pixels is what the artist drew round. The
+    /// path itself where nothing poses the layer, and where the pose cannot be inverted (a layer
+    /// collapsed to a line, which shows nothing to draw round).
+    func layerSpacePath(_ canvasPath: CGPath, forLayerID id: UUID) -> CGPath {
+        inkPose(forLayerID: id)?.inverse?.mapped(canvasPath) ?? canvasPath
+    }
+
     /// **Geometry the artist made in canvas points, written into a layer the canvas shows through
     /// `pose`** — mapped through the pose's inverse, so the layer's render puts it back exactly where
     /// it was made. The element itself where nothing poses the layer; nil only where a keystone

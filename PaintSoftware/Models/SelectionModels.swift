@@ -289,6 +289,14 @@ struct FloatingPiece {
     var liftTransform: FloatingTransform
     var mode: TransformMode
 
+    /// **The pose the layer this piece lands on is shown through, taken at the lift** — TODO (124)'s
+    /// follow-up (`CanvasManager.inkPose`), nil where nothing poses it. The piece is lifted from what
+    /// the canvas shows, floats where the artist sees it, and is written back through this map's
+    /// inverse (`commitFloatingPieceIfNeeded`), so a piece set down lands under the pen and not a
+    /// pose away from it. Read at the lift rather than at the bake because the bake can come after the
+    /// playhead has moved, which is the frame this was resolved at.
+    var landingPose: PoseMap?
+
     /// **Distort's four corners, in the piece's own local (centred, untransformed) space** — nil for
     /// a piece nobody has distorted, which is `Quad.rect(localBox)` exactly. LASSO_MOVE.md §3 stage 5.
     ///
@@ -809,7 +817,8 @@ extension CanvasManager {
         // divorcing them properly is VECTOR_INTERPOLATION item 26, not this seam.
         let cel = layers[currentLayerIndex].cels[celIndex]
         let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                       derived: derivedCelContent(for: cel, atFrame: currentFrame))
+                                       derived: derivedCelContent(for: cel, atFrame: currentFrame),
+                                       pose: inkPose(forLayerID: layers[currentLayerIndex].id))
         guard let path = PixelOps.floodFillMask(image: image, point: point, tolerance: magicWandTolerance) else { return }
         finishSelection(path: path)
     }
@@ -864,14 +873,23 @@ extension CanvasManager {
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
 
         let cel = layers[currentLayerIndex].cels[celIndex]
-        let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        let sourceLayerID = layers[currentLayerIndex].id
+        // **The piece is lifted from what the canvas shows, and the cel keeps what is left of what it
+        // stores** — TODO (124)'s follow-up. The loop was drawn round the picture the artist sees,
+        // which under a transformation layer is the cel carried through `inkPose`, so the piece is
+        // cut from that picture (`shown`) and the hole it leaves is cut from the cel's own pixels
+        // through the loop pulled back to where those are (`remainder`). Both are the one image and
+        // the one loop wherever nothing poses the layer.
+        let pose = inkPose(forLayerID: sourceLayerID)
+        let stored = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        let shown = pose.map { PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: $0) } ?? stored
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         let path: CGPath
         let bounds: CGRect
         if let sel = selection {
             path = sel.path
             bounds = sel.bounds.intersection(canvasRect)
-        } else if let contentBounds = PixelOps.opaqueContentBounds(fullImage) {
+        } else if let contentBounds = PixelOps.opaqueContentBounds(shown) {
             bounds = contentBounds.intersection(canvasRect)
             path = CGPath(rect: bounds, transform: nil)
         } else {
@@ -880,10 +898,11 @@ extension CanvasManager {
         }
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let (rawPiece, remainder) = PixelOps.maskedPiece(image: fullImage, path: path)
+        let (rawPiece, shownRemainder) = PixelOps.maskedPiece(image: shown, path: path)
         guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
+        let remainder = pose == nil ? shownRemainder
+            : PixelOps.clear(base: stored, path: layerSpacePath(path, forLayerID: sourceLayerID))
 
-        let sourceLayerID = layers[currentLayerIndex].id
         let sourceCelID = cel.id
         let lift = FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY),
                                      scaleX: 1, scaleY: 1, rotation: 0)
@@ -894,7 +913,8 @@ extension CanvasManager {
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: remainder,
             transform: lift, liftTransform: lift,
-            mode: transformMode
+            mode: transformMode,
+            landingPose: pose
         )
         // **The selection survives the lift and clears at the bake** — owner, 2026-08-22, so the
         // raster Move and the vector lasso move behave the same way on the same gesture
@@ -1187,11 +1207,14 @@ extension CanvasManager {
         let sourceLayerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: sourceLayerIndex, atFrame: currentFrame) else { return }
         let cel = layers[sourceLayerIndex].cels[celIndex]
-        let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        // The copy is taken from what the canvas shows — the loop was drawn round that picture, which
+        // under a transformation layer is the cel carried through its pose (`beginMove`).
+        let shown = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                       pose: inkPose(forLayerID: layers[sourceLayerIndex].id))
         let bounds = selection.bounds.intersection(CGRect(origin: .zero, size: canvasSize))
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let (rawPiece, _) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
+        let (rawPiece, _) = PixelOps.maskedPiece(image: shown, path: selection.path)
         guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
 
         let sourceLayerID = layers[sourceLayerIndex].id
@@ -1216,7 +1239,9 @@ extension CanvasManager {
             pieceImage: croppedPiece, baseSize: bounds.size,
             remainderPreview: nil,
             transform: duplicateLift, liftTransform: duplicateLift,
-            mode: transformMode
+            mode: transformMode,
+            // The copy lands on the new layer, which is shown through its own pose (`inkPose`).
+            landingPose: inkPose(forLayerID: newLayer.id)
         )
     }
 
@@ -1249,8 +1274,12 @@ extension CanvasManager {
         let sourceIndex = currentLayerIndex
         let cel = layers[sourceIndex].cels[celIndex]
         let sourceLayerID = layers[sourceIndex].id
+        // **Cut in the layer's own space**, the loop pulled back through its pose (`beginMove`): the
+        // piece moves to a layer that sits directly above this one in the same container, so the same
+        // transformation layers carry it and nothing needs resampling to keep it where the loop was.
         let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-        let (piece, remainder) = PixelOps.maskedPiece(image: fullImage, path: selection.path)
+        let (piece, remainder) = PixelOps.maskedPiece(
+            image: fullImage, path: layerSpacePath(selection.path, forLayerID: sourceLayerID))
 
         // TODO (108): span exactly the source cel, not the whole scene — see the same note on
         // `beginDuplicate` above, which had the identical defect.
@@ -1680,7 +1709,11 @@ extension CanvasManager {
         guard let targetLayerIndex = layerIndex(ofID: piece.targetLayerID),
               let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else { return true }
 
-        let rendered = PixelOps.render(floatingPiece: piece, into: canvasSize)
+        // The piece floats in canvas points, where the artist sees it; the layer stores its pixels
+        // in its own space, so what lands is the picture written back through the pose it is shown
+        // through (`landingPose`) — the identity on a layer nothing poses.
+        let shown = PixelOps.render(floatingPiece: piece, into: canvasSize)
+        let rendered = piece.landingPose?.inverse.map { PixelOps.posed(shown, through: $0) } ?? shown
         let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
 
         switch piece.kind {
@@ -1753,7 +1786,8 @@ extension CanvasManager {
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
-        layDownSolidFill(selection.path, color: brushColor.resolvedUIColor(opacity: brushOpacity),
+        layDownSolidFill(layerSpacePath(selection.path, forLayerID: selection.layerID),
+                         color: brushColor.resolvedUIColor(opacity: brushOpacity),
                          layerIndex: currentLayerIndex, celIndex: celIndex, label: .fill)
     }
 
@@ -1898,7 +1932,8 @@ extension CanvasManager {
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-            let newImage = PixelOps.clear(base: base, path: selection.path)
+            let newImage = PixelOps.clear(base: base,
+                                          path: layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id))
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage,
                                        newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),

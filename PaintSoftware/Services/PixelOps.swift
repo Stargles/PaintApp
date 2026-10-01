@@ -485,6 +485,34 @@ enum PixelOps {
         return (UIImage(cgImage: warped, scale: 1, orientation: .up), destination)
     }
 
+    /// **`draw`'s picture carried through `pose` into `context`** — the one place a pose meets pixels.
+    /// An affine pose is a CTM; a keystone has no CTM to be, so the picture is rasterised flat over
+    /// `frame` and warped (`warpedPosedTiers`). `rasterizeUncached` draws a cel's raster tiers through
+    /// it and `posed(_:through:)` draws a finished picture, so the two cannot resample differently.
+    private static func drawPosed(through pose: PoseMap, in context: CGContext, frame: CGRect,
+                                  drawing draw: () -> Void) {
+        switch pose {
+        case .affine(let transform):
+            context.concatenate(transform)
+            draw()
+        case .projective(let homography):
+            if let warped = warpedPosedTiers(frame: frame, through: homography, drawing: draw) {
+                warped.image.draw(in: warped.destination)
+            }
+        }
+    }
+
+    /// A canvas-sized `image` carried through `pose` — what the canvas shows of it where `pose` is the
+    /// map its layer is shown through (TODO (124): `CanvasManager.inkPose`). Run through a pose's
+    /// *inverse* it is the other direction, which is how a picture the artist moved on screen is
+    /// written back into the layer's own space.
+    static func posed(_ image: UIImage, through pose: PoseMap) -> UIImage {
+        let bounds = CGRect(origin: .zero, size: image.size)
+        return UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
+            drawPosed(through: pose, in: context.cgContext, frame: bounds) { image.draw(in: bounds) }
+        }
+    }
+
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality,
                                           window: StripWindow? = nil) -> UIImage {
@@ -559,17 +587,9 @@ enum PixelOps {
                 guard let pose = cel.pose else { return draw() }
                 context.cgContext.saveGState()
                 if let window { context.cgContext.translateBy(x: -window.origin.x, y: -window.origin.y) }
-                switch pose {
-                case .affine(let transform):
-                    context.cgContext.concatenate(transform)
-                    draw()
-                case .projective(let homography):
-                    let frame = CGRect(origin: .zero, size: window?.frameSize ?? canvasSize)
-                    if let warped = Self.warpedPosedTiers(frame: frame, through: homography,
-                                                          drawing: draw) {
-                        warped.image.draw(in: warped.destination)
-                    }
-                }
+                Self.drawPosed(through: pose, in: context.cgContext,
+                               frame: CGRect(origin: .zero, size: window?.frameSize ?? canvasSize),
+                               drawing: draw)
                 context.cgContext.restoreGState()
             }
             // The rect the posed tiers draw into: the frame in its own coordinates, since the shift
