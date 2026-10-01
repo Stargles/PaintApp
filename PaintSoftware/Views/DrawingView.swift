@@ -834,7 +834,16 @@ struct DrawingView: View {
     /// layer's bar is on screen *with* the rail rather than instead of it, and a 760-point card
     /// centred on the canvas would sit over the options panel's lower rows (Duplicate, Delete) and
     /// the rail's own — so the dock narrows and keeps to the rail's left instead.
+    ///
+    /// **Not while a piece floats.** Every other bar in the dock stands down for the Move bar
+    /// (`bottomDock`'s `isAnyPieceFloating` gates), so it is the only card up, and it cannot narrow: its
+    /// first row is 650-odd points of fixed controls. Squeezed to the room beside the rail it clips at
+    /// both ends and Done — the control at the right end — is off the card, where a tap lands on the
+    /// rail instead (`GraphEditorGestureUITests`, a Move raised from a transformation layer's options
+    /// with the rail open). A bar that cannot narrow takes its width and overlaps the rail, as it did
+    /// before the dock kept clear of it.
     private func dockClearance(canvasWidth: CGFloat) -> CGFloat {
+        guard !canvasManager.isAnyPieceFloating else { return 0 }
         let rail = layerRailClearance(canvasWidth: canvasWidth)
         guard rail > 0, layerOptionsID != nil else { return rail }
         return rail + LayerRail.optionsSpacing + LayerRail.optionsWidth

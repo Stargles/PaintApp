@@ -114,9 +114,12 @@ extension View {
     /// MEASURED on the Move, effect, transform-settings and gradient panels, where it drew a brush
     /// dot, baked the floating piece, closed the layer rail or closed the session the card belongs to.
     /// (Select's and Text's own content already took such a touch.)
-    /// An empty tap gesture over the card's own shape claims those touches; the controls inside still
-    /// win theirs, being the more specific gesture. It is here because this is the one modifier every
-    /// docked panel wears, so no panel can forget it.
+    /// An empty tap gesture over the card's own shape claims those touches. **Simultaneous, not the
+    /// plain `onTapGesture`**: that one is an ancestor gesture every control's own has to win against,
+    /// and the colour wheel's disc — a zero-distance drag that reads its own taps — lost its double-tap
+    /// reset to it (`ColorWheelsUITests`). The simultaneous one claims the touch and leaves every
+    /// gesture inside to run as it did. It is here because this is the one modifier every docked panel
+    /// wears, so no panel can forget it.
     ///
     /// `bottomDock.card` is the card's own frame for a test to read, which no panel exposes any other
     /// way.
@@ -126,7 +129,7 @@ extension View {
             .background(Color.black.opacity(0.92))
             .cornerRadius(14)
             .contentShape(RoundedRectangle(cornerRadius: 14))
-            .onTapGesture {}
+            .simultaneousGesture(TapGesture())
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
             .background(cardFrameProbe)
