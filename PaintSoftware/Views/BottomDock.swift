@@ -103,16 +103,42 @@ struct TimelineOccupiedHeightKey: PreferenceKey {
 }
 
 extension View {
-    /// The card chrome a docked options panel wears. **One definition for the four**, which is what
+    /// The card chrome a docked options panel wears. **One definition for every docked panel**, which is what
     /// the owner's *"make all of them"* asks for — before this, three of them painted a near-identical
     /// but not identical chain (0.9 / 0.9 / 0.95 opacity, radius 14 / 14 / 16, and the Move bar had
     /// neither the hairline nor the shadow).
+    ///
+    /// **And the card takes every touch that lands on it, wherever on it that is.** SwiftUI hit-tests
+    /// a view only where something interactive is, and a card's own background is not: a tap on a
+    /// label, or on the padding between controls, used to fall through to the canvas under the card —
+    /// MEASURED on the Move, effect, transform-settings and gradient panels, where it drew a brush
+    /// dot, baked the floating piece, closed the layer rail or closed the session the card belongs to.
+    /// (Select's and Text's own content already took such a touch.)
+    /// An empty tap gesture over the card's own shape claims those touches; the controls inside still
+    /// win theirs, being the more specific gesture. It is here because this is the one modifier every
+    /// docked panel wears, so no panel can forget it.
+    ///
+    /// `bottomDock.card` is the card's own frame for a test to read, which no panel exposes any other
+    /// way.
     func bottomDockCard(width: CGFloat) -> some View {
         self
             .frame(width: width)
             .background(Color.black.opacity(0.92))
             .cornerRadius(14)
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture {}
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+            .background(cardFrameProbe)
+    }
+
+    /// The card's own frame, for a test to read — `bottomDock.floor`'s device. A container identifier
+    /// would report the union of its children's frames and stamp itself onto them, so this is a
+    /// separate, empty, untouchable element the card's own size.
+    private var cardFrameProbe: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityIdentifier("bottomDock.card")
     }
 }

@@ -48,14 +48,6 @@ struct GradientSettingsPanel: View {
         }
         .padding(.horizontal, BottomDock.rowHorizontalPadding)
         .padding(.vertical, 10)
-        // **The card takes every touch that lands on it, and this is what makes it do so.** A row of
-        // labels and swatches has hit-testable content only where a control is, so a touch on a label
-        // or the padding between controls fell through to the canvas under the card — MEASURED, the
-        // first time the panel was driven: tapping the word "Gradient" drew a brush dot and, being a
-        // canvas edit, closed the very session the card belongs to. An empty tap gesture over the whole
-        // rectangle claims those touches; the controls inside still win theirs.
-        .contentShape(Rectangle())
-        .onTapGesture {}
         // **No identifier on this container.** One here is stamped onto every descendant and replaces
         // their own, so `gradientPanel.endSwatch` and the rest stop resolving — MEASURED on this panel,
         // the first time it was driven. The controls carry the identifiers, and any one of them says
