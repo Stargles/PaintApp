@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import UIKit
 
 /// **Test-only seams, each armed by its own launch argument and inert on every ordinary launch.**
 /// `Services/ProjectBackupManager.swift`'s `-resetGallery` and `-simulateProjectCorruption` are the
@@ -177,6 +178,27 @@ enum UITestSeeds {
             return
         }
         canvasManager.insertVideo(at: url, consumingSource: true)
+    }
+
+    /// **A picture on a fresh document, the way an import leaves it — held in the Move box** —
+    /// `-uiTestSeedImage`, for TODO (120).
+    ///
+    /// The photo picker is `seedVideoIfRequested`'s wall: system UI in another process, driven by no
+    /// XCUITest in this suite. This calls the verb the picker's own caller does, `insertImage`, on a
+    /// picture the app draws itself, so everything from there — the placement, the fit, the lift into
+    /// the Move box — is a real import's.
+    ///
+    /// **Four times wider than tall and black**, for what a test has to tell apart: the Move box of a
+    /// wide picture is a wide rectangle, where a box that circumscribed it would be a square, and a
+    /// black rectangle on the white paper is what `inkProbe` reads as ink.
+    static func seedImageIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedImage") else { return }
+        let size = CGSize(width: 240, height: 60)
+        let picture = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        canvasManager.insertImage(picture)
     }
 
     /// **TODO (53)'s document, which is the owner's own `AnimationTest`**: ink on a vector layer that

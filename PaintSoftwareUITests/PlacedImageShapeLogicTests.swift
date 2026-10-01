@@ -272,19 +272,12 @@ final class PlacedImageShapeLogicTests: XCTestCase {
                       "and Cut is still the centre rule, which is unchanged by the shape (§5.23)")
     }
 
-    /// **The Move box still encloses a photo the artist has stretched.**
+    /// **The Move box is the stretched photo's own rectangle** — not an enclosure of it.
     ///
-    /// `MoveBoxInk` reduces a placed image to a *disc* — `hypot(w, h)/2` about its centre — rather
-    /// than to its four corners, so that its contribution stays invariant as the yellow knob turns the
-    /// box. The radius has to take the **larger** of the two axis scales for that to keep enclosing
-    /// the picture: the operator norm of `R·S·R` is `max(sx, sy)`, so a 9:1 photo reaches three times
-    /// its unstretched half-diagonal along one axis whatever axis it was stretched about.
-    ///
-    /// Stage 3b phase 3's own note predicted this exact spot as the one stage 3c would break, and it
-    /// is half right: the *reach* is fixed here, and the axis-aligned `padScale` that pads it is now
-    /// conservative rather than exact — a loose box, which is the safe direction and the same
-    /// approximation a stroke's own reach already takes under a stretched box.
-    func testTheMoveBoxsInkStillEnclosesAPhotoTheArtistHasStretched() throws {
+    /// `MoveBoxInk` reduces a placed image to its four corners (`PlacedRectangle.corners`), the same
+    /// four points `VectorCanvas.quad(of:)` draws the membership quad through, so a photo stretched
+    /// 9:1 is boxed at 18 × 2 and not at the `hypot`-square a circumscribed disc would have given it.
+    func testTheMoveBoxOfAStretchedPhotoIsThePhotosOwnRectangle() throws {
         let (manager, layerIndex, vector) = fixture()
         let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
         vector.addImage(element)
@@ -296,8 +289,93 @@ final class PlacedImageShapeLogicTests: XCTestCase {
 
         let measured = try XCTUnwrap(manager.vectorFloat?.ink.bounds(), "the lift measured the photo")
         let picture = VectorCanvas.quad(of: element).boundingBoxOfPath
-        XCTAssertTrue(measured.contains(picture),
-                      "the box has to hold the photo it is around: \(measured) vs \(picture)")
+        assertRect(measured, equals: picture, "a 9:1 photo's box is its own 18 × 2 rectangle")
+    }
+
+    // MARK: - The Move box is the picture's own outline
+
+    /// **A landscape photo is boxed at its own shape.** *"The move box is vastly bigger than the actual
+    /// bounding box of the image itself"* — a wide picture was boxed by a **square** of side
+    /// `hypot(w, h)`, here 2.3× the photo's height. Two operands that cannot both be met by the
+    /// square: the box's *aspect* is the picture's, and its *size* is the picture's placed size.
+    func testTheLiftsBoxIsALandscapePhotosOwnRectangleAndNotASquare() throws {
+        let (manager, _, vector) = fixture()
+        let element = image(at: CGPoint(x: 32, y: 30), scale: 2, rotation: 0,
+                            size: CGSize(width: 12, height: 4))
+        vector.addImage(element)
+        XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
+
+        let box = try XCTUnwrap(manager.vectorFloat?.contentSize)
+        XCTAssertEqual(box.width, 24, accuracy: 1e-6, "12 pt photo × scale 2")
+        XCTAssertEqual(box.height, 8, accuracy: 1e-6, "4 pt photo × scale 2 — a square would be 25.3")
+        let pivot = try XCTUnwrap(manager.vectorFloat?.pivot)
+        XCTAssertEqual(pivot.x, 32, accuracy: 1e-6)
+        XCTAssertEqual(pivot.y, 30, accuracy: 1e-6)
+    }
+
+    /// **A turned photo is boxed by the axis-aligned hull of its corners** — the box at rest is
+    /// upright, so it is the quad's bounding box and nothing larger.
+    func testTheLiftsBoxOfATurnedPhotoIsTheHullOfItsCorners() throws {
+        let (manager, _, vector) = fixture()
+        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0.5,
+                            size: CGSize(width: 12, height: 4))
+        vector.addImage(element)
+        XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
+
+        let hull = VectorCanvas.quad(of: element).boundingBoxOfPath
+        let box = try XCTUnwrap(manager.vectorFloat?.contentSize)
+        XCTAssertEqual(box.width, hull.width, accuracy: 1e-6)
+        XCTAssertEqual(box.height, hull.height, accuracy: 1e-6)
+    }
+
+    /// **Turning the box to the photo's own angle hugs it exactly**, which is what the owner's
+    /// 2026-08-28 ruling (§5.22) asks of any drawing and a disc could not give a picture: the fitted
+    /// box is the photo's 12 × 4 whatever angle the photo is at, once the box is turned to match.
+    func testTurningTheBoxToThePhotosOwnAngleFitsItsOwnRectangle() throws {
+        let (manager, _, vector) = fixture()
+        let turn: CGFloat = 0.5
+        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: turn,
+                            size: CGSize(width: 12, height: 4))
+        vector.addImage(element)
+        XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
+        let float = try XCTUnwrap(manager.vectorFloat)
+
+        let fitted = CanvasManager.fittedFrame(of: float, at: ObjectTransformDrag.Pose(
+            transform: float.frame.transform, aspect: float.frame.aspect, boxAngle: turn,
+            stretchAxis: float.frame.stretchAxis))
+        XCTAssertEqual(fitted.contentSize.width, 12, accuracy: 1e-6)
+        XCTAssertEqual(fitted.contentSize.height, 4, accuracy: 1e-6)
+    }
+
+    /// **Video and stream boxes are their rectangles too** — the three placed kinds share
+    /// `PlacedRectangle`, so the one measurement covers them and this pins that none was left behind
+    /// on the old reading.
+    func testAVideoAndAStreamAreBoxedByTheirOwnRectangles() throws {
+        let transform = LayerTransform(position: CGPoint(x: 40, y: 30), scale: 1.5, rotation: 0)
+        let video = VectorVideoElement(assetURL: URL(fileURLWithPath: "/dev/null"),
+                                       assetFileName: "null",
+                                       naturalSize: CGSize(width: 32, height: 18),
+                                       sourceStart: .zero,
+                                       sourceEnd: SourceTime(value: 1, timescale: 1), speed: 1,
+                                       transform: transform)
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 32, height: 18),
+                                         host: "laptop", port: 47301, sourceLabel: "monitor",
+                                         transform: transform)
+        let videoBox = try XCTUnwrap(MoveBoxInk(of: [.video(video)]).bounds())
+        assertRect(videoBox, equals: VectorCanvas.quad(of: video).boundingBoxOfPath,
+                   "a 32 × 18 clip at scale 1.5 is 48 × 27")
+        XCTAssertEqual(videoBox.height, 27, accuracy: 1e-6)
+        let streamBox = try XCTUnwrap(MoveBoxInk(of: [.stream(stream)]).bounds())
+        assertRect(streamBox, equals: VectorCanvas.quad(of: stream).boundingBoxOfPath,
+                   "and a stream shares the arm")
+    }
+
+    private func assertRect(_ actual: CGRect, equals expected: CGRect, _ message: String,
+                            file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actual.minX, expected.minX, accuracy: 1e-6, message, file: file, line: line)
+        XCTAssertEqual(actual.minY, expected.minY, accuracy: 1e-6, message, file: file, line: line)
+        XCTAssertEqual(actual.width, expected.width, accuracy: 1e-6, message, file: file, line: line)
+        XCTAssertEqual(actual.height, expected.height, accuracy: 1e-6, message, file: file, line: line)
     }
 
     // MARK: - Through the Move bar
@@ -370,10 +448,11 @@ final class PlacedImageShapeLogicTests: XCTestCase {
 
     private func image(at position: CGPoint, scale: CGFloat, rotation: CGFloat,
                        aspect: CGFloat = 1, stretchAxis: CGFloat = 0,
-                       mirrored: Bool = false) -> VectorImageElement {
+                       mirrored: Bool = false,
+                       size: CGSize = CGSize(width: 6, height: 6)) -> VectorImageElement {
         VectorImageElement(image: CanvasFixture.solidImage(.green,
-                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                           size: CGSize(width: 6, height: 6)),
+                                                           rect: CGRect(origin: .zero, size: size),
+                                                           size: size),
                            transform: LayerTransform(position: position, scale: scale,
                                                      rotation: rotation),
                            aspect: aspect, stretchAxis: stretchAxis, mirrored: mirrored)

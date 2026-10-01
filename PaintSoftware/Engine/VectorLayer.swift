@@ -804,6 +804,18 @@ extension PlacedRectangle {
         return mirrored ? Self.sourceFlip.concatenating(base) : base
     }
 
+    /// **The picture's four corners in layer-local space** — `naturalSize`'s centred rectangle mapped
+    /// by `placement`, in the order `CGPath(rect:)` walks it. The one place a placed rectangle's
+    /// outline is derived, so the membership quad (`VectorCanvas.quad(of:)`) and the Move box
+    /// (`MoveBoxInk`) read the rectangle the artist can see and cannot come to disagree about it.
+    var corners: [CGPoint] {
+        let half = CGSize(width: naturalSize.width / 2, height: naturalSize.height / 2)
+        let t = placement
+        return [CGPoint(x: -half.width, y: -half.height), CGPoint(x: half.width, y: -half.height),
+                CGPoint(x: half.width, y: half.height), CGPoint(x: -half.width, y: half.height)]
+            .map { $0.applying(t) }
+    }
+
     /// The reflection `mirrored` means, in the picture's own space. See that field for why the axis is
     /// arbitrary.
     static var sourceFlip: CGAffineTransform { CGAffineTransform(scaleX: -1, y: 1) }
@@ -4103,10 +4115,7 @@ final class VectorCanvas {
     /// §1's measured table), and under `.winding` a rectangle traversed either way has a winding
     /// number of ±1 and is filled.
     static func quad(of element: some PlacedRectangle) -> CGPath {
-        let size = element.naturalSize
-        var t = element.placement
-        return CGPath(rect: CGRect(x: -size.width / 2, y: -size.height / 2,
-                                   width: size.width, height: size.height), transform: &t)
+        closedPath(through: element.corners)
     }
 
     /// **A text box's four corners as a closed path.** `TextFrame.corners` *is* the frame — already
@@ -4114,8 +4123,12 @@ final class VectorCanvas {
     /// pose a box can reach, where `boundingBox` is its axis-aligned hull and therefore loose the
     /// moment the box is not upright.
     static func quad(of frame: TextFrame) -> CGPath {
+        closedPath(through: frame.corners)
+    }
+
+    private static func closedPath(through corners: [CGPoint]) -> CGPath {
         let path = CGMutablePath()
-        path.addLines(between: frame.corners)
+        path.addLines(between: corners)
         path.closeSubpath()
         return path
     }

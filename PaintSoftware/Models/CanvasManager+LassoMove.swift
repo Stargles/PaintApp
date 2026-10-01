@@ -114,20 +114,13 @@ struct MoveBoxInk {
     ///  * A **fill** is a `CGPath` and needs no padding; its points — on-curve and control alike —
     ///    are what `boundingBoxOfPath` measures, so an unmapped measurement is the same rectangle
     ///    that function returns and a mapped one is tight instead of a mapped rectangle's corners.
-    ///  * A **placed image** is a *disc*: `hypot(w, h)/2` about its centre scaled by the **larger** of
-    ///    its two axis scales, the circumscribed circle rather than its four corners. That is what the
-    ///    lift has always measured, and keeping it is what makes an image's contribution invariant
-    ///    under the box angle *and* under its own `stretchAxis` — the operator norm of `R·S·R` is
-    ///    `max(sx, sy)`, so no corner of a stretched photo reaches past this whichever axis it was
-    ///    stretched about. The same expression `VectorCanvas.bounds(of:)` uses, and identical to the
-    ///    pre-3c one at `aspect == 1`.
-    ///    **The disc is now padded conservatively rather than exactly, and that is stage 3c arriving
-    ///    where this paragraph said it would.** `padScale` is an axis-aligned pair, exact for a disc
-    ///    only while the frame is a rotation; a float carrying an image could not be stretched before
-    ///    3c, so the frame always was one. It can be now, and a disc under a non-uniform map is an
-    ///    ellipse whose box wants the frame's *row norms* rather than one scalar per axis. The error
-    ///    is in the loose direction — a box slightly larger than the photo — and it is the same
-    ///    approximation a stroke's own reach has always taken under a stretched box.
+    ///  * A **placed image, video or stream** is its four corners — `PlacedRectangle.corners`, the
+    ///    rectangle the artist can see, so the box at rest *is* the picture's own outline and a turned
+    ///    box hugs it exactly as it hugs a text box (LASSO_MOVE.md §5.22). Reach is zero, so there is
+    ///    no padding to approximate and nothing for a stretched box's `padScale` to get wrong.
+    ///    **A circumscribed disc would not do, and not for want of trying it**: its box is a *square*
+    ///    of side `hypot(w, h)` whatever the picture's shape — 1.41× too big on each side of a square
+    ///    photo and 2× too tall on a 16:9 one — which is the only thing its angle-invariance buys.
     ///  * A **text box** is its four corners, which under a turned box is *tighter* than the
     ///    `boundingBox` the lift used to take of them and identical to it at rest, since that
     ///    property is their axis-aligned hull.
@@ -163,26 +156,11 @@ struct MoveBoxInk {
             guard !points.isEmpty else { return nil }
             return Cluster(hull: hull(of: points), reach: 0)
         case .image(let image):
-            let size = image.image.size
-            let axes = ObjectTransformFrame.axisScales(scale: image.transform.scale,
-                                                       aspect: image.aspect)
-            return Cluster(hull: [image.transform.position],
-                           reach: hypot(size.width, size.height) / 2 * max(abs(axes.x), abs(axes.y)))
+            return Cluster(hull: image.corners, reach: 0)
         case .video(let video):
-            // The placed-image arm on the same numbers: a centre point plus the circumscribing
-            // radius of the scaled rectangle, which is rotation-independent and therefore right
-            // whatever the placement's angle is.
-            let axes = ObjectTransformFrame.axisScales(scale: video.transform.scale,
-                                                       aspect: video.aspect)
-            return Cluster(hull: [video.transform.position],
-                           reach: hypot(video.naturalSize.width, video.naturalSize.height) / 2
-                               * max(abs(axes.x), abs(axes.y)))
+            return Cluster(hull: video.corners, reach: 0)
         case .stream(let stream):
-            let axes = ObjectTransformFrame.axisScales(scale: stream.transform.scale,
-                                                       aspect: stream.aspect)
-            return Cluster(hull: [stream.transform.position],
-                           reach: hypot(stream.naturalSize.width, stream.naturalSize.height) / 2
-                               * max(abs(axes.x), abs(axes.y)))
+            return Cluster(hull: stream.corners, reach: 0)
         case .text(let text):
             guard !text.frame.corners.isEmpty else { return nil }
             return Cluster(hull: text.frame.corners, reach: 0)
@@ -1835,7 +1813,7 @@ extension CanvasManager {
     /// size a function of the box's angle: what used to be measured once now has to be measured again
     /// in a turned frame on every touch-move, and both call sites have to be the *same* measurement
     /// or the box would change size the instant the artist touched the knob and put it back. The
-    /// element-by-element argument — half a stroke's width, an image's circumscribed disc, a text
+    /// element-by-element argument — half a stroke's width, a picture's or a text
     /// box's corners — lives there now, next to the padding rule that goes with it.
     ///
     /// Kept as a named function rather than inlined at the two lifts because the perf suite and this

@@ -1111,10 +1111,18 @@ struct CanvasView: UIViewRepresentable {
         ///
         ///     sandwich:<off|rest|live|stroke> entries:<n> derived:<n> rebuilds:<n> rasterizes:<n>
         ///     shape:<none|following|adjustable> xform:<scale>,<rotation>,<dx>,<dy>
-        ///     text:<none|box|editing>
+        ///     text:<none|box|editing> movebox:<none|x,y,w,h>
         ///
         /// — read by `LayerUITests` (the first two), `BakeWiringUITests` and `PlaybackBakeUITests`
-        /// (the three counts) and `CanvasTransformFreezeUITests` (the rest).
+        /// (the three counts), `CanvasTransformFreezeUITests` (the rest) and `ImageMoveBoxUITests`
+        /// (`movebox`).
+        ///
+        /// **`movebox` is the Move box as it is *drawn*, which nothing else exposes.**
+        /// `ObjectTransformOverlayView` is `CALayer`s inside the host, so a test could see the ink a
+        /// float carries and never the rectangle round it. The four numbers are that rectangle's
+        /// axis-aligned hull in the host's own unit square — the units `inkProbe` reads the canvas
+        /// in, so the two compare directly. It is refreshed whenever `updateTransformOverlay` runs
+        /// and not per touch-move, so it describes the box at rest or at a drag's end.
         ///
         /// **The three counts are the three canvas-sized costs a frame can carry**, and they are
         /// separate because each was found on its own and none of them implies the others:
@@ -1177,6 +1185,7 @@ struct CanvasView: UIViewRepresentable {
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
+                + " movebox:\(moveBoxHull())"
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
@@ -1188,6 +1197,22 @@ struct CanvasView: UIViewRepresentable {
 
         /// The last string `publishCanvasState` wrote, so an unchanged pass costs a comparison.
         private var lastPublishedCanvasState: String?
+
+        /// The Move box's four corners' axis-aligned hull in the host's unit square, as `x,y,w,h` —
+        /// or `none` when no box is up. Corners rather than the frame's size, so a turned or
+        /// re-fitted box reads as the rectangle on the glass and not as a number in its own axes.
+        private func moveBoxHull() -> String {
+            guard let overlay = transformOverlay, overlay.isActive, let frame = overlay.frameModel,
+                  let container = containerView, let host = hostView,
+                  host.bounds.width > 0, host.bounds.height > 0 else { return "none" }
+            let corners = frame.corners.map { container.convert($0, to: host) }
+            let xs = corners.map(\.x), ys = corners.map(\.y)
+            guard let minX = xs.min(), let maxX = xs.max(),
+                  let minY = ys.min(), let maxY = ys.max() else { return "none" }
+            return String(format: "%.4f,%.4f,%.4f,%.4f", minX / host.bounds.width,
+                          minY / host.bounds.height, (maxX - minX) / host.bounds.width,
+                          (maxY - minY) / host.bounds.height)
+        }
 
         /// **How many canvas-sized derived pictures this canvas has rasterized on the main actor** —
         /// posed ink and interpolated in-betweens both, counted in `updateInterpolationPreviews`.
@@ -1987,9 +2012,11 @@ struct CanvasView: UIViewRepresentable {
                                canvasScale: canvasContentScale,
                                distorting: canvasManager.vectorFloatIsDistort)
                 container.bringSubviewToFront(overlay)
+                publishCanvasState()
                 return
             }
             deactivateTransformOverlay()
+            publishCanvasState()
         }
 
         /// Hides the box, and ends any drag it was in the middle of.
@@ -3353,10 +3380,11 @@ struct CanvasView: UIViewRepresentable {
         private var canvasContentScale: CGFloat { fitScale * committedScale * liveScale }
 
         private func applyTransform() {
-            // Before the guards below, and before the no-op early return: the label has to track the
-            // transform even on the passes that change nothing in Core Animation, or a test reads a
-            // stale value. See `publishCanvasState`.
-            publishCanvasState()
+            // On every exit, including the no-op early return: the label has to track the transform
+            // even on the passes that change nothing in Core Animation, or a test reads a stale
+            // value — and **after the container's transform is written**, because `movebox:` is
+            // read through it. See `publishCanvasState`.
+            defer { publishCanvasState() }
             // Above the early return for exactly the reason stated for `publishCanvasState`: the
             // identity guard skips passes that change nothing in Core Animation, and anything
             // downstream that has to track the transform reads a stale value if it sits below.
