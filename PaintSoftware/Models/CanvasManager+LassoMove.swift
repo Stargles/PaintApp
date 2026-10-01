@@ -629,7 +629,7 @@ extension CanvasManager {
             let canvas = VectorCanvas(size: size, elements: copies, transform: source.transform)
             let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
                           raster: .empty(size: canvasSize ?? size), vector: canvas)
-            let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+            let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1.0,
                               isVisible: true, kind: .vector,
                               parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
             layers.insert(layer, at: sourceIndex + 1)
@@ -705,7 +705,7 @@ extension CanvasManager {
         let canvas = VectorCanvas(size: source.size, elements: moved, transform: source.transform)
         let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
                       raster: .empty(size: canvasSize ?? source.size), vector: canvas)
-        let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+        let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1.0,
                           isVisible: true, kind: .vector,
                           parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
         let layerID = layer.id

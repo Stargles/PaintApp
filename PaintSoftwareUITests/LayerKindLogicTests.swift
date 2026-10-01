@@ -122,6 +122,27 @@ final class LayerKindLogicTests: XCTestCase {
         }
     }
 
+    /// **A new layer is named by its kind's own word and its place in the stack** — TODO (142), the
+    /// owner: vector layers are "Layer N", raster layers "Raster N". Spelled out kind by kind rather
+    /// than derived from `defaultNameStem`, which would be a function compared with itself; the
+    /// second half pins that the number is the stack position the layer lands at, whichever kind it is.
+    func testANewLayerIsNamedByItsKindsWordAndItsPlaceInTheStack() {
+        let expected: [LayerKind: String] = [.raster: "Raster 1", .vector: "Layer 1",
+                                             .value: "Value 1", .transform: "Transform 1"]
+        for kind in LayerKind.allCases {
+            let m = manager(with: kind)
+            XCTAssertEqual(m.layers[m.currentLayerIndex].name, expected[kind], "the first \(kind) layer of a document")
+        }
+
+        let m = CanvasManager()
+        m.canvasSize = size
+        m.addVectorLayer()
+        m.addLayer()
+        m.addVectorLayer()
+        m.addLayer()
+        XCTAssertEqual(m.layers.map(\.name), ["Layer 1", "Raster 2", "Layer 3", "Raster 4"])
+    }
+
     /// **A transform layer is named and labelled as one** — the row an artist reads their stack on,
     /// and the undo history's sentence. `addTransformLayer` is the only writer of either.
     func testATransformLayerIsNamedAndItsAddIsLabelled() {

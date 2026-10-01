@@ -144,20 +144,48 @@ final class LayerStackUITests: PaintUITestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
         addVectorLayerFromOpenPanel(app)
         addVectorLayerFromOpenPanel(app)
-        // layers bottom-to-top: [Vector 1, Vector 2, Vector 3]; displayed top-to-bottom: 3, 2, 1.
+        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
         // Vector is the default kind, so both the canvas's first layer and the `+` produce
-        // `addVectorLayer`'s "Vector N" naming.
+        // `addVectorLayer`'s "Layer N" naming.
 
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Vector 3")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 1")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 3")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1")
 
         // Drag the topmost row below the bottom one so it becomes the bottom of the stack.
         dragRow(layerCell(app, layerIndex: 2), onto: layerCell(app, layerIndex: 0), dropDY: 0.95)
 
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 3",
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 3",
                        "The dragged layer should stay where it was dropped, not revert to its old index")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Vector 2",
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 2",
                        "The layers it was dragged past should have shifted up by one")
+    }
+
+    /// TODO (142) — the owner: new vector layers are "Layer 1, 2, etc." and raster layers "Raster 1,
+    /// 2, etc.", not "Vector N". Read off the rows of the layer panel an artist actually sees, from a
+    /// new document through both kinds of add, so it reds if either row keeps the old word.
+    func testNewVectorLayersAreNamedLayerAndNewRasterLayersRaster() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1",
+                       "the document's own first layer is a vector layer, and reads as a plain layer")
+        addVectorLayerFromOpenPanel(app)
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Layer 2", "a vector layer added from the + menu")
+
+        let addButton = app.buttons["layerPanel.addButton"]
+        addButton.tap()
+        let rasterItem = app.buttons["Raster Layer"]
+        XCTAssertTrue(rasterItem.waitForExistence(timeout: 5), "the + menu offers a Raster Layer")
+        rasterItem.tap()
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Raster 3", "a raster layer added from the + menu")
+
+        XCTAssertFalse(app.staticTexts["Vector 1"].exists, "no layer carries the old \"Vector N\" name")
+        XCTAssertFalse(app.staticTexts["Vector 2"].exists, "no layer carries the old \"Vector N\" name")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "layer-names"
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     /// Swiping a layer row reveals Delete and Duplicate — and no Edit, which moved to the options
@@ -176,7 +204,7 @@ final class LayerStackUITests: PaintUITestCase {
         duplicate.tap()
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
                       "Duplicating should add a second layer")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1 copy")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Layer 1 copy")
     }
 }
 
@@ -224,7 +252,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Layer 1, Layer 2]
 
         dragRow(layerCell(app, layerIndex: 1), onto: layerCell(app, layerIndex: 0), dropDY: 0.5)
 
@@ -234,11 +262,11 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         XCTAssertEqual(rowFolder(app, layerIndex: 1), "", "…in the container they were already in")
 
         // Both are still here, and the drop was a real move rather than a no-op: `layerPanel.row.N` is
-        // indexed by array position (bottom-to-top), so the dragged "Vector 2" passing below "Vector 1"
+        // indexed by array position (bottom-to-top), so the dragged "Layer 2" passing below "Layer 1"
         // swaps which name each index reports.
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 2",
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 2",
                        "The dragged layer came to rest beneath its target")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Layer 1")
     }
 
     /// Dropping onto a folder header moves the layer inside it — the interaction that used to be
@@ -250,7 +278,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2]
+        addVectorLayerFromOpenPanel(app) // layers: [Layer 1, Layer 2]
         addFolderFromAddMenu(app)
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
         XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "Sanity: the layer starts outside the folder")
@@ -1088,7 +1116,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         if app.buttons["moveBar.doneButton"].exists { app.buttons["moveBar.doneButton"].tap() }
 
         // **The assertion that the affordance does something real**, and it is about ink on a
-        // *different* layer: the strokes are on Vector 1 and the box belongs to the transformation
+        // *different* layer: the strokes are on Layer 1 and the box belongs to the transformation
         // layer above it, so this is §2.3's "re-poses whatever is under it" measured on the canvas.
         let inkAfter = inkColumn()
         XCTAssertNotNil(inkAfter, "The ink is still on the canvas after the move")
@@ -1445,7 +1473,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addVectorLayerFromOpenPanel(app) // layers: [Vector 1 (drawn on), Vector 2 (active)]
+        addVectorLayerFromOpenPanel(app) // layers: [Layer 1 (drawn on), Layer 2 (active)]
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "Setup: both layers are vector")
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true)
@@ -1502,7 +1530,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         addButton.press(forDuration: 1.2)
         let vectorItem = app.buttons["Vector Layer"]
         XCTAssertTrue(vectorItem.waitForExistence(timeout: 5))
-        vectorItem.tap() // layers: [Vector 1, Vector 2 (active)]
+        vectorItem.tap() // layers: [Layer 1, Layer 2 (active)]
         app.buttons["toolbar.layersButton"].tap() // close panel
 
         let canvas = app.otherElements["canvas.host"]
@@ -1517,7 +1545,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         addButton.press(forDuration: 1.2)
         let rasterItem = app.buttons["Raster Layer"]
         XCTAssertTrue(rasterItem.waitForExistence(timeout: 5), "The add menu should still offer a Raster Layer option")
-        rasterItem.tap() // layers: [Vector 1, Vector 2, Layer 3 (active, raster, on top)]
+        rasterItem.tap() // layers: [Layer 1, Layer 2, Raster 3 (active, raster, on top)]
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5))
 
         let top = app.staticTexts["layerPanel.row.2"]
@@ -1525,7 +1553,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         top.tap()
         let mergeDown = app.buttons["layerOptions.mergeDown"]
         XCTAssertTrue(mergeDown.waitForExistence(timeout: 5))
-        mergeDown.tap() // merges Layer 3 into the vector layer below it
+        mergeDown.tap() // merges Raster 3 into the vector layer below it
 
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForNonExistence(timeout: 5))
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false,

@@ -52,11 +52,11 @@ extension CodingUserInfoKey {
 /// against the five-byte record this stage widened): **7.10 bytes a sample on the wire** in
 /// quarter-pixel mode — 5.00 of payload, 1.67 of base64 expansion, and the rest `JSONEncoder`
 /// escaping base64's `/` as `\/`. **`Float32` coordinates are 12.18**, 9.00 of it payload: **1.72x**
-/// the packed form, which is the number the Move bar's help line rounds to 1.7 and the price the
-/// owner accepted for item (14). Against the **~77 bytes a sample** TODO.md measures in the owner's
-/// own `Untitled.paintproj` that is **~11x**. The ratio is a property of the *coordinates*, not of
-/// this code: it is however many digits `Double`'s shortest round-trip spelling needs, so the same
-/// probe over shorter decimals measured 60.5 and 8.6x. The packed form is smaller at every length,
+/// the packed form, which is the price the owner accepted for item (14). Against the **~77 bytes a
+/// sample** TODO.md measures in the owner's own `Untitled.paintproj` that is **~11x**. The ratio
+/// is a property of the *coordinates*, not of this code: it is however many digits `Double`'s
+/// shortest round-trip spelling needs, so the same probe over shorter decimals measured 60.5 and
+/// 8.6x. The packed form is smaller at every length,
 /// including a one-sample stroke (31 bytes against 69) — a flat `[Double]` was also measured, at
 /// 56.3, and is not worth having. BRUSH.md §5.1's channels move the payload term and leave the
 /// base64 and escaping ratios exactly where they are.

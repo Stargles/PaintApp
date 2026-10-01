@@ -555,20 +555,20 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
         openLayerPanel(app)
         let addLayer = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addLayer.waitForExistence(timeout: 5)) // the panel has to finish presenting first
-        addVectorLayerFromOpenPanel(app) // layers: [Vector 1, Vector 2] — vector is the default kind
+        addVectorLayerFromOpenPanel(app) // layers: [Layer 1, Layer 2] — vector is the default kind
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         app.buttons["toolbar.layersButton"].tap() // close the panel so it can't cover the timeline
 
         let topName = app.staticTexts["timeline.layerName.1"]
         XCTAssertTrue(topName.waitForExistence(timeout: 5))
-        XCTAssertEqual(topName.label, "Vector 2")
+        XCTAssertEqual(topName.label, "Layer 2")
 
         // One row down is rowHeight (34) + the 2pt gap between rows.
         let start = topName.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.9, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 40)),
                     withVelocity: .slow, thenHoldForDuration: 0.5)
 
-        XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Vector 2",
+        XCTAssertEqual(app.staticTexts["timeline.layerName.0"].label, "Layer 2",
                        "Dragging a timeline name down should restack that layer")
     }
 
@@ -690,22 +690,22 @@ final class UndoAndLayerHistoryUITests: PaintUITestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
         addVectorLayerFromOpenPanel(app)
         addVectorLayerFromOpenPanel(app)
-        // layers bottom-to-top: [Vector 1, Vector 2, Vector 3]; displayed top-to-bottom: 3, 2, 1.
+        // layers bottom-to-top: [Layer 1, Layer 2, Layer 3]; displayed top-to-bottom: 3, 2, 1.
 
         let bottomRow = app.staticTexts["layerPanel.row.0"]
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
-        XCTAssertEqual(bottomRow.label, "Vector 1")
+        XCTAssertEqual(bottomRow.label, "Layer 1")
 
         dragRow(layerCell(app, layerIndex: 2), onto: layerCell(app, layerIndex: 0), dropDY: 0.95)
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 3", "Sanity-check the drag actually landed")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 3", "Sanity-check the drag actually landed")
 
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled, "Reordering layers should be undoable")
         undo.tap()
 
-        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Vector 1", "Undo should restore the original bottom-to-top order")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Vector 3", "Undo should restore the original top layer too")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.0"].label, "Layer 1", "Undo should restore the original bottom-to-top order")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Layer 3", "Undo should restore the original top layer too")
     }
 
     /// A cel resize drag must register as ONE undo step for the whole gesture, not one per

@@ -140,9 +140,9 @@ struct MoveTransformBottomBar: View {
     /// neither is a thing anybody drawing has an opinion about. What they *do* have an opinion about
     /// is shrinking a drawing, saving, coming back and finding it grew back rough.
     ///
-    /// **Its help line says what it costs**, in the voice `caption` above uses for a control that
-    /// cannot act: there is a price, it is paid in file size, and there is a way to stop paying it.
-    /// A toggle whose cost is invisible is one an artist leaves on for a year.
+    /// **The row is the two switches and nothing else** (TODO (137)): each is named for what it does to
+    /// the piece, which is all a switch needs to say, and prose beside them is vertical space the
+    /// dock cannot spare.
     ///
     /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
     /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
@@ -169,14 +169,6 @@ struct MoveTransformBottomBar: View {
             .tint(.blue)
             .fixedSize()
             .accessibilityIdentifier("moveBar.keepFullPrecisionToggle")
-
-            Text("Strokes you move are stored exactly, so shrinking them now and growing them back "
-                 + "after a save loses nothing. They take about 1.7× the file space until you run "
-                 + "Bake Precise Strokes in Actions.")
-                .font(.caption2)
-                .foregroundColor(.gray)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

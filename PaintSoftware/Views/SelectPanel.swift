@@ -23,15 +23,16 @@ import SwiftUI
 ///
 /// **The band can refuse, and it says why rather than going quietly grey** —
 /// `CanvasManager.selectionEditUnavailableReason`, the rule and the voice `MoveTransformBottomBar`
-/// states for Mirror. At most one caption is ever on screen at the foot of the bar: the refusal
-/// replaces the "draw a selection" hint rather than stacking under it.
+/// states for Mirror. At most one caption is ever on screen at the foot of the bar, and with no
+/// selection there is none: every control in the row is dim for that one reason, and a hint saying
+/// so would cost a line of vertical space on every open (TODO (137)).
 ///
-/// **"What the loop catches" sits directly above the edit band and the action row** (TODO item
-/// (23)), because those are what obey it: Move — reached from the toolbar, not from here — Colour,
-/// Brush, Size, Opacity, Clear and To New Layer all read `CanvasManager.selectionMembership`, so the
-/// artist should be able to read the rule and the controls in one glance. It is above rather than
-/// below because it is chosen *first*: the panel's order is how you select (the mode tabs), how the
-/// next loop meets the last (Subtract, TODO (95)), what the loop then catches, and what to do with it.
+/// **The membership rule sits directly above the edit band and the action row** (TODO item (23)),
+/// because those are what obey it: Move — reached from the toolbar, not from here — Colour, Brush,
+/// Size, Opacity, Clear and To New Layer all read `CanvasManager.selectionMembership`, so the artist
+/// should be able to read the rule and the controls in one glance. It is above rather than below
+/// because it is chosen *first*: the panel's order is how you select (the mode tabs), how the next
+/// loop meets the last (Subtract, TODO (95)), what the loop then catches, and what to do with it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
@@ -74,10 +75,11 @@ struct SelectPanel: View {
     /// It sits between the loop rule and the action row because it is a *fourth* thing to do with the
     /// loop rather than a rule the action row obeys.
     ///
-    /// **Two bands and a caption since TODO (59)**, the owner 2026-09-10: *"the lasso fill menu is
-    /// way too tall. Try to compact the height. You can expand it horizontally."* MEASURED on an
-    /// iPad Pro 13-inch at `BottomDock.preferredWidth`: **261.5 points before, 162.5 after** — the
-    /// panel is now a rule row, an action row and one line of prose, against a card 760 wide.
+    /// **Two bands since TODO (59)**, the owner 2026-09-10: *"the lasso fill menu is way too tall.
+    /// Try to compact the height. You can expand it horizontally."* MEASURED on an iPad Pro 13-inch
+    /// at `BottomDock.preferredWidth`: **261.5 points before, 162.5 after** — the panel is now a rule
+    /// row and an action row, against a card 760 wide, with one line of prose only while a refusal
+    /// has something to say.
     /// Three things paid for it and none of them removes a control:
     ///
     ///   * the **paint-outside switch joins the rule row** (`paintOutsideToggle`), where it costs no
@@ -461,7 +463,7 @@ struct SelectPanel: View {
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
-    /// **TODO item (23) — "What the loop catches".** `Enclosed · Cut · Touching`, ordered by how much
+    /// **TODO item (23) — what the loop catches.** `Enclosed · Cut · Touching`, ordered by how much
     /// of the drawing the loop takes, with the shipped rule — Cut — in the middle and selected until
     /// the artist touches it.
     ///
@@ -478,17 +480,14 @@ struct SelectPanel: View {
     /// nothing else. Disabled and captioned rather than dropped, so switching layers does not reflow
     /// the bar under a finger.
     ///
-    /// Its caption carries the refusal when there is one and otherwise says what the *selected* rule
-    /// does, because the difference between the three is invisible until something has already been
-    /// moved or recoloured.
+    /// **No heading of its own** (TODO (137)): the three segments name the rule and the line under them
+    /// says what the *selected* one does — or, when there is one, why the picker is off — because the
+    /// difference between the three is invisible until something has already been moved or recoloured.
+    /// The picker's title is kept as its accessibility label, which is all a heading is to VoiceOver.
     private var membershipPicker: some View {
         let reason = canvasManager.selectionMembershipUnavailableReason
         let shown = canvasManager.displayedSelectionMembership
         return VStack(alignment: .leading, spacing: 4) {
-            Text("What the Loop Catches")
-                .font(.caption)
-                .foregroundColor(.white)
-
             Picker("What the Loop Catches", selection: Binding(
                 get: { shown },
                 set: { canvasManager.setSelectionMembership($0) }
@@ -692,13 +691,10 @@ struct SelectPanel: View {
         .accessibilityIdentifier("selectPanel.mode.\(mode.rawValue)")
     }
 
-    /// The one line under the bar, or none. Ordered by what the artist is most likely to have just
-    /// pressed against: without a selection nothing in the row does anything, so that hint comes
-    /// first; with one, a refusal is about the button they can now see is dim.
+    /// The one line under the bar, or none: with a selection, why a control in the row is dim. Without
+    /// one nothing in the row does anything, and that is not a refusal worth a line.
     private var caption: String? {
-        if !hasSelection {
-            return "Draw a selection on the canvas with the mode above, or tap Move to transform the whole layer."
-        }
+        guard hasSelection else { return nil }
         // The animation-group refusal is last because it refuses on exactly the two conditions the
         // other two do — a non-vector cel and an in-between — so with a selection in hand it is never
         // independently non-nil. Reading all three is what keeps that a fact rather than an assumption,

@@ -36,7 +36,8 @@ import Foundation
 /// **Three exhaustive `switch`es over this enum exist, and they are what made the fourth case
 /// answer at compile time**: `Tool.textUnavailableReason(onLayerOfKind:)`,
 /// `CanvasManager.selectionMembershipUnavailableReason` and `CanvasActiveLayer.init(kind:)` — plus
-/// `holdsPixels` below, which is the one every other reader should ask instead of `kind == .value`.
+/// `holdsPixels` below, which is the one every other reader should ask instead of `kind == .value`,
+/// and `defaultNameStem`.
 /// `LayerKindLogicTests` walks `allCases` through each of them so a fifth case cannot arrive with
 /// a site left answering for four.
 enum LayerKind: String, Codable, Equatable, CaseIterable {
@@ -58,6 +59,20 @@ extension LayerKind {
         switch self {
         case .raster, .vector: return true
         case .value, .transform: return false
+        }
+    }
+
+    /// The word a new layer of this kind is named with, before the number — `Layer 3`, `Raster 4`.
+    ///
+    /// **The vector kind takes the plain word and the pixel kind says what it is** — TODO (142), the
+    /// owner: new vector layers are "Layer N", raster layers "Raster N". A `switch` for `holdsPixels'
+    /// reason — the next kind has to choose its own word.
+    var defaultNameStem: String {
+        switch self {
+        case .raster: return "Raster"
+        case .vector: return "Layer"
+        case .value: return "Value"
+        case .transform: return "Transform"
         }
     }
 

@@ -2069,6 +2069,15 @@ final class CanvasManager: ObservableObject {
         return (currentLayerIndex + 1, layers[currentLayerIndex].parentFolderID)
     }
 
+    /// **The one place a new layer of a kind gets its automatic name** — its kind's stem and the
+    /// layer's own place in the stack once it is added (`layers.count + 1`, taken before the insert).
+    /// Decoration, not identity, for `defaultValueLayerName`'s reason: nothing preserves the number a
+    /// layer was born with. Every site that mints a layer calls this, so the stems cannot drift apart
+    /// between the `+` menu and the lasso verbs that make layers of their own.
+    func defaultLayerName(for kind: LayerKind) -> String {
+        "\(kind.defaultNameStem) \(layers.count + 1)"
+    }
+
     /// Inserts a freshly built layer at `newLayerPlacement` and makes it active. The one place the
     /// placement is spent, so the four `add*Layer` methods cannot drift on where "+" puts things.
     private func insertNewLayer(_ build: (UUID?) -> Layer) {
@@ -2081,7 +2090,7 @@ final class CanvasManager: ObservableObject {
         withStructureUndo(label: .addLayer) {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0,
+                Layer(id: UUID(), name: name ?? defaultLayerName(for: .raster), opacity: 1.0,
                       isVisible: true, parentFolderID: parent, cels: [cel])
             }
         }
@@ -2097,7 +2106,7 @@ final class CanvasManager: ObservableObject {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: size), vector: .empty(size: size))
             insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0,
+                Layer(id: UUID(), name: name ?? defaultLayerName(for: .vector), opacity: 1.0,
                       isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
             }
         }
@@ -2172,7 +2181,7 @@ final class CanvasManager: ObservableObject {
     /// 2026-09-11 and named itself "Transform n" from here; it is `LayerKind.transform` now and
     /// `addTransformLayer` names it once, at creation, since it has no mode to follow.
     static func defaultValueLayerName(effect: Effect?, ordinal: Int) -> String {
-        effect?.displayName ?? "Value \(ordinal)"
+        effect?.displayName ?? "\(LayerKind.value.defaultNameStem) \(ordinal)"
     }
 
     /// Adds a `.transform` layer — **the transformation layer, TRANSFORM_LAYER.md §2 ruling 2** — at
@@ -2202,7 +2211,7 @@ final class CanvasManager: ObservableObject {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? "Transform \(layers.count + 1)",
+                Layer(id: UUID(), name: name ?? defaultLayerName(for: .transform),
                       hasCustomName: name != nil,
                       opacity: 1.0, isVisible: true, kind: .transform,
                       transform: restingContainerPose, parentFolderID: parent, cels: [cel])

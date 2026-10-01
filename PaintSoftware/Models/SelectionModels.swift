@@ -1201,7 +1201,7 @@ extension CanvasManager {
         // nothing to match but wrong here, where there is a source cel to match.
         let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
                          raster: .empty(size: canvasSize))
-        let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [newCel])
+        let newLayer = Layer(id: UUID(), name: defaultLayerName(for: .raster), opacity: 1.0, isVisible: true, cels: [newCel])
         let insertIndex = sourceLayerIndex + 1
         layers.insert(newLayer, at: insertIndex)
         currentLayerIndex = insertIndex // triggers handleActiveContextChanged, but floatingPiece is still nil here
@@ -1256,7 +1256,7 @@ extension CanvasManager {
         // `beginDuplicate` above, which had the identical defect.
         let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
                          raster: bakedRasterTexture(image: piece, likeExisting: .empty(size: canvasSize)))
-        let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+        let newLayer = Layer(id: UUID(), name: defaultLayerName(for: .raster), opacity: 1.0,
                              isVisible: true, parentFolderID: layers[sourceIndex].parentFolderID,
                              cels: [newCel])
         let newLayerID = newLayer.id

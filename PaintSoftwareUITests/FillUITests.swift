@@ -113,14 +113,14 @@ final class FillContainmentUITests: PaintUITestCase {
 
         let addButton = app.buttons["layerPanel.addButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addVectorLayerFromOpenPanel(app) // "Vector 2" is added on top and becomes active; "Vector 1" (blank) stays underneath.
+        addVectorLayerFromOpenPanel(app) // "Layer 2" is added on top and becomes active; "Layer 1" (blank) stays underneath.
 
         layersButton.tap() // Close the panel so it can't cover the canvas.
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Draw lineart on the active top layer ("Vector 2").
+        // Draw lineart on the active top layer ("Layer 2").
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
         drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
         drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))

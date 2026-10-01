@@ -39,111 +39,112 @@ struct TopToolbar: View {
         PlaybackTrace.span(.bodyToolbars) { bodyContent }
     }
 
-    /// The top toolbar's body.
+    /// The top toolbar's body: the panel icons on the leading side, the scene name in the middle, the
+    /// tool icons on the trailing side. The two groups are given equal flexible widths, which is what
+    /// puts the name at the bar's own middle rather than at the middle of whatever room the groups
+    /// happen to leave.
     @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 10) {
-            // TODO (102) — the owner: *"Currently it displays the canvas name on the bottom left on
-            // the animation bar. This is ergonomically very bad, as it frequently activates the
-            // scribble write mode when my apple pencil touches near it. Move it to the top left."*
-            // The leftmost thing in the top bar, which is the literal top-left the ask names; it
-            // used to be `AnimationTimeline.miniToolbar`'s own inline `TextField`, with the same
-            // identifier and the same underlying `projectName`, so a project reopened mid-rename is
-            // unaffected. Still the app's only title-editing control, and since TODO (57) part 2 the
-            // only way to rename a project's folder on disk.
-            //
-            // **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The owner's ask
-            // names two things: move it, and keep Scribble off it.
-            //
-            // **This also makes "disable Scribble" true by construction rather than by veto.** The
-            // always-visible label is a `Text`, which Scribble cannot engage on at all — there is no
-            // `UITextInput` for iPadOS to hand a pencil touch to — so there is nothing here for
-            // `TextOverlayView.scribbleInteraction(_:shouldBeginAt:)`'s mechanism to be reused *onto*.
-            // The sheet's own `TextField` keeps Scribble on deliberately, matching
-            // `LayerOptionsPanel`'s "Rename Layer" alert below it in this file's sibling: neither a
-            // sheet nor an alert can sit over the canvas, so a pencil there is never competing with a
-            // brush stroke, and handwriting a project's name is the same "good use of a pencil" that
-            // doc comment already grants a layer's. (It is a `.sheet` rather than an `.alert` for an
-            // unrelated, second measured reason: see `RenameProjectSheet`'s own doc comment.)
-            Button {
-                draftProjectName = canvasManager.projectName
-                isRenamingProject = true
-            } label: {
-                Text(canvasManager.projectName)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .frame(width: 110, alignment: .leading)
+            HStack(spacing: 10) {
+                iconButton(system: "square.grid.2x2", isActive: false, action: onOpenGallery)
+                    .accessibilityIdentifier("toolbar.galleryButton")
+                // TODO (104) — Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint
+                // and Render Resolution, split out of Actions. Identified so a test — or a converted
+                // recording — can reach the panel where the debug recorder's own switch now lives
+                // (`ActionRecorderSection`, which moved here with the rest of the settings).
+                iconButton(system: "gearshape", isActive: activePanel == .settings) { toggle(.settings) }
+                    .accessibilityIdentifier("toolbar.settingsButton")
+                iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
+                    .accessibilityIdentifier("toolbar.actionsButton")
+                // TODO (103) — the "Add" submenu TODO (100) had put inside Actions, promoted to its own
+                // icon. See `AddMenu`.
+                iconButton(system: "plus", isActive: activePanel == .add) { toggle(.add) }
+                    .accessibilityIdentifier("toolbar.addButton")
+                iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
+                    .accessibilityIdentifier("toolbar.selectButton")
+                iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }
+                    .accessibilityIdentifier("toolbar.moveButton")
             }
-            .accessibilityIdentifier("timeline.projectNameField")
-            // `.sheet`, not `.alert` — `.alert` is the one presentation kind nothing in this app had
-            // ever driven end to end through XCUITest before this feature, and it MEASURED as
-            // unreliable there: a synthesized tap on the button that presents it, immediately after
-            // reopening a project from the gallery, did not raise it within three retried taps and
-            // fifteen seconds apiece, on a fresh device, in isolation. `.sheet` is the presentation
-            // this app's own `CanvasResizeSheet`/`ExportSheet`/`StreamConnectSheet` already use and
-            // `ToolsAndSelectionUITests` already drives successfully, so this reaches for the kind
-            // with a working precedent rather than the kind with none.
-            .sheet(isPresented: $isRenamingProject) {
-                RenameProjectSheet(name: $draftProjectName) { trimmed in
-                    canvasManager.projectName = trimmed
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            sceneNameButton
+
+            HStack(spacing: 10) {
+                iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
+                    selectBrushToolAndTogglePanel()
                 }
-            }
+                .accessibilityIdentifier("toolbar.brushButton")
+                iconButton(system: "eraser", isActive: !isToolHighlightSuppressed && (activePanel == .eraser || canvasManager.selectedTool == .eraser)) {
+                    selectEraserToolAndTogglePanel()
+                }
+                .accessibilityIdentifier("toolbar.eraserButton")
+                iconButton(system: "drop.fill", isActive: !isToolHighlightSuppressed && (activePanel == .fill || canvasManager.selectedTool == .fill)) {
+                    selectFillToolAndTogglePanel()
+                }
+                .accessibilityIdentifier("toolbar.fillButton")
+                // Interpolate is deliberately *not* here. Its entry point is the animation timeline's own
+                // top bar, next to onion skin and loop (`AnimationTimeline.interpolateButton`) — the mode
+                // acts on timeline blocks and every control it raises sits above the timeline, so a
+                // button at the top of the canvas put the switch as far from its subject as the screen
+                // allows. Product owner, 2026-08-01.
+                iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
+                    .accessibilityIdentifier("toolbar.layersButton")
 
-            iconButton(system: "square.grid.2x2", isActive: false, action: onOpenGallery)
-                .accessibilityIdentifier("toolbar.galleryButton")
-            iconButton(system: "wrench.and.screwdriver", isActive: activePanel == .actions) { toggle(.actions) }
-                .accessibilityIdentifier("toolbar.actionsButton")
-            // TODO (103) — the "Add" submenu TODO (100) had put inside Actions, promoted to its own
-            // icon. See `AddMenu`.
-            iconButton(system: "plus", isActive: activePanel == .add) { toggle(.add) }
-                .accessibilityIdentifier("toolbar.addButton")
-            // TODO (104) — Resize Canvas, Canvas Padding, Bake Precise Strokes, Fingers Can Paint and
-            // Render Resolution, split out of Actions. Identified so a test — or a converted
-            // recording — can reach the panel where the debug recorder's own switch now lives
-            // (`ActionRecorderSection`, which moved here with the rest of the settings).
-            iconButton(system: "gearshape", isActive: activePanel == .settings) { toggle(.settings) }
-                .accessibilityIdentifier("toolbar.settingsButton")
-            iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
-                .accessibilityIdentifier("toolbar.selectButton")
-            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }
-                .accessibilityIdentifier("toolbar.moveButton")
-
-            Spacer()
-
-            iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
-                selectBrushToolAndTogglePanel()
+                Button(action: { toggle(.color) }) {
+                    Circle()
+                        // The text's colour while a session is live — see `CanvasManager.activeEditColor`.
+                        // A swatch showing the brush colour above a picker editing the text's would be
+                        // the worse half of the two to get wrong.
+                        .fill(canvasManager.activeEditColor)
+                        .frame(width: 34, height: 34)
+                        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
+                }
+                .accessibilityIdentifier("toolbar.colorButton")
             }
-            .accessibilityIdentifier("toolbar.brushButton")
-            iconButton(system: "eraser", isActive: !isToolHighlightSuppressed && (activePanel == .eraser || canvasManager.selectedTool == .eraser)) {
-                selectEraserToolAndTogglePanel()
-            }
-            .accessibilityIdentifier("toolbar.eraserButton")
-            iconButton(system: "drop.fill", isActive: !isToolHighlightSuppressed && (activePanel == .fill || canvasManager.selectedTool == .fill)) {
-                selectFillToolAndTogglePanel()
-            }
-            .accessibilityIdentifier("toolbar.fillButton")
-            // Interpolate is deliberately *not* here. Its entry point is the animation timeline's own
-            // top bar, next to onion skin and loop (`AnimationTimeline.interpolateButton`) — the mode
-            // acts on timeline blocks and every control it raises sits above the timeline, so a
-            // button at the top of the canvas put the switch as far from its subject as the screen
-            // allows. Product owner, 2026-08-01.
-            iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
-                .accessibilityIdentifier("toolbar.layersButton")
-
-            Button(action: { toggle(.color) }) {
-                Circle()
-                    // The text's colour while a session is live — see `CanvasManager.activeEditColor`.
-                    // A swatch showing the brush colour above a picker editing the text's would be
-                    // the worse half of the two to get wrong.
-                    .fill(canvasManager.activeEditColor)
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
-            }
-            .accessibilityIdentifier("toolbar.colorButton")
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(Color.black)
+    }
+
+    /// The scene's name, which opens the rename sheet.
+    ///
+    /// **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The name sits where a
+    /// pencil resting near the top of the canvas lands, and a text field there starts Scribble. The
+    /// always-visible label is a `Text`, which Scribble cannot engage on at all — there is no
+    /// `UITextInput` for iPadOS to hand a pencil touch to — so keeping Scribble off it is true by
+    /// construction rather than by veto. The sheet's own `TextField` keeps Scribble on deliberately,
+    /// matching `LayerOptionsPanel`'s "Rename Layer" alert: neither a sheet nor an alert can sit over
+    /// the canvas, so a pencil there is never competing with a brush stroke, and handwriting a name is
+    /// the same "good use of a pencil" that doc comment grants a layer's. Still the app's only
+    /// title-editing control, and since TODO (57) part 2 the only way to rename a project's folder on
+    /// disk.
+    ///
+    /// **A `.sheet`, not an `.alert`** — `.alert` is the one presentation kind nothing in this app had
+    /// ever driven end to end through XCUITest before this feature, and it MEASURED as unreliable
+    /// there: a synthesized tap on the button that presents it, immediately after reopening a project
+    /// from the gallery, did not raise it within three retried taps and fifteen seconds apiece, on a
+    /// fresh device, in isolation. `.sheet` is the presentation this app's own
+    /// `CanvasResizeSheet`/`ExportSheet`/`StreamConnectSheet` already use and `ToolsAndSelectionUITests`
+    /// already drives successfully.
+    private var sceneNameButton: some View {
+        Button {
+            draftProjectName = canvasManager.projectName
+            isRenamingProject = true
+        } label: {
+            Text(canvasManager.projectName)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .frame(maxWidth: 240)
+        }
+        .accessibilityIdentifier("timeline.projectNameField")
+        .sheet(isPresented: $isRenamingProject) {
+            RenameProjectSheet(name: $draftProjectName) { trimmed in
+                canvasManager.projectName = trimmed
+            }
+        }
     }
 
     /// Brush/eraser/fill are mutually exclusive with Select and Move: only one of these "which tool is
