@@ -63,6 +63,7 @@ final class TimelineZoomPanUITests: PaintUITestCase {
             let centre = before.originX + 9 * before.pointsPerFrame
             let anchored = frame(atScreenX: centre, app)
             try spreadAndTravel(centre: centre, y: rowY, spread: 60, end: 96, travel: travel)
+            attachScreenshot(app, "pinch-and-travel-\(travel)")
 
             let after = track(app)
             let scale = after.pointsPerFrame / before.pointsPerFrame

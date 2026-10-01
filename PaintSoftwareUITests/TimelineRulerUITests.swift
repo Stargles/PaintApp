@@ -13,13 +13,6 @@ import XCTest
 /// what is on screen and not of a stored flag. Every test starts from a new document.
 final class TimelineRulerUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func rulerValue(_ app: XCUIApplication) -> String {
         app.otherElements["timeline.ruler"].value as? String ?? "<no value>"
     }
@@ -52,7 +45,7 @@ final class TimelineRulerUITests: PaintUITestCase {
 
         let rulerTop = ruler.frame.minY
         let rowTop = row.frame.minY
-        attach(app, "01-before-scroll")
+        attachScreenshot(app, "01-seven-layers-in-a-short-panel")
         XCTAssertGreaterThanOrEqual(rulerTop, panel.frame.minY, "The ruler is inside the timeline panel")
 
         // Seven layers at 36 pt a row overflow the shrunken panel by well over 100 pt.
@@ -62,7 +55,7 @@ final class TimelineRulerUITests: PaintUITestCase {
         empty.press(forDuration: 0.05, thenDragTo: empty.withOffset(CGVector(dx: 0, dy: -100)),
                     withVelocity: .default, thenHoldForDuration: 0.1)
 
-        attach(app, "02-after-scroll")
+        attachScreenshot(app, "02-scrolled-and-the-ruler-is-still-on-top")
         XCTAssertLessThan(row.frame.minY, rowTop - 20,
                           "PREMISE: the rows scrolled — row 1 was at \(rowTop) and is at \(row.frame.minY)")
         XCTAssertEqual(ruler.frame.minY, rulerTop, accuracy: 0.5,
@@ -85,7 +78,9 @@ final class TimelineRulerUITests: PaintUITestCase {
         XCTAssertTrue(rulerValue(app).hasPrefix("frames:1,2,3"),
                       "A new document opens zoomed in far enough to number its frames: \(rulerValue(app))")
 
+        attachScreenshot(app, "03-zoomed-in-frames")
         cel.pinch(withScale: 0.2, velocity: -2)
+        attachScreenshot(app, "04-pinched-out-seconds-at-24")
         let atTwentyFour = rulerValue(app)
         XCTAssertTrue(atTwentyFour.hasPrefix("seconds:0s,1s,2s"),
                       "Pinched out, the ruler counts seconds, from 0: \(atTwentyFour)")
@@ -96,6 +91,7 @@ final class TimelineRulerUITests: PaintUITestCase {
         XCTAssertTrue(twelve.waitForExistence(timeout: 3))
         twelve.tap()
         rate.tap()
+        attachScreenshot(app, "05-seconds-at-12")
         let atTwelve = rulerValue(app)
         XCTAssertTrue(atTwelve.hasPrefix("seconds:0s,1s,2s"), "Still seconds at 12 fps: \(atTwelve)")
         XCTAssertGreaterThan(labels(of: atTwelve).count, labels(of: atTwentyFour).count,
@@ -116,6 +112,7 @@ final class TimelineRulerUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let panel = app.otherElements["timeline.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        attachScreenshot(app, "06-default-height")
         XCTAssertEqual(panel.frame.height, 250 * 1.5, accuracy: 2,
                        "A new document opens its timeline 1.5× the 250 pt it was")
 

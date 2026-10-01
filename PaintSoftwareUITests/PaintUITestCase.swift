@@ -1059,6 +1059,15 @@ class PaintUITestCase: XCTestCase {
         XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
     }
 
+    /// Keeps a screenshot of the app in the test's result bundle, so a run can be looked at and not only
+    /// read — the bar for a visible feature is that someone saw it.
+    func attachScreenshot(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     // MARK: - The timeline's size
 
     /// Drags the timeline's grab handle up by `points` — down for a negative number — and answers how far
