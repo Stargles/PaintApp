@@ -32,7 +32,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins mid-drag is what slows
     /// the drag (`PrecisionDrag`, TODO (146)), and a take over a transformation layer's box records
     /// the slowed poses because they are the ones `apply` reports.
-    var touchesOnCanvas: () -> Int = { 0 }
+    ///
+    /// The touch asked about is counted whether or not the counter has heard of it, which is how the
+    /// baseline is taken at the drag's own touch-down — this overlay's pans are read before the
+    /// counter on some touch-downs; nil asks for the count as it stands.
+    var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
 
     /// Whether one of the box's pans owns a touch — **from touch-down, not from the pan's `.began`**,
     /// which is a slop's travel later. While it does, the box owns every other touch: a second finger
@@ -325,7 +329,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     private func claim(with pan: UIPanGestureRecognizer) {
         guard activePan == nil else { return }
         activePan = pan
-        precision = PrecisionDrag(startingAt: pan.location(in: self), touchesDown: touchesOnCanvas())
+        precision = PrecisionDrag(startingAt: pan.location(in: self),
+                                  touchesDown: touchesOnCanvas((pan as? TouchDownPanGestureRecognizer)?.landedTouch))
         dragOrigin = pan.location(in: self)
     }
 
@@ -333,7 +338,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// alone, a fifth of its travel while another touch is down.
     private func precisePoint(_ recognizer: UIPanGestureRecognizer) -> CGPoint {
         guard activePan === recognizer, var drag = precision else { return recognizer.location(in: self) }
-        let point = drag.point(for: recognizer.location(in: self), touchesDown: touchesOnCanvas())
+        let point = drag.point(for: recognizer.location(in: self), touchesDown: touchesOnCanvas(nil))
         precision = drag
         return point
     }

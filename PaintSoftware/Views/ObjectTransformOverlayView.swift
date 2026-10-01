@@ -75,7 +75,10 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
     /// `CanvasView` from the host's `TouchCountRecognizer`, which sees every touch however it landed.
     /// A touch that joins mid-drag is what slows the drag (`PrecisionDrag`, TODO (146)).
-    var touchesOnCanvas: () -> Int = { 0 }
+    ///
+    /// The touch asked about is counted whether or not the counter has heard of it, which is how the
+    /// baseline is taken at the drag's own touch-down; nil asks for the count as it stands.
+    var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
 
     // MARK: - Chrome, in screen points
 
@@ -333,7 +336,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         guard let handle = target(at: point) else { return }
         activeHandle = handle
         draggingTouch = touch
-        precision = PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas())
+        precision = PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas(touch))
         // **Before the drag's own latch and its undo bracket**, which is §5.1's load-bearing ordering:
         // the take's bracket has to be the outer one or the undo step takes the inner surface's label.
         onBoxTouchDown?()
@@ -345,7 +348,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         guard activeHandle != nil, let touch = draggingTouch, touches.contains(touch),
               var drag = precision else { return }
         // The pen's point as the drag is to read it — slowed while another touch is down.
-        let point = drag.point(for: touch.location(in: self), touchesDown: touchesOnCanvas())
+        let point = drag.point(for: touch.location(in: self), touchesDown: touchesOnCanvas(nil))
         precision = drag
         onHandleDragged?(point)
     }

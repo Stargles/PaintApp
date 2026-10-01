@@ -28,6 +28,12 @@ final class TouchCountRecognizer: UIGestureRecognizer {
 
     private var active: Set<UITouch> = []
 
+    /// Whether this recognizer has been told about `touch` yet. Recognizers on different views are
+    /// handed a touch-down in an order nothing promises, so a recognizer that runs *first* (a Move
+    /// box's own pan, one view deeper) cannot assume the count already includes its own touch — see
+    /// `CanvasView.Coordinator.touchesOnCanvas(counting:)`.
+    func has(_ touch: UITouch) -> Bool { active.contains(touch) }
+
     private func report() { onTouchesChanged?(active.count, fingerCount) }
 
     override init(target: Any?, action: Selector?) {

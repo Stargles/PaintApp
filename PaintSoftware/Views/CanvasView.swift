@@ -303,11 +303,11 @@ struct CanvasView: UIViewRepresentable {
         }
         // **A touch that joins a Move-box drag slows it** — TODO (146). Both Move overlays read the
         // count through this one closure, so the rule has one source: the host's own touch counter.
-        transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] in
-            coordinator?.touchesOnCanvas ?? 0
+        transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
+            coordinator?.touchesOnCanvas(counting: touch) ?? 0
         }
-        floatingOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] in
-            coordinator?.touchesOnCanvas ?? 0
+        floatingOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
+            coordinator?.touchesOnCanvas(counting: touch) ?? 0
         }
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
@@ -503,7 +503,18 @@ struct CanvasView: UIViewRepresentable {
         weak var touchCountRecognizer: TouchCountRecognizer?
 
         /// How many touches of any kind are on the canvas — what `PrecisionDrag` is measured against.
-        var touchesOnCanvas: Int { touchCountRecognizer?.activeCount ?? 0 }
+        ///
+        /// **`touch` is the dragging touch, counted whether or not the counter has heard of it yet.**
+        /// A Move box's own pan sits on a view deeper than the host, and nothing orders its touch-down
+        /// against the counter's: read first, the count would leave the dragging touch out, the
+        /// baseline would be one short, and the drag would read as *joined by a finger* the moment it
+        /// moved — a Move slowed to a fifth with nothing beside it. MEASURED as exactly that, once in
+        /// a handful of runs. Passing nil asks for the count as it stands (every later read).
+        func touchesOnCanvas(counting touch: UITouch? = nil) -> Int {
+            let counter = touchCountRecognizer
+            let unheard = touch.map { counter?.has($0) == false ? 1 : 0 } ?? 0
+            return (counter?.activeCount ?? 0) + unheard
+        }
 
         /// **Whether a Move box is being dragged right now**, by either overlay. While it is, the box
         /// owns the canvas: another touch makes the drag precise (`PrecisionDrag`) and nothing else —
