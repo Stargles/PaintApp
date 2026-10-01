@@ -265,9 +265,9 @@ struct OnionSkinPanel: View {
     /// the reference's own placement, replacing the old header-row button of the same setting.
     ///
     /// The link toggle is the owner's emphasis and is **on by default**: with it on, dragging any one
-    /// slider rescales the whole ramp and every other slider — on both sides — moves with it. See
-    /// `OnionSkinOpacityRamp` for exactly what that means, including what a drag to zero does and why
-    /// a far slider stops short of full.
+    /// slider rescales its side's whole ramp and every other slider *on that side* moves with it — and
+    /// no slider on the other side does (TODO (138)). See `OnionSkinOpacityRamp` for exactly what that
+    /// means, including what a drag to zero does and why a far slider stops short of full.
     ///
     /// **Sized to fit `maxSkinsPerSide` (5) slots on both sides inside this panel's own width, at
     /// every count the count sliders can reach.** Found in review: a slot sized for the old 380pt

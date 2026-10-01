@@ -3,6 +3,15 @@ import SwiftUI
 struct SideToolbar: View {
     @ObservedObject var canvasManager: CanvasManager
 
+    /// **The rail's width, and the owner's ask is why it is this small** — TODO (144): *"The left
+    /// side menu (with the size, opacity adjusters) I think could be made a lot slimmer for more space
+    /// efficiency."* 44 points is the least a touch target is allowed to be across, and nothing on the
+    /// rail needs more: a slider's thumb is a column of its own width whatever the rail around it
+    /// does, the buttons are 30 and the captions are 9-point type that scales to fit. Held in one
+    /// place for `DrawingView`, which sizes the column the rail sits in, and for the test that
+    /// measures how much of the screen it takes.
+    static let railWidth: CGFloat = 44
+
     /// When the fill tool is active the left rail's sliders control the fill settings instead of the
     /// brush's, so it doubles as quick access to gap-closing / threshold / edge-overlap (mirrored live
     /// while dragging a fill). Any other tool shows size / opacity sliders (the eraser's own separate
@@ -250,7 +259,7 @@ struct SideToolbar: View {
                     .foregroundColor(.white)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                    .frame(width: 56)
+                    .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("\(identifier).percent")
                     .accessibilityValue(percentText)
             } else {
@@ -260,7 +269,7 @@ struct SideToolbar: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.7)
-                    .frame(width: 56)
+                    .frame(maxWidth: .infinity)
                     // Named so a test can confirm the plain caption is what is showing at rest,
                     // the way it once read `sideToolbar.brushSizeReadout`'s permanent badge — not a
                     // tap target: a tap here reaches the canvas underneath and would discard whatever

@@ -37,7 +37,7 @@ nonisolated struct StreamEndpoint: Hashable, Codable {
     /// the other persistent default in the app.
     static func forgetLastUsedIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
                                           defaults: UserDefaults = .standard) {
-        guard arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") else { return }
+        guard EditorPreferences.forgetRequested(in: arguments) else { return }
         defaults.removeObject(forKey: lastHostDefaultsKey)
         defaults.removeObject(forKey: lastPortDefaultsKey)
     }

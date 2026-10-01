@@ -9,7 +9,7 @@ import SwiftUI
 /// `paletteStore`, `popoverSize`) is unchanged, so none of them changed.
 ///
 /// ## TODO (106), the owner's second pass — what changed and why
-/// - **The Disc type is gone**, whole: the view, the tab, `PickerType.disc`, its tests and the
+/// - **The Disc type is gone**, whole: the view, the tab, `ColorPickerType.disc`, its tests and the
 ///   `ColorMath` square<->disc remap that existed only for it. *"Remove the disc color picker."*
 /// - **The hue phase bug is fixed at its root.** The owner: *"The color picker wheel's color is not
 ///   accurate and rotated around 90 degrees out of phase. The red on the wheel is right, but red is
@@ -45,14 +45,12 @@ import SwiftUI
 /// (`header`, `typeTabBody`) — one previous swatch, one history strip, one palette grid, never a
 /// second copy.
 ///
-/// ## Why Square, not Triangle, opens first
-/// The tab bar's first *icon* is Triangle (matching the reference's own left-to-right order), but a
-/// dozen *other* features' XCUITests already reach into this panel assuming its first-shown content
-/// is the SV square (`colorPanel.svSquare`) and the hex field, sight unseen, because that was this
-/// picker's one tab before (73) gave it several. Square is functionally identical to what those tests
-/// were written against — a ring instead of a linear hue bar, everything else the same
-/// `SaturationBrightnessSquare` — so making *it* the initial `pickerType` costs nothing and keeps a
-/// dozen unrelated tests honest instead of coincidentally red.
+/// ## Which type it opens on
+/// **The one the artist last chose, in every panel** — `ColorPickerType.remembered`, written when a tab
+/// is tapped and read as the panel is built, so leaving the canvas and coming back, or opening the
+/// picker from a different one of its call sites, finds the picker where it was left (TODO (141)).
+/// Until a tab has been chosen it opens on Classic (`ColorPickerType.initial`), for the reason that
+/// type gives.
 struct ColorPickerPanel: View {
     /// The colour this panel edits. Every write goes through here, so the panel has no idea whether
     /// it is driving the brush, the paper, a value layer, an effect or a gradient stop.
@@ -86,34 +84,7 @@ struct ColorPickerPanel: View {
     /// than trailing one drag tick behind `color`.
     @State private var previousColor: Color = .black
 
-    enum PickerType: String, CaseIterable, Identifiable {
-        case triangle, square, value, palettes
-        var id: String { rawValue }
-
-        /// TODO (106): "label them in the reference's spirit" — the reference's own words for these
-        /// four tabs, kept over the rawValue (unchanged, so every existing
-        /// `colorPanel.tab.<rawValue>` identifier still resolves).
-        var title: String {
-            switch self {
-            case .triangle: return "Wheel"
-            case .square: return "Classic"
-            case .value: return "Values"
-            case .palettes: return "Palettes"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .triangle: return "triangle"
-            case .square: return "square"
-            case .value: return "slider.horizontal.3"
-            case .palettes: return "square.grid.3x3.fill"
-            }
-        }
-    }
-
-    // See the type's own doc comment for why this is `.square` rather than the tab bar's first entry.
-    @State private var pickerType: PickerType = .square
+    @State private var pickerType: ColorPickerType = .remembered()
 
     /// The ring + inner shape's shared bounding box. Fixed rather than `GeometryReader`-sized, so a
     /// drag's normalized offset means the same screen distance in every XCUITest.
@@ -182,7 +153,7 @@ struct ColorPickerPanel: View {
 
     private var tabBar: some View {
         HStack(spacing: 2) {
-            ForEach(PickerType.allCases) { type in
+            ForEach(ColorPickerType.allCases) { type in
                 tabButton(type)
             }
         }
@@ -192,9 +163,10 @@ struct ColorPickerPanel: View {
         .background(Color.white.opacity(0.06))
     }
 
-    private func tabButton(_ type: PickerType) -> some View {
+    private func tabButton(_ type: ColorPickerType) -> some View {
         Button {
             pickerType = type
+            type.remember()
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: type.systemImage)
@@ -209,6 +181,7 @@ struct ColorPickerPanel: View {
             .cornerRadius(7)
         }
         .accessibilityIdentifier("colorPanel.tab.\(type.rawValue)")
+        .accessibilityAddTraits(pickerType == type ? [.isSelected] : [])
     }
 
     // MARK: - Triangle / Square tabs

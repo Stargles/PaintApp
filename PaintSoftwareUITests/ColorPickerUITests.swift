@@ -109,6 +109,60 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertGreaterThan(Int(pixel.g), Int(pixel.b) + 40, "…with green clearly ahead of blue too, got \(pixel)")
     }
 
+    // MARK: - The chosen type is remembered
+
+    /// TODO (141) — the owner: *"The color wheel type resets to classic (square) every time the canvas
+    /// is exited and re-entered."* Driven the way they hit it: from a fresh document, choose Wheel,
+    /// leave to the gallery and reopen the drawing, and then — since the choice is the artist's rather
+    /// than the drawing's — quit the app and come back to it cold. The panel is read off the screen
+    /// both times: the Wheel's own triangle is up, the Classic square is not, and the tab bar says
+    /// which tab is selected.
+    ///
+    /// **The second half launches without `-resetEditorPreferences`**, which `launchIntoEditor` adds
+    /// to every launch it makes: the hook that makes the other twelve picker tests start on Classic is
+    /// the same one that would erase what this one is proving survives.
+    func testTheTypeTheArtistChoseIsStillChosenAfterLeavingTheCanvasAndAfterAFreshLaunch() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let colorButton = openColorPanel(app)
+        XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "PREMISE: a fresh install opens on Classic")
+
+        app.buttons["colorPanel.tab.triangle"].tap()
+        let triangle = app.otherElements["colorPanel.triangle"]
+        XCTAssertTrue(triangle.waitForExistence(timeout: 5), "PREMISE: the Wheel tab is up")
+        closeColorPanel(app, colorButton: colorButton, sentinel: triangle)
+
+        // Out to the gallery and back into the same drawing.
+        saveEditorAndReturnToGallery(app).tap()
+        assertThePanelOpensOnTheWheel(app, "after leaving the canvas and coming back")
+        attachScreenshot("Wheel after re-entering the canvas")
+
+        // And a launch of its own, which keeps everything but the reset arguments.
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 10), "The saved drawing is in the gallery of the new launch")
+        tile.tap()
+        assertThePanelOpensOnTheWheel(app, "after quitting the app and opening it again")
+    }
+
+    /// Opens the colour panel on a document that has just opened, and asserts it came up on the Wheel
+    /// rather than on Classic.
+    private func assertThePanelOpensOnTheWheel(_ app: XCUIApplication, _ when: String,
+                                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15),
+                      "The drawing reopens in the editor", file: file, line: line)
+        app.buttons["toolbar.colorButton"].tap()
+        XCTAssertTrue(app.otherElements["colorPanel.triangle"].waitForExistence(timeout: 5),
+                      "The colour panel should open on the Wheel \(when)", file: file, line: line)
+        XCTAssertFalse(app.otherElements["colorPanel.svSquare"].exists,
+                       "…and not on Classic, which is what it opened on every time before", file: file, line: line)
+        XCTAssertTrue(app.buttons["colorPanel.tab.triangle"].isSelected,
+                      "The tab bar should mark the Wheel as the selected tab \(when)", file: file, line: line)
+        XCTAssertFalse(app.buttons["colorPanel.tab.square"].isSelected, "…and Classic as not", file: file, line: line)
+    }
+
     // MARK: - Square
 
     /// A fresh document, Square tab (the panel's default, but reached explicitly by its own tab

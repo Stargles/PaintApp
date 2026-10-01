@@ -105,8 +105,16 @@ struct EditorPreferences: Codable, Equatable {
     /// Synchronous, in `PaintApp.init`, because the next tap can read the record.
     static func forgetIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
                                   defaults: UserDefaults = .standard) {
-        guard arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") else { return }
+        guard forgetRequested(in: arguments) else { return }
         defaults.removeObject(forKey: defaultsKey)
+    }
+
+    /// Whether this launch asked for the artist's app-wide preferences to be forgotten — the one
+    /// spelling of the condition, shared by every `forgetIfRequested` that answers to it
+    /// (`StreamEndpoint`'s last-used laptop, `ColorPickerType`'s remembered tab) so a fourth cannot
+    /// disagree about which launch arguments mean it.
+    static func forgetRequested(in arguments: [String]) -> Bool {
+        arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery")
     }
 }
 

@@ -77,7 +77,7 @@ struct DrawingView: View {
     @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 0) {
             SideToolbar(canvasManager: canvasManager)
-                .frame(width: 64)
+                .frame(width: SideToolbar.railWidth)
                 .cornerRadius(16)
                 .padding(.vertical, 12)
                 .padding(.leading, 12)

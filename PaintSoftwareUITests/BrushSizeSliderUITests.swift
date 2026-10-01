@@ -33,6 +33,63 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
     }
 
+    /// **TODO (144): the left rail is slim, and everything on it still fits.** The owner: *"The left
+    /// side menu (with the size, opacity adjusters) I think could be made a lot slimmer for more space
+    /// efficiency."*
+    ///
+    /// The rail's width is read off the canvas, which begins where the rail ends (the 12 points of
+    /// padding before it included), so it is how much of the screen the rail actually takes. It was 76
+    /// points; the cap below is the 44-point rail and that padding with a point or two of slack. A rail
+    /// that narrow is only a gain if nothing on it is cut off, so every control and caption is
+    /// asserted to lie inside it — on the brush's two sliders and, with three captions to fit in the
+    /// width, on the fill tool's three.
+    func testTheRailIsSlimAndEveryControlOnItStillFitsInside() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        let railRight = canvas.frame.minX
+        XCTAssertLessThanOrEqual(railRight, 58, "the rail and its padding take \(railRight) points; it took 76")
+        XCTAssertGreaterThan(railRight, 40, "PREMISE: there is a rail at all")
+
+        func assertInsideTheRail(_ element: XCUIElement, _ what: String,
+                                 file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertTrue(element.waitForExistence(timeout: 5), "\(what) is on the rail", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(element.frame.minX, 0, "\(what) is cut off on the left", file: file, line: line)
+            XCTAssertLessThanOrEqual(element.frame.maxX, railRight + 0.5,
+                                     "\(what) is wider than the rail: it ends at \(element.frame.maxX), the rail at \(railRight)",
+                                     file: file, line: line)
+        }
+        for identifier in ["sideToolbar.brushSizeSlider", "sideToolbar.brushOpacitySlider"] {
+            let slider = app.sliders[identifier]
+            assertInsideTheRail(slider, identifier)
+            XCTAssertGreaterThanOrEqual(slider.frame.height, 100,
+                                        "\(identifier) keeps a long track to drag along")
+            XCTAssertTrue(slider.isHittable, "\(identifier) can be touched")
+            assertInsideTheRail(app.staticTexts["\(identifier).caption"], "\(identifier)'s caption")
+        }
+        assertInsideTheRail(app.buttons["sideToolbar.eyedropperButton"], "the eyedropper")
+        assertInsideTheRail(app.buttons["sideToolbar.undoButton"], "Undo")
+        assertInsideTheRail(app.buttons["sideToolbar.redoButton"], "Redo")
+        attachScreen(app, "rail-brush")
+
+        app.buttons["toolbar.fillButton"].tap()
+        for identifier in ["sideToolbar.gapClosingSlider", "sideToolbar.thresholdSlider", "sideToolbar.edgeOverlapSlider"] {
+            assertInsideTheRail(app.sliders[identifier], identifier)
+            XCTAssertTrue(app.sliders[identifier].isHittable, "\(identifier) can be touched")
+            assertInsideTheRail(app.staticTexts["\(identifier).caption"], "\(identifier)'s caption")
+        }
+        attachScreen(app, "rail-fill")
+    }
+
+    private func attachScreen(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// **TODO (79)(b): no permanent percentage badge exists at rest, on either tool's sliders.** The
     /// rail used to overlay one on the brush's own Size/Opacity icons at all times; now the plain
     /// "Size"/"Opacity" captions are what is on screen with no finger down, on the brush *and* the

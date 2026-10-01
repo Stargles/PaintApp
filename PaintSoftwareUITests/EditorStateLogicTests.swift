@@ -43,7 +43,8 @@ final class EditorStateLogicTests: XCTestCase {
         manager.isOnionSkinEnabled = false
         manager.onionSkin.previousCount = 3
         manager.onionSkin.placement = .inFront
-        manager.onionSkin.linkedLevel = 0.6
+        manager.onionSkin.linkedPreviousLevel = 0.6
+        manager.onionSkin.linkedNextLevel = 0.2
         manager.isLoopEnabled = false
         manager.loopStartFrame = 2
         manager.loopEndFrame = 9
@@ -200,5 +201,43 @@ final class EditorStateLogicTests: XCTestCase {
         manager.applyEditorPreferences(preferences)
         XCTAssertEqual(manager.selectedEraserBrush, BrushLibrary.roundHard, "An unknown id changes no preset")
         XCTAssertEqual(manager.eraserSize, 33, "…while the size the artist had still applies")
+    }
+
+    // MARK: - The colour picker's type (TODO (141))
+
+    /// **Remembered per type, not just for the one that happens to differ from the default.** Each
+    /// case is chosen in a fresh suite and read back, so a `remember` that wrote a constant — or a
+    /// `remembered` that ignored the store — fails on the three cases that are not what it wrote.
+    func testTheColourPickerOpensOnClassicUntilATypeIsChosenAndThenOnThatType() throws {
+        XCTAssertEqual(ColorPickerType.initial, .square, "Classic is the default the dozen picker tests reach into")
+        for type in ColorPickerType.allCases {
+            let defaults = try isolatedDefaults()
+            XCTAssertEqual(ColorPickerType.remembered(in: defaults), .square, "Nothing chosen yet")
+            type.remember(in: defaults)
+            XCTAssertEqual(ColorPickerType.remembered(in: defaults), type, "\(type) was chosen, so \(type) is what opens")
+        }
+    }
+
+    func testAStoredColourPickerTypeThisBuildDoesNotKnowOpensOnClassic() throws {
+        let defaults = try isolatedDefaults()
+        defaults.set("hexagon", forKey: ColorPickerType.defaultsKey)
+        XCTAssertEqual(ColorPickerType.remembered(in: defaults), .square)
+    }
+
+    /// The launch hook is what lets every UI test pin the type without choosing one: it forgets under
+    /// the two arguments `EditorPreferences` answers to, and under no others.
+    func testTheLaunchHookForgetsTheRememberedPickerTypeUnderTheEditorResetArgumentsOnly() throws {
+        let defaults = try isolatedDefaults()
+        ColorPickerType.triangle.remember(in: defaults)
+
+        ColorPickerType.forgetIfRequested(arguments: ["-resetBrushLibrary", "-resetPalettes"], defaults: defaults)
+        XCTAssertEqual(ColorPickerType.remembered(in: defaults), .triangle, "No editor reset was asked for")
+
+        ColorPickerType.forgetIfRequested(arguments: ["-resetEditorPreferences"], defaults: defaults)
+        XCTAssertEqual(ColorPickerType.remembered(in: defaults), .square)
+
+        ColorPickerType.triangle.remember(in: defaults)
+        ColorPickerType.forgetIfRequested(arguments: ["-resetGallery"], defaults: defaults)
+        XCTAssertEqual(ColorPickerType.remembered(in: defaults), .square, "-resetGallery means a fresh install too")
     }
 }

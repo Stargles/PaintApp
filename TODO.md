@@ -328,23 +328,6 @@ the drawings."*
 and end of those brushes are messy. I have left a recording to prove this ending in 02122, 50kb."* The
 recording is `recording-20261001-002122.jsonl`, pulled to `~/PaintWork/evidence/`.
 
-## (141) The colour wheel type is remembered
-
-**Status** — not started. *"The color wheel type resets to classic (square) every time the canvas is
-exited and re-entered."*
-
-## (138) Onion skin: the two opacity sliders are independent
-
-**Status** — not started. *"In the onion skin edit menu when you change the opacity of the frames in
-front of or before it, one side right now is anchored. What I mean by that is that the user should be
-able to take the rightmost slider for example and adjust it, and the opacity of the left slider does
-not change. Vice versa with the left."*
-
-## (144) A slimmer left-side slider rail
-
-**Status** — not started. *"The left side menu (with the size, opacity adjusters) I think could be made
-a lot slimmer for more space efficiency."*
-
 ## (111) A Favourites brush folder
 
 **Status** — not started. *"Add a brush favorites folder and favorite Rough Ink, Technical Pen - Fine,

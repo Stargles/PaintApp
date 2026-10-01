@@ -402,21 +402,30 @@ struct OnionSkinSettings: Equatable, Codable {
     var nextTint = CodableColor(red: 0.30, green: 0.78, blue: 0.31, alpha: 1)
 
     /// **On by default**, the owner's emphasis. See `OnionSkinOpacityRamp` for exactly what it does.
+    ///
+    /// **A side's own switch, never a bridge between the two sides** — TODO (138), the owner: *"the
+    /// user should be able to take the rightmost slider for example and adjust it, and the opacity of
+    /// the left slider does not change. Vice versa with the left."* Linked, the sliders **of one
+    /// side** scale together along that side's ramp; the Previous and Next sides never move each
+    /// other, linked or not.
     var isOpacityLinked: Bool = true
 
-    /// The one number the linked ramp is scaled by: the opacity of the *nearest* skin on a side.
+    /// The one number a side's linked ramp is scaled by: the opacity of that side's *nearest* skin.
     ///
     /// 0.35 rather than 1 because an onion skin at full opacity is not a ghost, and because it keeps
-    /// the shipped default — one previous skin at 0.3 — roughly where it was.
-    var linkedLevel: Double = 0.35
+    /// the shipped default — one previous skin at 0.3 — roughly where it was. **One per side**, so a
+    /// drag on one side has no number of the other's to rescale.
+    static let defaultLinkedLevel = 0.35
+    var linkedPreviousLevel: Double = OnionSkinSettings.defaultLinkedLevel
+    var linkedNextLevel: Double = OnionSkinSettings.defaultLinkedLevel
 
     /// Per-slot opacities used **only while unlinked**, indexed by distance-1 (element 0 is the skin
     /// nearest the current drawing). Always `maxSkinsPerSide` long, so lowering the count and raising
     /// it again gives the artist their values back rather than a reset ramp.
     var freePreviousOpacities: [Double] = OnionSkinOpacityRamp
-        .opacities(level: 0.35, count: OnionSkinSettings.maxSkinsPerSide)
+        .opacities(level: OnionSkinSettings.defaultLinkedLevel, count: OnionSkinSettings.maxSkinsPerSide)
     var freeNextOpacities: [Double] = OnionSkinOpacityRamp
-        .opacities(level: 0.35, count: OnionSkinSettings.maxSkinsPerSide)
+        .opacities(level: OnionSkinSettings.defaultLinkedLevel, count: OnionSkinSettings.maxSkinsPerSide)
 
     func count(on side: Side) -> Int {
         side == .previous ? previousCount : nextCount
@@ -426,22 +435,26 @@ struct OnionSkinSettings: Equatable, Codable {
         side == .previous ? previousTint : nextTint
     }
 
+    func linkedLevel(on side: Side) -> Double {
+        side == .previous ? linkedPreviousLevel : linkedNextLevel
+    }
+
     /// The opacities actually shown on one side, nearest first — the ramp when linked, the artist's
     /// own values when not. `count(on:)` long.
     func opacities(on side: Side) -> [Double] {
         let n = max(0, min(count(on: side), Self.maxSkinsPerSide))
         guard n > 0 else { return [] }
-        guard !isOpacityLinked else { return OnionSkinOpacityRamp.opacities(level: linkedLevel, count: n) }
+        guard !isOpacityLinked else { return OnionSkinOpacityRamp.opacities(level: linkedLevel(on: side), count: n) }
         let free = side == .previous ? freePreviousOpacities : freeNextOpacities
         return (0..<n).map { $0 < free.count ? free[$0] : 0 }
     }
 
-    /// What the artist just did to one slider, applied.
+    /// What the artist just did to one slider, applied — **to that slider's side and no other**.
     ///
-    /// **Linked**: `slot` (1-based, 1 = nearest) is put at `value` by rescaling the whole ramp, which
-    /// moves every other slider on *both* sides — "all the opacity sliders behave linearly to each
-    /// other", the owner's words, read as strongly as it can be read. **Unlinked**: only that slot on
-    /// that side moves.
+    /// **Linked**: `slot` (1-based, 1 = nearest) is put at `value` by rescaling that side's ramp, which
+    /// moves every other slider *on the same side* — "all the opacity sliders behave linearly to each
+    /// other", the owner's words, which TODO (138) then limited to the side being dragged.
+    /// **Unlinked**: only that slot moves.
     mutating func setOpacity(_ value: Double, slot: Int, on side: Side) {
         let n = max(0, min(count(on: side), Self.maxSkinsPerSide))
         guard slot >= 1, slot <= n else { return }
@@ -456,17 +469,19 @@ struct OnionSkinSettings: Equatable, Codable {
             }
             return
         }
-        linkedLevel = OnionSkinOpacityRamp.level(settingSlot: slot, to: value, count: n)
+        let level = OnionSkinOpacityRamp.level(settingSlot: slot, to: value, count: n)
+        if side == .previous { linkedPreviousLevel = level } else { linkedNextLevel = level }
     }
 
-    /// Turning the link off freezes the ramp into the free values, so the sliders do not jump the
-    /// instant they become independent. Turning it on takes the nearest previous slider as the new
-    /// level, so the one the artist is most likely looking at is the one that stays put.
+    /// Turning the link off freezes each side's ramp into its free values, so the sliders do not jump
+    /// the instant they become independent. Turning it on takes each side's own nearest slider as that
+    /// side's new level, so the one the artist is most likely looking at stays put — on both sides,
+    /// with neither taking its level from the other.
     mutating func setOpacityLinked(_ linked: Bool) {
         guard linked != isOpacityLinked else { return }
         if linked {
-            let anchor = freePreviousOpacities.first ?? linkedLevel
-            linkedLevel = min(max(anchor, 0), 1)
+            linkedPreviousLevel = min(max(freePreviousOpacities.first ?? linkedPreviousLevel, 0), 1)
+            linkedNextLevel = min(max(freeNextOpacities.first ?? linkedNextLevel, 0), 1)
             isOpacityLinked = true
         } else {
             let previous = opacities(on: .previous)
@@ -480,6 +495,48 @@ struct OnionSkinSettings: Equatable, Codable {
             isOpacityLinked = false
         }
     }
+
+    // MARK: Persistence
+
+    init() {}
+
+    /// **Field by field, with a default for whatever is missing or unreadable**, so a document saved
+    /// before a field existed — or one this build cannot read a single value of — keeps every other
+    /// setting the artist made rather than falling back to a freshly defaulted whole, which is what the
+    /// synthesized decoder would do to the record (`EditorStateManifest` treats any throw as "no
+    /// settings"). A document that carries one shared `linkedLevel` seeds both sides with it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func decoded<Value: Decodable>(_ key: CodingKeys) -> Value? {
+            (try? c.decodeIfPresent(Value.self, forKey: key)).flatMap { $0 }
+        }
+        let defaults = OnionSkinSettings()
+        neighbourhood = decoded(.neighbourhood) ?? defaults.neighbourhood
+        placement = decoded(.placement) ?? defaults.placement
+        previousCount = decoded(.previousCount) ?? defaults.previousCount
+        nextCount = decoded(.nextCount) ?? defaults.nextCount
+        loops = decoded(.loops) ?? defaults.loops
+        colouring = decoded(.colouring) ?? defaults.colouring
+        resolution = decoded(.resolution) ?? defaults.resolution
+        previousTint = decoded(.previousTint) ?? defaults.previousTint
+        nextTint = decoded(.nextTint) ?? defaults.nextTint
+        isOpacityLinked = decoded(.isOpacityLinked) ?? defaults.isOpacityLinked
+        let sharedLevel: Double? = try? decoder.container(keyedBy: SharedLevelKey.self)
+            .decodeIfPresent(Double.self, forKey: .linkedLevel)
+        linkedPreviousLevel = decoded(.linkedPreviousLevel) ?? sharedLevel ?? defaults.linkedPreviousLevel
+        linkedNextLevel = decoded(.linkedNextLevel) ?? sharedLevel ?? defaults.linkedNextLevel
+        freePreviousOpacities = decoded(.freePreviousOpacities) ?? defaults.freePreviousOpacities
+        freeNextOpacities = decoded(.freeNextOpacities) ?? defaults.freeNextOpacities
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case neighbourhood, placement, previousCount, nextCount, loops, colouring, resolution,
+             previousTint, nextTint, isOpacityLinked, linkedPreviousLevel, linkedNextLevel,
+             freePreviousOpacities, freeNextOpacities
+    }
+
+    /// The one key a document written before the two sides had levels of their own carries.
+    private enum SharedLevelKey: String, CodingKey { case linkedLevel }
 }
 
 // MARK: - Linked opacity
@@ -494,18 +551,20 @@ struct OnionSkinSettings: Equatable, Codable {
 /// — a straight line from 1 at the nearest slot down to 1/n at the furthest, in equal steps. That is
 /// "a linear ramp from the nearest skin to the furthest".
 ///
-/// What is actually stored is one scalar, the **level** λ in 0...1, and the opacities are
+/// What is actually stored, per side, is one scalar, the **level** λ in 0...1, and the opacities are
 ///
 ///     o(d) = λ · s(d)
 ///
-/// so the whole vector is one point on a ray through the origin. Dragging *any* slider rescales that
-/// ray: putting slot k at v means λ = v / s(k), and every other slot moves to keep its ratio to the
-/// dragged one exactly as it was. That is "moving one moves the others, linearly to each other".
+/// so a side's whole vector is one point on a ray through the origin. Dragging *any* slider of a side
+/// rescales that ray: putting slot k at v means λ = v / s(k), and every other slot of the side moves to
+/// keep its ratio to the dragged one exactly as it was. That is "moving one moves the others, linearly
+/// to each other".
 ///
-/// Two consequences worth stating rather than discovering:
+/// Each side has a ramp and a level of its own, and a drag on one never touches the other. Two
+/// consequences worth stating rather than discovering:
 ///
-///  * **A drag to zero zeroes every slot**, on both sides. λ = 0 is a point on the ray like any
-///    other, and this is what "linear" costs — there is no offset to preserve.
+///  * **A drag to zero zeroes every slot on that side.** λ = 0 is a point on the ray like any other,
+///    and this is what "linear" costs — there is no offset to preserve.
 ///  * **A far slider cannot be dragged above its own share of a full ramp.** λ is clamped at 1, so
 ///    slot k tops out at s(k): with five skins, slot 3 stops at 0.6, because going higher would need
 ///    the nearer slots above 1 and they are already full. It is the ramp being straight that says so.

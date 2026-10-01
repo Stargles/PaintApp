@@ -1522,7 +1522,7 @@ final class CanvasManager: ObservableObject {
     /// **One value, not a dozen `@Published` properties**, because the render path compares the
     /// settings that produced the picture on screen against the settings now, and one `==` is what
     /// makes that comparison possible to get right. `onionSkinOpacity` used to be the whole of this
-    /// and is gone: it is `onionSkin.linkedLevel`, which is the same number with a ramp behind it.
+    /// and is gone: it is `onionSkin.linkedLevel(on:)`, which is the same number with a ramp behind it.
     @Published var onionSkin = OnionSkinSettings()
     @Published var isLoopEnabled: Bool = true
     /// The frame range playback loops within, set via the ruler's frame-number tap menu. Nil means
