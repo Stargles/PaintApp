@@ -997,8 +997,8 @@ private extension PaintUITestCase {
                        "\(from)|\(to)",
                        "PREMISE: two marks carrying no channel, which is what puts the next slider edit in seedAndKey")
 
-        openLayerPanel(app)
-        app.staticTexts["layerPanel.row.1"].tap()
+        // The effect layer is current, so its bar has been up since the grade was picked: the rail
+        // is shut and there is nothing to reopen.
         let slider = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         let before = try XCTUnwrap(Double(try XCTUnwrap(slider.value as? String)))
@@ -1010,7 +1010,6 @@ private extension PaintUITestCase {
         XCTAssertNotEqual(after, before, accuracy: 0.05,
                           "The slider did not move, so no key was written")
 
-        app.buttons["toolbar.layersButton"].tap()
         return AuthoredCurve(start: before, end: after)
     }
 }

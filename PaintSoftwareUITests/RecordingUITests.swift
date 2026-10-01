@@ -183,15 +183,15 @@ final class RecordingUITests: PaintUITestCase {
         record.tap()
         XCTAssertEqual(record.value as? String, "armed", "Setup: armed, and nothing has moved")
 
-        // Now the artist walks to the surface. The arm has to survive the walk, or the feature is
-        // unusable for the reason it was rebuilt: the slider is two menus away from the button.
-        openLayerPanel(app)
-        app.staticTexts["layerPanel.row.1"].tap()
+        // The graded layer is current, so its bar has been up since the grade was picked and the
+        // surface is already under the artist's hand. The arm has to have survived getting there —
+        // the add menu, the grade picker, the rail opening and shutting — or the feature is unusable
+        // for the reason it was rebuilt.
         let slider = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         XCTAssertEqual(record.value as? String, "armed",
-                       "The arm survived opening two panels — an arm that dropped on the way to the "
-                       + "surface would make the feature unreachable")
+                       "The arm survived the walk to the surface — an arm that dropped on the way "
+                       + "would make the feature unreachable")
         // **The landing.** One drag, which is touch-down, motion and lift — the take begins on the
         // first of those and playback starts with it.
         slider.adjust(toNormalizedSliderPosition: 0.9)

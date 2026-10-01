@@ -714,8 +714,9 @@ by `Effect.maxOutlineRadius` rather than `maxBlurTaps`.
 
 **All thirteen are now configurable, which they were not before.** `setLayerEffect` shipped with no UI
 caller anywhere in `Views/` for two phases, so an effect layer was creatable and stayed the identity
-grade forever. `EffectSection.swift` is that caller: one settings menu per effect behind the row's
-**Effect Settings ▸**, including the two that needed real editors rather than sliders — a curve editor
+grade forever. `EffectSection.swift` is that caller: one settings bar per effect, docked at the bottom
+of the screen for as long as the effect layer is the active one (a compositor node's is behind its options'
+**Effect Settings ▸**), including the two that needed real editors rather than sliders — a curve editor
 for Curves and a stop editor for Gradient Map. Both §4.4 wrappers reach the same menu, since both store
 the grade in a field called `effect`.
 

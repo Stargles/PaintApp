@@ -214,7 +214,8 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 3. Adjust opacity with the slider, toggle visibility with the eye icon, tap a row to make it active.
 4. Tap the active row again for its options menu (rename, blend mode, merge, delete). While one is
    open every row carries a checkmark to clip that layer to, and a drop to make it a fill boundary.
-   Mask and Effect Settings each open as a sub-menu in place, with a Back button.
+   Mask opens as a sub-menu in place, with a Back button; so does a compositor node's Effect
+   Settings, docked at the bottom of the screen.
 5. Swipe a row to Duplicate or Delete.
 6. Drag a row to reorder it. Dropping onto another layer reorders — it does not group; drop onto a
    folder or node row to go inside one. The row you are dragging leaves its slot, and an orange
@@ -228,10 +229,12 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    the layer is a flat colour composited that way; pick an effect and it becomes an adjustment layer
    instead, grading everything beneath it inside its own container. The two are answers to the same
    question, so picking one always clears the other. The row itself is never hidden — it shows the
-   effect's name in place of the blend mode's while one is set, and the colour swatch below it is
-   replaced by **Effect Settings ▸** for the same reason.
-3. **Effect Settings ▸** opens the knobs for whichever effect is set, including a curve editor
-   (Curves) and a gradient-stop editor (Gradient Map).
+   effect's name in place of the blend mode's while one is set, and the colour swatch below it goes
+   away for the same reason.
+3. **The effect's settings are on screen whenever its layer is the active one** — docked at the
+   bottom of the screen above the timeline, with no extra tap — and go when another layer is
+   selected. They include a curve editor (Curves) and a gradient-stop editor (Gradient Map). The
+   layer rail stays open beside them, and neither a pan, a pinch nor a tap on the canvas closes them.
 4. A compositor node's operation dropdown offers the same effects beneath the blend ops. A blend op
    takes two inputs; an effect op takes one, so it grades that input's composite as a unit.
 5. A value layer or node renames itself to follow the effect you pick, unless you have renamed it by
