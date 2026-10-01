@@ -14,31 +14,6 @@ import XCTest
 /// where a 4:1 picture's was 4× too tall.
 final class ImageMoveBoxUITests: PaintUITestCase {
 
-    /// The box as `x,y,w,h` in the host's unit square, or nil while there is none.
-    private func moveBox(_ app: XCUIApplication) -> CGRect? {
-        let field = readField(app, "movebox:")
-        let parts = field.split(separator: ",").compactMap { Double($0) }
-        guard parts.count == 4 else { return nil }
-        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
-    }
-
-    /// The box once it has stopped moving — **three reads 0.3 s apart that agree**. The box is up
-    /// before the canvas has been fitted to its host, and until then it is published in the
-    /// unfitted container's coordinates; the first non-nil reading is a real box in the wrong place.
-    private func settledMoveBox(_ app: XCUIApplication, timeout: TimeInterval = 10) -> CGRect? {
-        let deadline = Date().addingTimeInterval(timeout)
-        var agreeing = 0
-        var last: CGRect?
-        while Date() < deadline {
-            let now = moveBox(app)
-            agreeing = (now != nil && now == last) ? agreeing + 1 : 0
-            last = now
-            if agreeing >= 3 { return now }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        return nil
-    }
-
     /// The black rectangle's bounds in the host's unit square, measured off a screenshot of `window`.
     private func inkBounds(_ probe: (Double, Double) -> Bool, in window: CGRect) throws -> CGRect {
         var minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0

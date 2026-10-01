@@ -53,10 +53,22 @@ extension FloatingTransform: OverlayTransformProjecting {
 final class TouchDownPanGestureRecognizer: UIPanGestureRecognizer {
     var onTouchDown: (() -> Void)?
 
+    /// **The sequence is over** — every touch lifted, or the pan ended, failed or was cancelled.
+    /// `reset()` is UIKit's one guaranteed return to `.possible`, so this fires exactly once per
+    /// `onTouchDown` whatever became of the gesture in between. It is what lets an owner of the
+    /// touch-down (`FloatingPieceOverlayView`, TODO (146)) hold a claim for the drag's whole life
+    /// without trusting a `.ended` that a failed or cancelled pan never reaches.
+    var onSequenceEnded: (() -> Void)?
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
         guard numberOfTouches <= 1 else { return }
         onTouchDown?()
+    }
+
+    override func reset() {
+        super.reset()
+        onSequenceEnded?()
     }
 }
 

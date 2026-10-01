@@ -301,6 +301,14 @@ struct CanvasView: UIViewRepresentable {
         transformOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
             coordinator?.moveBoxTouchDown()
         }
+        // **A touch that joins a Move-box drag slows it** — TODO (146). Both Move overlays read the
+        // count through this one closure, so the rule has one source: the host's own touch counter.
+        transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] in
+            coordinator?.touchesOnCanvas ?? 0
+        }
+        floatingOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] in
+            coordinator?.touchesOnCanvas ?? 0
+        }
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
         }
@@ -493,6 +501,17 @@ struct CanvasView: UIViewRepresentable {
         var eyedropperRevertPending = false
         /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
+
+        /// How many touches of any kind are on the canvas — what `PrecisionDrag` is measured against.
+        var touchesOnCanvas: Int { touchCountRecognizer?.activeCount ?? 0 }
+
+        /// **Whether a Move box is being dragged right now**, by either overlay. While it is, the box
+        /// owns the canvas: another touch makes the drag precise (`PrecisionDrag`) and nothing else —
+        /// it starts no pan, pinch or rotation, and a finger that lifts away from the box is not a tap
+        /// that commits it. Both gates below ask this.
+        private var moveBoxDragIsLive: Bool {
+            (transformOverlay?.isDragging ?? false) || (floatingOverlay?.isDragging ?? false)
+        }
         /// Fingers reported by the *active stroke's own* recognizer as accompanying the pen, the
         /// second source `refreshShapeConstraint` folds in. See
         /// `StrokeGestureRecognizer.onAccompanyingFingersChanged` for why there are two.
@@ -3858,6 +3877,9 @@ struct CanvasView: UIViewRepresentable {
             guard gestureRecognizer === moveBoxCommitRecognizer, let container = containerView else {
                 return true
             }
+            // A finger pressed to steady the pen lifts as a tap, and the tap would put the box down
+            // under the pen that is still moving it. Decided here, at touch-down, like the rest.
+            guard !moveBoxDragIsLive else { return false }
             let canvasPoint = touch.location(in: container)
             let inputs = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             return CanvasTouchOwner.owner(in: inputs) == .moveBoxCommit
@@ -3922,6 +3944,17 @@ struct CanvasView: UIViewRepresentable {
             // on a hidden view is refused, and the refusal is silent — the box would appear with no
             // keyboard and no caret, and the artist would have to tap it a second time.
             textOverlay?.focusEditor()
+        }
+
+        /// **The canvas's pan, pinch and rotation do not begin under a Move-box drag.** The pen on the
+        /// box is a touch on the container, and a finger beside it makes two — exactly what the
+        /// two-finger pan asks for — so without this the finger that was meant to slow the drag would
+        /// move the canvas out from under it (TODO (146)). A pan already in progress when the drag
+        /// begins is left alone; only a beginning is refused.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
+            guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return true }
+            return !moveBoxDragIsLive
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {

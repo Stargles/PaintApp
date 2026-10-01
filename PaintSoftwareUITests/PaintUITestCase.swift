@@ -905,6 +905,34 @@ class PaintUITestCase: XCTestCase {
         return item
     }
 
+    // MARK: - The Move box on the glass
+
+    /// The Move box as `x,y,w,h` in `canvas.host`'s unit square — `CanvasView.Coordinator
+    /// .publishCanvasState`'s `movebox:` field, in the units `inkProbe` reads the canvas in — or nil
+    /// while no box is up.
+    func moveBox(_ app: XCUIApplication) -> CGRect? {
+        let parts = readField(app, "movebox:").split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 4 else { return nil }
+        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    }
+
+    /// The box once it has stopped moving — **three reads 0.3 s apart that agree**. The box is up
+    /// before the canvas has been fitted to its host, and after a drag it is published on the pass
+    /// that follows, so a single read can be a real box in the wrong place.
+    func settledMoveBox(_ app: XCUIApplication, timeout: TimeInterval = 10) -> CGRect? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var agreeing = 0
+        var last: CGRect?
+        while Date() < deadline {
+            let now = moveBox(app)
+            agreeing = (now != nil && now == last) ? agreeing + 1 : 0
+            last = now
+            if agreeing >= 3 { return now }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return nil
+    }
+
     // MARK: - Reading ink off the canvas
 
     /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
@@ -1065,6 +1093,56 @@ class PaintUITestCase: XCTestCase {
             paths.append(path)
         }
         try SynthesizedTouch.synthesize(paths)
+    }
+
+    /// **One finger drags while a second lands on the glass beside it** — the shape of TODO (146)'s
+    /// gesture with a finger standing in for the pen, since XCUITest cannot synthesise a Pencil.
+    ///
+    /// The dragging finger sits still until 0.3 s and then travels `delta` over `travel` seconds. The
+    /// second finger lands (`holdLandsAt`) *after the drag has begun* and *before it has moved* — the
+    /// order in which a hand presses to steady a pen — and rests, drifting by `holdDrift` over the same
+    /// stretch as a resting finger does and as a two-finger pan is made of, so a drag that is meant to
+    /// own the canvas is tested against both. `holding` nil is the control: the same drag with nothing
+    /// beside it.
+    ///
+    /// **The second finger lifts first, and that is not tidiness.** The synthesiser builds each event as
+    /// an array of positions indexed by finger, so a finger that lifts while an earlier-indexed one is
+    /// still down shifts the survivor into the lifted one's slot, and UIKit sees one touch jump across
+    /// the screen rather than one end and one continue — MEASURED here: the dragging touch's location
+    /// leapt to the other finger's the moment the first lifted, and the box followed it. A real hand
+    /// does not do that; the synthesiser does. For the same reason a finger that lands *before* the
+    /// dragging one cannot be driven faithfully — the touch the overlay is handed is replaced mid-drag.
+    ///
+    /// - Parameters:
+    ///   - from: where the dragging finger lands, normalised within `element`.
+    ///   - holding: where the second lands, normalised within `element`; nil for none.
+    func dragWithAFingerHeldBeside(_ element: XCUIElement, from: CGVector, delta: CGVector,
+                                   holding: CGVector?, holdDrift: CGVector = .zero,
+                                   holdLandsAt: TimeInterval = 0.1, travel: TimeInterval = 1.0) throws {
+        let begin = 0.3, steps = 20
+        let origin = element.coordinate(withNormalizedOffset: from).screenPoint
+        let dragging = try SynthesizedTouch.path(at: origin, offset: 0)
+        for step in 1...steps {
+            let t = Double(step) / Double(steps)
+            try SynthesizedTouch.move(dragging, to: CGPoint(x: origin.x + delta.dx * t, y: origin.y + delta.dy * t),
+                                      at: begin + travel * t)
+        }
+        let heldLifts = begin + travel + 0.05
+        guard let holding else {
+            try SynthesizedTouch.lift(dragging, at: heldLifts)
+            try SynthesizedTouch.synthesize([dragging])
+            return
+        }
+        let rest = element.coordinate(withNormalizedOffset: holding).screenPoint
+        let held = try SynthesizedTouch.path(at: rest, offset: holdLandsAt)
+        for step in 1...steps {
+            let t = Double(step) / Double(steps)
+            try SynthesizedTouch.move(held, to: CGPoint(x: rest.x + holdDrift.dx * t, y: rest.y + holdDrift.dy * t),
+                                      at: begin + travel * t)
+        }
+        try SynthesizedTouch.lift(held, at: heldLifts)
+        try SynthesizedTouch.lift(dragging, at: heldLifts + 0.2)
+        try SynthesizedTouch.synthesize([dragging, held])
     }
 
     /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the

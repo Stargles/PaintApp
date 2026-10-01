@@ -386,6 +386,8 @@
 		060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */; };
 		1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACD68660078E6C48908F501 /* DistortUITests.swift */; };
 		9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */; };
+		7CC3BA1E3F48A7D7EAAA6128 /* MoveBoxPrecisionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */; };
+		8E34D79CC4756C6F7D6835C6 /* MoveBoxPrecisionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */; };
 		3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */; };
 		D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */; };
 		688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */; };
@@ -510,6 +512,7 @@
 		86110EBE4F016C37BA5C0581 /* CanvasTransformLeavesStandingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */; };
 		9380BCFCF1D23885509B796E /* CanvasTouchSettleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */; };
 		7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */; };
+		2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -905,6 +908,8 @@
 		060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomographyLogicTests.swift; sourceTree = "<group>"; };
 		1ACD68660078E6C48908F501 /* DistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortUITests.swift; sourceTree = "<group>"; };
 		7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ImageMoveBoxUITests.swift"; sourceTree = "<group>"; };
+		CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MoveBoxPrecisionUITests.swift"; sourceTree = "<group>"; };
+		28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MoveBoxPrecisionLogicTests.swift"; sourceTree = "<group>"; };
 		05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EyedropperModeUITests.swift"; sourceTree = "<group>"; };
 		51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimatedDistortUITests.swift; sourceTree = "<group>"; };
 		688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortLogicTests.swift; sourceTree = "<group>"; };
@@ -1028,6 +1033,7 @@
 		3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTransformLeavesStandingUITests.swift; sourceTree = "<group>"; };
 		DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchSettleLogicTests.swift; sourceTree = "<group>"; };
 		560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchSettle.swift; sourceTree = "<group>"; };
+		BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PrecisionDrag.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1131,6 +1137,8 @@
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
 				1ACD68660078E6C48908F501 /* DistortUITests.swift */,
 				7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */,
+				CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */,
+				28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */,
 				05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */,
 				51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */,
 				688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */,
@@ -1600,6 +1608,7 @@
 				65A4BE1A756E44ED0525E024 /* PaintSoftware/Models/BrushSizeCurve.swift */,
 				8C6E9D1FBEC27BB633717D9A /* PaintSoftware/Models/CanvasManager+BrushSize.swift */,
 				560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */,
+				BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */,
 			);
 			name = "App sources shared with PaintSoftwareUITests";
 			sourceTree = "<group>";
@@ -1762,6 +1771,8 @@
 				060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */,
 				1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */,
 				9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */,
+				7CC3BA1E3F48A7D7EAAA6128 /* MoveBoxPrecisionUITests.swift in Sources */,
+				8E34D79CC4756C6F7D6835C6 /* MoveBoxPrecisionLogicTests.swift in Sources */,
 				3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */,
 				D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */,
 				688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */,
@@ -2211,6 +2222,7 @@
 				86110EBE4F016C37BA5C0581 /* CanvasTransformLeavesStandingUITests.swift in Sources */,
 				9380BCFCF1D23885509B796E /* CanvasTouchSettleLogicTests.swift in Sources */,
 				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,
+				2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

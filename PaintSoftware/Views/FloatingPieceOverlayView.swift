@@ -28,6 +28,21 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// artist started from.
     var onBoxTouchDown: (() -> Void)?
 
+    /// How many touches are on the canvas right now, the dragging one included — pushed down by
+    /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins mid-drag is what slows
+    /// the drag (`PrecisionDrag`, TODO (146)), and a take over a transformation layer's box records
+    /// the slowed poses because they are the ones `apply` reports.
+    var touchesOnCanvas: () -> Int = { 0 }
+
+    /// Whether one of the box's pans owns a touch — **from touch-down, not from the pan's `.began`**,
+    /// which is a slop's travel later. While it does, the box owns every other touch: a second finger
+    /// on another grip starts no second drag, a finger away from the box commits nothing when it
+    /// lifts, and the canvas's own pan, pinch and rotate stand down
+    /// (`CanvasView.Coordinator.gestureRecognizerShouldBegin`). Touch-down matters because the finger
+    /// that makes a drag precise is often already there when the pen starts to move, and the canvas's
+    /// two-finger pan would otherwise begin in the same breath as the pan that is meant to win.
+    var isDragging: Bool { activePan != nil }
+
     /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
     /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
     /// the tap-outside commit below used to run unconditionally, on the theory that settling a float
@@ -48,6 +63,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
 
     private var dragStartTransform: FloatingTransform = .identity
     private var dragStartTouch: CGPoint = .zero
+    /// The pan that owns the touch in flight, and the point it is read through — see `isDragging`.
+    private var activePan: UIPanGestureRecognizer?
+    private var precision: PrecisionDrag?
+    /// Where the finger came down — the origin the Move arm's translation is measured from.
+    private var dragOrigin: CGPoint = .zero
     /// The Uniform/Freeform corner or edge drag in flight, latched at touch-down so the resize
     /// anchors on the opposite corner/edge instead of on the piece's centre. Nil for every other
     /// gesture, and nil for a corner drag in Distort — see `FloatingResizeDrag`.
@@ -127,7 +147,17 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     private func reportingPan(_ action: Selector) -> TouchDownPanGestureRecognizer {
         let pan = TouchDownPanGestureRecognizer(target: self, action: action)
         pan.maximumNumberOfTouches = 1
-        pan.onTouchDown = { [weak self] in self?.onBoxTouchDown?() }
+        pan.delegate = self
+        pan.onTouchDown = { [weak self, weak pan] in
+            guard let self, let pan else { return }
+            self.claim(with: pan)
+            self.onBoxTouchDown?()
+        }
+        pan.onSequenceEnded = { [weak self, weak pan] in
+            guard let self, let pan, self.activePan === pan else { return }
+            self.activePan = nil
+            self.precision = nil
+        }
         return pan
     }
 
@@ -149,7 +179,13 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         piece = newPiece
         isHidden = newPiece == nil
         isUserInteractionEnabled = isInteractive
-        guard newPiece != nil else { return }
+        guard newPiece != nil else {
+            // A piece settled out from under a touch takes the claim with it; the sequence's own end
+            // would clear it too, a moment later.
+            activePan = nil
+            precision = nil
+            return
+        }
         layoutFromPiece()
     }
 
@@ -269,13 +305,37 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         case .began:
             dragStartTransform = piece!.transform
         case .changed:
-            let translation = recognizer.translation(in: self)
+            let point = precisePoint(recognizer)
             var updated = dragStartTransform
-            updated.position = CGPoint(x: dragStartTransform.position.x + translation.x, y: dragStartTransform.position.y + translation.y)
+            updated.position = CGPoint(x: dragStartTransform.position.x + point.x - dragOrigin.x,
+                                       y: dragStartTransform.position.y + point.y - dragOrigin.y)
             apply(updated)
         default:
             break
         }
+    }
+
+    // MARK: - The drag's point (TODO (146))
+
+    /// **Takes the box's touch at touch-down** and latches the drag's precision there: the origin is
+    /// where the finger came down — which is where the Move arm has always measured its translation
+    /// from, and not where the pan *began*, a slop later — and the baseline is the touches on the
+    /// canvas at that instant, so a finger that is already down by the time the pen moves is a finger
+    /// that joined the drag. The first pan to be touched keeps the claim; the others wait for it.
+    private func claim(with pan: UIPanGestureRecognizer) {
+        guard activePan == nil else { return }
+        activePan = pan
+        precision = PrecisionDrag(startingAt: pan.location(in: self), touchesDown: touchesOnCanvas())
+        dragOrigin = pan.location(in: self)
+    }
+
+    /// The point every arm reads for its gesture's current position: the pen's own while the pen is
+    /// alone, a fifth of its travel while another touch is down.
+    private func precisePoint(_ recognizer: UIPanGestureRecognizer) -> CGPoint {
+        guard activePan === recognizer, var drag = precision else { return recognizer.location(in: self) }
+        let point = drag.point(for: recognizer.location(in: self), touchesDown: touchesOnCanvas())
+        precision = drag
+        return point
     }
 
     // MARK: - Rotate handle
@@ -285,11 +345,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         switch recognizer.state {
         case .began:
             dragStartTransform = piece.transform
-            dragStartTouch = recognizer.location(in: self)
+            dragStartTouch = precisePoint(recognizer)
         case .changed:
             let center = dragStartTransform.position
             let startAngle = atan2(dragStartTouch.y - center.y, dragStartTouch.x - center.x)
-            let current = recognizer.location(in: self)
+            let current = precisePoint(recognizer)
             let currentAngle = atan2(current.y - center.y, current.x - center.x)
             var updated = dragStartTransform
             updated.rotation = dragStartTransform.rotation + (currentAngle - startAngle)
@@ -321,15 +381,16 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
             // `distortQuad` outlives a mode switch.
             resizeDrag = FloatingResizeDrag(piece: piece, corner: index)
         case .changed:
+            let point = precisePoint(recognizer)
             if let distortDrag {
                 // A delta that would make an undrawable quad is refused rather than clamped, so the
                 // handle sticks and the piece stays exactly where the last valid one put it.
-                guard let quad = distortDrag.quad(draggedTo: recognizer.location(in: self)) else { return }
+                guard let quad = distortDrag.quad(draggedTo: point) else { return }
                 apply(dragStartTransform, distortQuad: quad)
                 return
             }
             guard let resizeDrag else { return }
-            apply(resizeDrag.transform(draggedTo: recognizer.location(in: self)))
+            apply(resizeDrag.transform(draggedTo: point))
         default:
             distortDrag = nil
             resizeDrag = nil
@@ -348,7 +409,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
             resizeDrag = FloatingResizeDrag(piece: piece, edge: index)
         case .changed:
             guard let resizeDrag else { return }
-            apply(resizeDrag.transform(draggedTo: recognizer.location(in: self)))
+            apply(resizeDrag.transform(draggedTo: precisePoint(recognizer)))
         default:
             resizeDrag = nil
         }
@@ -381,9 +442,23 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// outline, the rotate knob, which UIKit's hit test has already given the touch to — or inside
     /// the piece's bounds with the 8 pt slack the edge grabs have always had. Either is a drag's
     /// touch, and the tap never sees it.
+    ///
+    /// **And never while a drag is in flight** (TODO (146)): a finger pressed to make the drag precise
+    /// lands away from the box and lifts as a tap, which would otherwise commit the piece it was
+    /// steadying. The ten pans share this delegate and are not the tap's business.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard let piece, touch.view === self else { return false }
+        guard gestureRecognizer is TouchTypeTapGestureRecognizer else { return true }
+        guard let piece, touch.view === self, !isDragging else { return false }
         return !piece.transformedBounds.insetBy(dx: -8, dy: -8).contains(touch.location(in: self))
+    }
+
+    /// **One drag at a time**: a second finger on another grip would start a second pan beside the
+    /// pen's and fight it for the piece. The pan that owns the drag begins; every other waits.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer is TouchDownPanGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        return activePan == nil || activePan === gestureRecognizer
     }
 
     /// **The one funnel every arm writes through**, so no gesture can update the model and the layout
