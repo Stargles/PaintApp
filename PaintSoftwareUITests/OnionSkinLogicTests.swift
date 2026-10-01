@@ -292,9 +292,9 @@ final class OnionSkinLogicTests: XCTestCase {
         assertVector(settings.opacities(on: .next), [0.8, 0.4], "…and the other side's ramp is where it was")
     }
 
-    /// Re-linking takes **each side's own** nearest slider as its level. It used to take the previous
-    /// side's for the one level both shared, which is the "one side is anchored" asymmetry in the
-    /// owner's report: the right side snapped to wherever the left one had been left.
+    /// Re-linking takes **each side's own** nearest slider as its level — not the previous side's for
+    /// both, which would be the "one side is anchored" asymmetry in the owner's report: the right side
+    /// snapping to wherever the left one had been left.
     func testRelinkingKeepsEachSidesOwnNearestSliderRatherThanTakingTheOthers() {
         var settings = OnionSkinSettings()
         settings.setOpacityLinked(false)
@@ -341,8 +341,8 @@ final class OnionSkinLogicTests: XCTestCase {
         settings.setOpacity(0.05, slot: 2, on: .previous)
 
         assertVector(settings.opacities(on: .previous), [0.8, 0.05, 0.4, 0.2])
-        assertVector(settings.opacities(on: .next), [0.8, 0.6, 0.4, 0.2],
-                     "the other side must not move while unlinked")
+        assertVector(settings.opacities(on: .next), [0.35, 0.2625, 0.175, 0.0875],
+                     "the next side was never touched, linked or unlinked, so it is still its default ramp")
     }
 
     func testLoweringAndRaisingTheCountGivesUnlinkedValuesBack() {

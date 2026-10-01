@@ -1405,7 +1405,7 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
             }
             let isPast = startFrame <= manager.currentFrame
             return OnionSkinFrame(image: image,
-                                  opacity: CGFloat(manager.onionSkin.linkedLevel),
+                                  opacity: CGFloat(manager.onionSkin.linkedLevel(on: isPast ? .previous : .next)),
                                   tint: isPast ? Self.pastTint : Self.futureTint)
         }
     }
