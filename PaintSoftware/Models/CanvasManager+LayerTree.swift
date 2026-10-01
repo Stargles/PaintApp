@@ -274,6 +274,23 @@ extension CanvasManager {
         return layers.count
     }
 
+    /// Where in `folders` an empty folder resting on `anchor` belongs. An empty folder renders above
+    /// everything else in its container (`containerEntries`), ordered among the empty folders there by
+    /// `folders` — later entries render higher — so the only places it can rest are among them:
+    /// directly above another empty folder, or, resting on anything lower (a layer, a folder that holds
+    /// layers, the bottom of the stack), beneath every empty folder in the container.
+    ///
+    /// The caller has already taken the moved folder out of `folders` and re-pointed its container.
+    private func emptyFolderSlot(above anchor: StackAnchor, inContainer container: UUID?) -> Int {
+        let siblings = folders.indices.filter {
+            resolvedContainer(ofFolder: folders[$0].id) == container && descendantSpan(ofFolder: folders[$0].id) == nil
+        }
+        if case .folder(let anchorID) = anchor, let above = siblings.first(where: { folders[$0].id == anchorID }) {
+            return above + 1
+        }
+        return siblings.min() ?? folders.count
+    }
+
     private func insertionIndex(above anchor: StackAnchor) -> Int {
         switch anchor {
         case .bottom:
@@ -390,11 +407,7 @@ extension CanvasManager {
                 guard !block.isEmpty else {
                     // No footprint in `layers`, so order among empty siblings comes from `folders`.
                     let moved = folders.remove(at: folderIndex)
-                    var insertAt = folders.count
-                    if case .folder(let otherID) = anchor, let below = folders.firstIndex(where: { $0.id == otherID }) {
-                        insertAt = below + 1
-                    }
-                    folders.insert(moved, at: min(max(insertAt, 0), folders.count))
+                    folders.insert(moved, at: emptyFolderSlot(above: anchor, inContainer: parentFolderID))
                     return
                 }
                 let target = clampInsertion(insertionIndex(above: anchor), into: parentFolderID)
@@ -411,7 +424,7 @@ extension CanvasManager {
               let draggedIndex = layers.firstIndex(where: { $0.id == draggedID }),
               let targetIndex = layers.firstIndex(where: { $0.id == targetID }) else { return nil }
 
-        let folder = LayerFolder(id: UUID(), name: name ?? "Folder \(folders.count + 1)",
+        let folder = LayerFolder(id: UUID(), name: name ?? defaultFolderName(effect: nil, op: nil),
                                  parentFolderID: layers[targetIndex].parentFolderID)
         let draggedWasAbove = draggedIndex > targetIndex
         withStructureUndo(label: .groupLayers) {

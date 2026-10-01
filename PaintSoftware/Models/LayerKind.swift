@@ -78,26 +78,9 @@ extension LayerKind {
 
     /// The automatic name for the next layer of this kind, given the names the document already
     /// holds — TODO (142)'s numbering: `Layer 1, Layer 2, Raster 1`, each kind counting on its own.
-    ///
-    /// **One more than the highest `<stem> N` already in use, not a count of the layers of the kind**,
-    /// so a name is never handed out twice while a higher one stands: with `Layer 1` and `Layer 2`,
-    /// deleting `Layer 1` and adding gives `Layer 3`, where a count would give `Layer 2` over the
-    /// layer already called that. It also keeps the newest layer of a kind the highest numbered.
-    ///
-    /// **It reads names, not kinds**, so an artist's own `Layer 9` counts too — the numbering steps
-    /// past any name it would collide with, whoever typed it. Nothing is stored for it: the number
-    /// is derived from the stack each time, so a document written before this rule opens under it.
-    /// Only a name that is exactly the stem, a space and up to nine digits counts, which keeps
-    /// `Layer 2 copy` and `Raster 3` out of `Layer`'s sequence and a pathological name from
-    /// overflowing the next number.
+    /// `DefaultName.next` is the rule and carries its argument; a folder takes the same one.
     func nextDefaultName<Names: Sequence>(among names: Names) -> String where Names.Element == String {
-        let prefix = defaultNameStem + " "
-        let highest = names.compactMap { name -> Int? in
-            guard name.hasPrefix(prefix) else { return nil }
-            let digits = name.dropFirst(prefix.count)
-            return digits.count <= 9 && digits.allSatisfy { $0.isASCII && $0.isNumber } ? Int(digits) : nil
-        }.max() ?? 0
-        return prefix + String(highest + 1)
+        DefaultName.next(stem: defaultNameStem, among: names)
     }
 
     /// Whether a layer of this kind may carry a grade — `Layer.layerEffect`'s kind test, and the
@@ -189,5 +172,36 @@ extension LayerKind {
     static func migratingTransformModeValueLayers(_ kind: LayerKind, effect: Effect?,
                                                   transform: LayerPose?) -> LayerKind {
         kind == .value && effect == nil && transform != nil ? .transform : kind
+    }
+}
+
+/// **The one rule for the number in an automatic name** — `Layer 3`, `Raster 1`, `Folder 2`, `Mix 1`.
+/// A layer takes it through `LayerKind.nextDefaultName` and a folder through
+/// `CanvasManager.defaultFolderName`, so the two cannot count differently.
+///
+/// **One more than the highest `<stem> N` already in use, not a count of the things of the kind**,
+/// so a name is never handed out twice while a higher one stands: with `Layer 1` and `Layer 2`,
+/// deleting `Layer 1` and adding gives `Layer 3`, where a count would give `Layer 2` over the
+/// layer already called that. It also keeps the newest of a kind the highest numbered.
+///
+/// **It reads names, not kinds**, so an artist's own `Layer 9` counts too — the numbering steps
+/// past any name it would collide with, whoever typed it. Nothing is stored for it: the number
+/// is derived from the stack each time, so a document written before this rule opens under it.
+enum DefaultName {
+
+    /// `<stem> N` for the next N — one past the highest in `names`, and 1 where there is none.
+    static func next<Names: Sequence>(stem: String, among names: Names) -> String where Names.Element == String {
+        let highest = names.compactMap { number(in: $0, stem: stem) }.max() ?? 0
+        return "\(stem) \(highest + 1)"
+    }
+
+    /// The N of a name that is exactly the stem, a space and up to nine digits, else nil. That keeps
+    /// `Layer 2 copy` and `Raster 3` out of `Layer`'s sequence and a pathological name from
+    /// overflowing the next number.
+    static func number(in name: String, stem: String) -> Int? {
+        let prefix = stem + " "
+        guard name.hasPrefix(prefix) else { return nil }
+        let digits = name.dropFirst(prefix.count)
+        return digits.count <= 9 && digits.allSatisfy { $0.isASCII && $0.isNumber } ? Int(digits) : nil
     }
 }

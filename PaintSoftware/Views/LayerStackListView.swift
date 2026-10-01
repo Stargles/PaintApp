@@ -340,8 +340,8 @@ struct LayerStackListView: UIViewRepresentable {
 
         // MARK: - Drop resolution
 
-        /// What a between-rows drop would produce, worked out without performing it: the row list as
-        /// it would then read, where the dragged row lands in it, and which folder it ends up in.
+        /// What a between-rows drop would produce, worked out without performing it: the row it comes
+        /// to rest on, and which folder it ends up in.
         ///
         /// The row order and `layers` don't line up (folder headers are interleaved, collapsed
         /// contents are hidden, and `layers` runs bottom-to-top), so rather than translating indices
@@ -359,7 +359,7 @@ struct LayerStackListView: UIViewRepresentable {
         /// (`dragExitLevel`). Defaulted to 0 so every caller that only cares about vertical placement
         /// (the preview's fallback path, tests written before this existed) is unchanged.
         func plannedDrop(draggedID: UUID, insertionIndex: Int, exitLevels: Int = 0)
-            -> (rows: [LayerRowModel], newIndex: Int, moved: LayerRowModel, parentFolderID: UUID?)? {
+            -> (moved: LayerRowModel, below: LayerRowModel?, parentFolderID: UUID?)? {
             guard let from = rows.firstIndex(where: { $0.id == draggedID }) else { return nil }
             var reordered = rows
             let moved = reordered.remove(at: from)
@@ -367,14 +367,23 @@ struct LayerStackListView: UIViewRepresentable {
             let target = min(max(insertionIndex > from ? insertionIndex - 1 : insertionIndex, 0), reordered.count)
             reordered.insert(moved, at: target)
             guard let newIndex = reordered.firstIndex(where: { $0.id == draggedID }) else { return nil }
+            // The row it comes to rest on. A folder's own contents are still where they were in
+            // `reordered` — only its header moved — so they are not what it rests on.
+            let contents = moved.isFolder ? folderContentIDs(moved.id) : []
+            let below = reordered[(newIndex + 1)...].first { !contents.contains($0.id) }
 
-            // Dropping directly under a folder header puts the row inside that folder; otherwise it
-            // joins whatever the row above belongs to. That makes "append to the end of a folder"
-            // work; to leave a folder, drop above its header or onto a row outside it.
+            // Dropping directly under a folder header that shows rows there puts the row inside that
+            // folder; otherwise it joins whatever the row above belongs to. That makes "append to the
+            // end of a folder" work, and a folder that shows nothing under its header — collapsed, or
+            // holding nothing yet — a row's neighbour rather than its container. Into one of those is
+            // the middle band's gesture (`resolveDropTarget`).
             var parentFolderID: UUID?
             if newIndex > 0 {
                 let above = reordered[newIndex - 1]
-                parentFolderID = above.isFolder ? above.id : above.parentFolderID
+                // A row reordered inside its own folder stays in it wherever the folder shows nothing
+                // else, which is the case a sole child dropped back where it was would otherwise fail.
+                let shownUnderHeader = moved.parentFolderID == above.id || below.map { $0.depth > above.depth } == true
+                parentFolderID = above.isFolder && shownUnderHeader ? above.id : above.parentFolderID
             }
             // The horizontal half of the drop — `canvasManager.containerAfterExiting` walks one
             // `parentFolderID` outward per exited level. The anchor/index math above and
@@ -390,26 +399,18 @@ struct LayerStackListView: UIViewRepresentable {
                !canvasManager.canDrop(inContainer: container, moving: moved.id) {
                 parentFolderID = canvasManager.folders.first { $0.id == container }?.parentFolderID
             }
-            return (reordered, newIndex, moved, parentFolderID)
+            return (moved, below, parentFolderID)
         }
 
         /// A drop landing *between* rows — `plannedDrop`'s answer, performed.
         func dropBetween(draggedID: UUID, insertionIndex: Int, exitLevels: Int = 0) {
             guard let plan = plannedDrop(draggedID: draggedID, insertionIndex: insertionIndex, exitLevels: exitLevels) else { return }
-            let reordered = plan.rows
-            let newIndex = plan.newIndex
             let moved = plan.moved
-            let parentFolderID = plan.parentFolderID
-
+            let restsOn = anchor(below: plan.below)
             if moved.isFolder {
-                // Only the header moved in `reordered`; its contents are still at their old spots,
-                // so skip past them when looking for what the folder now rests on.
-                let contents = folderContentIDs(moved.id)
-                let below = reordered[(newIndex + 1)...].first { !contents.contains($0.id) }
-                canvasManager.restackFolder(moved.id, above: anchor(below: below), parentFolderID: parentFolderID)
+                canvasManager.restackFolder(moved.id, above: restsOn, parentFolderID: plan.parentFolderID)
             } else {
-                let below = reordered.indices.contains(newIndex + 1) ? reordered[newIndex + 1] : nil
-                canvasManager.restackLayer(moved.id, above: anchor(below: below), parentFolderID: parentFolderID)
+                canvasManager.restackLayer(moved.id, above: restsOn, parentFolderID: plan.parentFolderID)
             }
         }
 

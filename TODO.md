@@ -198,11 +198,6 @@ everything inside the folder. However that only moves everything that is in the 
 user have the option in the move menu for folders (the one that has keep stroke width, etc.) to select
 between moving things in all frames, or just that cel."*
 
-## (134) A folder cannot be dragged below another folder
-
-**Status** — not started. *"make two folders, then try to move the top folder down below the other.
-You can't. Fix this."*
-
 ## (122) Timeline: a sticky frame row, seconds when zoomed out, 1.5× taller
 
 **Status** — not started. *"the animation timeline shows the frame number in the top row. When there

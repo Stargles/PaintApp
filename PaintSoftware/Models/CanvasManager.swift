@@ -4076,8 +4076,7 @@ final class CanvasManager: ObservableObject {
     @discardableResult
     func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
         let folder = LayerFolder(id: UUID(),
-                                 name: name ?? Self.defaultFolderName(effect: nil, op: nil,
-                                                                      ordinal: folders.count + 1),
+                                 name: name ?? defaultFolderName(effect: nil, op: nil),
                                  // `addValueLayer`'s rule: a supplied name is a chosen name.
                                  hasCustomName: name != nil,
                                  parentFolderID: parentFolderID)
@@ -4114,28 +4113,34 @@ final class CanvasManager: ObservableObject {
     }
 
     private func defaultNodeName(for op: CompositorOp) -> String {
-        Self.defaultFolderName(effect: nil, op: op, ordinal: folders.filter(\.isCompositorNode).count + 1)
+        defaultFolderName(effect: nil, op: op)
     }
 
     /// **The one generator for a folder's automatic name** — `defaultValueLayerName`'s twin, and there
-    /// for its reason: `addFolder`, `addCompositorNode`, `setNodeEffect` and `setMixBlendMode` all
-    /// produce names, and four spellings of "Mix \(n)" is how a node comes to be born with one name and
-    /// renamed to a different one for the same state.
+    /// for its reason: `addFolder`, `groupLayers`, `addCompositorNode`, `setNodeEffect` and
+    /// `setMixBlendMode` all produce names, and five spellings of "Mix \(n)" is how a node comes to be
+    /// born with one name and renamed to a different one for the same state.
     ///
     /// **The grade wins over the op**, because a node with a grade *is* an effect node whatever op it
     /// stores — `LayerFolder.effect` is the discriminant and `.stack` is only the shape that carries it.
     /// A node named "Group 2" for a Gaussian Blur would be naming the implementation.
     ///
-    /// `ordinal` is the caller's, because the two families count differently and always have: an
-    /// ordinary folder is numbered among all folders, a node among nodes. It is decoration, not
-    /// identity: it is a count taken when the name is minted, and nothing keeps it true after a
-    /// deletion or a restack.
-    static func defaultFolderName(effect: Effect?, op: CompositorOp?, ordinal: Int) -> String {
+    /// **The number is `DefaultName`'s, the rule a layer's is** — one past the highest `<stem> N` among
+    /// the folders already standing, so a name is never handed out twice (`Folder 1` and `Folder 2`,
+    /// delete `Folder 1`, add: `Folder 3`, where a count of the folders gave a second `Folder 2`).
+    /// `skipping` leaves one folder's own name out of the names read, for a folder being re-named.
+    func defaultFolderName(effect: Effect?, op: CompositorOp?, skipping skipped: Int? = nil) -> String {
         if let effect { return effect.displayName }
+        let names = folders.indices.lazy.filter { $0 != skipped }.map { self.folders[$0].name }
+        return DefaultName.next(stem: Self.defaultFolderStem(op: op), among: names)
+    }
+
+    /// The word an automatic folder name carries before its number.
+    private static func defaultFolderStem(op: CompositorOp?) -> String {
         switch op {
-        case .none:    return "Folder \(ordinal)"
-        case .stack?:  return "Group \(ordinal)"
-        case .mix?:    return "Mix \(ordinal)"
+        case .none:    return "Folder"
+        case .stack?:  return "Group"
+        case .mix?:    return "Mix"
         }
     }
 
@@ -4151,12 +4156,12 @@ final class CanvasManager: ObservableObject {
     /// rename and the reshape are one edit and undo has to treat them as one.
     private func renameFolderToFollowItsRole(_ idx: Int) {
         guard folders.indices.contains(idx), !folders[idx].hasCustomName else { return }
-        let ordinal = folders[idx].isCompositorNode
-            ? folders.filter(\.isCompositorNode).count
-            : folders.count
-        folders[idx].name = Self.defaultFolderName(effect: folders[idx].effect,
-                                                   op: folders[idx].compositorOp,
-                                                   ordinal: ordinal)
+        // A name that is already `<stem> N` for the role the folder now has is kept: re-deriving it
+        // would renumber it past its siblings for a change that did not alter what it is called.
+        let folder = folders[idx]
+        if folder.effect == nil,
+           DefaultName.number(in: folder.name, stem: Self.defaultFolderStem(op: folder.compositorOp)) != nil { return }
+        folders[idx].name = defaultFolderName(effect: folder.effect, op: folder.compositorOp, skipping: idx)
     }
 
     /// Removes a folder, keeping everything that was inside it. Its layers and subfolders move up

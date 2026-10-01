@@ -412,7 +412,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
         manager.restackFolder(inner, above: .folder(outer), parentFolderID: outer)
         assertRenderTreeMatchesFlatOrder(manager, "after nesting the A/B group inside Outer")
-        XCTAssertEqual(renderRows(manager), ["0:Outer", "1:D", "1:C", "1:Folder 2", "2:A", "2:B"],
+        XCTAssertEqual(renderRows(manager), ["0:Outer", "1:D", "1:C", "1:Folder 1", "2:A", "2:B"],
                        "Everything is inside Outer now, with the A/B group landing above D and C — the group was nested last, and a folder's place in the stack is wherever its span ends up")
 
         manager.restackLayer(ids[0], above: .bottom, parentFolderID: nil)

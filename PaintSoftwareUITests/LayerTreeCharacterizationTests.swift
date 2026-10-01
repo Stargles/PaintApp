@@ -176,6 +176,100 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
+    // MARK: - Empty folders order among themselves (TODO (134))
+    //
+    // *"make two folders, then try to move the top folder down below the other. You can't."* An empty
+    // folder has no span in `layers`, so it renders on top of its container, ordered among the other
+    // empty folders there by `folders`. `restackFolder` put every empty folder it moved at the end of
+    // `folders` — the top — unless it rested directly on another empty folder, so a move to the bottom
+    // of the stack, or onto a layer, left it exactly where it was.
+
+    func testAnEmptyFolderCanBeRestackedBelowAnotherEmptyFolderAndBackAbove() {
+        let manager = namedManager([])
+        let first = manager.addFolder(name: "First")
+        let second = manager.addFolder(name: "Second")
+        XCTAssertEqual(presentedRows(manager), ["0:Second", "0:First"], "Setup: the folder added last renders on top")
+
+        manager.restackFolder(second, above: .bottom, parentFolderID: nil)
+        XCTAssertEqual(presentedRows(manager), ["0:First", "0:Second"],
+                       "the top folder, put on the bottom of the stack, is below the other one")
+
+        manager.restackFolder(second, above: .folder(first), parentFolderID: nil)
+        XCTAssertEqual(presentedRows(manager), ["0:Second", "0:First"], "and back above it")
+    }
+
+    func testAnEmptyFolderRestingOnALayerGoesBelowEveryEmptyFolderAboveIt() {
+        let manager = namedManager(["L"])
+        manager.addFolder(name: "A")
+        manager.addFolder(name: "B")
+        let c = manager.addFolder(name: "C")
+        XCTAssertEqual(presentedRows(manager), ["0:C", "0:B", "0:A", "0:L"], "Setup")
+
+        manager.restackFolder(c, above: .layer(manager.layers[0].id), parentFolderID: nil)
+
+        XCTAssertEqual(presentedRows(manager), ["0:B", "0:A", "0:C", "0:L"],
+                       "an empty folder cannot sit under a layer, so the lowest place it has is below its empty siblings")
+    }
+
+    func testAnEmptyFolderRestackedInsideAFolderOrdersAmongThatFoldersEmptyChildren() {
+        let manager = namedManager([])
+        let outer = manager.addFolder(name: "Outer")
+        manager.addFolder(name: "Outside")
+        manager.addFolder(name: "X", parentFolderID: outer)
+        let y = manager.addFolder(name: "Y", parentFolderID: outer)
+        XCTAssertEqual(presentedRows(manager), ["0:Outside", "0:Outer", "1:Y", "1:X"], "Setup")
+
+        manager.restackFolder(y, above: .bottom, parentFolderID: outer)
+
+        XCTAssertEqual(presentedRows(manager), ["0:Outside", "0:Outer", "1:X", "1:Y"],
+                       "Y goes below X in Outer and the folder beside Outer is not what it is ordered against")
+    }
+
+    // MARK: - A new folder's name steps past the ones standing (TODO (134))
+
+    func testANewFolderIsNamedOnePastTheHighestFolderNumberStanding() {
+        let manager = namedManager([])
+        let one = manager.addFolder()
+        manager.addFolder()
+        XCTAssertEqual(manager.folders.map(\.name), ["Folder 1", "Folder 2"], "Setup")
+
+        manager.deleteFolder(one)
+        manager.addFolder()
+
+        XCTAssertEqual(manager.folders.map(\.name), ["Folder 2", "Folder 3"],
+                       "a count of the folders would have named the new one Folder 2 over the one standing")
+    }
+
+    func testGroupingNamesItsFolderByTheSameRule() {
+        let manager = namedManager(["A", "B"])
+        let first = manager.addFolder()
+        manager.addFolder()
+        manager.deleteFolder(first)
+        XCTAssertEqual(manager.folders.map(\.name), ["Folder 2"], "Setup")
+
+        guard let grouped = manager.groupLayers(manager.layers[0].id, with: manager.layers[1].id) else {
+            return XCTFail("groupLayers should create a folder for two distinct layers")
+        }
+
+        XCTAssertEqual(manager.folders.first { $0.id == grouped }?.name, "Folder 3")
+    }
+
+    func testNodesAreNumberedPerOperationAndARenamedNodeNeverTakesANumberStanding() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let first = manager.addCompositorNode(op: .mix(.multiply))
+        let second = manager.addCompositorNode(op: .mix(.multiply))
+        XCTAssertEqual(manager.folders.map(\.name), ["Mix 1", "Mix 2"], "Setup")
+
+        manager.setNodeEffect(first, to: .blur(Effect.Blur(radius: 4)))
+        manager.setMixBlendMode(first, to: .screen)
+        XCTAssertEqual(manager.folders[0].name, "Mix 3",
+                       "back to a Mix, and Mix 2 is still standing, so it is not Mix 2 again")
+
+        manager.setMixBlendMode(second, to: .screen)
+        XCTAssertEqual(manager.folders[1].name, "Mix 2",
+                       "a Mix that stays a Mix keeps the number it has")
+    }
+
     // MARK: - Grouping across a folder boundary
 
     func testGroupingALayerInsideAFolderOntoOneOutsideCreatesATopLevelFolder() {

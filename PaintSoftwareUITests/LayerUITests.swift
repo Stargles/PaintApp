@@ -321,6 +321,49 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 1"].value as? String, "0")
     }
 
+    /// **A folder can be moved below another folder** — TODO (134), the owner: *"make two folders, then
+    /// try to move the top folder down below the other. You can't."* Driven the way they did it, cold:
+    /// two folders from the Add menu, the top one lifted by its row and let go on the lower edge of
+    /// the other. What the panel lists is the assertion — the order flips, both folders stay at the top
+    /// level (not nested, which is what the middle of the row means), and the drag back above restores
+    /// the order — because the model was never the question: the drop resolved to *inside* the folder
+    /// under a header that showed nothing, and an empty folder restacked to the bottom stayed on top.
+    func testDroppingAFolderBelowAnotherFolderReordersThemInsteadOfNestingIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app) // Folder 1
+        addFolderFromAddMenu(app) // Folder 2, on top
+        let upper = folderCell(app, named: "Folder 2")
+        let lower = folderCell(app, named: "Folder 1")
+        XCTAssertTrue(upper.waitForExistence(timeout: 5) && lower.waitForExistence(timeout: 5), "Setup: both folders are listed")
+        XCTAssertLessThan(upper.frame.minY, lower.frame.minY, "Setup: the folder added last is on top")
+
+        /// The panel's order, read off the rows the artist sees, once the drop has landed.
+        func waitForOrder(_ top: String, above bottom: String, _ message: String) {
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline,
+                  folderCell(app, named: top).frame.minY >= folderCell(app, named: bottom).frame.minY {
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            XCTAssertLessThan(folderCell(app, named: top).frame.minY, folderCell(app, named: bottom).frame.minY, message)
+        }
+
+        dragRow(upper, onto: lower, dropDY: 0.95)
+        waitForOrder("Folder 1", above: "Folder 2", "The top folder, dropped below the other, should now be listed under it")
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "0",
+                       "…beside it, not inside it: a drop below a folder is not a drop into it")
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 1"].value as? String, "0")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "folder-dropped-below-the-other"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        dragRow(folderCell(app, named: "Folder 2"), onto: folderCell(app, named: "Folder 1"), dropDY: 0.05)
+        waitForOrder("Folder 2", above: "Folder 1", "Dropped on the upper edge of the other, it should be back on top")
+        XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "0")
+    }
+
     /// The owner's request: "if you click Mask, it brings up a mask tune menu in place of the edit
     /// menu … also include a back button which exits this menu and goes back to the edit menu."
     ///
