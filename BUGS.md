@@ -77,25 +77,6 @@ stale again around 2026-09-14T21:09Z regardless of how often the daemon runs. Th
 next successful sign-in is picked up within the hour, but hourly retries of a CLI-only path cannot
 fix a GUI-only dependency.
 
-## After the software keyboard leaves, the editor stays compressed until the next tap, which is eaten (2026-09-11)
-
-Type into a text box with the on-screen keyboard, leave text mode by picking the brush, and the
-editor keeps the layout the keyboard forced on it: the timeline and the side rail's undo/redo sit a
-few hundred points above their places and a black band stands where the keyboard was. It stays that
-way — MEASURED at 10+ s in four of four runs — until the next touch lands on a control, which
-restores the layout and **is not delivered as a press**: the first undo after typing does nothing.
-XCUITest sees it as the accessibility frames of `canvas.host` and `sideToolbar.undoButton` staying at
-the compressed geometry (`(76, 0, 956, 973)` against `(76, 0, 956, 1356)`) with `keyboards.count == 0`.
-Found driving `TextUndoFootprintUITests` on the iOS 26.5 simulator, which is the only text XCUITest
-that presses anything *after* leaving text mode — `CanvasTransformFreezeUITests` leaves text mode
-and pinches, and a pinch is not swallowed. Nothing in the app handles the keyboard explicitly, so
-this is SwiftUI's automatic keyboard avoidance and whatever defers the restoring layout pass; the
-recordings are in that test's xcresults. `TextUndoFootprintUITests.press` works around it by
-pressing until the history's state says the press took, and says so in an attachment each time. Not
-reproduced on the owner's iPad; whether the layout should compress under the keyboard at all is the
-owner's call (`.ignoresSafeArea(.keyboard)` on the editor root is the one-line alternative, and it
-would put the bottom-docked text panel under the keyboard).
-
 ## Splitting a stepped pose channel changes the left half's last frames (2026-09-11)
 
 `TransformTrack.split(atCelLocalFrame:)` inserts a key at `cut - 1` holding `pose(atCelLocalFrame:

@@ -54,6 +54,7 @@
 		F54CBF899B188F5FE35EFAC6 /* SelectPanelEditDisclosureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */; };
 		AE67687B22ADB002BE5EE5BB /* SelectionCompositionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */; };
 		D54E424E0EF7225465B42F15 /* SelectToolTapOffUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */; };
+		AC438CEF20D7E15F5A1CFF16 /* EditorKeyboardLayoutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC068BAAEC0EA25D0AA97AEA /* EditorKeyboardLayoutUITests.swift */; };
 		7503E247229882BAB46EE5CC /* OnionOpacitySlidersUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000E38FBC608D36A4AEC570A /* OnionOpacitySlidersUITests.swift */; };
 		573E552848FFF445EFE40DBE /* FolderMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */; };
 		5B9C4BCFAE6E2384340E55DF /* MoveToNewLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */; };
@@ -563,6 +564,7 @@
 		F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectPanelEditDisclosureUITests.swift; sourceTree = "<group>"; };
 		D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionCompositionUITests.swift; sourceTree = "<group>"; };
 		1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectToolTapOffUITests.swift; sourceTree = "<group>"; };
+		AC068BAAEC0EA25D0AA97AEA /* EditorKeyboardLayoutUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EditorKeyboardLayoutUITests.swift"; sourceTree = "<group>"; };
 		000E38FBC608D36A4AEC570A /* OnionOpacitySlidersUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "OnionOpacitySlidersUITests.swift"; sourceTree = "<group>"; };
 		9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderMoveLogicTests.swift; sourceTree = "<group>"; };
 		A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoveToNewLayerLogicTests.swift; sourceTree = "<group>"; };
@@ -1160,6 +1162,7 @@
 				F0CFABA3B53CEDAF1A6D38C7 /* SelectPanelEditDisclosureUITests.swift */,
 				D9336F1869A9C03A4512E675 /* SelectionCompositionUITests.swift */,
 				1F958580BD084D836187B02B /* SelectToolTapOffUITests.swift */,
+				AC068BAAEC0EA25D0AA97AEA /* EditorKeyboardLayoutUITests.swift */,
 				000E38FBC608D36A4AEC570A /* OnionOpacitySlidersUITests.swift */,
 				9D008579C86DE3112B78CD11 /* FolderMoveLogicTests.swift */,
 				A52611A2353BEC0B18E735AA /* MoveToNewLayerLogicTests.swift */,
@@ -1798,6 +1801,7 @@
 				F54CBF899B188F5FE35EFAC6 /* SelectPanelEditDisclosureUITests.swift in Sources */,
 				AE67687B22ADB002BE5EE5BB /* SelectionCompositionUITests.swift in Sources */,
 				D54E424E0EF7225465B42F15 /* SelectToolTapOffUITests.swift in Sources */,
+				AC438CEF20D7E15F5A1CFF16 /* EditorKeyboardLayoutUITests.swift in Sources */,
 				7503E247229882BAB46EE5CC /* OnionOpacitySlidersUITests.swift in Sources */,
 				573E552848FFF445EFE40DBE /* FolderMoveLogicTests.swift in Sources */,
 				5B9C4BCFAE6E2384340E55DF /* MoveToNewLayerLogicTests.swift in Sources */,

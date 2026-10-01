@@ -25,39 +25,19 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         // **Every pixel below is read in screen coordinates fixed here, before the keyboard has
-        // ever been up.** The software keyboard compresses the editor's layout (the timeline moves up
-        // over the lower canvas) and on this simulator the layout does not come back once the keyboard
-        // has gone, so `canvas.host`'s frame — and with it every host-normalised coordinate — is not
-        // the same thing after a text session as before it. The canvas *content* stays where it was
-        // on screen, anchored at the host's top-left, which is what makes a screen coordinate the
-        // stable one. The text also goes in the upper half of the canvas for the same reason.
+        // ever been up.** While the software keyboard is up the editor is laid out above it (the
+        // timeline moves up over the lower canvas), so `canvas.host`'s frame — and with it every
+        // host-normalised coordinate — means something else mid-session. The canvas *content* stays
+        // where it was on screen, anchored at the host's top-left, which is what makes a screen
+        // coordinate the stable one. The text also goes in the upper half of the canvas for the same
+        // reason.
         let host = canvas.frame
         func screenPoint(_ v: CGVector) -> CGPoint {
             CGPoint(x: host.minX + v.dx * host.width, y: host.minY + v.dy * host.height)
         }
-        // **The undo and redo buttons are pressed wherever they are drawn, found by looking, and
-        // pressed again if the press was swallowed.** They sit at the bottom of the side toolbar,
-        // which the keyboard pushes up, and MEASURED over four runs of this test (recordings in the
-        // xcresults of 2026-09-11; BUGS.md carries it): once the software keyboard has gone the
-        // editor's layout **stays compressed** — a black band where the keyboard was, the timeline
-        // and the rail's buttons a few hundred points above their places — **until the next touch on
-        // a control, which restores the layout and is not delivered as a press.** So the first undo
-        // after typing does nothing, whether it is tapped through its element (whose accessibility
-        // frame reports the compressed geometry) or at its drawn position. The press below goes to
-        // whichever of the two candidate points has the icon's light pixels on the rail's black, and
-        // is repeated until the history's state says it took: undo enables redo, redo disables it.
-        let undoAt = Self.centre(of: app.buttons["sideToolbar.undoButton"])
-        let redoAt = Self.centre(of: app.buttons["sideToolbar.redoButton"])
-        XCTAssertNotNil(undoAt, "PREMISE: the undo button is on screen")
-        XCTAssertNotNil(redoAt, "PREMISE: the redo button is on screen")
-        guard let undoAt, let redoAt else { return }
         let redoButton = app.buttons["sideToolbar.redoButton"]
-        func pressUndo() {
-            press(app, "sideToolbar.undoButton", drawnAt: undoAt, tookEffectWhen: { redoButton.isEnabled })
-        }
-        func pressRedo() {
-            press(app, "sideToolbar.redoButton", drawnAt: redoAt, tookEffectWhen: { !redoButton.isEnabled })
-        }
+        func pressUndo() { press(app, "sideToolbar.undoButton", tookEffectWhen: { redoButton.isEnabled }) }
+        func pressRedo() { press(app, "sideToolbar.redoButton", tookEffectWhen: { !redoButton.isEnabled }) }
 
         // 1. Strokes first, in the top-left of the visible canvas, well away from where the text
         //    will go. What the artist does next: pick up the brush and draw — it is the default tool.
@@ -94,7 +74,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
 
         // 5. Delete the label the way an artist does: reopen it and empty it. What the artist does
         //    next: Actions → Add Text, tap the words, delete them, pick the brush. The reopening tap
-        //    is a screen coordinate too, since the host's frame may have moved under the keyboard.
+        //    is a screen coordinate too, for the same reason.
         let wordsOnScreen = screenPoint(boxOrigin)
         reopenText(app, at: CGPoint(x: wordsOnScreen.x + host.width * 0.02, y: wordsOnScreen.y + host.width * 0.012))
         deleteCharacters(5, app, at: wordsOnScreen)
@@ -141,36 +121,19 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
     }
 
-    private static func centre(of element: XCUIElement) -> CGPoint? {
-        guard element.waitForExistence(timeout: 5) else { return nil }
-        let frame = element.frame
-        return CGPoint(x: frame.midX, y: frame.midY)
-    }
-
-    /// Taps `identifier`'s control at whichever of two candidate points its icon is actually drawn —
-    /// the point it occupied before any keyboard came up, or the point its accessibility frame
-    /// reports now — and again, up to three times, until `tookEffectWhen` says the press landed. See
-    /// the note in the test body for why neither point alone is reliable and why a press can be
-    /// swallowed outright.
-    private func press(_ app: XCUIApplication, _ identifier: String, drawnAt before: CGPoint,
-                       tookEffectWhen tookEffect: () -> Bool) {
-        for attempt in 1...3 {
-            let now = Self.centre(of: app.buttons[identifier]) ?? before
-            let candidates = [before, now]
-            let lit = candidates.first { brightPixels(around: $0, radius: 8) > 0 }
-            XCTAssertNotNil(lit, "\(identifier) is drawn at neither \(before) nor \(now) — nothing to press")
-            Self.coordinate(app, at: lit ?? before).tap()
-            let deadline = Date().addingTimeInterval(3)
-            while Date() < deadline {
-                if tookEffect() { return }
-                Thread.sleep(forTimeInterval: 0.2)
-            }
-            let note = XCTAttachment(string: "\(identifier): press \(attempt) at \(lit ?? before) was swallowed")
-            note.name = "swallowed press"
-            note.lifetime = .keepAlways
-            add(note)
+    /// Taps `identifier`'s control and waits for `tookEffectWhen` to say the press landed — undo enables
+    /// redo, redo disables it — so a press the app swallowed is a red test naming the button rather
+    /// than a later assertion about ink.
+    private func press(_ app: XCUIApplication, _ identifier: String, tookEffectWhen tookEffect: () -> Bool) {
+        let button = app.buttons[identifier]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "\(identifier) is on screen")
+        button.tap()
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if tookEffect() { return }
+            Thread.sleep(forTimeInterval: 0.2)
         }
-        XCTFail("\(identifier) did not take effect in three presses")
+        XCTFail("\(identifier) did not take effect")
     }
 
     /// Deletes `count` characters the same two ways `typeIntoTextBox` types them.
@@ -224,14 +187,13 @@ final class TextUndoFootprintUITests: PaintUITestCase {
     }
 
     /// **A tap synthesised while the keyboard is still leaving lands where a control *was*.** The
-    /// software keyboard compresses the editor's layout and its dismissal animates the layout back;
+    /// editor is laid out above the software keyboard and its dismissal animates the layout back;
     /// XCUITest reads a button's frame and then taps a point, and the undo button at the bottom of
     /// the side toolbar moves a few hundred points during that animation — MEASURED: an undo tapped
     /// one second after leaving text mode did nothing at all, and the recording showed the layout
     /// still settling. So wait for the keyboard to be gone and the host's frame to be back where it
-    /// started before pressing anything. Not an assertion: a layout that stays compressed is a
-    /// different defect, reported rather than failed here, and the screen-coordinate probes still
-    /// read the right pixels either way.
+    /// started before pressing anything — and fail if it never is, since a layout that stays
+    /// compressed is the defect `EditorKeyboardLayoutUITests` pins.
     private func waitForTheLayoutToSettle(_ app: XCUIApplication, _ canvas: XCUIElement, restoring host: CGRect) {
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
@@ -241,13 +203,8 @@ final class TextUndoFootprintUITests: PaintUITestCase {
             if settled { return }
             Thread.sleep(forTimeInterval: 0.25)
         }
-        let note = XCTAttachment(string: "canvas.host's accessibility frame did not return to \(host) within 10 s "
-                                 + "of the keyboard leaving; it reads \(canvas.frame), keyboards: "
-                                 + "\(app.keyboards.count); undo button reads "
-                                 + "\(app.buttons["sideToolbar.undoButton"].frame)")
-        note.name = "layout after the keyboard"
-        note.lifetime = .keepAlways
-        add(note)
+        XCTFail("canvas.host's frame did not return to \(host) within 10 s of the keyboard leaving; it reads "
+                + "\(canvas.frame), keyboards: \(app.keyboards.count)")
     }
 
     // MARK: - Reading what is drawn
@@ -281,30 +238,6 @@ final class TextUndoFootprintUITests: PaintUITestCase {
             for x in x0..<x1 {
                 let o = y * bytesPerRow + x * 4
                 if !(buffer[o] > 240 && buffer[o + 1] > 240 && buffer[o + 2] > 240) { count += 1 }
-            }
-        }
-        return count
-    }
-
-    /// How many pixels within `radius` of `point` are light — a white glyph on the rail's black.
-    private func brightPixels(around point: CGPoint, radius: CGFloat) -> Int {
-        let shot = XCUIScreen.main.screenshot().image
-        guard let cgImage = shot.cgImage else { return 0 }
-        let width = cgImage.width, height = cgImage.height
-        let scale = CGFloat(width) / shot.size.width
-        let bytesPerRow = width * 4
-        var buffer = [UInt8](repeating: 0, count: height * bytesPerRow)
-        guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let x0 = max(0, Int((point.x - radius) * scale)), x1 = min(width, Int((point.x + radius) * scale))
-        let y0 = max(0, Int((point.y - radius) * scale)), y1 = min(height, Int((point.y + radius) * scale))
-        var count = 0
-        for y in y0..<y1 {
-            for x in x0..<x1 {
-                let o = y * bytesPerRow + x * 4
-                if buffer[o] > 150 && buffer[o + 1] > 150 && buffer[o + 2] > 150 { count += 1 }
             }
         }
         return count

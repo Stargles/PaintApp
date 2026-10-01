@@ -327,6 +327,22 @@ extension CanvasManager {
 
     // MARK: Committing
 
+    /// **The keyboard goes first, from here, and not as a side effect of the overlay being hidden.**
+    /// Ending the session flips `textGestureActive`, SwiftUI re-runs `CanvasView.updateUIView`, and
+    /// the overlay's `deactivate()` hides the editor — which makes UIKit resign its first responder
+    /// *inside SwiftUI's own update pass*. The keyboard goes, but the editor's keyboard avoidance is
+    /// never told to relay out: MEASURED, the canvas host stays at the height the keyboard pushed it to
+    /// (973 pt against 1356) until the next touch, while the same dismissal from a timer callback, outside
+    /// any SwiftUI pass, left it at full height every time. Resigning here, in the action that ends the
+    /// session, puts the hide outside the update pass.
+    ///
+    /// Before the session's state is read as well as before it is changed: `textViewDidEndEditing`
+    /// flushes the last keystrokes to the recipe, which the commit then bakes.
+    private func dropTheKeyboardBeforeTheSessionEnds() {
+        guard textIsFocused else { return }
+        textFocusResigner?()
+    }
+
     /// Bakes the draft into the target cel's raster and registers one undo step for the whole
     /// session.
     ///
@@ -345,6 +361,7 @@ extension CanvasManager {
     /// would be a step the artist has to press through to get back to real work.
     func commitInteractiveText() {
         guard textGestureActive else { return }
+        dropTheKeyboardBeforeTheSessionEnds()
         textGestureActive = false
         textFingerDown = false
         textIsFocused = false
@@ -555,6 +572,7 @@ extension CanvasManager {
     /// mid-edit leaving a committed object permanently invisible.
     func cancelInteractiveText() {
         guard textGestureActive else { return }
+        dropTheKeyboardBeforeTheSessionEnds()
         textGestureActive = false
         textFingerDown = false
         textIsFocused = false

@@ -61,17 +61,21 @@ final class EditSelectedObjectUITests: PaintUITestCase {
     }
 
     /// Waits for the keyboard to be gone **and the host's frame to be back where it started** — the
-    /// software keyboard compresses the editor's layout and its dismissal animates it back, and
-    /// everything measured or aimed in that window is in a layout that is about to move. It does not
-    /// always come back on its own (MEASURED: still 973 pt after 15 s), so this returns after a bound.
+    /// editor is laid out above the software keyboard and its dismissal animates the layout back, and
+    /// everything measured or aimed in that window is in a layout that is about to move. Fails if it
+    /// never comes back: that is the defect `EditorKeyboardLayoutUITests` pins.
     private func waitForTheLayoutToSettle(_ app: XCUIApplication, _ canvas: XCUIElement, restoring host: CGRect) {
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             let frame = canvas.frame
-            if app.keyboards.count == 0 && abs(frame.minY - host.minY) < 1 && abs(frame.height - host.height) < 1 { break }
+            if app.keyboards.count == 0 && abs(frame.minY - host.minY) < 1 && abs(frame.height - host.height) < 1 {
+                Thread.sleep(forTimeInterval: 0.6)
+                return
+            }
             Thread.sleep(forTimeInterval: 0.25)
         }
-        Thread.sleep(forTimeInterval: 0.6)
+        XCTFail("canvas.host's frame did not return to \(host) within 15 s of the keyboard leaving; it reads "
+                + "\(canvas.frame), keyboards: \(app.keyboards.count)")
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
@@ -104,15 +108,13 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down (text:\(readTextState(app)))")
 
-        // 2. Select tool → Rectangle. **Before measuring anything**: leaving text mode leaves the
-        //    editor's layout compressed by the keyboard that has gone, and it comes back when the next
-        //    panel opens.
+        // 2. Select tool → Rectangle. **Before measuring anything**: the editor was laid out above the
+        //    keyboard that has just gone, and its dismissal is still animating the layout back.
+        waitForTheLayoutToSettle(app, canvas, restoring: host)
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
-        XCTAssertEqual(canvas.frame.height, host.height, accuracy: 1, "PREMISE: the layout is back")
 
         // **Above the text panel's top edge (0.336 of the host), and below the black margin over the
         // paper (0.14)**: the panel is a dark card and a dark pixel is "ink" to the probe, so a window
