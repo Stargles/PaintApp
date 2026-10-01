@@ -15,6 +15,9 @@ struct PaintApp: App {
         // frame is drawn. See `UITestSeeds` for why a simulator cannot otherwise reproduce the
         // owner's device at all on this axis.
         UITestSeeds.applyTextureBudgetOverrideIfRequested()
+        // Inert unless an XCUITest passed `-uiTestSlowBakeMillis`, and simulator-only; before the
+        // first document's baker exists, which reads it at every mint.
+        UITestSeeds.applyBakeDelayIfRequested()
         // TODO (36): resolve the artist's chosen projects folder **before** anything reads
         // `ProjectBackupManager.documentsDirectory`. Synchronous and on the main thread on purpose —
         // it is one bookmark resolve, and every line below this one asks where the library is. The

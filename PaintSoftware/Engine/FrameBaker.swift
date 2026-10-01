@@ -60,6 +60,18 @@ final class FrameBaker {
     /// width without a second code path.
     var budgetBytes: Int = CompositorBudget.textureBudgetBytes
 
+    /// **How long every composite waits first, on the worker queue** — zero on every ordinary launch,
+    /// and set only by `UITestSeeds.applyBakeDelayIfRequested` (`-uiTestSlowBakeMillis`, simulator
+    /// only).
+    ///
+    /// The owner's iPad composites a frame of one vector layer under two transformation layers in
+    /// 334–365 ms (MEASURED, TODO 145) and a simulator in a few, so what the canvas shows between an
+    /// edit and its bake — the wait `SandwichPresentation.live` exists for — is a window a test
+    /// cannot see into on the machine it runs on. This widens it, and only it: the sleep is on
+    /// `workQueue`, read at mint time with the rest of the job's values, so the main thread and the
+    /// live canvas's own rebuilds are untouched.
+    static var compositeDelay: TimeInterval = 0
+
     /// How far ahead of the playhead a baked frame is also decoded into the ring.
     ///
     /// §3.5: *"A small decoded ring holds the frames just ahead of the playhead… Play never decodes
@@ -469,6 +481,7 @@ final class FrameBaker {
         }
         let resolution = manager.renderResolution
         let budget = budgetBytes
+        let delay = Self.compositeDelay
         let wantsRing = Self.isWithin(ringLookahead, of: playhead, frame: frame,
                                       direction: direction)
         let frames = framesByDigest
@@ -484,7 +497,8 @@ final class FrameBaker {
                 // nine-frame hold one file and a scrub through it free (§3.3).
                 outcome = .alreadyOnDisk
             } else if let image = PlaybackTrace.span(.bakeComposite, {
-                recipe.composite(budgetBytes: budget)
+                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+                return recipe.composite(budgetBytes: budget)
             }) {
                 switch PlaybackTrace.span(.bakeWrite, {
                     store.store(image, for: key, playhead: playhead, frames: frames)

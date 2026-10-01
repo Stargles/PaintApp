@@ -16,8 +16,8 @@ class PaintUITestCase: XCTestCase {
     /// instance per test method, so this is per test. See `launchIntoEditor` for what it gates.
     private var hasLaunchedIntoEditor = false
 
-    /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
-    /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
+    /// "off" / "rest" / "live" / "stroke" — which rendering path the live canvas is on, published on
+    /// `canvas.host`'s label from `SandwichPresentation`.
     ///
     /// The label carries a second, space-separated field (`entries:`) that `midStrokeEntries` reads;
     /// only the first token is the state.

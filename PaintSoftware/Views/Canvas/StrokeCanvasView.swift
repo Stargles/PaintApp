@@ -278,6 +278,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             // switch mid-render is exactly when that happens.
             if oldValue !== vectorCanvas {
                 unlandedInk.removeAll()
+                // What a derived picture contains is a version of the canvas it was derived from.
+                interpolationCoverage = nil
                 // The ordering guard for an intermediate frame is about *this* canvas's counter.
                 shownVectorVersion = StrokeCanvasView.nothingDisplayed
                 // A stream surface shows a window of the canvas it was drawn from, at that
@@ -755,17 +757,33 @@ final class StrokeCanvasView: CanvasPlaneView {
         streamSurfaces.removeAll()
     }
 
-    /// A derived interpolated frame to show in place of this cel's own content. Non-nil exactly
-    /// when the cel carries an `InterpolationRecipe` that evaluates. Not stored in `vectorCanvas`:
-    /// an in-between is derived, never persisted. `CanvasView.Coordinator` recomputes and pushes it.
+    /// A derived frame to show in place of this cel's own content — an in-between, or the cel's
+    /// ink posed. Not stored in `vectorCanvas`: it is derived, never persisted.
+    /// `CanvasView.Coordinator` recomputes and pushes it.
     private(set) var interpolationImage: UIImage?
 
-    /// Replaces the interpolated frame and repaints if it changed. Repaints from here rather than
+    /// **The `vectorCanvas.version` whose ink `interpolationImage` already contains** — set when the
+    /// picture is a pose of this canvas's own ink, nil for an in-between, which contains none of it.
+    ///
+    /// What `unlandedInk` is retired against when the base is derived, exactly as a committed render
+    /// retires it by the version it was rasterized at. Retiring *everything* held is right for an
+    /// in-between (its edits are `LocalEdit`s, and nothing is held for them) and wrong for a pose:
+    /// the stroke just lifted would go with it while the posed picture standing in the base still
+    /// predates it. That picture is the live pair's middle (`CanvasView.Coordinator
+    /// .LiveActivePicture`), rendered off the main thread, so the stroke stays held until the
+    /// picture that contains it lands — TODO (145).
+    private var interpolationCoverage: Int?
+
+    /// Replaces the derived frame and repaints if it changed. Repaints from here rather than
     /// `refreshDisplayIfStale`, because an interpolated cel's own `version` is constant across a
     /// scrub, so the staleness check would never fire.
-    func setInterpolationImage(_ image: UIImage?) {
+    ///
+    /// `covering` is the canvas and version whose ink the picture contains, when it is a pose of a
+    /// cel's own ink; it counts only if that canvas is this view's.
+    func setInterpolationImage(_ image: UIImage?, covering: (canvas: VectorCanvas, version: Int)? = nil) {
         guard interpolationImage !== image else { return }
         interpolationImage = image
+        interpolationCoverage = covering.flatMap { $0.canvas === vectorCanvas ? $0.version : nil }
         refreshDisplay()
     }
 
@@ -835,12 +853,14 @@ final class StrokeCanvasView: CanvasPlaneView {
             displayedVectorVersion = vectorCanvas.version
             shownVectorVersion = vectorCanvas.version
             base = interpolationImage
+            // **A posed picture holds the cel's ink up to the version it was posed at**, so it
+            // retires what is held exactly as a committed render does (`interpolationCoverage`).
             // **A derived in-between replaces the cel's own content outright**, so nothing held
-            // against the cel's version is meaningful here — and `retire(upTo:)`'s arithmetic could
+            // against the cel's version is meaningful there — and `retire(upTo:)`'s arithmetic could
             // never release it, since an in-between's `version` is constant across a scrub.
             // Reached when the playhead moves onto an in-between while ink is still un-landed.
-            unlandedInk.removeAll()
-            installedVersion = nil
+            installedVersion = interpolationCoverage
+            if installedVersion == nil { unlandedInk.removeAll() }
         case .committedRender:
             let cached = vectorCanvas.cachedRender()
             switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,

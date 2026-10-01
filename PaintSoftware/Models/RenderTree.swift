@@ -789,6 +789,41 @@ extension Array where Element == RenderNode {
         }
         return nil
     }
+
+    /// **Whether the live pair at this cut is the picture, rather than a near picture of it** —
+    /// whether `split(atLeaf:)`'s two halves, with the leaf's own host drawn source-over between
+    /// them, add back up to what the compositor draws for the whole stack.
+    ///
+    /// `SandwichLogicTests`' load-bearing identity, stated as a predicate: the leaf draws source-over
+    /// (no blend, no grade, no mask of its own), no group around it assembles a buffer, and nothing
+    /// above it needs the compositor at all. Everywhere else the split is §5.2's accepted
+    /// approximation — a mode degrades to normal against transparency, a faded group fades twice —
+    /// which a stroke may show while the pen is down because lift snaps it back, and which an edit at
+    /// rest therefore must not: `SandwichPresentation.live` stands in for the bake only where this
+    /// answers true. Conservative on purpose (a mask above, say, is exact and still answers false),
+    /// because a false here costs only the wait for the bake.
+    func liveCutIsExact(atLeaf layerIndex: Int) -> Bool {
+        for (position, node) in enumerated() {
+            let above = Array(self[(position + 1)...])
+            switch node.content {
+            case .leaf(let index):
+                guard index == layerIndex else { continue }
+                return !node.blendMode.isBlending && node.effect == nil && node.masks.isEmpty
+                    && !above.needsCompositorOnCanvas
+            case .node(_, let inputs):
+                guard let slot = inputs.firstIndex(where: { $0.leafLayerIndices.contains(layerIndex) })
+                else { continue }
+                // Spelled `[RenderNode]` for `split`'s reason: inside an extension of `Array` the
+                // bare name means `Self`.
+                let slotsAbove: [RenderNode] = inputs[(slot + 1)...].flatMap { $0 }
+                return !node.needsOwnBuffer
+                    && inputs[slot].liveCutIsExact(atLeaf: layerIndex)
+                    && !slotsAbove.needsCompositorOnCanvas
+                    && !above.needsCompositorOnCanvas
+            }
+        }
+        return false
+    }
 }
 
 extension RenderNode {

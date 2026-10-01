@@ -11,8 +11,19 @@ import XCTest
 /// have carried a stroke stored at the pen (the owner's report: *"that stroke does not get put down
 /// where the user wants it, because the move layer on top moves it in compositing"*).
 ///
+/// **And an edit under one is on screen before its bake lands** — TODO (145), the owner's second
+/// report about the same document: *"the undos are latent. I'd estimate around 400ms"* and *"The
+/// first stroke briefly appears"*. `SandwichPresentationLogicTests` owns the choice of picture; what
+/// only this can say is that the picture chosen is right — that the active layer's own posed picture
+/// arrived with the halves around it, rather than the one it held from before the undo.
+///
 /// Its own class because xcodebuild distributes parallel work per test *class* (see CLAUDE.md).
 final class InkUnderTransformUITests: PaintUITestCase {
+
+    /// The bake's composite, held this long on its worker queue (`-uiTestSlowBakeMillis`) — ten times
+    /// the 334–365 ms the owner's iPad MEASURED for this document, so the window between an edit and
+    /// its bake is wide enough for a screenshot to land inside it on a loaded Mac.
+    private static let bakeDelay: TimeInterval = 3.5
 
     private func paperRect(in canvas: XCUIElement) -> CGRect {
         let frame = canvas.frame
@@ -101,6 +112,83 @@ final class InkUnderTransformUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         try moveATransformLayerAboveTheDrawing(app, canvas)
         try assertStrokeLandsUnderThePen(app, canvas)
+    }
+
+    /// **The owner's undo, under the same Move layer, with the bake as slow as their iPad's and
+    /// slower.** The undone stroke has to leave the canvas while the bake that would show it gone is
+    /// still compositing, and the canvas has to say it is showing the edit's live picture (`live`)
+    /// rather than the bake (`rest`) — which pins both halves of the fix: a canvas standing on the
+    /// previous bake still shows the stroke, and so does a live picture whose middle is the posed
+    /// ink the host held from before the undo.
+    func testAnUndoUnderAMovedTransformLayerIsOnScreenBeforeItsBake() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        try moveATransformLayerAboveTheDrawing(app, canvas)
+        let paper = paperRect(in: canvas)
+        dragOnCanvas(app, from: onHost(paper, 0.25, 0.3), to: onHost(paper, 0.45, 0.3))
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "Setup: the stroke's bake has to land"))
+        let drawn = try inkProbe(canvas)
+        XCTAssertGreaterThan(inkColumns(drawn, paper, row: 0.3, span: 0.27...0.43).count, 300,
+                             "PREMISE: the stroke is on the canvas before the undo")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        let tapped = Date()
+        var gone: (after: TimeInterval, state: String)?
+        while gone == nil, Date().timeIntervalSince(tapped) < Self.bakeDelay * 0.7 {
+            let probe = try inkProbe(canvas)
+            if inkColumns(probe, paper, row: 0.3, span: 0.27...0.43).isEmpty {
+                gone = (Date().timeIntervalSince(tapped), sandwichState(app))
+            }
+        }
+        attach(canvas, "after-the-undo-before-its-bake")
+        let shown = try XCTUnwrap(gone, "the undone stroke was still on the canvas \(Self.bakeDelay * 0.7) s "
+                                  + "after the undo, with its bake still compositing (canvas: "
+                                  + "\(sandwichState(app))) — the edit waited for the bake")
+        XCTContext.runActivity(named: "undo on screen after \(shown.after) s") { _ in }
+        XCTAssertEqual(shown.state, "live",
+                       "the stroke left the canvas but not by the edit's live picture — nothing else "
+                       + "should have been able to show the undo before the bake")
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "…and its bake lands"))
+        XCTAssertTrue(inkColumns(try settledProbe(canvas, window: CGRect(
+            x: paper.minX, y: paper.minY + paper.height * 0.2, width: paper.width, height: paper.height * 0.2)),
+                                 paper, row: 0.3, span: 0.27...0.43).isEmpty,
+                      "…and the bake agrees: the stroke stays gone")
+    }
+
+    /// **The stroke just lifted stays on screen until the posed picture that contains it lands.**
+    ///
+    /// Under a Move layer the active host's base is the cel's ink *posed* — a derived picture, the
+    /// live pair's middle, rendered off the main thread (TODO 145). Until it lands, the base is the
+    /// posed picture from before the stroke, and the stroke is on screen only as the ink its view
+    /// holds; a derived base that retired everything held would drop it for the length of that render.
+    /// The render is slowed (`-uiTestSlowVectorRenderMillis`) so the window is one a screenshot can
+    /// land in, and so is the bake — otherwise the bake lands first and the canvas shows *it*, with
+    /// the stroke in it, whatever the host is holding.
+    func testAStrokeUnderAMovedTransformLayerStaysUpUntilItsPosedPictureLands() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSlowVectorRenderMillis", "3000",
+                                "-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        try moveATransformLayerAboveTheDrawing(app, canvas)
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "Setup: the canvas settles on the bake"))
+        let paper = paperRect(in: canvas)
+        dragOnCanvas(app, from: onHost(paper, 0.25, 0.3), to: onHost(paper, 0.45, 0.3))
+        // No wait: the whole subject is the window before the posed picture lands.
+        let probe = try inkProbe(canvas)
+        let state = sandwichState(app)
+        attach(canvas, "just-lifted-before-its-posed-picture")
+        XCTAssertEqual(state, "stroke", "PREMISE: the host is what is on screen — the lifted stroke's "
+                       + "pair, with its bake still compositing — or this says nothing about the host")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.3, span: 0.27...0.43).count, 300,
+                             "the stroke just lifted is not on the canvas (state \(sandwichState(app))) — "
+                             + "the posed base predates it and nothing held it")
     }
 
     /// The same on a raster layer, where the ink is pixels stamped in the layer's own space — added

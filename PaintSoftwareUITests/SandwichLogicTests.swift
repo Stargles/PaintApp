@@ -576,6 +576,82 @@ final class SandwichLogicTests: XCTestCase {
                        "A buffering ancestor is where the half-group approximation shows, and §5.2 says so — this is the measurement behind that sentence")
     }
 
+    // MARK: - `liveCutIsExact`, the identity as a predicate
+
+    /// **`liveCutIsExact` answers true exactly where the three views are the picture** — TODO (145).
+    ///
+    /// The live canvas asks it before it puts an edit's live pair up in place of the bake
+    /// (`SandwichPresentation.live`), so a true on one of this file's approximations would put §5.2's
+    /// near picture on screen at rest, where EFFECT_BACKDROP.md rules the canvas exact. Both operands
+    /// are pixels: every battery shape answers true *and* reassembles byte for byte, and every
+    /// approximation answers false *and* measurably does not — a blend above the cut, the active
+    /// layer's own blend, a faded group around it, a grade above it, and the active layer being the
+    /// grade.
+    func testTheLiveCutIsExactWhereTheSandwichReassemblesAndNowhereElse() {
+        for testCase in battery() {
+            let tree = testCase.manager.renderTree(atFrame: 0)
+            XCTAssertTrue(tree.liveCutIsExact(atLeaf: testCase.active), "\(testCase.name)")
+            guard let pair = makeSandwichAndExact(testCase.manager, active: testCase.active) else {
+                XCTFail("\(testCase.name): both sides must composite"); continue
+            }
+            XCTAssertEqual(maxChannelDelta(pair.sandwich, pair.exact), 0, "\(testCase.name)")
+        }
+
+        func floorAndSquare() -> CanvasManager {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(grey, rect: CGRect(origin: .zero,
+                                                                                      size: CanvasFixture.canvasSize)))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                          CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+            return manager
+        }
+        var approximations: [(name: String, manager: CanvasManager, active: Int)] = []
+        do {
+            let manager = floorAndSquare()
+            manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+            approximations.append(("a blend above the cut", manager, 0))
+        }
+        do {
+            let manager = floorAndSquare()
+            manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+            approximations.append(("the active layer's own blend", manager, 1))
+        }
+        do {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            let square = CGRect(x: 0, y: 0, width: 40, height: 40)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: square))
+            CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(green, rect: square))
+            let folder = manager.addFolder(name: "Faded")
+            manager.layers[0].parentFolderID = folder
+            manager.layers[1].parentFolderID = folder
+            manager.setFolderOpacity(folder, to: 0.5)
+            manager.isCanvasBackgroundVisible = false
+            approximations.append(("a faded group around the cut", manager, 0))
+        }
+        do {
+            let manager = floorAndSquare()
+            manager.currentLayerIndex = 1
+            manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)))
+            approximations.append(("a grade above the cut", manager, 1))
+        }
+        do {
+            let manager = floorAndSquare()
+            manager.currentLayerIndex = 1
+            manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)))
+            approximations.append(("the active layer is the grade", manager, 2))
+        }
+        for approximation in approximations {
+            let tree = approximation.manager.renderTree(atFrame: 0)
+            XCTAssertFalse(tree.liveCutIsExact(atLeaf: approximation.active), approximation.name)
+            guard let pair = makeSandwichAndExact(approximation.manager, active: approximation.active) else {
+                XCTFail("\(approximation.name): both sides must composite"); continue
+            }
+            XCTAssertGreaterThan(maxChannelDelta(pair.sandwich, pair.exact), 1,
+                                 "PREMISE: \(approximation.name) is an approximation the pixels can see")
+        }
+    }
+
     // MARK: - `needsCompositorOnCanvas`, which is the risk containment
 
     /// The documents that existed before phase 5a stay on today's code path, exactly. That is the

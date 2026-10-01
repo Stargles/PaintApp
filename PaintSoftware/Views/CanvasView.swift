@@ -1084,10 +1084,11 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.sandwichEngagesOnCanvas(tree: tree)
         }
 
-        /// Which picture the canvas is showing right now — and, since RENDER.md stage 4d, whether the
-        /// bake for this frame has landed: `rest` is reached only when `sandwichFullKey` names the
-        /// frame the artist is on (`updateSandwich`'s trap 2), so an XCUITest reading "stroke" long
-        /// after lift is reading a bake that never arrived.
+        /// Which picture the canvas is showing right now (`SandwichPresentation`, chosen by its
+        /// `next`) — and, since RENDER.md stage 4d, whether the bake for this frame has landed:
+        /// `rest` is reached only when `sandwichFullKey` names the frame the artist is on, so an
+        /// XCUITest reading "stroke" or "live" long after the canvas went quiet is reading a bake
+        /// that never arrived.
         ///
         /// Published on `canvas.host` for the same reason `LayerStackCell` carries its markers: which
         /// of two rendering paths the canvas is on is not otherwise visible to an XCUITest, and "the
@@ -1097,12 +1098,6 @@ struct CanvasView: UIViewRepresentable {
         /// reads, and a canvas has no user-facing label to collide with. `canvas.host` is an
         /// accessibility element in its own right, which hides any descendant from the tree, so a 1×1
         /// marker view of the kind the layer panel uses could not be found inside it.
-        private enum SandwichPresentation: String {
-            /// Core Animation's flat row of hosts, unblanked — today's code path, unchanged.
-            case disengaged = "off"
-            case rest
-            case midStroke = "stroke"
-        }
         private var sandwichPresentation: SandwichPresentation = .disengaged {
             didSet {
                 if sandwichPresentation == .midStroke, oldValue != .midStroke { midStrokeEntryCount += 1 }
@@ -1114,7 +1109,7 @@ struct CanvasView: UIViewRepresentable {
         /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
         /// XCUITest. Space-separated fields, read by prefix —
         ///
-        ///     sandwich:<off|rest|stroke> entries:<n> derived:<n> rebuilds:<n> rasterizes:<n>
+        ///     sandwich:<off|rest|live|stroke> entries:<n> derived:<n> rebuilds:<n> rasterizes:<n>
         ///     shape:<none|following|adjustable> xform:<scale>,<rotation>,<dx>,<dy>
         ///     text:<none|box|editing>
         ///
@@ -1248,9 +1243,14 @@ struct CanvasView: UIViewRepresentable {
         /// the many SwiftUI passes that change nothing.
         ///
         /// **`full` is not here any more: it is the baked frame** (RENDER.md §3.6, stage 4d). These
-        /// two are the mid-stroke picture and nothing else — a different product from the bake, keyed
+        /// two are the live picture and nothing else — a different product from the bake, keyed
         /// additionally by which leaf the tree is cut at, and transient rather than stored.
-        private var sandwichHalves: (below: UIImage, above: UIImage)?
+        ///
+        /// **With the cut they were made at** (`LivePairFit`), because they are two thirds of the
+        /// live pair (TODO 145) and only make a picture with the layer they were cut around: the
+        /// third, the active layer's own picture, went to its host in the same main-thread turn
+        /// (`finishSandwichRebuild`).
+        private var sandwichHalves: (below: UIImage, above: UIImage, cut: LivePairCut)?
         /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
         /// deliberately *not* the same thing as `sandwichCacheKey`.
         private var sandwichKey: SandwichKey?
@@ -1546,26 +1546,32 @@ struct CanvasView: UIViewRepresentable {
                 aboveView.layer.magnificationFilter = filter
             }
 
-            // **Trap 2: stay mid-stroke until this frame's bake lands.** On lift the key unfreezes,
-            // so the baker's key moves too and its file does not exist yet; flipping to rest right
-            // away would show the picture composited *before* the stroke existed, and the artist
-            // would watch their just-finished stroke vanish and come back a beat later.
-            // `sandwichFullKey != key` is exactly "the frame lift asked for has not landed yet", and
-            // it is the same condition this trap used before the bake existed — `sandwichCacheKey`
-            // named the rebuild that was going to produce `full`, and this names the bake that is.
-            //
-            // Holding the mid-stroke pair is the *right* picture to hold meanwhile, not merely the
-            // older one: the stroke is committed to the cel, the active host still draws it, and it
-            // sits between two halves that never contained it.
-            let midStroke = isSandwichStrokeLive
-                || (sandwichPresentation == .midStroke && sandwichFullKey != key)
+            // **Which picture, as one pure choice** — `SandwichPresentation.next`, where the rules and
+            // their reasons are written down. **Trap 2** is one of them: stay mid-stroke until this
+            // frame's bake lands. On lift the key unfreezes, so the baker's key moves too and its
+            // file does not exist yet, and flipping to rest right away would show the picture
+            // composited *before* the stroke existed — the artist would watch their just-finished
+            // stroke vanish and come back a beat later. Holding the pair is the *right* picture
+            // meanwhile, not merely the older one: the stroke is committed to the cel, the active
+            // host still draws it, and it sits between two halves that never contained it. `.live`
+            // is the same wait reached by an edit that is not a stroke (TODO 145).
+            let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
+                ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
+            let cut = activeID.map { LivePairCut(frame: canvasManager.currentFrame, activeLayerID: $0) }
+            let held = sandwichHalves.flatMap { halves in sandwichCacheKey.map { (key: $0, cut: halves.cut) } }
+            let presentation = SandwichPresentation.next(
+                from: sandwichPresentation, strokeIsLive: isSandwichStrokeLive,
+                bakeIsCurrent: sandwichFullKey == key,
+                livePair: LivePairFit(held: held, key: key, cut: cut),
+                livePairIsExact: tree.liveCutIsExact(atLeaf: canvasManager.currentLayerIndex))
+            let live = presentation.activeHostDrawsItself
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour
             // of.** On the very first engage nothing is cached, and blanking now would flash an
             // empty canvas for however long the composite takes. Asked of the presentation actually
             // about to be applied, because the two now come from two places and either can be the
             // one that is missing.
-            if midStroke {
+            if live {
                 guard let halves = sandwichHalves else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== halves.below { belowView.image = halves.below }
                 if aboveView.image !== halves.above { aboveView.image = halves.above }
@@ -1577,16 +1583,16 @@ struct CanvasView: UIViewRepresentable {
                 if aboveView.image != nil { aboveView.image = nil }
             }
             if belowView.isHidden { belowView.isHidden = false }
-            let hideAbove = !midStroke
-            if aboveView.isHidden != hideAbove { aboveView.isHidden = hideAbove }
+            if aboveView.isHidden != !live { aboveView.isHidden = !live }
 
             // The active layer's host is the middle of the sandwich and the only one that draws
             // itself; everything else is in one of the two composites already. At rest even that one
             // is blanked, because `full` includes it.
-            let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
-                ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
+            // A stroke clips with the mask it resolved at touch-down. An edit's live pair needs none:
+            // it goes up only for a layer no mask clips (`liveCutIsExact`).
+            let mask = presentation == .midStroke ? liveMaskImage : nil
             for (id, host) in layerHosts {
-                let drawsItself = midStroke && id == activeID
+                let drawsItself = live && id == activeID
                 host.setBlanked(!drawsItself)
                 // §6.4 rides on exactly the same predicate as blanking, which is the point: the one
                 // host drawing its own pixels is the one place a mask can be applied, and every
@@ -1594,13 +1600,13 @@ struct CanvasView: UIViewRepresentable {
                 // the two together is also what removes the flash at both ends — the clip arrives
                 // the moment the host starts drawing itself and leaves the moment `full` takes over,
                 // rather than on the touch events, which are a beat early and a beat late.
-                host.setContentMask(drawsItself ? liveMaskImage : nil)
+                host.setContentMask(drawsItself ? mask : nil)
             }
-            // Trap 2 above keeps `midStroke` true until the rebuild lift asked for lands, so this is
-            // the lift, not the touch-up — releasing it any earlier would drop the clip while the
-            // host is still the thing on screen.
-            if !midStroke { liveMaskImage = nil }
-            sandwichPresentation = midStroke ? .midStroke : .rest
+            // Trap 2 keeps a lifted stroke on `.midStroke` until the bake lift asked for lands, so
+            // this is that landing, not the touch-up — releasing it any earlier would drop the clip
+            // while the host is still the thing on screen.
+            if presentation != .midStroke { liveMaskImage = nil }
+            sandwichPresentation = presentation
             // Both presentations put an image carrying the paper in `belowView` — `full` at rest,
             // `below` mid-stroke — so from here the `paperView` would be a second copy of it.
             paperIsNowPaintedBy(true)
@@ -1793,6 +1799,66 @@ struct CanvasView: UIViewRepresentable {
             applySandwichPresentationNow()
         }
 
+        /// **The active layer's third of the live pair** — what its host shows as its own picture at
+        /// the pair's key, produced on `sandwichQueue` beside the two halves and handed over with
+        /// them (TODO 145).
+        ///
+        /// **Why with the halves, and not by the pass that un-blanks the host.** A blanked host keeps
+        /// nothing current: `updateInterpolationPreviews` skips it, which is TODO (53)'s whole fix,
+        /// and `refreshDisplay` declines a rasterize nobody can see. So what it holds is the picture
+        /// from the last time it drew itself, any number of edits ago — and the edges that un-blank
+        /// it are not SwiftUI passes: `onStrokeBegan` latches a stroke and applies it on the spot,
+        /// and a rebuild or a bake landing reconciles from its own callback. A host refreshed only
+        /// by a later pass comes back on screen showing that old picture until the pass arrives,
+        /// which is the owner's *"The first stroke briefly appears"*: draw, undo, draw again, and
+        /// the undone stroke is under the pen for the length of the second one. Minted here, the
+        /// host's picture is never older than the halves either side of it, blanked or not.
+        private enum LiveActivePicture {
+            /// A picture in place of the cel's own ink — a pose or an in-between,
+            /// `LiveCelPreview.derived`. `covering` is the canvas and version of the cel's own ink it
+            /// already contains (`inkCoverage(of:)`).
+            case derived(layerID: UUID, content: DerivedCelContent,
+                         covering: (canvas: VectorCanvas, version: Int)?)
+            /// The cel's own committed render, for a blanked host, which is not keeping it current.
+            /// Rendered into the canvas's own memo — the one `refreshDisplay` reads — so the edge that
+            /// un-blanks the host installs it synchronously instead of showing what it had.
+            case committed(VectorCanvas, version: Int)
+
+            /// The picture, on `sandwichQueue`. A committed render lands in the canvas's memo, so
+            /// there is nothing to hand over.
+            func render() -> UIImage? {
+                // For a posed layer this *is* the pen-up render, so it takes the pen-up render's seam
+                // — zero on every ordinary launch; see `UITestSeeds.slowVectorRenderDelay`.
+                if UITestSeeds.slowVectorRenderDelay > 0 {
+                    Thread.sleep(forTimeInterval: UITestSeeds.slowVectorRenderDelay)
+                }
+                switch self {
+                case .derived(_, let content, _):
+                    return content.render(.full)
+                case .committed(let canvas, let version):
+                    _ = canvas.render(quality: .full, ifStillAtVersion: version)
+                    return nil
+                }
+            }
+        }
+
+        /// What the rebuild renders for the layer it cuts at. Nil for a raster tier, which the edge
+        /// that un-blanks the host reads synchronously, and for a vector host already on screen,
+        /// which keeps its own committed render current (`refreshDisplayIfStale`).
+        private func liveActivePicture(ofLayerAt index: Int) -> LiveActivePicture? {
+            let layer = canvasManager.layers[index]
+            guard let host = layerHosts[layer.id],
+                  let shown = shownCel(ofLayerAt: index,
+                                       in: canvasManager.renderTreeAndPoses(atFrame: canvasManager.currentFrame))
+            else { return nil }
+            if case .derived(let content) = shown.preview {
+                return .derived(layerID: layer.id, content: content, covering: Self.inkCoverage(of: shown.cel))
+            }
+            guard host.isBlanked, let canvas = shown.cel.vector, canvas === host.strokeView.vectorCanvas
+            else { return nil }
+            return .committed(canvas, version: canvas.version)
+        }
+
         private func startSandwichRebuild(for key: SandwichKey) {
             // **Mutual exclusion, not a discard, and the difference is `finishSandwichRebuild`.**
             // §3.6 rules that the bake queue *"reorders, it never discards"*, and `FrameBaker`
@@ -1804,14 +1870,15 @@ struct CanvasView: UIViewRepresentable {
             // would queue a rebuild per display frame and hand the artist a minutes-long backlog of
             // pictures nobody will see.
             guard !isSandwichRebuilding else { return }
-            // **The halves are a pre-warm for a stroke, and a stroke cannot begin while the
+            // **The halves are a pre-warm for a stroke or an edit, and neither happens while the
             // animation is playing.** `SandwichKey` carries every layer's content version, so every
             // frame flip moves it — which queued *two canvas-sized composites per playback tick* for
             // a pair of images nothing on screen was ever going to show: at rest the presentation is
-            // `.rest` and `sandwichFull` is the only image displayed, and the one state that reads
-            // `sandwichHalves` is entered from `onStrokeBegan`, and the touch that begins a stroke
-            // stops playback (`canvasInteractionBegan`: at once for a pencil, a moment later for a
-            // finger, which has to be watched first — `CanvasTouchSettle`). PERFORMANCE.md §5
+            // `.rest` and `sandwichFull` is the only image displayed. The two states that read
+            // `sandwichHalves` are a stroke, and the touch that begins one stops playback
+            // (`canvasInteractionBegan`: at once for a pencil, a moment later for a finger, which has
+            // to be watched first — `CanvasTouchSettle`), and an edit's live pair, which is entered
+            // only from halves minted for the key the canvas is on — that is, from here. PERFORMANCE.md §5
             // filed this as "every playback tick still computes the two halves nobody sees"; it is
             // this line, and it is the third of the three costs RENDER.md §2.2 forbids on this path.
             //
@@ -1825,9 +1892,13 @@ struct CanvasView: UIViewRepresentable {
             // path when nothing is cached yet. Both windows are one SwiftUI pass long in practice:
             // the index is only out of range between a delete and the reselect that follows it, and
             // the next pass schedules the rebuild this one declined.
-            guard let recipe = canvasManager.makeSandwichRecipe(atFrame: canvasManager.currentFrame,
-                                                                activeLayerIndex: canvasManager.currentLayerIndex)
+            let frame = canvasManager.currentFrame
+            let activeIndex = canvasManager.currentLayerIndex
+            guard let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: activeIndex),
+                  canvasManager.layers.indices.contains(activeIndex)
             else { return }
+            let cut = LivePairCut(frame: frame, activeLayerID: canvasManager.layers[activeIndex].id)
+            let active = liveActivePicture(ofLayerAt: activeIndex)
 
             isSandwichRebuilding = true
             sandwichRebuildCount += 1
@@ -1855,20 +1926,32 @@ struct CanvasView: UIViewRepresentable {
                 // reference for the duration of every stroke. A document that fits takes the
                 // identical path it took before: one composite per half, unwindowed, unchunked.
                 let halves = PlaybackTrace.span(.sandwichComposite) { recipe.compositeHalves() }
+                // **The third picture of the pair, on the same queue and for the same key** — see
+                // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.
+                let activeImage = active.flatMap { $0.render() }
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, below: halves?.below, above: halves?.above)
+                    self?.finishSandwichRebuild(key: key, cut: cut, below: halves?.below,
+                                                above: halves?.above, active: active, activeImage: activeImage)
                 }
             }
         }
 
-        private func finishSandwichRebuild(key: SandwichKey, below: CGImage?, above: CGImage?) {
+        private func finishSandwichRebuild(key: SandwichKey, cut: LivePairCut, below: CGImage?, above: CGImage?,
+                                           active: LiveActivePicture?, activeImage: UIImage?) {
             isSandwichRebuilding = false
-            // Both or neither: a half-updated pair would put a `below` from this frame under an
-            // `above` from the last one. `composite` returns nil only for a degenerate canvas.
+            // All three or none: a half-updated pair would put a `below` from this frame under an
+            // `above` from the last one, and a pair whose middle is older than its halves is the
+            // flash TODO (145) reported. `composite` returns nil only for a degenerate canvas.
             if let below, let above, key == sandwichKey {
                 sandwichHalves = (below: UIImage(cgImage: below, scale: 1, orientation: .up),
-                                  above: UIImage(cgImage: above, scale: 1, orientation: .up))
+                                  above: UIImage(cgImage: above, scale: 1, orientation: .up),
+                                  cut: cut)
                 sandwichCacheKey = key
+                if case .derived(let layerID, let content, let covering) = active {
+                    interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: content.identity,
+                                                                                preview: false)
+                    layerHosts[layerID]?.strokeView.setInterpolationImage(activeImage, covering: covering)
+                }
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
             // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
@@ -2548,6 +2631,29 @@ struct CanvasView: UIViewRepresentable {
 
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
 
+        /// **The cel a layer's host shows at the current frame, and what goes in its derived slot** —
+        /// one walk's answer, asked by `updateInterpolationPreviews` for every host and by the live
+        /// pair for the one it cuts at, so the two cannot resolve a layer differently. The frame is
+        /// §5.5's: a host under a Repeat shows the cel of the frame it is repeating, derived there.
+        private func shownCel(ofLayerAt index: Int,
+                              in walk: (tree: [RenderNode], poses: [Int: PoseMap], frames: [Int: Int]))
+        -> (cel: Cel, preview: LiveCelPreview)? {
+            let frame = walk.frames[index] ?? canvasManager.currentFrame
+            guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
+            let cel = canvasManager.layers[index].cels[celIndex]
+            return (cel, canvasManager.livePreview(forCel: cel, atFrame: frame, inheriting: walk.poses[index]))
+        }
+
+        /// **The cel's own ink a derived picture of it already contains** — all of it, at the
+        /// canvas's version now, when the derivation is a pose of that ink; nil for an in-between,
+        /// which derives from its references and contains no version of it. What lets the stroke
+        /// just finished stay on screen over a posed picture that predates it, until one that
+        /// contains it lands (`StrokeCanvasView.setInterpolationImage`).
+        private static func inkCoverage(of cel: Cel) -> (canvas: VectorCanvas, version: Int)? {
+            guard cel.interpolation == nil, let canvas = cel.vector else { return nil }
+            return (canvas, canvas.version)
+        }
+
         /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
         /// it everywhere else. `.preview` quality while scrubbing, `.full` on release — cached in
         /// separate slots on `VectorCanvas` so switching doesn't throw the other away.
@@ -2566,19 +2672,17 @@ struct CanvasView: UIViewRepresentable {
                 // the live stroke and a raster layer's pixels sit where the composite puts them.
                 host.shownPose = canvasManager.inkPose(ofLayerAt: layerIndex, showing: shownFrame,
                                                        inheriting: poses[layerIndex])
-                guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: shownFrame) else {
+                guard let shown = shownCel(ofLayerAt: layerIndex, in: walk) else {
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.setInterpolationImage(nil)
                     continue
                 }
-                let cel = layer.cels[celIndex]
                 // **The whole per-layer decision is `LiveCelPreview`, and none of it is left here** —
                 // read that type for why. What this loop used to do instead was ask
                 // `cel.interpolation != nil` first, which is a test for *one* of the two derivation
                 // sources, so a cel animated purely by a transform key took the no-recipe exit and
                 // the canvas drew its resting ink at every frame of a move the export was animating.
-                switch canvasManager.livePreview(forCel: cel, atFrame: shownFrame,
-                                                 inheriting: poses[layerIndex]) {
+                switch shown.preview {
                 case .derived(let derived):
                     // **A blanked host renders nothing, so the picture would be thrown away** — TODO
                     // (53), and it is the whole of the fix rather than a saving on the margin.
@@ -2592,13 +2696,20 @@ struct CanvasView: UIViewRepresentable {
                     // the leaf. So this is RENDER.md §2.2 on the one path that was still
                     // compositing on the main thread.
                     //
+                    // **And while the compositor is drawing the canvas at all, none is rendered
+                    // here** — TODO (145). Every host but the active one is blanked then, which is
+                    // the paragraph above; the active one's picture is the live pair's middle,
+                    // minted off the main thread with the halves for the same key
+                    // (`LiveActivePicture`), so it is current whenever an edge un-blanks it — and
+                    // rendering it here as well would be the main-thread composite again, on the
+                    // pass every stroke's lift raises.
+                    //
                     // **Before the key check, and the ordering is load-bearing.** Skipping without
                     // recording the key leaves the memo naming whatever was last *rendered*, so the
-                    // pass on which the host un-blanks — a stroke starting, the sandwich disengaging
-                    // — finds the key moved and repaints. Recording it here instead would leave the
-                    // host holding a picture from a frame nobody is on, with the memo insisting it
-                    // is current.
-                    guard !host.isBlanked else { continue }
+                    // pass on which the sandwich disengages finds the key moved and repaints.
+                    // Recording it here instead would leave the host holding a picture from a frame
+                    // nobody is on, with the memo insisting it is current.
+                    guard sandwichPresentation == .disengaged else { continue }
                     // **The derivation is resolved before the key, and it is what the key is made
                     // of** — see `InterpolationPreviewKey`. That covers a pose with no extra work:
                     // `PosedCelIdentity` carries the resolved maps, so scrubbing to a frame the
@@ -2613,9 +2724,10 @@ struct CanvasView: UIViewRepresentable {
                     // which would resolve a second one from the ids. Same pixels — that function is a
                     // thin call through `derivedCelContent` — and one resolve instead of two on the
                     // path that runs every SwiftUI pass.
-                    host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full))
+                    host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full),
+                                                          covering: Self.inkCoverage(of: shown.cel))
                 case .motionGroupTint:
-                    updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
+                    updateMotionGroupOverlay(layer: layer, cel: shown.cel, host: host)
                 case .cleared:
                     // The seam's contract is that nil means "not yet" rather than "empty" — a recipe
                     // can be malformed while a reference is being re-picked — so the cel falls back
@@ -2630,8 +2742,7 @@ struct CanvasView: UIViewRepresentable {
         /// so an un-keyed render doesn't re-rasterise every keyframe on every SwiftUI pass. Its
         /// identity is a different *type* from a derivation's, which is what keeps the two from
         /// colliding on one cel — see `InterpolationPreviewKey`.
-        private func updateMotionGroupOverlay(layer: Layer, celIndex: Int, host: LayerHostView) {
-            let cel = layer.cels[celIndex]
+        private func updateMotionGroupOverlay(layer: Layer, cel: Cel, host: LayerHostView) {
             guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
                   let version = cel.vector?.version else {
                 interpolationPreviewKeys.removeValue(forKey: layer.id)

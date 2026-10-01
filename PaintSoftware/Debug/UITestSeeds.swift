@@ -38,7 +38,9 @@ enum UITestSeeds {
     }
 
     /// **Makes the pen-up render take long enough for a person to draw again inside it** —
-    /// `-uiTestSlowVectorRenderMillis <n>`, read by `StrokeCanvasView.startVectorRender`.
+    /// `-uiTestSlowVectorRenderMillis <n>`, read by `StrokeCanvasView.startVectorRender` and, for a
+    /// layer the compositor is drawing, by the live pair's middle (`CanvasView.Coordinator
+    /// .LiveActivePicture`), which is the pen-up render of a posed layer.
     ///
     /// BUGS.md's 2026-09-04 defect opens by saying it is *"confirmed by tracing every path that
     /// repaints the base, not measured"*, and the reason is timing: the window between a stroke
@@ -49,9 +51,9 @@ enum UITestSeeds {
     /// how it survived from 2026-09-04 to 2026-09-09.
     ///
     /// This makes it reachable by slowing the *one* thing whose duration the defect is about, and
-    /// nothing else: the sleep is on `StrokeCanvasView.renderQueue`, which is a background serial
-    /// queue whose only job is that rasterize. The main thread is untouched, so a test that stages
-    /// the race is still driving the app the artist drives.
+    /// nothing else: the sleep is on `StrokeCanvasView.renderQueue`, or on the sandwich's own queue
+    /// for the live pair, both background serial queues whose job is that rasterize. The main thread
+    /// is untouched, so a test that stages the race is still driving the app the artist drives.
     ///
     /// Simulator-only, on `applyTextureBudgetOverrideIfRequested`'s rule and for its reason: a flag
     /// that silently made a *device* build draw slower would be a report about a machine that does
@@ -65,6 +67,26 @@ enum UITestSeeds {
               let millis = Int(args[args.index(after: flag)]), millis > 0 else { return 0 }
         return TimeInterval(millis) / 1000
     }()
+
+    /// **Makes a bake take as long as it does on the owner's iPad** — `-uiTestSlowBakeMillis <n>`,
+    /// armed from `PaintApp.init` into `FrameBaker.compositeDelay`.
+    ///
+    /// TODO (145)'s latency is the time between an edit and its bake, MEASURED at 334–365 ms of
+    /// composite alone on the device and a few milliseconds here, so the picture the canvas shows
+    /// inside that window — the previous bake, or the edit's live pair — is unobservable from a test
+    /// without it. The sleep is on the baker's own worker queue and nowhere else, so a test that
+    /// widens the window is still driving the app the artist drives.
+    ///
+    /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    static func applyBakeDelayIfRequested() {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestSlowBakeMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return }
+        FrameBaker.compositeDelay = TimeInterval(millis) / 1000
+    }
 
     /// **How long a `CanvasNotice` stays up, when a test needs to read one.**
     ///
