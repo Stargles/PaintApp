@@ -228,7 +228,12 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
 
         let play = app.buttons["timeline.playButton"]
         XCTAssertTrue(play.waitForExistence(timeout: 5))
+        let idleLabel = play.label
         play.tap()
+        // The button is what says playback is on (`isPlaying`), independent of what the label of
+        // the frame counter happens to read at the instant it is sampled.
+        let playingLabel = play.label
+        XCTAssertNotEqual(playingLabel, idleLabel, "PREMISE: the transport button reads differently while playing")
         XCTAssertTrue(playheadIsAdvancing(app), "PREMISE: tapping Play sets the playhead running")
 
         for stagger in [0.0, 0.02] {
@@ -237,6 +242,8 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                                        delta: CGVector(dx: 60, dy: 40))
             XCTAssertNotEqual(readTransform(app), before,
                               "PREMISE (stagger \(stagger)): the two-finger drag panned the canvas")
+            XCTAssertEqual(play.label, playingLabel,
+                           "THE BUG: a two-finger pan (fingers \(stagger * 1000) ms apart) stopped playback")
             XCTAssertTrue(playheadIsAdvancing(app),
                           "THE BUG: a two-finger pan (fingers \(stagger * 1000) ms apart) stopped the playhead")
         }
@@ -244,6 +251,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         let before = readTransform(app)
         canvas.pinch(withScale: 1.5, velocity: 1.0)
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas")
+        XCTAssertEqual(play.label, playingLabel, "THE BUG: a pinch stopped playback")
         XCTAssertTrue(playheadIsAdvancing(app), "THE BUG: a pinch stopped the playhead")
         attach(app, "still-playing-after-pan-and-pinch")
 
@@ -251,8 +259,8 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         // ends playback.
         drawLine(on: canvas, from: CGVector(dx: 0.40, dy: 0.60), to: CGVector(dx: 0.60, dy: 0.60))
         XCTAssertTrue(playheadHasStopped(app), "CONTROL: a drawing touch must still stop the playhead")
+        XCTAssertEqual(play.label, idleLabel, "CONTROL: …and the transport button says so")
     }
-
 
 
     // MARK: - Shared
@@ -281,25 +289,32 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         attach(app, "\(what)-after-pan-and-pinch")
     }
 
-    /// Whether the frame label takes more than one value in a short look. The two-frame loop flips
-    /// every ~40 ms, so a playing playhead is seen on both frames within a handful of reads and a
-    /// stopped one never is.
+    /// Whether the playhead is moving: the frame label takes more than one value across a run of reads.
+    ///
+    /// **By count rather than by deadline, and at jittered intervals.** While playback runs the app
+    /// seldom idles, and XCUITest waits for idle before it resolves a query, so one read can cost
+    /// seconds — a deadline of a few seconds then held one or two samples, which saw one frame by
+    /// chance. A dozen reads of a two-frame loop all agreeing by chance is one in two thousand. And the
+    /// loop is 83 ms long (two frames at 24 fps), so a steady read cost could alias with it; the
+    /// jitter is what makes "never changed" mean something.
     private func playheadIsAdvancing(_ app: XCUIApplication) -> Bool {
-        let deadline = Date().addingTimeInterval(3)
         var seen = Set<Int>()
-        repeat {
+        for _ in 0..<12 {
             if let frame = readFrameLabel(app)?.current { seen.insert(frame) }
             if seen.count > 1 { return true }
-        } while Date() < deadline
+            Thread.sleep(forTimeInterval: Double.random(in: 0.003...0.09))
+        }
         return false
     }
 
+    /// Whether the playhead has stopped: the same frame on every one of a dozen jittered looks, taken
+    /// after the half second a settled touch needs.
     private func playheadHasStopped(_ app: XCUIApplication) -> Bool {
         Thread.sleep(forTimeInterval: 0.5)
         var seen = Set<Int>()
-        for _ in 0..<8 {
+        for _ in 0..<12 {
             if let frame = readFrameLabel(app)?.current { seen.insert(frame) }
-            Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: Double.random(in: 0.003...0.09))
         }
         return seen.count == 1
     }
