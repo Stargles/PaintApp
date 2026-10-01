@@ -48,43 +48,297 @@ rather than assuming it still holds.
 
 ---
 
-## (101) Streaming: the reconnect loop, and Nearby finds nothing on the iPad
+## The owner's 2026-10-01 brief — (111)–(146)
 
-**Status** — **fixed and merged (`4b0da3c`, installed at `01b4fcc`); the LAN half is owner-confirmed** (2026-09-25: *"LAN works"*).
-The Info.plist keys and the connect-failure classification are merged (`84647c3`; docs/STREAM.md
-§5.9). On the owner's iPad at `0e20568`, the owner, 2026-09-25: *"it keeps switching between
-reconnecting - the computer closed the..., and not streaming - paused. Next, the computer does not
-appear on the LAN."* They confirmed the iPad **is on the same Wi-Fi** as the laptop and **Local
-Network is allowed** for PaintSoftware — so the LAN failure was ours, not the device's.
+Thirty-six asks in one message. **Each number is 110 + the owner's own ask number**, so the owner's
+"ask 14" is (124). Where the owner said two asks are one task, they share an entry. Queue order below;
+the owner left the order to us. Every entry is the owner's words, then what is left.
 
-**The loop, from the laptop's log**: a new connection from `100.70.220.4` every ~1 s, each logged
-`new connection replaces previous client` — the iPad held two live clients to one laptop and the
-single-client server made them evict each other forever. Clients are keyed by `StreamEndpoint`'s
-host *string*, so one laptop reached as `100.104.85.111`, `desktop-cbr0fl6` or `DESKTOP-CBR0FL6.local`
-was two endpoints (the ambient last-used address plus a stream element that stored another
-spelling). A second live `CanvasManager` was the other hypothesis, read out of the code and ruled
-out: `closeFrameBaker()`/`stopAll()` has one call site and runs before every reassignment of
-`@State canvasManager`. **Fixed** (docs/STREAM.md §5.10/§6): the laptop's HELLO now carries a
-stable machine id, the coordinator collapses two spellings onto one client once both agree, and
-`ProtocolServer` tells an evicted client why before closing its socket so it parks instead of
-fighting back — MEASURED live against the laptop while the owner's own (then-unpatched) iPad was
-mid-loop.
+---
 
-**LAN**: three bugs found and fixed on the laptop side (STREAM.md §5.10/§6) — the mDNS advertiser
-had joined the multicast group on only the OS's default-route interface rather than the laptop's
-actual Wi-Fi NIC, the A record could carry the laptop's Tailscale address instead of its LAN one,
-and neither `ExclusiveAddressUse=false` nor RFC 6762's unicast-response ("QU") replies were
-handled. Confirmed at the network layer on the laptop itself (multicast group membership per NIC,
-the advertised address, coexistence with Windows' own Dnscache responder on UDP 5353) — **not yet
-confirmed by Nearby actually listing the laptop on the owner's own iPad**, which needs their device
-on their Wi-Fi to exercise for real.
+## (117) The bottom-dock menu closes when the canvas is panned — a regression
 
-- [x] One client per laptop (a stable machine id from the server, clients deduped on it), and an
-      evicted client told why and not retrying — so nothing ping-pongs. Pinned:
-      `ProtocolServerReplacementTests` (real sockets), `StreamBarStateLogicTests`; MEASURED against
-      the real laptop. Needs the iPad's own build updated to observe the client half directly.
-- [ ] Owner-confirmed on the iPad: a stream stays **Live** — no more alternating "Reconnecting — the
-      computer closed the connection" / "Not streaming — Paused". Then (101) leaves whole.
+**Status** — not started. *"This is one significant regression if I recall correctly: Right now, the
+menu type that appears on the bottom above the timeline exits if you try to move the canvas. This is
+the menu used for text, effect settings, and a bunch of other stuff. Interestingly, the same menu type
+I believe is used for the lasso and move, and those do not dissapear when the canvas is being moved.
+This is important because I want to be able to move the canvas while in an effect."* Session 43 made
+panels survive a two-finger pan by dismissing only on a *confirmed single* touch; find what reopened it
+and why lasso/Move are immune while text/effect are not — one rule for every dock menu, not a third patch.
+
+- [ ] Every bottom-dock menu survives a two-finger pan/zoom; a cold-start XCUITest per menu kind.
+
+## (130) Playback pauses when the canvas is panned or zoomed
+
+**Status** — not started. *"The playback pauses when the canvas is panned or zoomed. It should not."*
+
+- [ ] Playback keeps running through a pan and a pinch; pinned by a test that plays, pans, and reads
+      the playhead still advancing.
+
+## (118) An effect layer's settings are open whenever it is selected
+
+**Status** — not started. *"Right now in an effect, you have to click effect settings to bring up the
+editing menu. Just have it be there automatically when the effect layer is currently selected."*
+Pairs with (117): the menu must then also survive a pan.
+
+- [ ] Selecting an effect layer shows its settings bar with no extra tap; the "Effect Settings" button
+      goes if nothing else needs it.
+
+## (121) Outside the canvas is still canvas — one root fix
+
+**Status** — not started. *"If you make a line half inside the canvas half outside, make that into a
+smart shape, then try to move the node sitting outside the canvas, it does not let you. This is
+concerning, because that problem originally was fixed for move box nodes. The fact that it missed
+smartshape line nodes means that whatever fix was implemented was tagged on rather than a complete fix
+to the root cause which breaks the priority of keeping the architecture clean. Starting a brushstroke
+outside of canvas also does not work. Additionally, there was another fix in the past which made it
+possible to move the canvas using fingers outside the canvas. All these have a related point: whatever
+is outside the canvas still should be counted, as if the canvas does extend further, with the only
+difference being the stuff outside the border just isnt rendered. There is probably a lot of code which
+needs to be pruned and refactored for this to be a clean fix."*
+
+- [ ] One input surface that covers the whole editor area and maps every touch into unbounded document
+      space; the per-feature outside-the-canvas patches (Move box nodes, the surround pan) deleted, not
+      kept beside it.
+- [ ] Smart-shape nodes, Move nodes, a stroke started outside, and a pan from the grey all work by the
+      same path; cold-start XCUITests for each.
+
+## (125) Realtime feedback for every transform edit — with (136) and (140)
+
+**Status** — not started. The owner names these as one task:
+
+- **(125)** *"I've noticed that moving a transform layer is extremely laggy. I need proper realtime
+  feedback especially when I am recording my movement for keyframes. I wonder if you can use the same
+  sandwich thing that the brush uses to eliminate lag. It may also help to pause the background
+  renderer until the user raises their pen off the move tool, because the background renderer
+  re-renders every frame if a move is keyframed, and that move is adjusted."*
+- **(136)** *"Using the folder move is extremely laggy (as with all other move tools). This is similar to
+  ask 15, just for folders, since multiple layers are being moved at once. When moving the stuff inside
+  a folder, it should be realtime."*
+- **(140)** *"This is a similar thing with the move adjusting causing a lot of lag, editing the nodes on
+  a transform in the graph editor lags heavily. It should be real time. I feel like this fix and ask 15
+  should basically be the same task without the need for two separate mechanisms."*
+
+- [ ] One live-preview mechanism for a transform being edited — transform-layer Move, folder Move,
+      graph-editor node drag — measured before and after on the device-sized document.
+- [ ] The frame baker holds off while a transform edit is live and re-bakes once on release.
+
+## (124) A stroke drawn under a transform layer lands where it was drawn — with (145)
+
+**Status** — not started.
+
+- **(124)** *"Right now, put a move layer on top of a normal vector layer. When the user lays down a
+  stroke, that stroke does not get put down where the user wants it, because the move layer on top
+  moves it in compositing. Make it so the stroke the user lays down is properly transformed so whatever
+  they draw accurately reflects the position the stroke gets set in."*
+- **(145)** *"In the recording 02226 (42kb), I place a stroke, then undo, then place a stroke and undo
+  again. The first stroke briefly appears the second time I undo. Also, the undos are latent. I'd
+  estimate around 400ms. I suspect it is because it has two transform layers above it. With ask 14, I
+  hope this issue gets fixed."* The recording is `recording-20261001-002226.jsonl`, pulled to
+  `~/PaintWork/evidence/`.
+
+- [ ] Input under a transform stack is mapped through the inverse of the stack's pose at the playhead,
+      live stroke included.
+- [ ] (145) re-checked after (124); if the flash or the ~400 ms undo survive it, root-caused separately.
+
+## (112) The stream says "paused" and stops updating until the artist draws
+
+**Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to
+update until I draw something on the canvas. It says stream paused. I wonder where that message even
+comes from, because it is separate to it being frozen manually through the freeze button. I'm not even
+sure why it exists at all. There could be a lot of other bugs with it not updating when it is supposed
+to, so an investigate. I will just explain the ideal behaviour: The streamer should update when the
+computer screen is changed. Whatever is shown on the computer screen should be on the ipad when the
+streamer is not frozen manually. There could be a lot of edge cases with this such as the streaming
+layer being hidden and then shown again, etc."*
+
+**Folds in (101)'s last check** — (101)'s reconnect loop and LAN discovery are fixed and
+owner-confirmed (`4b0da3c`, 2026-09-25: *"LAN works"*); what was left was the owner's word that a stream
+stays Live instead of reading "Paused", and this report is that word.
+
+- [ ] Every source of a "Paused" state found and named; any not owed to the manual Freeze removed or
+      made self-healing.
+- [ ] The stream redraws on every laptop frame while visible and unfrozen — hide/show, layer switch,
+      background/foreground, laptop lock/unlock — tested against `tools/stream/fake-streamer.py`.
+
+## (139) Keys, not keyframes — every channel component independent
+
+**Status** — needs owner rulings before a build. *"An update has to be done to the graph editor and key
+framing. First off, remove all notion of keyframes, everything should just be keys. Lets say we have a
+move option. The X and Y and rotation etc components keys should be fully independent from each
+other."* KEYFRAMES.md §2.26–§2.28 (the keyframe-mark workflow) and §2.5 (a transform key stores a quad)
+are what this reverses.
+
+- [ ] Rulings: what replaces the mark-then-edit workflow; what Distort's corners become.
+- [ ] Separate X / Y / rotation / scale channels with their own keys; `keyframeMarks` gone.
+
+## (131) Bake an effect, blend or transform layer into the layers below
+
+**Status** — needs owner rulings before a build. *"Right now, there is the option to merge down effects
+layers with the layer below them. This is an incomplete implementation. Instead, replace that buttons
+function with baking: lets say you have 2 layers and a blend mode value layer or effect layer above it.
+When that layer bakes, it should adjust the color of all the strokes/objects etc affected below it. In
+this case, it is both the layers below. Add the same feature for transform layers."*
+
+- [ ] Rulings: what a spatial effect (blur, bloom, glow, outline) does to a vector stroke; how an
+      animated transform layer bakes (per frame, like Bake Animation?).
+- [ ] Merge Down's effect arm replaced by Bake; the same for transform layers.
+
+## (128) The gradient is an object in a vector layer, not a layer property
+
+**Status** — not started. *"revise the gradient feature. Currently it seems to be a property of the
+layer. Remove all that and make sure nothing is left. It is supposed to be an object in the vector
+layer."* (103) shipped it as `ValueFill.gradient`; that goes whole.
+
+- [ ] A gradient element in `VectorCanvas`, movable and selectable; `ValueFill.gradient` and every
+      path that reads it deleted.
+
+## (129) Rectangle and Ellipse are solid shapes, not smart shapes
+
+**Status** — not started. *"the rectangle and ellipse objects in the add menu should not be smart
+shapes. They should be entirely solid shapes. I think the best way to implement them may be to make it
+the same type of shape as what the fill tool lays down."*
+
+- [ ] Add → Rectangle / Ellipse lay down a fill element of the fill tool's own type.
+
+## (113) Fill: mend the gap to a neighbouring fill
+
+**Status** — not started. *"The fill tool should have an option (in the drop down menu) where it
+exudes a particular behavior. Say we have fill selection A, and then selection B, separated by a line.
+Currently when fill A and B are filled independantly, it leaves a tiny unfilled region between these
+two regions directly under the line. The option should have fill B smartly detect its edge is near fill
+A, and mend the gap (extend fill B to touch fill A). This should work in both lasso and flood modes."*
+
+- [ ] An option in the fill menu; B grows to meet A under the line in flood and lasso modes; tested by
+      rendered pixels (no unfilled seam), not by stored geometry alone.
+
+## (114) Fill: an extension buffer for "Canvas Edge is a boundary"
+
+**Status** — not started. *"In the fill tool, under Canvas Edge is a boundary, there should be an
+extension buffer slider, like if i set it to 100px, then the canvas edge fill boundary will be extended
+100px into the padding."*
+
+- [ ] A slider under the toggle; the boundary sits that many document pixels out into the padding.
+
+## (115) The font picker shows each font in itself
+
+**Status** — not started. *"When adding text and selecting the font, I currently have no idea what the
+fonts look like. Make the fonts font in the selector menu the actual font."*
+
+## (116) Edit a text box from the Select tool
+
+**Status** — not started. *"When I select a textbox with the select tool, there should be another edit
+option to edit the text, which will bring up the text menu, and I can change it in real time. It also
+should bring up the move box for that text where I can move it."*
+
+## (119) The eyedropper can sample the layer itself, ignoring what is composited over it
+
+**Status** — not started. *"In the colour picker menu, add a small switch on the top right which
+switches the eyedropper between two modes: the first is its current behaviour, and the second should be
+that the eyedropper choses the colour of the thing it is over in the layer that it is in. For example if
+I add an effect or blend mode on top, it does not affect it. This should be the default. This is also
+one of the things the canvas should remember so if the user exits and enters back, it sticks."*
+
+- [ ] The switch, layer mode the default, persisted per document.
+
+## (120) An image's Move box is far bigger than the image
+
+**Status** — not started. *"When moving an image, right now the move box is vastly bigger than the
+actual bounding box of the image itself. Fix that."*
+
+## (146) A second finger makes a Move precise
+
+**Status** — not started. *"When in the move menu, add a thing where if the user presses a finger onto
+the canvas while moving the box with their pen, it makes the move more precise, like 5x less than the
+pen's movement. This should work with recording movement too."*
+
+## (135) Folder Move: every frame or this cel
+
+**Status** — not started. *"If you click on edit on a folder and then click on move, you can move
+everything inside the folder. However that only moves everything that is in the current cel. Make the
+user have the option in the move menu for folders (the one that has keep stroke width, etc.) to select
+between moving things in all frames, or just that cel."*
+
+## (134) A folder cannot be dragged below another folder
+
+**Status** — not started. *"make two folders, then try to move the top folder down below the other.
+You can't. Fix this."*
+
+## (122) Timeline: a sticky frame row, seconds when zoomed out, 1.5× taller
+
+**Status** — not started. *"the animation timeline shows the frame number in the top row. When there
+are a lot of layers, this top row should still remain on the top and not disappear when scrolling down.
+When the timeline iszoomed out it should display seconds instead of frames. Also make it around 1.5x
+taller."*
+
+## (123) Timeline: pinch-zoom while panning, as the canvas does
+
+**Status** — not started. *"The animation timeline supports zooming in and out with two fingers, but it
+seems that it does not support zooming while panning sideways like the canvas move. Make it do so. I
+wonder if you can reuse the canvas pan/zoom code for this to cut clutter."*
+
+## (126) Export straight to Photos
+
+**Status** — not started. *"The export right now saves to files, if possible I'd like it to be saved as
+an image (like in the camera roll) directly from the menu. It just needs to pop up in google photos so I
+can access it easily."*
+
+## (127) Export: include the padding (default off)
+
+**Status** — not started. *"When I render, there should be an option to include the padding in the
+render (default off)."*
+
+## (133) Settings: draw the canvas padding over the artwork (default on)
+
+**Status** — not started. *"In the settings menu as part of canvas padding, add the option to render
+canvas padding on top (not below), default on. This means that the canvas border wont get covered up by
+the drawings."*
+
+## (132) Direction-following brushes: messy stroke start and end
+
+**Status** — not started. *"For brushes which rotation follows the direction of the stroke, the start
+and end of those brushes are messy. I have left a recording to prove this ending in 02122, 50kb."* The
+recording is `recording-20261001-002122.jsonl`, pulled to `~/PaintWork/evidence/`.
+
+## (143) Top bar order: gallery, settings, actions, add, select, move — then the name
+
+**Status** — not started. *"In the top menu, rearrange the icons into this order from left to right:
+gallery, settings, actions, add, select, move. Then in the middle top should be the canvas name (to the
+right of all those icons)."*
+
+## (142) New layers are "Layer N" (vector) and "Raster N"
+
+**Status** — not started. *"Instead of the default title for vector layers being "Vector 1, 2, etc",
+just change it into "Layer 1, 2, etc.". For raster layers make them "Raster 1, 2, etc."*
+
+## (137) Shorter Move and Select menus
+
+**Status** — not started. *"In the move menu, remove the text "strokes you move are stored exactly...",
+it takes up way too much space, especially vertical space. In the selection menu, remove "what the loop
+catches", and "draw a selection on the canvas with the mode above...". Same issue, takes too much
+vertical space."*
+
+## (141) The colour wheel type is remembered
+
+**Status** — not started. *"The color wheel type resets to classic (square) every time the canvas is
+exited and re-entered."*
+
+## (138) Onion skin: the two opacity sliders are independent
+
+**Status** — not started. *"In the onion skin edit menu when you change the opacity of the frames in
+front of or before it, one side right now is anchored. What I mean by that is that the user should be
+able to take the rightmost slider for example and adjust it, and the opacity of the left slider does
+not change. Vice versa with the left."*
+
+## (144) A slimmer left-side slider rail
+
+**Status** — not started. *"The left side menu (with the size, opacity adjusters) I think could be made
+a lot slimmer for more space efficiency."*
+
+## (111) A Favourites brush folder
+
+**Status** — not started. *"Add a brush favorites folder and favorite Rough Ink, Technical Pen - Fine,
+round soft, opaque round, and round hard."*
 
 ---
 

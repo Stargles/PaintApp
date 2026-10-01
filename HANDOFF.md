@@ -20,7 +20,7 @@ folder (CLAUDE.md "Build and test", first paragraph), so every worktree lives at
 end this by granting Xcode Full Disk Access; nobody has yet. `~/PaintWork/deploy` is a detached
 worktree kept for device builds — `git -C ~/PaintWork/deploy checkout --detach origin/main` and build.
 
-**TODO (101)'s reconnect loop is fixed, merged from `tmp/pingpong`** — one client per laptop by a
+**(101)'s reconnect loop is fixed, merged from `tmp/pingpong`** — one client per laptop by a
 server-minted machine id, and an evicted client parks instead of fighting back (docs/STREAM.md
 §5.10/§6). MEASURED against the real laptop while the owner's own (then-unpatched) iPad was
 mid-loop. Three LAN mDNS bugs on our own side fixed too (multicast joined the wrong interface, the
@@ -39,8 +39,8 @@ runs to its timeout. **Fast tier at close: 4331 / 4327 passed / 0 failed / 4 ski
 Release, reconciled against a static `func test` count — the full UI suite has not been run since
 `tmp/pingpong` merged.
 
-**The owner's iPad has `01b4fcc`** (Release, installed 2026-09-25 with the (101) fix; profile to
-2026-10-01T01:27Z — unchanged, the build reused the existing profile rather than minting a new one).
+**The owner's iPad has `fe036df`** (Release, installed by the re-signer 2026-09-30; profile to
+2026-10-08T03:16Z).
 **Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
 slept 2026-09-20 → 23, the profile lapsed, and iOS asked the owner to re-trust the developer. The
 certificate itself has not changed since 2026-07-20.
@@ -51,26 +51,20 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**First: (101)'s last check** — the fix is installed (`01b4fcc`) and the owner confirmed Nearby/LAN
-works on 2026-09-25 (*"LAN works"*). What is left is their word that a stream now stays Live instead
-of alternating "Reconnecting — the computer closed the connection" / "Not streaming — Paused"; then
-(101) leaves TODO whole.
+**The owner's 2026-10-01 brief, (111)–(146), is the queue** — thirty-six asks recorded in TODO.md in
+the order this pass works them (number = 110 + the owner's ask number). Session 46 is working it in
+lanes under a cap of one Opus or two Sonnet workers at once; **check `git worktree list` and the
+`tmp/*` branches for what is in flight** — this file names lanes only when they merge.
 
-**Owner-side, in queue order:**
+- **Needs owner rulings before a build**: (139) keys-not-keyframes, (131) Bake. Their questions go to
+  the owner through the question tool, not prose.
+- **Evidence on disk**: the two recordings the brief cites, `recording-20261001-002122.jsonl` ((132))
+  and `-002226.jsonl` ((145)), were pulled off the iPad into `~/PaintWork/evidence/`.
+- **(101) is folded into (112)**: the reconnect loop and LAN are fixed and confirmed; the owner's
+  "stream paused" report is the answer to (101)'s last check.
 
-1. **Feel the new build**: (101) above, plus the freeze (a two-finger drag with the Effect menu open
-   now recovers by itself — and if the canvas ever repairs a freeze, a badge says so and a
-   `flight-…jsonl` lands in Settings → Recordings; send it), the colour picker against the
-   reference, the + and gear icons, Cut/Copy/Paste, the rename sheet, the slider % beside the size
-   pop-up, a video at 12 fps, To New Layer's cel span.
-2. **BUGS.md's newest entry**: since `f77df00` the colour panel shows one palette row above the fold;
-   is that what the owner wants?
-3. **(27) stage 5** — unchanged: stream Blender, measure latency, the device tick, Ctrl+V, the
-   blend-mode limitation.
-
-**Then ask the owner what to pick up** — the queue is the "Later" features and the deprioritised three.
-**16k canvases** would need the display rebuilt around screen-sized tiles; it was offered as a design
-conversation, not started.
+**Owner-side, unchanged**: (27) stage 5 (stream Blender, latency, the device tick, Ctrl+V, the
+blend-mode limitation) and BUGS.md's palette-row question.
 
 ## What shipped this session
 
