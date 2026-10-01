@@ -22,9 +22,11 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         add(shot)
     }
 
-    /// **The picture's box, dragged twice: alone, and with a finger landing beside it after the drag
-    /// began.** The first is the control — and the proof that the baseline is read correctly, since a
-    /// count that is off by one would slow it. The second is the owner's gesture.
+    /// **The picture's box, dragged three times: alone, with a finger landing beside it after the drag
+    /// began and drifting as a resting finger does, and with one that rests perfectly still.** The first
+    /// is the control — and the proof that the baseline is read correctly, since a count that is off by
+    /// one would slow it. The second is the owner's gesture, and a drift is what a two-finger pan is
+    /// made of. The third lifts as a tap, which is what commits a box when nothing is dragging it.
     ///
     /// **A finger already down when the drag begins (a resting palm) is not driven here**, and not for
     /// want of trying: the event synthesiser re-issues a touch's identity when a second finger lands
@@ -69,7 +71,16 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         XCTAssertEqual(readTransform(app), transform,
                        "…and the finger that slowed the drag did not pan the canvas: it is where it was")
 
-        attachScreen("vector-box-after-the-two-drags")
+
+        // 3. The same, with the second finger resting perfectly still and lifting as a tap — the case
+        // that would put the box down under the pen if the tap-away were still offered the touch.
+        let third = CGVector(dx: afterPrecise.midX, dy: afterPrecise.midY)
+        try dragWithAFingerHeldBeside(canvas, from: third, delta: drag, holding: aside)
+        let afterStill = try XCTUnwrap(settledMoveBox(app),
+                                       "the box is still up: a finger that lifts as a tap away from it did not commit it")
+        XCTAssertEqual((afterStill.minY - afterPrecise.minY) / controlTravel, 0.2, accuracy: 0.06,
+                       "…and it was slowed just the same")
+        attachScreen("vector-box-after-the-three-drags")
     }
 
     /// **The same on the raster Move box**, which is the recordable one's mechanism: ten pans on a
@@ -127,6 +138,14 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
                       "the finger that lifted away from the box did not bake the piece")
         XCTAssertEqual(readTransform(app), transform, "…and it did not pan the canvas")
-        attachScreen("raster-box-after-the-two-drags")
+
+        // The finger that rests perfectly still lifts as a tap: with nothing dragging the piece that
+        // is what bakes it.
+        try dragWithAFingerHeldBeside(canvas,
+                                      from: CGVector(dx: centre.dx, dy: centre.dy + controlTravel + preciseTravel),
+                                      delta: drag, holding: CGVector(dx: 0.20, dy: 0.60))
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
+                      "a still finger lifting as a tap away from the box did not bake the piece")
+        attachScreen("raster-box-after-the-three-drags")
     }
 }
