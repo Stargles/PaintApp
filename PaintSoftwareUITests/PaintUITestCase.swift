@@ -115,6 +115,23 @@ class PaintUITestCase: XCTestCase {
         return frameLabel.waitForExistence(timeout: 10)
     }
 
+    /// One space-separated field of `canvas.host`'s accessibility label, with its `prefix` removed, or
+    /// `?(label)` when it is not there. XCUITest can read neither a recognizer's state nor a view's
+    /// transform, so `CanvasView.Coordinator.publishCanvasState` writes what a test needs to ask —
+    /// `xform:`, `text:`, `shape:`, `sandwich:` — onto that one label.
+    func readField(_ app: XCUIApplication, _ prefix: String) -> String {
+        let label = app.otherElements["canvas.host"].label
+        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix(prefix) }) else {
+            return "?(\(label))"
+        }
+        return String(field.dropFirst(prefix.count))
+    }
+
+    /// The `xform:` field — "scale,rotation,dx,dy" — which moves exactly when the canvas does.
+    func readTransform(_ app: XCUIApplication) -> String {
+        readField(app, "xform:")
+    }
+
     /// Parses the "Frame N/M" label into (current, total), both 1-based as displayed.
     func readFrameLabel(_ app: XCUIApplication) -> (current: Int, total: Int)? {
         let label = app.staticTexts["timeline.frameLabel"]
@@ -497,6 +514,17 @@ class PaintUITestCase: XCTestCase {
         let layersButton = app.buttons["toolbar.layersButton"]
         XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
         layersButton.tap()
+    }
+
+    /// Shuts the layer rail, and the options panel hanging off it, leaving the canvas clear.
+    ///
+    /// **An effect layer's settings bar is on screen *with* the rail since TODO (118)** — it is there
+    /// because the layer is selected, and the rail is how another is — where it used to stand the rail
+    /// down for as long as it was up. A test that reads the artwork's pixels or taps the canvas shuts
+    /// the rail itself, and the bar surviving that is the point rather than a convenience.
+    func closeLayerRail(_ app: XCUIApplication) {
+        let layersButton = app.buttons["toolbar.layersButton"]
+        if layersButton.isSelected { layersButton.tap() }
     }
 
     /// Adds a vector layer through the panel's "+" menu, with the panel **already open** — the

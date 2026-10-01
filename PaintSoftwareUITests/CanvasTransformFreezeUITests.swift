@@ -558,22 +558,9 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         return after
     }
 
-    /// The `xform:` field of `canvas.host`'s accessibility label — "scale,rotation,dx,dy".
-    private func readTransform(_ app: XCUIApplication) -> String {
-        readField(app, "xform:")
-    }
-
     /// The `shape:` field — "none" / "following" / "adjustable". See `publishCanvasState`.
     private func readShapeState(_ app: XCUIApplication) -> String {
         readField(app, "shape:")
-    }
-
-    private func readField(_ app: XCUIApplication, _ prefix: String) -> String {
-        let label = app.otherElements["canvas.host"].label
-        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix(prefix) }) else {
-            return "?(\(label))"
-        }
-        return String(field.dropFirst(prefix.count))
     }
 
     /// Just the dx,dy half of an `xform:` value — the part that only moves when the gesture anchored

@@ -17,16 +17,6 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
     }
 
-    /// The `xform:` field of `canvas.host`'s accessibility label — "scale,rotation,dx,dy", the one
-    /// place the navigation transform is legible to a test (`CanvasTransformFreezeUITests`).
-    private func readTransform(_ app: XCUIApplication) -> String {
-        let label = app.otherElements["canvas.host"].label
-        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix("xform:") }) else {
-            return "?(\(label))"
-        }
-        return String(field.dropFirst("xform:".count))
-    }
-
     /// **TODO (79)(b) removed the permanent percentage badge this used to read**, and the obvious
     /// replacement does not work: a plain SwiftUI `Slider`'s own accessibility `.value` is usually a
     /// reliable reading (`BrushEditorUITests`' `brushPanel.base.hardness` relies on exactly that), but

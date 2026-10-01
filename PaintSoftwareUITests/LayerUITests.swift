@@ -802,22 +802,20 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     }
 
     /// The owner's 2026-08-27 ask, as behaviour: *"the effect settings menu right now takes beside
-    /// the layers menu. Those two things take up about 80% of the canvas, making it hard to see what
-    /// you are editing … the menu is on the bottom, like the same kind of menu that the lasso or move
-    /// tool uses."*
+    /// the layers menu … the menu is on the bottom, like the same kind of menu that the lasso or move
+    /// tool uses."* — and TODO (118)'s, which took the tap out of it: *"Just have it be there
+    /// automatically when the effect layer is currently selected."*
     ///
-    /// **Three assertions, and the second is the one that would be forgotten.** That the knobs are
-    /// *there* is the easy half; that the layer rail has stood down is the half that makes the change
-    /// worth anything, because the rail and its options panel are the larger part of what the artist
-    /// could not see past. The third is the return trip — the rail comes back, with the same node's
-    /// options still open, which is the whole reason `showingEffectSettings` is kept apart from
-    /// `layerOptionsID` rather than folded into it.
+    /// **Three assertions.** The knobs are *there* with no tap — the layer is current the moment it is
+    /// made. They are at the bottom of the window. And they are **beside the layer rail rather than
+    /// over it**: the rail stays up, because it is how the artist picks another layer, and a bar that
+    /// shared its screen with the options panel by sitting on top of Duplicate and Delete would be a
+    /// bar that cannot coexist with the thing that selects it (`DrawingView.dockClearance`).
     ///
-    /// **The geometry assertion is deliberately coarse.** "In the bottom half of the window" is what
-    /// an XCUITest can honestly say about a layout; the exact 560×300 card is a design decision that
-    /// should be free to change without a red test. What must not change silently is which end of the
-    /// screen it is at.
-    func testEffectSettingsOpenAsABottomBarAndStandTheLayerRailDown() throws {
+    /// **The geometry assertions are deliberately coarse.** "In the bottom half of the window" and "left
+    /// of the options panel" are what an XCUITest can honestly say about a layout; the exact card is a
+    /// design decision that should be free to change without a red test.
+    func testAnEffectLayersSettingsAreABottomBarBesideTheRailWithNoTap() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
@@ -826,36 +824,27 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         let rail = app.tables["layerPanel.list"]
         XCTAssertTrue(rail.waitForExistence(timeout: 5), "Sanity: the rail is up and holding the options panel")
 
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5),
-                      "A value layer in effect mode offers the Effect Settings row")
-        openKnobs.tap()
-
         // Brightness / Contrast is what `addEffectLayerFromAddMenu` creates, so these are its knobs.
         let brightness = app.sliders["effectSettings.brightness"]
-        XCTAssertTrue(brightness.waitForExistence(timeout: 5), "The row opens the grade's knobs")
+        XCTAssertTrue(brightness.waitForExistence(timeout: 5),
+                      "The effect layer is current, so its knobs are up with no tap")
         XCTAssertTrue(app.sliders["effectSettings.contrast"].exists)
+        XCTAssertFalse(app.buttons["layerOptions.effectSettings"].exists,
+                       "…and there is no Effect Settings row left to tap")
 
-        XCTAssertFalse(rail.exists, """
-            The layer rail is still up behind the effect bar. Moving the 240pt knob panel to the \
-            bottom while leaving the ~440pt rail over the artwork does not answer the complaint the \
-            change is for — see DrawingView's rail, which stands down while `effectBeingEdited` is \
-            non-nil exactly as the Select panel stands down for the Move bar.
+        XCTAssertTrue(rail.exists, "The rail is still up behind the bar: it is how another layer is picked")
+        let rename = app.buttons["layerOptions.rename"]
+        XCTAssertTrue(rename.exists, "…with the layer's options open beside it")
+        XCTAssertLessThan(app.sliders["effectSettings.contrast"].frame.maxX, rename.frame.minX, """
+            The bar sits over the options panel. With the rail up beside it the bar has to keep to the \
+            rail's left, or it covers the very rows (Duplicate, Delete) the open options exist for.
             """)
-        XCTAssertFalse(openKnobs.exists, "…and the options panel went with it")
 
         let window = app.windows.element(boundBy: 0).frame
         XCTAssertGreaterThan(brightness.frame.minY, window.midY, """
             The knobs are not in the bottom half of the window, so they are not the "same kind of \
             menu that the lasso or move tool uses" the owner asked for.
             """)
-
-        app.buttons["layerOptions.subMenuBack"].tap()
-
-        XCTAssertTrue(rail.waitForExistence(timeout: 5), "Back brings the rail back…")
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5),
-                      "…with the same node's options still open, rather than at the bare stack")
-        XCTAssertFalse(brightness.exists)
     }
 
     /// The owner's follow-up to the bar above, same day: *"Try to make that menu shorter vertically
@@ -881,10 +870,6 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)   // Brightness / Contrast: two sliders, the short case.
 
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
-        openKnobs.tap()
-
         let header = app.staticTexts["layerOptions.subMenuTitle"]
         XCTAssertTrue(header.waitForExistence(timeout: 5))
         let contrast = app.sliders["effectSettings.contrast"]
@@ -904,19 +889,15 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             this failed while every other assertion in this test still passed.
             """)
 
-        // Back to the rail, flip the same layer to Levels (five sliders, the tall case) through its
-        // Blend Mode menu — the same menu `addEffectLayerFromAddMenu` used to pick Brightness/Contrast
-        // in the first place — then reopen the settings bar.
-        app.buttons["layerOptions.subMenuBack"].tap()
+        // Flip the same layer to Levels (five sliders, the tall case) through its Blend Mode menu —
+        // the same menu `addEffectLayerFromAddMenu` used to pick Brightness/Contrast in the first
+        // place. The bar follows the grade, so there is nothing to reopen.
         let modeButton = app.buttons["layerOptions.blendModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
         modeButton.tap()
         let levelsItem = app.buttons["layerOptions.blendMode.levels"]
         XCTAssertTrue(levelsItem.waitForExistence(timeout: 5), "The Blend Mode menu lists Levels")
         levelsItem.tap()
-
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
-        openKnobs.tap()
 
         let header2 = app.staticTexts["layerOptions.subMenuTitle"]
         XCTAssertTrue(header2.waitForExistence(timeout: 5))

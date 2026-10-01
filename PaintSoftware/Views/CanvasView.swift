@@ -1805,8 +1805,9 @@ struct CanvasView: UIViewRepresentable {
             // frame flip moves it — which queued *two canvas-sized composites per playback tick* for
             // a pair of images nothing on screen was ever going to show: at rest the presentation is
             // `.rest` and `sandwichFull` is the only image displayed, and the one state that reads
-            // `sandwichHalves` is entered from `onStrokeBegan`, whose `onAnyTouchBegan` calls
-            // `canvasTouchLanded()` and stops playback before the first dab. PERFORMANCE.md §5
+            // `sandwichHalves` is entered from `onStrokeBegan`, and the touch that begins a stroke
+            // stops playback (`canvasInteractionBegan`: at once for a pencil, a moment later for a
+            // finger, which has to be watched first — `CanvasTouchSettle`). PERFORMANCE.md §5
             // filed this as "every playback tick still computes the two halves nobody sees"; it is
             // this line, and it is the third of the three costs RENDER.md §2.2 forbids on this path.
             //
@@ -3308,24 +3309,13 @@ struct CanvasView: UIViewRepresentable {
                 self.strokeAccompanyingFingers = fingers
                 self.refreshShapeConstraint()
             }
-            recognizer.onAnyTouchBegan = { [weak self] in
-                // Touching the canvas at all — any finger count — ends a live take. Closing the
-                // bottom-docked panels (Effect Settings included) waits for `onSingleTouchBegan`
-                // below, so a two-finger pan/pinch/rotate's first finger does not take them down
-                // before the second arrives to say this was never a stroke — TODO (67), the owner's
-                // report naming Colour Wheels.
-                //
-                // **`mayContinueTake` is true here and nowhere else** — KEYFRAMES.md §7 stage 10.
-                // This is the one entry point that can become a timing stroke, so it is the one that
-                // must not end the take it is part of. A take is stopped by playback stopping, and
-                // every other caller of this method still stops it.
-                self?.canvasManager.canvasTouchLanded(mayContinueTake: true)
-            }
-            recognizer.onSingleTouchBegan = { [weak self] in
-                // The panel-closing half — see `canvasInteractionBegan`'s own doc. Same
-                // `mayContinueTake` reasoning as `onAnyTouchBegan` above: this can still be the touch
-                // that becomes a timing stroke.
-                self?.canvasManager.canvasInteractionBegan(mayContinueTake: true)
+            // The canvas touch's one entry — see `CanvasManager.canvasInteractionBegan`.
+            // **`mayContinueTake` is true here** (KEYFRAMES.md §7 stage 10): this is the entry that
+            // can become a timing stroke, so it must not end the take it is part of. A finger is
+            // watched before it counts (it may be the first of a two-finger pan); a pencil acts at once.
+            recognizer.onSingleTouchBegan = { [weak self] touch in
+                self?.canvasManager.canvasInteractionBegan(mayContinueTake: true,
+                                                           mayBeATransform: touch.type != .pencil)
             }
         }
 
@@ -3501,6 +3491,7 @@ struct CanvasView: UIViewRepresentable {
             // touch lifts, every other recognizer here should be back in `.possible` — see
             // `strandedCheckDelay` for how soon.
             touchCounter.onTouchesChanged = { [weak self] total, _ in
+                self?.canvasManager.canvasTouchCountChanged(total)
                 self?.refreshShapeConstraint()
                 if total == 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + Self.strandedCheckDelay) {
@@ -3510,6 +3501,9 @@ struct CanvasView: UIViewRepresentable {
             }
             install(touchCounter, on: host)
             touchCountRecognizer = touchCounter
+            // A new counter starts at zero, so the count the manager last heard (from a counter this
+            // one replaces) is stale — and a stale two would make every finger look like a companion.
+            canvasManager.canvasTouchCountChanged(0)
 
             let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
             threeFingerTap.numberOfTouchesRequired = 3
@@ -3673,7 +3667,7 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// A touch on the box is a touch on the canvas, so it does what every other canvas touch
         /// does first: `canvasInteractionBegan`, with `mayContinueTake` true because the box is
-        /// KEYFRAMES.md §5's second recordable surface, exactly as `strokeRecognizer.onAnyTouchBegan`
+        /// KEYFRAMES.md §5's second recordable surface, exactly as `strokeRecognizer.onSingleTouchBegan`
         /// passes true for §7's — the touch that continues a take must not be the one that stops it.
         /// Then the take itself, `beginMoveBoxTake`, which may start one — after the canvas-touch
         /// rule for the reason `StrokeCanvasView.handleBegin` orders its own take after it: what the
@@ -3691,7 +3685,7 @@ struct CanvasView: UIViewRepresentable {
         /// `MoveBoxCommitUITests.testDraggingAGripClosesAnOpenTopBarDropdown` pins it, at touch-down
         /// like every other canvas touch.
         func moveBoxTouchDown() {
-            canvasManager.canvasInteractionBegan(mayContinueTake: true)
+            canvasManager.canvasInteractionBegan(mayContinueTake: true, mayBeATransform: true)
             canvasManager.beginMoveBoxTake()
         }
 
@@ -3747,7 +3741,7 @@ struct CanvasView: UIViewRepresentable {
             // to refuse still has to close whatever popover or dropdown is sitting over the canvas.
             // This was the app's one bare `interactionBegan.send()` until 2026-08-26 — see that
             // function's own comment for how a clean merge produced it.
-            canvasManager.canvasInteractionBegan()
+            canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
             // the same mapping `handleFillPress` uses.
@@ -4119,9 +4113,8 @@ struct CanvasView: UIViewRepresentable {
         /// **Dismissing the open menu is unconditional.** Touching the canvas with a single touch
         /// closes whatever top-bar dropdown is open — that is what
         /// `StrokeGestureRecognizer.onSingleTouchBegan` does on every layer that *can* be drawn on,
-        /// fired before its own pencil-only gate for exactly this reason (TODO (67) narrowed this
-        /// from `onAnyTouchBegan`, which fired on a two-finger touch-down too; see that property's
-        /// own doc). On this path it did not happen at all: the notice states are precisely the states
+        /// fired before its own pencil-only gate for exactly this reason. On this path it did not
+        /// happen at all: the notice states are precisely the states
         /// in which `reconcileLayers` turns the active host's interaction off, so that host's
         /// recognizer never sees the touch and neither signal ever runs, and nothing here sent the
         /// signal either. The result was that with the layer panel open, tapping the canvas to close
@@ -4147,7 +4140,8 @@ struct CanvasView: UIViewRepresentable {
             // .recordingOwnsMoveBox` is the narrow answer and carries the whole argument; the
             // menu-dismissing half below is untouched, because closing a dropdown mid-take is right.
             canvasManager.canvasInteractionBegan(
-                mayContinueTake: canvasManager.recordingOwnsMoveBox)
+                mayContinueTake: canvasManager.recordingOwnsMoveBox,
+                mayBeATransform: recognizer.lastTouchType != .pencil)
             // `Tool.paintsOnCanvas`, not a second spelling of the same three cases: this path exists
             // to explain why a touch that *would have drawn* did not, so it is asking `shouldInteract`'s
             // tool clause over again and must give the same answer. The fill and the eyedropper have
@@ -4210,7 +4204,7 @@ struct CanvasView: UIViewRepresentable {
             switch recognizer.state {
             case .began:
                 // Continuing to fill dismisses whatever top-bar dropdown is open.
-                canvasManager.canvasInteractionBegan()
+                canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
                 // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
                 // source flag rather than off a third copy of the preference, so the fill path and the
                 // stroke path cannot drift apart.
@@ -4326,7 +4320,7 @@ struct CanvasView: UIViewRepresentable {
             guard let container = containerView else { return }
             // Before the gate, as every canvas touch is: a declined finger still closes an open
             // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
-            canvasManager.canvasInteractionBegan()
+            canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             guard !eyedropperPickInFlight else { return }
             // **Rule (i)**, the same line the other four container recognizers now open with: with

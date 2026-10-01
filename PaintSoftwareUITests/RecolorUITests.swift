@@ -103,11 +103,9 @@ final class RecolorUITests: PaintUITestCase {
                       "Recolour is in the effect catalogue, so it is in the mode menu")
         recolourItem.tap()
 
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5), "A value layer in effect mode offers Effect Settings")
-        openKnobs.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up")
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up the moment the grade is picked, with no extra tap")
+        closeLayerRail(app)
         XCTAssertEqual(title.label, "Recolour")
 
         // 3.
@@ -228,7 +226,6 @@ final class RecolorUITests: PaintUITestCase {
         XCTAssertTrue(recolourItem.waitForExistence(timeout: 5), "Recolour should be reachable in the menu")
         recolourItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let addColour = app.buttons["effectSettings.recolorAddEntry"]
         XCTAssertTrue(addColour.waitForExistence(timeout: 5))
         addColour.tap()

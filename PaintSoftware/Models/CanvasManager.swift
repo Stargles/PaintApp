@@ -1584,6 +1584,21 @@ final class CanvasManager: ObservableObject {
     /// close themselves on any outside touch (`AnchoredMenuRouter`).
     let interactionBegan = PassthroughSubject<Void, Never>()
 
+    /// The lone finger `canvasInteractionBegan` is waiting on, if there is one — see
+    /// `CanvasTouchSettle`.
+    private var touchSettle = CanvasTouchSettle()
+
+    /// Cancels the timer that will end the watch, or nil when none is running.
+    private var cancelSettleWindow: (() -> Void)?
+
+    /// Starts the watch window's timer and returns the way to cancel it. A seam so a logic test can
+    /// settle a finger by hand instead of by sleeping; the default is the main queue.
+    var scheduleSettleWindow: (TimeInterval, @escaping () -> Void) -> () -> Void = { delay, work in
+        let item = DispatchWorkItem(block: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        return { item.cancel() }
+    }
+
     // MARK: - Open presentations
 
     /// Which of the editor's presentations are on screen right now.
@@ -1604,23 +1619,74 @@ final class CanvasManager: ObservableObject {
         ActionRecorder.ifRecording { $0.model("presentation.dismissed", presentation.rawValue) }
     }
 
-    /// **The touch-agnostic half of a canvas touch, TODO (67).** Ends a take that should not
-    /// continue — the one part of "a touch has landed on the canvas" that is safe to act on before
-    /// the recognizer knows how many fingers are involved, because a running take does not care how
-    /// many fingers are under it.
+    /// **The one place a canvas touch becomes an interaction**, and the only place that decides what
+    /// it closes and stops: playback ends (unless a take may carry on through it), and the
+    /// `activePanel` subscribers close the top-bar dropdowns and the layer rail. Called from every
+    /// canvas-touch site in `CanvasView` — `strokeRecognizer.onSingleTouchBegan`, `handleMoveBoxCommit`,
+    /// `moveBoxTouchDown`, `handleTextPress`, `handleCatchAllTap`, `handleFillPress` and
+    /// `handleEyedropperPress` — rather than a `.send()` at each of them.
     ///
-    /// **Split out of what is now `canvasInteractionBegan` because `strokeRecognizer.onAnyTouchBegan`
-    /// fires on *every* touch, including the first half of a simultaneous two-finger canvas
-    /// pan/pinch/rotate** — indistinguishable, at that instant, from a drawing touch. Routing that
-    /// signal through the *whole* of `canvasInteractionBegan` closed the bottom-docked settings panels
-    /// (Effect Settings, Text, Select, …) out from under the gesture before the second finger ever
-    /// arrived to say this was never a stroke — the owner's report, naming Colour Wheels. The
-    /// panel-closing half waits for `canvasInteractionBegan`, called only once
-    /// `strokeRecognizer.onSingleTouchBegan` confirms the touch is not one of a batch.
+    /// **A finger is not an interaction until it has been watched** (`CanvasTouchSettle`), and that is
+    /// the whole of TODO (117) and (130). A hand lands the two fingers of a pan 10–20 ms apart, so the
+    /// first reaches the canvas alone and looks exactly like the tap or stroke it is not; acting on it
+    /// closed the effect settings bar and the text panel and stopped the playhead before the second
+    /// arrived. Every earlier answer — a pinch-only `onSingleTouchBegan`, a state-driven `StreamBar`
+    /// that no touch can close — protected one menu from one site. This protects all of them from all
+    /// of them, because what moved is when the touch counts, not which menu it reaches.
     ///
-    /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
-    ///   from — the drawing canvas (§7), or the Move box (§5). See the `stopPlayback` call below.
-    func canvasTouchLanded(mayContinueTake: Bool = false) {
+    /// - Parameters:
+    ///   - mayContinueTake: whether this touch is on a surface a live take can keep recording from —
+    ///     the drawing canvas (§7), or the Move box (§5). A take ends when playback does, so a
+    ///     touch that is part of one must not be what stops it.
+    ///   - mayBeATransform: whether this touch might be the first finger of a two-finger transform.
+    ///     True for a finger; false for the pencil, which cannot be half of one and so acts at once,
+    ///     and for a tap that has already lifted. It is false by default because acting at once is
+    ///     what a caller that has not thought about it expects, and what every logic test written
+    ///     before this parameter asserts.
+    func canvasInteractionBegan(mayContinueTake: Bool = false, mayBeATransform: Bool = false) {
+        guard mayBeATransform else {
+            touchSettle.supersede()
+            endSettleWindow()
+            settleInteraction(mayContinueTake: mayContinueTake)
+            return
+        }
+        apply(touchSettle.fingerLanded(mayContinueTake: mayContinueTake))
+    }
+
+    /// The host's `TouchCountRecognizer` reports how many touches are on the canvas, which is what
+    /// tells a watched finger it is no longer alone (`CanvasTouchSettle.touchCountChanged`).
+    func canvasTouchCountChanged(_ total: Int) {
+        apply(touchSettle.touchCountChanged(to: total))
+    }
+
+    private func apply(_ verdict: CanvasTouchSettle.Verdict) {
+        switch verdict {
+        case .nothing:
+            break
+        case .watch:
+            holdPlayback()
+            cancelSettleWindow = scheduleSettleWindow(CanvasTouchSettle.window) { [weak self] in
+                guard let self else { return }
+                self.cancelSettleWindow = nil
+                self.apply(self.touchSettle.windowElapsed())
+            }
+        case .settled(let landing):
+            endSettleWindow()
+            settleInteraction(mayContinueTake: landing.mayContinueTake)
+        case .transform:
+            endSettleWindow()
+            releasePlaybackHold()
+        }
+    }
+
+    private func endSettleWindow() {
+        cancelSettleWindow?()
+        cancelSettleWindow = nil
+    }
+
+    /// A canvas touch that is an edit, a tap or a stroke, and not half of a transform: what it
+    /// stops and what it closes.
+    private func settleInteraction(mayContinueTake: Bool) {
         // A touch that is about to become an edit ends playback. The playhead moving under the
         // artist's hand is the whole hazard: a tick lands mid-gesture, `currentFrame`'s `didSet`
         // commits the float and clears the selection through `handleActiveContextChanged`, and the
@@ -1642,40 +1708,18 @@ final class CanvasManager: ObservableObject {
         // not.** `handleCatchAllTap` fires on every touch on a layer with no drawing surface — which
         // a transformation layer is by definition — so on that one layer kind the touch that starts
         // a Move-box take arrived here and ended it, and the artist was told "Nothing was recorded"
-        // for a drag they had just made. The comment above used to name "a catch-all tap" among the
-        // sites that correctly stop a take; that is now true only when the box is *not* the thing
-        // the take is recording, and `CanvasManager.recordingOwnsMoveBox` is the predicate that
+        // for a drag they had just made. `CanvasManager.recordingOwnsMoveBox` is the predicate that
         // splits the two. Found by driving the feature, invisible to every model-level test.
         //
         // **Arming needs no exception.** Arming starts nothing, so playback is not running when the
         // first pen lands; this stops nothing, and `startRecording` calls `play()` a moment later.
         // It is the *second* stroke of a take that would otherwise end it here, and `stopPlayback`
         // ends a take outright (see its own comment).
-        if !(mayContinueTake && isRecording) { stopPlayback() }
-    }
-
-    /// The single entry point for "a touch has landed on the canvas **and it is not part of a
-    /// two-finger transform**": `canvasTouchLanded` above, then tells the `activePanel` subscribers,
-    /// which close the bottom-docked panels and the top-bar dropdowns.
-    ///
-    /// What is load-bearing is that there is one function, called from all **seven** canvas-touch
-    /// sites in `CanvasView`, rather than a `.send()` at each of them. Named rather than counted,
-    /// because a number on its own cannot be checked against anything:
-    ///
-    /// `strokeRecognizer.onSingleTouchBegan`, `handleMoveBoxCommit`, `moveBoxTouchDown`,
-    /// `handleTextPress`, `handleCatchAllTap`, `handleFillPress`, `handleEyedropperPress`.
-    ///
-    /// **"Not part of a two-finger transform" is the best the sites can say, not a guarantee.** A hand
-    /// lands its two fingers 10–20 ms apart, in two events (`recording-20260923-200911`), so the first
-    /// finger of a pan reaches the stroke recognizer alone and the catch-all's zero-duration press
-    /// begins on it. What that closes is SwiftUI chrome, which strands nothing when it goes
-    /// mid-gesture — MEASURED with the layer rail closing under a staggered two-finger drag. The
-    /// stranding was a UIKit presentation's gate, and the editor has none (`CanvasPresentation`).
-    ///
-    /// - Parameter mayContinueTake: whether this touch is on a surface a live take can keep recording
-    ///   from — the drawing canvas (§7), or the Move box (§5). See `canvasTouchLanded`.
-    func canvasInteractionBegan(mayContinueTake: Bool = false) {
-        canvasTouchLanded(mayContinueTake: mayContinueTake)
+        if mayContinueTake && isRecording {
+            releasePlaybackHold()
+        } else {
+            stopPlayback()
+        }
         interactionBegan.send()
     }
 
@@ -2952,6 +2996,7 @@ final class CanvasManager: ObservableObject {
         playbackTimer?.invalidate()
         playbackTimer = nil
         playbackClock = nil
+        playbackHeld = false
         isPlaying = false
         // **A take cannot outlive the clock it is timed against** — KEYFRAMES.md §5. Playback stops
         // from four places besides the record button (the end of the scene, a canvas touch, the play
@@ -2966,10 +3011,35 @@ final class CanvasManager: ObservableObject {
         if isPlaying { stopPlayback() } else { play() }
     }
 
+    /// Whether the tick source is paused without playback having stopped — see `holdPlayback`.
+    private var playbackHeld = false
+
+    /// **Pauses the playhead for the moment it takes to learn what a finger on the canvas is**, and
+    /// does not stop playback. A lone finger may be about to draw — and a stroke cannot have the
+    /// playhead move under it (`settleInteraction`) — or may be the first of the two fingers of a
+    /// pan, in which case playback was never supposed to notice (TODO (130)). Holding is the answer
+    /// that is right for both: the ticks wait, then `stopPlayback` ends it for a stroke, or
+    /// `releasePlaybackHold` resumes it for a transform.
+    ///
+    /// **Not while a take is recording**, whose clock is the performance: pausing it would leave a
+    /// gap in what is being captured, and a touch that continues a take has nothing to wait for.
+    func holdPlayback() {
+        guard isPlaying, !isRecording else { return }
+        playbackHeld = true
+    }
+
+    /// Resumes a held playhead **from where it stands**: the clock is rebased, so the time spent
+    /// held is not owed back as skipped frames.
+    func releasePlaybackHold() {
+        guard playbackHeld else { return }
+        playbackHeld = false
+        playbackClock?.rebase(at: playbackNow())
+    }
+
     /// Hands the playhead whatever frames the wall clock says are due, and stops playback if that
     /// ran off the end. Called by the tick source, and directly by tests driving `playbackNow`.
     func tickPlayback() {
-        guard isPlaying, var clock = playbackClock else { return }
+        guard isPlaying, !playbackHeld, var clock = playbackClock else { return }
         let due = clock.take(at: playbackNow(), fps: fps)
         playbackClock = clock
         guard due > 0 else { return }

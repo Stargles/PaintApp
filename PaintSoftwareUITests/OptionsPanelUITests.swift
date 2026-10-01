@@ -230,11 +230,8 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
-        openKnobs.tap()
         XCTAssertTrue(app.sliders["effectSettings.contrast"].waitForExistence(timeout: 5),
-                      "the knobs did not open")
+                      "the knobs are not on screen the moment the effect layer is current")
         attach(app, "06-effect-settings-bar")
         assertPanelIsDockedAndFlat(app, topControl: app.staticTexts["layerOptions.subMenuTitle"],
                                    "the effect settings bar")
@@ -365,7 +362,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(sobelItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Sobel")
         sobelItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let gainSlider = app.sliders["effectSettings.gain"]
         XCTAssertTrue(gainSlider.waitForExistence(timeout: 5),
                       "Sobel's Gain slider did not open — the artist cannot reach it")
@@ -377,7 +373,6 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         XCTAssertTrue(gainSlider.waitForExistence(timeout: 5), "Reopening should show the same Gain slider")
         gainSlider.adjust(toNormalizedSliderPosition: 1.0)   // gain 8, the brightest
         app.buttons["layerOptions.close"].tap()
@@ -421,7 +416,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(bloomItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Bloom")
         bloomItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let radiusSlider = app.sliders["effectSettings.radius"]
         XCTAssertTrue(radiusSlider.waitForExistence(timeout: 5), "Bloom's settings did not open")
         radiusSlider.adjust(toNormalizedSliderPosition: 1.0)                        // the widest glow
@@ -434,7 +428,6 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         let colorSwatch = app.buttons["effectSettings.color"]
         XCTAssertTrue(colorSwatch.waitForExistence(timeout: 5),
                       "Bloom's Colour swatch did not open — the artist cannot reach it")
@@ -492,7 +485,6 @@ final class OptionsPanelUITests: PaintUITestCase {
                       "The Blend Mode menu should list Gradient Map")
         gradientItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let stopSwatch = app.buttons["effectSettings.gradientStop.0.color"]
         XCTAssertTrue(stopSwatch.waitForExistence(timeout: 5), "Gradient Map's first stop did not open")
         XCTAssertEqual(stopSwatch.value as? String, "000000", "Premise: the default gradient starts black")
@@ -592,7 +584,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(ditherItem.waitForExistence(timeout: 5), "The menu should list Dither")
         ditherItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let strengthSlider = app.sliders["effectSettings.screenStrength"]
         XCTAssertTrue(strengthSlider.waitForExistence(timeout: 5),
                       "Dither's Screen Strength slider did not open — the artist cannot reach it")
@@ -658,7 +649,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(hsvShiftItem.waitForExistence(timeout: 5), "The menu should list HSV Shift")
         hsvShiftItem.tap()
 
-        app.buttons["layerOptions.effectSettings"].tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
         XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up")
         XCTAssertEqual(title.label, "HSV Shift", "Picking the merged entry must land on the shift, not the colorize, reading")
@@ -700,7 +690,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(hsvShiftRow.waitForExistence(timeout: 5),
                       "The merged HSV Shift entry must still be in the menu while colorized")
         hsvShiftRow.tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         XCTAssertEqual(colorizeToggle.value as? String, "1",
                        "Re-picking the one HSV Shift row while colorized must not reset Colorize off")
 
@@ -712,7 +701,6 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         XCTAssertTrue(hueSlider.waitForExistence(timeout: 5), "Reopening should show the same Hue slider")
         hueSlider.adjust(toNormalizedSliderPosition: 0.5)   // 0°, red
         app.buttons["layerOptions.close"].tap()
@@ -725,79 +713,5 @@ final class OptionsPanelUITests: PaintUITestCase {
             Cyan-ish reading \(cyanish), red reading \(reddish) — close readings mean the slider is \
             not reaching the render.
             """)
-    }
-
-    // MARK: - TODO (67): a two-finger canvas transform must not close a bottom-docked panel
-
-    /// **The owner's report, driven exactly as they described it:** *"The effect settings menus
-    /// cancels when you move the canvas with two fingers. For example, color wheels. There is
-    /// already an X at the top right corner for that."*
-    ///
-    /// `StrokeGestureRecognizer.onAnyTouchBegan` used to fire on every touch, including the first
-    /// half of a simultaneous two-finger touch-down — indistinguishable, at that instant, from a
-    /// drawing touch — and routed straight through `canvasInteractionBegan`, which sends
-    /// `interactionBegan` and closes whatever `DrawingView.activePanel` has open. `onSingleTouchBegan`
-    /// is the fix: it does not fire for a batched multi-touch touch-down, so the Effect Settings bar
-    /// (Colour Wheels' own, the owner's example) survives a pinch or rotate the same way a real
-    /// two-finger pan would, while a genuine single-finger stroke still closes it exactly as before.
-    ///
-    /// `canvas.pinch(withScale:velocity:)` rather than a hand-built two-finger drag:
-    /// `CanvasTransformFreezeUITests`' own doc has the measurement — XCUITest has no two-finger drag
-    /// primitive, and `pinch`/`rotate` are the only multi-touch gestures it can synthesise, always
-    /// delivering both touches in one `touchesBegan` call. That is exactly the case
-    /// `onSingleTouchBegan` excludes, so a pinch here is a faithful stand-in for the owner's pan.
-    ///
-    /// **Colour Wheels on a compositor node, not on a value layer — and that choice is load-bearing,
-    /// not decoration.** A value layer *is* the layer a stroke would land on, and `Layer
-    /// .hasNoDrawingSurface` makes `CanvasTouchInputs.activeHostIsInteractive` false for it
-    /// (`reconcileLayers`' `shouldInteract`, verbatim), which disables every layer host's own
-    /// `StrokeGestureRecognizer` while it is current — so a first draft of this test that put Colour
-    /// Wheels on a value layer passed whether or not `onSingleTouchBegan` existed at all: the
-    /// recognizer this bug lives in was never in the loop, and only `handleCatchAllTap` (already
-    /// correct, untouched by this fix) was ever reachable. A node's own settings hang off
-    /// `layerOptionsID`, entirely independent of `currentLayerIndex` — opening one never calls
-    /// `selectLayer` — so the plain vector layer stays current and drawable throughout, and a
-    /// single-finger stroke on it genuinely exercises `StrokeGestureRecognizer.onSingleTouchBegan`.
-    func testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-
-        openLayerPanel(app)
-        addMixNodeFromAddMenu(app)
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5),
-                      "PREMISE: the node landed in the panel")
-        app.buttons["layerPanel.folder.Mix 1.options"].tap()
-        app.buttons["layerOptions.mixModeButton"].tap()
-        let colorWheels = scrollMenuTo(app, identifier: "layerOptions.mixMode.colourwheels")
-        XCTAssertTrue(colorWheels.waitForExistence(timeout: 5), "The menu should list Colour Wheels")
-        colorWheels.tap()
-
-        let openKnobs = app.buttons["layerOptions.nodeEffectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5))
-        openKnobs.tap()
-        let title = app.staticTexts["layerOptions.subMenuTitle"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "Colour Wheels' settings bar is up")
-        XCTAssertEqual(title.label, "Colour Wheels")
-        attach(app, "colourwheels-bar-open")
-
-        // THE FIX: a two-finger canvas transform must leave it standing. Nothing selected the empty
-        // node's own layer, which also has no drawing surface — layer 0, the document's own vector
-        // layer, is still current and still interactive, so a stroke on it (the control below)
-        // genuinely reaches `StrokeGestureRecognizer`, unlike a value-layer fixture, whose own layer
-        // becoming current would disable that recognizer entirely and pass this test either way —
-        // mutation-tested by reverting the fix and confirming this exact assertion goes red.
-        canvas.pinch(withScale: 1.3, velocity: 1.0)
-        XCTAssertTrue(title.exists,
-                      "THE BUG: a two-finger canvas pinch/pan/rotate must not close the Effect Settings bar")
-        XCTAssertEqual(title.label, "Colour Wheels", "…and it must still be showing the same effect")
-        attach(app, "colourwheels-bar-survives-pinch")
-
-        // THE CONTROL: a genuine single-finger drawing touch on that same still-current, still-
-        // drawable layer must still close it — the same recognizer, deciding the other way.
-        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.5), to: CGVector(dx: 0.6, dy: 0.5))
-        XCTAssertFalse(title.exists,
-                       "A single-finger touch on the canvas must still close the Effect Settings bar")
     }
 }

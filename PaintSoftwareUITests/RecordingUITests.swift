@@ -187,7 +187,6 @@ final class RecordingUITests: PaintUITestCase {
         // unusable for the reason it was rebuilt: the slider is two menus away from the button.
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         let slider = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         XCTAssertEqual(record.value as? String, "armed",

@@ -168,6 +168,25 @@ extension CanvasManager {
         }
     }
 
+    /// **The grade whose settings bar belongs on screen because its layer is the one the artist is
+    /// on** — TODO (118), the owner: *"Right now in an effect, you have to click effect settings to
+    /// bring up the editing menu. Just have it be there automatically when the effect layer is
+    /// currently selected."* Nil when the current layer carries no grade.
+    ///
+    /// **`layerEffect`, which is the app's one answer to "is this layer an effect"** (`Layer
+    /// .layerEffect`'s own doc says so): a `.value` layer in effect mode, and a vector layer carrying a
+    /// grade through its ink (TODO (92)). It follows `currentLayerIndex` by whatever route that moves
+    /// — a rail row, a timeline name, a block, an undo — so there is nowhere for a bar to be left up
+    /// over a layer the artist has left, and nothing to close.
+    ///
+    /// Compositor *nodes* are not here. A node has no selected state in the rail (its row expands and
+    /// collapses), so its bar is still raised from its options — `DrawingView.effectBarTarget`.
+    var effectLayerOnBar: KeyframeTarget? {
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].layerEffect != nil else { return nil }
+        return .layer(id: layers[currentLayerIndex].id)
+    }
+
     /// **The container pose as stored on a target** — §4.4's transformation layer, and nothing on a
     /// folder: a folder poses nothing since TODO (71), whose Move lifts the folder's *contents* into
     /// the Move tool's own float instead. `storedEffect(of:)`'s shape one payload over, including its

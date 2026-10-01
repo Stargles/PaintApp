@@ -491,6 +491,9 @@
 		50AC8BF2E7512F7835F966C5 /* PaintSoftware/Resources/brushtip-stipple-specks.png in Resources */ = {isa = PBXBuildFile; fileRef = AC21EE11B6588BA210F44256 /* PaintSoftware/Resources/brushtip-stipple-specks.png */; };
 		A9F0449B88567B8F34B33C00 /* PaintSoftware/Resources/brushtip-chalk-block.png in Resources */ = {isa = PBXBuildFile; fileRef = E0E9851408E0E3F0095A83A3 /* PaintSoftware/Resources/brushtip-chalk-block.png */; };
 		EE85F5408AD35C8538CE4C53 /* PaintSoftware/Resources/brushtip-streak-dots-6.png in Resources */ = {isa = PBXBuildFile; fileRef = C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */; };
+		86110EBE4F016C37BA5C0581 /* CanvasTransformLeavesStandingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */; };
+		9380BCFCF1D23885509B796E /* CanvasTouchSettleLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */; };
+		7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -990,6 +993,9 @@
 		AC21EE11B6588BA210F44256 /* PaintSoftware/Resources/brushtip-stipple-specks.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-stipple-specks.png; sourceTree = "<group>"; };
 		E0E9851408E0E3F0095A83A3 /* PaintSoftware/Resources/brushtip-chalk-block.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-chalk-block.png; sourceTree = "<group>"; };
 		C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-streak-dots-6.png; sourceTree = "<group>"; };
+		3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTransformLeavesStandingUITests.swift; sourceTree = "<group>"; };
+		DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchSettleLogicTests.swift; sourceTree = "<group>"; };
+		560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchSettle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1330,6 +1336,8 @@
 				C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */,
 				7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */,
 				ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */,
+				3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */,
+				DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -1543,6 +1551,7 @@
 				B10B8B7F84AF90435CCA1189 /* PaintSoftware/Views/TextOverlayView.swift */,
 				65A4BE1A756E44ED0525E024 /* PaintSoftware/Models/BrushSizeCurve.swift */,
 				8C6E9D1FBEC27BB633717D9A /* PaintSoftware/Models/CanvasManager+BrushSize.swift */,
+				560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */,
 			);
 			name = "App sources shared with PaintSoftwareUITests";
 			sourceTree = "<group>";
@@ -2135,6 +2144,9 @@
 				976A5BDDC3FDF0305AB884D9 /* PaintSoftware/Views/TextOverlayView.swift in Sources */,
 				DEC0DE3F0000000000000004 /* InterpolationRenderLogicTests.swift in Sources */,
 				DEC0DE400000000000000002 /* InterpolationWorkflowLogicTests.swift in Sources */,
+				86110EBE4F016C37BA5C0581 /* CanvasTransformLeavesStandingUITests.swift in Sources */,
+				9380BCFCF1D23885509B796E /* CanvasTouchSettleLogicTests.swift in Sources */,
+				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

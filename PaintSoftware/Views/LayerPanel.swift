@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// **The layer rail's geometry, in one place** — what `DrawingView` lays the rail out with and what it
+/// reads to keep other things clear of it (the notice banner, and the bottom dock when an effect
+/// layer's bar is up beside the rail). Two copies of this arithmetic used to drift apart in comments
+/// each saying they mirrored the other.
+enum LayerRail {
+    /// The rail: just under half the canvas area, never more than 460.
+    static func width(in canvasWidth: CGFloat) -> CGFloat { min(canvasWidth * 0.46, 460) }
+    /// The per-layer options panel that hangs off the rail's leading edge, and the gap between them.
+    static let optionsWidth: CGFloat = 240
+    static let optionsSpacing: CGFloat = 10
+}
+
 struct LayerPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     /// The layer whose options popover is open. Owned by `DrawingView` so the popover can be drawn
@@ -245,20 +257,11 @@ struct LayerPanel: View {
 struct LayerOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let layerID: UUID
-    /// Whether this node's effect knobs are open — **`DrawingView`'s state, not this panel's**, since
-    /// 2026-08-27. The knobs are `EffectSettingsBar` now and they dock at the bottom of the screen
-    /// instead of replacing these rows, so the flag that raises them has to be visible to the view
-    /// that owns that slot. It stays a `Bool` rather than becoming part of `layerOptionsID` because it
-    /// answers a different question: *which* node's options are open, and *whether* its grade is being
-    /// tuned.
-    @Binding var showingEffectSettings: Bool
-    /// **`showingEffectSettings`'s twin, TODO (64).** A picked transform mode's rows — Rotate's
-    /// speed, Parallax's shares, Shake's amplitudes, Repeat's period — dock at the bottom of the
-    /// screen the same way and for the same reason (Levels is five sliders in a 240pt rail; Parallax
-    /// is a whole list). Kept apart from `showingEffectSettings` rather than folded into it: a
-    /// transform layer carries no effect in practice, but nothing about either flag's type enforces
-    /// that, and one flag standing for two independent questions would make one bar's open state
-    /// silently answer for the other's.
+    /// Whether the picked transform mode's rows — Rotate's speed, Parallax's shares, Shake's
+    /// amplitudes, Repeat's period — are docked at the bottom of the screen (TODO (64)), **`DrawingView`'s
+    /// state, not this panel's**: the bar they are in is a bottom bar in that view's ZStack, so the flag
+    /// that raises it has to be visible to the view that owns that slot. (An effect layer's grade has
+    /// no such flag — its bar is on screen because the layer is selected, TODO (118).)
     @Binding var showingTransformSettings: Bool
     var onClose: () -> Void
 
@@ -307,11 +310,9 @@ struct LayerOptionsPanel: View {
                              mask: canvasManager.layers[index].alphaMask,
                              onBack: { showingMaskMenu = false }, onClose: onClose)
                 } else {
-                    // **No effect branch here any more.** The knobs are `EffectSettingsBar`, docked at
-                    // the bottom of the screen by `DrawingView`, which also stands this whole rail down
-                    // while they are up — so there is nothing for this panel to render in that state
-                    // and rendering it anyway would put a second host under the bar for the same
-                    // `.effectOutlineColour` presentation.
+                    // **No effect branch here.** The knobs are `EffectSettingsBar`, docked at the
+                    // bottom of the screen by `DrawingView` for as long as this layer is the one the
+                    // artist is on, so there is nothing for this panel to render for them.
                     editRows(index: index)
                 }
             } else {
@@ -320,7 +321,7 @@ struct LayerOptionsPanel: View {
                     .padding()
             }
         }
-        .frame(width: 240)
+        .frame(width: LayerRail.optionsWidth)
         .background(Color.black.opacity(0.82))
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
@@ -328,9 +329,6 @@ struct LayerOptionsPanel: View {
         // The panel is reused in place when the artist opens another row's options (`DrawingView`
         // swaps the id, not the view), so the sub-menu has to be closed here rather than relying on
         // the state being torn down.
-        // `showingEffectSettings` is *not* reset here any more: it belongs to `DrawingView` now, which
-        // clears it in its own `onChange(of: layerOptionsID)` — the one place that sees the id change
-        // whether this panel is on screen or standing down behind the effect bar.
         .onChange(of: layerID) { _, _ in
             showingMaskMenu = false
         }
@@ -379,16 +377,11 @@ struct LayerOptionsPanel: View {
             // stamps one — would answer nil to both and fall into the effect branch with no effect to
             // edit. Effect mode *is* `layerEffect != nil`; everything else is flat colour, including
             // the layer that has not been given a colour yet, which is what the swatch is for.
-            if let effect = canvasManager.layers[index].layerEffect {
-                // Effect mode: the grade's knobs, behind a row rather than inline. Levels alone is
-                // five sliders and Gradient Map is a list, which is the same argument the Mask row
-                // made first — hence the same shape, the same chevron and the same Back button.
-                effectSettingsRow(title: effect.displayName,
-                                  identifier: "layerOptions.effectSettings") {
-                    showingEffectSettings = true
-                }
-                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-            } else if canvasManager.layers[index].kind == .value {
+            //
+            // **No effect branch**: in effect mode the grade's knobs are not behind a row here, they
+            // are `EffectSettingsBar`, docked at the bottom of the screen by `DrawingView` for as long
+            // as this layer is the one the artist is on (TODO (118)).
+            if canvasManager.layers[index].layerEffect == nil, canvasManager.layers[index].kind == .value {
                 // Flat colour or linear gradient: the layer's other either/or, right above whichever
                 // of the two rows below answers it — `ValueFill.gradient`'s doc argues why one field
                 // carries the choice rather than a mode enum beside it. Absent in effect mode, where
@@ -891,9 +884,8 @@ private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) ->
     .accessibilityValue(current.rawValue)
 }
 
-/// The "Effect Settings ▸" row — `maskRow`'s shape for `maskMenu`'s reason, and file-level for
-/// `maskRow`'s other reason: a layer's grade and a node's grade must not come to look like two
-/// different features because two panels drew the same row twice.
+/// A node's "Effect Settings ▸" row — `maskRow`'s shape for `maskMenu`'s reason: Levels is five
+/// sliders and Gradient Map is a list, and the rail is 240pt wide.
 ///
 /// A plain `Button` around the whole row here, unlike `maskRow`, which needs its texts queryable as
 /// `staticTexts` and so puts its tap target in an `.overlay` beside them. Nothing on this row is read
@@ -1635,9 +1627,11 @@ private func maskSubtitle(_ mask: AlphaMask?) -> String {
 struct FolderOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let folderID: UUID
-    /// `LayerOptionsPanel.showingEffectSettings`'s twin, for the same reason: §4.4's grade sits on
-    /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same bar — and since
-    /// that bar moved to the bottom of the screen, the same `DrawingView` state raises it.
+    /// Whether this node's grade is open — §4.4's grade sits on `LayerFolder` exactly as it sits on
+    /// `Layer`, so a node's knobs are the same bar, docked at the bottom of the screen, and
+    /// **`DrawingView`'s state** raises it. Unlike an effect layer's bar, which is on screen because
+    /// the layer is selected (TODO (118)), a node has no selected state in the rail to derive it
+    /// from, so the row below is how it is raised.
     @Binding var showingEffectSettings: Bool
     var onClose: () -> Void
 
@@ -1780,14 +1774,16 @@ struct FolderOptionsPanel: View {
                     .padding()
             }
         }
-        .frame(width: 240)
+        .frame(width: LayerRail.optionsWidth)
         .background(Color.black.opacity(0.82))
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
         // `LayerOptionsPanel`'s rule: the panel is reused in place when another node's options open,
         // so the sub-menu closes here rather than with the view. `showingEffectSettings` is
-        // `DrawingView`'s now and is cleared there, for the reason given at the layer panel's twin.
+        // `DrawingView`'s and is cleared there, in its own `onChange(of: layerOptionsID)` — the one
+        // place that sees the id change whether this panel is on screen or standing down behind the
+        // effect bar.
         .onChange(of: folderID) { _, _ in
             showingMaskMenu = false
         }

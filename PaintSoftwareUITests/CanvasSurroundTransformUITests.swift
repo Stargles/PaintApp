@@ -58,15 +58,4 @@ final class CanvasSurroundTransformUITests: PaintUITestCase {
         let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength)
         field.typeText(clear + value)
     }
-
-    /// The `xform:` field of `canvas.host`'s accessibility label — "scale,rotation,dx,dy", the
-    /// device `CanvasTransformFreezeUITests` reads for the same reason: XCUITest can read neither a
-    /// recognizer's state nor a view's transform.
-    private func readTransform(_ app: XCUIApplication) -> String {
-        let label = app.otherElements["canvas.host"].label
-        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix("xform:") }) else {
-            return "?(\(label))"
-        }
-        return String(field.dropFirst("xform:".count))
-    }
 }

@@ -999,7 +999,6 @@ private extension PaintUITestCase {
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
-        app.buttons["layerOptions.effectSettings"].tap()
         let slider = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         let before = try XCTUnwrap(Double(try XCTUnwrap(slider.value as? String)))
@@ -1011,7 +1010,6 @@ private extension PaintUITestCase {
         XCTAssertNotEqual(after, before, accuracy: 0.05,
                           "The slider did not move, so no key was written")
 
-        app.buttons["layerOptions.subMenuBack"].tap()
         app.buttons["toolbar.layersButton"].tap()
         return AuthoredCurve(start: before, end: after)
     }

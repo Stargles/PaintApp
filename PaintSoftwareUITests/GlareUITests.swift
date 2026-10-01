@@ -121,11 +121,9 @@ final class GlareUITests: PaintUITestCase {
         XCTAssertTrue(glareItem.waitForExistence(timeout: 5), "The Blend Mode menu must list Glare")
         glareItem.tap()
 
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5), "A value layer in effect mode offers Effect Settings")
-        openKnobs.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up")
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up the moment the grade is picked, with no extra tap")
+        closeLayerRail(app)
         XCTAssertEqual(title.label, "Glare")
 
         // 4.

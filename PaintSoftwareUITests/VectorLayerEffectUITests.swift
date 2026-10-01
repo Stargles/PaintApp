@@ -104,11 +104,9 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         let blurItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.gaussianblur")
         XCTAssertTrue(blurItem.waitForExistence(timeout: 5), "A vector layer's Blend Mode menu must list the effects")
         blurItem.tap()
-        let openKnobs = app.buttons["layerOptions.effectSettings"]
-        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5), "A vector layer with an effect offers Effect Settings")
-        openKnobs.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up")
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up the moment the grade is picked, with no extra tap")
+        closeLayerRail(app)
         XCTAssertEqual(title.label, "Gaussian Blur")
         let radius = app.sliders["effectSettings.radius"]
         XCTAssertTrue(radius.waitForExistence(timeout: 5), "The radius slider is on the bar")

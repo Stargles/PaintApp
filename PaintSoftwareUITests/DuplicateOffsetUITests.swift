@@ -93,10 +93,12 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu must list Duplicate Offset")
         item.tap()
 
-        // Its settings: the rows §5.6 promises, and the swatch's picker reachable by name.
-        app.buttons["layerOptions.effectSettings"].tap()
+        // Its settings: the rows §5.6 promises, and the swatch's picker reachable by name. The bar is
+        // up with no tap (TODO (118)); the rail it shares the screen with is shut so the canvas is
+        // clear for the box drag below.
         let adjustBox = app.buttons["effectSettings.adjustBox"]
         XCTAssertTrue(adjustBox.waitForExistence(timeout: 5), "The settings bar must offer Adjust Box")
+        closeLayerRail(app)
         XCTAssertEqual(app.buttons["effectSettings.regionButton"].value as? String, "Rim", "Rim by default — ruling 14")
         XCTAssertEqual(app.buttons["effectSettings.blendModeButton"].value as? String, "Normal")
         XCTAssertTrue(app.sliders["effectSettings.opacity"].exists, "…and an opacity slider — ruling 16")
@@ -149,9 +151,6 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         XCTAssertGreaterThan(written, 100, "The drag moved the copy right by a good way, in canvas pixels: \(written)")
         attach(app, "3-offset-x-written")
 
-        // The bar's Close hands back the rail, and the rail's own button puts it away: a clear canvas.
-        app.buttons["layerOptions.close"].tap()
-        openLayerPanel(app)
         attach(app, "4-after-the-drag")
 
         // What is drawn. Left half of the bar: the copy moved away, so it is the rim — red.

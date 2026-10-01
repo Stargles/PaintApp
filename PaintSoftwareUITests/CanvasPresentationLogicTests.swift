@@ -96,15 +96,15 @@ final class CanvasPresentationLogicTests: XCTestCase {
     // MARK: - What a canvas touch closes
 
     /// **`canvasInteractionBegan()` closes the panels and nothing else.** It is the single entry point
-    /// the seven canvas-touch sites in `CanvasView` call, and its `send()` is what closes the
+    /// the canvas-touch sites in `CanvasView` call, and its `send()` is what closes the
     /// bottom-docked panels and the top-bar dropdowns (`DrawingView`'s `activePanel`, which is view
     /// `@State` and cannot live on the manager).
     ///
     /// **It must not close a presentation**, and not because that would be redundant. A hand lands
-    /// its two fingers in two events, so this runs on the first finger of a two-finger pan; closing
-    /// from here is closing under a live gesture, which is exactly the shape of the freeze. The
-    /// presentations close through `AnchoredMenuRouter`, on the touch itself, with nothing a canvas
-    /// recognizer is bound to going with them.
+    /// its two fingers in two events, so a finger reaches here before it is known not to be the first
+    /// of a two-finger pan; closing from here is closing under a live gesture, which is exactly the
+    /// shape of the freeze. The presentations close through `AnchoredMenuRouter`, on the touch itself,
+    /// with nothing a canvas recognizer is bound to going with them.
     func testCanvasInteractionBeganSignalsOnceAndClosesNoPresentation() {
         let manager = CanvasFixture.manager()
         var signals = 0
@@ -117,24 +117,6 @@ final class CanvasPresentationLogicTests: XCTestCase {
         XCTAssertEqual(signals, 1, "`interactionBegan` has to fire — it is what closes the panels")
         XCTAssertEqual(manager.openPresentations, [.layerViewSelector],
                        "…and a canvas touch closes no presentation; the router does that")
-    }
-
-    /// **`canvasTouchLanded` runs on *every* canvas touch — the first finger of a two-finger
-    /// pan/pinch/rotate included — and must therefore close nothing** (TODO (67)): the panel-closing
-    /// `send()` lives in `canvasInteractionBegan`, which only a single touch reaches. The seam
-    /// `onSingleTouchBegan` is unreachable from this target (a real `UITouch`/`UIEvent` cannot be
-    /// constructed here), but the split itself is a model fact, and this is its model-level half.
-    func testCanvasTouchLandedDoesNotSignal() {
-        let manager = CanvasFixture.manager()
-        var signals = 0
-        let subscription = manager.interactionBegan.sink { signals += 1 }
-        defer { subscription.cancel() }
-
-        manager.canvasTouchLanded()
-        XCTAssertEqual(signals, 0, """
-            `canvasTouchLanded` must not send `interactionBegan` — a two-finger canvas transform's \
-            first finger reaches only this, and must not close the bottom-docked panels a stroke would.
-            """)
     }
 
     // MARK: - The half the compiler cannot check

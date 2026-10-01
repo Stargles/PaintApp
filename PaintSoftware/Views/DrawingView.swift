@@ -15,20 +15,23 @@ struct DrawingView: View {
     @State private var activePanel: ActivePanel = .none
     /// Layer whose options menu is open, shown to the left of the layer panel.
     @State private var layerOptionsID: UUID?
-    /// Whether `layerOptionsID`'s grade is being tuned — i.e. whether `EffectSettingsBar` is docked.
+    /// Whether the compositor node named by `layerOptionsID` has its grade open — i.e. whether
+    /// `EffectSettingsBar` is docked for it. **Nodes only**: an effect *layer's* bar is not raised, it
+    /// is on screen whenever that layer is the one the artist is on (`CanvasManager.effectLayerOnBar`,
+    /// TODO (118)), so no flag is needed and no tap.
     ///
-    /// **It lives here rather than in the options panel because the bar it raises does too.** Until
-    /// 2026-08-27 this was one `@State` inside `LayerOptionsPanel` and a second inside
-    /// `FolderOptionsPanel`, each swapping that panel's own rows for the knobs; the knobs are now a
-    /// bottom bar in this view's ZStack, and the flag had to come with them. Both panels still write
-    /// it — through a `Binding` — so the row that opens the knobs is still the row beside the grade.
+    /// **It lives here rather than in the options panel because the bar it raises does too.** The
+    /// knobs are a bottom bar in this view's ZStack, and the flag had to come with them. The node's
+    /// panel still writes it — through a `Binding` — so the row that opens the knobs is still the row
+    /// beside the grade. A node has no "selected" state in the rail to derive the bar from: its row
+    /// expands and collapses, and its options are a button of their own.
     ///
     /// **Not folded into `layerOptionsID`.** They answer different questions (*which* node's options
     /// are open versus *whether* its grade is being tuned), and keeping them apart is what lets Back
     /// put the rail back with the same options panel still open, rather than dumping the artist at the
     /// bare stack.
-    @State private var showingEffectSettings = false
-    /// `showingEffectSettings`'s twin, TODO (64): whether the picked transform mode's rows (Rotate's
+    @State private var showingNodeEffectSettings = false
+    /// `showingNodeEffectSettings`'s twin, TODO (64): whether the picked transform mode's rows (Rotate's
     /// speed, Parallax's shares, Shake's amplitudes, Repeat's period) are docked at the bottom of the
     /// screen. Kept apart from it rather than folded in — a transform layer carries no effect in
     /// practice, but nothing about either flag's type enforces that, and one flag doing both jobs
@@ -45,7 +48,7 @@ struct DrawingView: View {
     /// Which stroke tool's brush is open in the **full-screen** editor, or nil — BRUSH.md §2.24.
     ///
     /// **On this view rather than inside `StrokeSettingsPanel`, because the screen it raises is this
-    /// view's.** It is the same move `showingEffectSettings` made above and for the identical
+    /// view's.** It is the same move `showingNodeEffectSettings` made above and for the identical
     /// reason: the flag has to live where the surface does. It is deliberately *not* folded into
     /// `activePanel` — the editor is raised from the panel and covers it, so "which dropdown is
     /// open" and "is the editor up" are two questions, and `CanvasTouchOwner` is fed the first one
@@ -144,7 +147,8 @@ struct DrawingView: View {
                 // wide enough to show nesting and thumbnails, with the per-layer options menu
                 // hanging off its left edge.
                 //
-                // **It stands down while the effect bar is up**, which is the Select-panel rule one
+                // **It stands down while a bar raised from it is up** (a node's grade, a transform
+                // mode's rows), which is the Select-panel rule one
                 // surface over and the larger half of the owner's 2026-08-27 complaint: the rail and
                 // the options panel hanging off it are ~700 of the ~1,280 points of canvas width, and
                 // moving only the 240pt knob panel to the bottom would have left the artist looking at
@@ -156,7 +160,7 @@ struct DrawingView: View {
                 // term in any of the fourteen gates anyway — `ActivePanel`'s doc records that only
                 // `.select` is load-bearing to that question — so this could not have moved it even by
                 // accident.)
-                if activePanel == .layers && effectBeingEdited == nil && transformBeingEdited == nil {
+                if railIsOnScreen {
                     layerPanelRail
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 } else if activePanel != .none && activePanel != .layers {
@@ -182,8 +186,10 @@ struct DrawingView: View {
                 // because it is otherwise top-leading and the column below relies on being the
                 // full height.
                 GeometryReader { proxy in
-                    bottomDock(width: BottomDock.width(in: proxy.size.width))
-                        .frame(width: proxy.size.width, height: proxy.size.height)
+                    let clearance = dockClearance(canvasWidth: proxy.size.width)
+                    bottomDock(width: BottomDock.width(in: proxy.size.width - clearance))
+                        .frame(width: proxy.size.width - clearance, height: proxy.size.height)
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                 }
 
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
@@ -255,7 +261,7 @@ struct DrawingView: View {
         .animation(.easeInOut(duration: 0.2), value: canvasManager.isAnyPieceFloating)
         // Same argument again for the effect bar: the rail sliding out and the bar sliding up are one
         // transition, so they are keyed on the one value that drives both.
-        .animation(.easeInOut(duration: 0.2), value: showingEffectSettings)
+        .animation(.easeInOut(duration: 0.2), value: effectBarTarget)
         // TODO (64)'s twin of the line above, for the transform settings bar.
         .animation(.easeInOut(duration: 0.2), value: showingTransformSettings)
         .animation(.easeInOut(duration: 0.2), value: brushEditing?.idPrefix)
@@ -324,7 +330,7 @@ struct DrawingView: View {
             // rule, moved here with the flag. This is the one place that sees the id change whether
             // the options panel is on screen or standing down behind the bar; the panel's
             // `.onChange(of: layerID)` cannot see it while the panel is not being rendered.
-            if showingEffectSettings { showingEffectSettings = false }
+            if showingNodeEffectSettings { showingNodeEffectSettings = false }
             // TODO (64)'s twin of the line above, for the transform settings bar.
             if showingTransformSettings { showingTransformSettings = false }
         }
@@ -432,12 +438,14 @@ struct DrawingView: View {
         VStack(spacing: 10) {
             Spacer()
 
-            // The effect knobs (`EffectSettingsBar`) — the owner's 2026-08-27 ask. Raised by the Effect
-            // Settings row in a value layer's or a compositor node's options menu, and while it is up
-            // the layer rail that raised it stands down; see the rail's own comment above.
+            // The effect knobs (`EffectSettingsBar`) — the owner's 2026-08-27 ask. **On screen whenever
+            // the layer the artist is on is an effect layer** (TODO (118), the owner: *"Just have it be
+            // there automatically when the effect layer is currently selected."*), and raised from a
+            // compositor node's options menu for a node, which has no selected state to derive it
+            // from; while a node's is up the layer rail that raised it stands down — see the rail's
+            // own comment above.
             //
-            // Keyed on the *resolved* grade rather than on `showingEffectSettings` alone, and the two
-            // readers are the same expression, so the bar and the rail's suppression cannot disagree.
+            // Keyed on the *resolved* grade, so the bar and the rail's suppression cannot disagree.
             // That matters: an undo of the pick that created the grade — or, on a node, choosing a
             // blend mode, which `setMixBlendMode` clears the effect for — takes the effect away while
             // the bar is open. The old rail version fell back to its own edit rows in that state; here,
@@ -493,8 +501,11 @@ struct DrawingView: View {
                     // The Duplicate Offset's box, over *this* node's copy (TODO (61) stage 6). The
                     // model decides whether one comes up and says so if not.
                     onAdjustBox: { canvasManager.beginEffectBoxMove(for: editing.target) },
-                    onBack: { showingEffectSettings = false },
-                    onClose: { layerOptionsID = nil })
+                    // **A node's bar is a sub-menu of the options that raised it, so it can go Back to
+                    // them or close them; an effect layer's is not a sub-menu of anything** — it is
+                    // there because the layer is, and goes when the artist selects another.
+                    onBack: editing.raisedFromRail ? { showingNodeEffectSettings = false } : nil,
+                    onClose: editing.raisedFromRail ? { layerOptionsID = nil } : nil)
                 .bottomDockCard(width: width)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -604,24 +615,34 @@ struct DrawingView: View {
         .padding(.bottom, BottomDock.bottomInset(clearing: timelineOccupiedHeight))
     }
 
+    /// Which grade's bar is docked, and why — nil whenever the effect bar should not be on screen at
+    /// all.
+    ///
+    /// **Two sources, and the rail is a different thing to each.** A node's grade is *raised* from the
+    /// rail's options (`showingNodeEffectSettings`), so the rail stands down for it and Back puts it
+    /// back. An effect layer's is *selected* (`CanvasManager.effectLayerOnBar`): the bar is there
+    /// because the layer is current, which is why it needs no tap, no flag and no exit — and why the
+    /// rail, which is how the artist picks another layer, must stay. A node the artist explicitly
+    /// opened wins over the layer they happen to be on.
+    private var effectBarTarget: KeyframeTarget? {
+        if showingNodeEffectSettings, let id = layerOptionsID,
+           canvasManager.folders.contains(where: { $0.id == id }) {
+            return .folder(id: id)
+        }
+        return canvasManager.effectLayerOnBar
+    }
+
     /// The grade whose knobs are docked, and where an edit to it goes — nil whenever the effect bar
     /// should not be on screen at all.
     ///
-    /// **The two branches are `LayerOptionsPanel`'s and `FolderOptionsPanel`'s old sub-menu conditions,
-    /// unchanged and now in one place**, which is what lets `bottomDock` and the rail's suppression ask
-    /// the same question. `layerEffect` rather than `effect` on the layer side is load-bearing and was
-    /// so before this moved: it is nil unless the layer is a value layer in effect mode, so an undo
-    /// that takes the grade away closes the bar rather than leaving knobs over a layer that no longer
-    /// has one. The folder side reads `effect` because §4.4 puts the grade straight on `LayerFolder`.
+    /// **`effectBarTarget` names the grade home and this resolves it**, with a guard that is
+    /// load-bearing and was so before this moved: `storedEffect(of:)` is the layer's `layerEffect` —
+    /// nil unless the layer carries one — so an undo that takes the grade away closes the bar rather
+    /// than leaving knobs over a layer that no longer has one. A folder's reads `effect` directly,
+    /// because §4.4 puts the grade straight on `LayerFolder`.
     private var effectBeingEdited: EffectEditing? {
-        guard showingEffectSettings, let id = layerOptionsID else { return nil }
+        guard let target = effectBarTarget else { return nil }
         let frame = canvasManager.currentFrame
-
-        // Which of the two grade homes `layerOptionsID` names — and the *only* place this stage has to
-        // ask, because everything downstream of it takes a `KeyframeTarget` and the two arms are the
-        // same code from here on (§2.21).
-        let target: KeyframeTarget = canvasManager.folders.contains { $0.id == id }
-            ? .folder(id: id) : .layer(id: id)
 
         guard canvasManager.storedEffect(of: target) != nil,
               let resolved = canvasManager.resolvedEffect(of: target, atFrame: frame) else { return nil }
@@ -633,6 +654,7 @@ struct DrawingView: View {
             // `listedAnimationChannelIDs` — is what the channel list uses, and the two are documented
             // apart on `AnimationCurve.isAnimated`.
             animatedChannelIDs: Set(canvasManager.curvedEffectChannelIDs(of: target)),
+            raisedFromRail: target.isFolder,
             // Which of the two grade homes a whole-`Effect` write goes to is `setStoredEffect`'s
             // question now, resolved at write time — so a restack while the bar is open cannot send the
             // write to a neighbour, and the view holds no copy of that switch.
@@ -672,6 +694,8 @@ struct DrawingView: View {
         let effect: Effect
         let target: KeyframeTarget
         let animatedChannelIDs: Set<String>
+        /// Whether this bar is a sub-menu of the rail's options, and so has a Back and a close.
+        let raisedFromRail: Bool
         let onChange: (Effect) -> Void
     }
 
@@ -711,7 +735,7 @@ struct DrawingView: View {
         guard canvasManager.isAnyPieceFloating else { return false }
         switch activePanel {
         case .select: return true
-        case .layers: return effectBeingEdited != nil || transformBeingEdited != nil
+        case .layers: return railStandsDown
         default: return false
         }
     }
@@ -757,20 +781,40 @@ struct DrawingView: View {
         canvasManager.notice = nil
     }
 
+    /// Whether a bar raised from the rail's options is up — a node's grade, or a transform mode's
+    /// rows — so the rail stands down for it (`bottomDock`'s two `raisedFromRail` bars). An effect
+    /// layer's bar is not one of these: it is there because the layer is selected, and the rail is how
+    /// the artist selects another.
+    private var railStandsDown: Bool {
+        effectBeingEdited?.raisedFromRail == true || transformBeingEdited != nil
+    }
+
+    /// Whether the layer rail is on screen — what `activePanel` says, less the bars it stands down
+    /// for. The expression has to mirror what is actually drawn, not what `activePanel` says.
+    private var railIsOnScreen: Bool {
+        activePanel == .layers && !railStandsDown
+    }
+
     /// How much of the canvas's width the layer rail is occupying, so the notice can be centred in
-    /// what is left instead of behind it. Mirrors `layerPanelRail`'s own width expression; zero when
-    /// the rail is closed, which is most of the time.
+    /// what is left instead of behind it; zero when the rail is closed, which is most of the time.
     ///
-    /// The per-layer options menu that can open to the rail's left is deliberately *not* counted: it
-    /// is transient, it is only ever open while the artist is already looking at the panel, and
-    /// reserving room for it would shove the notice well off-centre in the common case where it is
-    /// shut.
-    ///
-    /// Zero while the effect bar has the rail stood down, for the same reason it is zero when the rail
-    /// is shut: the expression has to mirror what is actually on screen, not what `activePanel` says.
+    /// The per-layer options menu that can open to the rail's left is deliberately *not* counted
+    /// here: it is transient, it is only ever open while the artist is already looking at the panel,
+    /// and reserving room for it would shove the notice well off-centre in the common case where it
+    /// is shut. `dockClearance` counts it, because the dock is the thing that would cover it.
     private func layerRailClearance(canvasWidth: CGFloat) -> CGFloat {
-        guard activePanel == .layers, effectBeingEdited == nil, transformBeingEdited == nil else { return 0 }
-        return min(canvasWidth * 0.46, 460)
+        railIsOnScreen ? LayerRail.width(in: canvasWidth) : 0
+    }
+
+    /// **How much of the canvas's width the bottom dock must keep clear of** — the rail and, while
+    /// one is open, the options panel hanging off its leading edge. Since TODO (118) an effect
+    /// layer's bar is on screen *with* the rail rather than instead of it, and a 760-point card
+    /// centred on the canvas would sit over the options panel's lower rows (Duplicate, Delete) and
+    /// the rail's own — so the dock narrows and keeps to the rail's left instead.
+    private func dockClearance(canvasWidth: CGFloat) -> CGFloat {
+        let rail = layerRailClearance(canvasWidth: canvasWidth)
+        guard rail > 0, layerOptionsID != nil else { return rail }
+        return rail + LayerRail.optionsSpacing + LayerRail.optionsWidth
     }
 
     /// The layer stack rail: just under half the screen wide, running the full height below the top
@@ -780,7 +824,7 @@ struct DrawingView: View {
     /// to its left.
     private var layerPanelRail: some View {
         GeometryReader { geometry in
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: LayerRail.optionsSpacing) {
                 Spacer(minLength: 0)
 
                 // `layerOptionsID` names either a layer or a folder — which options panel it opens
@@ -789,13 +833,12 @@ struct DrawingView: View {
                 if let layerOptionsID {
                     if canvasManager.folders.contains(where: { $0.id == layerOptionsID }) {
                         FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID,
-                                           showingEffectSettings: $showingEffectSettings) {
+                                           showingEffectSettings: $showingNodeEffectSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID,
-                                          showingEffectSettings: $showingEffectSettings,
                                           showingTransformSettings: $showingTransformSettings) {
                             self.layerOptionsID = nil
                         }
@@ -804,7 +847,7 @@ struct DrawingView: View {
                 }
 
                 LayerPanel(canvasManager: canvasManager, optionsLayerID: $layerOptionsID)
-                    .frame(width: min(geometry.size.width * 0.46, 460))
+                    .frame(width: LayerRail.width(in: geometry.size.width))
                     .frame(maxHeight: .infinity)
                     .background(Color.black.opacity(0.62))
                     .overlay(Rectangle().frame(width: 1).foregroundColor(Color.white.opacity(0.12)), alignment: .leading)

@@ -280,8 +280,11 @@ struct EffectSettingsBar: View {
     /// this bar down while the box is floating so the canvas is clear to drag on. A default so the
     /// previews and any harness around a bare `Effect` need not supply one.
     var onAdjustBox: () -> Void = {}
-    var onBack: () -> Void
-    var onClose: () -> Void
+    /// **Back and close, or neither.** A compositor node's bar is a sub-menu of the options that raised
+    /// it — Back puts the rail back, × closes the options. An effect layer's is on screen because the
+    /// layer is selected (TODO (118)), so it has no menu to go back to or to close, and passes nil.
+    var onBack: (() -> Void)?
+    var onClose: (() -> Void)?
 
     /// Outline's, Bloom's or Duplicate Offset's colour swatch popover — one `@State` for the whole
     /// panel rather than one per row, because only one settings panel is ever on screen and it shows
@@ -990,20 +993,22 @@ struct ContentHeightCap: Layout {
 func optionsSubMenuHeader(title: String,
                           backIdentifier: String = "layerOptions.subMenuBack",
                           titleIdentifier: String = "layerOptions.subMenuTitle",
-                          onBack: @escaping () -> Void,
-                          onClose: @escaping () -> Void) -> some View {
+                          onBack: (() -> Void)?,
+                          onClose: (() -> Void)?) -> some View {
     HStack(spacing: 8) {
-        Button(action: onBack) {
-            HStack(spacing: 3) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .bold))
-                Text("Back").font(.subheadline)
+        if let onBack {
+            Button(action: onBack) {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Back").font(.subheadline)
+                }
+                .foregroundColor(.white)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.white)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(backIdentifier)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(backIdentifier)
 
         Spacer()
 
@@ -1015,12 +1020,14 @@ func optionsSubMenuHeader(title: String,
 
         Spacer()
 
-        Button(action: onClose) {
-            Image(systemName: "xmark")
-                .font(.caption)
-                .foregroundColor(.gray)
+        if let onClose {
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .accessibilityIdentifier("layerOptions.close")
         }
-        .accessibilityIdentifier("layerOptions.close")
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
