@@ -1308,7 +1308,7 @@ final class EffectLayerLogicTests: XCTestCase {
     func testAValueLayerRenamesItselfToFollowItsMode() {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addValueLayer()
-        XCTAssertEqual(manager.layers[1].name, "Value 2", "Premise: it starts under the flat-colour default")
+        XCTAssertEqual(manager.layers[1].name, "Value 1", "Premise: it starts under the flat-colour default")
 
         manager.setLayerEffect(layerIndex: 1, to: .blur(Effect.Blur(radius: 4)))
         XCTAssertEqual(manager.layers[1].name, "Gaussian Blur",
@@ -1319,7 +1319,7 @@ final class EffectLayerLogicTests: XCTestCase {
                        "…and switching to another grade follows, rather than sticking on the first one")
 
         manager.setLayerEffect(layerIndex: 1, to: nil)
-        XCTAssertEqual(manager.layers[1].name, "Value 2",
+        XCTAssertEqual(manager.layers[1].name, "Value 1",
                        "Returning to flat colour returns the default name — a layer that is a colour "
                        + "must not go on advertising a grade it no longer has")
     }
@@ -1357,7 +1357,7 @@ final class EffectLayerLogicTests: XCTestCase {
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
         XCTAssertNil(manager.layers[1].effect, "Picking a blend leaves nothing for the grade to have graded with")
         XCTAssertEqual(manager.layers[1].blendMode, .multiply, "…and the blend itself is still recorded")
-        XCTAssertEqual(manager.layers[1].name, "Value 2",
+        XCTAssertEqual(manager.layers[1].name, "Value 1",
                        "The row must not go on advertising a grade the layer no longer applies")
 
         // The artist's own name is never the picker's to take back — the same flag `setLayerEffect`
@@ -1382,7 +1382,7 @@ final class EffectLayerLogicTests: XCTestCase {
         manager.undo()
 
         XCTAssertNil(manager.layers[1].layerEffect, "One undo takes the grade back")
-        XCTAssertEqual(manager.layers[1].name, "Value 2",
+        XCTAssertEqual(manager.layers[1].name, "Value 1",
                        "…and the name with it, in the same step — not one undo for the grade and "
                        + "another for the label")
     }

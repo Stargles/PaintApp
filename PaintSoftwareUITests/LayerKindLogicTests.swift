@@ -122,11 +122,11 @@ final class LayerKindLogicTests: XCTestCase {
         }
     }
 
-    /// **A new layer is named by its kind's own word and its place in the stack** — TODO (142), the
-    /// owner: vector layers are "Layer N", raster layers "Raster N". Spelled out kind by kind rather
-    /// than derived from `defaultNameStem`, which would be a function compared with itself; the
-    /// second half pins that the number is the stack position the layer lands at, whichever kind it is.
-    func testANewLayerIsNamedByItsKindsWordAndItsPlaceInTheStack() {
+    /// **A new layer is named by its kind's own word and the next number of that kind** — TODO (142),
+    /// the owner: vector layers are "Layer N", raster layers "Raster N", and each counts on its own.
+    /// Spelled out kind by kind rather than derived from `defaultNameStem`, which would be a function
+    /// compared with itself.
+    func testANewLayerIsNamedByItsKindsWordAndCountsOnItsOwn() {
         let expected: [LayerKind: String] = [.raster: "Raster 1", .vector: "Layer 1",
                                              .value: "Value 1", .transform: "Transform 1"]
         for kind in LayerKind.allCases {
@@ -140,7 +140,54 @@ final class LayerKindLogicTests: XCTestCase {
         m.addLayer()
         m.addVectorLayer()
         m.addLayer()
-        XCTAssertEqual(m.layers.map(\.name), ["Layer 1", "Raster 2", "Layer 3", "Raster 4"])
+        m.addValueLayer()
+        m.addTransformLayer()
+        m.addValueLayer()
+        XCTAssertEqual(m.layers.map(\.name),
+                       ["Layer 1", "Raster 1", "Layer 2", "Raster 2", "Value 1", "Transform 1", "Value 2"],
+                       "no kind takes a number from another's sequence")
+    }
+
+    /// **The next number is one past the highest in use, so a deletion never makes a duplicate.** With
+    /// `Layer 1` and `Layer 2`, deleting the first and adding gives `Layer 3` — a count of the layers
+    /// of the kind would say `Layer 2`, over the layer already called that. Deleting the *last* one
+    /// hands its number back, which is not a duplicate: nothing carries it.
+    func testTheNextNumberIsOnePastTheHighestInUseSoADeletionNeverMakesADuplicate() {
+        let m = CanvasManager()
+        m.canvasSize = size
+        m.addVectorLayer()
+        m.addVectorLayer()
+        XCTAssertEqual(m.layers.map(\.name), ["Layer 1", "Layer 2"], "Setup")
+
+        m.deleteLayer(at: 0)
+        m.addVectorLayer()
+        XCTAssertEqual(m.layers.map(\.name), ["Layer 2", "Layer 3"],
+                       "the survivor is still Layer 2, so the new one is Layer 3 and not a second Layer 2")
+
+        m.deleteLayer(at: m.layers.count - 1)
+        m.addVectorLayer()
+        XCTAssertEqual(m.layers.map(\.name), ["Layer 2", "Layer 3"],
+                       "with the highest gone its number is free again")
+    }
+
+    /// **The numbering reads names, so it steps past one the artist typed, and ignores what is not the
+    /// pattern** — the rule itself, on plain strings.
+    func testNextDefaultNameReadsOnlyExactStemAndNumberNames() {
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: [String]()), "Layer 1")
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: ["Layer 1", "Layer 2"]), "Layer 3")
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: ["Layer 2", "Layer 7", "Layer 3"]), "Layer 8",
+                       "the highest, not the count and not the first gap")
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: ["Layer 41"]), "Layer 42",
+                       "an artist's own Layer 41 is a name to step past")
+        XCTAssertEqual(LayerKind.raster.nextDefaultName(among: ["Layer 5", "Raster 2"]), "Raster 3",
+                       "another kind's numbers are another sequence")
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: ["Layer 2 copy", "Layer", "Layer  3", "Layer -4",
+                                                                  "Layer +9", "Layer 1x", "my Layer 6", "layer 8"]),
+                       "Layer 1", "only the stem, one space and digits count")
+        XCTAssertEqual(LayerKind.vector.nextDefaultName(among: ["Layer 99999999999999999999"]), "Layer 1",
+                       "a number too long to be one the app made cannot overflow the next")
+        XCTAssertEqual(LayerKind.value.nextDefaultName(among: ["Gaussian Blur", "Value 3"]), "Value 4",
+                       "a value layer in effect mode is named for its grade and takes no number")
     }
 
     /// **A transform layer is named and labelled as one** — the row an artist reads their stack on,

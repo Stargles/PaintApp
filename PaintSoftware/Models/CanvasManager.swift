@@ -1550,8 +1550,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// **One value, not a dozen `@Published` properties**, because the render path compares the
     /// settings that produced the picture on screen against the settings now, and one `==` is what
-    /// makes that comparison possible to get right. `onionSkinOpacity` used to be the whole of this
-    /// and is gone: it is `onionSkin.linkedLevel(on:)`, which is the same number with a ramp behind it.
+    /// makes that comparison possible to get right.
     @Published var onionSkin = OnionSkinSettings()
     @Published var isLoopEnabled: Bool = true
     /// The frame range playback loops within, set via the ruler's frame-number tap menu. Nil means
@@ -2146,13 +2145,12 @@ final class CanvasManager: ObservableObject {
         return (currentLayerIndex + 1, layers[currentLayerIndex].parentFolderID)
     }
 
-    /// **The one place a new layer of a kind gets its automatic name** — its kind's stem and the
-    /// layer's own place in the stack once it is added (`layers.count + 1`, taken before the insert).
-    /// Decoration, not identity, for `defaultValueLayerName`'s reason: nothing preserves the number a
-    /// layer was born with. Every site that mints a layer calls this, so the stems cannot drift apart
-    /// between the `+` menu and the lasso verbs that make layers of their own.
+    /// **The one place a new layer of a kind gets its automatic name** — `LayerKind.nextDefaultName`'s
+    /// answer over the names the stack holds now: `Layer 1, Layer 2, Raster 1`, each kind counting on
+    /// its own. Every site that mints a layer calls this, so the numbering cannot drift apart between
+    /// the `+` menu and the lasso verbs that make layers of their own.
     func defaultLayerName(for kind: LayerKind) -> String {
-        "\(kind.defaultNameStem) \(layers.count + 1)"
+        kind.nextDefaultName(among: layers.lazy.map(\.name))
     }
 
     /// Inserts a freshly built layer at `newLayerPlacement` and makes it active. The one place the
@@ -2222,7 +2220,7 @@ final class CanvasManager: ObservableObject {
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
                 Layer(id: UUID(),
-                      name: name ?? Self.defaultValueLayerName(effect: effect, ordinal: layers.count + 1),
+                      name: name ?? defaultValueLayerName(effect: effect),
                       // A caller that supplied a name chose it, so the mode picker must not take it
                       // back — see `Layer.hasCustomName`. Every in-app route leaves this nil.
                       hasCustomName: name != nil,
@@ -2240,21 +2238,15 @@ final class CanvasManager: ObservableObject {
     /// strings.
     ///
     /// The grade's own `displayName` in effect mode — "Gaussian Blur", "Brightness / Contrast" — and
-    /// the numbered default in flat-colour mode.
-    ///
-    /// `ordinal` is **the stack's layer count including this layer**, which is what the creation site
-    /// has always used (`layers.count + 1`, taken before the insert) and what the rename site passes
-    /// (`layers.count`, taken after). It is decoration, not identity: nothing preserves the number a
-    /// layer was born with — a restack or a deletion changes what any positional scheme would say — so
-    /// a layer that leaves effect mode in a taller stack than it entered it comes back with a larger
-    /// number. Worth stating because it looks like a bug and is not; the alternative, storing the
-    /// birth ordinal to reproduce it, is a second field carrying nothing an artist can act on.
+    /// the next `Value N` in flat-colour mode, numbered like every other kind (`defaultLayerName`).
+    /// A layer coming back to flat colour is not among the names it is numbered against (its own is
+    /// the grade's), so it takes the next free number rather than the one it had before.
     ///
     /// Two answers, not three: the transformation layer was this kind's third mode until
     /// 2026-09-11 and named itself "Transform n" from here; it is `LayerKind.transform` now and
     /// `addTransformLayer` names it once, at creation, since it has no mode to follow.
-    static func defaultValueLayerName(effect: Effect?, ordinal: Int) -> String {
-        effect?.displayName ?? "\(LayerKind.value.defaultNameStem) \(ordinal)"
+    func defaultValueLayerName(effect: Effect?) -> String {
+        effect?.displayName ?? defaultLayerName(for: .value)
     }
 
     /// Adds a `.transform` layer — **the transformation layer, TRANSFORM_LAYER.md §2 ruling 2** — at
@@ -2351,7 +2343,7 @@ final class CanvasManager: ObservableObject {
             layers[layerIndex].pendingBaselines =
                 Effect.channelEntriesAddressed(by: effect, from: layers[layerIndex].pendingBaselines)
             if layers[layerIndex].kind == .value, !layers[layerIndex].hasCustomName {
-                layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
+                layers[layerIndex].name = defaultValueLayerName(effect: effect)
             }
         }
     }
@@ -3757,7 +3749,7 @@ final class CanvasManager: ObservableObject {
                 layers[layerIndex].pendingBaselines =
                     Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
                 if layers[layerIndex].kind == .value, !layers[layerIndex].hasCustomName {
-                    layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
+                    layers[layerIndex].name = defaultValueLayerName(effect: nil)
                 }
             }
         }
@@ -4131,8 +4123,9 @@ final class CanvasManager: ObservableObject {
     /// A node named "Group 2" for a Gaussian Blur would be naming the implementation.
     ///
     /// `ordinal` is the caller's, because the two families count differently and always have: an
-    /// ordinary folder is numbered among all folders, a node among nodes. `defaultValueLayerName`'s
-    /// note on what an ordinal is and is not applies here unchanged.
+    /// ordinary folder is numbered among all folders, a node among nodes. It is decoration, not
+    /// identity: it is a count taken when the name is minted, and nothing keeps it true after a
+    /// deletion or a restack.
     static func defaultFolderName(effect: Effect?, op: CompositorOp?, ordinal: Int) -> String {
         if let effect { return effect.displayName }
         switch op {

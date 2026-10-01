@@ -162,7 +162,8 @@ final class LayerStackUITests: PaintUITestCase {
 
     /// TODO (142) — the owner: new vector layers are "Layer 1, 2, etc." and raster layers "Raster 1,
     /// 2, etc.", not "Vector N". Read off the rows of the layer panel an artist actually sees, from a
-    /// new document through both kinds of add, so it reds if either row keeps the old word.
+    /// new document through both kinds of add, so it reds if either row keeps the old word — and the
+    /// numbers count per kind: Layer 1, Layer 2, Raster 1, Layer 3.
     func testNewVectorLayersAreNamedLayerAndNewRasterLayersRaster() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -178,7 +179,12 @@ final class LayerStackUITests: PaintUITestCase {
         let rasterItem = app.buttons["Raster Layer"]
         XCTAssertTrue(rasterItem.waitForExistence(timeout: 5), "the + menu offers a Raster Layer")
         rasterItem.tap()
-        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Raster 3", "a raster layer added from the + menu")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.2"].label, "Raster 1",
+                       "a raster layer added from the + menu counts its own kind, not the stack position")
+        addVectorLayerFromOpenPanel(app)
+        XCTAssertEqual(app.staticTexts["layerPanel.row.3"].label, "Layer 3",
+                       "the next vector layer carries on the vector sequence — the raster layer between "
+                       + "them took no number from it")
 
         XCTAssertFalse(app.staticTexts["Vector 1"].exists, "no layer carries the old \"Vector N\" name")
         XCTAssertFalse(app.staticTexts["Vector 2"].exists, "no layer carries the old \"Vector N\" name")
@@ -931,7 +937,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
 
         let row = app.staticTexts["layerPanel.row.1"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertEqual(row.label, "Value 2")
+        XCTAssertEqual(row.label, "Value 1")
 
         row.tap()   // already selected after the add: opens its options
         let swatch = app.buttons["layerOptions.valueColorButton"]
@@ -1526,7 +1532,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         addButton.press(forDuration: 1.2)
         let rasterItem = app.buttons["Raster Layer"]
         XCTAssertTrue(rasterItem.waitForExistence(timeout: 5), "The add menu should still offer a Raster Layer option")
-        rasterItem.tap() // layers: [Layer 1, Layer 2, Raster 3 (active, raster, on top)]
+        rasterItem.tap() // layers: [Layer 1, Layer 2, Raster 1 (active, raster, on top)]
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5))
 
         let top = app.staticTexts["layerPanel.row.2"]
@@ -1534,7 +1540,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         top.tap()
         let mergeDown = app.buttons["layerOptions.mergeDown"]
         XCTAssertTrue(mergeDown.waitForExistence(timeout: 5))
-        mergeDown.tap() // merges Raster 3 into the vector layer below it
+        mergeDown.tap() // merges Raster 1 into the vector layer below it
 
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForNonExistence(timeout: 5))
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false,

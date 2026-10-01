@@ -121,8 +121,10 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertNotEqual(frames[0].image.pngData(), current.pngData(),
                           "must not return the cel the playhead is sitting in")
         XCTAssertNil(frames[0].tint, "Original Colors was asked for")
-        XCTAssertEqual(frames[0].opacity, CGFloat(manager.onionSkin.linkedLevel(on: .previous)), accuracy: 1e-9,
-                       "one skin on a side is slot 1, which the ramp puts at the level itself")
+        XCTAssertEqual(frames[0].opacity, CGFloat(manager.onionSkin.opacities(on: .previous)[0]), accuracy: 1e-9,
+                       "the skin is composited at the opacity its own slider shows")
+        XCTAssertEqual(frames[0].opacity, CGFloat(OnionSkinRampEnds.standard.nearest), accuracy: 1e-9,
+                       "…which, on a fresh document, is the shipped nearest-skin opacity")
     }
 
     /// The product owner's bug, headless: a masked layer showed translucent ink outside its mask on
@@ -183,8 +185,8 @@ final class OnionSkinLogicTests: XCTestCase {
     func testASlotAtZeroOpacityIsNotCompositedAtAll() {
         let manager = twoCelManager()
         manager.currentFrame = 8
-        manager.onionSkin.linkedPreviousLevel = 0
-        manager.onionSkin.linkedNextLevel = 0
+        manager.onionSkin.linkedPrevious.nearest = 0
+        manager.onionSkin.linkedNext.nearest = 0
 
         XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty,
                       "a skin at zero opacity is a canvas-sized draw that produces nothing")
@@ -199,73 +201,98 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty)
     }
 
-    // MARK: - Linked opacity: the ramp
+    // MARK: - Linked opacity: a straight line between a side's two ends
 
-    /// The normalised shape, stated as literals rather than recomputed from the formula — a test that
-    /// re-derives the thing under test proves only that the compiler is deterministic.
-    func testTheRampShapeIsALinearFallFromTheNearestSlotToTheFurthest() {
-        XCTAssertEqual(OnionSkinOpacityRamp.shape(count: 0), [])
-        assertVector(OnionSkinOpacityRamp.shape(count: 1), [1])
-        assertVector(OnionSkinOpacityRamp.shape(count: 2), [1, 0.5])
-        assertVector(OnionSkinOpacityRamp.shape(count: 3), [1, 2.0 / 3, 1.0 / 3])
-        assertVector(OnionSkinOpacityRamp.shape(count: 4), [1, 0.75, 0.5, 0.25])
-        assertVector(OnionSkinOpacityRamp.shape(count: 5), [1, 0.8, 0.6, 0.4, 0.2])
+    /// The line, stated as literals rather than recomputed from the formula — a test that re-derives
+    /// the thing under test proves only that the compiler is deterministic. Falling, rising, flat,
+    /// and the two degenerate counts.
+    func testALinkedSideIsTheStraightLineBetweenItsTwoEnds() {
+        let ends = OnionSkinRampEnds(nearest: 0.8, furthest: 0.2)
+        XCTAssertEqual(ends.opacities(count: 0), [])
+        assertVector(ends.opacities(count: 1), [0.8])
+        assertVector(ends.opacities(count: 2), [0.8, 0.2])
+        assertVector(ends.opacities(count: 3), [0.8, 0.5, 0.2])
+        assertVector(ends.opacities(count: 5), [0.8, 0.65, 0.5, 0.35, 0.2])
 
-        // Strictly positive everywhere, which is what keeps the furthest slider able to move the
-        // level at all — a shape reaching 0 there would make `value / shape` undefined.
-        for n in 1...OnionSkinSettings.maxSkinsPerSide {
-            for s in OnionSkinOpacityRamp.shape(count: n) { XCTAssertGreaterThan(s, 0) }
-        }
+        assertVector(OnionSkinRampEnds(nearest: 0.1, furthest: 0.9).opacities(count: 5), [0.1, 0.3, 0.5, 0.7, 0.9])
+        assertVector(OnionSkinRampEnds(nearest: 0.4, furthest: 0.4).opacities(count: 4), [0.4, 0.4, 0.4, 0.4])
+        assertVector(OnionSkinRampEnds(nearest: 1.7, furthest: -0.5).opacities(count: 3), [1, 0.5, 0],
+                     "an end outside 0…1 is held to it before the line is drawn")
     }
 
-    func testDraggingTheNearestSliderScalesTheWholeRamp() {
+    /// **The owner's words, driven on the model**: with the chain on, take a side's furthest slider and
+    /// every slider between it and the nearest moves onto the line.
+    func testDraggingTheFurthestEndMovesEverySliderBetweenAndTheEndLandsWhereItWasPut() {
+        var settings = OnionSkinSettings()
+        settings.previousCount = 5
+        settings.nextCount = 5
+
+        settings.setOpacity(0.9, slot: 5, on: .previous)
+
+        assertVector(settings.opacities(on: .previous), [0.35, 0.4875, 0.625, 0.7625, 0.9])
+        XCTAssertEqual(settings.opacities(on: .previous)[4], 0.9, accuracy: 1e-9,
+                       "the dragged slider lands exactly where the finger put it — no share of a ramp caps it")
+    }
+
+    func testDraggingTheNearestEndMovesEverySliderBetweenToo() {
         var settings = OnionSkinSettings()
         settings.previousCount = 5
         settings.nextCount = 5
 
         settings.setOpacity(0.8, slot: 1, on: .previous)
 
-        assertVector(settings.opacities(on: .previous), [0.8, 0.64, 0.48, 0.32, 0.16])
-        XCTAssertEqual(settings.opacities(on: .previous)[0], 0.8, accuracy: 1e-9,
-                       "the dragged slider lands exactly where the finger put it")
+        assertVector(settings.opacities(on: .previous), [0.8, 0.6175, 0.435, 0.2525, 0.07])
     }
 
-    func testDraggingAMiddleSliderRescalesTheRampAndLandsOnTheDraggedValue() {
+    /// An end goes anywhere in 0…1 and the other end is not dragged along by it — dragging to zero
+    /// zeroes that slider and nothing else, which is what the old single-level ramp could not do.
+    func testAnEndGoesToZeroWithoutTakingTheOtherEndWithIt() {
+        var settings = OnionSkinSettings()
+        settings.previousCount = 3
+        settings.setOpacity(0.6, slot: 3, on: .previous)
+
+        settings.setOpacity(0, slot: 1, on: .previous)
+
+        assertVector(settings.opacities(on: .previous), [0, 0.3, 0.6])
+    }
+
+    /// **The sliders between the ends are not the artist's to set while the chain is on**, and a touch
+    /// on one changes nothing — including not the link, which is one switch for both sides.
+    func testTheSlidersBetweenTheEndsAreNotFreeWhileLinkedAndATouchOnOneDoesNothing() {
         var settings = OnionSkinSettings()
         settings.previousCount = 5
-        settings.nextCount = 5
+        settings.nextCount = 2
+        XCTAssertEqual((1...5).map { settings.isOpacityFree(slot: $0, on: .previous) },
+                       [true, false, false, false, true], "five skins: only the two ends are free")
+        XCTAssertEqual((1...2).map { settings.isOpacityFree(slot: $0, on: .next) }, [true, true],
+                       "two skins are both ends")
+        XCTAssertFalse(settings.isOpacityFree(slot: 3, on: .next), "a slot the side does not show is not free")
+        settings.nextCount = 1
+        XCTAssertTrue(settings.isOpacityFree(slot: 1, on: .next), "one skin is one slider, and it is free")
 
-        settings.setOpacity(0.3, slot: 3, on: .previous)
+        let before = settings
+        settings.setOpacity(0.9, slot: 3, on: .previous)
+        XCTAssertEqual(settings, before, "an inner slider takes no write")
 
-        assertVector(settings.opacities(on: .previous), [0.5, 0.4, 0.3, 0.2, 0.1])
+        settings.setOpacityLinked(false)
+        XCTAssertEqual((1...5).map { settings.isOpacityFree(slot: $0, on: .previous) },
+                       [true, true, true, true, true], "unlinked, every shown slot is free")
     }
 
-    /// The far endpoint, and the ceiling that comes with a straight ramp. Slot 5 of 5 is one fifth of
-    /// the nearest, so it tops out at 0.2 however far the finger goes — going higher would need the
-    /// nearer slots above 1. Unlinking is the escape hatch and the next test shows it working.
-    func testTheFurthestSliderScalesTheRampAndCannotExceedItsShareOfAFullOne() {
+    func testTheFurthestEndKeepsItsValueWhenTheCountChanges() {
         var settings = OnionSkinSettings()
         settings.previousCount = 5
+        settings.setOpacity(0.9, slot: 5, on: .previous)
 
-        settings.setOpacity(0.15, slot: 5, on: .previous)
-        assertVector(settings.opacities(on: .previous), [0.75, 0.6, 0.45, 0.3, 0.15])
-
-        settings.setOpacity(0.5, slot: 5, on: .previous)
-        assertVector(settings.opacities(on: .previous), [1, 0.8, 0.6, 0.4, 0.2])
-        XCTAssertEqual(settings.linkedLevel(on: .previous), 1, accuracy: 1e-9)
-    }
-
-    func testDraggingAnySliderToZeroZeroesEveryOtherSliderOnThatSideOnly() {
-        var settings = OnionSkinSettings()
-        settings.previousCount = 4
-        settings.nextCount = 3
-        let previousBefore = settings.opacities(on: .previous)
-
-        settings.setOpacity(0, slot: 2, on: .next)
-
-        assertVector(settings.opacities(on: .next), [0, 0, 0])
-        assertVector(settings.opacities(on: .previous), previousBefore, "the other side keeps its ramp")
-        XCTAssertEqual(settings.linkedLevel(on: .next), 0, accuracy: 1e-9)
+        settings.previousCount = 3
+        assertVector(settings.opacities(on: .previous), [0.35, 0.625, 0.9], "the furthest slider moved, its opacity did not")
+        settings.previousCount = 2
+        assertVector(settings.opacities(on: .previous), [0.35, 0.9])
+        settings.previousCount = 1
+        assertVector(settings.opacities(on: .previous), [0.35], "one skin is the nearest alone")
+        settings.previousCount = 5
+        assertVector(settings.opacities(on: .previous), [0.35, 0.4875, 0.625, 0.7625, 0.9],
+                     "…and raising the count again draws the ramp the artist had")
     }
 
     /// TODO (138) — the owner: *"the user should be able to take the rightmost slider for example and
@@ -275,11 +302,11 @@ final class OnionSkinLogicTests: XCTestCase {
     func testTheTwoSidesAreIndependentBothWaysEvenWhileLinked() {
         var settings = OnionSkinSettings()
         XCTAssertTrue(settings.isOpacityLinked, "Setup: linked is the default, and is where the owner saw it")
-        let defaultLevel = OnionSkinSettings.defaultLinkedLevel
+        let nearest = OnionSkinRampEnds.standard.nearest
 
         settings.setOpacity(0.8, slot: 1, on: .next)
         assertVector(settings.opacities(on: .next), [0.8])
-        assertVector(settings.opacities(on: .previous), [defaultLevel], "dragging the right one moved the left")
+        assertVector(settings.opacities(on: .previous), [nearest], "dragging the right one moved the left")
 
         settings.setOpacity(0.1, slot: 1, on: .previous)
         assertVector(settings.opacities(on: .previous), [0.1])
@@ -287,44 +314,72 @@ final class OnionSkinLogicTests: XCTestCase {
 
         settings.previousCount = 3
         settings.nextCount = 2
-        settings.setOpacity(0.4, slot: 2, on: .previous)
-        assertVector(settings.opacities(on: .previous), [0.6, 0.4, 0.2], "linked: its own ramp still scales together")
-        assertVector(settings.opacities(on: .next), [0.8, 0.4], "…and the other side's ramp is where it was")
+        settings.setOpacity(0.5, slot: 3, on: .previous)
+        assertVector(settings.opacities(on: .previous), [0.1, 0.3, 0.5], "linked: its own line, end to end")
+        assertVector(settings.opacities(on: .next), [0.8, OnionSkinRampEnds.standard.furthest],
+                     "…and the other side's line is where it was")
     }
 
-    /// Re-linking takes **each side's own** nearest slider as its level — not the previous side's for
-    /// both, which would be the "one side is anchored" asymmetry in the owner's report: the right side
-    /// snapping to wherever the left one had been left.
-    func testRelinkingKeepsEachSidesOwnNearestSliderRatherThanTakingTheOthers() {
+    /// `nearestOpacity` is the one number a consumer that draws a single frame on a side reads, and it
+    /// is the nearest slider's opacity whichever mode and however many skins the side shows.
+    func testTheNearestOpacityIsTheNearestSlidersWhicheverModeTheSideIsIn() {
         var settings = OnionSkinSettings()
+        settings.previousCount = 3
+        settings.setOpacity(0.7, slot: 1, on: .previous)
+        XCTAssertEqual(settings.nearestOpacity(on: .previous), 0.7, accuracy: 1e-9)
+        XCTAssertEqual(settings.nearestOpacity(on: .previous), settings.opacities(on: .previous)[0], accuracy: 1e-9)
+
+        settings.setOpacityLinked(false)
+        settings.setOpacity(0.2, slot: 1, on: .previous)
+        XCTAssertEqual(settings.nearestOpacity(on: .previous), 0.2, accuracy: 1e-9, "unlinked: the free slider's")
+
+        settings.previousCount = 0
+        XCTAssertEqual(settings.nearestOpacity(on: .previous), 0.2, accuracy: 1e-9, "…with no skins shown too")
+    }
+
+    /// Re-linking keeps **each side's own** end sliders where they stand — the nearest and the
+    /// furthest the side is showing — and lets the ones between fall onto the line. It never takes one
+    /// side's end from the other.
+    func testRelinkingKeepsEachSidesOwnEndsAndDrawsTheLineBetweenThem() {
+        var settings = OnionSkinSettings()
+        settings.previousCount = 3
         settings.setOpacityLinked(false)
         settings.setOpacity(0.9, slot: 1, on: .previous)
+        settings.setOpacity(0.1, slot: 2, on: .previous)
+        settings.setOpacity(0.5, slot: 3, on: .previous)
         settings.setOpacity(0.2, slot: 1, on: .next)
 
         settings.setOpacityLinked(true)
 
-        assertVector(settings.opacities(on: .previous), [0.9])
-        assertVector(settings.opacities(on: .next), [0.2], "the right side took the left side's level")
+        assertVector(settings.opacities(on: .previous), [0.9, 0.7, 0.5],
+                     "the ends stayed at 0.9 and 0.5; the 0.1 between them fell onto the line")
+        assertVector(settings.opacities(on: .next), [0.2], "the right side took nothing from the left")
+        XCTAssertEqual(settings.linkedNext.furthest, OnionSkinRampEnds.standard.furthest, accuracy: 1e-9,
+                       "a side showing one skin has no furthest slider to take, so it keeps the one it had")
     }
 
     /// The settings are part of the document's editor state, so what a save wrote has to read back —
-    /// including the one record shape older builds wrote, with a single `linkedLevel` for both sides.
-    func testTheSettingsRoundTripAndAnOlderRecordWithOneSharedLevelSeedsBothSides() throws {
+    /// and a record that is missing fields, or carries keys this build no longer reads, keeps what it
+    /// can and defaults the rest.
+    func testTheSettingsRoundTripAndAnOlderRecordKeepsWhatItCanRead() throws {
         var settings = OnionSkinSettings()
         settings.previousCount = 4
+        settings.nextCount = 3
         settings.placement = .inFront
-        settings.linkedPreviousLevel = 0.7
-        settings.linkedNextLevel = 0.2
+        settings.linkedPrevious = OnionSkinRampEnds(nearest: 0.7, furthest: 0.15)
+        settings.linkedNext = OnionSkinRampEnds(nearest: 0.2, furthest: 0.6)
+        settings.setOpacityLinked(false)
+        settings.setOpacity(0.45, slot: 2, on: .next)
         let data = try JSONEncoder().encode(settings)
         XCTAssertEqual(try JSONDecoder().decode(OnionSkinSettings.self, from: data), settings)
 
-        let older = Data(#"{"previousCount":3,"placement":"inFront","linkedLevel":0.6,"isOpacityLinked":true}"#.utf8)
+        let older = Data(#"{"previousCount":3,"placement":"inFront","linkedLevel":0.6,"linkedPreviousLevel":0.5,"isOpacityLinked":true}"#.utf8)
         let decoded = try JSONDecoder().decode(OnionSkinSettings.self, from: older)
-        XCTAssertEqual(decoded.linkedLevel(on: .previous), 0.6, accuracy: 1e-9)
-        XCTAssertEqual(decoded.linkedLevel(on: .next), 0.6, accuracy: 1e-9)
         XCTAssertEqual(decoded.previousCount, 3, "a record missing most fields keeps the ones it has")
         XCTAssertEqual(decoded.placement, .inFront)
         XCTAssertEqual(decoded.nextCount, OnionSkinSettings().nextCount, "…and defaults the rest")
+        XCTAssertEqual(decoded.linkedPrevious, OnionSkinRampEnds.standard,
+                       "the keys of the one-level ramp are not read: its ends are the defaults")
     }
 
     func testUnlinkedSlidersMoveOneAtATime() {
@@ -332,17 +387,18 @@ final class OnionSkinLogicTests: XCTestCase {
         settings.previousCount = 4
         settings.nextCount = 4
         settings.setOpacity(0.8, slot: 1, on: .previous)
+        settings.setOpacity(0.2, slot: 4, on: .previous)
         settings.setOpacityLinked(false)
 
-        // Unlinking freezes the ramp rather than resetting it, so the sliders do not jump the
+        // Unlinking freezes the line rather than resetting it, so the sliders do not jump the
         // instant they become independent.
         assertVector(settings.opacities(on: .previous), [0.8, 0.6, 0.4, 0.2])
 
         settings.setOpacity(0.05, slot: 2, on: .previous)
 
         assertVector(settings.opacities(on: .previous), [0.8, 0.05, 0.4, 0.2])
-        assertVector(settings.opacities(on: .next), [0.35, 0.2625, 0.175, 0.0875],
-                     "the next side was never touched, linked or unlinked, so it is still its default ramp")
+        assertVector(settings.opacities(on: .next), [0.35, 0.35 - 0.28 / 3, 0.35 - 0.56 / 3, 0.07],
+                     "the next side was never touched, linked or unlinked, so it is still its default line")
     }
 
     func testLoweringAndRaisingTheCountGivesUnlinkedValuesBack() {

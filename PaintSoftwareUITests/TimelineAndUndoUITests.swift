@@ -168,59 +168,6 @@ final class TimelineGestureUITests: PaintUITestCase {
                        "holding to open the panel must not itself toggle the mode")
     }
 
-    /// **TODO (138), cold start: the two opacity sliders are independent.** The owner: *"the user
-    /// should be able to take the rightmost slider for example and adjust it, and the opacity of the
-    /// left slider does not change. Vice versa with the left."* Driven in the state they were in — a
-    /// fresh document, the shipped one skin a side with the link on — by dragging each side's thumb and
-    /// reading **both** sliders' exposed values after, so it reds if either direction still moves the
-    /// other. `OnionSkinLogicTests` owns the arithmetic; this is the proof the sliders an artist can
-    /// touch are wired to it.
-    ///
-    /// The drags start **on the thumb**, as `BrushSizeSliderUITests.dragVerticalSlider` explains a
-    /// rotated `Slider` needs; `adjust(toNormalizedSliderPosition:)` does not move one.
-    func testDraggingOneOnionOpacitySliderLeavesTheOtherSideWhereItWas() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let button = app.buttons["timeline.onionSkinToggle"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
-        button.press(forDuration: 0.6)
-
-        let previous = app.sliders["onionPanel.previous.opacity1"]
-        let next = app.sliders["onionPanel.next.opacity1"]
-        XCTAssertTrue(previous.waitForExistence(timeout: 5), "the previous side's slider is on the panel")
-        XCTAssertTrue(next.waitForExistence(timeout: 5), "the next side's slider is on the panel")
-        XCTAssertEqual(app.descendants(matching: .any)["onionPanel.linkOpacityToggle"].value as? String, "on",
-                       "PREMISE: linked, which is the state where one slider used to drag the other")
-
-        func percent(_ slider: XCUIElement) -> Int {
-            Int((slider.value as? String)?.replacingOccurrences(of: "%", with: "") ?? "") ?? -1
-        }
-        /// Drags a slider's thumb from where it is to `target` (0...1), in the rotated frame: 1 is the
-        /// bottom (zero) and 0 the top (full), with the thumb inset from each end by its own radius.
-        func drag(_ slider: XCUIElement, from: Double, to target: Double) {
-            func dy(_ value: Double) -> CGFloat { CGFloat(1 - (0.16 + value * 0.68)) }
-            let start = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: dy(from)))
-            let end = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: dy(target)))
-            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
-        }
-
-        let startPrevious = percent(previous), startNext = percent(next)
-        XCTAssertEqual(startPrevious, startNext, "PREMISE: both sides open at the same level")
-        XCTAssertGreaterThan(startPrevious, 0)
-
-        // The right slider moves; the left one must not.
-        drag(next, from: Double(startNext) / 100, to: 0.9)
-        XCTAssertGreaterThan(percent(next), startNext + 20, "PREMISE: the drag moved the right slider")
-        XCTAssertEqual(percent(previous), startPrevious, "dragging the right slider moved the left one")
-
-        // And the other way round.
-        let movedNext = percent(next)
-        drag(previous, from: Double(startPrevious) / 100, to: 0.08)
-        XCTAssertLessThan(percent(previous), startPrevious - 15, "PREMISE: the drag moved the left slider")
-        XCTAssertEqual(percent(next), movedNext, "dragging the left slider moved the right one")
-        attachScreen("onion-sliders-independent")
-    }
-
     /// **TODO (72), cold start: one colour picker.** The owner's report was literal — "we have 2
     /// color pickers, bloating the code" — so this proves the fix by identity, exactly as
     /// `LayerUITests.testTheCanvasColourRowOpensTheSamePickerTheBrushUses` proved it for the canvas

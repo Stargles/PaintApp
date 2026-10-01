@@ -25,7 +25,7 @@ import SwiftUI
 /// switch of its own in either direction — the button already is both switches.
 ///
 /// Everything here is a thin binding onto `CanvasManager.onionSkin`. Every decision the panel can
-/// make — which cel a slot shows, what a linked drag does to the other sliders, how large the
+/// make — which cel a slot shows, what a linked end slider does to the ones between, how large the
 /// composite is allowed to be — lives in `OnionSkinSource.swift` as pure functions, so the whole
 /// feature is testable without a simulator and this file has nothing to get wrong but layout.
 struct OnionSkinPanel: View {
@@ -264,10 +264,11 @@ struct OnionSkinPanel: View {
     /// One vertical slider per skin on each side, with the link toggle **between** the two columns —
     /// the reference's own placement, replacing the old header-row button of the same setting.
     ///
-    /// The link toggle is the owner's emphasis and is **on by default**: with it on, dragging any one
-    /// slider rescales its side's whole ramp and every other slider *on that side* moves with it — and
-    /// no slider on the other side does (TODO (138)). See `OnionSkinOpacityRamp` for exactly what that
-    /// means, including what a drag to zero does and why a far slider stops short of full.
+    /// The link toggle is the owner's emphasis and is **on by default**: with it on, each side's two end
+    /// sliders — the nearest skin and the furthest — are the free ones, and every slider between them
+    /// sits on the straight line joining the two. Those inner sliders are dimmed and do not take a
+    /// touch (`OnionSkinSettings.isOpacityFree`); the other side is its own line and never moves
+    /// (TODO (138)). See `OnionSkinRampEnds` for exactly what that means.
     ///
     /// **Sized to fit `maxSkinsPerSide` (5) slots on both sides inside this panel's own width, at
     /// every count the count sliders can reach.** Found in review: a slot sized for the old 380pt
@@ -356,6 +357,7 @@ struct OnionSkinPanel: View {
             Slider(value: Binding(get: { value },
                                   set: { canvasManager.onionSkin.setOpacity($0, slot: slot, on: side) }),
                    in: 0...1)
+                .disabled(!settings.isOpacityFree(slot: slot, on: side))
                 .frame(width: 88)
                 .rotationEffect(.degrees(-90))
                 .frame(width: 20, height: 88)

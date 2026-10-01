@@ -56,21 +56,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## (142)/(138) follow-ups — ruled after the first build
-
-**Status** — not started. Both items merged (`3e9168d`, `1c85aed`) and the owner then ruled on what
-the build left open, 2026-10-01:
-
-- **(142) Numbering counts per kind**: Layer 1, Layer 2, Raster 1 — not the stack position the build
-  kept (which reads Layer 1, Raster 2, Layer 3).
-- **(138) The onion chain stays and links one side**: *"keep it, links one side. When it is on, the
-  user can select the furthest left or right sliders per side and every slider in between will be
-  linearly interpolated between the two."* — with two or more skins on a side, the side's two end
-  sliders are free and the ones between follow a straight line between them.
-
-- [ ] Per-kind numbering in `CanvasManager.defaultLayerName(for:)`.
-- [ ] The chained side interpolates its inner sliders between its two ends; the other side untouched.
-
 ## (121) Outside the canvas is still canvas — one root fix
 
 **Status** — not started. *"If you make a line half inside the canvas half outside, make that into a

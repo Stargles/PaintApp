@@ -43,8 +43,8 @@ final class EditorStateLogicTests: XCTestCase {
         manager.isOnionSkinEnabled = false
         manager.onionSkin.previousCount = 3
         manager.onionSkin.placement = .inFront
-        manager.onionSkin.linkedPreviousLevel = 0.6
-        manager.onionSkin.linkedNextLevel = 0.2
+        manager.onionSkin.linkedPrevious = OnionSkinRampEnds(nearest: 0.6, furthest: 0.4)
+        manager.onionSkin.linkedNext = OnionSkinRampEnds(nearest: 0.2, furthest: 0.9)
         manager.isLoopEnabled = false
         manager.loopStartFrame = 2
         manager.loopEndFrame = 9
