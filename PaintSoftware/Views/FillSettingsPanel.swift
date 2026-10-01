@@ -108,6 +108,25 @@ struct FillSettingsPanel: View {
                 }
                 .padding(.horizontal)
 
+                // The mend sits under Edge Overlap because it is the same concern one step further: Edge
+                // Overlap tucks a fill a few pixels under the line it stopped against, and the mend
+                // carries on the rest of the way when a fill already sits on the far side of it.
+                VStack(alignment: .leading) {
+                    Toggle(isOn: Binding(
+                        get: { canvasManager.fillMendsNeighbourGap },
+                        set: { canvasManager.setFillMendsNeighbourGap($0) }
+                    )) {
+                        Text("Mend Gap to Neighbouring Fill")
+                            .foregroundColor(.white)
+                    }
+                    .tint(Self.selectedTint)
+                    .accessibilityIdentifier("fillPanel.mendGapToggle")
+                    Text("Where a fill on this layer sits across a line from this one, the colour grows under the line to meet it, so no seam is left between them. It reaches twice Gap Closing, only crosses line, and never covers the other fill or open paper.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal)
+
                 // **Below the three sliders, not beside Gap Closing, and the reason is the panel's
                 // height rather than its logic.** It reads as a Gap Closing modifier — it also adds
                 // the canvas rectangle to the set of things gap-closing may bridge to — but it is
@@ -126,6 +145,29 @@ struct FillSettingsPanel: View {
                     .tint(Self.selectedTint)
                     .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
                     Text("Fills stop at the canvas edge instead of spreading out into the padding, and Gap Closing may bridge to it so a line stopping just short still seals.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+
+                    // **The edge can be moved out into the padding** (TODO (114)). Its travel is the
+                    // padding itself — past that the boundary is the canvas's own edge, which is the
+                    // toggle off — so a canvas with no padding has nothing to extend into and the
+                    // slider is shown but dead, saying why, rather than vanishing and leaving the
+                    // artist to wonder where the option went.
+                    let padding = canvasManager.canvasPadding
+                    let canExtend = canvasManager.fillCanvasEdgeIsBoundary && padding >= 1
+                    Text("Extension Buffer: \(Int(min(canvasManager.fillCanvasEdgeExtension, padding))) px")
+                        .foregroundColor(canExtend ? .white : .gray)
+                        .padding(.top, 4)
+                    Slider(value: Binding(
+                        get: { min(canvasManager.fillCanvasEdgeExtension, padding) },
+                        set: { canvasManager.setFillCanvasEdgeExtension($0) }
+                    ), in: 0...max(padding, 1), step: 1)
+                        .tint(Self.selectedTint)
+                        .disabled(!canExtend)
+                        .accessibilityIdentifier("fillPanel.canvasEdgeExtensionSlider")
+                    Text(padding >= 1
+                         ? "How far into the padding the canvas edge bounds the fill. 0 is the paper's own edge; the top is the padding's outer edge."
+                         : "This canvas has no padding to extend into. Set Canvas Padding in Settings first.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

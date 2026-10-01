@@ -33,14 +33,18 @@ extension CanvasManager {
     /// Not `private`: `fillPending`/`fillRendered` in CanvasManager.swift are typed with it, and
     /// Swift scopes `private` to the file rather than the type.
     ///
-    /// `inset` is `canvasPadding` — carried here rather than read in `drainFillWork` because that
-    /// runs on `fillQueue` and `canvasPadding` is `@Published` main-thread state. The key is already
-    /// the main-thread-captured carrier for everything the render used, so putting it here keeps
-    /// that invariant. It cannot change mid-gesture (`setCanvasPadding` calls
-    /// `commitAllInteractiveState` first), so it never needs to trigger a re-render during a drag —
-    /// but being part of the key means it would if that guarantee were ever relaxed.
+    /// `inset` is how far the artwork rect sits inside the canvas: `canvasPadding`, less the
+    /// extension the artist asked the boundary to reach into it (`fillCanvasEdgeExtension`) —
+    /// carried here rather than read in `drainFillWork` because that runs on `fillQueue` and both are
+    /// `@Published` main-thread state. The key is already the main-thread-captured carrier for
+    /// everything the render used, so putting it here keeps that invariant. The padding cannot change
+    /// mid-gesture (`setCanvasPadding` calls `commitAllInteractiveState` first); the extension can,
+    /// from its slider, and that is a re-render of the live fill like any other setting.
+    ///
+    /// `mend` is `fillMendsNeighbourGap`.
     struct FillKey: Equatable {
         var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool; var inset: Int
+        var mend: Bool
     }
 
     /// Everything a `fillQueue` render needs from the gesture that asked for it, snapshotted on the
@@ -119,7 +123,8 @@ extension CanvasManager {
         fillGeneration &+= 1
         let generation = fillGeneration
         fillPending = currentFillKey()
-        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
+        fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min,
+                               mend: false)
         fillRenderedRegion = nil
         // Claimed here so early drag updates don't spawn a second worker. Every caller enqueues a
         // worker of this generation immediately after, which is what lets a *superseded* worker
@@ -177,6 +182,15 @@ extension CanvasManager {
         return queued?.generation == live ? queued : nil
     }
 
+    /// Lets go of everything the retired gesture held on `fillQueue`: the GPU session, its window, and
+    /// the layers it read. Queued behind any render still running for the gesture.
+    private func endFillSession() {
+        fillSession = nil
+        fillWindow = nil
+        fillGestureReferences = []
+        fillGestureNeighbours = []
+    }
+
     /// Begins an interactive fill at `point` (canvas-pixel coords, top-left origin): composites every
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
     /// the tapped colour, and paints an initial fill. A plain tap is just this immediately followed by
@@ -202,6 +216,7 @@ extension CanvasManager {
         guard let celIndex = ensureCelAtCurrentFrame(layerIndex: layerIndex) else { return }
 
         let references = fillReferenceSources()
+        let neighbours = [(layer: layers[layerIndex], cel: layers[layerIndex].cels[celIndex])]
         let width = Int(canvasSize.width.rounded())
         let height = Int(canvasSize.height.rounded())
         let seedX = min(max(Int(point.x.rounded(.down)), 0), width - 1)
@@ -229,6 +244,7 @@ extension CanvasManager {
         fillQueue.async { [weak self] in
             guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             self.fillGestureReferences = references
+            self.fillGestureNeighbours = neighbours
             // A tap has no fence to redraw. Cleared beside the session it belongs to, so the two can
             // never describe different gestures — see `fillGestureLoopPath`.
             self.fillGestureLoopPath = nil
@@ -373,7 +389,8 @@ extension CanvasManager {
                 threshold: Int((fillThreshold * 1000).rounded()),
                 edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
                 edgeIsWall: fillCanvasEdgeIsBoundary,
-                inset: Int(canvasPadding.rounded()))
+                inset: Int(max(0, canvasPadding - fillCanvasEdgeExtension).rounded()),
+                mend: fillMendsNeighbourGap)
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -383,6 +400,25 @@ extension CanvasManager {
     func setFillCanvasEdgeIsBoundary(_ enabled: Bool) {
         guard fillCanvasEdgeIsBoundary != enabled else { return }
         fillCanvasEdgeIsBoundary = enabled
+        if fillGestureActive { scheduleFillRender() }
+    }
+
+    /// Sets how far into the padding the canvas edge's boundary reaches, and re-runs an adjustable
+    /// fill so the artist sees the boundary move. Whole pixels, never negative — the boundary does
+    /// not come in from the paper's edge, which is the option's own meaning.
+    func setFillCanvasEdgeExtension(_ pixels: CGFloat) {
+        let v = max(0, pixels.rounded())
+        guard fillCanvasEdgeExtension != v else { return }
+        fillCanvasEdgeExtension = v
+        if fillGestureActive { scheduleFillRender() }
+    }
+
+    /// Turns the mend on or off and, like the other two switches, re-runs an adjustable fill — the
+    /// natural order is to fill, see the seam, and flip this, and the seam should close under the
+    /// artist's finger.
+    func setFillMendsNeighbourGap(_ enabled: Bool) {
+        guard fillMendsNeighbourGap != enabled else { return }
+        fillMendsNeighbourGap = enabled
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -536,7 +572,7 @@ extension CanvasManager {
         // Capture the render before clearing — needed for the vector-path extraction below.
         let render = fillLastRender ?? queuedRender
         fillLastRender = nil
-        fillQueue.async { [weak self] in self?.fillSession = nil; self?.fillWindow = nil; self?.fillGestureReferences = [] }
+        fillQueue.async { [weak self] in self?.endFillSession() }
         let fillColor = fillGestureFillColor
         let coverageCut = fillHalfCoverageAlpha
         defer { fillGestureBaseBaked = nil; fillGestureLayerID = nil; fillGestureCelID = nil; refreshUndoRedoState() }
@@ -782,6 +818,7 @@ extension CanvasManager {
 
         guard let celIndex = ensureCelAtCurrentFrame(layerIndex: layerIndex) else { return }
         let references = fillReferenceSources()
+        let neighbours = [(layer: layers[layerIndex], cel: layers[layerIndex].cels[celIndex])]
 
         fillGestureActive = true
         fillFingerDown = true
@@ -811,6 +848,7 @@ extension CanvasManager {
             self.lassoFillReportedEmpty = false
             self.fillGestureLoopPath = path
             self.fillGestureReferences = references
+            self.fillGestureNeighbours = neighbours
             // The lasso's collar flood runs against the same wall set the bucket does, so it gets
             // (46) for free — a segmented enclosure lassoed no longer leaks its collar out through
             // the gaps between dabs.
@@ -839,7 +877,7 @@ extension CanvasManager {
         }
         fillGestureLayerID = nil
         fillGestureCelID = nil
-        fillQueue.async { [weak self] in self?.fillSession = nil; self?.fillWindow = nil; self?.fillGestureReferences = [] }
+        fillQueue.async { [weak self] in self?.endFillSession() }
         refreshUndoRedoState()
     }
 
@@ -891,6 +929,13 @@ extension CanvasManager {
             // step moves at least one side to the canvas edge or doubles it, and a window with no
             // growable side is trusted whole.
             while true {
+                // Built once per session, and only for a fill that mends: the composite is a layer's
+                // worth of drawing the artist who has not asked for it should not pay for. Here rather
+                // than where the session is made so that switching the mend on over a fill already
+                // on screen, and a window grown for a bigger flood, both find it in place.
+                if key.mend, !session.hasNeighbours {
+                    session.installNeighbours(Self.neighbourMask(of: fillGestureNeighbours, in: window))
+                }
                 bytes = Self.runFill(session, in: window, key: key, context: context, seedColor: fillSeedColor)
                 guard bytes != nil, !session.isLasso else { break }
                 let reached = session.paintedReaches(band: window.band(forHalo: Self.fillWindowHalo),
@@ -1015,7 +1060,7 @@ extension CanvasManager {
         return session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColor,
                             threshold: Float(Double(key.threshold) / 1000.0),
                             gapRadius: Float(key.gap) * scale, edgeOverlap: Float(key.edge) * scale,
-                            artworkRect: paper, fillColor: context.color)
+                            artworkRect: paper, mendsNeighbours: key.mend, fillColor: context.color)
     }
 
     /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel
@@ -1089,6 +1134,19 @@ extension CanvasManager {
             return true
         }
         return ok ? bytes : nil
+    }
+
+    /// Where `sources` have any paint at all, in the window's working pixels — the mend's neighbour set
+    /// (TODO (113)). The same composite the reference is, of the one cel the fill lands on, so a
+    /// vector cel's fills are drawn the way the artist sees them and a raster cel's committed fills
+    /// are in it however they were baked. A composite that cannot be made is an empty set, which
+    /// mends nothing.
+    static func neighbourMask(of sources: [(layer: Layer, cel: Cel)], in window: FillWindow) -> [UInt8] {
+        let count = window.workingWidth * window.workingHeight
+        guard let rgba = compositeReferenceRGBA(references: sources, window: window) else {
+            return [UInt8](repeating: 0, count: count)
+        }
+        return (0..<count).map { rgba[$0 * 4 + 3] != 0 ? 255 : 0 }
     }
 
     /// Wraps a top-left-origin premultiplied-last RGBA byte buffer into a UIImage for the fill preview.

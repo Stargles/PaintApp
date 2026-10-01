@@ -125,15 +125,16 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(mask, 16 * Self.mib)
         XCTAssertEqual(onion, 64 * Self.mib)
         XCTAssertEqual(vectorRender, 96 * Self.mib, "twelve of the owner's canvases, inside the byte budget")
-        // 46 bytes a pixel — the lasso worst case, two reference colours. MEASURED at **42** for a
-        // lasso over a uniform reference, which resolves to one colour and skips four buffers; the
-        // prediction the budget weighs is deliberately the upper one. A rate rather than a total,
-        // because the rate is the durable fact and the total follows from the canvas.
-        XCTAssertEqual(fill / (ownersCanvasBytes / 4), 46, "46 bytes a canvas pixel, worst case")
+        // 47 bytes a pixel — the lasso worst case, two reference colours: 46 when this was measured,
+        // plus the one byte TODO (113)'s neighbour mask adds to every session. MEASURED at **42**
+        // (43 now) for a lasso over a uniform reference, which resolves to one colour and skips four
+        // buffers; the prediction the budget weighs is deliberately the upper one. A rate rather than
+        // a total, because the rate is the durable fact and the total follows from the canvas.
+        XCTAssertEqual(fill / (ownersCanvasBytes / 4), 47, "47 bytes a canvas pixel, worst case")
         // The fill's two counters and two `FillParams` are the only bytes here that do not scale.
         let fillConstants = 2 * (MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride)
         XCTAssertEqual(fillConstants, 168, "a `FillParams` is 80 bytes — eleven scalars and two float4s")
-        XCTAssertEqual(total, 844 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
+        XCTAssertEqual(total, 846 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
         XCTAssertLessThan(total, ceiling,
                           "seven ceilings added together must still fit inside the process limit, or the arithmetic is asking for a jetsam")
 

@@ -192,25 +192,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (113) Fill: mend the gap to a neighbouring fill
-
-**Status** — not started. *"The fill tool should have an option (in the drop down menu) where it
-exudes a particular behavior. Say we have fill selection A, and then selection B, separated by a line.
-Currently when fill A and B are filled independantly, it leaves a tiny unfilled region between these
-two regions directly under the line. The option should have fill B smartly detect its edge is near fill
-A, and mend the gap (extend fill B to touch fill A). This should work in both lasso and flood modes."*
-
-- [ ] An option in the fill menu; B grows to meet A under the line in flood and lasso modes; tested by
-      rendered pixels (no unfilled seam), not by stored geometry alone.
-
-## (114) Fill: an extension buffer for "Canvas Edge is a boundary"
-
-**Status** — not started. *"In the fill tool, under Canvas Edge is a boundary, there should be an
-extension buffer slider, like if i set it to 100px, then the canvas edge fill boundary will be extended
-100px into the padding."*
-
-- [ ] A slider under the toggle; the boundary sits that many document pixels out into the padding.
-
 ## (119) The eyedropper can sample the layer itself, ignoring what is composited over it
 
 **Status** — not started. *"In the colour picker menu, add a small switch on the top right which

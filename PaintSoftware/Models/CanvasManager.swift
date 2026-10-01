@@ -1329,6 +1329,29 @@ final class CanvasManager: ObservableObject {
     /// before padding was considered. See `edgeBridge` in Fill.metal for both mechanisms and for why
     /// the boundary is a barrier between pixels rather than ink added to the wall mask.
     @Published var fillCanvasEdgeIsBoundary: Bool = true
+
+    /// How far the canvas edge's boundary sits **outside the paper, into the padding**, in canvas
+    /// pixels — the owner's *"if I set it to 100px, then the canvas edge fill boundary will be
+    /// extended 100px into the padding."* 0 is the boundary at the paper's own edge, which is what the
+    /// option has always meant.
+    ///
+    /// Only read while `fillCanvasEdgeIsBoundary` is on, and it cannot reach past the padded canvas:
+    /// the fill's boundary rect is the artwork rect outset by this and clamped to `canvasSize`
+    /// (`currentFillKey` does the arithmetic, in the one place the rect is decided). A value larger
+    /// than the padding is therefore the boundary at the canvas's own edge — the same fill the option
+    /// off gives — which is why the slider's range follows the padding and the stored value need not.
+    ///
+    /// Not persisted, and neither is the toggle it belongs to: both are `CanvasManager` state for the
+    /// session, like every other fill setting.
+    @Published var fillCanvasEdgeExtension: CGFloat = 0
+
+    /// Whether a fill grows into the gap between itself and paint already on its layer — the owner's
+    /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). Off by
+    /// default: it is an option, and what it changes is where a fill's edge lands.
+    ///
+    /// It reaches **twice Gap Closing** and no further, so that slider is its range as well as the
+    /// close's — see `MetalFillSession.fill(mendsNeighbours:)`. Both fill types honour it.
+    @Published var fillMendsNeighbourGap: Bool = false
     @Published var isFilling: Bool = false
 
     @Published var canvasBackgroundColor: Color = .white
@@ -3534,8 +3557,8 @@ final class CanvasManager: ObservableObject {
     /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
-    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0)
-    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min)
+    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0, mend: false)
+    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min, mend: false)
     var fillWorkerScheduled = false
 
     /// **Which gesture `fillQueue` is working for.** Bumped by every `begin*Fill`, and again by
@@ -3569,6 +3592,10 @@ final class CanvasManager: ObservableObject {
     /// can composite them again. The same list every render of the gesture reads — the artwork
     /// cannot change while a fill is adjustable, since every edit runs `beginCanvasEdit` first.
     var fillGestureReferences: [(layer: Layer, cel: Cel)] = []
+    /// The cel the live gesture lands on, in the shape `fillGestureReferences` has so the same
+    /// composite reads it — what a mend grows toward (TODO (113)). `fillQueue` only, held for the
+    /// gesture for the same reason the references are: a grown window composites it again.
+    var fillGestureNeighbours: [(layer: Layer, cel: Cel)] = []
 
     /// The loop the live lasso gesture drew, in canvas coordinates — kept so an empty result can
     /// redraw the artist's own fence (LASSO_FILL.md §7.4). Nil for a bucket fill.

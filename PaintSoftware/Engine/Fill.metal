@@ -223,14 +223,16 @@ kernel void edgeBridge(const device float2* wallCoord [[buffer(0)]],
     out[i] = (toWall + distanceToCanvasEdge(gid, params) <= radius) ? 1 : 0;
 }
 
-// `dst |= src`, for folding the edge bridge into the closed wall mask after the erode has run.
+// `dst = max(dst, src)`: folds the edge bridge into the closed wall mask after the erode has run, and
+// the mend into a fill's coverage. Both flags (0 or 1) and a coverage (0 to 255) are held to "non-zero
+// is set, and the larger is the stronger", so one kernel serves both.
 kernel void unionMask(const device uchar* src   [[buffer(0)]],
                       device uchar*        dst   [[buffer(1)]],
                       constant FillParams& params [[buffer(2)]],
                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    if (src[i]) dst[i] = 1;
+    dst[i] = max(dst[i], src[i]);
 }
 
 // MARK: - Flood fill (parallel scanline / span propagation)
@@ -585,4 +587,87 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
     if (a == 0) { out[i] = uchar4(0); return; }
     float k = float(a) / 255.0;
     out[i] = uchar4(clamp(params.fillColor * k * 255.0 + 0.5, 0.0, 255.0));
+}
+
+// MARK: - Mending the gap to a neighbouring fill (TODO (113))
+//
+// **The seam, and why it exists at all.** A flood stops at the antialiased edge of the line it meets,
+// on whichever side it started. Two fills either side of one line therefore each stop at their own
+// side's edge, plus the few pixels Edge Overlap tucks under it — and the strip under the line's core
+// belongs to neither. A lasso pair has the same strip for the same reason: each loop's fence stops at
+// the line's near side. The mend is the third thing a fill can do about it, after Edge Overlap's
+// uniform disk: grow *only* where the colour on the other side of the line already is.
+//
+// **The rule: a pixel is mended when, along some straight line through it, ink runs unbroken from
+// this fill to the neighbour — and no longer than the reach.** That is the seam, exactly: the
+// divider's own pixels between two cells qualify, and nothing else does. A radius cannot say it — a
+// dilation by half the reach leaves a strip against each side of a seam wider than that — and neither
+// can a distance to the nearest fill, which paints the outline of a shape whose far side is *paper*
+// because a fill happens to be 14 px away across it, or the stretch of a frame's edge that runs on
+// past a divider with the neighbour only ever beside it. In each of those the run meets paper, or the
+// wrong end of a corner, so no line through the pixel joins the two. "Never onto open paper" is the
+// same fact: paper is not ink, so no run crosses it.
+//
+// Four axes, each walked both ways, find a crossing at whatever angle the line was drawn: some axis is
+// within 22.5 degrees of square on to it, so the run is at most 8% longer than the line is thick.
+//
+// **The neighbour is not painted over.** Its pixels end a run and are never mended themselves.
+
+/// Whether the mend may walk through here: ink under every reference. `wall2` is only read when the
+/// lasso has a second reference colour (`refCount > 1`), where a pixel is paper if it is passable
+/// under *either*.
+static inline bool mendIsInk(uint i, const device uchar* wall, const device uchar* wall2, uint refCount) {
+    return wall[i] != 0 && (refCount < 2u || wall2[i] != 0);
+}
+
+/// Where a walk from a pixel ends, as `(what, steps)`: bit 1 of `what` is this fill, bit 2 the
+/// neighbour (a pixel can be both, where Edge Overlap tucked this fill over the neighbour's edge), and
+/// 0 means the walk met paper, the barrier or the buffer's rim first. `steps` counts to the pixel the
+/// walk ended on.
+static inline uint2 mendRun(uint2 from, int dx, int dy, int limit, bool onPaper,
+                            const device uchar* painted, const device uchar* neighbour,
+                            const device uchar* wall, const device uchar* wall2,
+                            constant FillParams& params, uint refCount) {
+    for (int k = 1; k <= limit; k++) {
+        int nx = int(from.x) + dx * k;
+        int ny = int(from.y) + dy * k;
+        if (nx < 0 || ny < 0 || nx >= int(params.width) || ny >= int(params.height)) break;
+        // The barrier lies between pixels: a run that crossed it would join colour on the paper to
+        // colour on the margin, which `edgeDilate` and `lassoEdgeErode` do not do either.
+        if (insideArtworkRect(uint(nx), uint(ny), params) != onPaper) break;
+        uint n = pixelIndex(uint(nx), uint(ny), params.width);
+        uint what = (painted[n] != 0 ? 1u : 0u) | (neighbour[n] != 0 ? 2u : 0u);
+        if (what != 0) return uint2(what, uint(k));
+        if (!mendIsInk(n, wall, wall2, refCount)) break;
+    }
+    return uint2(0, 0);
+}
+
+// Writes 255 where the pixel is to be mended and 0 everywhere else, into a buffer of its own: the walks
+// read `painted` at every other pixel, so mending in place would make each answer depend on which
+// thread had run first. `unionMask` folds the result in. `reach` is in pixels.
+kernel void mendGap(const device uchar* painted   [[buffer(0)]],
+                    const device uchar* neighbour [[buffer(1)]],
+                    const device uchar* wall      [[buffer(2)]],
+                    const device uchar* wall2     [[buffer(3)]],
+                    device uchar*       mended    [[buffer(4)]],
+                    constant FillParams& params   [[buffer(5)]],
+                    constant float&      reach    [[buffer(6)]],
+                    constant uint&       refCount [[buffer(7)]],
+                    uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    mended[i] = 0;
+    if (painted[i] != 0 || neighbour[i] != 0 || !mendIsInk(i, wall, wall2, refCount)) return;
+    bool onPaper = insideArtworkRect(gid.x, gid.y, params);
+    const int2 axes[4] = { int2(1, 0), int2(0, 1), int2(1, 1), int2(1, -1) };
+    for (int a = 0; a < 4; a++) {
+        float stride = (axes[a].x != 0 && axes[a].y != 0) ? 1.41421356f : 1.0f;
+        int limit = int(reach / stride);
+        uint2 ahead = mendRun(gid, axes[a].x, axes[a].y, limit, onPaper, painted, neighbour, wall, wall2, params, refCount);
+        if (ahead.x == 0) continue;
+        uint2 behind = mendRun(gid, -axes[a].x, -axes[a].y, limit, onPaper, painted, neighbour, wall, wall2, params, refCount);
+        bool joins = ((ahead.x & 1u) != 0 && (behind.x & 2u) != 0) || ((ahead.x & 2u) != 0 && (behind.x & 1u) != 0);
+        if (joins && float(ahead.y + behind.y) * stride <= reach) { mended[i] = 255; return; }
+    }
 }

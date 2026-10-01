@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import UIKit
 import simd
 
@@ -651,5 +652,130 @@ final class FillBoundaryLogicTests: XCTestCase {
         // A degenerate rect is the option off, not a fence around nothing.
         let empty = try fill(reference, side: Self.canvasW, seed: (x: 20, y: 60), artworkRect: .zero)
         XCTAssertEqual(filledCount(empty), filledCount(around))
+    }
+
+    // MARK: - The extension buffer (TODO (114))
+
+    /// The owner: *"under Canvas Edge is a boundary, there should be an extension buffer slider, like if
+    /// I set it to 100px, then the canvas edge fill boundary will be extended 100px into the
+    /// padding."* The boundary is the artwork rect outset by the buffer and clamped to the padded
+    /// canvas — decided in one place, `currentFillKey`'s inset, and these tests read **where the
+    /// colour actually lands** rather than the number, because every other test in this file hands the
+    /// session its rect directly and cannot see whether the manager derives the right one.
+    ///
+    /// A 64 px canvas with 16 px of padding on every side, so the paper is `[16, 48)` and the padded
+    /// canvas is the whole `[0, 64)`.
+    private static let paddedCanvas = 64
+    private static let padding: CGFloat = 16
+
+    private func paddedManager(extension buffer: CGFloat, boundary: Bool = true) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasPadding = Self.padding
+        manager.fillCanvasEdgeIsBoundary = boundary
+        manager.setFillCanvasEdgeExtension(buffer)
+        return manager
+    }
+
+    private func settle(_ seconds: TimeInterval = 0.5) {
+        let done = expectation(description: "fill settles")
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { done.fulfill() }
+        wait(for: [done], timeout: seconds + 5)
+    }
+
+    /// One tap on blank paper at the canvas centre, lifted, settled and committed, and the layer's
+    /// pixels read back as an alpha per pixel.
+    private func floodedAlpha(_ manager: CanvasManager) throws -> (Int, Int) -> UInt8 {
+        manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+        manager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
+        manager.endInteractiveFill()
+        settle()
+        manager.commitInteractiveFill()
+        return try committedAlpha(manager)
+    }
+
+    private func lassoedAlpha(_ manager: CanvasManager) throws -> (Int, Int) -> UInt8 {
+        manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+        let loop = CGMutablePath()
+        loop.addRect(CGRect(x: 0, y: 0, width: Self.paddedCanvas, height: Self.paddedCanvas))
+        manager.beginInteractiveLassoFill(path: loop)
+        manager.endInteractiveFill()
+        settle()
+        manager.commitInteractiveFill()
+        return try committedAlpha(manager)
+    }
+
+    private func committedAlpha(_ manager: CanvasManager) throws -> (Int, Int) -> UInt8 {
+        let cel = try XCTUnwrap(manager.layers[0].cels.first)
+        let cg = try XCTUnwrap(cel.raster.renderToUIImage().cgImage)
+        // A tier nothing was committed to renders as a shared 1x1, so a fill that came back empty reads
+        // as bare everywhere instead of trapping on an index.
+        guard cg.width == Self.paddedCanvas else { return { _, _ in 0 } }
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
+        return { x, y in bytes[(y * cg.width + x) * 4 + 3] }
+    }
+
+    /// The flood stops exactly `buffer` px out from the paper's edge, on all four sides — one pixel in
+    /// is colour and one pixel out is not — and a buffer wider than the padding is the canvas's own
+    /// edge, the same fill as the option off.
+    func testTheFloodReachesIntoThePaddingByExactlyTheBuffer() throws {
+        for buffer in [CGFloat(0), 1, 7, 15, 16, 40] {
+            let alpha = try floodedAlpha(paddedManager(extension: buffer))
+            let lo = Int(max(0, Self.padding - buffer))
+            let hi = Self.paddedCanvas - lo
+            for y in [lo, 32, hi - 1] {
+                XCTAssertGreaterThan(alpha(lo, y), 200, "buffer \(Int(buffer)): column \(lo) is the first colour in row \(y)")
+                XCTAssertGreaterThan(alpha(hi - 1, y), 200, "buffer \(Int(buffer)): column \(hi - 1) is the last in row \(y)")
+                if lo > 0 {
+                    XCTAssertEqual(alpha(lo - 1, y), 0, "buffer \(Int(buffer)): column \(lo - 1) is outside the boundary")
+                    XCTAssertEqual(alpha(hi, y), 0, "buffer \(Int(buffer)): column \(hi) is outside the boundary")
+                }
+            }
+            for x in [lo, 32, hi - 1] {
+                XCTAssertGreaterThan(alpha(x, lo), 200, "buffer \(Int(buffer)): row \(lo) is the first colour in column \(x)")
+                if lo > 0 {
+                    XCTAssertEqual(alpha(x, lo - 1), 0, "buffer \(Int(buffer)): row \(lo - 1) is outside the boundary")
+                    XCTAssertEqual(alpha(x, hi), 0, "buffer \(Int(buffer)): row \(hi) is outside the boundary")
+                }
+            }
+        }
+    }
+
+    /// **The lasso honours it too**, because the paper's rect is one decision for both fills: a loop
+    /// around the whole canvas, on blank paper, finds the region the boundary fences off from its
+    /// ring — the paper outset by the buffer — and nothing past it. (At a buffer that takes the
+    /// boundary out to the canvas's own edge there is no fence left and the loop encloses nothing,
+    /// which is LASSO_FILL.md §4 case 6, so the range stops short of the padding.)
+    func testTheLassoReachesIntoThePaddingByExactlyTheBuffer() throws {
+        for buffer in [CGFloat(0), 5, 15] {
+            let alpha = try lassoedAlpha(paddedManager(extension: buffer))
+            let lo = Int(max(0, Self.padding - buffer))
+            let hi = Self.paddedCanvas - lo
+            for y in 0..<Self.paddedCanvas {
+                for x in 0..<Self.paddedCanvas {
+                    let inside = (lo..<hi).contains(x) && (lo..<hi).contains(y)
+                    XCTAssertEqual(alpha(x, y) > 200, inside,
+                                   "buffer \(Int(buffer)): (\(x),\(y)) is \(inside ? "inside" : "outside") the boundary")
+                }
+            }
+        }
+    }
+
+    /// The buffer is the boundary's, so with the boundary off it means nothing: the flood fills the
+    /// whole canvas whatever the slider holds.
+    func testTheBufferDoesNothingWhileTheCanvasEdgeIsNotABoundary() throws {
+        let alpha = try floodedAlpha(paddedManager(extension: 5, boundary: false))
+        XCTAssertGreaterThan(alpha(0, 0), 200)
+        XCTAssertGreaterThan(alpha(63, 63), 200)
+    }
+
+    func testTheBufferIsPartOfTheKeyAndNeverNegative() {
+        let manager = paddedManager(extension: 0)
+        XCTAssertEqual(manager.currentFillKey().inset, 16)
+        manager.setFillCanvasEdgeExtension(10)
+        XCTAssertEqual(manager.currentFillKey().inset, 6, "The artwork rect is the paper outset by the buffer")
+        manager.setFillCanvasEdgeExtension(100)
+        XCTAssertEqual(manager.currentFillKey().inset, 0, "…and no further than the padded canvas")
+        manager.setFillCanvasEdgeExtension(-4)
+        XCTAssertEqual(manager.fillCanvasEdgeExtension, 0, "The boundary does not come in from the paper's edge")
     }
 }
