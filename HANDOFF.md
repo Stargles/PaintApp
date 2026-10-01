@@ -51,21 +51,40 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**The owner's 2026-10-01 brief, (111)–(146), is the queue** — thirty-six asks recorded in TODO.md in
-the order this pass works them (number = 110 + the owner's ask number). Session 46 is working it in
-lanes under a cap of one Opus or two Sonnet workers at once; **check `git worktree list` and the
-`tmp/*` branches for what is in flight** — this file names lanes only when they merge.
+**The owner's 2026-10-01 brief, (111)–(146), is the queue** — recorded in TODO.md in work order
+(number = 110 + the owner's ask number). **Merged so far (session 46):** (117) (118) (130) the dock and
+playback survive a pan, (143) (142) (137) (141) (138) (144) (111) the small UI asks and their two
+ruled follow-ups, (129) (128) (116) (115) fill-type shapes, the gradient object, Select → Edit, font
+faces, (113) (114) fill mend and extension buffer, plus two defects found on the way (the editor
+stayed squeezed after the keyboard; taps fell through four bottom panels). **Seventeen items remain.**
 
-- **(139), (131) and (128) were ruled 2026-10-01** (the rulings are in their TODO entries). A
-  read-only design survey for them and for (124) is at `~/PaintWork/design/survey-1001.md` — read it
-  before building any of the four.
-- **Evidence on disk**: the two recordings the brief cites, `recording-20261001-002122.jsonl` ((132))
-  and `-002226.jsonl` ((145)), were pulled off the iPad into `~/PaintWork/evidence/`.
-- **(101) is folded into (112)**: the reconnect loop and LAN are fixed and confirmed; the owner's
-  "stream paused" report is the answer to (101)'s last check.
+**In flight**: an Opus worker on `tmp/offcanvas` — (121) outside-the-canvas as one input path, then
+(124)+(145) drawing under a transform layer on the same seam. The cap this session is one Opus *or*
+two Sonnet at once, so nothing else runs beside it. **Check `git worktree list` before trusting this.**
 
-**Owner-side, unchanged**: (27) stage 5 (stream Blender, latency, the device tick, Ctrl+V, the
-blend-mode limitation) and BUGS.md's palette-row question.
+**Next, in order**: (125)+(136)+(140) one live-preview mechanism for transform edits (Opus); then
+Sonnet lanes — (119) (120) (146), (134) (135), (122) (123), (126) (127) (133), (132), (112); then
+(139) and (131) (both ruled; (131) after (128), which has merged).
+
+- **Design notes for (139), (131), (124)** are at `~/PaintWork/design/survey-1001.md` (a read-only
+  survey; the rulings in TODO.md override it). The worker brief every lane reads is
+  `~/PaintWork/brief-common.md`.
+- **Evidence on disk**: `recording-20261001-002122.jsonl` ((132)) and `-002226.jsonl` ((145)) are in
+  `~/PaintWork/evidence/`.
+- **(101) is folded into (112)**.
+
+**Questions queued for the owner** (they asked not to be asked before 11am EST 2026-10-01; use the
+question tool):
+1. Select → Edit when a loop catches both a text box and a gradient: topmost wins (shipped), one button
+   per object, or refuse and ask for a tighter loop?
+2. Fill Mend's reach is twice Gap Closing: keep, a separate Mend Reach slider, or a fixed small reach?
+3. While typing, the editor shrinks so the Text panel rides above the keyboard: keep, lift only the
+   dock above the keyboard, or let the keyboard cover the panel?
+
+**Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
+an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line.
+
+**Owner-side, unchanged**: (27) stage 5 and BUGS.md's palette-row question.
 
 ## What shipped this session
 
@@ -83,7 +102,7 @@ decisions most likely to be tripped over:
   clipped to its true path at display scale. The panel still opens on Classic (the old Square) because
   a dozen tests reach `colorPanel.svSquare`.
 - **(103)** — Rectangle/Ellipse call `beginInteractiveShape` with a default square (there is no shape
-  tool); Linear Gradient is `ValueFill.gradient`, not a new layer kind.
+  tool) — since (129) they lay down solid fill objects, and the gradient is a fill object (128).
 - **(105)** — `VectorVideoElement.mappedFrameRate`, frozen at insertion (24 when absent).
 - **(86)** — `CanvasManager.maxCanvasExtent(deviceMemoryBudgetBytes:)`, fit ≈42.25 B/px − 288.6 MiB,
   63% margin; 6000 at 1850 MiB, 8000 at twice that.
