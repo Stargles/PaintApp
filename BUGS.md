@@ -4,6 +4,17 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Three UI tests red on `main` before (121), cause unknown (2026-10-01)
+
+Found by the (121)/(124)/(145) worker: each fails alone on an erased device **and** on `main` at
+`416831f`, before any of its own commits — so not environmental, and not (121). Unbisected; this
+session's earlier merges (`9704384`..`34fc2c5`) are the first suspects.
+
+- `PoseBakeUITests` (Bake Animation).
+- `GraphEditorGestureUITests.testGraphEditorPoseNodeDeleteAndTapToAddOnATransformationLayer` —
+  *"The box should have committed"*.
+- `ColorWheelsUITests` — *"A double-tap resets the wheel"*.
+
 ## Since TODO (106) the colour panel shows one row of the palette (2026-09-25)
 
 MEASURED from the accessibility tree on the 13-inch simulator, colour panel open on the Classic tab:
