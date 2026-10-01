@@ -127,6 +127,56 @@ class PaintUITestCase: XCTestCase {
         return String(field.dropFirst(prefix.count))
     }
 
+    // MARK: - The text tool
+
+    /// The `text:` field of `canvas.host`'s label — "none" / "box" / "editing". See
+    /// `CanvasView.publishCanvasState`.
+    func readTextState(_ app: XCUIApplication) -> String {
+        readField(app, "text:")
+    }
+
+    /// Polls `text:` rather than reading it once: placing a box is a SwiftUI state change and the
+    /// label is republished on the pass that follows it, so a single read straight after the tap can
+    /// legitimately still say "none".
+    func waitForTextState(_ app: XCUIApplication, _ accepted: String...) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            if accepted.contains(readTextState(app)) { return true }
+        } while Date() < deadline
+        return false
+    }
+
+    /// **`app.typeText` cannot reach the editor**, for the reason `CanvasTransformFreezeUITests`
+    /// records: `canvas.host` is an accessibility element in its own right and hides its subtree,
+    /// so XCUITest sees nothing with keyboard focus and refuses to synthesise the keystrokes. What it
+    /// *can* reach is the software keyboard, which is a window of its own — so the string is typed
+    /// key by key when the keyboard is up, and pasted through the edit menu (another window of its
+    /// own) when a hardware keyboard is connected and no software keyboard appears.
+    func typeIntoTextBox(_ string: String, _ app: XCUIApplication, at insideTheBox: CGPoint) {
+        if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
+            for character in string {
+                // The keyboard shows whichever case its shift state has, and auto-capitalisation
+                // shifts it for the first letter; either case draws the same glyph shapes for this
+                // test's purpose, so take the key that is there.
+                let exact = app.keys[String(character)]
+                let other = app.keys[character.isUppercase ? String(character).lowercased()
+                                                            : String(character).uppercased()]
+                let key = exact.waitForExistence(timeout: 2) ? exact : other
+                XCTAssertTrue(key.waitForExistence(timeout: 3), "the software keyboard has a \(character) key")
+                key.tap()
+            }
+            return
+        }
+        UIPasteboard.general.string = string
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: insideTheBox.x, dy: insideTheBox.y))
+            .press(forDuration: 1.0)
+        let paste = app.menuItems["Paste"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5),
+                      "no software keyboard and no Paste menu — nothing this test can reach types into the box")
+        paste.tap()
+    }
+
+
     /// The `xform:` field — "scale,rotation,dx,dy" — which moves exactly when the canvas does.
     func readTransform(_ app: XCUIApplication) -> String {
         readField(app, "xform:")

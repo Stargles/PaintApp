@@ -443,9 +443,18 @@ extension CanvasManager {
     /// buffer, with padding eating into it — makes the two Actions controls fight over one number in
     /// a way neither of them shows.
     var artworkSize: CGSize? {
+        artworkRect?.size
+    }
+
+    /// The artwork rect in canvas coordinates: the paper, inset from the buffer's edge by the padding.
+    /// **Not `CGRect(origin: .zero, size: artworkSize)`**, which is the same size in the wrong place
+    /// whenever there is padding — the origin is the padding, on both axes. Nil before a canvas exists.
+    var artworkRect: CGRect? {
         guard let canvasSize else { return nil }
-        return CGSize(width: max(1, canvasSize.width - 2 * canvasPadding),
-                      height: max(1, canvasSize.height - 2 * canvasPadding))
+        let width = max(1, canvasSize.width - 2 * canvasPadding)
+        let height = max(1, canvasSize.height - 2 * canvasPadding)
+        return CGRect(x: (canvasSize.width - width) / 2, y: (canvasSize.height - height) / 2,
+                      width: width, height: height)
     }
 
     /// What `resizeCanvas(to:)` will accept for an artwork dimension, given the padding already on

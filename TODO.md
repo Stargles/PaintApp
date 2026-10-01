@@ -192,30 +192,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (128) The gradient is an object in a vector layer, not a layer property
-
-**Status** — not started. *"revise the gradient feature. Currently it seems to be a property of the
-layer. Remove all that and make sure nothing is left. It is supposed to be an object in the vector
-layer."* (103) shipped it as `ValueFill.gradient`; that goes whole.
-
-**Ruled 2026-10-01:** a gradient is a fill element painted with a gradient (the fill tool's own
-element type), selected and moved like any fill. **Its colours and direction are edited in a settings
-panel** (two swatches and an angle, like the Text panel), *"Note that if a gradient is selected, there
-should be an edit gradient button like the edit text button."* — the same Select-tool Edit entry as
-(116)'s text.
-
-- [ ] `VectorFillElement` carries a solid-or-gradient paint; Add → Linear Gradient lays one down;
-      `ValueFill.gradient` and every path that reads it deleted.
-- [ ] Select → Edit Gradient opens the panel, live.
-
-## (129) Rectangle and Ellipse are solid shapes, not smart shapes
-
-**Status** — not started. *"the rectangle and ellipse objects in the add menu should not be smart
-shapes. They should be entirely solid shapes. I think the best way to implement them may be to make it
-the same type of shape as what the fill tool lays down."*
-
-- [ ] Add → Rectangle / Ellipse lay down a fill element of the fill tool's own type.
-
 ## (113) Fill: mend the gap to a neighbouring fill
 
 **Status** — not started. *"The fill tool should have an option (in the drop down menu) where it
@@ -234,17 +210,6 @@ extension buffer slider, like if i set it to 100px, then the canvas edge fill bo
 100px into the padding."*
 
 - [ ] A slider under the toggle; the boundary sits that many document pixels out into the padding.
-
-## (115) The font picker shows each font in itself
-
-**Status** — not started. *"When adding text and selecting the font, I currently have no idea what the
-fonts look like. Make the fonts font in the selector menu the actual font."*
-
-## (116) Edit a text box from the Select tool
-
-**Status** — not started. *"When I select a textbox with the select tool, there should be another edit
-option to edit the text, which will bring up the text menu, and I can change it in real time. It also
-should bring up the move box for that text where I can move it."*
 
 ## (119) The eyedropper can sample the layer itself, ignoring what is composited over it
 

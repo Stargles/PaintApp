@@ -410,22 +410,6 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                       + "(text:\(readTextState(app)))")
     }
 
-    /// The `text:` field of `canvas.host`'s label — "none" / "box" / "editing".
-    private func readTextState(_ app: XCUIApplication) -> String {
-        readField(app, "text:")
-    }
-
-    /// Polls `text:` rather than reading it once: placing a box is a SwiftUI state change and the
-    /// label is republished on the pass that follows it, so a single read straight after the tap can
-    /// legitimately still say "none".
-    private func waitForTextState(_ app: XCUIApplication, _ accepted: String...) -> Bool {
-        let deadline = Date().addingTimeInterval(5)
-        repeat {
-            if accepted.contains(readTextState(app)) { return true }
-        } while Date() < deadline
-        return false
-    }
-
     /// The owner's third report, and the direct net under two changes made together.
     ///
     /// "If I then try to zoom in and out of the screen or even pan it, it for some reason zooms in

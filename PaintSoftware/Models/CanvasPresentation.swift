@@ -57,14 +57,6 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// case an `onDismiss` that runs on host deletion as well as on the flag going false.
     case valueLayerColour
 
-    /// TODO (103) — the start end of a linear-gradient value layer's two stops, in
-    /// `LayerOptionsPanel`. Two cases rather than one shared index (`effectGradientStopColour`'s
-    /// shape) because there are exactly two of these and always will be — `onionPreviousTintColour`/
-    /// `onionNextTintColour` is the precedent for a fixed pair.
-    case valueLayerGradientStartColour
-    /// The end stop — `valueLayerGradientStartColour`'s twin.
-    case valueLayerGradientEndColour
-
     /// An effect's outline colour swatch, in `EffectSettingsBar`. Brackets `onEditBegan`/`onEditEnded`
     /// over its lifetime, same as `valueLayerColour`.
     case effectOutlineColour
@@ -94,6 +86,23 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// The next-drawings tint swatch, the green end of the same bar.
     case onionNextTintColour
 
+    // MARK: - Objects placed on the canvas
+
+    /// The start colour of a gradient object, in `GradientSettingsPanel`. Two cases rather than one
+    /// shared index (`effectGradientStopColour`'s shape) because there are exactly two of these and
+    /// always will be — `onionPreviousTintColour`/`onionNextTintColour` is the precedent for a fixed
+    /// pair.
+    case gradientStartColour
+    /// The end colour — `gradientStartColour`'s twin.
+    case gradientEndColour
+
+    // MARK: - The text panel
+
+    /// The font family list, hung off the text panel's Font row — TODO (115). A presentation of its
+    /// own rather than a native `Menu` because a `Menu`'s rows are drawn by UIKit, which discards a
+    /// custom font: this list exists so every family is shown in itself.
+    case textFont
+
     // MARK: - The Select panel
 
     /// The Select panel's Colour swatch — TODO (42)'s picker. Brackets a selection edit over its
@@ -116,9 +125,9 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
             return .onionSkinOptions
         case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .frameRateOptions, .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
-             .valueLayerGradientStartColour, .valueLayerGradientEndColour,
+             .gradientStartColour, .gradientEndColour,
              .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour, .effectGuideColour, .selectionColour:
+             .effectDuplicateOffsetColour, .effectGuideColour, .textFont, .selectionColour:
             return nil
         }
     }

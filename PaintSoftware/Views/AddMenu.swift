@@ -7,7 +7,9 @@ import Combine   // objectWillChange.send()
 /// independant icon on the top bar. Additionally, put other things under the add like add
 /// square/rectangle, circle/ellipse, add linear gradient."* TODO (100) had already pulled these four
 /// rows into a submenu inside `ActionsMenu`; this promotes that submenu to a toolbar icon of its own
-/// and adds the three new rows after it.
+/// and adds the three new rows after it. The three are objects the artist places, not marks they
+/// make: a solid rectangle, a solid ellipse and a gradient, each of the fill tool's own kind
+/// (`CanvasManager+FillObjects.swift`).
 ///
 /// **The one panel besides `ActionsMenu` that needs the `activePanel` binding**, and for the same
 /// reason `ActionsMenu` first grew it: "Add Text" is a mode change, not a direct action, and entering
@@ -148,18 +150,14 @@ struct AddMenu: View {
         }
     }
 
-    /// TODO (103) — the owner's *"add square/rectangle, circle/ellipse"*. **There is no dedicated
-    /// shape tool**: today a rectangle or oval only ever arrives from holding a pen/pencil stroke
-    /// still, which `ShapeDetector` reads and `CanvasManager.beginInteractiveShape` turns into an
-    /// adjustable shape with on-canvas handles (`ShapeOverlayView`), committed by lifting the pencil
-    /// or cancelled by tapping away. That machinery does not care where the geometry came from, so
-    /// this inserts a **default rectangle the artist then sizes** — the same adjustable state a held
-    /// stroke would have produced, with empty `samples` (which `ShapeDetector.collapseSamplesToShape`
-    /// already treats as a uniform half-pressure outline, since a recognized shape gesture with no
-    /// pressure profile of its own answers exactly the same way).
+    /// TODO (129) — *"the rectangle and ellipse objects in the add menu should not be smart shapes.
+    /// They should be entirely solid shapes."* A solid object in the brush colour, of the fill tool's
+    /// own kind (`CanvasManager.addSolidShape`), held in the Move box on a vector layer so it can be
+    /// sized at once — which is why the menu closes: the box is what the artist reaches for next.
     private var rectangleRow: some View {
         Button {
-            insertDefaultShape(kind: .rectangle)
+            canvasManager.addSolidShape(.rectangle)
+            activePanel = .none
         } label: {
             row(icon: "rectangle", title: "Rectangle", enabled: canvasManager.canvasSize != nil)
         }
@@ -167,11 +165,11 @@ struct AddMenu: View {
         .accessibilityIdentifier("add.rectangleRow")
     }
 
-    /// `ShapeGeometry.Kind` calls this case `.oval`, not `.ellipse` — see `rectangleRow`'s comment
-    /// for the mechanism; this is the same call with the other kind.
+    /// `rectangleRow`'s twin: the same call with the other shape.
     private var ellipseRow: some View {
         Button {
-            insertDefaultShape(kind: .oval)
+            canvasManager.addSolidShape(.ellipse)
+            activePanel = .none
         } label: {
             row(icon: "circle", title: "Ellipse", enabled: canvasManager.canvasSize != nil)
         }
@@ -179,36 +177,13 @@ struct AddMenu: View {
         .accessibilityIdentifier("add.ellipseRow")
     }
 
-    /// Centred inside the artwork rect (or the canvas, on a document with no padding) at 60% of the
-    /// shorter side — big enough to grab a handle on immediately, small enough that every handle
-    /// starts on screen whatever the canvas's aspect ratio.
-    private func insertDefaultShape(kind: ShapeGeometry.Kind) {
-        guard let bounds = canvasManager.artworkSize.map({ CGRect(origin: .zero, size: $0) })
-                        ?? canvasManager.canvasSize.map({ CGRect(origin: .zero, size: $0) }) else { return }
-        let side = min(bounds.width, bounds.height) * 0.6
-        let origin = CGPoint(x: bounds.midX - side / 2, y: bounds.midY - side / 2)
-        let shape = ShapeGeometry(kind: kind, startPoint: origin,
-                                  endPoint: CGPoint(x: origin.x + side, y: origin.y + side))
-        canvasManager.beginInteractiveShape(shape)
-        // `beginInteractiveShape` does not publish on its own — its only other caller
-        // (`CanvasView.Coordinator`'s hold-timer) follows it with a direct, synchronous
-        // `updateShapeOverlay()` on the UIKit side, which this button has no coordinator to reach.
-        // Publishing here is the SwiftUI-side equivalent: it is what gets `CanvasView.updateUIView`
-        // to run and call that same method, so the shape's preview actually appears instead of
-        // sitting in the model with nothing on screen to show for it.
-        canvasManager.objectWillChange.send()
-        // Close the menu so the artist sees the handles they are meant to drag — the same reason
-        // `addTextRow` above hands off to a settings panel instead of leaving this one open.
-        activePanel = .none
-    }
-
-    /// TODO (103) — the owner's *"add linear gradient"*. §4.5's value layer is flat colour only;
-    /// `ValueFill.gradient` (Layer.swift) is the linear-gradient case this row adds a layer with,
-    /// rather than a new `LayerKind` — the artist edits its two stops and its direction from the
-    /// same settings bar the flat-colour swatch already lives in (`LayerOptionsPanel`).
+    /// TODO (128) — a gradient is an object in a vector layer, not a layer of its own: this lays one
+    /// down over the artwork (`CanvasManager.addGradient`) and opens its panel, where the two colours
+    /// and the direction are chosen. It closes this menu for the reason `addTextRow` hands off to the
+    /// text panel — the panel is what comes next.
     private var linearGradientRow: some View {
         Button {
-            canvasManager.addValueLayer(gradient: .default)
+            canvasManager.addGradient()
             activePanel = .none
         } label: {
             row(icon: "square.lefthalf.filled", title: "Linear Gradient", enabled: canvasManager.canvasSize != nil)

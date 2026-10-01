@@ -251,6 +251,12 @@ final class CanvasManager: ObservableObject {
     /// and the readout reads this on the pass that publish causes.
     var selectionEdit: SelectionEditSession?
 
+    /// The gradient panel's session — from Edit Gradient (or Add → Linear Gradient) to the next canvas
+    /// edit, tool change or undo (`CanvasManager+FillObjects.swift`). Nil when no gradient is being
+    /// edited. **`@Published`, unlike `selectionEdit`**, because the dock's gradient card is keyed on
+    /// it: the card is there because a gradient is open, not because of an `ActivePanel` case.
+    @Published var gradientEdit: GradientEditSession?
+
     /// Every guide stroke in the document. Document-level for the same reason, and because a guide
     /// is meant to be *referenced* by several intervals rather than copied into each, which only
     /// works if it has one home and a stable id.
@@ -1759,6 +1765,10 @@ final class CanvasManager: ObservableObject {
         // line" — every existing caller of this method inherits the text bake with no per-tool
         // retrofit, which is the whole reason the chokepoint exists.
         commitInteractiveText()
+        // An open gradient is settled before any other edit lands on its canvas: its undo step swaps
+        // the whole display list between two snapshots, so a stroke committed while it was still open
+        // would be swept out by it.
+        commitGradientEdit()
     }
 
     /// Whether `commitAllInteractiveState()` would settle anything. The autosave's hold — TODO (76):
@@ -1766,7 +1776,7 @@ final class CanvasManager: ObservableObject {
     /// piece the artist is still adjusting, so it waits for them instead of committing them.
     var hasInteractiveStatePending: Bool {
         fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
-            || floatingPiece != nil || vectorFloat != nil
+            || gradientEdit != nil || floatingPiece != nil || vectorFloat != nil
     }
 
     /// `beginCanvasEdit()` plus settling a floating Move/Duplicate piece — for the points where the
@@ -2182,11 +2192,7 @@ final class CanvasManager: ObservableObject {
     /// flat-colour mode the fill is resolved into the snapshot's source at `leafSnapshots`, and in
     /// effect mode the snapshot elides the layer's pixels entirely and the compositor reaches the leaf
     /// by its grade before it would look for a source.
-    /// - Parameter gradient: TODO (103) — non-nil starts the layer in linear-gradient mode instead of
-    ///   flat colour (`ValueFill.gradient`'s doc explains the either/or). `color` is still stamped
-    ///   alongside it for the same reason a flat layer stamps mid-grey: flipping the gradient off in
-    ///   `LayerOptionsPanel` has to land the layer somewhere, and this is that somewhere.
-    func addValueLayer(color: PaletteColor = ValueFill.defaultColor, gradient: LinearGradientFill? = nil,
+    func addValueLayer(color: PaletteColor = ValueFill.defaultColor,
                        effect: Effect? = nil, name: String? = nil) {
         withStructureUndo(label: effect == nil ? .addValueLayer : .addEffectLayer) {
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
@@ -2198,7 +2204,7 @@ final class CanvasManager: ObservableObject {
                       // back — see `Layer.hasCustomName`. Every in-app route leaves this nil.
                       hasCustomName: name != nil,
                       opacity: 1.0, isVisible: true, kind: .value, effect: effect,
-                      fill: ValueFill(color: color, gradient: gradient), parentFolderID: parent, cels: [cel])
+                      fill: ValueFill(color: color), parentFolderID: parent, cels: [cel])
             }
         }
         // One constructor, two modes (see the doc above), so one recorder line that names which —
@@ -4422,6 +4428,9 @@ final class CanvasManager: ObservableObject {
         // is no lifted-but-adjustable state for it to have: the slider's lift *is* the commit, so a
         // session that is still open when undo lands is one the artist is still dragging.
         cancelSelectionEdit()
+        // The gradient panel is the opposite case: it has no finger to be under, so what is open is
+        // an adjustable edit, and it commits so the undo that follows has a real step to revert.
+        commitGradientEdit()
     }
 
     func refreshUndoRedoState() {
@@ -4436,8 +4445,9 @@ final class CanvasManager: ObservableObject {
         // transform's own clause when that path was deleted (TODO item (12) stage 2): Move with no
         // selection is a float now, so `vectorFloat != nil` is the whole answer for both.
         let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
-            || vectorFloat != nil || history.canUndo
-        let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive && history.canRedo
+            || gradientEdit?.applied == true || vectorFloat != nil || history.canUndo
+        let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive
+            && gradientEdit?.applied != true && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

@@ -313,6 +313,39 @@ final class FontLibrary {
         provider(withID: packID)?.faces(inFamily: family) ?? []
     }
 
+    /// **The font a family is shown in, in the picker** — the family's own regular face, so each row
+    /// reads as what the text will look like (TODO (115)).
+    ///
+    /// Through `resolve`, which is the one route from a descriptor to something drawable, so a family
+    /// whose regular face has gone missing falls back exactly as the text itself would and a row can
+    /// never be drawn in a face the panel could not apply. The plainest face of the family is asked
+    /// for because the row names the *family*: Helvetica Neue's row in Thin would show a hairline
+    /// where the artist will get Regular.
+    func previewFont(inFamily family: String, packID: String?, size: CGFloat) -> UIFont {
+        let face = provider(withID: packID)?.face(inFamily: family, bold: false, italic: false)
+        let descriptor = face?.descriptor ?? FontDescriptor(familyName: family, packID: packID)
+        return resolve(descriptor, size: size).font
+    }
+
+    /// Whether `font` can say `name` legibly — false for the symbol, dingbat and ornament families,
+    /// whose own face cannot spell its own name. The font list asks it so that such a family's row can
+    /// say which family it is (in the system face) *and* show what the family looks like (a sample in
+    /// its face) rather than a line of ornaments nobody can read.
+    ///
+    /// **Two tests, because neither is enough alone.** An ornament face often *has* a glyph for every
+    /// letter — it maps `A` to a flourish — so a cmap lookup says yes where the artist would read
+    /// nothing; and the font's own class says so (`.classOrnamentals`, `.classSymbolic`) without
+    /// knowing anything about the name. A face with a missing glyph is the other way a name goes
+    /// unreadable (a script that has no Latin), and that one the lookup finds.
+    static func canSpell(_ name: String, in font: UIFont) -> Bool {
+        let unreadable: UIFontDescriptor.SymbolicTraits = [.classOrnamentals, .classSymbolic]
+        guard font.fontDescriptor.symbolicTraits.isDisjoint(with: unreadable) else { return false }
+        let units = Array(name.utf16.filter { !CharacterSet.whitespaces.contains(UnicodeScalar($0) ?? " ") })
+        guard !units.isEmpty else { return true }
+        var glyphs = [CGGlyph](repeating: 0, count: units.count)
+        return CTFontGetGlyphsForCharacters(font as CTFont, units, &glyphs, units.count)
+    }
+
     /// **exact face → any face in the family matching the descriptor's traits → system**, reporting
     /// which step answered. ADD_TEXT.md §1's contract, and the only route from a `FontDescriptor` to
     /// something drawable.

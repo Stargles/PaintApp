@@ -131,7 +131,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
                       "PREMISE: the canvas tap has to put a live, focused text box on screen "
                       + "(text:\(readTextState(app)))")
         let frame = canvas.frame
-        type(string, app, at: CGPoint(x: frame.minX + (origin.dx + 0.01) * frame.width,
+        typeIntoTextBox(string, app, at: CGPoint(x: frame.minX + (origin.dx + 0.01) * frame.width,
                                       y: frame.minY + (origin.dy + 0.01) * frame.height))
         leaveTextForTheBrush(app)
     }
@@ -173,36 +173,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         XCTFail("\(identifier) did not take effect in three presses")
     }
 
-    /// **`app.typeText` cannot reach the editor**, for the reason `CanvasTransformFreezeUITests`
-    /// records: `canvas.host` is an accessibility element in its own right and hides its subtree,
-    /// so XCUITest sees nothing with keyboard focus and refuses to synthesise the keystrokes. What it
-    /// *can* reach is the software keyboard, which is a window of its own — so the string is typed
-    /// key by key when the keyboard is up, and pasted through the edit menu (another window of its
-    /// own) when a hardware keyboard is connected and no software keyboard appears.
-    private func type(_ string: String, _ app: XCUIApplication, at insideTheBox: CGPoint) {
-        if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
-            for character in string {
-                // The keyboard shows whichever case its shift state has, and auto-capitalisation
-                // shifts it for the first letter; either case draws the same glyph shapes for this
-                // test's purpose, so take the key that is there.
-                let exact = app.keys[String(character)]
-                let other = app.keys[character.isUppercase ? String(character).lowercased()
-                                                            : String(character).uppercased()]
-                let key = exact.waitForExistence(timeout: 2) ? exact : other
-                XCTAssertTrue(key.waitForExistence(timeout: 3), "the software keyboard has a \(character) key")
-                key.tap()
-            }
-            return
-        }
-        UIPasteboard.general.string = string
-        Self.coordinate(app, at: insideTheBox).press(forDuration: 1.0)
-        let paste = app.menuItems["Paste"]
-        XCTAssertTrue(paste.waitForExistence(timeout: 5),
-                      "no software keyboard and no Paste menu — nothing this test can reach types into the box")
-        paste.tap()
-    }
-
-    /// Deletes `count` characters the same two ways `type` types them.
+    /// Deletes `count` characters the same two ways `typeIntoTextBox` types them.
     private func deleteCharacters(_ count: Int, _ app: XCUIApplication, at insideTheBox: CGPoint) {
         if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
             let key = app.keys["delete"]
@@ -277,24 +248,6 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         note.name = "layout after the keyboard"
         note.lifetime = .keepAlways
         add(note)
-    }
-
-    /// The `text:` field of `canvas.host`'s label — "none" / "box" / "editing". See
-    /// `CanvasView.publishCanvasState`.
-    private func readTextState(_ app: XCUIApplication) -> String {
-        let label = app.otherElements["canvas.host"].label
-        guard let field = label.split(separator: " ").first(where: { $0.hasPrefix("text:") }) else {
-            return "?(\(label))"
-        }
-        return String(field.dropFirst("text:".count))
-    }
-
-    private func waitForTextState(_ app: XCUIApplication, _ accepted: String...) -> Bool {
-        let deadline = Date().addingTimeInterval(5)
-        repeat {
-            if accepted.contains(readTextState(app)) { return true }
-        } while Date() < deadline
-        return false
     }
 
     // MARK: - Reading what is drawn

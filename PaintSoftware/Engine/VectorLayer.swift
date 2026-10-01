@@ -6,6 +6,14 @@ extension CodableColor {
     /// The stored components as a `UIColor`. One definition rather than the same four-argument
     /// initialiser repeated at every call site.
     var uiColor: UIColor { UIColor(red: red, green: green, blue: blue, alpha: alpha) }
+
+    /// The components of `color` — the inverse of `uiColor`, and one definition rather than the
+    /// `getRed` dance at every site that stores a picked colour.
+    init(_ color: UIColor) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        self.init(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+    }
 }
 
 /// Whether a `VectorStroke` *adds* ink or *removes* it. A mode on `VectorStroke` rather than its
@@ -548,15 +556,99 @@ extension VectorStroke {
     }
 }
 
-/// A filled region stored as a vector path on a vector layer: the flood-fill tool's output when used
-/// on a `.vector` layer, instead of rasterizing into `Cel.bakedImage`. A closed (possibly multi-loop,
-/// with holes) contour extracted from the GPU fill mask, stored as archived `UIBezierPath` data.
+/// **What a fill is painted with** — one flat colour, or a linear gradient between two colours.
+///
+/// A property of the *element*, which is what makes a gradient an object on a vector layer rather than
+/// a setting of the layer: it is laid down, selected, moved, cut by the eraser, warped by an
+/// interpolation and animated by a channel exactly as a flat fill is, because every one of those
+/// already carries `VectorFillElement` through its geometry and the paint travels with it
+/// (`mapped(by:)`).
+enum FillPaint: Equatable {
+    case solid(CodableColor)
+    case linearGradient(LinearGradientPaint)
+
+    /// The paint carried through a geometric map — the same one that carried the fill's path.
+    ///
+    /// A flat colour has no geometry and is returned as it is. A gradient's two points go through the
+    /// map; **for an affine map that is exact** (a linear ramp stays linear), and for a projective or
+    /// lattice map it is the endpoint approximation, which is right at both ends and a little off in
+    /// between — the path's own flatten-then-map is the part such a map is careful about, and a ramp
+    /// between two colours is not where the eye finds the difference.
+    ///
+    /// Nil when a point cannot be mapped (a homography sending it through infinity), which the caller
+    /// treats as it treats an unmappable path.
+    func mapped(by map: (CGPoint) -> CGPoint?) -> FillPaint? {
+        switch self {
+        case .solid:
+            return self
+        case .linearGradient(var gradient):
+            guard let from = map(gradient.from), let to = map(gradient.to) else { return nil }
+            gradient.from = from
+            gradient.to = to
+            return .linearGradient(gradient)
+        }
+    }
+
+    /// `mapped(by:)` through an affine, which cannot refuse a point — so this has no nil to answer.
+    func transformed(by transform: CGAffineTransform) -> FillPaint {
+        mapped(by: { $0.applying(transform) }) ?? self
+    }
+}
+
+/// A linear gradient: `start` at `from`, `end` at `to`, held beyond both, blended along the line
+/// between them. **The two points are in the space of the fill's own path** — local space on a vector
+/// canvas — so the gradient is placed on the drawing, not on the screen.
+struct LinearGradientPaint: Codable, Equatable {
+    var start: CodableColor
+    var end: CodableColor
+    var from: CGPoint
+    var to: CGPoint
+
+    /// Black to white — a gradient the artist can see the instant it lands. A mid-tone pair would read
+    /// as a flat field until the ends were edited apart.
+    static let defaultStart = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+    static let defaultEnd = CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
+
+    /// The direction of `from → to`, in radians. `0` runs left to right and a positive turn is
+    /// clockwise in canvas (Y-down) space, the convention `ShapeGeometry.rotation` uses, so the number
+    /// the panel shows means what it would mean on a shape. A collapsed gradient reads 0.
+    var angle: CGFloat {
+        let dx = to.x - from.x, dy = to.y - from.y
+        return dx == 0 && dy == 0 ? 0 : atan2(dy, dx)
+    }
+
+    /// **Edge to edge of `rect` at any angle**, the way a CSS `linear-gradient` runs: every corner is
+    /// projected onto the direction, and the two extreme projections are where the ramp starts and
+    /// ends, so turning the direction never crops the gradient into a corner of itself. The line
+    /// passes through the rect's centre.
+    static func spanning(_ rect: CGRect, angle: CGFloat,
+                         start: CodableColor = defaultStart, end: CodableColor = defaultEnd) -> LinearGradientPaint {
+        let dx = cos(angle), dy = sin(angle)
+        let centre = CGPoint(x: rect.midX, y: rect.midY)
+        let reach = (abs(rect.width * dx) + abs(rect.height * dy)) / 2
+        return LinearGradientPaint(start: start, end: end,
+                                   from: CGPoint(x: centre.x - dx * reach, y: centre.y - dy * reach),
+                                   to: CGPoint(x: centre.x + dx * reach, y: centre.y + dy * reach))
+    }
+
+    /// This gradient turned to `angle` and re-spanned over `rect`, colours kept. What the panel's angle
+    /// slider writes: the stored form is two points, and a direction only means something against the
+    /// extent it runs across.
+    func turned(to angle: CGFloat, over rect: CGRect) -> LinearGradientPaint {
+        Self.spanning(rect, angle: angle, start: start, end: end)
+    }
+}
+
+/// A filled region stored as a vector path on a vector layer: the fill tool's output on a `.vector`
+/// layer (a closed, possibly multi-loop contour with holes, archived as `UIBezierPath` data), and what
+/// Add → Rectangle, Ellipse and Linear Gradient lay down. Painted with one flat colour or a gradient
+/// (`FillPaint`).
 struct VectorFillElement: Identifiable, Codable {
     var id: UUID = UUID()
     /// Archiver data for the fill path (supports multi-subpath via UIBezierPath's NSSecureCoding).
     var pathData: Data
-    var color: CodableColor
-    /// Additional opacity multiplier on top of the color's own alpha (matches `VectorStroke.opacity`).
+    var paint: FillPaint
+    /// Additional opacity multiplier on top of the paint's own alpha (matches `VectorStroke.opacity`).
     var opacity: Double
     /// When true the path is rendered with the even-odd fill rule (used for clear-selection holes).
     var evenOddFill: Bool = false
@@ -567,12 +659,16 @@ struct VectorFillElement: Identifiable, Codable {
     /// Optional, so the synthesized decoder reads a file written before it existed.
     var animationGroupID: UUID? = nil
 
-    init(path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
-        let bezier = UIBezierPath(cgPath: path)
-        self.pathData = (try? NSKeyedArchiver.archivedData(withRootObject: bezier, requiringSecureCoding: true)) ?? Data()
-        self.color = color
+    init(path: CGPath, paint: FillPaint, opacity: Double = 1.0, evenOddFill: Bool = false) {
+        self.pathData = Self.archived(path)
+        self.paint = paint
         self.opacity = opacity
         self.evenOddFill = evenOddFill
+    }
+
+    /// A flat-colour fill, which is nearly every fill there is.
+    init(path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
+        self.init(path: path, paint: .solid(color), opacity: opacity, evenOddFill: evenOddFill)
     }
 
     var cgPath: CGPath? {
@@ -580,7 +676,70 @@ struct VectorFillElement: Identifiable, Codable {
         return bezier.cgPath
     }
 
-    var uiColor: UIColor { color.uiColor }
+    /// The flat colour, or nil when this fill is a gradient. The one door the colour-only controls
+    /// (Change Colour) reach a fill through, so a gradient is out of their reach by the type rather
+    /// than by a check somebody has to remember.
+    var solidColor: CodableColor? {
+        if case .solid(let color) = paint { return color }
+        return nil
+    }
+
+    var gradient: LinearGradientPaint? {
+        if case .linearGradient(let gradient) = paint { return gradient }
+        return nil
+    }
+
+    /// **This fill with its geometry replaced and everything else kept** — id, opacity, rule and
+    /// animation group, and the paint too unless a new one is handed in. It is what every site that
+    /// rebuilds a fill from a mapped or cut `CGPath` calls, because restating the other fields by hand
+    /// is how `animationGroupID` was dropped twice (KEYFRAMES.md §3.4).
+    ///
+    /// A cut half passes no paint: it is the same picture through a smaller window, so its gradient
+    /// does not move. A fill carried through a map passes the paint carried through the same map.
+    func reshaped(to path: CGPath, paint newPaint: FillPaint? = nil) -> VectorFillElement {
+        var result = self
+        result.pathData = Self.archived(path)
+        if let newPaint { result.paint = newPaint }
+        return result
+    }
+
+    private static func archived(_ path: CGPath) -> Data {
+        (try? NSKeyedArchiver.archivedData(withRootObject: UIBezierPath(cgPath: path), requiringSecureCoding: true)) ?? Data()
+    }
+
+    // The wire form keeps what every earlier file wrote: a flat fill is a `color`, and a gradient is a
+    // `gradient` with no `color` beside it. A document written before gradients decodes unchanged, and
+    // a flat fill's payload is byte-for-byte what it was.
+    private enum CodingKeys: String, CodingKey {
+        case id, pathData, color, gradient, opacity, evenOddFill, animationGroupID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        pathData = try c.decode(Data.self, forKey: .pathData)
+        if let gradient = try c.decodeIfPresent(LinearGradientPaint.self, forKey: .gradient) {
+            paint = .linearGradient(gradient)
+        } else {
+            paint = .solid(try c.decode(CodableColor.self, forKey: .color))
+        }
+        opacity = try c.decode(Double.self, forKey: .opacity)
+        evenOddFill = try c.decode(Bool.self, forKey: .evenOddFill)
+        animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(pathData, forKey: .pathData)
+        switch paint {
+        case .solid(let color): try c.encode(color, forKey: .color)
+        case .linearGradient(let gradient): try c.encode(gradient, forKey: .gradient)
+        }
+        try c.encode(opacity, forKey: .opacity)
+        try c.encode(evenOddFill, forKey: .evenOddFill)
+        try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
+    }
 }
 
 /// **A rectangle of pixels placed on a vector layer by a general affine** — the "placement group"
@@ -3135,6 +3294,13 @@ final class VectorCanvas {
         return mapped
     }
 
+    /// What `addFill(canvasSpacePath:paint:...)` put on the canvas: the new element's id, and the
+    /// rectangle that contains its ink.
+    struct AddedFill {
+        let id: UUID
+        let ink: CGRect
+    }
+
     /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the lasso,
     /// and every other on-screen path are measured — mapping it into this canvas's local space first,
     /// or it would go through `transform` twice at render time.
@@ -3156,16 +3322,28 @@ final class VectorCanvas {
     ///   path, whose coordinates are float32, so it comes back a fraction *smaller* than the rect the
     ///   caller asked to fill (20.3 stores as 20.299999237). One point of slack covers that with room
     ///   to spare, and costs nothing: `repairClip` rounds the clip out to integral regardless.
+    ///
+    /// **The paint's geometry is canvas space too.** A gradient's two points are brought into local
+    /// space through the same inverse as the path, or a gradient laid down on a layer Move has already
+    /// shifted would be placed one transform off its own shape.
     @discardableResult
-    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) -> CGRect {
+    func addFill(canvasSpacePath path: CGPath, paint: FillPaint, opacity: Double = 1.0, evenOddFill: Bool = false) -> AddedFill {
         lock.lock()
         defer { lock.unlock() }
-        let fill = VectorFillElement(path: Self.localPath(path, through: _transform), color: color,
+        let localPaint = _transform.isIdentity ? paint : paint.transformed(by: _transform.inverted())
+        let fill = VectorFillElement(path: Self.localPath(path, through: _transform), paint: localPaint,
                                      opacity: opacity, evenOddFill: evenOddFill)
         _elements.append(.fill(fill))
         invalidate(.appended(count: 1))
-        guard let placed = fill.cgPath else { return .null }
-        return placed.boundingBoxOfPath.insetBy(dx: -1, dy: -1)
+        guard let placed = fill.cgPath else { return AddedFill(id: fill.id, ink: .null) }
+        return AddedFill(id: fill.id, ink: placed.boundingBoxOfPath.insetBy(dx: -1, dy: -1))
+    }
+
+    /// `addFill(canvasSpacePath:paint:...)` with a flat colour, returning only where the fill landed —
+    /// what every caller that has no use for the new element's id asks for.
+    @discardableResult
+    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) -> CGRect {
+        addFill(canvasSpacePath: path, paint: .solid(color), opacity: opacity, evenOddFill: evenOddFill).ink
     }
 
     /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see
@@ -4209,17 +4387,15 @@ final class VectorCanvas {
                 // Both halves mint fresh ids, exactly as a split stroke's do: keeping the parent's on
                 // one of them would make "which is the original" a coin flip the first time a lasso
                 // cuts one fill into three.
-                var insideFill = VectorFillElement(path: insidePart, color: fill.color,
-                                                   opacity: fill.opacity, evenOddFill: fill.evenOddFill)
-                var outsideFill = VectorFillElement(path: outsidePart, color: fill.color,
-                                                    opacity: fill.opacity, evenOddFill: fill.evenOddFill)
-                // **Both halves keep the parent's animation group**, which the ids deliberately do not
-                // (§3.4: membership is a field on the element, and a fresh id is what tells the two
-                // halves apart). `piece(of:)` carries it for a stroke by copying the whole value; a
-                // fill is rebuilt from four fields, so it has to be said. Without this a cut fill drops
-                // out of the channel that was moving it and stops animating, silently.
-                insideFill.animationGroupID = fill.animationGroupID
-                outsideFill.animationGroupID = fill.animationGroupID
+                // `reshaped(to:)` copies the parent whole, so each half keeps its paint — a gradient
+                // keeps its two points, because a cut piece is the same picture through a smaller
+                // window — and its animation group (§3.4: membership is a field on the element, and
+                // a half that lost it would drop out of the channel that was moving it and stop
+                // animating, silently). Only the id is the half's own.
+                var insideFill = fill.reshaped(to: insidePart)
+                var outsideFill = fill.reshaped(to: outsidePart)
+                insideFill.id = UUID()
+                outsideFill.id = UUID()
                 insideIDs.insert(insideFill.id)
                 result.append(.fill(outsideFill))
                 result.append(.fill(insideFill))
@@ -4940,14 +5116,11 @@ final class VectorCanvas {
         guard let path = fill.cgPath,
               let flattened = StrokeGeometry.flattened(path),
               let moved = map.mapped(flattened) else { return nil }
-        var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
-                                       evenOddFill: fill.evenOddFill)
+        guard let paint = fill.paint.mapped(by: { map.map($0) }) else { return nil }
         // Identity, not geometry — `drawn(_:through:widthScale:)`'s reason, restated: a nudge moves
-        // an element, it does not mint a new one, and the float tracks its pieces by id. The
-        // animation group is the same kind of thing and travels for the same reason.
-        mapped.id = fill.id
-        mapped.animationGroupID = fill.animationGroupID
-        return mapped
+        // an element, it does not mint a new one, and the float tracks its pieces by id.
+        // `reshaped` keeps the id and the animation group, which are the same kind of thing.
+        return fill.reshaped(to: moved, paint: paint)
     }
 
     /// The text arm. **Exact, and that is a theorem rather than a tolerance**: a homography is
@@ -5068,18 +5241,12 @@ final class VectorCanvas {
             // currency of its own. (`copy(using:)` works in single precision — a mapped coordinate is
             // right to about 1e-6 of its magnitude, not to 1e-9.)
             guard let path = fill.cgPath, let moved = path.copy(using: &transform) else { return nil }
-            var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
-                                           evenOddFill: fill.evenOddFill)
-            // The id is identity, not geometry: a nudge moves an element, it does not mint a new one,
-            // and the float tracks its pieces by id.
-            mapped.id = fill.id
-            // **And so is the animation group**, which this arm dropped until 2026-09-06. The
-            // initialiser above takes four fields, so every path that rebuilds a fill from a mapped
-            // `CGPath` — every lasso nudge, every canvas resize — silently un-tagged it, and a fill
-            // the artist had put in a group stopped travelling with the group at the first Move.
-            // KEYFRAMES.md §3.4 rules membership onto every element kind for exactly that reason.
-            mapped.animationGroupID = fill.animationGroupID
-            return .fill(mapped)
+            // **`reshaped` keeps the id and the animation group**: a nudge moves an element, it does
+            // not mint a new one, and the float tracks its pieces by id. The group is the field this
+            // arm dropped until 2026-09-06 — every lasso nudge and canvas resize silently un-tagged a
+            // fill, which stopped travelling with its group at the first Move (KEYFRAMES.md §3.4).
+            // The gradient's two points go through the same affine as the path, which is exact.
+            return .fill(fill.reshaped(to: moved, paint: fill.paint.transformed(by: t)))
         case .image, .text, .video, .stream:
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
             // for them itself, because the currency differs — see the header.
@@ -6910,17 +7077,51 @@ final class VectorCanvas {
 
     private static func draw(fill: VectorFillElement, into cg: CGContext) {
         guard let path = fill.cgPath else { return }
-        cg.setFillColor(fill.uiColor.cgColor)
         cg.setAlpha(fill.opacity)
-        cg.addPath(path)
-        if fill.evenOddFill {
-            cg.fillPath(using: .evenOdd)
-        } else {
-            cg.fillPath()
+        switch fill.paint {
+        case .solid(let color):
+            cg.setFillColor(color.uiColor.cgColor)
+            cg.addPath(path)
+            if fill.evenOddFill {
+                cg.fillPath(using: .evenOdd)
+            } else {
+                cg.fillPath()
+            }
+        case .linearGradient(let gradient):
+            drawGradient(gradient, clippedTo: path, evenOdd: fill.evenOddFill, into: cg)
         }
         // Reset here rather than after a whole block of fills: in an interleaved list a leftover
         // global alpha would dim whatever element came next.
         cg.setAlpha(1.0)
+    }
+
+    /// A gradient fill: the path is the clip and the ramp is drawn through it, held past both ends so
+    /// a fill larger than the line between its two points is painted to its edge in the end colours.
+    ///
+    /// **The two compositors never see this**, which is what makes a gradient identical under Core
+    /// Graphics and Metal by construction: it is rasterised here, once, into the cel's picture, and
+    /// both backends then composite those same pixels. `GradientObjectLogicTests` pins that rather
+    /// than assuming it.
+    ///
+    /// A collapsed gradient (`from == to`) has no direction to ramp along and is painted in its end
+    /// colour — a CSS gradient's answer for a zero-length line — rather than leaving `CGGradient` to
+    /// decide what an empty span means.
+    private static func drawGradient(_ gradient: LinearGradientPaint, clippedTo path: CGPath,
+                                     evenOdd: Bool, into cg: CGContext) {
+        cg.saveGState()
+        defer { cg.restoreGState() }
+        cg.addPath(path)
+        cg.clip(using: evenOdd ? .evenOdd : .winding)
+        guard gradient.from != gradient.to else {
+            cg.setFillColor(gradient.end.uiColor.cgColor)
+            cg.fill(path.boundingBoxOfPath)
+            return
+        }
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let colours = [gradient.start.uiColor.cgColor, gradient.end.uiColor.cgColor] as CFArray
+        guard let ramp = CGGradient(colorsSpace: space, colors: colours, locations: [0, 1]) else { return }
+        cg.drawLinearGradient(ramp, start: gradient.from, end: gradient.to,
+                              options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
     }
 
     /// Draws a text element's glyphs into the layer's local space.

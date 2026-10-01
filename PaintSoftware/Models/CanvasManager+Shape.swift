@@ -84,7 +84,7 @@ extension CanvasManager {
     }
 
     /// Begins an interactive shape. Called when the hold timer fires and ShapeDetector confirms a shape.
-    func beginInteractiveShape(_ shape: ShapeGeometry, samples: [VectorSample] = []) {
+    func beginInteractiveShape(_ shape: ShapeGeometry, samples: [VectorSample]) {
         guard !shapeFingerDown else { return }
         // Laying down a new shape is a canvas edit: whatever was still pending bakes first, so the
         // two never share the transient tier (only one shape's geometry is tracked at a time).

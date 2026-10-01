@@ -596,15 +596,16 @@ enum InterpolationEvaluator {
     /// warped control points, but at the lattice scales this feature uses the difference is far below
     /// a pixel, and subdividing every curve to fix it would cost more than the entire warp.
     ///
-    /// The id is carried across. Nothing in rendering reads a fill's id, but keeping it stable is
-    /// what lets a future matcher recognise the same fill at two keyframes (e.g. to lerp colour
-    /// between corresponded fills).
+    /// A gradient fill's two points go through the lattice with the path, so the ramp follows the
+    /// shape it fills.
+    ///
+    /// The id is carried across (`reshaped` keeps everything that is not geometry). Nothing in
+    /// rendering reads a fill's id, but keeping it stable is what lets a future matcher recognise the
+    /// same fill at two keyframes (e.g. to lerp colour between corresponded fills).
     private static func warped(_ fill: VectorFillElement, by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
         guard let path = fill.cgPath else { return fill }
-        var result = VectorFillElement(path: warped(path: path, by: map), color: fill.color,
-                                       opacity: fill.opacity, evenOddFill: fill.evenOddFill)
-        result.id = fill.id
-        return result
+        return fill.reshaped(to: warped(path: path, by: map),
+                             paint: fill.paint.mapped(by: { map([$0]).first }) ?? fill.paint)
     }
 
     /// A placed image, moved.

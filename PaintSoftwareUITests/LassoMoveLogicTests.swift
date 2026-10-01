@@ -3684,7 +3684,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements[0].id, originalID)
         XCTAssertEqual(vector.elements[0].fill?.pathData, originalPath, "and moves no geometry")
         XCTAssertEqual(vector.elements[0].fill?.evenOddFill, true, "the fill rule survives the rewrite")
-        assertRGB(vector.elements[0].fill?.color, 1, 0.5, 0, "the whole fill takes the picked colour")
+        assertRGB(vector.elements[0].fill?.solidColor, 1, 0.5, 0, "the whole fill takes the picked colour")
     }
 
     /// **Under Cut a fill is cut at the loop and only the inside chunk takes the colour** — the
@@ -3707,8 +3707,8 @@ final class LassoMoveLogicTests: XCTestCase {
         let fills = vector.elements.compactMap(\.fill)
         XCTAssertEqual(fills.count, 2, "the fill was cut at the loop")
         XCTAssertFalse(fills.contains { $0.id == originalID }, "and both halves mint fresh ids")
-        assertRGB(fills[0].color, 0, 0, 1, "the chunk outside the loop keeps its blue")
-        assertRGB(fills[1].color, 1, 0.5, 0, "and the chunk inside takes the picked colour")
+        assertRGB(fills[0].solidColor, 0, 0, 1, "the chunk outside the loop keeps its blue")
+        assertRGB(fills[1].solidColor, 1, 0.5, 0, "and the chunk inside takes the picked colour")
         XCTAssertTrue(fills.allSatisfy { $0.evenOddFill }, "both halves carry the parent's fill rule")
     }
 
@@ -3791,8 +3791,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(stroke?.opacity, 0.6, "and keeps its own opacity, not brushOpacity")
 
         let fill = vector.elements.compactMap(\.fill).first
-        assertRGB(fill?.color, 0.2, 0.4, 0.8, "the fill takes the hue")
-        XCTAssertEqual(fill?.color.alpha, 0.25,
+        assertRGB(fill?.solidColor, 0.2, 0.4, 0.8, "the fill takes the hue")
+        XCTAssertEqual(fill?.solidColor?.alpha, 0.25,
                        "a fill stores its transparency in the alpha channel — it must survive untouched")
         XCTAssertEqual(fill?.opacity, 0.5, "and its multiplier too")
 
@@ -3826,7 +3826,7 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.undo()
 
         assertRGB(vector.elements.compactMap(\.stroke).first?.color, 0, 0, 0, "the stroke's black is back")
-        assertRGB(vector.elements.compactMap(\.fill).first?.color, 0, 0, 1, "the fill's blue is back")
+        assertRGB(vector.elements.compactMap(\.fill).first?.solidColor, 0, 0, 1, "the fill's blue is back")
         assertRGB(vector.elements.compactMap(\.text).first?.recipe.color, 0, 0.5, 0, "the text's green is back")
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and it was one press, not three")
     }
@@ -3949,7 +3949,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         XCTAssertEqual(vector.elements.map(\.id), before, "the display list is rewritten in place")
         for element in vector.elements {
-            assertRGB(element.fill?.color ?? element.stroke?.color, 1, 0, 0, "and all three took the colour")
+            assertRGB(element.fill?.solidColor ?? element.stroke?.color, 1, 0, 0, "and all three took the colour")
         }
     }
 

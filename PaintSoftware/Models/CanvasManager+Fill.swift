@@ -215,9 +215,7 @@ extension CanvasManager {
         fillLastRender = nil
         fillGestureSeed = (seedX, seedY)
         fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
-        fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: brushOpacity))
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
@@ -565,9 +563,6 @@ extension CanvasManager {
             // thumbnails, fill references, Move lifts and merges — the vector twin of the raster
             // "ghost layer" bug. An unextractable mask means an empty fill, so dropping the preview
             // is the correct outcome; nothing is recorded.
-            if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
-                layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
-            }
             // Clear the transient raster preview either way so it isn't drawn a second time.
             setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
             // `minimumAlpha` because a vector fill is a *path*: it has no coverage ramp to inherit, so
@@ -580,32 +575,14 @@ extension CanvasManager {
             // Traced in the window's working pixels and mapped back through the window, so a fill
             // worked below scale 1 lands as a path at canvas scale — coarser along its edge by the
             // window's factor, and nowhere else.
-            guard let vectorCanvas = layers[layerIndex].cels[celIndex].vector, let render,
+            guard let render,
                   let traced = PixelOps.pathFromAlphaMask(bytes: render.bytes, width: render.window.workingWidth,
                                                           height: render.window.workingHeight,
                                                           minimumAlpha: coverageCut) else { return }
             var toCanvas = render.window.transform.inverted()
             guard let path = traced.copy(using: &toCanvas) else { return }
-            // The whole display list, not `vectorCanvas.fills`: `addFill` appends the new element on
-            // top of the strokes (LASSO_FILL.md §2a), so the list is no longer kind-sorted and a
-            // fills-bucket undo would have to invent a z-position for the fill it puts back — see
-            // `registerVectorElementsUndo`.
-            let elementsBefore = vectorCanvas.elements
-            // The mask is measured against the *rendered* canvas, so it's canvas-space — this
-            // overload maps it back through the layer's transform (see its doc comment).
-            let landed = vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
-            registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
-                                       newElements: vectorCanvas.elements,
-                                       layerID: layerID, celID: celID, label: label,
-                                       // One fill appended and nothing rewritten, and `addFill` says
-                                       // exactly where it went — so redoing this costs the fill's own
-                                       // rectangle rather than every dab on the cel. **The undo costs
-                                       // the same rectangle since TODO (41)**, and not because of
-                                       // this argument: a departing fill is bounded by
-                                       // `VectorCanvas.derivedFootprint(of:)`, which reads the very
-                                       // path that is about to leave the list. Passing `landed` is
-                                       // still right — it is free, and it is the arriving half.
-                                       swap: .addsAndRemoves(ink: landed))
+            placeVectorFill(path, paint: .solid(fillColor), layerIndex: layerIndex, celIndex: celIndex,
+                            label: label)
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             // --- Raster path: flatten into `raster` directly, with the fill on top ---
@@ -642,6 +619,88 @@ extension CanvasManager {
                                       newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
                                       newBaked: nil, label: label)
         }
+    }
+
+    // MARK: - A path that is already known
+
+    /// Where a solid path came to rest.
+    enum SolidFillLanding: Equatable {
+        /// A `VectorFillElement` on a vector layer, which can be selected, moved and edited.
+        case element(UUID)
+        /// Pixels in a raster layer's cel — there is no object to name.
+        case pixels
+    }
+
+    /// **The fill tool's add path for geometry nobody has to flood-fill** — a lasso selection filled
+    /// from the Select panel, a rectangle or an ellipse from the Add menu. `commitInteractiveFill` is
+    /// the same destination reached by tracing a mask; everything after the path is known is shared.
+    ///
+    /// **The layer's kind decides the destination outright, with no fallback between the two** — each
+    /// tier is invisible to the other's renderer, which is `commitInteractiveFill`'s own rule. A
+    /// vector layer gets a `VectorFillElement`; a raster layer is flattened with the shape painted on
+    /// top, into `Cel.raster`, the tier the eraser stamps. One undo step either way.
+    ///
+    /// - Parameters:
+    ///   - path: in canvas space, like every on-screen path.
+    ///   - color: already resolved against the brush opacity, as the fill tool resolves its own.
+    /// - Returns: nil when the cel is gone.
+    @discardableResult
+    func layDownSolidFill(_ path: CGPath, color: UIColor, layerIndex: Int, celIndex: Int,
+                          label: HistoryActionLabel) -> SolidFillLanding? {
+        guard let canvasSize, layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return nil }
+        if layers[layerIndex].kind == .vector {
+            return placeVectorFill(path, paint: .solid(CodableColor(color)), layerIndex: layerIndex,
+                                   celIndex: celIndex, label: label).map(SolidFillLanding.element)
+        }
+        let cel = layers[layerIndex].cels[celIndex]
+        let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        let newImage = PixelOps.fill(base: base, path: path, color: color)
+        registerUndoableCelChange(layerID: layers[layerIndex].id, celID: cel.id,
+                                  oldRaster: cel.raster, oldBaked: cel.bakedImage,
+                                  newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
+                                  newBaked: nil, label: label)
+        return .pixels
+    }
+
+    /// The vector arm: one `VectorFillElement` appended to the cel's display list, and the step that
+    /// takes it away.
+    ///
+    /// **The whole display list is what the step swaps, not `vectorCanvas.fills`.** `addFill` appends
+    /// the new element on top of the strokes (LASSO_FILL.md §2a), so the list is no longer
+    /// kind-sorted and a fills-bucket undo would have to invent a z-position for the fill it puts
+    /// back — see `registerVectorElementsUndo`. One fill appended and nothing rewritten, and `addFill`
+    /// says exactly where it went, so redoing this costs the fill's own rectangle rather than every
+    /// dab on the cel. **The undo costs the same rectangle since TODO (41)**, and not because of this
+    /// argument: a departing fill is bounded by `VectorCanvas.derivedFootprint(of:)`, which reads the
+    /// very path that is about to leave the list. Passing the landing rectangle is still right — it
+    /// is free, and it is the arriving half.
+    ///
+    /// A vector layer's cel with no canvas gets an empty one rather than the fill landing in a tier
+    /// the layer never draws.
+    ///
+    /// - Returns: the new element's id, or nil when the cel is gone.
+    @discardableResult
+    func placeVectorFill(_ canvasPath: CGPath, paint: FillPaint, layerIndex: Int, celIndex: Int,
+                         label: HistoryActionLabel) -> UUID? {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex)
+        else { return nil }
+        if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
+            layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
+        }
+        guard let vectorCanvas = layers[layerIndex].cels[celIndex].vector else { return nil }
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[celIndex].id
+        let elementsBefore = vectorCanvas.elements
+        // The path is canvas space — the mask is measured against the *rendered* canvas, a lasso and a
+        // shape against the screen — so this overload maps it back through the layer's transform.
+        let added = vectorCanvas.addFill(canvasSpacePath: canvasPath, paint: paint)
+        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                   newElements: vectorCanvas.elements,
+                                   layerID: layerID, celID: celID, label: label,
+                                   swap: .addsAndRemoves(ink: added.ink))
+        celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        return added.id
     }
 
     // MARK: - Lasso fill
@@ -730,9 +789,7 @@ extension CanvasManager {
         fillLastRender = nil
         fillGestureSeed = (0, 0)   // unused: a lasso session seeds from its mask
         fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
-        fillGestureFillColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
+        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: brushOpacity))
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID

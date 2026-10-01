@@ -35,6 +35,9 @@ import SwiftUI
 /// loop meets the last (Subtract, TODO (95)), what the loop then catches, and what to do with it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// Written by the Edit entry, which hands the dock to the editor of the object the loop caught —
+    /// see `editObjectTab`.
+    @Binding var activePanel: ActivePanel
 
     private var hasSelection: Bool { canvasManager.selection != nil }
 
@@ -188,6 +191,7 @@ struct SelectPanel: View {
                 actionTab(icon: "paintbrush.fill", title: "Fill") { canvasManager.fillSelection() }
                     .accessibilityIdentifier("selectPanel.fillButton")
                 editDisclosure
+                editObjectTab
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
@@ -233,6 +237,30 @@ struct SelectPanel: View {
         .accessibilityIdentifier("selectPanel.editDisclosure")
         .accessibilityValue(showsEditBand ? "expanded" : "collapsed")
         .accessibilityAddTraits(showsEditBand ? [.isSelected] : [])
+    }
+
+    /// **Edit Text / Edit Gradient — TODO (116) and (128), one entry for both.** The owner: *"When I
+    /// select a textbox with the select tool, there should be another edit option to edit the text,
+    /// which will bring up the text menu, and I can change it in real time"*, and *"if a gradient is
+    /// selected, there should be an edit gradient button like the edit text button."*
+    ///
+    /// **Offered only when the loop caught an object that has an editor** (`SelectionStyle
+    /// .editableObject`), and titled for the kind, so the entry says what it will open. It is the
+    /// topmost such object — when a loop catches a gradient and a text box, the one the artist can see.
+    /// Beside the Edit disclosure because both are "edit what I selected": that one restyles ink, this
+    /// one opens an object's own editor.
+    ///
+    /// The tap hands the dock over — the text panel for text, none for a gradient, whose card the
+    /// model's own session raises — and the loop stays where it is, since a live selection outlives
+    /// the tool that made it.
+    @ViewBuilder
+    private var editObjectTab: some View {
+        if let object = canvasManager.selectionStyle.editableObject {
+            actionTab(icon: object.systemImage, title: object.title) {
+                if let opened = canvasManager.editSelectedObject() { activePanel = opened.panel }
+            }
+            .accessibilityIdentifier("selectPanel.editObjectButton")
+        }
     }
 
     /// **Colour · Brush · Size · Opacity, one flat row** — the four things the toolbar shows for the

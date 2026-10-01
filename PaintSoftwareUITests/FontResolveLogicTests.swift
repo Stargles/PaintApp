@@ -258,4 +258,53 @@ final class FontResolveLogicTests: XCTestCase {
                        "Foundry-Text", "A face that does not start with its family's name keeps its "
                        + "whole name rather than being trimmed to nonsense.")
     }
+
+    // MARK: - The font list's rows (TODO (115))
+
+    /// **A family's row is drawn in that family.** `previewFont` is what `FontFamilyList` sets every
+    /// row's name in, so for every family the device lists it has to be a face *of that family* — not
+    /// the system face the old `Menu` drew them all in. Asserted over the real library (every family
+    /// the device ships) on the one thing iOS has always been true of: `UIFont(name:)` keeps the
+    /// family it was made from.
+    ///
+    /// Mutation caught: answering `UIFont.systemFont` for every row reddens every family at once.
+    func testEveryListedFamilysPreviewFontIsAFaceOfThatFamily() {
+        let library = FontLibrary.shared
+        var checked = 0
+        for group in library.groups() {
+            for family in group.families where family != FontDescriptor.systemFamilyName {
+                let font = library.previewFont(inFamily: family, packID: group.packID, size: 20)
+                XCTAssertEqual(font.familyName, family, "\(family)'s row is not drawn in \(family)")
+                XCTAssertEqual(font.pointSize, 20)
+                checked += 1
+            }
+        }
+        XCTAssertGreaterThan(checked, 10, "PREMISE: the device lists families to check")
+    }
+
+    /// **A row can only name its family in its own face if that face can spell the name** — the
+    /// ornament and symbol families cannot, and the list says them in the system face instead.
+    func testOnlyAFaceThatHasTheLettersCanSpellItsOwnName() throws {
+        let baskerville = FontLibrary.shared.previewFont(inFamily: "Baskerville", packID: nil, size: 20)
+        XCTAssertTrue(FontLibrary.canSpell("Baskerville", in: baskerville), "a text face spells its name")
+        XCTAssertTrue(FontLibrary.canSpell("Bodoni 72", in: UIFont.systemFont(ofSize: 20)))
+        let ornaments = ["BodoniOrnamentsITCTT", "ZapfDingbatsITC"].lazy
+            .compactMap { UIFont(name: $0, size: 20) }.first
+        let symbols = try XCTUnwrap(ornaments ?? { throw XCTSkip("this OS ships no ornament or dingbat face") }())
+        XCTAssertFalse(FontLibrary.canSpell("Ornaments", in: symbols),
+                       "an ornament face cannot spell a name in letters it does not have")
+    }
+
+    /// The row is the family's *regular* face — what the artist gets by choosing it — and the system
+    /// row is San Francisco. A family whose regular is missing falls back as the text would.
+    func testThePreviewIsTheRegularFaceAndFallsBackLikeTheTextDoes() {
+        let library = FontLibrary.shared
+        let system = library.previewFont(inFamily: FontDescriptor.systemFamilyName, packID: nil, size: 20)
+        XCTAssertEqual(system.fontName, UIFont.systemFont(ofSize: 20).fontName, "the System row is San Francisco")
+        let helvetica = library.previewFont(inFamily: "Helvetica Neue", packID: nil, size: 20)
+        XCTAssertFalse(helvetica.fontDescriptor.symbolicTraits.contains(.traitBold),
+                       "a row names the family, so it shows the regular and not whichever face sorts first")
+        let missing = library.previewFont(inFamily: "No Such Family", packID: nil, size: 20)
+        XCTAssertEqual(missing.pointSize, 20, "an unknown family still draws — in the system font, as the text would")
+    }
 }

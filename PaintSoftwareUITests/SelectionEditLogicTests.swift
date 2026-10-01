@@ -391,7 +391,7 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertEqual(eraser.size, 11, "eraser: size, because the hole's width is visible")
         XCTAssertEqual(eraser.opacity, 0.3, "eraser: opacity, because how much it removes is visible")
 
-        XCTAssertEqual(fill.color, colour(1, 0, 0, 0.25), "fill: the hue, keeping its own alpha")
+        XCTAssertEqual(fill.solidColor, colour(1, 0, 0, 0.25), "fill: the hue, keeping its own alpha")
         XCTAssertEqual(fill.opacity, 0.3, "fill: opacity")
 
         XCTAssertEqual(text.recipe.color, colour(1, 0, 0, 0.4), "text: the hue, keeping its own alpha")

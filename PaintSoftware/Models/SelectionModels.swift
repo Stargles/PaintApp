@@ -1743,39 +1743,18 @@ extension CanvasManager {
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
         commitAllInteractiveState()
-        guard let selection = requested, let canvasSize,
+        guard let selection = requested,
               layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
-        let cel = layers[currentLayerIndex].cels[celIndex]
-        let isVector = layers[currentLayerIndex].kind == .vector
-        if isVector, let vectorCanvas = cel.vector {
-            // Whole-list snapshots, because `addFill` appends on top of the strokes — LASSO_FILL.md
-            // §2a's *"cover everything"*, which is one rule for the word "Fill" whether it arrives
-            // from the fill tool or from this menu command. See `registerVectorElementsUndo`.
-            let elementsBefore = vectorCanvas.elements
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-            brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
-            // `selection.path` is in canvas space, like every on-screen path — see
-            // `VectorCanvas.addFill(canvasSpacePath:...)` for why it must not be stored verbatim.
-            let landed = vectorCanvas.addFill(canvasSpacePath: selection.path,
-                                              color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
-            setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
-            registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
-                                       newElements: vectorCanvas.elements,
-                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill,
-                                       // The fill tool's answer, for the same reason — see
-                                       // `commitInteractiveFill`.
-                                       swap: .addsAndRemoves(ink: landed))
-        } else {
-            let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-            let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
-            registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
-                                       oldRaster: cel.raster, oldBaked: cel.bakedImage,
-                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
-                                       newBaked: nil, label: .fill)
-        }
+        // Clear the transient tier first, or a stale pre-edit fill preview composites over the top.
+        setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
+        // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
+        // whichever door it arrives from: a vector layer gets an element on top of everything
+        // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
+        layDownSolidFill(selection.path, color: brushColor.resolvedUIColor(opacity: brushOpacity),
+                         layerIndex: currentLayerIndex, celIndex: celIndex, label: .fill)
     }
 
     /// **Everything the loop catches goes, under the rule the artist picked in the Select panel**

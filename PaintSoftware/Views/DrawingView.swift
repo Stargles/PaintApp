@@ -544,6 +544,18 @@ struct DrawingView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // **The gradient's settings — TODO (128)** — keyed on the model's own answer
+            // (`gradientEdit`: a gradient is open for editing) and not on an `ActivePanel` case, the
+            // stream bar's arrangement and for its reason: `canvasInteractionBegan`'s
+            // `activePanel = .none` cannot close it on a two-finger pan, and touch arbitration is
+            // untouched. The next canvas edit, tool change or undo settles the session, which is what
+            // takes the card away. The Move bar wins while a piece floats, the Select panel's rule.
+            if canvasManager.gradientEdit != nil, !canvasManager.isAnyPieceFloating {
+                GradientSettingsPanel(canvasManager: canvasManager)
+                    .bottomDockCard(width: width)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // The Move menu, keyed off whether anything is actually floating rather than off which
             // panel is open — tapping the canvas to commit, or Duplicate from the Select panel, both
             // surface it.
@@ -589,7 +601,7 @@ struct DrawingView: View {
             // `selectionOverlayIsCapturing` has required `!hasFloatingPiece && !hasVectorFloat`
             // since it was written).
             if activePanel == .select && !canvasManager.isAnyPieceFloating {
-                SelectPanel(canvasManager: canvasManager)
+                SelectPanel(canvasManager: canvasManager, activePanel: $activePanel)
                     .bottomDockCard(width: width)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -633,13 +645,14 @@ struct DrawingView: View {
         return canvasManager.effectLayerOnBar
     }
 
-    /// **An effect layer's bar gives the dock to a tool panel the artist opens over it** — Select or
-    /// Add Text — and is back when that panel closes. Its bar is there because the layer is current,
+    /// **An effect layer's bar gives the dock to a tool panel the artist opens over it** — Select,
+    /// Add Text or an open gradient — and is back when that panel closes. Its bar is there because the layer is current,
     /// so unlike a node's it has no flow that closes it before another menu opens, and stacking it
     /// under a 150-point Select panel would put most of the canvas behind two cards. The two are
     /// exclusive in the dock, as the Move bar already makes them for a floating piece.
     private func effectBarYieldsToToolPanel(_ editing: EffectEditing) -> Bool {
-        !editing.raisedFromRail && (activePanel == .select || activePanel == .text)
+        !editing.raisedFromRail
+            && (activePanel == .select || activePanel == .text || canvasManager.gradientEdit != nil)
     }
 
     /// The grade whose knobs are docked, and where an edit to it goes — nil whenever the effect bar

@@ -13,7 +13,8 @@ toolset, and a frame-by-frame animation timeline.
 - **Fill**: GPU (Metal) colour-based flood fill with adjustable threshold/gap-closing/edge-overlap,
   live drag-to-adjust before committing, and per-layer "fill reference" boundaries
 - **Select & Move**: lasso/rectangle/automatic (magic wand) selection, move/duplicate with
-  resize/rotate/mirror, and a selection-clipped paint/fill mode
+  resize/rotate/mirror, and a selection-clipped paint/fill mode. A loop around a text box or a
+  gradient offers **Edit Text** / **Edit Gradient**, which opens that object's own panel live
 - **Layers**: three kinds — **raster** and **vector** hold pixels, and a **value** layer holds none.
   Plus opacity, visibility, fill-reference toggle, object (photo) layers with on-canvas transform
   handles, and groups that composite as parentheses — isolated or pass-through, with their own
@@ -257,8 +258,11 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 - **Actions menu**: Cut/Copy/Paste a selection, flip horizontal/vertical, export.
 - **Settings menu**: resize the canvas, adjust canvas padding (a drawable margin around the artwork),
   bake precise strokes, fingers-can-paint, render resolution.
-- **Add menu**: insert a photo/video, stream a computer's screen, add text, or add a rectangle,
-  ellipse or linear-gradient layer.
+- **Add menu**: insert a photo/video, stream a computer's screen, add text, or add a solid
+  rectangle, a solid ellipse or a linear gradient — each an object of the fill tool's own kind
+  (a rectangle or ellipse arrives held in the Move box on a vector layer; a gradient arrives with its
+  panel up: two colours and an angle). A gradient is an object in a vector layer, not a layer of its
+  own. The text panel's font list shows every family set in itself.
 - The document name is editable in the middle of the top bar.
 - **Pinch** to zoom, **two-finger rotate/drag** to rotate/pan the canvas.
 

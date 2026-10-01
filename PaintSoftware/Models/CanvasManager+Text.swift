@@ -70,10 +70,7 @@ extension CanvasManager {
 
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
-        textGestureLayerID = layerID
-        textGestureCelID = celID
-        textEditingElementID = nil
-        textHandleDrag = nil
+        bindTextSession(toLayer: layerID, cel: celID)
 
         // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
         // reopens the same object rather than dropping a second one on top. `topmostText` hits the
@@ -81,19 +78,7 @@ extension CanvasManager {
         if layers[layerIndex].kind == .vector,
            let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
            let existing = vectorCanvas.topmostText(atCanvasPoint: canvasPoint) {
-            let draft = vectorCanvas.canvasText(fromLocal: existing)
-            textRecipe = draft.recipe
-            textFrame = draft.frame
-            textEditingElementID = existing.id
-            // Suppressed from the flatten, never lifted out of the array — `ADD_TEXT.md` §1/§2, and
-            // this assignment is the session's **first and only** invalidation until it commits.
-            vectorCanvas.editingElementID = existing.id
-            textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
-            textGestureActive = true
-            textFingerDown = false
-            textIsFocused = false
-            celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-            refreshUndoRedoState()
+            reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
             return
         }
 
@@ -112,6 +97,59 @@ extension CanvasManager {
         textFingerDown = false
         textIsFocused = false
         objectWillChange.send()
+        refreshUndoRedoState()
+    }
+
+    /// **Opens a text object that is already on the active vector cel for editing, by identity** — the
+    /// Select tool's Edit Text (TODO (116)), where the artist has lassoed the box and there is no tap
+    /// point to hit-test. It is `beginTextSession(at:)`'s re-open branch reached by id: the same
+    /// session, the same overlay with its box and grips, the same panel, so typing, restyling and
+    /// dragging the box all behave exactly as they do after tapping the text with the text tool.
+    ///
+    /// - Returns: false when the object is not on the cel under the playhead, or text cannot go on
+    ///   this layer — the caller then has nothing to open a panel for.
+    @discardableResult
+    func beginEditingText(elementID: UUID) -> Bool {
+        beginCanvasEdit()
+        guard layers.indices.contains(currentLayerIndex),
+              Tool.textUnavailableReason(onLayerOfKind: activeLayerKind) == nil,
+              layers[currentLayerIndex].kind == .vector,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector,
+              let existing = vectorCanvas.elements.lazy.compactMap(\.text).first(where: { $0.id == elementID })
+        else { return false }
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIndex].id
+        bindTextSession(toLayer: layerID, cel: celID)
+        reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
+        return true
+    }
+
+    /// The cel a session is about to run on, with no object chosen yet and no handle held — the four
+    /// assignments both ways in (`beginTextSession(at:)` and `beginEditingText(elementID:)`) start by
+    /// making.
+    private func bindTextSession(toLayer layerID: UUID, cel celID: UUID) {
+        textGestureLayerID = layerID
+        textGestureCelID = celID
+        textEditingElementID = nil
+        textHandleDrag = nil
+    }
+
+    /// The session opening on an object already in the display list. **Suppressed from the flatten,
+    /// never lifted out of the array** — `ADD_TEXT.md` §1/§2, and the assignment to `editingElementID`
+    /// is the session's **first and only** invalidation until it commits.
+    private func reopenText(_ existing: VectorTextElement, in vectorCanvas: VectorCanvas,
+                            layerID: UUID, celID: UUID) {
+        let draft = vectorCanvas.canvasText(fromLocal: existing)
+        textRecipe = draft.recipe
+        textFrame = draft.frame
+        textEditingElementID = existing.id
+        vectorCanvas.editingElementID = existing.id
+        textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
+        textGestureActive = true
+        textFingerDown = false
+        textIsFocused = false
+        celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         refreshUndoRedoState()
     }
 

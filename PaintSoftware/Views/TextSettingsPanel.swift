@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 
 /// The text tool's settings panel — `ADD_TEXT.md` stage 1, in `StrokeSettingsPanel`'s shape inside
@@ -29,6 +30,10 @@ struct TextSettingsPanel: View {
     /// slider rather than above it (TODO item (49)). Wide enough for "Paragraph Spacing: 000",
     /// which is the longest of the five.
     private static let labelWidth: CGFloat = 190
+
+    /// Whether the font list is up. View state: the list is a presentation, and its own lifetime is
+    /// the router's (`CanvasPresentation.textFont`).
+    @State private var showingFontPicker = false
 
     private var typography: Typography { canvasManager.textRecipe.typography }
 
@@ -106,43 +111,37 @@ struct TextSettingsPanel: View {
 
     // MARK: - Font
 
-    /// The family picker: a grouped native `Menu` with `Section`s and a checkmark on the current
-    /// value — `blendModeRow` / `BlendMode.menuGroups`' idiom (`LayerPanel.swift:590-`), which is
-    /// this app's answer for "many named options" and already one the artist has met.
+    /// The family picker: a list of every installed family, grouped System / Serif / Sans / Mono /
+    /// Display — plus a section per installed pack once Stage 6 exists, for free, because the
+    /// sections come from `FontLibrary.groups()` rather than from a list written here — **each name
+    /// drawn in its own face**, with a checkmark on the current one.
     ///
-    /// iOS ships roughly 60-80 families and this lists all of them, grouped System / Serif / Sans /
-    /// Mono / Display — plus a section per installed pack once Stage 6 exists, for free, because the
-    /// sections come from `FontLibrary.groups()` rather than from a list written here.
-    ///
-    /// **The rows are not drawn in their own faces**, though `ADD_TEXT.md` §1 sketches that they
-    /// would be: a SwiftUI `Menu`'s buttons are rendered by UIKit's own menu presentation, which
-    /// discards a custom `.font` on the label. Showing the family name in the system face is the
-    /// honest version of that; a live per-face preview needs a custom picker sheet, which is a
-    /// bigger piece of UI than this stage should be spending on.
+    /// TODO (115), the owner: *"When adding text and selecting the font, I currently have no idea
+    /// what the fonts look like. Make the fonts font in the selector menu the actual font."* It was a
+    /// native `Menu` (`blendModeRow`'s idiom) until then, and a SwiftUI `Menu`'s rows are drawn by
+    /// UIKit, which discards a custom `.font` — so the list is the app's own presentation instead
+    /// (`CanvasPresentation.textFont`, an `AnchoredMenu`), which draws real SwiftUI rows.
     private var fontRow: some View {
-        Menu {
-            ForEach(FontLibrary.shared.groups()) { group in
-                Section(group.title) {
-                    ForEach(group.families, id: \.self) { family in
-                        Button {
-                            selectFamily(family, packID: group.packID)
-                        } label: {
-                            if family == canvasManager.textRecipe.font.familyName {
-                                Label(family, systemImage: "checkmark")
-                            } else {
-                                Text(family)
-                            }
-                        }
-                        .accessibilityIdentifier("textPanel.font.\(family)")
-                    }
-                }
-            }
+        Button {
+            showingFontPicker.toggle()
         } label: {
             menuLabel(title: "Font", value: canvasManager.textRecipe.font.familyName)
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("\(Self.idPrefix).fontButton")
         .accessibilityValue(canvasManager.textRecipe.font.familyName)
+        .canvasPresentation(.textFont, isPresented: $showingFontPicker, canvasManager: canvasManager) {
+            FontFamilyList(current: canvasManager.textRecipe.font.familyName) { family, packID in
+                selectFamily(family, packID: packID)
+                showingFontPicker = false
+            }
+            .frame(width: Self.fontListSize.width, height: Self.fontListSize.height)
+        }
     }
+
+    /// Tall enough for about ten rows, which is what makes the list a thing to scroll through and not
+    /// a thing to read at a glance; narrow enough that the longest family name still fits at 20 pt.
+    private static let fontListSize = CGSize(width: 320, height: 440)
 
     /// The face within the family — Regular / Bold / Italic and whatever else the family ships.
     ///
@@ -323,5 +322,84 @@ struct TextSettingsPanel: View {
                 canvasManager.textRecipeDidChange()
             }
         )
+    }
+}
+
+/// **Every installed font family, each name set in that family** — TODO (115). Rows come from
+/// `FontLibrary.groups()` and are drawn in `FontLibrary.previewFont`, the same resolution the text
+/// itself goes through, so a row can never promise a face the panel cannot apply.
+///
+/// **A family whose own face cannot spell its name** (`FontLibrary.canSpell`) — the ornament and symbol
+/// fonts — is named in the system face with a sample of itself beside it; every other row is its name
+/// in its face.
+///
+/// **A row's accessibility value is the PostScript name of the face it is drawn in**, so a test can
+/// tell a list drawn in its families from one drawn in the system face: the picture is not something
+/// XCUITest can read, and a value that agreed with the family name alone would say nothing.
+///
+/// Lazy, because a device ships dozens of families and the list is opened to look at, not to render.
+struct FontFamilyList: View {
+    let current: String
+    let onPick: (_ family: String, _ packID: String?) -> Void
+
+    /// Large enough to read the face's character, small enough that ten rows share a screen.
+    static let previewSize: CGFloat = 20
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(FontLibrary.shared.groups()) { group in
+                    Text(group.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
+                    ForEach(group.families, id: \.self) { family in
+                        row(family, packID: group.packID)
+                    }
+                }
+            }
+            .padding(.bottom, 8)
+        }
+        .background(Color.black.opacity(0.92))
+    }
+
+    private func row(_ family: String, packID: String?) -> some View {
+        let font = FontLibrary.shared.previewFont(inFamily: family, packID: packID, size: Self.previewSize)
+        return Button {
+            onPick(family, packID)
+        } label: {
+            HStack {
+                if FontLibrary.canSpell(family, in: font) {
+                    Text(family)
+                        .font(Font(font as CTFont))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                } else {
+                    // A symbol or ornament family: its own face cannot spell its name, so the name is
+                    // said in the system face and the family is shown as a sample of itself.
+                    Text(family)
+                        .font(.system(size: Self.previewSize))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Spacer(minLength: 12)
+                    Text("ABC abc 123")
+                        .font(Font(font as CTFont))
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
+                Spacer()
+                if family == current {
+                    Image(systemName: "checkmark").foregroundColor(.blue)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("textPanel.font.\(family)")
+        .accessibilityValue(font.fontName)
     }
 }
