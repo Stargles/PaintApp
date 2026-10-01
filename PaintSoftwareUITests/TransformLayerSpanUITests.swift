@@ -169,12 +169,10 @@ final class TransformLayerSpanUITests: PaintUITestCase {
     /// rows are no longer inline in the rail, so this is the same reachability CLAUDE.md's brief for
     /// TODO (64) asked for — driven, not asserted from a hand-built model.
     ///
-    /// **And a two-finger canvas transform must not close the bar** — TODO (67)'s fix
-    /// (`StrokeGestureRecognizer.onSingleTouchBegan`) already keeps `EffectSettingsBar` up through a
-    /// pinch (`OptionsPanelUITests.testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes`);
-    /// `TransformSettingsBar` shares `DrawingView.bottomDock`'s same `isAnyPieceFloating`/
-    /// `activePanel` wiring, so the fix should already cover it. One pinch, asserted, proves that
-    /// rather than assuming it.
+    /// **And a two-finger canvas transform must not close the bar** — `CanvasManager
+    /// .canvasInteractionBegan` watches a finger before it counts, so no panel needs a defence of
+    /// its own (`CanvasTransformLeavesStandingUITests` drives the staggered pan for every dock
+    /// menu). One pinch here, asserted, proves it for this bar's own route rather than assuming it.
     func testShakeSettingsDockAtTheBottomReachableFromAColdStartAndSurviveAPinch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

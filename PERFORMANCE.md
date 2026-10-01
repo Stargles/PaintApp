@@ -4485,7 +4485,8 @@ slot every ordinary document uses.
 layer's content version, so every flip moves it and `startSandwichRebuild` queued **two canvas-sized
 composites per tick** for images nothing on screen displays — the `.rest` presentation shows
 `sandwichFull` alone, and the one state that reads `sandwichHalves` is entered from `onStrokeBegan`,
-whose `onAnyTouchBegan` stops playback before the first dab.
+whose touch stops playback before the first dab (`canvasInteractionBegan`: at once for a pencil, after a
+sub-100 ms watch for a finger).
 
 ### 16.2 The measurement — `PlaybackBudgetBench`, Release, idle machine
 

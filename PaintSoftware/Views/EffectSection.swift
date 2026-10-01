@@ -173,19 +173,21 @@ func effectMenuSlug(_ effect: Effect) -> String {
 // MARK: - The settings bar
 
 /// The chosen effect's knobs, as a **bottom bar** docked above the timeline — `MoveTransformBottomBar`'s
-/// slot and `MoveTransformBottomBar`'s card, raised by the Effect Settings row in a value layer's or a
-/// node's options menu.
+/// slot and `MoveTransformBottomBar`'s card. It is on screen whenever the active layer is an effect
+/// layer (TODO (118): *"Just have it be there automatically when the effect layer is currently
+/// selected."*), and a compositor node's is raised by the Effect Settings row in the node's options.
 ///
-/// **It used to sit in the rail, and the owner's complaint is why it does not** (2026-08-27): *"the
+/// **It is a bottom bar rather than a rail panel because of the owner's complaint** (2026-08-27): *"the
 /// effect settings menu right now takes beside the layers menu. Those two things take up about 80% of
 /// the canvas, making it hard to see what you are editing … the menu is on the bottom, like the same
 /// kind of menu that the lasso or move tool uses."* That is a "I can't see my work while I'm editing
 /// it" report, and a grade is the worst possible thing to tune blind: every slider here changes the
 /// whole canvas at once, so the artwork *is* the readout. Moving the knobs alone would not have fixed
 /// it — the 240pt options panel was the smaller half of the 700pt the two panels took together — so
-/// `DrawingView` also stands the layer rail down for as long as this bar is up, the way the Select
-/// panel stands down for the Move bar. Same rule as there, and for the same reason: the *presentation*
-/// is suppressed and `activePanel` is left alone, so Back puts the artist back exactly where they were.
+/// for a node's bar `DrawingView` also stands the layer rail down for as long as it is up, the way the
+/// Select panel stands down for the Move bar: the *presentation* is suppressed and `activePanel` is
+/// left alone, so Back puts the artist back exactly where they were. An effect layer's bar has no rail
+/// to go back to and shares the screen with it instead (`DrawingView.dockClearance`).
 ///
 /// **One effect, never a list.** A node carries at most one grade — `Layer.layerEffect` is a single
 /// `Effect?` and `setLayerEffect`/`setLayerBlendMode` each clear what the other sets — so there is no

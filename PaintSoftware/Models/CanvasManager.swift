@@ -1626,13 +1626,13 @@ final class CanvasManager: ObservableObject {
     /// `moveBoxTouchDown`, `handleTextPress`, `handleCatchAllTap`, `handleFillPress` and
     /// `handleEyedropperPress` — rather than a `.send()` at each of them.
     ///
-    /// **A finger is not an interaction until it has been watched** (`CanvasTouchSettle`), and that is
-    /// the whole of TODO (117) and (130). A hand lands the two fingers of a pan 10–20 ms apart, so the
-    /// first reaches the canvas alone and looks exactly like the tap or stroke it is not; acting on it
-    /// closed the effect settings bar and the text panel and stopped the playhead before the second
-    /// arrived. Every earlier answer — a pinch-only `onSingleTouchBegan`, a state-driven `StreamBar`
-    /// that no touch can close — protected one menu from one site. This protects all of them from all
-    /// of them, because what moved is when the touch counts, not which menu it reaches.
+    /// **A finger is not an interaction until it has been watched** (`CanvasTouchSettle`), which is
+    /// what keeps a two-finger pan or pinch from closing a panel or stopping the playhead (TODO (117)
+    /// and (130)). A hand lands the two fingers of a pan 10–20 ms apart, so the first reaches the
+    /// canvas alone and looks exactly like the tap or stroke it is not; acting on it would close the
+    /// effect settings bar and the text panel and stop playback before the second arrives. The rule is
+    /// about *when the touch counts*, not about which menu it reaches, so no panel needs a defence of
+    /// its own against it.
     ///
     /// - Parameters:
     ///   - mayContinueTake: whether this touch is on a surface a live take can keep recording from —

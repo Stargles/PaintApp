@@ -2,14 +2,12 @@ import Foundation
 
 /// **Whether a finger that has just landed on the canvas is an edit or the first finger of two.**
 ///
-/// A canvas touch used to be an interaction **the instant it landed** — it stopped the playhead and
-/// closed whatever panel was open — and that is wrong for exactly one input: a hand lands the two
-/// fingers of a pan or a pinch 10–20 ms apart (`recording-20260923-200911`), so the first finger
-/// reaches the canvas **alone**, indistinguishable from the tap or stroke it is not. It closed the
-/// effect settings bar and the text panel and stopped playback before the second finger arrived to
-/// say so — the owner's TODO (117) and (130), which were the same defect (the batched `pinch` that
-/// XCUITest synthesises lands both touches in one event and so never showed it, which is how TODO
-/// (67) shipped green and still lost the menu).
+/// A canvas touch is not an interaction the instant it lands: a hand lands the two fingers of a pan
+/// or a pinch 10–20 ms apart (`recording-20260923-200911`), so the first reaches the canvas **alone**,
+/// indistinguishable from the tap or stroke it is not. Acting on it would close the open panel and
+/// stop the playhead before the second finger arrived to say so (the owner's TODO (117) and (130)).
+/// The batched `pinch` that XCUITest synthesises lands both touches in one event and never shows
+/// this; `staggeredTwoFingerDrag` does.
 ///
 /// So a lone finger is **watched** for `window` before it is believed. If a second touch joins in
 /// that time it was the start of a transform, and none of the consequences happen. If the window
@@ -23,8 +21,8 @@ import Foundation
 /// landing, a second touch, a lift and a timeout without a simulator or a sleep.
 struct CanvasTouchSettle {
 
-    /// How long a lone finger is watched. Four times the 10–20 ms a hand's two fingers land apart,
-    /// and still shorter than a stroke's first visible dab.
+    /// How long a lone finger is watched: four times the 10–20 ms a hand's two fingers land apart, so
+    /// the second is seen, and short enough that the delay to a tap's effect is not.
     static let window: TimeInterval = 0.08
 
     /// What a watched landing will do once it settles. The one thing a second landing for the same

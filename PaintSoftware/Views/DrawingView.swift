@@ -455,7 +455,8 @@ struct DrawingView: View {
             // effect's copy, the box and its bar dock here, and the artist has to see the canvas to
             // drag on it. The presentation is suppressed and nothing else moves, so Done on the box
             // puts this bar straight back with the same grade's rows.
-            if let editing = effectBeingEdited, !canvasManager.isAnyPieceFloating {
+            if let editing = effectBeingEdited, !canvasManager.isAnyPieceFloating,
+               !effectBarYieldsToToolPanel(editing) {
                 EffectSettingsBar(
                     effect: editing.effect,
                     canvasManager: canvasManager,
@@ -630,6 +631,15 @@ struct DrawingView: View {
             return .folder(id: id)
         }
         return canvasManager.effectLayerOnBar
+    }
+
+    /// **An effect layer's bar gives the dock to a tool panel the artist opens over it** — Select or
+    /// Add Text — and is back when that panel closes. Its bar is there because the layer is current,
+    /// so unlike a node's it has no flow that closes it before another menu opens, and stacking it
+    /// under a 150-point Select panel would put most of the canvas behind two cards. The two are
+    /// exclusive in the dock, as the Move bar already makes them for a floating piece.
+    private func effectBarYieldsToToolPanel(_ editing: EffectEditing) -> Bool {
+        !editing.raisedFromRail && (activePanel == .select || activePanel == .text)
     }
 
     /// The grade whose knobs are docked, and where an edit to it goes — nil whenever the effect bar

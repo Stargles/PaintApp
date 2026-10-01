@@ -1575,7 +1575,7 @@ ink lands on the active layer at its own height.
   have drawn across four cels. Such a take also **cancels** its own structure bracket rather than
   committing it, because every byte it changed is already in the stroke's step.
 - **A canvas touch does not end the take it is part of.** `canvasInteractionBegan` gained
-  `mayContinueTake`, passed true by the stroke recognizer's `onAnyTouchBegan` — a fill tap or an
+  `mayContinueTake`, passed true by the stroke recognizer's `onSingleTouchBegan` — a fill tap or an
   eyedropper press during a take still stops playback, because neither has a cel-crossing story.
   **"And by nothing else" was true for one day**: §5.2's Move box is the second caller, and it had to be,
   because `handleCatchAllTap` fires for every touch on a layer with no drawing surface and was ending the

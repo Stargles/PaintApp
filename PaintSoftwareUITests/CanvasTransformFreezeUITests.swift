@@ -197,8 +197,9 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "lensblur",
                        "PREMISE: the active layer is a value layer grading Lens Blur, as the owner's was")
 
-        // Left of the rail, the options panel and every menu that hangs off them.
-        let first = CGVector(dx: 0.10, dy: 0.45), second = CGVector(dx: 0.22, dy: 0.60)
+        // Left of the rail, the options panel and every menu that hangs off them, and above the
+        // effect layer's settings bar, which is up beside the rail with the layer current.
+        let first = CGVector(dx: 0.10, dy: 0.20), second = CGVector(dx: 0.22, dy: 0.33)
         let menus: [(name: String, open: (XCUIApplication) -> Void)] = [
             ("the Blend Mode / Effect menu", openEffectMenu),
             ("the Views menu", openViewsMenu),

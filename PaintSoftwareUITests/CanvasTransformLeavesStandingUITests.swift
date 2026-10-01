@@ -114,6 +114,57 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                       "CONTROL: a single-finger touch on the canvas must still close a node's bar")
     }
 
+    /// An effect layer's bar shares the dock with the tool panels rather than stacking under them: the
+    /// Select panel takes the slot while it is open, and the bar comes back when it closes.
+    func testAnEffectLayersBarGivesTheDockToTheSelectPanelAndTakesItBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        closeLayerRail(app)
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the effect layer's bar is up")
+
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForExistence(timeout: 5), "PREMISE: the Select panel is up")
+        XCTAssertTrue(title.waitForNonExistence(timeout: 5),
+                      "Select opened over an effect layer's bar: the two stack in the dock instead of one yielding")
+        attach(app, "select-over-effect-layer")
+
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForNonExistence(timeout: 5), "PREMISE: Select closed")
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect layer is still current, so its bar is back")
+    }
+
+    /// A transform layer's mode settings (Rotate's speed here) — the third bar raised from the rail's
+    /// options, docked in the same place and closed by the same rule.
+    func testATransformModesSettingsBarSurvivesATwoFingerPanAndAPinch() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "PREMISE: the transform layer landed above the drawing")
+        row.tap()
+        let modeButton = app.buttons["layerOptions.transformModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
+        modeButton.tap()
+        let rotate = app.buttons["layerOptions.transformMode.rotate"]
+        XCTAssertTrue(rotate.waitForExistence(timeout: 5), "PREMISE: the mode picker lists Rotate")
+        rotate.tap()
+        let settings = app.buttons["layerOptions.transformSettings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "PREMISE: a picked mode leaves its settings row")
+        settings.tap()
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the mode's settings are docked at the bottom")
+        attach(app, "transform-settings-bar-up")
+
+        try assertTheMenuSurvivesTheTransforms(app, canvas, "the transform mode's settings bar") { title.exists }
+    }
+
     /// Add Text's settings, opened from the Add menu — the other menu the owner names.
     func testTheTextPanelSurvivesATwoFingerPanAndAPinch() throws {
         let app = XCUIApplication()
@@ -201,6 +252,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.40, dy: 0.60), to: CGVector(dx: 0.60, dy: 0.60))
         XCTAssertTrue(playheadHasStopped(app), "CONTROL: a drawing touch must still stop the playhead")
     }
+
 
 
     // MARK: - Shared

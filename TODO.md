@@ -56,34 +56,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## (117) The bottom-dock menu closes when the canvas is panned — a regression
-
-**Status** — not started. *"This is one significant regression if I recall correctly: Right now, the
-menu type that appears on the bottom above the timeline exits if you try to move the canvas. This is
-the menu used for text, effect settings, and a bunch of other stuff. Interestingly, the same menu type
-I believe is used for the lasso and move, and those do not dissapear when the canvas is being moved.
-This is important because I want to be able to move the canvas while in an effect."* Session 43 made
-panels survive a two-finger pan by dismissing only on a *confirmed single* touch; find what reopened it
-and why lasso/Move are immune while text/effect are not — one rule for every dock menu, not a third patch.
-
-- [ ] Every bottom-dock menu survives a two-finger pan/zoom; a cold-start XCUITest per menu kind.
-
-## (130) Playback pauses when the canvas is panned or zoomed
-
-**Status** — not started. *"The playback pauses when the canvas is panned or zoomed. It should not."*
-
-- [ ] Playback keeps running through a pan and a pinch; pinned by a test that plays, pans, and reads
-      the playhead still advancing.
-
-## (118) An effect layer's settings are open whenever it is selected
-
-**Status** — not started. *"Right now in an effect, you have to click effect settings to bring up the
-editing menu. Just have it be there automatically when the effect layer is currently selected."*
-Pairs with (117): the menu must then also survive a pan.
-
-- [ ] Selecting an effect layer shows its settings bar with no extra tap; the "Effect Settings" button
-      goes if nothing else needs it.
-
 ## (121) Outside the canvas is still canvas — one root fix
 
 **Status** — not started. *"If you make a line half inside the canvas half outside, make that into a
