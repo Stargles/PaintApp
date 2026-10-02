@@ -709,36 +709,6 @@ extension Array where Element == RenderNode {
         }
     }
 
-    /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
-    /// order. Nil when `layerIndex` is not a leaf anywhere in this tree.
-    ///
-    /// **§5.2's sandwich is the whole reason this exists.** Core Animation cannot Multiply one view
-    /// against arbitrary siblings, so a blended layer is drawn as three views — the composite of
-    /// everything below, the active layer's own stroke host untouched, the composite of everything
-    /// above — and this is the cut that produces the outer two. Stamping a dab changes neither half,
-    /// which is what keeps the compositor off the drawing path.
-    ///
-    /// A group that *contains* the active leaf becomes two half-groups, one on each side, and **each
-    /// keeps the original's `id`, `opacity`, `isVisible`, `blendMode`, `isIsolated` and `masks`
-    /// verbatim.**
-    /// Dropping them would be more wrong rather than less: the layer's own host already has every
-    /// enclosing group's opacity folded into it by `effectiveOpacity(ofLayer:)`, so a half-group that
-    /// forgot the group's properties would disagree with the one view sitting between the two halves.
-    ///
-    /// **Where the group buffers, giving both halves its properties is an approximation, and this is
-    /// exactly §5.2's "live stroke inside a blended group".** A faded group fades twice, once per
-    /// half, instead of once over the composite the halves would have made together; a group blend
-    /// mode runs against the backdrop once per half. §10 decision 5 settles the real answer —
-    /// recomposite the active node's subtree per frame — and until that exists the sandwich is the
-    /// near picture that snaps correct on lift. The delta is measured rather than asserted away —
-    /// 64 on a group at half opacity, in
-    /// `SandwichLogicTests.testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup`.
-    ///
-    /// A half-group pruned to nothing is **dropped entirely**, not emitted as a node with an empty
-    /// slot. The derivation above keeps a genuinely *empty folder* on purpose — its group properties
-    /// need somewhere to hang, and a folder that is empty only at this frame must not blink out of
-    /// the tree between frames — and a half that was pruned to nothing has neither reason.
-    /// `testAnEmptyFolderSurvivesIntoWhicheverHalfItRanksIn` is the fixture for the difference.
     /// This stack with every leaf naming `old` renamed to `new`, everything else untouched.
     ///
     /// **RENDER.md §3.4 rule 3 is the only caller and the whole reason this exists.** A chunk's tree
@@ -772,86 +742,125 @@ extension Array where Element == RenderNode {
         }
     }
 
-    func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])? {
-        for (position, node) in enumerated() {
-            switch node.content {
-            case .leaf(let index):
-                guard index == layerIndex else { continue }
-                return (Array(self[..<position]), Array(self[(position + 1)...]))
-
-            case .node(_, let inputs):
-                // Slots are ordered and each is its own bottom-to-top stack, so the slots before the
-                // one holding the leaf are wholly below it and the ones after are wholly above —
-                // the same reasoning as for siblings, one level in. At arity 1, which is every node
-                // the derivation can currently produce, there are no such slots and this is just the
-                // recursion.
-                var found: (slot: Int, below: [RenderNode], above: [RenderNode])?
-                for (slot, input) in inputs.enumerated() {
-                    guard let inner = input.split(atLeaf: layerIndex) else { continue }
-                    found = (slot, inner.below, inner.above)
-                    break
-                }
-                guard let found else { continue }
-
-                var below = Array(self[..<position])
-                var above = Array(self[(position + 1)...])
-                // Spelled `[[RenderNode]](…)` rather than `Array(…)`: inside an extension of `Array`
-                // the bare name means `Self`, so `Array(inputs[…])` would ask for a stack of leaves
-                // where a list of slots is wanted.
-                if let half = node.half(inputs: [[RenderNode]](inputs[..<found.slot]) + [found.below]) {
-                    below.append(half)
-                }
-                if let half = node.half(inputs: [found.above] + [[RenderNode]](inputs[(found.slot + 1)...])) {
-                    above.insert(half, at: 0)
-                }
-                return (below, above)
-            }
+    /// **The frame cut into bands around runs of leaves, bottom-to-top** — static, run 0, static,
+    /// run 1, …, static: `2 × runs.count + 1` stacks, each the tree pruned to the leaves that rank in
+    /// it. Nil when a run names a leaf that is not in this tree, or when the runs are not each
+    /// contiguous and in evaluation order — a band is one span of the leaf order, or it is not a band.
+    ///
+    /// **§5.2's sandwich is the whole reason this exists.** Core Animation cannot Multiply one view
+    /// against arbitrary siblings, so the live canvas draws the frame as a few views — the composite
+    /// of everything below a cut, what is between, the composite of everything above — and this is
+    /// the cut that produces them. A stroke's cut is one run of one leaf, the active layer, whose own
+    /// host draws the middle (`split(atLeaf:)`); a transform edit's runs are the leaves it moves
+    /// (`CanvasManager.liveTransformRuns`), each composited into a picture of its own that Core
+    /// Animation re-poses per update (TODO (125)). Stamping a dab or nudging a pose changes no band,
+    /// which is what keeps the compositor off both gestures.
+    ///
+    /// A group that *contains* a cut becomes a part-group in every band it spans, and **each keeps
+    /// the original's `id`, `opacity`, `isVisible`, `blendMode`, `isIsolated` and `masks`
+    /// verbatim.** Dropping them would be more wrong rather than less: the active layer's own host
+    /// already has every enclosing group's opacity folded into it by `effectiveOpacity(ofLayer:)`, so
+    /// a part-group that forgot the group's properties would disagree with the one view sitting
+    /// between the two halves.
+    ///
+    /// **Where the group buffers, giving every part its properties is an approximation, and this is
+    /// exactly §5.2's "live stroke inside a blended group".** A faded group fades once per band,
+    /// instead of once over the composite the bands would have made together; a group blend mode runs
+    /// against the backdrop once per band. The delta is measured rather than asserted away — 64 on a
+    /// group at half opacity, in `SandwichLogicTests.testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup`
+    /// — and it is the near picture the owner ruled acceptable for a live edit, which the bake
+    /// replaces (TODO (125), 2026-10-01).
+    ///
+    /// **A slot is in every band from the one the walk enters it in to the one it leaves it in**, so
+    /// the slot holding a cut appears on both sides of it — empty on one, when the cut is its first or
+    /// last leaf — and a slot wholly on one side appears only there. A part-group pruned to nothing is
+    /// **dropped entirely**, not emitted as a node with only empty slots. The derivation above keeps a
+    /// genuinely *empty folder* on purpose — its group properties need somewhere to hang, and a
+    /// folder that is empty only at this frame must not blink out of the tree between frames — so a
+    /// node with no leaf at all goes whole into the band it ranks in.
+    /// `testAnEmptyFolderSurvivesIntoWhicheverHalfItRanksIn` is the fixture for the difference.
+    func cut(around runs: [[Int]]) -> [[RenderNode]]? {
+        var runOf: [Int: Int] = [:]
+        for (run, leaves) in runs.enumerated() {
+            guard !leaves.isEmpty else { return nil }
+            for leaf in leaves { runOf[leaf] = run }
         }
-        return nil
+        // The runs, checked against the leaf order before anything is built: every leaf present, each
+        // run one unbroken span, the spans in order. A span is a stretch of equal entries once the
+        // order is read as "which run, if any" — so a gap in a run reads as the run twice.
+        let order = leafLayerIndices
+        guard Set(order).isSuperset(of: runOf.keys) else { return nil }
+        var spans: [Int?] = []
+        for leaf in order where spans.isEmpty || spans[spans.count - 1] != runOf[leaf] {
+            spans.append(runOf[leaf])
+        }
+        // `[Int](…)` rather than `Array(…)`: inside an extension of `Array` the bare name means `Self`.
+        guard spans.compactMap({ $0 }) == [Int](runs.indices),
+              runs.reduce(0, { $0 + $1.count }) == runOf.count else { return nil }
+
+        var cursor = 0
+        var touched = 0...0
+        return bands(count: 2 * runs.count + 1, runOf: runOf, cursor: &cursor, touched: &touched)
     }
 
-    /// **Whether the live pair at this cut is the picture, rather than a near picture of it** —
-    /// whether `split(atLeaf:)`'s two halves, with the leaf's own host drawn source-over between
-    /// them, add back up to what the compositor draws for the whole stack.
-    ///
-    /// `SandwichLogicTests`' load-bearing identity, stated as a predicate: the leaf draws source-over
-    /// (no blend, no grade, no mask of its own), no group around it assembles a buffer, and nothing
-    /// above it needs the compositor at all. Everywhere else the split is §5.2's accepted
-    /// approximation — a mode degrades to normal against transparency, a faded group fades twice —
-    /// which a stroke may show while the pen is down because lift snaps it back, and which an edit at
-    /// rest therefore must not: `SandwichPresentation.live` stands in for the bake only where this
-    /// answers true. Conservative on purpose (a mask above, say, is exact and still answers false),
-    /// because a false here costs only the wait for the bake.
-    func liveCutIsExact(atLeaf layerIndex: Int) -> Bool {
-        for (position, node) in enumerated() {
-            let above = Array(self[(position + 1)...])
+    /// `cut(around:)`'s walk. `cursor` is the band the walk stands in *between* leaves — the static
+    /// band after a run once its leaf has been passed, which is where whatever follows it ranks —
+    /// carried across siblings and into every slot; `touched` widens to every band the walk visits,
+    /// so a part-group knows which bands it spans.
+    private func bands(count: Int, runOf: [Int: Int], cursor: inout Int,
+                       touched: inout ClosedRange<Int>) -> [[RenderNode]] {
+        var out = [[RenderNode]](repeating: [], count: count)
+        func visit(_ band: Int) {
+            touched = Swift.min(touched.lowerBound, band)...Swift.max(touched.upperBound, band)
+        }
+        for node in self {
             switch node.content {
             case .leaf(let index):
-                guard index == layerIndex else { continue }
-                return !node.blendMode.isBlending && node.effect == nil && node.masks.isEmpty
-                    && !above.needsCompositorOnCanvas
+                if let run = runOf[index] {
+                    visit(2 * run + 1)
+                    out[2 * run + 1].append(node)
+                    cursor = 2 * run + 2
+                } else {
+                    out[cursor].append(node)
+                }
+                visit(cursor)
             case .node(_, let inputs):
-                guard let slot = inputs.firstIndex(where: { $0.leafLayerIndices.contains(layerIndex) })
-                else { continue }
-                // Spelled `[RenderNode]` for `split`'s reason: inside an extension of `Array` the
+                guard !node.leafLayerIndices.isEmpty else {
+                    out[cursor].append(node)
+                    continue
+                }
+                // Spelled `[[RenderNode]]` rather than `Array(…)`: inside an extension of `Array` the
                 // bare name means `Self`.
-                let slotsAbove: [RenderNode] = inputs[(slot + 1)...].flatMap { $0 }
-                return !node.needsOwnBuffer
-                    && inputs[slot].liveCutIsExact(atLeaf: layerIndex)
-                    && !slotsAbove.needsCompositorOnCanvas
-                    && !above.needsCompositorOnCanvas
+                var slots = [[[RenderNode]]](repeating: [], count: count)
+                for input in inputs {
+                    var span = cursor...cursor
+                    let parts = input.bands(count: count, runOf: runOf, cursor: &cursor, touched: &span)
+                    for spanned in span { slots[spanned].append(parts[spanned]) }
+                    visit(span.lowerBound)
+                    visit(span.upperBound)
+                }
+                for index in 0..<count {
+                    if let part = node.half(inputs: slots[index]) { out[index].append(part) }
+                }
             }
         }
-        return false
+        return out
+    }
+
+    /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
+    /// order — `cut(around:)` with one run of one leaf, the stroke's sandwich. Nil when `layerIndex`
+    /// is not a leaf anywhere in this tree.
+    func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])? {
+        cut(around: [[layerIndex]]).map { (below: $0[0], above: $0[2]) }
     }
 }
 
 extension RenderNode {
 
-    /// This node with its inputs replaced by one side of a split, or nil if that side holds nothing
-    /// at all — see `split(atLeaf:)`, which is the only caller and carries the reasoning.
+    /// This node with its inputs replaced by one band of a cut, or nil if that band holds nothing
+    /// at all — see `cut(around:)`, which is the only caller and carries the reasoning.
     ///
-    /// "Nothing at all" is every slot being empty, not the half being leafless: a half that still
+    /// "Nothing at all" is every slot being empty, not the band being leafless: a band that still
     /// contains an empty folder contains something the derivation put there deliberately.
     fileprivate func half(inputs: [[RenderNode]]) -> RenderNode? {
         guard case .node(let op, _) = content, inputs.contains(where: { !$0.isEmpty }) else { return nil }

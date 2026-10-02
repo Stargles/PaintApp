@@ -840,6 +840,9 @@ struct TimelineTrackView: UIViewRepresentable {
             /// Whether any write actually changed the document, so a drag that resolved to the frame
             /// and value it started on cancels its bracket instead of recording an empty undo step.
             var didWrite = false
+            /// Whether this drag began a live transform edit (`CanvasManager.graphBandEdit`), which its
+            /// end must then end.
+            var beganLiveEdit = false
         }
         private var graphBandDrag: GraphBandDrag?
         /// The marquee's standing selection, surviving between gestures so a set picked up by one
@@ -967,6 +970,16 @@ struct TimelineTrackView: UIViewRepresentable {
                                           grabbed: hit, handle: handle,
                                           startSelection: graphBandSelection,
                                           poseBaseline: poseBaseline)
+            // **A finger on a pose node is a live transform edit** (TODO (140)): the canvas re-poses
+            // what the channel moves instead of re-rendering it per tick, and the baker waits for the
+            // finger. At touch-down rather than at the first movement, so the bands are minted while
+            // the finger settles and the drag's first tick already has them. Nil — the drag keeps the
+            // live pair — for a grade or an animation group.
+            let grabbedIDs = Set(carried.map(\.parameterID) + [handle?.key.parameterID].compactMap { $0 })
+            if let edit = canvasManager.graphBandEdit(target: content.target, parameterIDs: grabbedIDs) {
+                canvasManager.beginLiveTransformEdit(edit)
+                graphBandDrag?.beganLiveEdit = true
+            }
         }
 
         private func updateGraphBandTouch(at point: CGPoint) {
@@ -1171,6 +1184,11 @@ struct TimelineTrackView: UIViewRepresentable {
             graphBandView.setFrozenAxes([:])
             guard let drag = graphBandDrag else { return }
             graphBandDrag = nil
+            // The drag's live transform edit ends with the drag, however it ends — the restore below
+            // and the commit are both edits the baker should then bake. Only a drag that began one:
+            // `layoutGraphBand` reaches here on every timeline layout while the band is shut, which is
+            // every tick of a Move-box drag, and that edit is not this drag's to end.
+            if drag.beganLiveEdit { canvasManager.endLiveTransformEdit() }
             guard drag.didMove else { return }
             if cancelled {
                 graphBandSelection = drag.startSelection

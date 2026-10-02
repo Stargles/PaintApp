@@ -349,8 +349,10 @@
 		3CC4C75F63CCF35C12C138D2 /* PaintSoftwareUITests/CanvasPlaneLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/CanvasPlaneLogicTests.swift */; };
 		FFD2C8447778EC23E212AED8 /* PaintSoftwareUITests/InkPoseLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD31A79BB0D1A6B628F18F1 /* PaintSoftwareUITests/InkPoseLogicTests.swift */; };
 		11A41BD1F8DF4715A804C702 /* PaintSoftwareUITests/SandwichPresentationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4EE6D8D78EEC566F4117DB2 /* PaintSoftwareUITests/SandwichPresentationLogicTests.swift */; };
+		B64B5637F4196865CB4B0A53 /* PaintSoftwareUITests/LiveTransformEditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78572D04B64B5637F4196865 /* PaintSoftwareUITests/LiveTransformEditLogicTests.swift */; };
 		FA8161A5ABE50770492CD941 /* PaintSoftwareUITests/OutsideTheCanvasUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OutsideTheCanvasUITests.swift */; };
 		5FA29FF497936558D37CFB82 /* PaintSoftwareUITests/InkUnderTransformUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7A2608E1514218D1ADDB27 /* PaintSoftwareUITests/InkUnderTransformUITests.swift */; };
+		7ABD79B243D6FE3A6E651A51 /* PaintSoftwareUITests/LiveTransformEditUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F1B84A7ABD79B243D6FE3A /* PaintSoftwareUITests/LiveTransformEditUITests.swift */; };
 		48D1984FBB1B8FEFBBF2A7C2 /* PaintSoftwareUITests/MoveBoxCommitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C494C3E91B4033250CCEE00E /* PaintSoftwareUITests/MoveBoxCommitUITests.swift */; };
 		58F73341CCB3328E7357555E /* PaintSoftware/Views/BottomDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */; };
 		A633B8E531389FD6277046A7 /* PaintSoftwareUITests/BottomDockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */; };
@@ -422,6 +424,7 @@
 		7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */; };
 		31A4BCC1C2ABA2FE94895518 /* PaintSoftware/Views/SandwichKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D766A044436F87B721D685F /* PaintSoftware/Views/SandwichKey.swift */; };
 		AB16875438902C7C26CCA57B /* PaintSoftware/Views/SandwichPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B69A7B9E4E0FB7BDA26B8B8 /* PaintSoftware/Views/SandwichPresentation.swift */; };
+		973C401329FD95B2BA4F23D2 /* PaintSoftware/Models/LiveTransformEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74DC1633973C401329FD95B2 /* PaintSoftware/Models/LiveTransformEdit.swift */; };
 		6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */; };
 		A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */; };
 		0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */; };
@@ -886,8 +889,10 @@
 		A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/CanvasPlaneLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/CanvasPlaneLogicTests.swift; sourceTree = "<group>"; };
 		7BD31A79BB0D1A6B628F18F1 /* PaintSoftwareUITests/InkPoseLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftwareUITests/InkPoseLogicTests.swift"; sourceTree = "<group>"; };
 		E4EE6D8D78EEC566F4117DB2 /* PaintSoftwareUITests/SandwichPresentationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftwareUITests/SandwichPresentationLogicTests.swift"; sourceTree = "<group>"; };
+		78572D04B64B5637F4196865 /* PaintSoftwareUITests/LiveTransformEditLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftwareUITests/LiveTransformEditLogicTests.swift"; sourceTree = "<group>"; };
 		745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OutsideTheCanvasUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/OutsideTheCanvasUITests.swift; sourceTree = "<group>"; };
 		0B7A2608E1514218D1ADDB27 /* PaintSoftwareUITests/InkUnderTransformUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftwareUITests/InkUnderTransformUITests.swift"; sourceTree = "<group>"; };
+		13F1B84A7ABD79B243D6FE3A /* PaintSoftwareUITests/LiveTransformEditUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftwareUITests/LiveTransformEditUITests.swift"; sourceTree = "<group>"; };
 		C494C3E91B4033250CCEE00E /* PaintSoftwareUITests/MoveBoxCommitUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/MoveBoxCommitUITests.swift; sourceTree = "<group>"; };
 		561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/BottomDock.swift; sourceTree = "<group>"; };
 		E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/BottomDockLogicTests.swift; sourceTree = "<group>"; };
@@ -959,6 +964,7 @@
 		893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineLayoutKey.swift; sourceTree = "<group>"; };
 		4D766A044436F87B721D685F /* PaintSoftware/Views/SandwichKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/SandwichKey.swift; sourceTree = "<group>"; };
 		5B69A7B9E4E0FB7BDA26B8B8 /* PaintSoftware/Views/SandwichPresentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/SandwichPresentation.swift; sourceTree = "<group>"; };
+		74DC1633973C401329FD95B2 /* PaintSoftware/Models/LiveTransformEdit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/LiveTransformEdit.swift"; sourceTree = "<group>"; };
 		1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/VectorPreviewPlan.swift; sourceTree = "<group>"; };
 		C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameRecipe.swift; sourceTree = "<group>"; };
 		5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ChunkedComposite.swift; sourceTree = "<group>"; };
@@ -1488,6 +1494,7 @@
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				4D766A044436F87B721D685F /* PaintSoftware/Views/SandwichKey.swift */,
 				5B69A7B9E4E0FB7BDA26B8B8 /* PaintSoftware/Views/SandwichPresentation.swift */,
+				74DC1633973C401329FD95B2 /* PaintSoftware/Models/LiveTransformEdit.swift */,
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
 				CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */,
 				1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */,
@@ -1607,8 +1614,10 @@
 				A948CF9A47CE8644DA565209 /* PaintSoftwareUITests/CanvasPlaneLogicTests.swift */,
 				7BD31A79BB0D1A6B628F18F1 /* PaintSoftwareUITests/InkPoseLogicTests.swift */,
 				E4EE6D8D78EEC566F4117DB2 /* PaintSoftwareUITests/SandwichPresentationLogicTests.swift */,
+				78572D04B64B5637F4196865 /* PaintSoftwareUITests/LiveTransformEditLogicTests.swift */,
 				745F23C7FEB5A307E5E7E519 /* PaintSoftwareUITests/OutsideTheCanvasUITests.swift */,
 				0B7A2608E1514218D1ADDB27 /* PaintSoftwareUITests/InkUnderTransformUITests.swift */,
+				13F1B84A7ABD79B243D6FE3A /* PaintSoftwareUITests/LiveTransformEditUITests.swift */,
 				C494C3E91B4033250CCEE00E /* PaintSoftwareUITests/MoveBoxCommitUITests.swift */,
 				561E5C1749CFBBECD7E4A0D2 /* PaintSoftware/Views/BottomDock.swift */,
 				E0B64357470C6503025B0B7E /* PaintSoftwareUITests/BottomDockLogicTests.swift */,
@@ -2028,6 +2037,7 @@
 				7545BD810B772D38E87EF035 /* PaintSoftware/Views/TimelineLayoutKey.swift in Sources */,
 				31A4BCC1C2ABA2FE94895518 /* PaintSoftware/Views/SandwichKey.swift in Sources */,
 				AB16875438902C7C26CCA57B /* PaintSoftware/Views/SandwichPresentation.swift in Sources */,
+				973C401329FD95B2BA4F23D2 /* PaintSoftware/Models/LiveTransformEdit.swift in Sources */,
 				6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */,
 				A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */,
 				0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */,
@@ -2192,8 +2202,10 @@
 				3CC4C75F63CCF35C12C138D2 /* PaintSoftwareUITests/CanvasPlaneLogicTests.swift in Sources */,
 				FFD2C8447778EC23E212AED8 /* PaintSoftwareUITests/InkPoseLogicTests.swift in Sources */,
 				11A41BD1F8DF4715A804C702 /* PaintSoftwareUITests/SandwichPresentationLogicTests.swift in Sources */,
+				B64B5637F4196865CB4B0A53 /* PaintSoftwareUITests/LiveTransformEditLogicTests.swift in Sources */,
 				FA8161A5ABE50770492CD941 /* PaintSoftwareUITests/OutsideTheCanvasUITests.swift in Sources */,
 				5FA29FF497936558D37CFB82 /* PaintSoftwareUITests/InkUnderTransformUITests.swift in Sources */,
+				7ABD79B243D6FE3A6E651A51 /* PaintSoftwareUITests/LiveTransformEditUITests.swift in Sources */,
 				48D1984FBB1B8FEFBBF2A7C2 /* PaintSoftwareUITests/MoveBoxCommitUITests.swift in Sources */,
 				58F73341CCB3328E7357555E /* PaintSoftware/Views/BottomDock.swift in Sources */,
 				A633B8E531389FD6277046A7 /* PaintSoftwareUITests/BottomDockLogicTests.swift in Sources */,

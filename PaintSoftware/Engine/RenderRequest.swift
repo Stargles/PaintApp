@@ -800,8 +800,9 @@ extension CanvasManager {
         return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
     }
 
-    /// The recipe §5.2's sandwich is assembled from, or nil when there is no canvas to composite
-    /// into or `activeLayerIndex` is not a leaf of the tree (`Array<RenderNode>.split(atLeaf:)`).
+    /// The recipe §5.2's sandwich is assembled from, cut at the active layer — the stroke's cut, and
+    /// an edit's live pair — or nil when there is no canvas to composite into or `activeLayerIndex`
+    /// is not a leaf of the tree. `makeSandwichRecipe(atFrame:runs:)` with one run of one leaf.
     ///
     /// **There is no synchronous spelling of this and that is deliberate.** `CanvasView` mints here
     /// and resolves inside `sandwichQueue.async`; a wrapper that did both on the main actor would be
@@ -838,9 +839,19 @@ extension CanvasManager {
     func makeSandwichRecipe(atFrame frame: Int,
                             activeLayerIndex: Int,
                             quality: RenderQuality = .full) -> SandwichRecipe? {
+        makeSandwichRecipe(atFrame: frame, runs: [[activeLayerIndex]], quality: quality)
+    }
+
+    /// The recipe cut around `runs` (`[RenderNode].cut(around:)`) — a transform edit's moving leaves
+    /// (TODO (125)), or the stroke's one active leaf. Nil when there is no canvas, or the runs are
+    /// not contiguous spans of this frame's leaf order.
+    @MainActor
+    func makeSandwichRecipe(atFrame frame: Int,
+                            runs: [[Int]],
+                            quality: RenderQuality = .full) -> SandwichRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
         let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame)
-        guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
+        guard let bands = tree.cut(around: runs) else { return nil }
 
         // **`renderResolution` is applied here and nowhere else**, which is what makes it a live-canvas
         // setting rather than a document one — see the type. One size for the whole request: the
@@ -869,7 +880,7 @@ extension CanvasManager {
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)
         return SandwichRecipe(
-            tree: tree, below: halves.below, above: halves.above,
+            tree: tree, bands: bands,
             leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
                                   alsoIncluding: maskedLayerIndices(in: maskStacks)),
             maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
@@ -909,6 +920,19 @@ extension CanvasManager {
     ///   piece, and the flatten behind it is honestly empty where the piece used to be. The fix is
     ///   this clause and not "skip blanking for the float's host": that host still draws its own
     ///   unsuppressed remainder, so unblanking it would lay the whole layer a second time over `full`.
+    ///
+    /// **A transformation layer's Move box is neither, and keeps the compositor** (TODO (125)). It
+    /// holds no picture — a clear pixel — and lifts nothing out of any cel: what moves under it is the
+    /// composite itself, re-posed by the live transform edit's bands. It used to take the float clause
+    /// with the others, which put every posed drawing beneath it back on the flat row and
+    /// re-rasterized each of them on the main thread on every tick of the drag (PERFORMANCE.md §24).
+    ///
+    /// ## The fourth clause is a live transform edit, added 2026-10-02
+    ///
+    /// `LiveTransformEdit.movesBands`: while a pose is being dragged, the canvas draws it as bands
+    /// re-posed by Core Animation, which only the compositor's path can do. A transformation layer
+    /// still at rest — the first drag of a new one — poses nothing yet, so `hasContainerPoseInForce`
+    /// alone would leave its first drag on the flat row.
     ///
     /// ## The in-between clause, and why it is gone (2026-08-29)
     ///
@@ -1007,8 +1031,9 @@ extension CanvasManager {
     /// than a late one, and nobody has measured it.
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
-        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || isPlaying else { return false }
-        guard floatingPiece == nil, vectorFloat == nil else { return false }
+        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || isPlaying
+                || liveTransformEdit?.movesBands == true else { return false }
+        guard floatingPiece.map({ $0.kind == .containerPose }) ?? true, vectorFloat == nil else { return false }
         return !isScrubbingInterpolation
     }
 
@@ -1107,8 +1132,12 @@ extension CanvasManager {
     /// level up.** That accessor exists so the key and `leafSnapshots` cannot be short different
     /// *fields*; this exists so the key and the recipe cannot be built from different *frames* or
     /// different trees. `CanvasView.Coordinator.makeSandwichKey` is the only caller in the app and
-    /// does nothing but supply `override` — its two latches, which are coordinator state and cannot
-    /// move here.
+    /// does nothing but supply `held` — its latches, which are coordinator state and cannot move here.
+    ///
+    /// **`held` is the content versions the coordinator holds rather than reads**, by layer index —
+    /// the active layer's under a live dab or an open text edit, and every moving leaf's under a live
+    /// transform edit (TODO (125)). An entry holding `nil` is a real answer and not an absence: a
+    /// layer with no cel at this frame has a nil version, and an edit opened on one keeps holding it.
     ///
     /// `frame` is spent here and is deliberately not a field of the result; `SandwichKey`'s own doc
     /// carries that argument, which is TODO (54)'s fix.
@@ -1117,7 +1146,7 @@ extension CanvasManager {
     /// every SwiftUI pass. Omitting it resolves the same tree here.
     @MainActor
     func sandwichKey(atFrame frame: Int, activeLayerIndex: Int,
-                     override: ActiveContentOverride = .resolve,
+                     holding held: [Int: LayerContentVersion?] = [:],
                      tree: [RenderNode]? = nil) -> SandwichKey {
         // §4.4's per-leaf container poses and §5.5's source frames, resolved once for the whole
         // map: `contentVersion` resolves them itself when they are not handed in, and asking inside
@@ -1125,7 +1154,7 @@ extension CanvasManager {
         // most protective of. The tree comes off the same walk when the caller has not handed one in.
         let walk = renderTreeAndPoses(atFrame: frame)
         let contents = layers.indices.map { index -> LayerContentVersion? in
-            if case .held(let content) = override, index == activeLayerIndex { return content }
+            if let content = held[index] { return content }
             return contentVersion(ofLayer: index, atFrame: frame, poses: walk.poses, frames: walk.frames)
         }
         return SandwichKey(tree: tree ?? walk.tree,
@@ -1134,17 +1163,6 @@ extension CanvasManager {
                            renderResolution: renderResolution,
                            canvasBackgroundColor: canvasBackgroundColor,
                            isCanvasBackgroundVisible: isCanvasBackgroundVisible)
-    }
-
-    /// What the active layer's content version should be, for the two states in which the coordinator
-    /// holds it rather than reading it — a live dab and an open text edit. See
-    /// `CanvasView.Coordinator.makeSandwichKey`, which is the only thing that ever passes `.held`.
-    ///
-    /// `.held(nil)` is a real answer and not an absence: a layer with no cel at this frame has a nil
-    /// version, and a text edit opened on one has to keep holding that nil.
-    enum ActiveContentOverride {
-        case resolve
-        case held(LayerContentVersion?)
     }
 
     /// The field list itself, over a `Layer` the caller already holds. Static and value-only so that

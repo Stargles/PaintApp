@@ -28,6 +28,11 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// artist started from.
     var onBoxTouchDown: (() -> Void)?
 
+    /// **The finger that landed on the box has lifted, or its gesture was cancelled** — the end of
+    /// the live transform edit `onBoxTouchDown` began (TODO (125)), which is what lets the baker
+    /// bake the result. Fired once per claimed touch sequence, from the pan that claimed it.
+    var onBoxTouchUp: (() -> Void)?
+
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
     /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins mid-drag is what slows
     /// the drag (`PrecisionDrag`, TODO (146)), and a take over a transformation layer's box records
@@ -161,6 +166,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
             guard let self, let pan, self.activePan === pan else { return }
             self.activePan = nil
             self.precision = nil
+            self.onBoxTouchUp?()
         }
         return pan
     }

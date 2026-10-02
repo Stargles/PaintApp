@@ -189,29 +189,37 @@ struct FrameRecipe {
     }
 }
 
-/// The three requests §5.2's sandwich is assembled from, as a recipe — one set of leaves, three
-/// trees, and the paper that goes into two of them.
+/// The requests §5.2's sandwich is assembled from, as a recipe — one set of leaves, the frame cut
+/// into bands (`[RenderNode].cut(around:)`), and the paper that goes into the lowest of them.
 ///
-/// **One `leaves` array for all three, and that sharing is the reason this is one type rather than
-/// three recipes.** A leaf is indexed by `layers` index rather than by position in a tree, so the
-/// same array answers all three walks unchanged, and the flatten — which PERFORMANCE.md §11 measured
-/// at 276 ms against an 84 ms composite and which is therefore the expensive half — is paid once for
-/// the three instead of three times.
+/// **One `leaves` array for every band, and that sharing is the reason this is one type rather than
+/// a recipe per band.** A leaf is indexed by `layers` index rather than by position in a tree, so the
+/// same array answers every walk unchanged, and the flatten — which PERFORMANCE.md §11 measured at
+/// 276 ms against an 84 ms composite and which is therefore the expensive half — is paid once.
+///
+/// **Two cuts, one recipe.** A stroke's (and an edit's live pair) is cut around one leaf, the active
+/// layer, whose host draws itself between `below` and `above`; a transform edit's is cut around the
+/// runs of leaves it moves (`CanvasManager.liveTransformRuns`), and every band is composited — the
+/// moving ones into pictures Core Animation re-poses per update (TODO (125)).
 struct SandwichRecipe {
 
     /// The whole tree, uncut — what `full` composites.
     let tree: [RenderNode]
-    /// Everything strictly below the active layer in evaluation order, and everything strictly above.
-    let below: [RenderNode]
-    let above: [RenderNode]
+    /// The frame cut into bands bottom-to-top — static, run, static, …, static. A stroke's cut has
+    /// three: `below`, the active leaf, `above`.
+    let bands: [[RenderNode]]
+
+    /// Everything below the lowest run in evaluation order, and everything above the highest.
+    var below: [RenderNode] { bands[0] }
+    var above: [RenderNode] { bands[bands.count - 1] }
 
     let leaves: [LeafSnapshot?]
     let maskStacks: [MaskSource: [RenderNode]]
     let frame: Int
     let canvasSize: CGSize
-    /// **The paper goes into `full` and `below`, and `above` composites onto transparency.**
-    /// EFFECT_BACKDROP.md §6 step 3: `above` is drawn over the live stroke and over everything
-    /// beneath it, so a background in it would be an opaque sheet hiding the whole picture.
+    /// **The paper goes into `full` and `below`, and every other band composites onto
+    /// transparency.** EFFECT_BACKDROP.md §6 step 3: a band above the lowest is drawn over
+    /// everything beneath it, so a background in it would be an opaque sheet hiding the picture.
     let paper: RenderBackground?
     let quality: RenderQuality
 
@@ -251,6 +259,28 @@ struct SandwichRecipe {
         guard let below = belowRecipe.composite(budgetBytes: budgetBytes),
               let above = aboveRecipe.composite(budgetBytes: budgetBytes) else { return nil }
         return (below, above)
+    }
+
+    /// **Every band a transform edit draws, each composited under the memory ceiling** — the moving
+    /// runs as well as the static bands between them, since nothing of the frame is drawn by a host
+    /// while the edit is live (TODO (125)). `compositeHalves`' striped path, one band at a time.
+    ///
+    /// A band the cut left empty is nil rather than a canvas-sized transparent image — except the
+    /// lowest, which carries the paper whatever it holds — and **all or none** otherwise, for
+    /// `compositeHalves`' reason: a band from this mint beside one from the last is a
+    /// coherent-looking picture that is wrong.
+    func compositeBands(budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> [CGImage?]? {
+        var images: [CGImage?] = []
+        for (index, band) in bands.enumerated() {
+            guard !band.isEmpty || index == 0 else {
+                images.append(nil)
+                continue
+            }
+            guard let image = frameRecipe(band, background: index == 0 ? paper : nil)
+                .composite(budgetBytes: budgetBytes) else { return nil }
+            images.append(image)
+        }
+        return images
     }
 
     /// The `below` half as an ordinary frame recipe — **the paper goes in here**, exactly as it does

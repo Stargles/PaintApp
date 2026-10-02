@@ -56,33 +56,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## (125) Realtime feedback for every transform edit — with (136) and (140)
-
-**Status** — not started. The owner names these as one task:
-
-- **(125)** *"I've noticed that moving a transform layer is extremely laggy. I need proper realtime
-  feedback especially when I am recording my movement for keyframes. I wonder if you can use the same
-  sandwich thing that the brush uses to eliminate lag. It may also help to pause the background
-  renderer until the user raises their pen off the move tool, because the background renderer
-  re-renders every frame if a move is keyframed, and that move is adjusted."*
-- **(136)** *"Using the folder move is extremely laggy (as with all other move tools). This is similar to
-  ask 15, just for folders, since multiple layers are being moved at once. When moving the stuff inside
-  a folder, it should be realtime."*
-- **(140)** *"This is a similar thing with the move adjusting causing a lot of lag, editing the nodes on
-  a transform in the graph editor lags heavily. It should be real time. I feel like this fix and ask 15
-  should basically be the same task without the need for two separate mechanisms."*
-
-- [ ] One live-preview mechanism for a transform being edited — transform-layer Move, folder Move,
-      graph-editor node drag — measured before and after on the device-sized document.
-- [ ] The frame baker holds off while a transform edit is live and re-bakes once on release.
-- [ ] **Ruled 2026-10-01 — an edit on a blended layer is fast, then exact.** (145) (`746948d`) made an
-      undo under transform layers show at once through `SandwichPresentation.live`, but only where
-      `liveCutIsExact` holds (a plain normal layer); a layer with a blend mode, effect or mask still
-      waits ~0.4 s for the bake. The owner chose *"Fast, briefly approximate"*, and then: *"for the fast one
-      it can be just the layer without any effects added, no need to try and approximate"* — so the
-      instant picture draws the active layer plain (no blend mode, effect or mask), and the exact
-      bake replaces it when it lands.
-
 ## The owner's second 2026-10-01 message — (147)–(152) and three follow-ups
 
 Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that

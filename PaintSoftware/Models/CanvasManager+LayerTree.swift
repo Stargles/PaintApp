@@ -72,7 +72,7 @@ extension CanvasManager {
 
     /// A layer's folder, or nil if it has none — or if the folder it names no longer exists, in
     /// which case the layer shows up at the top level rather than vanishing from the stack.
-    private func resolvedContainer(ofLayer index: Int) -> UUID? {
+    func resolvedContainer(ofLayer index: Int) -> UUID? {
         guard let parent = layers[index].parentFolderID, folders.contains(where: { $0.id == parent }) else { return nil }
         return parent
     }

@@ -32,14 +32,22 @@ enum SandwichPresentation: String {
     /// below the active layer and everything strictly above, MEASURED at 14–23 ms on the same iPad
     /// (`sandwichComposite`) — so the edit is on screen a rebuild after it lands rather than a bake.
     ///
-    /// **Only where the pair is the picture** (`liveCutIsExact`). Elsewhere it is §5.2's near
-    /// picture — the active layer's blend or grade gone to normal, a faded group faded twice — which
-    /// a stroke may show while the pen is down, because lift snaps it back to the bake, and which an
-    /// edit at rest must not trade the true picture for: there the previous bake is the right thing
-    /// to stand on, stale but never wrong. That is EFFECT_BACKDROP.md's 2026-08-27 ruling — at rest
-    /// the canvas is the exact composite, and the mid-stroke approximation is tolerable because
-    /// stopping returns the artist to it.
+    /// **Fast, then exact — on every document** (owner, 2026-10-01, TODO (125)). Where the pair is
+    /// not the picture it is §5.2's near picture: the active layer drawn *plain* — its host draws its
+    /// own ink, with no blend mode, grade or mask — and a blended layer above it composited onto
+    /// transparency. The owner chose that over waiting: *"for the fast one it can be just the layer
+    /// without any effects added, no need to try and approximate"*, and the bake replaces it when it
+    /// lands. A layer above that blends is the same class of approximation as the active layer's own
+    /// mode, so it takes the same rule rather than a wait of its own.
     case live
+
+    /// **A transform edit's bands** — TODO (125): the frame cut around the leaves the edit moves,
+    /// every band composited once, and each moving band re-posed per update by a Core Animation
+    /// transform (`LiveTransformEdit`). Every host is blanked: nothing of the frame draws itself.
+    ///
+    /// Held after the finger lifts until a picture of the result lands — the bake, or the live pair
+    /// minted for it — trap 2's rule for a stroke, reached by a move.
+    case moving
 
     /// The live pair under the pen: a stroke is in progress, or has lifted and its bake has not
     /// landed yet (trap 2). **Drawn exactly as `.live` is**, and distinct from it for the one reader
@@ -51,30 +59,43 @@ enum SandwichPresentation: String {
     /// presentations — rather than being blanked under a picture that already contains it.
     var activeHostDrawsItself: Bool { self == .live || self == .midStroke }
 
-    /// **The next presentation, from the current one and four facts about what the canvas holds.**
+    /// **The next presentation, from the current one and what the canvas holds.**
     ///
     /// - A stroke under the pen is drawn live, whatever else is true.
+    /// - A transform edit under the finger is drawn by its bands once bands for its cut are in hand,
+    ///   and kept on them when they are merely stale — a take flips the frame under them, and the
+    ///   rebuild that catches up is already on its way. Stale bands are never *entered*: the previous
+    ///   gesture's are not this one's.
     /// - Otherwise a bake for this key is the whole truth, and wins.
+    /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
+    ///   this frame — until the bake or the live pair minted for the result replaces them.
     /// - Otherwise a lifted stroke stays on its pair while the pair is cut here (trap 2).
-    /// - Otherwise an edit's pair is shown if it is for this key and is the picture
-    ///   (`livePairIsExact`), and **kept** if it is merely stale — one edit behind, at most, and that
-    ///   edit's rebuild is already on its way. Falling back to the bake there would show an *older*
-    ///   picture than the one leaving the screen: after two quick undos the second would put the
-    ///   first undo's stroke back for a moment — the shape of the flash the owner reported, reached
-    ///   by another door.
+    /// - Otherwise an edit's pair is shown if it is for this key, and **kept** if it is merely stale —
+    ///   one edit behind, at most, and that edit's rebuild is already on its way. Falling back to the
+    ///   bake there would show an *older* picture than the one leaving the screen: after two quick
+    ///   undos the second would put the first undo's stroke back for a moment — the shape of the
+    ///   flash the owner reported, reached by another door.
     /// - A stale pair is never *entered*, from the rest picture: it is no newer than the bake the
     ///   canvas is already standing on, so swapping one stale picture for another is a flicker for
     ///   nothing.
-    static func next(from current: SandwichPresentation, strokeIsLive: Bool, bakeIsCurrent: Bool,
-                     livePair: LivePairFit, livePairIsExact: Bool) -> SandwichPresentation {
+    static func next(from current: SandwichPresentation, strokeIsLive: Bool, transformEditIsLive: Bool,
+                     bakeIsCurrent: Bool, livePair: LivePairFit,
+                     holdsBandsOfThisFrame: Bool) -> SandwichPresentation {
         if strokeIsLive { return .midStroke }
+        if transformEditIsLive {
+            switch livePair {
+            case .current: return .moving
+            case .stale: return current == .moving ? .moving : .rest
+            case .none: return .rest
+            }
+        }
         if bakeIsCurrent { return .rest }
+        if current == .moving, holdsBandsOfThisFrame { return .moving }
         switch livePair {
         case .none:
             return .rest
         case .stale, .current:
             if current == .midStroke { return .midStroke }
-            guard livePairIsExact else { return .rest }
             return livePair == .current || current == .live ? .live : .rest
         }
     }
@@ -97,12 +118,18 @@ enum LivePairFit: Equatable {
     /// minted now, at whatever frame.
     case current
 
-    /// `held` is the key and cut of the pair the canvas has, nil when it has none.
+    /// `held` is the key and cut of the picture the canvas has, nil when it has none.
+    ///
+    /// **A picture fits only a cut of its own kind.** Two cuts around the host fit whatever frame
+    /// each was made at — equal keys are byte-identical halves — but a transform edit's bands are
+    /// not a pair and a pair is not bands, whatever the key says: the middle of one is a host and of
+    /// the other a picture, and showing either as the other blanks or doubles a layer. Bands fit
+    /// only bands around the same runs, which is what makes them one edit's.
     init(held: (key: SandwichKey, cut: LivePairCut)?, key: SandwichKey, cut: LivePairCut?) {
-        guard let held else { self = .none; return }
+        guard let held, let cut, held.cut.isSameKind(as: cut) else { self = .none; return }
         if held.key == key {
             self = .current
-        } else if let cut, held.cut == cut {
+        } else if held.cut == cut {
             self = .stale
         } else {
             self = .none
@@ -110,11 +137,28 @@ enum LivePairFit: Equatable {
     }
 }
 
-/// **Where a live pair is cut**: the frame it was minted at and the layer drawn between its halves.
+/// **Where a live picture is cut** — around the active layer, or around a transform edit's runs.
 ///
 /// By id rather than by index, because an index names a different layer after an insert or a delete
 /// below it, and a pair cut at the old one would then be drawn around the wrong host.
-struct LivePairCut: Equatable {
-    let frame: Int
-    let activeLayerID: UUID
+enum LivePairCut: Equatable {
+
+    /// A stroke's pair, or an edit's: the active layer drawn by its own host between two halves.
+    /// **With its frame**, because the host draws the frame the canvas is on and must not stand
+    /// between halves from another.
+    case aroundHost(frame: Int, layerID: UUID)
+
+    /// A transform edit's bands, around the runs it moves (`CanvasManager.liveTransformRuns`).
+    /// **Without a frame**: every band is a picture of one moment, so bands from the previous frame
+    /// of a take are one coherent picture a frame stale — §2.10's previous picture — not a mixture.
+    case aroundRuns([[UUID]])
+
+    /// Around a host both, at any frame; or around the same runs both.
+    func isSameKind(as other: LivePairCut) -> Bool {
+        switch (self, other) {
+        case (.aroundHost, .aroundHost): return true
+        case (.aroundRuns(let a), .aroundRuns(let b)): return a == b
+        default: return false
+        }
+    }
 }

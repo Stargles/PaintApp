@@ -337,7 +337,7 @@ final class LiveHalvesStripLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
         guard let recipe = sandwich(manager, active: 0) else { return }
         // A zero-size frame is the one thing every layer of this stack answers nil for.
-        let degenerate = SandwichRecipe(tree: recipe.tree, below: recipe.below, above: recipe.above,
+        let degenerate = SandwichRecipe(tree: recipe.tree, bands: recipe.bands,
                                         leaves: recipe.leaves, maskStacks: recipe.maskStacks,
                                         frame: recipe.frame, canvasSize: .zero, paper: nil,
                                         quality: recipe.quality)

@@ -5381,3 +5381,76 @@ lookup to a dictionary before this was merged. Not included, because no headless
 it: UIKit's own delivery and the `sendEvent` interception's per-move `contains(where:)`. Memory: the
 ring holds at most 5,000 events, INFERRED at ~1 MB when full.
 
+
+## 24. A transform under the finger, and the three ways it lagged (2026-10-02)
+
+TODO (125), (136) and (140), which the owner named as one task: *"moving a transform layer is extremely
+laggy … especially when I am recording my movement for keyframes"*; *"Using the folder move is extremely
+laggy (as with all other move tools)"*; *"editing the nodes on a transform in the graph editor lags
+heavily … this fix and ask 15 should basically be the same task."*
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5) on the 8-core
+MacBook, ~94% idle before each run (one baseline run started at 29% idle; its numbers sit within a few
+percent of its twin's, which is §6's contention costing wall clock and not per-update work). The
+gestures are the artist's own, driven by XCUITest — the Move box dragged 240 × 60 pt at 120 pt/s after a
+0.3 s press, a folder's Move the same, a graph node dragged 40 pt at 20 pt/s — on a seeded §1 document:
+**2048×1024**, three vector layers of forty strokes each, one cel per layer holding all twelve frames, a
+transformation layer keyed at 0 and 11 (a 410 px slide), playhead at frame 5. A temporary instrument,
+not merged, armed `PlaybackTrace` from the box's lift (or the first touch-move) to five seconds after
+release and marked each update and each new picture on screen. Two runs per cell; each row below is
+both, and they agreed to within the noise shown.
+
+| entry point | | baseline (`aa5c384`) | after |
+|---|---|---|---|
+| **transformation layer's Move box** | updates processed | **1.9–2.0 /s** (one per 681–688 ms) | **60.5 /s** |
+| | main thread per update | **~630 ms** (`derivedPreview`: three posed renders) | **7.4 ms** (p90 7.9) |
+| | pictures on screen | 4.4 /s | **60 /s** |
+| | bakes composited **during** the drag | 2 (≈955 ms of CPU) | **0** |
+| | box comes up (main thread) | **2.79 s** | **0.24 s** |
+| **graph-editor pose node** | updates processed | 40.6 /s | 40.2–40.7 /s |
+| | main thread per update | 6.7–7.0 ms | 7.2–7.4 ms |
+| | pictures on screen during the drag | **0** — frozen for the whole drag | **35 /s** |
+| | how old the picture is at an update | **965 ms** mean, 1.97 s max | **38–41 ms** mean, 286–301 ms max (the first update, before the bands land) |
+| | bakes / live-pair composites during the drag | **5 / 6** (≈1.86 s + 1.79 s) | **0 / 0** |
+| **folder's Move** (plain / posed) | updates processed | 60.5 / 41.9–60.5 /s | 52–55 / 60 /s |
+| | main thread per update | 2.0–2.6 ms | 1.4–2.3 ms |
+| | pictures on screen | one per update | one per update |
+
+### 24.1 Why each lagged — three different bottlenecks
+
+- **The Move box re-rasterized every posed drawing on the main thread, on every tick.** Its box was a
+  floating piece, and `sandwichEngagesOnCanvas` refuses the compositor for any floating piece — correct
+  for a lifted bitmap or lassoed ink, wrong for a box that holds a clear pixel. On the flat row every
+  layer the transformation layer poses is drawn by its own host from a posed picture
+  (`updateInterpolationPreviews`), and `showContainerPoseLive` writes the pose on every tick, so every
+  tick was three canvas-sized rest-space dab bakes on the main actor. This is §14's 71.9 ms posed render,
+  times three layers, per touch-move — and the same cost made the box take 2.8 s to come up.
+- **The graph node kept the compositor and starved it.** Every tick moved the key, so the live pair and
+  the bake each restarted on every tick, re-posing the same drawings at ~300 ms a composite; neither ever
+  landed while the finger moved, and (145)'s `.live` would not enter a stale pair. The main thread was
+  fine — the picture simply never arrived until ~660 ms after release.
+- **The folder's Move was already the cheap shape.** Its lifted ink is a bitmap under a Core Animation
+  transform (`StrokeCanvasView.updateVectorFloat`, PERFORMANCE item 11's rule) and it follows every
+  update in a simulator. What it pays is the lift (~0.38 s on the main thread here) and, between the lift
+  and the finger, the baker compositing every frame of the lifted-hole state underneath it (twelve
+  frames, ≈780 ms, in this bench) — pictures nothing reads while a float is up. **Not reproduced as a
+  per-update lag**; the owner's device may differ, and the next measurement owed is on the device.
+
+### 24.2 The one mechanism
+
+`LiveTransformEdit`: while a transform is under the finger the canvas cuts the frame around the leaves
+the edit moves (`[RenderNode].cut(around:)`), composites every band once off the main thread, and
+re-poses each moving band per update with a Core Animation transform — the delta between the map its ink
+was shown through at the mint and the map the walk resolves now. Nothing the edit changes is
+rasterized until release. `FrameBaker.isSuspended` holds for the length of the gesture (the model sets
+it), and the bands stay up after release until the result's live pair or bake lands. The box, a take
+recorded through it, and a graph node all feed it; a floating piece (a folder's Move, a lasso, a raster
+lift) keeps its own latch — the same principle — and shares the baker's hold.
+
+**What is left, with numbers.** The ~7.4 ms per update that remains is the SwiftUI pass a document write
+raises — `layers` (and the box's `floatingPiece`) are written on every tick — almost all of it
+unattributed body evaluation; §18.7 measured a whole-editor pass at ~35 ms on the owner's iPad 9, so on
+the device the box should now be bound by that pass rather than by any render, INFERRED at ~25–30
+updates a second. Keeping the live pose off the published model for the length of the gesture (the
+vector float's own rule) is the lever if that is not enough. The first update of a graph drag waits for
+the bands' one mint (~300 ms here) because the finger lands on the node and moves almost at once.

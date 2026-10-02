@@ -142,7 +142,9 @@ The sequence is worth keeping, because each step was reasonable on what was know
 own design note states the guarantee outright: at rest the canvas is `composite(full)` in one image,
 *"exact for every mode and every nesting, byte-identical to the thumbnail"*, and **"lift is what snaps
 it back"** — the mid-stroke approximation is tolerable precisely because stopping returns the artist to
-the truth. Drawing the canvas in two pieces so a ghost can sit between them costs the **selected**
+the truth. *(Refined 2026-10-01, TODO (125): an edit at rest — an undo, a transform drag — now shows that
+near picture for the length of its bake, the active layer drawn plain; the owner chose fast-then-exact.
+The truth still arrives, a bake later.)* Drawing the canvas in two pieces so a ghost can sit between them costs the **selected**
 layer its backdrop, so its blend mode degrades to normal: `blendOver`'s `mix(cs, B(cb,cs), da)` sees
 `da == 0` inside a half composited onto transparency. MEASURED on a multiply layer over a painted
 floor: **max channel delta 121**, and it does not read as a 121 — a correctly-multiplied dark navy

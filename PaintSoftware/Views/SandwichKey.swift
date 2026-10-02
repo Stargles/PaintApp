@@ -4,7 +4,7 @@ import SwiftUI
 /// `CanvasManager.makeSandwichRecipe`, as one value.
 ///
 /// `CanvasView.Coordinator.makeSandwichKey` is the only thing that builds one; three of the
-/// coordinator's fields hold one (`sandwichKey`, `sandwichCacheKey`, `sandwichFullKey`) and every
+/// coordinator's fields hold one (`sandwichKey`, the live picture's, `sandwichFullKey`) and every
 /// rebuild, every fetch of a baked frame and `updateSandwich`'s mid-stroke trap are decided by
 /// comparing two of them.
 ///

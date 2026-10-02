@@ -435,6 +435,17 @@ between two finished pictures. **This paragraph asked for one worker and wanted 
 memo is bought by the *size*:** `PixelOps.rasterize` and `MaskResolver.CacheKey` are keyed on the buffer, so the
 bake mints at `.liveComposite` and the three share their flattens across two queues. That also lets the halves keep
 `.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. 
+
+**A transform being dragged holds the baker and is drawn by bands — TODO (125), 2026-10-02.** While a pose is
+under the finger (a transformation layer's Move box, a take recorded through it, a pose node in the graph editor:
+`CanvasManager.liveTransformEdit`), `FrameBaker.isSuspended` holds — the stroke's own seam, set by the model —
+so a keyed pose's drag no longer restarts a whole-frame composite on every tick of a span it dirties whole; the
+pass that ends the edit kicks one bake of the result. The canvas meanwhile shows the frame cut around the leaves
+the edit moves (`[RenderNode].cut(around:)`, which `split(atLeaf:)` is now the one-leaf case of), every band
+composited once on `sandwichQueue` and each moving band re-posed per update by a Core Animation transform; the
+bands stay up after release until the result's live pair or its bake lands, so nothing older is shown. The live
+pair's exactness gate (`liveCutIsExact`) went with the owner's 2026-10-01 ruling: an edit's pair goes up on every
+document, the active layer drawn plain, and the bake makes it exact. PERFORMANCE.md §24 is the measurement.
 **This section said the single-slot drop-if-busy behaviour of `isSandwichRebuilding` "is not inherited", and that
 sentence was wrong about the thing it was declining to inherit.** `isSandwichRebuilding` is not a drop. It is
 mutual exclusion with a retry: `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from

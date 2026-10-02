@@ -72,6 +72,11 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     /// refusal and the arm surviving it are both `CanvasManager.beginMoveBoxTake`'s answer.
     var onBoxTouchDown: (() -> Void)?
 
+    /// The drag `onBoxTouchDown` began is over — `FloatingPieceOverlayView.onBoxTouchUp`'s twin, and
+    /// the end of the live transform edit (TODO (125)). After `onHandleDragEnded`, so the nudge it
+    /// writes is what the baker bakes.
+    var onBoxTouchUp: (() -> Void)?
+
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
     /// `CanvasView` from the host's `TouchCountRecognizer`, which sees every touch however it landed.
     /// A touch that joins mid-drag is what slows the drag (`PrecisionDrag`, TODO (146)).
@@ -378,6 +383,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         draggingTouch = nil
         precision = nil
         onHandleDragEnded?()
+        onBoxTouchUp?()
     }
 
     // MARK: - Test seam

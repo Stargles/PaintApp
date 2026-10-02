@@ -28,7 +28,9 @@ model and render path are specified there and this document does not restate the
   transformation layer used to pose exactly as a shown one, where a hidden grade grades nothing;
   every mode below inherits both fixes.
 - **The Move box is `FloatingPieceKind.containerPose`**, a box the size of the canvas with no pixels;
-  `showContainerPoseLive` writes the pose on every tick so the preview *is* the render path;
+  `showContainerPoseLive` writes the pose on every tick so the preview *is* the render path — **drawn, since
+  TODO (125), as bands Core Animation re-poses per update** (`LiveTransformEdit`), the box keeping the
+  compositor rather than putting every posed drawing back on the flat row to be re-rasterized per tick;
   `commitContainerPose` routes through `KeyframeControl.write`'s five-arm rule and **every arm writes
   the stored base** (`LayerPose.resolvedPose` is a precedence, not a composition). `seedingContainer`
   seeds the *old* pose onto the immediate neighbouring keyframes. The graph band draws the pose as six

@@ -2,7 +2,7 @@ import XCTest
 import SwiftUI
 
 /// **What the live canvas shows between an edit and its bake** — `SandwichPresentation.next` and
-/// `LivePairFit`, TODO (145).
+/// `LivePairFit`, TODO (145), and what it shows while a transform is dragged, TODO (125).
 ///
 /// The owner, 2026-10-01, with one vector layer under two transformation layers: *"I place a stroke,
 /// then undo, then place a stroke and undo again. The first stroke briefly appears the second time I
@@ -15,8 +15,16 @@ import SwiftUI
 @MainActor
 final class SandwichPresentationLogicTests: XCTestCase {
 
-    private static let all: [SandwichPresentation] = [.disengaged, .rest, .live, .midStroke]
+    private static let all: [SandwichPresentation] = [.disengaged, .rest, .live, .moving, .midStroke]
     private static let fits: [LivePairFit] = [.none, .stale, .current]
+
+    /// `SandwichPresentation.next` with every fact not under test at its quiet value: no transform
+    /// edit, and no bands held of this frame.
+    private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
+                      bake: Bool, pair: LivePairFit, bands: Bool = false) -> SandwichPresentation {
+        SandwichPresentation.next(from: current, strokeIsLive: stroke, transformEditIsLive: edit,
+                                  bakeIsCurrent: bake, livePair: pair, holdsBandsOfThisFrame: bands)
+    }
 
     /// Distinct keys, cheaply: everything equal but the cut index.
     private func key(_ n: Int) -> SandwichKey {
@@ -31,8 +39,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
         for current in Self.all {
             for fit in Self.fits {
                 for bake in [false, true] {
-                    XCTAssertEqual(SandwichPresentation.next(from: current, strokeIsLive: true,
-                                                             bakeIsCurrent: bake, livePair: fit, livePairIsExact: true),
+                    XCTAssertEqual(next(current, stroke: true, bake: bake, pair: fit),
                                    .midStroke, "from \(current), pair \(fit), bake current \(bake)")
                 }
             }
@@ -42,8 +49,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
     func testABakeForThisKeyIsTheWholePictureOnceNoStrokeIsDown() {
         for current in Self.all {
             for fit in Self.fits {
-                XCTAssertEqual(SandwichPresentation.next(from: current, strokeIsLive: false,
-                                                         bakeIsCurrent: true, livePair: fit, livePairIsExact: true),
+                XCTAssertEqual(next(current, bake: true, pair: fit),
                                .rest, "from \(current), pair \(fit)")
             }
         }
@@ -52,21 +58,17 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// **The latency half.** An edit at rest moves the key; until its bake lands, the pair minted for
     /// it is the newest picture the canvas has, and it goes up.
     func testAnEditsOwnPairGoesUpBeforeItsBake() {
-        XCTAssertEqual(SandwichPresentation.next(from: .rest, strokeIsLive: false, bakeIsCurrent: false,
-                                                 livePair: .current, livePairIsExact: true), .live)
-        XCTAssertEqual(SandwichPresentation.next(from: .disengaged, strokeIsLive: false,
-                                                 bakeIsCurrent: false, livePair: .current, livePairIsExact: true), .live,
+        XCTAssertEqual(next(.rest, bake: false, pair: .current), .live)
+        XCTAssertEqual(next(.disengaged, bake: false, pair: .current), .live,
                        "the first engage: a pair lands before the first bake does")
-        XCTAssertEqual(SandwichPresentation.next(from: .live, strokeIsLive: false, bakeIsCurrent: false,
-                                                 livePair: .current, livePairIsExact: true), .live)
+        XCTAssertEqual(next(.live, bake: false, pair: .current), .live)
     }
 
     /// **Trap 2, unchanged**: a lifted stroke stays on the mid-stroke presentation until its bake
     /// lands, through a pair landing for its key and through one that has not yet.
     func testALiftedStrokeStaysMidStrokeUntilItsBake() {
         for fit in [LivePairFit.stale, .current] {
-            XCTAssertEqual(SandwichPresentation.next(from: .midStroke, strokeIsLive: false,
-                                                     bakeIsCurrent: false, livePair: fit, livePairIsExact: true), .midStroke,
+            XCTAssertEqual(next(.midStroke, bake: false, pair: fit), .midStroke,
                            "pair \(fit)")
         }
     }
@@ -74,20 +76,16 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// **The flash half.** A live picture one edit behind is newer than any bake the canvas holds, so
     /// it is kept — and a stale pair is never *entered* from the bake, which is no older than it.
     func testAStalePairIsKeptButNeverEntered() {
-        XCTAssertEqual(SandwichPresentation.next(from: .live, strokeIsLive: false, bakeIsCurrent: false,
-                                                 livePair: .stale, livePairIsExact: true), .live)
-        XCTAssertEqual(SandwichPresentation.next(from: .rest, strokeIsLive: false, bakeIsCurrent: false,
-                                                 livePair: .stale, livePairIsExact: true), .rest)
-        XCTAssertEqual(SandwichPresentation.next(from: .disengaged, strokeIsLive: false,
-                                                 bakeIsCurrent: false, livePair: .stale, livePairIsExact: true), .rest)
+        XCTAssertEqual(next(.live, bake: false, pair: .stale), .live)
+        XCTAssertEqual(next(.rest, bake: false, pair: .stale), .rest)
+        XCTAssertEqual(next(.disengaged, bake: false, pair: .stale), .rest)
     }
 
     /// A pair cut at another frame or another layer is not a picture of this one; §2.10's previous
     /// bake is.
     func testAPairCutElsewhereFallsBackToTheBake() {
         for current in Self.all {
-            XCTAssertEqual(SandwichPresentation.next(from: current, strokeIsLive: false,
-                                                     bakeIsCurrent: false, livePair: .none, livePairIsExact: true),
+            XCTAssertEqual(next(current, bake: false, pair: .none),
                            .rest, "from \(current)")
         }
     }
@@ -99,8 +97,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
     func testTheOwnersDrawUndoDrawUndoNeverStepsBackToAnOlderBake() {
         var shown = SandwichPresentation.rest
         func pass(stroke: Bool = false, bake: Bool, pair: LivePairFit) -> SandwichPresentation {
-            shown = SandwichPresentation.next(from: shown, strokeIsLive: stroke, bakeIsCurrent: bake,
-                                              livePair: pair, livePairIsExact: true)
+            shown = next(shown, stroke: stroke, bake: bake, pair: pair)
             return shown
         }
         XCTAssertEqual(pass(stroke: true, bake: true, pair: .current), .midStroke, "pen down")
@@ -117,33 +114,85 @@ final class SandwichPresentationLogicTests: XCTestCase {
         XCTAssertEqual(pass(bake: true, pair: .current), .rest, "and its bake lands")
     }
 
-    /// **Where the pair is only §5.2's near picture, an edit waits for the bake** — the active
-    /// layer's blend or grade would go to normal on the live pair, which is a wrong picture rather
-    /// than a stale one, and EFFECT_BACKDROP.md rules the canvas at rest exact.
-    func testAnEditWaitsForTheBakeWhereThePairIsNotThePicture() {
-        for fit in [LivePairFit.stale, .current] {
-            for current in [SandwichPresentation.disengaged, .rest, .live] {
-                XCTAssertEqual(SandwichPresentation.next(from: current, strokeIsLive: false, bakeIsCurrent: false,
-                                                         livePair: fit, livePairIsExact: false),
-                               .rest, "from \(current), pair \(fit)")
+    /// **The ruled fast picture** (owner, 2026-10-01, TODO (125)): an edit's pair goes up before its
+    /// bake on every document, including one where the pair is only §5.2's near picture — the
+    /// active layer drawn plain, a blended layer above it composited onto transparency. There is no
+    /// exactness fact left in the choice for a document to fail.
+    func testAnEditsPairGoesUpWhetherOrNotItIsThePicture() {
+        XCTAssertEqual(next(.rest, bake: false, pair: .current), .live)
+        XCTAssertEqual(next(.live, bake: false, pair: .stale), .live)
+        XCTAssertEqual(next(.live, bake: true, pair: .current), .rest, "and the exact bake replaces it")
+    }
+
+    // MARK: - A transform edit's bands (TODO (125))
+
+    /// The finger is down on a transform: its bands are the picture once they are in hand, whatever
+    /// the bake says — under the edit the key holds the moving leaves, so the bake for that key is
+    /// the picture from *before* the drag, not its result.
+    func testATransformEditIsDrawnByItsBandsOnceTheyAreInHand() {
+        for current in Self.all where current != .midStroke {
+            for bake in [false, true] {
+                XCTAssertEqual(next(current, edit: true, bake: bake, pair: .current), .moving,
+                               "from \(current), bake current \(bake)")
+                XCTAssertEqual(next(current, edit: true, bake: bake, pair: .none), .rest,
+                               "from \(current): no bands yet, so the picture already up stays")
             }
         }
     }
 
-    /// …and a stroke is unaffected: the near picture under the pen, and through trap 2, is ruled.
-    func testAStrokeIsDrawnLiveWhetherOrNotThePairIsThePicture() {
-        XCTAssertEqual(SandwichPresentation.next(from: .rest, strokeIsLive: true, bakeIsCurrent: false,
-                                                 livePair: .current, livePairIsExact: false), .midStroke)
-        for fit in [LivePairFit.stale, .current] {
-            XCTAssertEqual(SandwichPresentation.next(from: .midStroke, strokeIsLive: false, bakeIsCurrent: false,
-                                                     livePair: fit, livePairIsExact: false), .midStroke,
-                           "trap 2, pair \(fit)")
+    /// A take flips the frame under the bands, and the rebuild that catches up is one in flight:
+    /// stale bands are kept. They are never entered — the previous gesture's are not this one's.
+    func testStaleBandsAreKeptButNeverEntered() {
+        XCTAssertEqual(next(.moving, edit: true, bake: false, pair: .stale), .moving)
+        for current in [SandwichPresentation.rest, .live, .disengaged] {
+            XCTAssertEqual(next(current, edit: true, bake: false, pair: .stale), .rest, "from \(current)")
         }
+    }
+
+    /// A stroke under the pen still wins, edit or no edit.
+    func testAStrokeBeatsATransformEdit() {
+        XCTAssertEqual(next(.moving, stroke: true, edit: true, bake: false, pair: .current), .midStroke)
+    }
+
+    /// **Nothing stale after release**: the bands stay up until a picture of the result lands — the
+    /// bake, or the live pair minted for it (whose landing replaces the bands, so the canvas then
+    /// holds no bands) — and they are not held for a frame they were not minted at.
+    func testBandsStayUpAfterReleaseUntilAPictureOfTheResultLands() {
+        XCTAssertEqual(next(.moving, bake: false, pair: .none, bands: true), .moving,
+                       "released: neither the bake nor the result's pair has landed")
+        XCTAssertEqual(next(.moving, bake: true, pair: .none, bands: true), .rest, "the bake lands")
+        XCTAssertEqual(next(.moving, bake: false, pair: .current), .live, "the result's pair lands first")
+        XCTAssertEqual(next(.moving, bake: false, pair: .none, bands: false), .rest,
+                       "a scrub after release: bands of another frame are not this frame's picture")
+        XCTAssertEqual(next(.rest, bake: false, pair: .none, bands: true), .rest,
+                       "and bands are never entered without an edit")
+    }
+
+    /// **The owner's drag, pass by pass**: touch down before the bands exist, the bands land, ticks
+    /// re-pose them, the finger lifts, the result's pair lands, its bake lands. The property is the
+    /// one the lag broke — from the bands' landing to the bake's, the canvas never stands on a
+    /// picture from before the drag.
+    func testTheOwnersDragIsOnItsBandsFromTheirLandingToTheBake() {
+        var shown = SandwichPresentation.rest
+        func pass(edit: Bool, bake: Bool, pair: LivePairFit, bands: Bool) -> SandwichPresentation {
+            shown = next(shown, edit: edit, bake: bake, pair: pair, bands: bands)
+            return shown
+        }
+        XCTAssertEqual(pass(edit: true, bake: true, pair: .none, bands: false), .rest, "touch down")
+        XCTAssertEqual(pass(edit: true, bake: true, pair: .current, bands: true), .moving, "the bands land")
+        XCTAssertEqual(pass(edit: true, bake: true, pair: .current, bands: true), .moving, "a tick")
+        XCTAssertEqual(pass(edit: false, bake: false, pair: .none, bands: true), .moving,
+                       "lift: the key moves, and the bake on hand is from before the drag")
+        XCTAssertEqual(pass(edit: false, bake: false, pair: .current, bands: false), .live,
+                       "the result's pair lands")
+        XCTAssertEqual(pass(edit: false, bake: true, pair: .current, bands: false), .rest, "its bake lands")
     }
 
     func testTheHostDrawsItselfExactlyInTheTwoLivePresentations() {
         XCTAssertFalse(SandwichPresentation.disengaged.activeHostDrawsItself)
         XCTAssertFalse(SandwichPresentation.rest.activeHostDrawsItself)
+        XCTAssertFalse(SandwichPresentation.moving.activeHostDrawsItself,
+                       "every leaf is in a band while a transform edit is drawn")
         XCTAssertTrue(SandwichPresentation.live.activeHostDrawsItself)
         XCTAssertTrue(SandwichPresentation.midStroke.activeHostDrawsItself)
     }
@@ -151,38 +200,59 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// What `canvas.host`'s label publishes, which `LayerUITests`, `BakeWiringUITests` and
     /// `InkUnderTransformUITests` read by string.
     func testThePublishedNames() {
-        XCTAssertEqual(Self.all.map(\.rawValue), ["off", "rest", "live", "stroke"])
+        XCTAssertEqual(Self.all.map(\.rawValue), ["off", "rest", "live", "moving", "stroke"])
     }
 
     // MARK: - LivePairFit
 
     func testNoPairIsNoFit() {
-        XCTAssertEqual(LivePairFit(held: nil, key: key(0), cut: LivePairCut(frame: 0, activeLayerID: layerA)),
+        XCTAssertEqual(LivePairFit(held: nil, key: key(0), cut: LivePairCut.aroundHost(frame: 0, layerID: layerA)),
                        .none)
     }
 
     /// Equal keys are byte-identical halves by `SandwichKey`'s sufficiency argument, which holds
     /// across frames — so a pair for this key fits whatever frame it was cut at.
     func testAPairForThisKeyIsCurrentWhereverItWasCut() {
-        let held = (key: key(0), cut: LivePairCut(frame: 3, activeLayerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut(frame: 3, activeLayerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA)),
                        .current)
-        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut(frame: 7, activeLayerID: layerA)),
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 7, layerID: layerA)),
                        .current)
     }
 
     func testAnOlderPairCutHereIsStale() {
-        let held = (key: key(0), cut: LivePairCut(frame: 3, activeLayerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut(frame: 3, activeLayerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA)),
                        .stale)
     }
 
     func testAnOlderPairCutAtAnotherFrameOrLayerDoesNotFit() {
-        let held = (key: key(0), cut: LivePairCut(frame: 3, activeLayerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut(frame: 4, activeLayerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 4, layerID: layerA)),
                        .none, "another frame")
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut(frame: 3, activeLayerID: layerB)),
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerID: layerB)),
                        .none, "another layer between the halves")
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: nil), .none, "no active layer")
+    }
+
+    // MARK: - LivePairFit across the two cuts
+
+    /// **A pair is never bands and bands are never a pair**, even at one key: the middle of one is a
+    /// host and of the other a picture.
+    func testAPictureFitsOnlyACutOfItsOwnKind() {
+        let runs = LivePairCut.aroundRuns([[layerA]])
+        let host = LivePairCut.aroundHost(frame: 3, layerID: layerA)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: runs), key: key(0), cut: host), .none)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: host), key: key(0), cut: runs), .none)
+    }
+
+    /// Bands fit bands around the same runs — at any frame, since they carry none — and no others.
+    func testBandsFitOnlyTheirOwnRuns() {
+        let held = (key: key(0), cut: LivePairCut.aroundRuns([[layerA, layerB]]))
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: .aroundRuns([[layerA, layerB]])), .current)
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: .aroundRuns([[layerA, layerB]])), .stale,
+                       "a take's next frame")
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: .aroundRuns([[layerA], [layerB]])), .none,
+                       "the same leaves moving as two runs are another cut")
     }
 }

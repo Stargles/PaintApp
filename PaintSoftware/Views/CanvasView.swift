@@ -301,6 +301,9 @@ struct CanvasView: UIViewRepresentable {
         transformOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
             coordinator?.moveBoxTouchDown()
         }
+        transformOverlay.onBoxTouchUp = { [weak coordinator = context.coordinator] in
+            coordinator?.moveBoxTouchUp()
+        }
         // **A touch that joins a Move-box drag slows it** — TODO (146). Both Move overlays read the
         // count through this one closure, so the rule has one source: the host's own touch counter.
         transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
@@ -346,6 +349,9 @@ struct CanvasView: UIViewRepresentable {
         // loud for a box over lifted pixels or lassoed ink, neither of which poses a container.
         floatingOverlay.onBoxTouchDown = { [weak coordinator = context.coordinator] in
             coordinator?.moveBoxTouchDown()
+        }
+        floatingOverlay.onBoxTouchUp = { [weak coordinator = context.coordinator] in
+            coordinator?.moveBoxTouchUp()
         }
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
@@ -867,6 +873,11 @@ struct CanvasView: UIViewRepresentable {
                         container.bringSubviewToFront(host)
                     }
                 }
+                // A transform edit's middle bands, between the hosts (all blanked while they show)
+                // and the upper view — `showMovingBands` inserts each new one there too.
+                if sandwichEngaged {
+                    for view in bandViews { container.bringSubviewToFront(view) }
+                }
                 if sandwichEngaged, let sandwichAboveView { container.bringSubviewToFront(sandwichAboveView) }
                 lastOrderedLayerIDs = orderedIDs
                 lastOrderedSandwichEngaged = sandwichEngaged
@@ -1140,7 +1151,8 @@ struct CanvasView: UIViewRepresentable {
         /// reason `SandwichPresentation` documents above: none of it is otherwise visible to an
         /// XCUITest. Space-separated fields, read by prefix —
         ///
-        ///     sandwich:<off|rest|live|stroke> entries:<n> derived:<n> rebuilds:<n> rasterizes:<n>
+        ///     sandwich:<off|rest|live|moving|stroke> entries:<n> derived:<n> rebuilds:<n> moves:<n>
+        ///     rasterizes:<n>
         ///     shape:<none|following|adjustable> xform:<scale>,<rotation>,<dx>,<dy>
         ///     text:<none|box|editing> movebox:<none|x,y,w,h>
         ///
@@ -1205,6 +1217,7 @@ struct CanvasView: UIViewRepresentable {
                 + " entries:\(midStrokeEntryCount)"
                 + " derived:\(derivedRenderCount)"
                 + " rebuilds:\(sandwichRebuildCount)"
+                + " moves:\(liveMoveCount)"
                 // **The third cost of a frame, and the one playback was actually spending.**
                 // `derived:` counts posed and interpolated pictures and `rebuilds:` counts sandwich
                 // composites; neither sees the cel's *own* committed render, which is what a layer
@@ -1293,26 +1306,57 @@ struct CanvasView: UIViewRepresentable {
         weak var sandwichBelowView: UIImageView?
         weak var sandwichAboveView: UIImageView?
 
-        /// The two composites of one rebuild — everything strictly below the active layer and
-        /// everything strictly above — wrapped as `UIImage` once so assigning them is an identity
-        /// check rather than a fresh wrapper, and therefore a Core Animation no-op, on every one of
-        /// the many SwiftUI passes that change nothing.
+        /// **The live picture: the bands of one rebuild, with the key and the cut they were minted
+        /// for** — wrapped as `UIImage` once so assigning them is an identity check rather than a
+        /// fresh wrapper, and therefore a Core Animation no-op, on every one of the many SwiftUI
+        /// passes that change nothing.
         ///
-        /// **`full` is not here any more: it is the baked frame** (RENDER.md §3.6, stage 4d). These
-        /// two are the live picture and nothing else — a different product from the bake, keyed
-        /// additionally by which leaf the tree is cut at, and transient rather than stored.
+        /// **`full` is not here any more: it is the baked frame** (RENDER.md §3.6, stage 4d). This is
+        /// the live picture and nothing else — a different product from the bake, keyed additionally
+        /// by where the tree is cut, and transient rather than stored.
         ///
-        /// **With the cut they were made at** (`LivePairFit`), because they are two thirds of the
-        /// live pair (TODO 145) and only make a picture with the layer they were cut around: the
-        /// third, the active layer's own picture, went to its host in the same main-thread turn
-        /// (`finishSandwichRebuild`).
-        private var sandwichHalves: (below: UIImage, above: UIImage, cut: LivePairCut)?
+        /// **Two cuts, one product** (TODO (125)). Cut around the host, it is two thirds of the live
+        /// pair (TODO 145) and only makes a picture with the layer it was cut around: the third, the
+        /// active layer's own picture, went to its host in the same main-thread turn
+        /// (`finishSandwichRebuild`). Cut around a transform edit's runs, it is every band of the
+        /// frame, the moving ones re-posed per update from `mintMaps` (`showMovingBands`).
+        private struct LivePicture {
+            /// The `SandwichKey` the bands were minted at. Stale bands are still shown — at most one
+            /// edit behind — while the rebuild that replaces them runs.
+            let key: SandwichKey
+            let cut: LivePairCut
+            /// The frame they were minted at — what keeps a transform edit's bands from outliving a
+            /// scrub after the finger lifts.
+            let frame: Int
+            /// One image per band, bottom-to-top; nil for a band the cut left empty, and for the run a
+            /// host draws (a cut around the host composites only its two halves).
+            let bands: [UIImage?]
+            /// A transform edit's bands only: the edit, and the map each run's ink was shown through
+            /// at the mint (`CanvasManager.liveTransformMaps`) — what each moving band's transform is
+            /// measured from.
+            let edit: LiveTransformEdit?
+            let mintMaps: [PoseMap]
+
+            var below: UIImage? { bands.first ?? nil }
+            var above: UIImage? { bands.count > 1 ? bands[bands.count - 1] : nil }
+        }
+        private var livePicture: LivePicture?
         /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
-        /// deliberately *not* the same thing as `sandwichCacheKey`.
+        /// deliberately *not* the same thing as `livePicture`'s.
         private var sandwichKey: SandwichKey?
-        /// The key `sandwichHalves` was built from. Stale halves are still shown — they are at most
-        /// one edit behind — while the rebuild that replaces them runs.
-        private var sandwichCacheKey: SandwichKey?
+
+        /// The views a transform edit's bands between `below` and `above` are drawn in — moving runs
+        /// and the static bands between them — bottom-to-top, made on demand and lifted under the
+        /// upper sandwich view. Hidden in every other presentation.
+        private var bandViews: [UIImageView] = []
+
+        /// **How many updates a transform edit's picture has followed** — one per pass that re-posed
+        /// a moving band to a map it was not already at while the finger is down, and one per
+        /// touch-move a floating piece's latch was moved under (`objectTransformDragged`). Published on
+        /// `canvas.host` (`moves:`) for `midStrokeEntryCount`'s reason: XCUITest drags are
+        /// synchronous, so a test cannot look *during* one, and a count taken after it is the only
+        /// way to say the picture followed the finger rather than jumping at the end.
+        private var liveMoveCount = 0
 
         /// The rest picture, from the baker (§3.6), wrapped once for the same identity reason.
         ///
@@ -1329,7 +1373,7 @@ struct CanvasView: UIViewRepresentable {
         /// `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
         private var sandwichFullKey: SandwichKey?
 
-        /// One rebuild of the two halves in flight at a time. See `startSandwichRebuild`.
+        /// One rebuild of the live picture in flight at a time. See `startSandwichRebuild`.
         private var isSandwichRebuilding = false
         /// True from the first touch of a stroke to its lift. The only input to this whole section
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
@@ -1425,7 +1469,7 @@ struct CanvasView: UIViewRepresentable {
         /// The mid-stroke presentation wants the two halves, and `startSandwichRebuild` deliberately
         /// declines to build them while the animation plays (*"a stroke cannot begin while the
         /// animation is playing"*, which stage 10 made false). So a take begun on a document that
-        /// already has bakes would find `midStroke` true and `sandwichHalves` nil, `updateSandwich`
+        /// already has bakes would find `midStroke` true and no pair held, `updateSandwich`
         /// would return before touching `belowView` — and the artist would watch their animation
         /// stop dead the moment the pen landed, for the length of the take.
         ///
@@ -1539,7 +1583,7 @@ struct CanvasView: UIViewRepresentable {
                     for host in layerHosts.values { host.setContentMask(nil) }
                     liveMaskImage = nil
                 }
-                guard sandwichPresentation != .disengaged || sandwichHalves != nil
+                guard sandwichPresentation != .disengaged || livePicture != nil
                         || sandwichFull != nil else { return }
                 // Everything back to today's path, and the images dropped rather than kept warm: three
                 // canvas-sized images is 50 MB at 2048² and 192 MB at 4000² (§5.3), which is not a
@@ -1549,10 +1593,10 @@ struct CanvasView: UIViewRepresentable {
                 belowView.isHidden = true
                 aboveView.image = nil
                 aboveView.isHidden = true
+                for view in bandViews { view.image = nil; view.isHidden = true }
                 for host in layerHosts.values { host.setBlanked(false) }
-                sandwichHalves = nil
+                livePicture = nil
                 sandwichKey = nil
-                sandwichCacheKey = nil
                 // The baked frame goes with them, and for the same accounting rather than to save
                 // the bake: the file stays on disk and re-engaging pays one decode, but a
                 // canvas-sized `UIImage` held for a canvas that has stopped showing it is 16 MB at
@@ -1570,7 +1614,15 @@ struct CanvasView: UIViewRepresentable {
 
             let key = PlaybackTrace.span(.sandwichKey) { makeSandwichKey(tree: tree) }
             sandwichKey = key
-            if key != sandwichCacheKey { startSandwichRebuild(for: key) }
+            // **Where the live picture is cut this pass**: around the runs a transform edit moves while
+            // one is live, around the active layer's host otherwise. A rebuild is due when the key has
+            // moved, or when the picture held is of the other kind of cut — beginning a drag moves the
+            // cut before it moves any content. Not when a pair was merely cut at another frame: equal
+            // keys are byte-identical halves (`LivePairFit`), which is what lets a hold step for free.
+            let edit = movingBandsEdit
+            let cut = wantedLiveCut(for: edit, tree: tree)
+            let heldFits = livePicture.map { held in cut.map { held.cut.isSameKind(as: $0) } ?? true } ?? false
+            if key != livePicture?.key || !heldFits { startSandwichRebuild(for: key) }
             // **The rest picture comes off the bake now** (§3.6), so this is a lookup and not a
             // composite: ring, then store, then a miss. A miss changes nothing on screen (§2.10) and
             // `FrameBaker.onFrameFinished` brings the pass that turns it into a hit.
@@ -1591,15 +1643,14 @@ struct CanvasView: UIViewRepresentable {
             // reading the picker would choose nearest for an image that genuinely needs
             // interpolating, and the blocky result would look like the bug the comment above exists
             // to prevent.
-            // Either product answers: the bake and the halves are minted at one size, which is
+            // Either product answers: the bake and the live picture are minted at one size, which is
             // `FrameBaker.recipe`'s whole argument for `.liveComposite`.
-            let composited = sandwichFull?.size ?? sandwichHalves?.below.size ?? .zero
+            let composited = sandwichFull?.size ?? livePicture?.below?.size ?? .zero
             let isReduced = composited != .zero
                 && composited != (canvasManager.canvasSize ?? composited)
             let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
             if belowView.layer.magnificationFilter != filter {
-                belowView.layer.magnificationFilter = filter
-                aboveView.layer.magnificationFilter = filter
+                for view in [belowView, aboveView] + bandViews { view.layer.magnificationFilter = filter }
             }
 
             // **Which picture, as one pure choice** — `SandwichPresentation.next`, where the rules and
@@ -1610,42 +1661,64 @@ struct CanvasView: UIViewRepresentable {
             // stroke vanish and come back a beat later. Holding the pair is the *right* picture
             // meanwhile, not merely the older one: the stroke is committed to the cel, the active
             // host still draws it, and it sits between two halves that never contained it. `.live`
-            // is the same wait reached by an edit that is not a stroke (TODO 145).
+            // is the same wait reached by an edit that is not a stroke (TODO 145), and `.moving`'s
+            // hold after the finger lifts is the same wait reached by a move (TODO 125).
             let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
                 ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
-            let cut = activeID.map { LivePairCut(frame: canvasManager.currentFrame, activeLayerID: $0) }
-            let held = sandwichHalves.flatMap { halves in sandwichCacheKey.map { (key: $0, cut: halves.cut) } }
+            var holdsBandsOfThisFrame = false
+            if case .aroundRuns? = livePicture?.cut, livePicture?.frame == canvasManager.currentFrame {
+                holdsBandsOfThisFrame = true
+            }
             let presentation = SandwichPresentation.next(
                 from: sandwichPresentation, strokeIsLive: isSandwichStrokeLive,
+                transformEditIsLive: edit != nil,
                 bakeIsCurrent: sandwichFullKey == key,
-                livePair: LivePairFit(held: held, key: key, cut: cut),
-                livePairIsExact: tree.liveCutIsExact(atLeaf: canvasManager.currentLayerIndex))
+                livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) }, key: key, cut: cut),
+                holdsBandsOfThisFrame: holdsBandsOfThisFrame)
             let live = presentation.activeHostDrawsItself
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour
             // of.** On the very first engage nothing is cached, and blanking now would flash an
             // empty canvas for however long the composite takes. Asked of the presentation actually
-            // about to be applied, because the two now come from two places and either can be the
+            // about to be applied, because the pictures come from two places and either can be the
             // one that is missing.
-            if live {
-                guard let halves = sandwichHalves else { return paperIsNowPaintedBy(false) }
-                if belowView.image !== halves.below { belowView.image = halves.below }
-                if aboveView.image !== halves.above { aboveView.image = halves.above }
-            } else {
+            switch presentation {
+            case .moving:
+                guard let picture = livePicture, case .aroundRuns = picture.cut,
+                      let below = picture.below else { return paperIsNowPaintedBy(false) }
+                if belowView.image !== below { belowView.image = below }
+                if aboveView.image !== picture.above { aboveView.image = picture.above }
+                showMovingBands(picture, editIsLive: edit != nil)
+            case .live, .midStroke:
+                guard let picture = livePicture, case .aroundHost = picture.cut,
+                      let below = picture.below, let above = picture.above
+                else { return paperIsNowPaintedBy(false) }
+                if belowView.image !== below { belowView.image = below }
+                if aboveView.image !== above { aboveView.image = above }
+            case .rest, .disengaged:
                 guard let full = sandwichFull else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== full { belowView.image = full }
                 // Nothing in the upper view at rest: the baked frame is the whole tree, so a second
                 // image over it would be everything above the active layer drawn a second time.
                 if aboveView.image != nil { aboveView.image = nil }
             }
+            // Hidden and emptied together: a band is a canvas-sized image, and one held by a hidden
+            // view after its drag is memory nothing on screen justifies.
+            if presentation != .moving {
+                for view in bandViews where view.image != nil { view.image = nil; view.isHidden = true }
+            }
             if belowView.isHidden { belowView.isHidden = false }
-            if aboveView.isHidden != !live { aboveView.isHidden = !live }
+            let showsAbove = live || presentation == .moving
+            if aboveView.isHidden != !showsAbove { aboveView.isHidden = !showsAbove }
 
-            // The active layer's host is the middle of the sandwich and the only one that draws
+            // The active layer's host is the middle of the live pair and the only one that draws
             // itself; everything else is in one of the two composites already. At rest even that one
-            // is blanked, because `full` includes it.
-            // A stroke clips with the mask it resolved at touch-down. An edit's live pair needs none:
-            // it goes up only for a layer no mask clips (`liveCutIsExact`).
+            // is blanked, because `full` includes it, and under a transform edit every host is,
+            // because every leaf is in one of the bands.
+            //
+            // A stroke clips with the mask it resolved at touch-down. An edit's live pair draws the
+            // active layer plain — no mask, as no blend mode or grade — until its bake lands: the
+            // owner's ruling for the fast picture (TODO (125), `SandwichPresentation.live`).
             let mask = presentation == .midStroke ? liveMaskImage : nil
             for (id, host) in layerHosts {
                 let drawsItself = live && id == activeID
@@ -1663,9 +1736,86 @@ struct CanvasView: UIViewRepresentable {
             // while the host is still the thing on screen.
             if presentation != .midStroke { liveMaskImage = nil }
             sandwichPresentation = presentation
-            // Both presentations put an image carrying the paper in `belowView` — `full` at rest,
-            // `below` mid-stroke — so from here the `paperView` would be a second copy of it.
+            // Every presentation puts an image carrying the paper in `belowView` — `full` at rest,
+            // `below` otherwise — so from here the `paperView` would be a second copy of it.
             paperIsNowPaintedBy(true)
+        }
+
+        /// The live transform edit the canvas draws as bands, or nil — a floating piece's edit draws
+        /// its own picture (`LiveTransformEdit.movesBands`).
+        private var movingBandsEdit: LiveTransformEdit? {
+            canvasManager.liveTransformEdit.flatMap { $0.movesBands ? $0 : nil }
+        }
+
+        /// **Where the live picture should be cut this pass**: around the runs `edit` moves, by id,
+        /// or around the active layer's host.
+        private func wantedLiveCut(for edit: LiveTransformEdit?, tree: [RenderNode]? = nil) -> LivePairCut? {
+            let frame = canvasManager.currentFrame
+            if let edit {
+                let layers = canvasManager.layers
+                return .aroundRuns(canvasManager.liveTransformRuns(edit, atFrame: frame, tree: tree)
+                    .map { run in run.map { layers[$0].id } })
+            }
+            let index = canvasManager.currentLayerIndex
+            guard canvasManager.layers.indices.contains(index) else { return nil }
+            return .aroundHost(frame: frame, layerID: canvasManager.layers[index].id)
+        }
+
+        /// **A transform edit's bands, on screen and re-posed to where the model has the edit now** —
+        /// the whole per-update cost of TODO (125)'s drag: one walk for the maps, one Core Animation
+        /// transform per moving band, no pixel.
+        ///
+        /// Each moving band was composited with its run's ink shown through `mintMaps`; the transform
+        /// is the delta from there to the map the walk resolves now — `LiveLayerTransform.viewMap`,
+        /// the vector float's own conjugation, so the projective case (a Distort box) is the same
+        /// path. Static bands between runs are shown untransformed. Read from the model rather than
+        /// from the gesture, so whatever writes the pose — the box, a take, a graph node, an undo
+        /// while the bands are still up — is what the band shows.
+        private func showMovingBands(_ picture: LivePicture, editIsLive: Bool) {
+            guard let container = containerView, let edit = picture.edit,
+                  case .aroundRuns(let ids) = picture.cut else { return }
+            let middle = Array(picture.bands.dropFirst().dropLast())
+            while bandViews.count < middle.count {
+                let view = Self.makeSandwichView()
+                view.layer.magnificationFilter = sandwichBelowView?.layer.magnificationFilter ?? .nearest
+                container.insertSubview(view, belowSubview: sandwichAboveView ?? view)
+                NSLayoutConstraint.activate([
+                    view.topAnchor.constraint(equalTo: container.topAnchor),
+                    view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                    view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                    view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                ])
+                bandViews.append(view)
+            }
+            let layers = canvasManager.layers
+            let runs = ids.map { run in run.compactMap { id in layers.firstIndex { $0.id == id } } }
+            let maps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: canvasManager.currentFrame)
+            let size = canvasManager.canvasSize ?? .zero
+            var moved = false
+            for (index, view) in bandViews.enumerated() {
+                guard index < middle.count, let image = middle[index] else {
+                    if !view.isHidden { view.isHidden = true; view.image = nil }
+                    continue
+                }
+                if view.image !== image { view.image = image }
+                if view.isHidden { view.isHidden = false }
+                // Band `index + 1` of the cut: odd bands are runs, run `index / 2`.
+                var transform = CATransform3DIdentity
+                if index % 2 == 0, index / 2 < maps.count, index / 2 < picture.mintMaps.count,
+                   let delta = LiveLayerTransform.viewMap(from: picture.mintMaps[index / 2].homography,
+                                                          to: maps[index / 2].homography,
+                                                          inBoundsOfSize: size) {
+                    transform = delta.catransform3D
+                }
+                if !CATransform3DEqualToTransform(view.layer.transform, transform) {
+                    view.layer.transform = transform
+                    moved = true
+                }
+            }
+            if moved, editIsLive {
+                liveMoveCount += 1
+                publishCanvasState()
+            }
         }
 
         // MARK: §6.4's live mask
@@ -1763,12 +1913,22 @@ struct CanvasView: UIViewRepresentable {
         /// session opens is computed fresh and *then* held for the rest of it.
         private var textEditHeldContent: (layerIndex: Int, content: LayerContentVersion?)?
 
-        /// **The whole of this function is the two states in which the *active* layer's content
-        /// version is held rather than read.** Everything else — the tree, every other layer's
-        /// version, the resolution and the paper — is `CanvasManager.sandwichKey(atFrame:…)`, which
-        /// lives beside `makeSandwichRecipe` so the key and the recipe cannot be built from different
-        /// frames. `tree` is handed on rather than re-derived because `reconcileLayers` already has
-        /// it.
+        /// The moving leaves' content versions as of the first key built after a transform edit
+        /// began, and the edit they belong to. Nil whenever no edit is live.
+        ///
+        /// **Latched forward, as the text edit's is**, and for the same kind of reason: the edit's
+        /// first pass has already been asked for its runs, so the versions are taken then and held
+        /// for the rest of the gesture. Every tick of the drag moves a moving leaf's pose and so its
+        /// version; held, the key stands still, no rebuild is queued per tick, and the bands minted
+        /// once are re-posed instead (TODO (125)). A leaf that joins the runs later — a take crossing
+        /// into another block — is latched when it joins.
+        private var transformEditHeldContent: (edit: LiveTransformEdit, contents: [Int: LayerContentVersion?])?
+
+        /// **The whole of this function is the states in which a layer's content version is held
+        /// rather than read.** Everything else — the tree, every other layer's version, the
+        /// resolution and the paper — is `CanvasManager.sandwichKey(atFrame:…)`, which lives beside
+        /// `makeSandwichRecipe` so the key and the recipe cannot be built from different frames. `tree`
+        /// is handed on rather than re-derived because `reconcileLayers` already has it.
         private func makeSandwichKey(tree: [RenderNode]) -> SandwichKey {
             let frame = canvasManager.currentFrame
             let active = canvasManager.currentLayerIndex
@@ -1779,7 +1939,7 @@ struct CanvasView: UIViewRepresentable {
             let textEditLive = canvasManager.isTextEditLive
             if !textEditLive { textEditHeldContent = nil }
 
-            let override: CanvasManager.ActiveContentOverride
+            var held: [Int: LayerContentVersion?] = [:]
             // **The active layer's content version is in the key only while no stroke is in
             // progress, and that one clause is both halves of the contract.** During a dab the
             // version is held at whatever it was when the dab started, so stamping invalidates
@@ -1787,24 +1947,33 @@ struct CanvasView: UIViewRepresentable {
             // On lift it goes live again, the key moves, and the canvas snaps to the exact
             // composite. Held rather than elided so that *starting* a stroke does not move the key
             // either — the state switch has to be an image swap, not a rebuild.
-            if isSandwichStrokeLive, let held = sandwichKey?.contents, held.indices.contains(active) {
-                override = .held(held[active])
+            if isSandwichStrokeLive, let contents = sandwichKey?.contents, contents.indices.contains(active) {
+                held[active] = contents[active]
             } else if textEditLive {
                 // Latched forward: the first key of the session is computed fresh and then held. One
                 // extra `contentVersion` for one layer, once per session, and it resolves its own
                 // pose map because there is no loop here to hoist one out of.
                 if let latch = textEditHeldContent, latch.layerIndex == active {
-                    override = .held(latch.content)
+                    held[active] = latch.content
                 } else {
                     let fresh = canvasManager.contentVersion(ofLayer: active, atFrame: frame)
                     textEditHeldContent = (active, fresh)
-                    override = .held(fresh)
+                    held[active] = fresh
                 }
+            }
+            if let edit = movingBandsEdit {
+                var latch = transformEditHeldContent?.edit == edit ? transformEditHeldContent!.contents : [:]
+                for leaf in canvasManager.liveTransformRuns(edit, atFrame: frame, tree: tree).joined()
+                where latch[leaf] == nil {
+                    latch[leaf] = canvasManager.contentVersion(ofLayer: leaf, atFrame: frame)
+                }
+                transformEditHeldContent = (edit, latch)
+                held.merge(latch) { current, _ in current }
             } else {
-                override = .resolve
+                transformEditHeldContent = nil
             }
             return canvasManager.sandwichKey(atFrame: frame, activeLayerIndex: active,
-                                             override: override, tree: tree)
+                                             holding: held, tree: tree)
         }
 
         // MARK: Rebuilding
@@ -1931,30 +2100,54 @@ struct CanvasView: UIViewRepresentable {
             // frame flip moves it — which queued *two canvas-sized composites per playback tick* for
             // a pair of images nothing on screen was ever going to show: at rest the presentation is
             // `.rest` and `sandwichFull` is the only image displayed. The two states that read
-            // `sandwichHalves` are a stroke, and the touch that begins one stops playback
+            // the halves are a stroke, and the touch that begins one stops playback
             // (`canvasInteractionBegan`: at once for a pencil, a moment later for a finger, which has
             // to be watched first — `CanvasTouchSettle`), and an edit's live pair, which is entered
             // only from halves minted for the key the canvas is on — that is, from here. PERFORMANCE.md §5
             // filed this as "every playback tick still computes the two halves nobody sees"; it is
             // this line, and it is the third of the three costs RENDER.md §2.2 forbids on this path.
             //
+            // **A take is the one gesture that plays, and its bands are on screen** (TODO (125)): a
+            // Move box dragged while recording moves the frame under the finger, and only the bands
+            // follow it. Their key holds the moving leaves, so a flip that changes nothing else
+            // re-mints nothing; one that does is one rebuild in flight, shown a frame stale.
+            //
             // Nothing is left stale by declining: `isPlaying` is `@Published`, so stopping playback
             // raises the pass that warms them, and until then trap 1 keeps the canvas on the picture
             // it already has.
-            guard !canvasManager.isPlaying else { return }
-            // Nil for a stale or non-leaf `activeLayerIndex`, or a degenerate canvas — it does not
-            // fall back to `full`, deliberately, so that a wrong cut is never composited. The canvas
-            // keeps showing whatever is cached (at most one edit stale), or stays on Core Animation's
-            // path when nothing is cached yet. Both windows are one SwiftUI pass long in practice:
-            // the index is only out of range between a delete and the reselect that follows it, and
-            // the next pass schedules the rebuild this one declined.
+            let edit = movingBandsEdit
+            guard !canvasManager.isPlaying || edit != nil else { return }
+            // Nil for a stale or non-leaf `activeLayerIndex`, runs that are not spans of this frame's
+            // leaves, or a degenerate canvas — it does not fall back to `full`, deliberately, so that
+            // a wrong cut is never composited. The canvas keeps showing whatever is cached (at most
+            // one edit stale), or stays on Core Animation's path when nothing is cached yet. Both
+            // windows are one SwiftUI pass long in practice: the index is only out of range between a
+            // delete and the reselect that follows it, and the next pass schedules the rebuild this
+            // one declined.
             let frame = canvasManager.currentFrame
-            let activeIndex = canvasManager.currentLayerIndex
-            guard let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: activeIndex),
-                  canvasManager.layers.indices.contains(activeIndex)
-            else { return }
-            let cut = LivePairCut(frame: frame, activeLayerID: canvasManager.layers[activeIndex].id)
-            let active = liveActivePicture(ofLayerAt: activeIndex)
+            let recipe: SandwichRecipe
+            let cut: LivePairCut
+            let active: LiveActivePicture?
+            let mintMaps: [PoseMap]
+            if let edit {
+                let runs = canvasManager.liveTransformRuns(edit, atFrame: frame)
+                guard let bands = canvasManager.makeSandwichRecipe(atFrame: frame, runs: runs) else { return }
+                recipe = bands
+                cut = .aroundRuns(runs.map { run in run.map { canvasManager.layers[$0].id } })
+                // On the main actor, from the same model state the recipe just froze — the two have
+                // to describe one moment, or the first update would jump by the difference.
+                mintMaps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: frame)
+                active = nil
+            } else {
+                let activeIndex = canvasManager.currentLayerIndex
+                guard let pair = canvasManager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: activeIndex),
+                      canvasManager.layers.indices.contains(activeIndex)
+                else { return }
+                recipe = pair
+                cut = .aroundHost(frame: frame, layerID: canvasManager.layers[activeIndex].id)
+                mintMaps = []
+                active = liveActivePicture(ofLayerAt: activeIndex)
+            }
 
             isSandwichRebuilding = true
             sandwichRebuildCount += 1
@@ -1970,39 +2163,51 @@ struct CanvasView: UIViewRepresentable {
                 // baked frame, and §2.15 allows exactly one producer of it; that producer is
                 // `FrameBaker`, which chunks the walk under a memory ceiling (§3.4) and writes the
                 // result where play and export can read it. `SandwichRecipe.resolve()` still mints
-                // it because the *cut* is defined against it — `below` and `above` are correct
-                // precisely when they recompose to `full` — and that invariant is what
-                // `SandwichLogicTests` pins. Nothing on the canvas resolves it.
+                // it because the *cut* is defined against it — the bands are correct precisely when
+                // they recompose to `full` — and that invariant is what `SandwichLogicTests` pins.
+                // Nothing on the canvas resolves it.
                 //
-                // **`compositeHalves` rather than `Compositor.composite`, and that is the whole of
-                // RENDER.md §2.12 on this path.** It takes each half through `StripedCompositor` and
-                // `ChunkedCompositor` — the same two cuts the bake takes — so a document whose
-                // textures do not fit the device is composited in horizontal bands at the size the
-                // knob asked for, rather than refused by the GPU and re-rendered whole on the CPU
-                // reference for the duration of every stroke. A document that fits takes the
-                // identical path it took before: one composite per half, unwindowed, unchunked.
-                let halves = PlaybackTrace.span(.sandwichComposite) { recipe.compositeHalves() }
+                // **`compositeHalves`/`compositeBands` rather than `Compositor.composite`, and that is
+                // the whole of RENDER.md §2.12 on this path.** Each band goes through
+                // `StripedCompositor` and `ChunkedCompositor` — the same two cuts the bake takes — so
+                // a document whose textures do not fit the device is composited in horizontal bands
+                // at the size the knob asked for, rather than refused by the GPU and re-rendered whole
+                // on the CPU reference for the duration of every stroke. A document that fits takes
+                // the identical path it took before: one composite per band, unwindowed, unchunked.
+                let bands: [CGImage?]? = PlaybackTrace.span(.sandwichComposite) {
+                    if case .aroundRuns = cut { return recipe.compositeBands() }
+                    return recipe.compositeHalves().map { [$0.below, nil, $0.above] }
+                }
                 // **The third picture of the pair, on the same queue and for the same key** — see
                 // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.
                 let activeImage = active.flatMap { $0.render() }
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, cut: cut, below: halves?.below,
-                                                above: halves?.above, active: active, activeImage: activeImage)
+                    self?.finishSandwichRebuild(key: key, cut: cut, frame: frame, bands: bands, edit: edit,
+                                                mintMaps: mintMaps, active: active, activeImage: activeImage)
                 }
             }
         }
 
-        private func finishSandwichRebuild(key: SandwichKey, cut: LivePairCut, below: CGImage?, above: CGImage?,
+        private func finishSandwichRebuild(key: SandwichKey, cut: LivePairCut, frame: Int, bands: [CGImage?]?,
+                                           edit: LiveTransformEdit?, mintMaps: [PoseMap],
                                            active: LiveActivePicture?, activeImage: UIImage?) {
             isSandwichRebuilding = false
-            // All three or none: a half-updated pair would put a `below` from this frame under an
-            // `above` from the last one, and a pair whose middle is older than its halves is the
-            // flash TODO (145) reported. `composite` returns nil only for a degenerate canvas.
-            if let below, let above, key == sandwichKey {
-                sandwichHalves = (below: UIImage(cgImage: below, scale: 1, orientation: .up),
-                                  above: UIImage(cgImage: above, scale: 1, orientation: .up),
-                                  cut: cut)
-                sandwichCacheKey = key
+            // All or none: a half-updated pair would put a `below` from this frame under an `above`
+            // from the last one, and a pair whose middle is older than its halves is the flash TODO
+            // (145) reported. `composite` returns nil only for a degenerate canvas.
+            //
+            // **Kept when it is for the cut the canvas wants, even if the key has moved on** — it is
+            // still newer than anything the canvas holds, and `LivePairFit` calls it stale rather than
+            // current, so it is only ever *kept* on screen, never entered from rest. A take needs
+            // exactly this: the frame flips under every mint, and a mint discarded for it would leave
+            // the bands nothing to show. **And never across the two kinds of cut**, whatever the key:
+            // a pair minted before a drag began lands at the drag's held key, and must not take the
+            // bands' place.
+            let wanted = wantedLiveCut(for: movingBandsEdit)
+            if let bands, let wanted, cut == wanted || (key == sandwichKey && cut.isSameKind(as: wanted)) {
+                livePicture = LivePicture(key: key, cut: cut, frame: frame,
+                                          bands: bands.map { $0.map { UIImage(cgImage: $0, scale: 1, orientation: .up) } },
+                                          edit: edit, mintMaps: mintMaps)
                 if case .derived(let layerID, let content, let covering) = active {
                     interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: content.identity,
                                                                                 preview: false)
@@ -2247,6 +2452,8 @@ struct CanvasView: UIViewRepresentable {
                 let pose = drag.pose(draggedTo: point)
                 liveVectorFloatPose = pose
                 showVectorFloat(float, at: pose)
+                liveMoveCount += 1
+                publishCanvasState()
                 // The re-fit is the one thing this function gained that is *not* free: it walks the
                 // lifted ink's points once per touch-move. `MoveBoxInk` is why that is a pass over an
                 // array of `CGPoint` rather than a walk of the display list, and
@@ -2762,12 +2969,19 @@ struct CanvasView: UIViewRepresentable {
                     // rendering it here as well would be the main-thread composite again, on the
                     // pass every stroke's lift raises.
                     //
+                    // **And never while a transform edit is live** — TODO (125). Every tick of the
+                    // drag re-poses this layer, and its picture is a band re-posed by Core Animation;
+                    // rendering it here as well was the 600 ms main-thread pass per tick the owner
+                    // felt as lag (PERFORMANCE.md §24). The one window where this is not blanked is
+                    // the edit's first engage, before its bands land, and there the host's picture
+                    // from before the drag stands until they do.
+                    //
                     // **Before the key check, and the ordering is load-bearing.** Skipping without
                     // recording the key leaves the memo naming whatever was last *rendered*, so the
                     // pass on which the sandwich disengages finds the key moved and repaints.
                     // Recording it here instead would leave the host holding a picture from a frame
                     // nobody is on, with the memo insisting it is current.
-                    guard sandwichPresentation == .disengaged else { continue }
+                    guard sandwichPresentation == .disengaged, movingBandsEdit == nil else { continue }
                     // **The derivation is resolved before the key, and it is what the key is made
                     // of** — see `InterpolationPreviewKey`. That covers a pose with no extra work:
                     // `PosedCelIdentity` carries the resolved maps, so scrubbing to a frame the
@@ -3858,6 +4072,14 @@ struct CanvasView: UIViewRepresentable {
         func moveBoxTouchDown() {
             canvasManager.canvasInteractionBegan(mayContinueTake: true, mayBeATransform: true)
             canvasManager.beginMoveBoxTake()
+            // After the take, so its bracket is the outer one (§5.1); the edit is what puts the drag
+            // on the live bands and holds the baker until the finger lifts (TODO (125)).
+            if let edit = canvasManager.moveBoxEdit { canvasManager.beginLiveTransformEdit(edit) }
+        }
+
+        /// The finger on the Move box lifted — both overlays' `onBoxTouchUp`.
+        func moveBoxTouchUp() {
+            canvasManager.endLiveTransformEdit()
         }
 
         /// **Whether the Move box's tap-away is offered this touch at all — decided where the touch

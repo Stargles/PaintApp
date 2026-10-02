@@ -965,6 +965,21 @@ final class CanvasManager: ObservableObject {
             ActionRecorder.ifRecording { $0.model("vectorFloat", vectorFloat == nil ? "nil" : "active") }
         }
     }
+    /// **A transform being edited right now, finger down** — TODO (125), (136) and (140): a Move-box
+    /// drag, a take recorded through the box, or a pose node dragged in the graph editor. Nil between
+    /// gestures. See `LiveTransformEdit` for what the canvas and the baker do while it is set.
+    @Published private(set) var liveTransformEdit: LiveTransformEdit?
+
+    /// A finger landed on the transform being edited. Idempotent, so a second surface reporting the
+    /// same gesture — every grip of the box hears its touch-down — changes nothing.
+    func beginLiveTransformEdit(_ edit: LiveTransformEdit) {
+        if liveTransformEdit != edit { liveTransformEdit = edit }
+    }
+
+    /// The finger lifted, or the gesture was cancelled.
+    func endLiveTransformEdit() {
+        if liveTransformEdit != nil { liveTransformEdit = nil }
+    }
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
@@ -3258,6 +3273,14 @@ final class CanvasManager: ObservableObject {
     /// `FrameBaker.isSuspended`. A dab publishes nothing, so mid-stroke passes are rare rather than
     /// absent (the cel spawn on the first stroke of a frame is one), and each would otherwise start
     /// a composite of a picture the artist is halfway through replacing.
+    ///
+    /// **A live transform edit suspends it too, and that one is the model's to know** (TODO (125)).
+    /// Every tick of a keyed pose's drag dirties every frame the pose spans, so without the hold the
+    /// baker started a whole-frame composite whenever the last one landed — MEASURED at five inside a
+    /// two-second graph-node drag (PERFORMANCE.md §24), every one of a picture the next tick replaced,
+    /// and all of it CPU taken from the drag. The owner's *"pause the background renderer until the
+    /// user raises their pen off the move tool"*: held while `liveTransformEdit` is set, and the pass
+    /// that clears it is the one that kicks the bake of the result.
     @MainActor
     func syncFrameBake(suspended: Bool) {
         // Re-rooted rather than reset when the store's directory moves — a different document, or
@@ -3285,7 +3308,7 @@ final class CanvasManager: ObservableObject {
         let wantedRingBudget = Self.frameRingByteBudget(forFrameBytes: decodedFrameBytes)
         if baker.ring.byteBudget != wantedRingBudget { baker.ring.byteBudget = wantedRingBudget }
 
-        baker.isSuspended = suspended
+        baker.isSuspended = suspended || liveTransformEdit != nil
         // `noteDocumentChanged` rather than `syncDirty()` + `kick()`: they are the same two lines,
         // and two spellings of one path is what §2.15 calls a peculiarity — the one the tests use
         // has to be the one the app takes, or the suite pins a path nothing runs.
