@@ -522,12 +522,12 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             // recognizers are, and stands down to the chrome like them — whatever the artist grabbed
             // wins, and the object is placed by the touch that grabs nothing. The text overlays are
             // here too, unlike `textPress`: that tap would commit the box it landed in, where a
-            // placement under a text box's own grips is simply outranked. No `+moveBoxCommit`: with
-            // the Move box up the press is suspended, so the tap away settles the box first.
+            // placement under a text box's own grips is simply outranked. Neither `+moveBoxCommit` nor
+            // `objectTransformOverlay+`: with the Move box up the press is suspended, so the tap away
+            // settles the box first and a touch on the box is the box's alone.
             "shapeOverlay+placementPress",
             "textOverlay+placementPress",
             "textTransformOverlay+placementPress",
-            "objectTransformOverlay+placementPress",
             "guideOverlay+placementPress",
             // (j)'s own rows, on plain canvas away from the box. `moveBoxCommit` is last in every one
             // of them, which is the whole of its precedence argument: it takes what is left.
