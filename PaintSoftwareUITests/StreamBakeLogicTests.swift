@@ -340,18 +340,25 @@ final class StreamBakeLogicTests: XCTestCase {
         assertRed(compositedPixel(f, atFrame: 0, x: 32, y: 32), "unfrozen: the next frame lands")
     }
 
-    /// Freezing invalidates nothing: neither version moves, so no memo is dropped and the bake
-    /// is not re-keyed for a picture that did not change.
-    func testFreezeMovesNeitherVersion() throws {
+    /// **Freezing drops no memo and commits the picture.** `version` moves with `committedVersion`
+    /// (both by `invalidateRenderOnly`) but its damage is the null region — the proof that no pixel
+    /// changed — so every memo stands; and the committed move is what re-keys the bake for the
+    /// picture the artist froze on (`VectorCanvas.setStreamFrozen`). Unfreezing moves nothing.
+    func testFreezeCommitsThePictureAndDropsNoMemo() throws {
         let f = fixture()
         let vector = try XCTUnwrap(f.cels[0].vector)
         let stream = try XCTUnwrap(vector.streams.first)
-        let version = vector.version
         let committed = vector.committedVersion
+        let rendered = vector.render()
         XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
                                                 elementID: stream.id, true))
-        XCTAssertEqual(vector.version, version)
-        XCTAssertEqual(vector.committedVersion, committed)
+        XCTAssertEqual(vector.committedVersion, committed + 1, "the frozen picture is the document's now")
+        XCTAssertTrue(vector.render() === rendered, "and the memo of the picture that did not change stands")
+
+        let afterFreeze = vector.committedVersion
+        XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
+                                                elementID: stream.id, false))
+        XCTAssertEqual(vector.committedVersion, afterFreeze, "unfreezing changes no picture")
     }
 
     // MARK: - The snapshot's size

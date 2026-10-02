@@ -59,6 +59,12 @@ struct SandwichKey: Equatable {
     /// layer tap is a hit in the ring rather than a composite.
     let activeLayerIndex: Int
 
+    /// **The live streams the cut is drawn around too** (`CanvasManager.liveHostRun`): the pair's
+    /// middle is the leaves from the lowest to the highest of the active layer and these, so a stream
+    /// going live, frozen, hidden or posed moves the cut exactly as the active layer changing does,
+    /// and a pair minted for one cut is never taken for the other's.
+    let liveStreamLayers: [Int]
+
     /// Parallel to `layers`; nil where a layer has no cel at this frame.
     let contents: [LayerContentVersion?]
 

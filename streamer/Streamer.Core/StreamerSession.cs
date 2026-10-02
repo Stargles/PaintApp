@@ -72,12 +72,19 @@ public sealed class StreamerSession : IAsyncDisposable
         _log($"StreamerSession: encoder = {Encoder.ElementName} ({Encoder.Reason})");
     }
 
-    /// <summary>Called by ProtocolServer.ClientConnected. Starts the pipeline (unless
-    /// explicitly paused) and always sends a fresh STATUS to the new client.</summary>
+    /// <summary>Called by ProtocolServer.ClientConnected. A new connection is a new session:
+    /// a pause is the connection's own (STREAM.md §3), so a pause the previous client asked for —
+    /// one that was replaced, or whose socket died while its iPad was locked in the background,
+    /// neither of which reaches OnClientDisconnectedAsync in time or at all — is not in force for
+    /// this one. Starts the pipeline and always sends a fresh STATUS to the new client.</summary>
     public async Task OnClientConnectedAsync()
     {
-        lock (_gate) _hasClient = true;
-        if (_currentSource != null && !_pausedByClient)
+        lock (_gate)
+        {
+            _hasClient = true;
+            _pausedByClient = false;
+        }
+        if (_currentSource != null)
         {
             await StartPipelineLockedAsync().ConfigureAwait(false);
         }
@@ -100,8 +107,10 @@ public sealed class StreamerSession : IAsyncDisposable
                 BroadcastStatus("Paused by client");
                 break;
             case ControlMessage.Resume:
+                // Idempotent: a client states its wish on every connect (STREAM.md §3), and a
+                // pipeline that is already running has nothing to restart.
                 _pausedByClient = false;
-                if (_currentSource != null) await StartPipelineLockedAsync().ConfigureAwait(false);
+                if (_currentSource != null && !IsStreaming) await StartPipelineLockedAsync().ConfigureAwait(false);
                 BroadcastStatus();
                 break;
             case ControlMessage.Keyframe:

@@ -62,15 +62,83 @@ extension CanvasManager {
         return (currentLayerIndex, celIndex, stream)
     }
 
-    /// **Whether the canvas at rest is the baked composite rather than the flat row of hosts** —
-    /// the case `ScreenStreamCoordinator`'s header names, where a live frame cannot reach the
-    /// screen because `committedVersion` keeps the bake blind to it. Asked of the whole document,
-    /// exactly as `sandwichEngagesOnCanvas` asks it minus the two transient clauses (playback, a
-    /// float), so the bar's note is about the document's *shape* and does not flicker with a
-    /// gesture. The bar prints `StreamBarState.sandwichNote` while this is true.
+    // MARK: - A live stream on an engaged canvas (STREAM.md §5.3)
+
+    /// **The layers whose stream the canvas draws live**: visible, unfrozen, a stream on the cel the
+    /// layer shows at this frame, a leaf of the tree, and — the one condition that is a limit rather
+    /// than a rule — not moved by a pose. A live frame reaches the screen through the layer host's
+    /// `StreamSurfaceView`, which draws the element where the cel's own coordinates put it; a cel the
+    /// walk poses (a transformation layer above it, a Move channel of its own) is shown through a
+    /// derived picture instead, which the surface cannot sit over, and its stream holds
+    /// (`StreamPictureNote.heldByAPose`). Empty while the animation plays: the tick stands down then
+    /// (§2.9) and playback reads the bake.
+    ///
+    /// **Asked of every pass on an engaged canvas and of nothing else's cost**: a document with no
+    /// stream answers from one memoized flag per cel, which is what `ScreenStreamCoordinator.sync`
+    /// already pays beside it.
     @MainActor
-    var streamPictureIsHeldByTheSandwich: Bool {
-        renderTree(atFrame: currentFrame).needsCompositorOnCanvas || hasContainerPoseInForce
+    func liveStreamLayerIndices(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil) -> [Int] {
+        guard !isPlaying else { return [] }
+        let frame = frame ?? currentFrame
+        let shownFrames = displayedFrames(atFrame: frame)
+        let candidates = layers.indices.filter { index in
+            layers[index].kind == .vector
+                && layers[index].cels.contains(where: { $0.vector?.holdsStream == true })
+                && isLayerEffectivelyVisible(index)
+                && showsAnUnfrozenStream(layerIndex: index, atFrame: shownFrames[index] ?? frame)
+        }
+        guard !candidates.isEmpty else { return [] }
+        let walk = precomputed ?? renderTreeAndPoses(atFrame: frame)
+        let leaves = Set(walk.tree.leafLayerIndices)
+        return candidates.filter { leaves.contains($0) && !streamIsMoved(onLayer: $0, in: walk, atFrame: frame) }
+    }
+
+    @MainActor
+    private func showsAnUnfrozenStream(layerIndex: Int, atFrame frame: Int) -> Bool {
+        guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: frame) else { return false }
+        return layers[layerIndex].cels[celIndex].vector?.streams.contains(where: { !$0.isFrozen }) == true
+    }
+
+    /// Whether `walk` poses the cel this layer shows — the one thing a live stream cannot be drawn
+    /// through (`liveStreamLayerIndices`).
+    @MainActor
+    private func streamIsMoved(onLayer index: Int, in walk: RenderWalk, atFrame frame: Int) -> Bool {
+        let shownFrame = walk.frames[index] ?? frame
+        guard let celIndex = activeCelIndex(inLayer: index, atFrame: shownFrame) else { return false }
+        return derivedCelContent(for: layers[index].cels[celIndex], atFrame: shownFrame,
+                                 inheriting: walk.poses[index]) != nil
+    }
+
+    /// **The leaves whose own hosts draw the engaged canvas's picture** — the live pair's middle
+    /// (`LivePairCut.aroundHost`): the active layer, so a stroke lands on a host that is already
+    /// drawing, and every live stream, so its frames reach a host that is. Every leaf between the
+    /// lowest and the highest of them draws too: the pair has one middle, and a run that is one span
+    /// of the leaf order is what `[RenderNode].cut(around:)` can cut. Those between layers are drawn
+    /// plain, as the active layer is (`SandwichPresentation.live`); with no stream in the document
+    /// this is the active layer alone, as it always was. Empty when the active layer is not a leaf
+    /// and nothing streams.
+    @MainActor
+    func liveHostRun(tree: [RenderNode]) -> [Int] {
+        var hosts = Set(liveStreamLayerIndices())
+        if layers.indices.contains(currentLayerIndex) { hosts.insert(currentLayerIndex) }
+        let order = tree.leafLayerIndices
+        let positions = order.indices.filter { hosts.contains(order[$0]) }
+        guard let first = positions.first, let last = positions.last else { return [] }
+        return Array(order[first ... last])
+    }
+
+    /// **What the bar says about the picture on the canvas, when it is not the computer's whole
+    /// truth** — for the stream the bar is about, while it is shown and unfrozen. A frozen stream is
+    /// the exact picture (its frame is part of the document: `VectorCanvas.setStreamFrozen`) and says
+    /// nothing, and a flat canvas of ordinary layers has nothing to add.
+    @MainActor
+    var activeStreamPictureNote: StreamPictureNote? {
+        guard let active = activeStreamCel, !active.element.isFrozen, !isPlaying,
+              isLayerEffectivelyVisible(active.layerIndex) else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        if streamIsMoved(onLayer: active.layerIndex, in: walk, atFrame: currentFrame) { return .heldByAPose }
+        // The document's shape, not a gesture's: the note must not flicker with a stroke or a float.
+        return walk.tree.needsCompositorOnCanvas || hasContainerPoseInForce ? .drawnPlain : nil
     }
 
     // MARK: - The address row (STREAM.md §5.7)

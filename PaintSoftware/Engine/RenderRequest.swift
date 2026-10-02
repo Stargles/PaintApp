@@ -1181,6 +1181,7 @@ extension CanvasManager {
         }
         return SandwichKey(tree: tree ?? walk.tree,
                            activeLayerIndex: activeLayerIndex,
+                           liveStreamLayers: liveStreamLayerIndices(atFrame: frame, walk: walk),
                            contents: contents,
                            renderResolution: renderResolution,
                            canvasBackgroundColor: canvasBackgroundColor,

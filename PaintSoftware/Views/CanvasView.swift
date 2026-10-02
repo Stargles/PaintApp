@@ -1763,6 +1763,8 @@ struct CanvasView: UIViewRepresentable {
             // hold after the finger lifts is the same wait reached by a move (TODO 125).
             let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
                 ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
+            // A live stream is drawn by its host, which only a live presentation has (TODO (112)).
+            let streamIsLive = !canvasManager.liveStreamLayerIndices().isEmpty
             var holdsBandsOfThisFrame = false
             if case .aroundRuns? = livePicture?.cut, livePicture?.frame == canvasManager.currentFrame {
                 holdsBandsOfThisFrame = true
@@ -1772,7 +1774,7 @@ struct CanvasView: UIViewRepresentable {
                 transformEditIsLive: edit != nil,
                 bakeIsCurrent: sandwichFullKey == key,
                 livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) }, key: key, cut: cut),
-                holdsBandsOfThisFrame: holdsBandsOfThisFrame)
+                holdsBandsOfThisFrame: holdsBandsOfThisFrame, streamIsLive: streamIsLive)
             let live = presentation.activeHostDrawsItself
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour
@@ -1809,25 +1811,31 @@ struct CanvasView: UIViewRepresentable {
             let showsAbove = live || presentation == .moving
             if aboveView.isHidden != !showsAbove { aboveView.isHidden = !showsAbove }
 
-            // The active layer's host is the middle of the live pair and the only one that draws
-            // itself; everything else is in one of the two composites already. At rest even that one
-            // is blanked, because `full` includes it, and under a transform edit every host is,
+            // The hosts the pair is cut around are its middle and the only ones that draw themselves —
+            // the active layer, and a live stream's layer with whatever lies between (`liveHostRun`);
+            // everything else is in one of the two composites already. At rest even they are
+            // blanked, because `full` includes them, and under a transform edit every host is,
             // because every leaf is in one of the bands.
             //
-            // A stroke clips with the mask it resolved at touch-down. An edit's live pair draws the
-            // active layer plain — no mask, as no blend mode or grade — until its bake lands: the
-            // owner's ruling for the fast picture (TODO (125), `SandwichPresentation.live`).
+            // A stroke clips with the mask it resolved at touch-down, and only the active layer's host
+            // wears it. An edit's live pair draws its layers plain — no mask, as no blend mode or
+            // grade — until its bake lands: the owner's ruling for the fast picture (TODO (125),
+            // `SandwichPresentation.live`).
+            var drawnByHosts: Set<UUID> = []
+            if live, let picture = livePicture, case .aroundHost(_, let ids) = picture.cut {
+                drawnByHosts = Set(ids)
+            }
             let mask = presentation == .midStroke ? liveMaskImage : nil
             for (id, host) in layerHosts {
-                let drawsItself = live && id == activeID
+                let drawsItself = live && (id == activeID || drawnByHosts.contains(id))
                 host.setBlanked(!drawsItself)
-                // §6.4 rides on exactly the same predicate as blanking, which is the point: the one
-                // host drawing its own pixels is the one place a mask can be applied, and every
-                // other host's pixels are inside a composite that has already been clipped. Tying
+                // §6.4 rides on exactly the same predicate as blanking, which is the point: a host
+                // drawing its own pixels is the one place a mask can be applied, and every other
+                // host's pixels are inside a composite that has already been clipped. Tying
                 // the two together is also what removes the flash at both ends — the clip arrives
                 // the moment the host starts drawing itself and leaves the moment `full` takes over,
                 // rather than on the touch events, which are a beat early and a beat late.
-                host.setContentMask(drawsItself ? mask : nil)
+                host.setContentMask(drawsItself && id == activeID ? mask : nil)
             }
             // Trap 2 keeps a lifted stroke on `.midStroke` until the bake lift asked for lands, so
             // this is that landing, not the touch-up — releasing it any earlier would drop the clip
@@ -1846,7 +1854,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **Where the live picture should be cut this pass**: around the runs `edit` moves, by id,
-        /// or around the active layer's host.
+        /// or around the hosts that draw (`CanvasManager.liveHostRun`).
         private func wantedLiveCut(for edit: LiveTransformEdit?, tree: [RenderNode]? = nil) -> LivePairCut? {
             let frame = canvasManager.currentFrame
             if let edit {
@@ -1854,9 +1862,9 @@ struct CanvasView: UIViewRepresentable {
                 return .aroundRuns(canvasManager.liveTransformRuns(edit, atFrame: frame, tree: tree)
                     .map { run in run.map { layers[$0].id } })
             }
-            let index = canvasManager.currentLayerIndex
-            guard canvasManager.layers.indices.contains(index) else { return nil }
-            return .aroundHost(frame: frame, layerID: canvasManager.layers[index].id)
+            let run = canvasManager.liveHostRun(tree: tree ?? canvasManager.renderTree(atFrame: frame))
+            guard !run.isEmpty else { return nil }
+            return .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id })
         }
 
         /// **A transform edit's bands, on screen and re-posed to where the model has the edit now** —
@@ -2122,9 +2130,9 @@ struct CanvasView: UIViewRepresentable {
             applySandwichPresentationNow()
         }
 
-        /// **The active layer's third of the live pair** — what its host shows as its own picture at
-        /// the pair's key, produced on `sandwichQueue` beside the two halves and handed over with
-        /// them (TODO 145).
+        /// **A host's third of the live pair** — what the host of each layer the pair is cut around
+        /// shows as its own picture at the pair's key, produced on `sandwichQueue` beside the two
+        /// halves and handed over with them (TODO 145).
         ///
         /// **Why with the halves, and not by the pass that un-blanks the host.** A blanked host keeps
         /// nothing current: `updateInterpolationPreviews` skips it, which is TODO (53)'s whole fix,
@@ -2165,14 +2173,12 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// What the rebuild renders for the layer it cuts at. Nil for a raster tier, which the edge
+        /// What the rebuild renders for a layer it cuts at. Nil for a raster tier, which the edge
         /// that un-blanks the host reads synchronously, and for a vector host already on screen,
         /// which keeps its own committed render current (`refreshDisplayIfStale`).
-        private func liveActivePicture(ofLayerAt index: Int) -> LiveActivePicture? {
+        private func liveActivePicture(ofLayerAt index: Int, in walk: RenderWalk) -> LiveActivePicture? {
             let layer = canvasManager.layers[index]
-            guard let host = layerHosts[layer.id],
-                  let shown = shownCel(ofLayerAt: index,
-                                       in: canvasManager.renderTreeAndPoses(atFrame: canvasManager.currentFrame))
+            guard let host = layerHosts[layer.id], let shown = shownCel(ofLayerAt: index, in: walk)
             else { return nil }
             if case .derived(let content) = shown.preview {
                 return .derived(layerID: layer.id, content: content, covering: Self.inkCoverage(of: shown.cel))
@@ -2225,7 +2231,7 @@ struct CanvasView: UIViewRepresentable {
             let frame = canvasManager.currentFrame
             let recipe: SandwichRecipe
             let cut: LivePairCut
-            let active: LiveActivePicture?
+            let active: [LiveActivePicture]
             let mintMaps: [PoseMap]
             if let edit {
                 let runs = canvasManager.liveTransformRuns(edit, atFrame: frame)
@@ -2235,16 +2241,16 @@ struct CanvasView: UIViewRepresentable {
                 // On the main actor, from the same model state the recipe just froze — the two have
                 // to describe one moment, or the first update would jump by the difference.
                 mintMaps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: frame)
-                active = nil
+                active = []
             } else {
-                let activeIndex = canvasManager.currentLayerIndex
-                guard let pair = canvasManager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: activeIndex),
-                      canvasManager.layers.indices.contains(activeIndex)
+                let walk = canvasManager.renderTreeAndPoses(atFrame: frame)
+                let run = canvasManager.liveHostRun(tree: walk.tree)
+                guard !run.isEmpty, let pair = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [run])
                 else { return }
                 recipe = pair
-                cut = .aroundHost(frame: frame, layerID: canvasManager.layers[activeIndex].id)
+                cut = .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id })
                 mintMaps = []
-                active = liveActivePicture(ofLayerAt: activeIndex)
+                active = run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) }
             }
 
             isSandwichRebuilding = true
@@ -2278,17 +2284,17 @@ struct CanvasView: UIViewRepresentable {
                 }
                 // **The third picture of the pair, on the same queue and for the same key** — see
                 // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.
-                let activeImage = active.flatMap { $0.render() }
+                let activeImages = active.map { $0.render() }
                 Task { @MainActor in
                     self?.finishSandwichRebuild(key: key, cut: cut, frame: frame, bands: bands, edit: edit,
-                                                mintMaps: mintMaps, active: active, activeImage: activeImage)
+                                                mintMaps: mintMaps, active: active, activeImages: activeImages)
                 }
             }
         }
 
         private func finishSandwichRebuild(key: SandwichKey, cut: LivePairCut, frame: Int, bands: [CGImage?]?,
                                            edit: LiveTransformEdit?, mintMaps: [PoseMap],
-                                           active: LiveActivePicture?, activeImage: UIImage?) {
+                                           active: [LiveActivePicture], activeImages: [UIImage?]) {
             isSandwichRebuilding = false
             // All or none: a half-updated pair would put a `below` from this frame under an `above`
             // from the last one, and a pair whose middle is older than its halves is the flash TODO
@@ -2306,10 +2312,11 @@ struct CanvasView: UIViewRepresentable {
                 livePicture = LivePicture(key: key, cut: cut, frame: frame,
                                           bands: bands.map { $0.map { UIImage(cgImage: $0, scale: 1, orientation: .up) } },
                                           edit: edit, mintMaps: mintMaps)
-                if case .derived(let layerID, let content, let covering) = active {
+                for (picture, image) in zip(active, activeImages) {
+                    guard case .derived(let layerID, let content, let covering) = picture else { continue }
                     interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: content.identity,
                                                                                 preview: false)
-                    layerHosts[layerID]?.strokeView.setInterpolationImage(activeImage, covering: covering)
+                    layerHosts[layerID]?.strokeView.setInterpolationImage(image, covering: covering)
                 }
             }
             // The whole reconciliation rather than only the image swap: this result may be the first

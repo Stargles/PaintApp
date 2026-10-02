@@ -218,17 +218,19 @@ final class StreamBarStateLogicTests: XCTestCase {
         let layerIndex = manager.currentLayerIndex
         coordinator.stateChanged(.connected, at: Self.endpoint)
         coordinator.statusArrived(status(), from: Self.endpoint)
-        XCTAssertTrue(coordinator.sentControlCommands.isEmpty, "Setup: nothing sent yet")
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume],
+                       "Setup: a connection's first reconcile states the wish — an element wants pictures")
 
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
-        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause], "the only element frozen: pause")
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .pause],
+                       "the only element frozen: pause")
 
         // The laptop answers a pause with STATUS streaming:false; the bar says Frozen regardless.
         coordinator.statusArrived(status(streaming: false, reason: "Paused by client"), from: Self.endpoint)
         XCTAssertEqual(coordinator.barState(for: try XCTUnwrap(manager.activeStreamCel?.element)), .frozen)
 
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, false))
-        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause, .resume],
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .pause, .resume],
                        "the first unfreeze resumes, and asks for no second keyframe — resume carries one")
         XCTAssertEqual(coordinator.barState(for: try XCTUnwrap(manager.activeStreamCel?.element)), .live,
                        "the lifted pause is not reported as Not streaming while the laptop's STATUS is in flight")
@@ -241,10 +243,10 @@ final class StreamBarStateLogicTests: XCTestCase {
         manager.commitVectorFloatIfNeeded()
         let secondLayer = manager.currentLayerIndex
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: secondLayer, celIndex: 0, elementID: second.id, true))
-        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause, .resume],
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .pause, .resume],
                        "one of two frozen: the laptop keeps sending for the other")
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: secondLayer, celIndex: 0, elementID: second.id, false))
-        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.pause, .resume, .keyframe])
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .pause, .resume, .keyframe])
 
         // Both frozen: pause. Then the connection drops and comes back — the pause is re-sent,
         // because the laptop the client reconnected to knows nothing of the old one.
@@ -333,47 +335,209 @@ final class StreamBarStateLogicTests: XCTestCase {
                        "nothing names it again: paused again — \(element.id)")
     }
 
-    // MARK: - The sandwich note
+    // MARK: - A connection states its wish (TODO (112))
 
-    /// The bar's note about the held picture is up exactly when the canvas at rest is the baked
-    /// composite: a blend mode, a mask, an effect or a transformation layer anywhere in the
-    /// document, and not for a plain stack or a dimmed layer.
-    func testTheSandwichNoteFollowsWhatPutsTheCanvasOnTheComposite() throws {
+    /// **The first reconcile on every connection says what this end wants, either way** — the
+    /// laptop's pause can outlive the connection that asked for it (an iPad locked in the background,
+    /// a Wi-Fi drop: the socket dies and the laptop never hears a `resume`), and a new connection
+    /// cannot see that. An iPad that assumed the laptop started unpaused left the stream on "Paused"
+    /// until something happened to re-state the wish.
+    func testEveryConnectionStatesItsWishSoAStalePauseOnTheLaptopCannotOutliveTheConnection() throws {
         let (manager, _) = streaming()
+        let coordinator = manager.streamCoordinator
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume],
+                       "an element wants pictures: the first connect resumes, whatever state the laptop is in")
+
+        // The app is backgrounded (pause), the socket dies while it sleeps, the iPad wakes and
+        // reconnects. The laptop may still hold the pause; this end says resume.
+        coordinator.stateChanged(.reconnecting(lastFailure: .other("dropped")), at: Self.endpoint)
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .resume],
+                       "a new connection resumes again, because nothing asked on the old one reached it")
+    }
+
+    /// **A wish this end could not deliver is not a wish it has asked.** `ScreenStreamClient.send` drops
+    /// a command with no live connection, so a pause noted down while the socket was reconnecting
+    /// stood in for one the laptop never heard — and the next connection, finding its wish already
+    /// "asked", said nothing to a laptop that still held an older pause. MEASURED in
+    /// `StreamLiveUITests.testALaptopThatStillHoldsAnOldPauseIsToldToResumeOnTheNewConnection`.
+    func testAWishMadeWhileTheConnectionIsDownIsStatedWhenItComesBack() throws {
+        let (manager, element) = streaming()
+        let coordinator = manager.streamCoordinator
         let layerIndex = manager.currentLayerIndex
-        XCTAssertFalse(manager.streamPictureIsHeldByTheSandwich, "a flat stack: the live picture shows")
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume])
+
+        coordinator.stateChanged(.reconnecting(lastFailure: .other("dropped")), at: Self.endpoint)
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
+        coordinator.sync()
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume],
+                       "nothing is said, and nothing is recorded as said, to a laptop this end is not connected to")
+
+        coordinator.stateChanged(.connected, at: Self.endpoint)
+        XCTAssertEqual(coordinator.sentControlCommands.map(\.command), [.resume, .pause],
+                       "the wish made while the socket was down is stated the moment there is one")
+    }
+
+    // MARK: - The tick after it stood down (TODO (112))
+
+    /// **The tick is armed by a frame's arrival alone, so the end of playback arms one.** Frames that
+    /// land while the animation plays are held in the decoder's slot with no tick to carry them; a
+    /// laptop whose screen then sits still sends no further frame, and the canvas would keep a picture
+    /// the computer no longer shows until its screen next changed.
+    func testTheTickIsArmedWhenPlaybackStopsSoAFrameThatLandedMeanwhileIsShown() throws {
+        let (manager, _) = streaming()
+        let coordinator = manager.streamCoordinator
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        let frame = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 4),
+                                             size: CGSize(width: 8, height: 4))
+        coordinator.frameSourceOverride = { endpoint in
+            endpoint == Self.endpoint ? (1, frame.cgImage!) : nil
+        }
+        manager.play()
+        defer { manager.stopPlayback() }
+        XCTAssertTrue(manager.isPlaying, "Setup")
+        coordinator.sync()   // a canvas pass while playing: the tick stands down
+        coordinator.tick()
+        XCTAssertNil(try XCTUnwrap(vector.streams.first).displayFrame, "Setup: nothing is written while playing")
+
+        manager.stopPlayback()
+        coordinator.sync()   // the pass playback's stop raises
+
+        let shown = expectation(description: "the armed tick writes the frame that landed while playing")
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+            if vector.streams.first?.displayFrame != nil { shown.fulfill() }
+        }
+        wait(for: [shown], timeout: 2)
+        poll.invalidate()
+    }
+
+    // MARK: - What the bar says about the picture
+
+    /// The note is up exactly when the canvas is not the computer's whole picture: the compositor
+    /// draws it (a blend mode, a mask, an effect, a transformation layer anywhere in the document —
+    /// the stream is drawn live but plain), or a pose moves the stream (it holds). A plain stack and
+    /// a dimmed layer have nothing to add; a frozen stream is exact and says nothing.
+    func testThePictureNoteSaysWhyTheCanvasIsNotTheComputersWholePicture() throws {
+        let (manager, element) = streaming()
+        let layerIndex = manager.currentLayerIndex
+        XCTAssertNil(manager.activeStreamPictureNote, "a flat stack: the canvas is the computer's picture")
 
         manager.layers[layerIndex].opacity = 0.4
-        XCTAssertFalse(manager.streamPictureIsHeldByTheSandwich, "a dimmed reference stays on the flat row")
+        XCTAssertNil(manager.activeStreamPictureNote, "a dimmed reference stays on the flat row")
 
         manager.layers[layerIndex].blendMode = .multiply
-        XCTAssertTrue(manager.streamPictureIsHeldByTheSandwich, "a multiplied reference is on the composite")
+        XCTAssertEqual(manager.activeStreamPictureNote, .drawnPlain, "a multiplied reference is on the composite")
         manager.layers[layerIndex].blendMode = .normal
-        XCTAssertFalse(manager.streamPictureIsHeldByTheSandwich)
+        XCTAssertNil(manager.activeStreamPictureNote)
 
         // Another layer's blend mode engages the whole canvas, the stream layer included.
         manager.layers[0].blendMode = .screen
-        XCTAssertTrue(manager.streamPictureIsHeldByTheSandwich, "any layer's blend mode holds it")
-        manager.layers[0].blendMode = .normal
-        XCTAssertFalse(manager.streamPictureIsHeldByTheSandwich)
+        XCTAssertEqual(manager.activeStreamPictureNote, .drawnPlain, "any layer's blend mode puts the canvas on the composite")
 
-        XCTAssertFalse(StreamBarState.sandwichNote.isEmpty)
-        XCTAssertTrue(StreamBarState.sandwichNote.hasPrefix("Live picture pauses"), StreamBarState.sandwichNote)
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
+        XCTAssertNil(manager.activeStreamPictureNote, "a frozen stream is the exact picture")
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, false))
+        XCTAssertEqual(manager.activeStreamPictureNote, .drawnPlain)
+        manager.layers[0].blendMode = .normal
+
+        // A transformation layer that moves the stream: its picture holds.
+        manager.addTransformLayer()
+        let size = CanvasFixture.canvasSize
+        let box = CGRect(origin: .zero, size: size)
+        let moving = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 8, y: 0))
+        manager.layers[manager.layers.count - 1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                                                                raster: .empty(size: size))]
+        manager.layers[manager.layers.count - 1].transform = LayerPose(
+            pose: PoseQuad(restingIn: box),
+            track: TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(restingIn: box)),
+                                         .init(frame: 11, pose: moving)]))
+        manager.currentLayerIndex = layerIndex
+        manager.currentFrame = 6    // mid-move: the walk poses the stream's cel here, and not at the key's rest
+        XCTAssertEqual(manager.activeStreamPictureNote, .heldByAPose, "a moved stream cannot be drawn live")
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [], "and it joins no live pair")
+
+        XCTAssertFalse(StreamPictureNote.drawnPlain.sentence.isEmpty)
+        XCTAssertNotEqual(StreamPictureNote.drawnPlain.sentence, StreamPictureNote.heldByAPose.sentence)
     }
 
-    /// **What the note says is true of the pixels on screen, and the pixels are what this asserts.**
-    /// At rest on an engaged sandwich the canvas shows the baked frame (`FrameBaker.image(atFrame:)`,
-    /// keyed on `FrameBakeKey`, which reads `committedVersion`). With the stream layer on Multiply:
-    /// the bake of frame 0 is green; a red frame ticks in; the key has not moved, the baker has
-    /// nothing to do, and the rest picture is **still green** — the staleness the note names. Then
-    /// an ordinary edit moves the key and the next bake is red. Two operands each way, through the
-    /// real baker; a version-number assertion could not tell "the key stood still" from "nobody
-    /// looked".
-    func testTheRestPictureOnAnEngagedSandwichHoldsWhileTheStreamMovesOnUntilAnEdit() throws {
+    /// **Which streams the canvas draws live**: visible, unfrozen, shown at this frame, unposed.
+    func testTheLiveStreamsAreTheVisibleUnfrozenUnposedOnes() throws {
+        let (manager, element) = streaming()
+        let layerIndex = manager.currentLayerIndex
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [layerIndex], "a stream on a visible layer")
+
+        manager.layers[layerIndex].isVisible = false
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [], "a hidden layer has nothing to draw")
+        manager.layers[layerIndex].isVisible = true
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [layerIndex], "and shown again it is live with no further word")
+
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [], "a frozen stream is the document's picture")
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, false))
+
+        manager.currentFrame = 20   // past the cel's [0, 12)
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [], "no cel at the playhead")
+        manager.currentFrame = 3
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [layerIndex])
+
+        manager.play()
+        defer { manager.stopPlayback() }
+        XCTAssertEqual(manager.liveStreamLayerIndices(), [], "while the animation plays the bake carries the picture (§2.9)")
+    }
+
+    /// **The pair's middle**: the active layer alone until a stream is live, then every leaf from the
+    /// lowest of the two to the highest — so a stroke finds its host already drawing, and the stream's
+    /// frames find theirs.
+    func testTheHostRunIsTheActiveLayerAloneUntilAStreamIsLiveAndThenTheSpanBetween() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.currentFrame = 0
+        _ = manager.insertStream(host: Self.endpoint.host, port: Self.endpoint.port, status: status())
+        manager.commitVectorFloatIfNeeded()
+        let stream = manager.currentLayerIndex
+        manager.addLayer()
+        manager.addLayer()
+        let top = manager.currentLayerIndex
+        func run() -> [Int] { manager.liveHostRun(tree: manager.renderTree(atFrame: 0)) }
+
+        XCTAssertEqual(manager.layers.count, 4)
+        manager.currentLayerIndex = top
+        XCTAssertEqual(run(), Array(stream ... top), "the stream below the active layer: both and what lies between")
+        manager.currentLayerIndex = 0
+        XCTAssertEqual(run(), Array(0 ... stream), "the active layer below the stream")
+        manager.currentLayerIndex = stream
+        XCTAssertEqual(run(), [stream], "the stream is the active layer: the run is that one layer")
+
+        // Not live: the run is what it always was.
+        let element = try XCTUnwrap(manager.layers[stream].cels[0].vector?.streams.first)
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: stream, celIndex: 0, elementID: element.id, true))
+        manager.currentLayerIndex = top
+        XCTAssertEqual(run(), [top], "a frozen stream joins nothing: the active layer alone")
+    }
+
+    /// A stream going live, frozen or hidden moves the sandwich's key, so a pair minted for one cut is
+    /// never taken for the other's.
+    func testTheSandwichKeyFollowsTheLiveStreams() throws {
+        let (manager, element) = streaming()
+        let layerIndex = manager.currentLayerIndex
+        let live = manager.sandwichKey(atFrame: 0, activeLayerIndex: 0)
+        XCTAssertEqual(live.liveStreamLayers, [layerIndex])
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
+        let frozen = manager.sandwichKey(atFrame: 0, activeLayerIndex: 0)
+        XCTAssertEqual(frozen.liveStreamLayers, [])
+        XCTAssertNotEqual(live, frozen)
+    }
+
+    /// **Freeze is exact on a canvas the compositor draws.** A frame arrives on `version` alone, so
+    /// the bake of the frame holds whichever picture it was last baked with — a tick moves no key —
+    /// and Freeze would show an older picture than the one the artist froze on. It moves
+    /// `committedVersion`, so the next bake is the frozen frame. Through the real baker, two operands
+    /// each way: the rest picture before the freeze is the old green, after it the red the artist saw.
+    func testFreezingOnAnEngagedCanvasBakesTheFrameTheArtistFrozeOn() throws {
         let (manager, element) = streaming()
         let layerIndex = manager.currentLayerIndex
         manager.layers[layerIndex].blendMode = .multiply
-        XCTAssertTrue(manager.streamPictureIsHeldByTheSandwich, "Setup: the note is up")
         let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
         // The stream's own picture size is 1920×1080 here; frames of that size keep the fit exact.
         func frame(_ color: UIColor) -> UIImage {
@@ -393,33 +557,29 @@ final class StreamBarStateLogicTests: XCTestCase {
         manager.syncFrameBake(suspended: false)
         drain(baker)
         let keyBefore = try XCTUnwrap(baker.currentKey(atFrame: 0))
-        let restBefore = try XCTUnwrap(baker.image(atFrame: 0), "the baker has frame 0")
-        let centre = pixel(restBefore, 32, 32)
-        XCTAssertGreaterThan(Int(centre.g), Int(centre.r) + 100, "the rest picture is the green frame (over white paper, multiplied)")
+        let restBefore = pixel(try XCTUnwrap(baker.image(atFrame: 0), "the baker has frame 0"), 32, 32)
+        XCTAssertGreaterThan(Int(restBefore.g), Int(restBefore.r) + 100,
+                             "the rest picture is the green frame (over white paper, multiplied)")
 
-        // The stream moves on to red. The key stands still and so does the picture on screen.
+        // The stream moves on to red. A tick moves no bake key: the baked picture cannot carry a frame.
         slot = (2, frame(.red))
         coordinator.tick()
         XCTAssertGreaterThan(Int(pixel(try XCTUnwrap(vector.render().cgImage), 32, 32).r), 100,
-                             "Setup: the cel's own render is red now — the flat row would show it")
+                             "Setup: the cel's own render is red now")
         manager.syncFrameBake(suspended: false)
         drain(baker)
         XCTAssertEqual(baker.currentKey(atFrame: 0), keyBefore, "a tick moves no bake key")
         let restAfterTick = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
-        XCTAssertGreaterThan(Int(restAfterTick.g), Int(restAfterTick.r) + 100,
-                             "the rest picture is still green: that is what the note tells the artist")
+        XCTAssertGreaterThan(Int(restAfterTick.g), Int(restAfterTick.r) + 100, "so the bake is still green")
 
-        // An ordinary edit re-keys the frame, and the next rest picture is the red one.
-        vector.setStreamFrame(id: element.id, image: frame(.red), index: 3)
-        vector.bumpVersion()
-        manager.celContentChangedOutsideStroke(layerID: manager.layers[layerIndex].id,
-                                               celID: manager.layers[layerIndex].cels[0].id)
+        // Freeze: the frozen frame is the document's now, and the next bake is red.
+        XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
         baker.noteDocumentChanged()
         manager.syncFrameBake(suspended: false)
         drain(baker)
-        XCTAssertNotEqual(baker.currentKey(atFrame: 0), keyBefore, "an edit moves the key")
-        let restAfterEdit = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
-        XCTAssertGreaterThan(Int(restAfterEdit.r), Int(restAfterEdit.g) + 100, "and the rest picture follows it")
+        XCTAssertNotEqual(baker.currentKey(atFrame: 0), keyBefore, "freezing re-keys the frame")
+        let restAfterFreeze = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
+        XCTAssertGreaterThan(Int(restAfterFreeze.r), Int(restAfterFreeze.g) + 100, "and the bake is the frame frozen on")
     }
 
     // MARK: - The ping-pong fix (STREAM.md §3/§6): one client per laptop

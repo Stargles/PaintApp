@@ -724,7 +724,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// Refused — and any surface dropped — while nothing this view draws reaches the screen, or
     /// while a derived picture owns the base slot (a posed frame shows the stream where the pose
     /// puts it, which the memo's own coordinates cannot say; that frame is stale by design and the
-    /// bar says so — `StreamBarState.sandwichNote`).
+    /// bar says so — `StreamPictureNote.heldByAPose`).
     func presentStreamFrame(elementID: UUID, isolating ids: Set<UUID>? = nil,
                             posedBy: [UUID: PoseMap] = [:]) {
         guard let vectorCanvas, !hostIsBlanked, interpolationImage == nil,

@@ -117,7 +117,7 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 | 0x01 | HELLO | both | JSON `{"proto":1,"app":"PaintStreamer"\|"PaintApp","version":"…","name":"desktop-cbr0fl6"\|"Kevin's iPad","machineId":"…"}` — first message each way. `machineId` (2026-09-25, the ping-pong fix) is additive and laptop-only: a GUID `Streamer.Core.Settings.GetOrCreateMachineId` mints once and keeps beside the other settings, so the iPad can tell that two `StreamEndpoint`s (a Tailscale IP, a MagicDNS name, its `.ts.net` FQDN, an mDNS `.local` name) are the *same* laptop. Missing on an older build of either side; a Swift `Optional`/C# `string?` decodes that as absent, not a parse failure |
 | 0x02 | STATUS | L→I | JSON `{"source":{"kind":"monitor"\|"window"\|"none","name":"Blender","id":"…"},"width":1920,"height":1080,"fps":30,"codec":"h264","streaming":true}` — on connect, on every source change, on pause/resume. `{"streaming":false,"reason":"Replaced by another connection"}` (2026-09-25) is sent to a client the instant `ProtocolServer` accepts a new one that replaces it, before its socket actually closes — `ScreenStreamClient` matches this exact string and parks (`.replaced`) rather than treating the close that follows as an ordinary drop to reconnect from |
 | 0x03 | VIDEO | L→I | `u8 flags` (bit0 = keyframe) `u64 pts_us` then **one H.264 access unit, Annex-B byte stream**. Every keyframe is preceded by SPS and PPS inside the same payload |
-| 0x04 | CONTROL | I→L | JSON `{"cmd":"pause"\|"resume"\|"keyframe"}` — pause stops encoding server-side; resume restarts it with a keyframe |
+| 0x04 | CONTROL | I→L | JSON `{"cmd":"pause"\|"resume"\|"keyframe"}` — pause stops encoding server-side; resume starts it again, with a keyframe, unless it is already running |
 | 0x10 | FILE_BEGIN | both | JSON `{"id":7,"name":"ref.mp4","size":1234567,"kind":"image"\|"video"\|"other"}` |
 | 0x11 | FILE_CHUNK | both | `u32 id` then bytes, ≤ 256 KiB |
 | 0x12 | FILE_END | both | JSON `{"id":7}` |
@@ -126,6 +126,14 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
 | 0x21 | PONG | both | empty |
 
 **Rules.**
+- **A pause belongs to the connection that asked for it, and every connection states its wish.** The
+  laptop clears a pause when a new connection's HELLO completes (`StreamerSession.OnClientConnectedAsync`)
+  — the old client's socket may have died with its iPad asleep, or been replaced, neither of which is
+  reported as a disconnect in time — and the iPad, which cannot see what state a laptop is in, sends
+  `pause` or `resume` as the first thing it says on every connection (`ScreenStreamCoordinator
+  .syncPauseState`), so a pause that outlived its connection on a build that predates the clear is
+  lifted by the first `resume`. TODO (112): before this, the iPad assumed the laptop began unpaused and
+  said nothing, and the owner's stream sat on "Not streaming — Paused" until something re-sent a wish.
 - The laptop encodes only while a client is connected and not paused; STATUS `streaming:false` means
   the picture is stale on purpose (no source picked, paused, or the capture failed — `reason` field).
 - The laptop sends a keyframe on connect, on every source change, on `resume`, on `keyframe`, and at
@@ -421,17 +429,36 @@ them is TODO (96) and TODO (97) respectively:
 
 Once a second — not per tick — the coordinator also publishes (`celContentChangedOutsideStroke`)
 for the displayed cel, so the layer-panel thumbnail catches up through its 400 ms debounce. The tick
-does nothing while `isPlaying` (2.9) or while the app is backgrounded.
+does nothing while `isPlaying` (2.9) or while the app is backgrounded — and **the edge out of either
+arms one** (`tickSuppressionMayHaveEnded`): the tick is armed by a frame's arrival alone, a frame that
+lands while it stands down waits in the decoder's slot, and a laptop whose screen then sits still
+sends no further frame to arrive. TODO (112): without that the canvas kept a picture the computer no
+longer showed until its screen next changed.
 
-**A canvas on the engaged sandwich at rest shows the stream at whatever the bake froze** — a blend
-mode, a mask, an effect, a container pose. Stage 2 measured the alternative and kept the staleness,
-in words: a per-tick in-memory composite of the current frame MEASURED **45.8 ms a tick on
-CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080 frame, the stream
-layer on Multiply; `StreamSandwichBench`), an order of magnitude over the ~4 ms a 30 Hz tick could
-carry. So the bar says it instead — `StreamBarState.sandwichNote`, *"Live picture pauses while a
-blend mode, mask, effect or transformation layer is in the document"*, shown while
-`CanvasManager.streamPictureIsHeldByTheSandwich`. A *dimmed* reference is a layer opacity, which
-stays on the flat row and stays live; it is a *multiplied* one that pauses. Never silent staleness.
+**A canvas the compositor draws shows a live stream through the live pair** — TODO (112). A blend
+mode, a mask, an effect or a container pose anywhere in the document puts the canvas on a composite
+image, and a frame reaches the screen through its layer host's surface and nowhere else: the bake is
+blind to a frame by construction (`committedVersion`), and a per-tick composite MEASURED **45.8 ms on
+CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080 frame; `StreamSandwichBench`)
+and a canvas-sized image per frame is what killed the render server (§5.3's TODO (97)). Until (112) the
+canvas simply stood on whatever the last bake froze — *"pauses and refuses to update until I draw
+something"* — and the bar said *"Live picture pauses while a blend mode, mask, effect or
+transformation layer is in the document"*; a stroke un-stuck it because it was the one thing that put a
+host between the halves of a live pair, and its commit re-baked. Now **a live stream is what the pair is
+for** (`SandwichPresentation.live`, `streamIsLive`): `CanvasManager.liveHostRun` is the leaves from the
+lowest to the highest of the active layer and every live stream (`liveStreamLayerIndices`: visible,
+unfrozen, a stream on the cel shown at this frame, a leaf, not posed), the pair is cut around that run
+and those hosts draw themselves between the two halves, and the bake — which cannot carry a frame — is
+not the picture to wait for. **The price is the near picture** (owner, 2026-10-01, *"for the fast one it
+can be just the layer without any effects added"*): the layers in the run are drawn plain, and a
+blended or graded layer above it is composited onto transparency. **Freeze is the exact picture** — a
+freeze moves `committedVersion` (`VectorCanvas.setStreamFrozen`) so the bake holds the frame frozen on,
+and the canvas rests on it. The bar says what the picture is, never nothing
+(`StreamPictureNote`, `streamBar.pictureNote`): `.drawnPlain` while a live stream is on a compositor
+canvas, and `.heldByAPose` for the one thing that still cannot be drawn live — a stream a transformation
+layer or a Move channel of its own moves, which is drawn from a derived image (`presentStreamFrame`
+refuses a derived base) and updates when something else on the canvas changes. A *dimmed* reference is
+a layer opacity, which stays on the flat row and says nothing.
 
 MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
 2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main
@@ -447,8 +474,10 @@ Freeze sets `isFrozen` and stops the tick for that element; Unfreeze clears it a
 keyframe. When every stream element on the connection is frozen the client sends `pause`; the first
 unfreeze sends `resume` (whose keyframe §3 guarantees — no second request rides with it), and an
 unfreeze on a connection that was not paused sends `keyframe`. **Freeze is not an undo step** — it is
-a viewing state like the render-resolution knob, persisted with the document. Bake works while
-frozen and bakes the frozen picture.
+a viewing state like the render-resolution knob, persisted with the document — **but it commits the
+picture**: the freeze moves `committedVersion`, so the bake holds the frame frozen on (§5.3) and a
+canvas the compositor draws rests on the exact frozen picture. Bake works while frozen and bakes the
+frozen picture.
 
 **Built (stage 2), with two corrections.** *"Writes the current frame to `lastFrameFileName` at
 once"* is gone: `ProjectStore` stages a whole new package on every save and swaps it in by rename, so
@@ -460,8 +489,9 @@ streams with one id and the artist freezes the one they are standing on; **the f
 element a `StreamPicture` of its own**, since the copies otherwise share one box and the far cel goes
 on receiving frames a frozen picture must not (§5.3). The pause is reconciled by
 one function (`ScreenStreamCoordinator.syncPauseState`) on freeze, on backgrounding, on foregrounding
-and on every `.connected` transition, since a laptop just reconnected to knows nothing of the pause
-the old connection carried; the decoder is reset on `resume` rather than on `pause`, so the resume's
+and on every `.connected` transition, which **states the wish outright whichever it is** (§3) — a
+laptop just reconnected to may or may not still hold the pause the old connection carried; the
+decoder is reset when a `resume` lifts a pause this end asked for, rather than on the `pause`, so the resume's
 keyframe is the first thing decoded and an access unit still in flight after a pause is not turned
 into a keyframe *request* (which the fake streamer answers by restarting the pipeline the pause
 stopped). One consequence to know: the flag lives on the element, and the element is what an undo
@@ -553,7 +583,8 @@ canvas is on the composite. The address row opens `StreamConnectSheet` with a `S
 successful connect there is `CanvasManager.retargetStream` — host, port, label and size rewritten on
 the element in one undo step, placement and picture kept — rather than a second layer. Identifiers
 `streamBar.sourceLabel` / `stateLabel` (value: `live` · `frozen` · `connecting` · `reconnecting` ·
-`notStreaming`) / `freezeButton` / `bakeFrameButton` / `addressButton` / `sandwichNote`.
+`notStreaming`) / `freezeButton` / `bakeFrameButton` / `addressButton` / `pictureNote` (value
+`drawnPlain` · `heldByAPose`, §5.3).
 `StreamBarStateLogicTests` pins the cold-start reach, the word's precedence and the pause protocol.
 
 ### 5.8 Files (2.10)
@@ -799,7 +830,8 @@ updated to observe directly; §7's deploy step is that.
 - The last frame is saved as JPEG q0.9, on save alone (§5.6); the bake snapshot as the image
   path's existing format.
 - A bake's neighbours keep the stream element's id; only the baked cel is re-identified (§5.5).
-- The engaged sandwich says the live picture is paused rather than paying a per-tick composite (§5.3).
+- A live stream on a canvas the compositor draws is drawn by its host between the two halves, the
+  layers around it plain, and the bar says so; Freeze is the exact picture (§5.3).
 - Bitrate ~6 Mbit/s, 30 fps cap, GOP 2 s — tune on measurement.
 - During playback the picture holds; on stop the next tick resumes it.
 

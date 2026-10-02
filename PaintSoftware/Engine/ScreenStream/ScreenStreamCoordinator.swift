@@ -46,6 +46,10 @@ import UIKit
 /// - while the app is in the background — the connection is paused from this end too, so the
 ///   laptop stops encoding for nobody.
 ///
+/// Both are `tickIsSuppressed`, and the tick is armed by a frame's arrival alone — so the edge out of
+/// either arms one (`tickSuppressionMayHaveEnded`), or a frame that landed meanwhile would wait for a
+/// next one a still screen never sends.
+///
 /// An element the Move box holds is written like any other (`setStreamFrame` invalidates nothing
 /// for a suppressed element) and presented inside the float: `CanvasView`'s closure hands the host
 /// the lifted ids and their poses, and the surface rides the box.
@@ -53,14 +57,13 @@ import UIKit
 /// ## What it does not do
 ///
 /// It never bumps `committedVersion`, so the frame bake, the dirty sweep and the sandwich key are
-/// blind to it by construction. The consequence is stated rather than hidden: a document whose
-/// canvas is on the sandwich at rest — a blend mode, a mask, an effect, a container pose — shows
-/// the stream at whatever picture the bake froze, until something else re-bakes that frame.
-/// **Stage 2 measured the alternative and left it** — a per-tick in-memory composite of the frame
-/// is a canvas-sized composite of every layer, MEASURED at tens of milliseconds at 2048²
-/// (`StreamSandwichBench`), an order of magnitude over the ~4 ms the tick could carry — so the
-/// bar says so in words instead (`StreamBarState.sandwichNote`), and a stroke on the layer, which
-/// puts the sandwich mid-stroke, is the one time the live picture reaches an engaged canvas.
+/// blind to a frame by construction — which is why a frame cannot reach the canvas through the baked
+/// composite, and why a document the compositor draws (a blend mode, a mask, an effect, a container
+/// pose) shows its stream the way an edit's near picture is shown: the canvas stands on the live
+/// pair, cut around the stream's layer, whose own host presents the frames
+/// (`CanvasManager.liveHostRun`, `SandwichPresentation.live`). A per-tick composite of the frame was
+/// the alternative and MEASURED tens of milliseconds at 2048² (`StreamSandwichBench`), an order of
+/// magnitude over the ~4 ms the tick could carry.
 ///
 /// ## What the bar reads — STREAM.md §5.6, §5.7
 ///
@@ -92,8 +95,14 @@ final class ScreenStreamCoordinator: ObservableObject {
     @Published private(set) var statuses: [StreamEndpoint: StreamStatus] = [:]
     /// Each live client's connection state as of its last transition. Published for the bar.
     @Published private(set) var connectionStates: [StreamEndpoint: ScreenStreamClient.State] = [:]
-    /// The endpoints this coordinator has told to `pause` and not yet to `resume`.
-    private var pausedEndpoints: Set<StreamEndpoint> = []
+    /// **What this end last asked each endpoint's laptop to do on the connection it holds now** —
+    /// `true` for `pause`, `false` for `resume`. **Absent means nothing has been asked yet, which is
+    /// not the same as "not paused"**: a pause belongs to the connection that asked for it, but a
+    /// laptop that outlived that connection (an iPad locked in the background, a Wi-Fi drop) may still
+    /// hold it, and the new connection cannot tell. So the first reconcile after a connect says the
+    /// wish outright, either way, instead of assuming the laptop starts where this end expects it.
+    /// Cleared by every transition out of `.connected`.
+    private var askedPause: [StreamEndpoint: Bool] = [:]
     /// The connect sheet's pending question, one per endpoint: resolved by the first STATUS after
     /// HELLO, or by the first failure.
     private var pendingConnects: [StreamEndpoint: [CheckedContinuation<StreamStatus, Error>]] = [:]
@@ -102,6 +111,9 @@ final class ScreenStreamCoordinator: ObservableObject {
     private var lastTick: CFAbsoluteTime = 0
     private var lastPublish: CFAbsoluteTime = 0
     private var isInBackground = false
+    /// Whether the tick was held off (`tickIsSuppressed`) the last time anything looked — so the edge
+    /// out of it can arm one.
+    private var tickWasSuppressed = false
     private var observers: [NSObjectProtocol] = []
 
     /// Installed by `CanvasView.Coordinator`: this element on this layer holds a new frame and is
@@ -222,7 +234,7 @@ final class ScreenStreamCoordinator: ObservableObject {
         for (endpoint, client) in clients where !wanted.contains(endpoint) && pendingConnects[endpoint] == nil {
             clients.removeValue(forKey: endpoint)
             connectionStates.removeValue(forKey: endpoint)
-            pausedEndpoints.remove(endpoint)
+            askedPause.removeValue(forKey: endpoint)
             // The ping-pong fix's collapse can leave two keys pointing at one client; stop the
             // socket only once nothing wanted still shares it, or an ambient connection and a
             // stream element naming the same laptop differently would have one of them silently
@@ -231,6 +243,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             if !stillWanted { client.stop() }
         }
         syncPauseState()
+        tickSuppressionMayHaveEnded()
     }
 
     /// Stops every client and forgets every status. The document is closing.
@@ -239,7 +252,7 @@ final class ScreenStreamCoordinator: ObservableObject {
         clients.removeAll()
         statuses.removeAll()
         connectionStates.removeAll()
-        pausedEndpoints.removeAll()
+        askedPause.removeAll()
         for (endpoint, continuations) in pendingConnects {
             for continuation in continuations {
                 continuation.resume(throwing: ConnectFailure(reason: .other("The document was closed."),
@@ -435,7 +448,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             clients[otherEndpoint] = newClient
             connectionStates[otherEndpoint] = connectionStates[newEndpoint]
             statuses[otherEndpoint] = statuses[newEndpoint]
-            pausedEndpoints.remove(otherEndpoint)
+            askedPause.removeValue(forKey: otherEndpoint)
             // A `connect(to: otherEndpoint)` in flight (the sheet's own narrow window, §6) would
             // otherwise wait on a continuation nothing can ever resolve: `otherClient` is stopped
             // and will not call back again, and `newClient`'s own callbacks only ever report under
@@ -514,7 +527,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             collapseIfSameMachine(newEndpoint: endpoint)
             syncPauseState()
         case .reconnecting, .connecting, .stopped, .replaced:
-            for alias in aliasedEndpoints(sharing: endpoint) { pausedEndpoints.remove(alias) }
+            for alias in aliasedEndpoints(sharing: endpoint) { askedPause.removeValue(forKey: alias) }
         }
     }
 
@@ -552,28 +565,26 @@ final class ScreenStreamCoordinator: ObservableObject {
         return sawOne ? true : nil
     }
 
-    /// **Sends `pause` to every connected laptop nothing wants frames from, and `resume` to every
-    /// one something wants them from again.** Idempotent: it compares against `pausedEndpoints`,
-    /// so calling it on every event that could change the answer costs nothing when nothing did.
-    /// `send` is a no-op on a client that is not connected, and `.connected` calls back in here, so
-    /// a pause a reconnect lost is re-sent the moment the laptop answers.
+    /// **Says to every connected laptop what this end wants from it — `pause` when nothing needs its
+    /// pictures, `resume` when something does — and says it again only when the wish changes.**
+    /// Idempotent: it compares against `askedPause`, so calling it on every event that could change
+    /// the answer costs nothing when nothing did. `.connected` calls back in here, so the first
+    /// reconcile of every connection states the wish outright (`askedPause`'s note: a laptop's pause
+    /// can outlive the connection that asked for it, and a connection cannot see that).
     ///
-    /// The decoder is reset on `resume` rather than on `pause`: §3 has the laptop restart with a
-    /// keyframe, and a reset here makes that keyframe the first thing decoded — where a reset on
-    /// `pause` would turn any access unit still in flight into a keyframe *request*, which the
-    /// fake streamer answers by restarting the very pipeline the pause just stopped.
+    /// The decoder is reset when a `resume` lifts a pause this end asked for, rather than on the
+    /// `pause`: §3 has the laptop restart with a keyframe, and a reset here makes that keyframe the
+    /// first thing decoded — where a reset on `pause` would turn any access unit still in flight into
+    /// a keyframe *request*, which the fake streamer answers by restarting the very pipeline the
+    /// pause just stopped. A first `resume` on a connection resets nothing: `connect()` already did.
     ///
-    /// **STREAM.md §6, corrected by stage 4**: `b07984d` (stage 2) read "no element names this
-    /// endpoint" as "leave it alone," to stop a pause/resume pair firing four milliseconds apart on
-    /// every Stream Screen connect — between the sheet's own `connect()` and the element it goes on
-    /// to insert, nothing names the endpoint yet. §6's new bullet asks for more than that stage 2
-    /// ever needed: a document's *ambient* connection (`documentEndpoint`) can sit with no element
-    /// naming it for the rest of a session, and that must read as **paused**, not as "leave alone."
-    /// The two are told apart by `pendingConnects`: it holds a continuation only for the span between
-    /// `connect(to:)` being called and its STATUS (or failure) resolving it, which is exactly stage
-    /// 2's four-millisecond window and never true of the ambient connection, which nothing calls
-    /// `connect(to:)` for. So the four-millisecond flap stays fixed and the ambient connection is now
-    /// paused, by asking a narrower question of `everyElementIsFrozen`'s nil.
+    /// **A connection nothing names is paused, and the one exception is the sheet's own window.**
+    /// Between `connect(to:)` being called and the element the sheet goes on to insert, nothing
+    /// names the endpoint yet, and a `pause` there was a `pause`/`resume` pair four milliseconds apart
+    /// on every Stream Screen connect — each a pipeline restart on the laptop. `pendingConnects`
+    /// holds a continuation only for that span (STATUS or failure resolves it), and is never true of
+    /// a document's ambient connection (`documentEndpoint`), which nothing calls `connect(to:)` for
+    /// and which therefore reads as paused, so the laptop does not encode for a canvas nobody shows.
     private func syncPauseState() {
         // **Per unique client, not per dictionary key.** Once the ping-pong fix's
         // `collapseIfSameMachine` has folded two spellings of one laptop onto one client, `clients`
@@ -587,38 +598,45 @@ final class ScreenStreamCoordinator: ObservableObject {
             guard !handled.contains(id) else { continue }
             handled.insert(id)
             let aliases = aliasedEndpoints(sharing: endpoint)
+            // **Nothing can be said to a laptop this end is not connected to, and nothing is recorded
+            // as said.** `ScreenStreamClient.send` drops a command with no live connection, so a
+            // wish noted down here while reconnecting would stand in for one the laptop never heard —
+            // MEASURED in `StreamLiveUITests`: backgrounded (pause), socket dropped, one canvas pass
+            // while reconnecting wrote "paused" into the mirror, the foreground wrote "resumed", and
+            // the new connection found its wish already "asked" and sent nothing to a laptop that
+            // still held the old pause. `.connected` comes back through here once there is one.
+            guard aliases.contains(where: { connectionStates[$0] == .connected }) else { continue }
 
             // Paused for the background, for the artist having frozen everything on it, or for
-            // nothing naming it at all. The one exception is the moment between the connect sheet's
-            // own `connect()` and the element it is about to insert — see the doc comment above.
-            let wanted: Bool
+            // nothing naming it at all.
+            let wantsPaused: Bool
             if isInBackground {
-                wanted = false
+                wantsPaused = true
             } else if let allFrozen = everyElementIsFrozen(atAnyOf: aliases) {
-                wanted = !allFrozen
+                wantsPaused = allFrozen
             } else if aliases.contains(where: { pendingConnects[$0] != nil }) {
-                // about to be claimed — do not flap
-                wanted = !aliases.contains(where: { pausedEndpoints.contains($0) })
+                continue    // about to be claimed by the sheet's own insert: say nothing, do not flap
             } else {
-                wanted = false                                  // §6: nothing names it, so: paused
+                wantsPaused = true
             }
-            let paused = aliases.contains(where: { pausedEndpoints.contains($0) })
-            if !wanted, !paused {
+            let asked = aliases.lazy.compactMap { self.askedPause[$0] }.first
+            guard asked != wantsPaused else { continue }
+            for alias in aliases { askedPause[alias] = wantsPaused }
+
+            if wantsPaused {
                 client.pause()
-                for alias in aliases { pausedEndpoints.insert(alias) }
                 sentControlCommands.append((endpoint, .pause))
-            } else if wanted, paused {
-                client.decoder.reset()
-                client.resume()
-                for alias in aliases { pausedEndpoints.remove(alias) }
-                sentControlCommands.append((endpoint, .resume))
-                // The laptop's STATUS after `resume` is on its way; until it lands the stored one
-                // still says "Paused by client", which is a pause this end has just lifted. Say so.
-                if var status = statuses[endpoint], !status.streaming {
-                    status.streaming = true
-                    status.reason = nil
-                    for alias in aliases { statuses[alias] = status }
-                }
+                continue
+            }
+            if asked == true { client.decoder.reset() }
+            client.resume()
+            sentControlCommands.append((endpoint, .resume))
+            // The laptop's STATUS after `resume` is on its way; until it lands the stored one still
+            // says "Paused by client", which is a pause this end has just lifted. Say so.
+            if asked == true, var status = statuses[endpoint], !status.streaming {
+                status.streaming = true
+                status.reason = nil
+                for alias in aliases { statuses[alias] = status }
             }
         }
     }
@@ -627,7 +645,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// change was a Freeze → Unfreeze: §5.4 asks for a keyframe on unfreeze, and `resume` carries
     /// one by §3, so the explicit request goes out only when the connection was not paused.
     func elementFrozenStateChanged(endpoint: StreamEndpoint, unfroze: Bool) {
-        let wasPaused = pausedEndpoints.contains(endpoint)
+        let wasPaused = askedPause[endpoint] == true
         syncPauseState()
         if unfroze, !wasPaused, let client = clients[endpoint] {
             client.requestKeyframe()
@@ -688,7 +706,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     func tick() {
         let started = CFAbsoluteTimeGetCurrent()
         lastTick = started
-        guard let manager, !manager.isPlaying, !isInBackground else { return }
+        guard let manager, !tickIsSuppressed else { return }
         tickCount += 1
         let signpost = Self.signposter.beginInterval("tick")
         defer { Self.signposter.endInterval("tick", signpost) }
@@ -745,6 +763,21 @@ final class ScreenStreamCoordinator: ObservableObject {
         }
     }
 
+    /// STREAM.md §2.9's playback and the background: the two states the tick stands down in.
+    private var tickIsSuppressed: Bool { manager?.isPlaying == true || isInBackground }
+
+    /// **Arms a tick on every edge out of `tickIsSuppressed`.** The tick is armed by a frame's arrival
+    /// and by nothing else, and a frame that lands while it stands down is held in the decoder's slot
+    /// with no tick to carry it — a laptop whose screen then stays still sends no further frame to
+    /// arrive, so the picture on the canvas would stay one the computer no longer shows until the
+    /// screen next changed. Run from `sync()`, which a canvas pass makes when playback stops, and from
+    /// the foreground notification.
+    private func tickSuppressionMayHaveEnded() {
+        let suppressed = tickIsSuppressed
+        defer { tickWasSuppressed = suppressed }
+        if tickWasSuppressed, !suppressed { frameArrived() }
+    }
+
     private func latestFrame(for endpoint: StreamEndpoint) -> (index: Int, image: CGImage)? {
         if let frameSourceOverride { return frameSourceOverride(endpoint) }
         return clients[endpoint]?.decoder.latestImage()
@@ -755,6 +788,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     private func appDidEnterBackground() {
         isInBackground = true
         syncPauseState()
+        tickSuppressionMayHaveEnded()
     }
 
     private func appWillEnterForeground() {
@@ -762,6 +796,7 @@ final class ScreenStreamCoordinator: ObservableObject {
         // `resume` carries a keyframe by §3, so nothing here asks for a second one; an endpoint
         // every element of which is frozen stays paused, which is what the artist left it as.
         syncPauseState()
+        tickSuppressionMayHaveEnded()
     }
 }
 
@@ -798,10 +833,32 @@ enum StreamBarState: Equatable {
         case .pausedByOther: return "Paused — another connection took the stream"
         }
     }
+}
 
-    /// The sentence the bar adds while the layer sits in an engaged sandwich at rest — a blend
-    /// mode, a mask, an effect or a transformation layer anywhere in the document puts the whole
-    /// canvas on the baked composite, which `committedVersion` keeps blind to a live frame by
-    /// design (see `ScreenStreamCoordinator`'s header). Never silent staleness.
-    static let sandwichNote = "Live picture pauses while a blend mode, mask, effect or transformation layer is in the document"
+/// **What the bar adds beneath the state word when the picture on the canvas is not the whole of what
+/// the computer shows** — never silent. Computed by `CanvasManager.activeStreamPictureNote` and read
+/// by `StreamBar`; the bar says nothing while the canvas is exactly the computer's picture.
+enum StreamPictureNote: Equatable {
+    /// A blend mode, mask, effect or transformation layer is in the document, so the canvas is the
+    /// compositor's, and a live frame cannot go through it per frame (MEASURED at 45.8 ms a
+    /// composite on CoreGraphics and 72.7 ms on Metal, Debug, 2048²: `StreamSandwichBench`). The
+    /// stream is drawn live between the composite of everything below it and of everything above, by
+    /// its own layer host — the picture an edit shows while its bake is on the way
+    /// (`SandwichPresentation.live`) — and **Freeze is the exact picture**: the frozen frame is
+    /// baked with the rest.
+    case drawnPlain
+
+    /// A transformation layer or a Move channel of the stream's own moves it, and a moved picture is
+    /// drawn from a derived image the live surface cannot sit over: the stream updates when something
+    /// else on the canvas is edited.
+    case heldByAPose
+
+    var sentence: String {
+        switch self {
+        case .drawnPlain:
+            return "While live, blend modes, masks and effects are not applied. Freeze for the exact picture."
+        case .heldByAPose:
+            return "A pose moves this screen, so it updates only when something else on the canvas changes."
+        }
+    }
 }

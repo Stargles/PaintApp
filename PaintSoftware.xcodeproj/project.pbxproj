@@ -316,6 +316,10 @@
 		B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */; };
 		39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */; };
 		8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */; };
+		0F71EB2E4D4EE006595A4A8F /* StreamLiveEngagedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */; };
+		A466B8D5372493291632700E /* StreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA208F3D9C12070A6A7BF90 /* StreamUITestCase.swift */; };
+		62DD1FD5060A263641E08AB8 /* StreamLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC1025E1D84658BC8C43BFA /* StreamLiveUITests.swift */; };
+		B6AA93E2D1CE9EEEF2F3E9CA /* FakeLaptopStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EC54E53FD6FD75D4428C5F3 /* FakeLaptopStreamer.swift */; };
 		14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */; };
 		B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */; };
 		AA39A488A7B847076BEB6241 /* StreamConnectFailureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */; };
@@ -870,6 +874,10 @@
 		D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSandwichBench.swift; sourceTree = "<group>"; };
 		85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamPersistenceLogicTests.swift; sourceTree = "<group>"; };
 		B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBarStateLogicTests.swift; sourceTree = "<group>"; };
+		EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamLiveEngagedUITests.swift; sourceTree = "<group>"; };
+		9BA208F3D9C12070A6A7BF90 /* StreamUITestCase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamUITestCase.swift; sourceTree = "<group>"; };
+		BEC1025E1D84658BC8C43BFA /* StreamLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamLiveUITests.swift; sourceTree = "<group>"; };
+		2EC54E53FD6FD75D4428C5F3 /* FakeLaptopStreamer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FakeLaptopStreamer.swift; sourceTree = "<group>"; };
 		448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBakeLogicTests.swift; sourceTree = "<group>"; };
 		E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamDiscoveryLogicTests.swift; sourceTree = "<group>"; };
 		AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamConnectFailureLogicTests.swift; sourceTree = "<group>"; };
@@ -1295,6 +1303,10 @@
 				D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */,
 				85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */,
 				B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */,
+				EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */,
+				9BA208F3D9C12070A6A7BF90 /* StreamUITestCase.swift */,
+				BEC1025E1D84658BC8C43BFA /* StreamLiveUITests.swift */,
+				2EC54E53FD6FD75D4428C5F3 /* FakeLaptopStreamer.swift */,
 				448C7EDB3EDFC912ECFCEDD3 /* StreamBakeLogicTests.swift */,
 				E4D527CA24F457AD7901D9CB /* StreamDiscoveryLogicTests.swift */,
 				AAA9AC22B6B0952EB759A898 /* StreamConnectFailureLogicTests.swift */,
@@ -2303,6 +2315,10 @@
 				B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */,
 				39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */,
 				8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */,
+				0F71EB2E4D4EE006595A4A8F /* StreamLiveEngagedUITests.swift in Sources */,
+				A466B8D5372493291632700E /* StreamUITestCase.swift in Sources */,
+				62DD1FD5060A263641E08AB8 /* StreamLiveUITests.swift in Sources */,
+				B6AA93E2D1CE9EEEF2F3E9CA /* FakeLaptopStreamer.swift in Sources */,
 				14D82D4DE717D1F9D61DD998 /* StreamBakeLogicTests.swift in Sources */,
 				B1E44B5508D8FDF4DE783BD5 /* StreamDiscoveryLogicTests.swift in Sources */,
 				AA39A488A7B847076BEB6241 /* StreamConnectFailureLogicTests.swift in Sources */,

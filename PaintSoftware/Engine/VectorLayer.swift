@@ -1705,10 +1705,17 @@ final class VectorCanvas {
     /// canvas starts empty and is told again on the next tick, which costs one region bookkeeping.
     private var streamFrameIndexes: [UUID: Int] = [:]
 
-    /// **Sets one stream element's `isFrozen` and invalidates nothing** — STREAM.md §5.4. A freeze is
-    /// a viewing state, not an edit: the picture on the cel is exactly the picture that was there,
-    /// so no memo is stale and neither `version` nor `committedVersion` moves. The flag is persisted
-    /// with the document and read by `ScreenStreamCoordinator.tick`, which skips a frozen element.
+    /// **Sets one stream element's `isFrozen`** — STREAM.md §5.4. A freeze is a viewing state, not an
+    /// edit: the picture on the cel is exactly the picture that was there, so no pixel is stale and
+    /// no memo is dropped (`.region(.null)`, `invalidateRenderOnly`'s proof of exactly that). The
+    /// flag is persisted with the document and read by `ScreenStreamCoordinator.tick`, which skips a
+    /// frozen element.
+    ///
+    /// **A freeze does move `committedVersion`, and that is what makes it exact.** Frames arrive on
+    /// `version` alone (`setStreamFrame`), so the bake of a frame the stream spans holds whichever
+    /// picture it was last baked with — and a frozen element is drawn by the bake wherever the
+    /// compositor draws the canvas. Without the move, Freeze on such a canvas would show an older
+    /// picture than the one the artist froze on. Unfreezing changes no picture and moves nothing.
     ///
     /// **A freeze gives the element a `StreamPicture` of its own**, holding the frame it froze on:
     /// the box is shared with every other copy of the element — the cel on the far side of a Bake
@@ -1724,6 +1731,7 @@ final class VectorCanvas {
         stream.isFrozen = frozen
         if frozen { stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index) }
         _elements[index] = .stream(stream)
+        if frozen { invalidateRenderOnly(.region(.null)) }
         return true
     }
 

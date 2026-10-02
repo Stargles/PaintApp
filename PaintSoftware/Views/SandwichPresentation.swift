@@ -39,6 +39,13 @@ enum SandwichPresentation: String {
     /// without any effects added, no need to try and approximate"*, and the bake replaces it when it
     /// lands. A layer above that blends is the same class of approximation as the active layer's own
     /// mode, so it takes the same rule rather than a wait of its own.
+    ///
+    /// **A live stream is the other thing the pair is for, and there the bake never replaces it**
+    /// (TODO (112)). A frame reaches the screen through its layer's host, never through a composite
+    /// (`ScreenStreamCoordinator`), so on a canvas the compositor draws the host has to be the middle
+    /// of the pair or the stream stands on whatever the last bake froze — the owner's *"pauses and
+    /// refuses to update until I draw something"*, where the drawing was the one thing that put a host
+    /// there. While a stream is live the pair is the picture and the bake is not waited for.
     case live
 
     /// **A transform edit's bands** — TODO (125): the frame cut around the leaves the edit moves,
@@ -69,6 +76,10 @@ enum SandwichPresentation: String {
     /// - Otherwise a bake for this key is the whole truth, and wins.
     /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
     ///   this frame — until the bake or the live pair minted for the result replaces them.
+    /// - **A live stream keeps the canvas on the pair** whatever the bake says: a bake is the picture
+    ///   that cannot carry a frame, so it is not the picture to wait for. The pair is shown once it is
+    ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
+    ///   moment its pair is current rather than when a bake lands.
     /// - Otherwise a lifted stroke stays on its pair while the pair is cut here (trap 2).
     /// - Otherwise an edit's pair is shown if it is for this key, and **kept** if it is merely stale —
     ///   one edit behind, at most, and that edit's rebuild is already on its way. Falling back to the
@@ -80,7 +91,7 @@ enum SandwichPresentation: String {
     ///   nothing.
     static func next(from current: SandwichPresentation, strokeIsLive: Bool, transformEditIsLive: Bool,
                      bakeIsCurrent: Bool, livePair: LivePairFit,
-                     holdsBandsOfThisFrame: Bool) -> SandwichPresentation {
+                     holdsBandsOfThisFrame: Bool, streamIsLive: Bool) -> SandwichPresentation {
         if strokeIsLive { return .midStroke }
         if transformEditIsLive {
             switch livePair {
@@ -89,13 +100,13 @@ enum SandwichPresentation: String {
             case .none: return .rest
             }
         }
-        if bakeIsCurrent { return .rest }
+        if bakeIsCurrent, !streamIsLive { return .rest }
         if current == .moving, holdsBandsOfThisFrame { return .moving }
         switch livePair {
         case .none:
             return .rest
         case .stale, .current:
-            if current == .midStroke { return .midStroke }
+            if current == .midStroke, !(streamIsLive && livePair == .current) { return .midStroke }
             return livePair == .current || current == .live ? .live : .rest
         }
     }
@@ -137,16 +148,17 @@ enum LivePairFit: Equatable {
     }
 }
 
-/// **Where a live picture is cut** — around the active layer, or around a transform edit's runs.
+/// **Where a live picture is cut** — around the hosts that draw, or around a transform edit's runs.
 ///
 /// By id rather than by index, because an index names a different layer after an insert or a delete
 /// below it, and a pair cut at the old one would then be drawn around the wrong host.
 enum LivePairCut: Equatable {
 
-    /// A stroke's pair, or an edit's: the active layer drawn by its own host between two halves.
-    /// **With its frame**, because the host draws the frame the canvas is on and must not stand
-    /// between halves from another.
-    case aroundHost(frame: Int, layerID: UUID)
+    /// A stroke's pair, or an edit's, or a live stream's: the layers `CanvasManager.liveHostRun`
+    /// names — the active layer, with every live stream and what lies between — drawn by their own
+    /// hosts between two halves. **With its frame**, because the hosts draw the frame the canvas is
+    /// on and must not stand between halves from another.
+    case aroundHost(frame: Int, layerIDs: [UUID])
 
     /// A transform edit's bands, around the runs it moves (`CanvasManager.liveTransformRuns`).
     /// **Without a frame**: every band is a picture of one moment, so bands from the previous frame

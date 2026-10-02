@@ -556,7 +556,10 @@ class ClientSession:
             await self.engine.stop()
             await self.send_status(reason="Paused by client")
         elif cmd == "resume":
-            await self.engine.start()
+            # Idempotent, like Streamer.Core's: a client states its wish on every connect (§3), and
+            # a pipeline that is already running has nothing to restart.
+            if not self.engine.streaming:
+                await self.engine.start()
             await self.send_status()
         elif cmd == "keyframe":
             await self.engine.restart()

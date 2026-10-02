@@ -19,16 +19,18 @@ final class SandwichPresentationLogicTests: XCTestCase {
     private static let fits: [LivePairFit] = [.none, .stale, .current]
 
     /// `SandwichPresentation.next` with every fact not under test at its quiet value: no transform
-    /// edit, and no bands held of this frame.
+    /// edit, no bands held of this frame, and no live stream.
     private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
-                      bake: Bool, pair: LivePairFit, bands: Bool = false) -> SandwichPresentation {
+                      bake: Bool, pair: LivePairFit, bands: Bool = false,
+                      stream: Bool = false) -> SandwichPresentation {
         SandwichPresentation.next(from: current, strokeIsLive: stroke, transformEditIsLive: edit,
-                                  bakeIsCurrent: bake, livePair: pair, holdsBandsOfThisFrame: bands)
+                                  bakeIsCurrent: bake, livePair: pair, holdsBandsOfThisFrame: bands,
+                                  streamIsLive: stream)
     }
 
     /// Distinct keys, cheaply: everything equal but the cut index.
     private func key(_ n: Int) -> SandwichKey {
-        SandwichKey(tree: [], activeLayerIndex: n, contents: [], renderResolution: .full,
+        SandwichKey(tree: [], activeLayerIndex: n, liveStreamLayers: [], contents: [], renderResolution: .full,
                     canvasBackgroundColor: .white, isCanvasBackgroundVisible: true)
     }
 
@@ -188,6 +190,62 @@ final class SandwichPresentationLogicTests: XCTestCase {
         XCTAssertEqual(pass(edit: false, bake: true, pair: .current, bands: false), .rest, "its bake lands")
     }
 
+    // MARK: - A live stream (TODO (112))
+
+    /// **A live stream's frames reach the screen through its layer's host and no other way**, so on a
+    /// canvas the compositor draws, the pair — whose middle is that host — is the picture, and the
+    /// bake, which is blind to a frame by construction, is not waited for.
+    func testALiveStreamKeepsTheCanvasOnItsPairWhateverTheBakeSays() {
+        for current in [SandwichPresentation.disengaged, .rest, .live, .midStroke] {
+            for bake in [false, true] {
+                XCTAssertEqual(next(current, bake: bake, pair: .current, stream: true), .live,
+                               "from \(current), bake current \(bake)")
+            }
+        }
+    }
+
+    /// The pair keeps its two guards with a stream live: a stale pair is kept where it is on screen
+    /// and never entered from the bake, and no pair means the bake is the picture on hand.
+    func testALiveStreamsStalePairIsKeptNeverEnteredAndNoPairFallsBackToTheBake() {
+        for bake in [false, true] {
+            XCTAssertEqual(next(.live, bake: bake, pair: .stale, stream: true), .live)
+            XCTAssertEqual(next(.midStroke, bake: bake, pair: .stale, stream: true), .midStroke)
+            XCTAssertEqual(next(.rest, bake: bake, pair: .stale, stream: true), .rest)
+            XCTAssertEqual(next(.disengaged, bake: bake, pair: .stale, stream: true), .rest)
+            for current in Self.all where current != .midStroke {
+                XCTAssertEqual(next(current, bake: bake, pair: .none, stream: true), .rest,
+                               "from \(current): no pair cut here, the bake is the picture on hand")
+            }
+        }
+    }
+
+    /// Trap 2 waits for a bake, and a stream's canvas never rests on one: a lifted stroke leaves the
+    /// mid-stroke presentation for the live one the moment its pair is current.
+    func testAStrokeLiftedOverALiveStreamSettlesOnTheLivePairNotOnABake() {
+        XCTAssertEqual(next(.midStroke, bake: false, pair: .stale, stream: true), .midStroke, "the key moved at lift")
+        XCTAssertEqual(next(.midStroke, bake: false, pair: .current, stream: true), .live, "its pair landed")
+        XCTAssertEqual(next(.midStroke, stroke: true, bake: true, pair: .current, stream: true), .midStroke,
+                       "and a stroke under the pen still wins")
+    }
+
+    /// The owner's report, pass by pass: a canvas the compositor draws, a stream going live on it.
+    /// The first pass has no pair (the bake is the only picture), the pair lands and takes over, the
+    /// bake landing changes nothing, and once the stream is no longer live (frozen, hidden) the bake
+    /// is the picture again.
+    func testALiveStreamIsOnItsPairFromTheFirstPairToTheLastFrame() {
+        var shown = SandwichPresentation.disengaged
+        func pass(bake: Bool, pair: LivePairFit, stream: Bool) -> SandwichPresentation {
+            shown = next(shown, bake: bake, pair: pair, stream: stream)
+            return shown
+        }
+        XCTAssertEqual(pass(bake: false, pair: .none, stream: true), .rest, "engage: nothing minted yet")
+        XCTAssertEqual(pass(bake: false, pair: .current, stream: true), .live, "the pair lands")
+        XCTAssertEqual(pass(bake: true, pair: .current, stream: true), .live,
+                       "the bake lands: the stream's frames are not in it, so the pair stays")
+        XCTAssertEqual(pass(bake: true, pair: .none, stream: false), .rest,
+                       "frozen: the cut moved, the bake holds the frozen frame")
+    }
+
     func testTheHostDrawsItselfExactlyInTheTwoLivePresentations() {
         XCTAssertFalse(SandwichPresentation.disengaged.activeHostDrawsItself)
         XCTAssertFalse(SandwichPresentation.rest.activeHostDrawsItself)
@@ -206,31 +264,31 @@ final class SandwichPresentationLogicTests: XCTestCase {
     // MARK: - LivePairFit
 
     func testNoPairIsNoFit() {
-        XCTAssertEqual(LivePairFit(held: nil, key: key(0), cut: LivePairCut.aroundHost(frame: 0, layerID: layerA)),
+        XCTAssertEqual(LivePairFit(held: nil, key: key(0), cut: LivePairCut.aroundHost(frame: 0, layerIDs: [layerA])),
                        .none)
     }
 
     /// Equal keys are byte-identical halves by `SandwichKey`'s sufficiency argument, which holds
     /// across frames — so a pair for this key fits whatever frame it was cut at.
     func testAPairForThisKeyIsCurrentWhereverItWasCut() {
-        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA]))
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA])),
                        .current)
-        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 7, layerID: layerA)),
+        XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: LivePairCut.aroundHost(frame: 7, layerIDs: [layerA])),
                        .current)
     }
 
     func testAnOlderPairCutHereIsStale() {
-        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA]))
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA])),
                        .stale)
     }
 
     func testAnOlderPairCutAtAnotherFrameOrLayerDoesNotFit() {
-        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerID: layerA))
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 4, layerID: layerA)),
+        let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA]))
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 4, layerIDs: [layerA])),
                        .none, "another frame")
-        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerID: layerB)),
+        XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerB])),
                        .none, "another layer between the halves")
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: nil), .none, "no active layer")
     }
@@ -241,7 +299,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// host and of the other a picture.
     func testAPictureFitsOnlyACutOfItsOwnKind() {
         let runs = LivePairCut.aroundRuns([[layerA]])
-        let host = LivePairCut.aroundHost(frame: 3, layerID: layerA)
+        let host = LivePairCut.aroundHost(frame: 3, layerIDs: [layerA])
         XCTAssertEqual(LivePairFit(held: (key: key(0), cut: runs), key: key(0), cut: host), .none)
         XCTAssertEqual(LivePairFit(held: (key: key(0), cut: host), key: key(0), cut: runs), .none)
     }

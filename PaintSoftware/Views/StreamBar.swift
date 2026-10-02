@@ -18,8 +18,8 @@ import SwiftUI
 ///
 /// **No control here is allowed to be pressed and do nothing.** Bake Frame with no picture yet
 /// raises `CanvasNotice.streamBakeRefused` and says why; while the canvas is on the baked
-/// composite the bar says in words that the live picture is held (`StreamBarState.sandwichNote`),
-/// rather than leaving the artist to wonder why a Live stream is not moving.
+/// composite or a pose moves the stream the bar says in words what the picture is
+/// (`StreamPictureNote`), rather than leaving the artist to wonder why a Live stream looks as it does.
 struct StreamBar: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject var coordinator: ScreenStreamCoordinator
@@ -100,12 +100,13 @@ struct StreamBar: View {
                 Spacer(minLength: 0)
             }
 
-            if canvasManager.streamPictureIsHeldByTheSandwich {
-                Text(StreamBarState.sandwichNote)
+            if let note = canvasManager.activeStreamPictureNote {
+                Text(note.sentence)
                     .font(.caption2)
                     .foregroundColor(.gray)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("streamBar.sandwichNote")
+                    .accessibilityIdentifier("streamBar.pictureNote")
+                    .accessibilityValue(note == .heldByAPose ? "heldByAPose" : "drawnPlain")
             }
         }
         .padding(.horizontal, 16)

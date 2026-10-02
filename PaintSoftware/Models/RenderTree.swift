@@ -872,6 +872,9 @@ extension RenderNode {
 
 // MARK: - Derivation
 
+/// One walk's three answers — the tree, §4.4's per-leaf poses and §5.5's per-leaf source frames.
+typealias RenderWalk = (tree: [RenderNode], poses: [Int: PoseMap], frames: [Int: Int])
+
 extension CanvasManager {
 
     /// The stack **at one frame** as a render tree, bottom-to-top: the last element composites over
@@ -915,7 +918,7 @@ extension CanvasManager {
     /// (a leaf's opacity and effect are numbers by the time they are nodes), so what a repeated leaf
     /// needs is for its cel, its derivation and its version to be looked up at the source frame,
     /// which is `leafSnapshots`' job and not the compositor's.
-    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: PoseMap], frames: [Int: Int]) {
+    func renderTreeAndPoses(atFrame frame: Int) -> RenderWalk {
         var poses: [Int: PoseMap] = [:]
         var frames: [Int: Int] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame, documentFrame: frame,
