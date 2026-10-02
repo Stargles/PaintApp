@@ -310,7 +310,8 @@ final class InkUnderTransformUITests: PaintUITestCase {
         XCTAssertLessThan(red(0.04, 0.2), 60, "the left edge of the shown artwork is not the dark end of the ramp")
         XCTAssertGreaterThan(red(0.96, 0.2), 220, "the right edge of the shown artwork is not the light end")
         let mid = red(0.5, 0.2)
-        XCTAssertTrue((100...160).contains(mid), "the middle of the shown artwork is not the middle of the ramp (red \(mid))")
+        XCTAssertTrue((80...118).contains(mid),
+                      "the middle of the shown artwork is not the middle of the ramp — Oklab's 99 for black to white, not sRGB's 128 (red \(mid))")
     }
 
     /// **The wand on a vector layer selects the ink the artist tapped.** Two marks drawn on the
