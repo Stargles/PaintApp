@@ -73,9 +73,8 @@ extension CanvasManager {
     /// (`StreamPictureNote.heldByAPose`). Empty while the animation plays: the tick stands down then
     /// (§2.9) and playback reads the bake.
     ///
-    /// **Asked of every pass on an engaged canvas and of nothing else's cost**: a document with no
-    /// stream answers from one memoized flag per cel, which is what `ScreenStreamCoordinator.sync`
-    /// already pays beside it.
+    /// **Cheap for a document with no stream**: it answers from one memoized flag per cel, which is
+    /// what `ScreenStreamCoordinator.sync` already pays beside it on every canvas pass.
     @MainActor
     func liveStreamLayerIndices(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil) -> [Int] {
         guard !isPlaying else { return [] }
