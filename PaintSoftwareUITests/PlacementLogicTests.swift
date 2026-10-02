@@ -423,8 +423,17 @@ final class PlacementLogicTests: XCTestCase {
         XCTAssertEqual(second.transform.position.x, 30, accuracy: 0.01, "a second picture at the same place does not cascade")
         XCTAssertEqual(second.transform.position.y, 30, accuracy: 0.01)
 
+        // **A drag that is mostly vertical sizes the picture by its height**, so the pen rides the
+        // picture's top or bottom edge and the width is four times the height: a square box would read
+        // the same pen as a 10-point picture. Mutation caught: dragging the picture out as a square.
+        XCTAssertTrue(manager.dragOut(.media(PrimedMedia(source: .image(picture), displaySize: picture.size)),
+                                      from: pen(30, 30), to: pen(32, 35)))
+        let tall = try XCTUnwrap(vector.elements.compactMap(\.image).last)
+        XCTAssertEqual(tall.transform.scale * 40, 40, accuracy: 0.01,
+                       "half the height is the pen's 5 points, so the picture is 10 tall and 40 wide")
+
         manager.undo()
-        XCTAssertEqual(vector.elements.compactMap(\.image).count, 1, "one undo took the second away")
+        XCTAssertEqual(vector.elements.compactMap(\.image).count, 2, "one undo took the third away")
     }
 
     /// A picture dragged out on a layer that cannot hold it gets a vector layer, as an import does.
