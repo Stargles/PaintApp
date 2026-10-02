@@ -67,6 +67,17 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertTrue(button.waitForNonExistence(timeout: 5), "choosing a row closes the Add menu")
         XCTAssertEqual(primedObjectName(app), name, "the Add icon says what the next pen-down places")
         XCTAssertTrue(app.buttons["toolbar.addButton"].isSelected, "…and is lit while it is primed")
+        attach(app, "primed-\(name)")
+    }
+
+    /// The rail's sliders are a `Slider` rotated -90°, which `adjust(toNormalizedSliderPosition:)` does
+    /// not move and a touch away from the thumb does not grab (`BrushSizeSliderUITests` found both). So
+    /// the caller says where the thumb is and where it should go, as normalised dy in the rotated frame:
+    /// 0 is the visual top, the maximum.
+    private func dragRailSlider(_ slider: XCUIElement, fromNormalizedDy from: CGFloat, toNormalizedDy to: CGFloat) {
+        let start = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+        let end = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+        start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
     }
 
     private func undo(_ app: XCUIApplication) {
@@ -89,6 +100,8 @@ final class FillObjectUITests: PaintUITestCase {
         prime(app, row: "add.rectangleRow", named: "rectangle")
         XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)),
                       "priming places nothing: the shape comes with the pen")
+        XCTAssertTrue(app.sliders["sideToolbar.brushOpacitySlider"].exists, "the rail keeps the dial a shape has: its opacity")
+        XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists, "…and not the brush's size, which the pen is about to set")
 
         // A diagonal-ish drag: half the square's side is the larger of the two travels, 0.18 of the paper.
         dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.68, 0.64))
@@ -268,7 +281,7 @@ final class FillObjectUITests: PaintUITestCase {
         let width = app.sliders["sideToolbar.gradientWidthSlider"]
         XCTAssertTrue(width.waitForExistence(timeout: 5), "the left rail shows the Width slider while a gradient is primed")
         XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists, "…in place of the brush's size")
-        width.adjust(toNormalizedSliderPosition: 0.49)
+        dragRailSlider(width, fromNormalizedDy: 0.09, toNormalizedDy: 0.5)   // the thumb starts at 100%, the top
 
         dragOnCanvas(app, from: paperPoint(canvas, 0.2, 0.5), to: paperPoint(canvas, 0.8, 0.5))
 
@@ -295,19 +308,22 @@ final class FillObjectUITests: PaintUITestCase {
 
     /// **The direction of the gradient is the direction of the drag**: top to bottom, dark at the press
     /// and light at the lift, at the Width the rail left it (100%, so the band covers the paper's width).
+    /// The lift stays above the gradient's own docked panel, which covers the lower part of the canvas.
     func testTheGradientRunsInTheDirectionOfTheDrag() throws {
         let (app, canvas) = launch()
         prime(app, row: "add.linearGradientRow", named: "gradient")
 
-        dragOnCanvas(app, from: paperPoint(canvas, 0.5, 0.2), to: paperPoint(canvas, 0.5, 0.8))
+        dragOnCanvas(app, from: paperPoint(canvas, 0.5, 0.15), to: paperPoint(canvas, 0.5, 0.65))
+        attach(app, "gradient-top-to-bottom")
 
-        let top = paperPoint(canvas, 0.5, 0.25), bottom = paperPoint(canvas, 0.5, 0.75)
+        let top = paperPoint(canvas, 0.5, 0.2), bottom = paperPoint(canvas, 0.5, 0.6)
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "dark at the press, the top")
         XCTAssertTrue(waitUntil(canvas, bottom, { self.red($0) > 170 }), "light at the lift, the bottom")
-        let left = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.1, 0.5).dx, dy: paperPoint(canvas, 0.1, 0.5).dy))
-        let right = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.9, 0.5).dx, dy: paperPoint(canvas, 0.9, 0.5).dy))
+        let left = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.1, 0.4).dx, dy: paperPoint(canvas, 0.1, 0.4).dy))
+        let right = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.9, 0.4).dx, dy: paperPoint(canvas, 0.9, 0.4).dy))
         XCTAssertLessThanOrEqual(abs(left - right), 6, "a top-to-bottom ramp is constant along a row, across the whole band")
-        attach(app, "gradient-top-to-bottom")
+        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.08).dx, dy: paperPoint(canvas, 0.5, 0.08).dy)),
+                      "and it begins at the press: bare paper above it")
     }
 
     /// **The panel's angle turns the ramp, live**, and Done closes the panel.

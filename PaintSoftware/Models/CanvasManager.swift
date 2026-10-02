@@ -1094,6 +1094,8 @@ final class CanvasManager: ObservableObject {
     /// placed is deleted here, so no door out of priming has to remember to.
     @Published var primedObject: PrimedObject? {
         didSet {
+            guard oldValue != primedObject else { return }
+            ActionRecorder.ifRecording { $0.model("primedObject", primedObject?.name ?? "none") }
             if primedObject == nil { toolBeforePlacement = nil }
             if case .media(let old)? = oldValue, case .video(let url) = old.source,
                primedObject?.mediaFileURL != url {

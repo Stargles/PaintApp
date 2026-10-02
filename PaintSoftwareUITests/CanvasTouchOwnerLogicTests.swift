@@ -522,14 +522,13 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             // recognizers are, and stands down to the chrome like them — whatever the artist grabbed
             // wins, and the object is placed by the touch that grabs nothing. The text overlays are
             // here too, unlike `textPress`: that tap would commit the box it landed in, where a
-            // placement under a text box's own grips is simply outranked.
+            // placement under a text box's own grips is simply outranked. No `+moveBoxCommit`: with
+            // the Move box up the press is suspended, so the tap away settles the box first.
             "shapeOverlay+placementPress",
             "textOverlay+placementPress",
             "textTransformOverlay+placementPress",
             "objectTransformOverlay+placementPress",
             "guideOverlay+placementPress",
-            "guideOverlay+placementPress+moveBoxCommit",
-            "placementPress+moveBoxCommit",
             // (j)'s own rows, on plain canvas away from the box. `moveBoxCommit` is last in every one
             // of them, which is the whole of its precedence argument: it takes what is left.
             "catchAllNotice+moveBoxCommit",
@@ -755,6 +754,10 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                        "the Select panel owns the canvas's single touch while it is open")
         XCTAssertFalse(CanvasTouchInputs(tool: .place, hasFloatingPiece: true, activeLayer: .raster).placementPressIsEnabled,
                        "and so does a floating piece")
+        let underTheMoveBox = CanvasTouchInputs(tool: .place, hasVectorFloat: true, activeLayer: .vector)
+        XCTAssertFalse(underTheMoveBox.placementPressIsEnabled,
+                       "and so does the vector Move box: Move is entered after priming and its tap-away settles it first")
+        XCTAssertEqual(CanvasTouchOwner.owner(in: underTheMoveBox), .moveBoxCommit)
         for tool in Tool.allCases where tool != .place {
             XCTAssertFalse(CanvasTouchInputs(tool: tool, activeLayer: .raster).placementPressIsEnabled,
                            "\(tool) must not enable the placement press")

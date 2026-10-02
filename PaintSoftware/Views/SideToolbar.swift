@@ -18,9 +18,8 @@ struct SideToolbar: View {
     /// state while erasing, otherwise the paint brush's).
     private var isFillMode: Bool { canvasManager.selectedTool == .fill }
     private var isEraserMode: Bool { canvasManager.selectedTool == .eraser }
-    /// A gradient is primed (TODO (149)): the rail offers the one dial it has, how wide it is dragged
-    /// out, where it would otherwise offer the brush's.
-    private var isGradientPrimed: Bool { canvasManager.primedObject == .gradient }
+    /// An Add-menu object is primed (TODO (149)); the rail offers the dials that object has.
+    private var isPlacing: Bool { canvasManager.selectedTool == .place }
 
     /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
     private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
@@ -69,16 +68,8 @@ struct SideToolbar: View {
                         range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
                         identifier: "sideToolbar.edgeOverlapSlider"
                     )
-                } else if isGradientPrimed {
-                    // `gradientWidthFraction` is a share of the artwork's longer side, so the slider's
-                    // own percentage readout is the "% of canvas size" the owner asked for.
-                    labeledSlider(
-                        title: "Width",
-                        value: $canvasManager.gradientWidthFraction,
-                        range: 0.01...1,
-                        identifier: "sideToolbar.gradientWidthSlider",
-                        showsPercentWhileAdjusting: true
-                    )
+                } else if isPlacing {
+                    placementSliders
                 } else if isEraserMode {
                     // TODO (79)(a): the same `BrushSizeCurve` the brush's slider uses, via
                     // `eraserSizeSliderPosition` — see `CanvasManager+BrushSize.swift`. The eraser's
@@ -178,6 +169,34 @@ struct SideToolbar: View {
         }
         .frame(maxHeight: .infinity)
         .background(Color.black.opacity(0.85))
+    }
+
+    /// **The dials a primed object has, and only those** (TODO (149)) — the brush's Size is not one of
+    /// them, since the pen sizes the object as it drags. A gradient has its Width, a share of the
+    /// artwork's longer side, so the slider's own percentage readout is the "% of canvas size" the
+    /// owner asked for. A rectangle and an ellipse are painted in the brush colour at the brush's
+    /// opacity, so that is theirs. A picture or clip has none.
+    @ViewBuilder private var placementSliders: some View {
+        switch canvasManager.primedObject {
+        case .gradient:
+            labeledSlider(
+                title: "Width",
+                value: $canvasManager.gradientWidthFraction,
+                range: 0.01...1,
+                identifier: "sideToolbar.gradientWidthSlider",
+                showsPercentWhileAdjusting: true
+            )
+        case .rectangle, .ellipse:
+            labeledSlider(
+                title: "Opacity",
+                value: $canvasManager.brushOpacity,
+                range: 0...1,
+                identifier: "sideToolbar.brushOpacitySlider",
+                showsPercentWhileAdjusting: true
+            )
+        case .media, nil:
+            EmptyView()
+        }
     }
 
     /// Select the eyedropper, then tap the canvas to take the colour under the tap.

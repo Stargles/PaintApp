@@ -461,10 +461,14 @@ extension CanvasTouchInputs {
 
     /// The primed object's press-and-drag. Suspended while Select is engaged or a piece is floating,
     /// for the fill's and the text tool's reason — those overlays own the canvas's single-touch
-    /// gestures while they are up. Priming settles a floating piece on the way in
-    /// (`CanvasManager.primeObject`) and every door into it closes the Select panel, so the two
-    /// clauses cannot both be true through the menu; they are the guard for a door nobody has built.
-    var placementPressIsEnabled: Bool { tool == .place && !selectPanelIsOpen && !hasFloatingPiece }
+    /// gestures while they are up — **and while the vector Move box is up, which the fill's and the
+    /// text tool's are not and which is the difference that matters here**: Move is entered *after*
+    /// priming (it is a toggle, not a tool, so `selectedTool` stays `.place`), and the tap away from its
+    /// box has to settle the box before a placement lands on a cel the float has lifted ink out of.
+    /// The object stays primed through it, so the next pen-down places it.
+    var placementPressIsEnabled: Bool {
+        tool == .place && !selectPanelIsOpen && !hasFloatingPiece && !hasVectorFloat
+    }
 
     /// `reconcileLayers`' `needsCatch`, verbatim: no layers, the active layer not effectively
     /// visible, or the active layer holding no pixels.
