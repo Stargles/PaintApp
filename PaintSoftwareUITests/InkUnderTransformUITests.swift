@@ -25,18 +25,6 @@ final class InkUnderTransformUITests: PaintUITestCase {
     /// its bake is wide enough for a screenshot to land inside it on a loaded Mac.
     private static let bakeDelay: TimeInterval = 3.5
 
-    private func paperRect(in canvas: XCUIElement) -> CGRect {
-        let frame = canvas.frame
-        let side = min(frame.width, frame.height)
-        return CGRect(x: (frame.width - side) / 2, y: (frame.height - side) / 2,
-                      width: side, height: side).applying(
-                        CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
-    }
-
-    private func onHost(_ paper: CGRect, _ x: Double, _ y: Double) -> CGVector {
-        CGVector(dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)
-    }
-
     /// Where along one paper row the ink is, as paper-x fractions inside `span`.
     private func inkColumns(_ probe: (Double, Double) -> Bool, _ paper: CGRect, row: Double,
                             span: ClosedRange<Double>) -> [Double] {

@@ -91,6 +91,17 @@ enum BottomDock {
     static func bottomInset(clearing occupiedHeight: CGFloat) -> CGFloat {
         max(0, occupiedHeight) + timelineGap
     }
+
+    /// **How much of the canvas area's bottom is under chrome** — the timeline, and the docked card
+    /// riding on it when there is one (`BottomDockCardHeightKey`). The canvas extends beneath both,
+    /// so this is the strip of it the artist cannot see: what the canvas draws for the artist to
+    /// read keeps clear of it (`RotationReadoutView`).
+    ///
+    /// **The full width of the area, though the card is narrower**: one rectangle is one rule, and the
+    /// strip beside a 760-point card is not worth a second.
+    static func coveredBottom(timeline occupiedHeight: CGFloat, card cardHeight: CGFloat) -> CGFloat {
+        cardHeight > 0 ? bottomInset(clearing: occupiedHeight) + cardHeight : max(0, occupiedHeight)
+    }
 }
 
 /// The rendered height of the whole timeline — the panel plus whatever strip is above it — reported
@@ -99,6 +110,15 @@ struct TimelineOccupiedHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// The rendered height of the docked card, summed over the cards on screen — reported by
+/// `bottomDockCard` to `DrawingView`, which hands `BottomDock.coveredBottom` to the canvas.
+struct BottomDockCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value += nextValue()
     }
 }
 
@@ -133,6 +153,9 @@ extension View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
             .background(cardFrameProbe)
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: BottomDockCardHeightKey.self, value: proxy.size.height)
+            })
     }
 
     /// The card's own frame, for a test to read — `bottomDock.floor`'s device. A container identifier

@@ -71,6 +71,34 @@ enum TransformMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - How much of a folder a folder's Move carries
+
+/// **Which cels a folder's Move moves** — TODO (135), the owner: *"If you click on edit on a folder
+/// and then click on move, you can move everything inside the folder. However that only moves
+/// everything that is in the current cel. Make the user have the option in the move menu for folders
+/// … to select between moving things in all frames, or just that cel."*
+///
+/// **Chosen on the Move bar, which is where the artist is when they find out they need it**, and kept
+/// on `CanvasManager.folderMoveScope` for the session beside Keep Stroke Width and Keep Full
+/// Precision — the same kind of thing, a rule about what this Move writes, and not saved with the
+/// drawing for their reason.
+enum FolderMoveScope: String, CaseIterable, Identifiable {
+    /// The cel each layer of the folder shows under the playhead — what a folder's Move was when it
+    /// was built (TODO (71)), and the default.
+    case thisCel
+    /// Every cel of every layer in the folder, across the whole timeline, by the one map the box
+    /// makes. A cel that spans several frames is one cel and is moved once.
+    case allFrames
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .thisCel: return "This Cel"
+        case .allFrames: return "All Frames"
+        }
+    }
+}
+
 // MARK: - One press of a fixed-angle rotate button
 
 /// The arithmetic behind Rotate 45° / Rotate 90°, kept out of both the bar and the manager so it can

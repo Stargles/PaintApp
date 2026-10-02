@@ -956,6 +956,43 @@ class PaintUITestCase: XCTestCase {
         return nil
     }
 
+    // MARK: - The paper on the glass
+
+    /// The paper's rect in the host's unit square: a square document (`launchIntoEditor` takes the
+    /// 2048×2048 default) letterboxed across a host that is not, as a centred square of side
+    /// `min(w, h)` with black surround. **Measure against this rather than against the host** whenever
+    /// "on the paper" is the subject — a normalized offset that turned out to be off it makes every
+    /// assertion vacuous.
+    func paperRect(in canvas: XCUIElement) -> CGRect {
+        let frame = canvas.frame
+        let side = min(frame.width, frame.height)
+        return CGRect(x: (frame.width - side) / 2, y: (frame.height - side) / 2,
+                      width: side, height: side).applying(
+                        CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
+    }
+
+    /// A point given in fractions of the **paper** (which may be negative — off it), as host fractions.
+    func onHost(_ paper: CGRect, _ x: Double, _ y: Double) -> CGVector {
+        CGVector(dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)
+    }
+
+    /// How many of 201 evenly spaced paper columns along one row, over `span` of the paper's width,
+    /// read as ink.
+    func inkColumnCount(_ probe: (Double, Double) -> Bool, _ paper: CGRect, row: Double,
+                        span: ClosedRange<Double>) -> Int {
+        (0...200).map { span.lowerBound + (span.upperBound - span.lowerBound) * Double($0) / 200 }
+            .filter { probe(paper.minX + paper.width * $0, paper.minY + paper.height * row) }.count
+    }
+
+    /// A drag that starts on `from`, holds still long enough for a drag-start to be armed, and travels
+    /// `paperDX` of the paper's width at a finger's pace — dozens of touch-moves.
+    func dragAcross(_ canvas: XCUIElement, from: CGVector, paperDX: Double, paper: CGRect) {
+        let start = canvas.coordinate(withNormalizedOffset: from)
+        let points = paper.width * canvas.frame.width * paperDX
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: points, dy: 0)),
+                    withVelocity: XCUIGestureVelocity(240), thenHoldForDuration: 0.3)
+    }
+
     // MARK: - Reading ink off the canvas
 
     /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.

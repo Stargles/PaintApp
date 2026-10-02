@@ -911,6 +911,14 @@ final class CanvasManager: ObservableObject {
     /// Not persisted, for `preserveMovePrecision`'s reason one line up: it is about the drawing in
     /// front of the artist, not about their hardware.
     @Published var keepsStrokeWidthOnMove: Bool = false
+    /// **TODO (135) — which cels a folder's Move carries**, the picker on the Move bar while a folder's
+    /// box is up. `.thisCel` is the shipped behaviour and the default.
+    ///
+    /// Not persisted, for `preserveMovePrecision`'s reason two properties up: it is about the move in
+    /// front of the artist, not about their hardware. **Written through
+    /// `setFolderMoveScope(_:)`, never assigned from a view** — a folder float lifted under one scope
+    /// has to be lifted again under the other, so the value and the float cannot disagree.
+    @Published var folderMoveScope: FolderMoveScope = .thisCel
     /// **TODO item (23) — "What the loop catches", in the Select panel.** Which of the three
     /// membership rules a lasso answers with: `Enclosed`, `Cut` (the default and the shipped
     /// behaviour), `Touching`.

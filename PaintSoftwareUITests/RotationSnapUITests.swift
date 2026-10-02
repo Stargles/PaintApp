@@ -110,6 +110,54 @@ final class RotationSnapUITests: PaintUITestCase {
         XCTAssertEqual(againDegrees, freeDegrees + 11, accuracy: 15.01, "…and it is the grid angle nearest where the pen went")
     }
 
+    // MARK: - The pill stays where the artist can see it
+
+    /// **A knob at the edge of what covers the canvas's bottom gets a pill above that edge** — the
+    /// follow-up to (151): the canvas host extends beneath the Move bar and the timeline, and a pill
+    /// beside a knob near them was drawn behind them. Cold from a fresh document with the picture in
+    /// its Move box: the box is turned half way round (Rotate 90° twice, so its knob stands *below* it,
+    /// toward the bar), dragged down until the knob is six points above the bar's top edge, and the knob
+    /// is turned a little. The pill's own frame is read off `canvas.host`'s `readoutbox:` — it is a
+    /// UIKit subview the host hides from XCUITest — and held against the bar's frame, which the dock
+    /// publishes as `bottomDock.card`.
+    func testThePillStandsAboveTheMoveBarWhenTheKnobIsAtItsEdge() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedImage"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        _ = try XCTUnwrap(settledMoveBox(app), "the import lifts the picture into a Move box")
+        for _ in 0..<2 { app.buttons["moveBar.rotate90RightButton"].tap() }
+        let card = app.otherElements["bottomDock.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "PREMISE: the Move bar is docked")
+        let host = canvas.frame
+        let coveredTop = card.frame.minY - host.minY
+        let turned = try XCTUnwrap(settledMoveBox(app), "the box is still up after the turn")
+
+        // The knob stands 36 points beyond the box's edge, now its bottom one. Carry the box to where
+        // that puts it 6 points above the bar.
+        let knobY = Double(turned.maxY) * Double(host.height) + 36
+        let down = coveredTop - 6 - knobY
+        try dragWithAFingerHeldBeside(canvas, from: CGVector(dx: turned.midX, dy: turned.midY),
+                                      delta: CGVector(dx: 0, dy: down), holding: nil)
+        let carried = try XCTUnwrap(settledMoveBox(app), "the box is still up after the drag")
+        let knob = CGPoint(x: Double(carried.midX) * Double(host.width),
+                           y: Double(carried.maxY) * Double(host.height) + 36)
+        XCTAssertEqual(Double(knob.y), coveredTop - 6, accuracy: 12, "PREMISE: the knob is at the bar's edge")
+
+        try dragWithAFingerHeldBeside(canvas, from: CGVector(dx: knob.x / host.width, dy: knob.y / host.height),
+                                      delta: CGVector(dx: 40, dy: 0), holding: nil)
+        attachScreen("pill-at-the-bars-edge")
+        let reading = readField(app, "readout:")
+        XCTAssertNotEqual(reading, "none", "a held knob raises the pill (\(canvas.label))")
+        let box = readField(app, "readoutbox:").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(box.count, 4, "the pill publishes where it stands: \(canvas.label)")
+        let pillBottom = host.minY + CGFloat(box[1] + box[3]) * host.height
+        XCTAssertLessThanOrEqual(pillBottom, card.frame.minY,
+                                 "the pill (bottom \(pillBottom)) stands above the Move bar's top edge (\(card.frame.minY))")
+        XCTAssertGreaterThan(host.minY + CGFloat(box[1]) * host.height, host.minY, "…and on the glass")
+    }
+
     // MARK: - Finding a knob on the glass
 
     /// The centroid, in the host's own points, of the **densest cluster** of pixels in `canvas`'s capture

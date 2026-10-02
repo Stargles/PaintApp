@@ -143,7 +143,9 @@ struct MoveTransformBottomBar: View {
     ///
     /// **The row is the two switches and nothing else** (TODO (137)): each is named for what it does to
     /// the piece, which is all a switch needs to say, and prose beside them is vertical space the
-    /// dock cannot spare.
+    /// dock cannot spare. **Under a folder's box it is the two switches and one more control** — which
+    /// cels the box moves (TODO (135)) — for the same reason: it is a rule about what this Move writes,
+    /// so it sits with the others rather than in a row of its own.
     ///
     /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
     /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
@@ -170,6 +172,21 @@ struct MoveTransformBottomBar: View {
             .tint(.blue)
             .fixedSize()
             .accessibilityIdentifier("moveBar.keepFullPrecisionToggle")
+
+            if let lift = canvasManager.vectorFloat?.folder {
+                divider
+                Picker("Frames", selection: Binding(
+                    get: { lift.scope },
+                    set: { canvasManager.setFolderMoveScope($0) }
+                )) {
+                    ForEach(FolderMoveScope.allCases) { scope in
+                        Text(scope.displayName).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(minWidth: 190)
+                .accessibilityIdentifier("moveBar.folderScopePicker")
+            }
 
             if canvasManager.floatHoldsPlacedMedia {
                 divider

@@ -227,4 +227,88 @@ final class RotationSnapLogicTests: XCTestCase {
         XCTAssertEqual(drag.clampedFrame(draggedTo: there, snapsRotation: true)?.corners,
                        drag.clampedFrame(draggedTo: there)?.corners)
     }
+
+    // MARK: - Where the pill stands
+
+    /// **The pill stays where the artist can see it** — the follow-up to TODO (151): the canvas host
+    /// extends beneath the timeline and the docked panel, and a pill beside a knob near their edge was
+    /// drawn behind them. `RotationReadoutView.centre(forKnob:awayFrom:pillSize:within:)` is the one
+    /// rule, so these are its operands: where the pill goes against the box, against the edge of the
+    /// visible area, and against a knob that is past it.
+    private let pill = CGSize(width: 64, height: 28)
+    private let glass = CGRect(x: 0, y: 0, width: 1000, height: 450)
+
+    private func pillRect(_ centre: CGPoint) -> CGRect {
+        CGRect(x: centre.x - pill.width / 2, y: centre.y - pill.height / 2, width: pill.width, height: pill.height)
+    }
+
+    /// With room, the pill is on the side of the knob away from the box, its edge `standOff` off the
+    /// knob — above a knob that stands above its box, below one that stands below.
+    func testThePillStandsOffTheKnobOnTheSideAwayFromTheBox() {
+        let above = RotationReadoutView.centre(forKnob: CGPoint(x: 500, y: 200), awayFrom: CGPoint(x: 500, y: 300),
+                                               pillSize: pill, within: glass)
+        XCTAssertEqual(above.x, 500, accuracy: 1e-9)
+        XCTAssertEqual(above.y, 200 - RotationReadoutView.standOff - pill.height / 2, accuracy: 1e-9,
+                       "a knob above its box has the pill above it")
+        let below = RotationReadoutView.centre(forKnob: CGPoint(x: 500, y: 300), awayFrom: CGPoint(x: 500, y: 200),
+                                               pillSize: pill, within: glass)
+        XCTAssertEqual(below.y, 300 + RotationReadoutView.standOff + pill.height / 2, accuracy: 1e-9,
+                       "…and a knob below its box has it below")
+    }
+
+    /// **A knob at the edge of the visible area gets the pill on the box's side of it** — clamped
+    /// instead, the pill would sit on top of the knob and the finger on it. Two readings of one knob:
+    /// the same stand-off with room (above), and none (below the glass's last 40 points).
+    func testAKnobAtTheEdgeOfTheVisibleAreaGetsThePillOnTheBoxsSideOfIt() {
+        let knob = CGPoint(x: 500, y: glass.maxY - 10)
+        let centre = RotationReadoutView.centre(forKnob: knob, awayFrom: CGPoint(x: 500, y: knob.y - 100),
+                                                pillSize: pill, within: glass)
+        XCTAssertEqual(centre.y, knob.y - RotationReadoutView.standOff - pill.height / 2, accuracy: 1e-9,
+                       "the pill is over the knob, a stand-off clear of it, not clamped across it")
+        XCTAssertLessThanOrEqual(pillRect(centre).maxY, glass.maxY - RotationReadoutView.edgeInset,
+                                 "and inside the visible area")
+    }
+
+    /// **A knob beyond the visible area — under the timeline — still gets a pill, at its edge.** Neither
+    /// side of the knob has room, so the rule falls back to the clamp: the pill is where the artist can
+    /// read it, nearest the knob they are holding.
+    func testAKnobUnderTheTimelineGetsAPillAtTheEdgeOfWhatIsVisible() {
+        let centre = RotationReadoutView.centre(forKnob: CGPoint(x: 500, y: 600), awayFrom: CGPoint(x: 500, y: 520),
+                                                pillSize: pill, within: glass)
+        XCTAssertEqual(pillRect(centre).maxY, glass.maxY - RotationReadoutView.edgeInset, accuracy: 1e-9)
+    }
+
+    /// **For every knob on and around the glass the pill is inside the visible area** — a sweep, because
+    /// the rule's claim is about all of them: the four edges and the corners are not cases of their
+    /// own. The box is taken at the glass's middle, and knobs run from the host's corner to well under
+    /// the timeline.
+    func testThePillIsInsideTheVisibleAreaForEveryKnobPosition() {
+        let inner = glass.insetBy(dx: RotationReadoutView.edgeInset, dy: RotationReadoutView.edgeInset)
+        for x in stride(from: CGFloat(-50), through: 1050, by: 50) {
+            for y in stride(from: CGFloat(-50), through: 700, by: 25) {
+                let centre = RotationReadoutView.centre(forKnob: CGPoint(x: x, y: y),
+                                                        awayFrom: CGPoint(x: 500, y: 225),
+                                                        pillSize: pill, within: glass)
+                XCTAssertTrue(inner.contains(pillRect(centre)),
+                              "the pill for a knob at (\(x), \(y)) stands at \(pillRect(centre))")
+            }
+        }
+    }
+
+    /// **The view holds the pill above what covers the host's bottom** — the wiring from
+    /// `coveredBottom` to the rule. The control is the same knob with nothing covering the host, which
+    /// puts the pill in the strip the timeline would occupy.
+    func testThePillViewStandsAboveTheStripTheTimelineCovers() {
+        func pillFrame(covered: CGFloat) -> CGRect {
+            let host = UIView(frame: CGRect(x: 0, y: 0, width: 1000, height: 700))
+            let view = RotationReadoutView()
+            host.addSubview(view)
+            view.coveredBottom = covered
+            view.show(angle: .pi / 12, knob: CGPoint(x: 500, y: 640), centre: CGPoint(x: 500, y: 560), in: host)
+            return view.frame
+        }
+        XCTAssertGreaterThan(pillFrame(covered: 0).maxY, 450, "PREMISE: uncovered, the pill stands where the timeline would be")
+        XCTAssertLessThanOrEqual(pillFrame(covered: 250).maxY, 450 - RotationReadoutView.edgeInset,
+                                 "covered, it stands above the covered strip")
+    }
 }

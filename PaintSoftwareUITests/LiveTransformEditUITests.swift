@@ -14,39 +14,8 @@ final class LiveTransformEditUITests: PaintUITestCase {
     /// Long enough that every probe below lands before the result's bake does.
     private static let bakeDelay: TimeInterval = 4
 
-    // MARK: - Geometry
-
-    /// The paper's rect in the host's unit square: a square document letterboxed across the host.
-    private func paperRect(in canvas: XCUIElement) -> CGRect {
-        let frame = canvas.frame
-        let side = min(frame.width, frame.height)
-        return CGRect(x: (frame.width - side) / 2, y: (frame.height - side) / 2,
-                      width: side, height: side).applying(
-                        CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
-    }
-
-    private func onHost(_ paper: CGRect, _ x: Double, _ y: Double) -> CGVector {
-        CGVector(dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)
-    }
-
-    /// Paper columns along one row that read as ink, over `span` of the paper's width.
-    private func inkColumns(_ probe: (Double, Double) -> Bool, _ paper: CGRect, row: Double,
-                            span: ClosedRange<Double>) -> Int {
-        (0...200).map { span.lowerBound + (span.upperBound - span.lowerBound) * Double($0) / 200 }
-            .filter { probe(paper.minX + paper.width * $0, paper.minY + paper.height * row) }.count
-    }
-
     private func moves(_ app: XCUIApplication) -> Int {
         Int(readField(app, "moves:")) ?? -1
-    }
-
-    /// A drag that starts on `from`, holds still long enough for the edit's bands to be minted, and
-    /// travels `dx` of the paper's width at a finger's pace — dozens of touch-moves.
-    private func dragAcross(_ canvas: XCUIElement, from: CGVector, paperDX: Double, paper: CGRect) {
-        let start = canvas.coordinate(withNormalizedOffset: from)
-        let points = paper.width * canvas.frame.width * paperDX
-        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: points, dy: 0)),
-                    withVelocity: XCUIGestureVelocity(240), thenHoldForDuration: 0.3)
     }
 
     /// How many pixels are ink in exactly one of two same-sized screenshots of the canvas — the mark
@@ -114,15 +83,15 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTAssertTrue(["moving", "live"].contains(state),
                       "the drag's own bands, or the pair minted for its result — the bake was held "
                       + "for \(Self.bakeDelay) s and cannot be what is on screen (canvas: \(state))")
-        XCTAssertGreaterThan(inkColumns(probe, lifted, row: 0.6, span: 0.41...0.49), 50,
+        XCTAssertGreaterThan(inkColumnCount(probe, lifted, row: 0.6, span: 0.41...0.49), 50,
                              "the mark is drawn where the box carried it, before any bake of it")
-        XCTAssertEqual(inkColumns(probe, lifted, row: 0.6, span: 0.21...0.29), 0,
+        XCTAssertEqual(inkColumnCount(probe, lifted, row: 0.6, span: 0.21...0.29), 0,
                        "…and is gone from where it was")
 
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "the result's bake lands"))
         let settled = try settledProbe(canvas, window: CGRect(x: lifted.minX, y: lifted.minY + lifted.height * 0.5,
                                                                width: lifted.width, height: lifted.height * 0.2))
-        XCTAssertGreaterThan(inkColumns(settled, lifted, row: 0.6, span: 0.41...0.49), 50,
+        XCTAssertGreaterThan(inkColumnCount(settled, lifted, row: 0.6, span: 0.41...0.49), 50,
                              "and the bake agrees with what the drag showed")
     }
 
@@ -164,9 +133,9 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTContext.runActivity(named: "the picture followed \(followed) updates") { _ in }
         XCTAssertGreaterThan(followed, 10, "the folder's ink should have followed the finger, update by update")
         for row in [0.4, 0.6] {
-            XCTAssertGreaterThan(inkColumns(probe, lifted, row: row, span: 0.41...0.49), 50,
+            XCTAssertGreaterThan(inkColumnCount(probe, lifted, row: row, span: 0.41...0.49), 50,
                                  "the mark at \(row) went with the box — both layers are in the folder")
-            XCTAssertEqual(inkColumns(probe, lifted, row: row, span: 0.21...0.29), 0,
+            XCTAssertEqual(inkColumnCount(probe, lifted, row: row, span: 0.21...0.29), 0,
                            "…and left where it was")
         }
     }

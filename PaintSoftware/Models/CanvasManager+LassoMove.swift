@@ -268,6 +268,22 @@ struct VectorFloatPart {
     /// Whether this part's latched bitmap can differ from a render of its whole list — see
     /// `VectorCanvas.mayDiverge`. False for ordinary artwork.
     let mayDiverge: Bool
+
+    /// **Whether this cel is the one its layer shows under the playhead** — the ink the artist can see
+    /// the box around. True for every part of every lift but a folder's All Frames Move (TODO (135)),
+    /// which carries the layer's other cels too: those take every nudge's map and nothing else. They
+    /// are not suppressed, drawn in the float's preview or measured into the box, because none of them
+    /// is on the glass — the preview stays the current frame's picture, and the box hugs it.
+    let isShown: Bool
+}
+
+/// **A folder's Move, as the float remembers it** — which folder was lifted, and under which scope.
+/// The scope lives on the float and not only on `CanvasManager.folderMoveScope` so that the bake is
+/// read against what was *lifted* (`commitPoseFromFloat`), whatever the picker says by then, and so
+/// the Move bar knows the float it sits under is a folder's at all.
+struct FolderLift: Equatable {
+    let folderID: UUID
+    let scope: FolderMoveScope
 }
 
 /// A lassoed region lifted out for interactive moving, not yet baked.
@@ -275,7 +291,9 @@ struct VectorFloatPart {
 /// Transient — never persisted, never carried by `makeCopy()`. Keyed by stable UUIDs rather than
 /// array indices for `Selection`'s reason: indices shift whenever `layers` is mutated.
 struct VectorFloat {
-    /// **The layers this float carries, one for every lift but a folder's** — TODO (71). Never empty.
+    /// **The layers this float carries, one for every lift but a folder's** — TODO (71) — **and under
+    /// a folder's All Frames Move the cels on other frames as well** (TODO (135)), each a part with
+    /// `isShown` false. The parts on the glass come first, so `parts[0]` is always one. Never empty.
     /// `parts[0]` is the layer the box was measured in: its `baseTransform` is the one the box's
     /// placement is expressed against, and `handleActiveContextChanged` reads it as the cel the float
     /// is *about* — a folder Move settles the moment the artist walks to any other layer or frame,
@@ -369,10 +387,14 @@ struct VectorFloat {
     /// verbatim, beside each part's own `elementsBeforeLift`.
     let selectionBeforeLift: Selection?
 
+    /// Which folder this float is a Move of, and under which scope — nil for every other lift.
+    let folder: FolderLift?
+
     /// Whether any part's latched bitmap can differ from a render of its whole list — see
     /// `VectorCanvas.mayDiverge`. False for ordinary artwork, and then the latch stands for the
-    /// float's whole life.
-    var mayDiverge: Bool { parts.contains { $0.mayDiverge } }
+    /// float's whole life. **Only the parts on the glass are asked**: a part on another frame is never
+    /// latched, so what its bitmap could differ from is not a question about it.
+    var mayDiverge: Bool { parts.contains { $0.isShown && $0.mayDiverge } }
 
     /// Whether `layerID` is one of the layers this float carries, and — when `celID` is named — that
     /// the part from it is from that cel. The structural edits that are about to replace or destroy a
@@ -381,10 +403,11 @@ struct VectorFloat {
         parts.contains { $0.layerID == layerID && (celID == nil || $0.celID == celID) }
     }
 
-    /// The part carrying `elementID` from `layerID`, if it is travelling — what a stream frame asks
-    /// to know whether it is presented over the layer's own host or inside the float, and as what.
+    /// The part carrying `elementID` from `layerID`, if it is travelling on the glass — what a stream
+    /// frame asks to know whether it is presented over the layer's own host or inside the float, and
+    /// as what. A part on another frame is not on the glass, and a duplicated cel carries the same ids.
     func part(carrying elementID: UUID, onLayer layerID: UUID) -> VectorFloatPart? {
-        parts.first { $0.layerID == layerID && $0.insideIDs.contains(elementID) }
+        parts.first { $0.isShown && $0.layerID == layerID && $0.insideIDs.contains(elementID) }
     }
 
     /// Whether the layer should currently be showing the float through Core Animation. False between
@@ -502,7 +525,8 @@ extension CanvasManager {
                                    insideIDs: split.insideIDs, liftedInside: lifted, poses: poses,
                                    baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
-                                   sourceVersion: vector.contentVersion, mayDiverge: split.mayDiverge)
+                                   sourceVersion: vector.contentVersion, mayDiverge: split.mayDiverge,
+                                   isShown: true)
         vectorFloat = Self.float(parts: [part], ink: ink, bounds: bounds,
                                  boxTransform: vector.layerTransform(pivot: pivot),
                                  selectionBeforeLift: selection)
@@ -518,13 +542,14 @@ extension CanvasManager {
     /// piece about its centre and the knob turns it, the six the whole-cel box has always had.
     private static func float(parts: [VectorFloatPart], ink: MoveBoxInk, bounds: CGRect,
                               boxTransform: LayerTransform,
-                              selectionBeforeLift: Selection?) -> VectorFloat {
+                              selectionBeforeLift: Selection?,
+                              folder: FolderLift? = nil) -> VectorFloat {
         let frame = ObjectTransformFrame(transform: boxTransform, contentSize: bounds.size)
         return VectorFloat(parts: parts,
                            pivot: CGPoint(x: bounds.midX, y: bounds.midY), contentSize: bounds.size,
                            ink: ink, frame: frame,
                            liftFrameTransform: frame.transform, mirror: .identity,
-                           selectionBeforeLift: selectionBeforeLift, wantsLatch: true,
+                           selectionBeforeLift: selectionBeforeLift, folder: folder, wantsLatch: true,
                            latchedFrameTransform: frame.transform, latchedAspect: frame.aspect,
                            latchedStretchAxis: frame.stretchAxis, latchedDistort: nil)
     }
@@ -923,7 +948,24 @@ extension CanvasManager {
     /// it. The box is measured over all of them together, in the first part's space, and every nudge,
     /// knob, Mirror, Reset and the bake after it is the ordinary float's — nothing in the Move bar
     /// knows the piece is several layers. Raster layers in the folder are not carried: a pixel piece
-    /// is the other lifecycle (`FloatingPiece`), and one box cannot drag both.
+    /// is the other lifecycle (`FloatingPiece`), and one box cannot drag both. Neither are
+    /// transformation, value and effect layers, which hold no ink.
+    ///
+    /// **`folderMoveScope` decides how many cels each layer contributes** (TODO (135)). `.thisCel` is
+    /// the cel under the playhead, as above. `.allFrames` adds every other cel of the layer as a part
+    /// that is not on the glass (`VectorFloatPart.isShown`): it takes each nudge's map in the same
+    /// `applyToVectorFloat` loop and the same undo step, so one drag moves every frame and one Undo
+    /// puts every frame back — and it is the box's own arithmetic, with no second code path to drift
+    /// from it. **A cel is one part however many frames it spans**, so a drawing held for four frames
+    /// moves once. **A derived in-between is not a part**: it has no display list of its own, and it
+    /// is re-derived from the references that do move.
+    ///
+    /// **Every cel is lifted at the frame of it nearest the playhead** — the playhead itself for the
+    /// cel it is on, which is `.thisCel`'s arithmetic to the bit, and the edge of the span for the
+    /// rest. That frame is where the cel's pose channels and the transformation layers above it are
+    /// read from, so a screen delta lands as a screen delta on the frame a cel is closest to.
+    /// Written into stored geometry, it is exact there and the pose's own image of it on the cel's
+    /// other frames — exact for a pose that translates, and not for one that turns or scales.
     ///
     /// **Refused whole at an in-between**, with `activeVectorMoveTarget`'s own banner, if any layer
     /// in the folder shows a derived cel under the playhead: a folder moved with one of its layers
@@ -936,42 +978,60 @@ extension CanvasManager {
     ///
     /// - Returns: whether a box came up. False when the folder is not in the document or holds no
     ///   vector layer with a drawn cel at this frame — nothing to move is nothing to refuse, and the
-    ///   row that raises this says what a folder Move takes.
+    ///   row that raises this says what a folder Move takes. **A folder with drawings on other frames
+    ///   and none on this one raises no box under either scope**: the box hugs ink on the glass, and
+    ///   there is none to hug.
     @discardableResult
     func beginVectorFolderMove(_ folderID: UUID) -> Bool {
         commitAllInteractiveState()
         guard folders.contains(where: { $0.id == folderID }) else { return false }
-        var parts: [VectorFloatPart] = []
-        var posedByPart: [[VectorElement]] = []
+        let scope = folderMoveScope
+        var shown: [VectorFloatPart] = []
+        var elsewhere: [VectorFloatPart] = []
+        var posedByShownPart: [[VectorElement]] = []
         for layerIndex in descendantLayerIndices(ofFolder: folderID) where layers[layerIndex].kind == .vector {
             let layerID = layers[layerIndex].id
             guard inBetweenCelID(inLayer: layerID) == nil else {
                 raise(.cannotMoveDerivedFrame)
                 return false
             }
-            guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
-                  let vector = layers[layerIndex].cels[celIndex].vector,
-                  let lift = vector.liftWholeCel() else { continue }
-            let celID = layers[layerIndex].cels[celIndex].id
-            guard !refusesToDamageAnAnimation(lift.elements, movedIDs: lift.insideIDs) else { return false }
-            let carried = lift.elements.filter { lift.insideIDs.contains($0.id) }
-            let poses = celPoseMaps(vector.elements, layerID: layerID, celID: celID, atFrame: currentFrame)
-                .filter { lift.insideIDs.contains($0.key) }
-            parts.append(VectorFloatPart(layerID: layerID, celID: celID,
-                                         insideIDs: lift.insideIDs,
-                                         liftedInside: Dictionary(uniqueKeysWithValues: carried.map { ($0.id, $0) }),
-                                         poses: poses, baseTransform: vector.transform,
-                                         elementsBeforeLift: vector.elements,
-                                         sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge))
-            // Measured on the ink where it is *shown* — `VectorFloatPart.poses`, the lasso arm's reason.
-            posedByPart.append(Self.posed(carried, by: poses))
+            let shownCelIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame)
+            let celIndices: [Int]
+            switch scope {
+            case .thisCel: celIndices = shownCelIndex.map { [$0] } ?? []
+            case .allFrames: celIndices = Array(layers[layerIndex].cels.indices)
+            }
+            for celIndex in celIndices {
+                let cel = layers[layerIndex].cels[celIndex]
+                guard cel.interpolation == nil, let vector = cel.vector,
+                      let lift = vector.liftWholeCel() else { continue }
+                guard !refusesToDamageAnAnimation(lift.elements, movedIDs: lift.insideIDs) else { return false }
+                let carried = lift.elements.filter { lift.insideIDs.contains($0.id) }
+                let poses = celPoseMaps(vector.elements, layerID: layerID, celID: cel.id,
+                                        atFrame: Self.frame(of: cel, nearest: currentFrame))
+                    .filter { lift.insideIDs.contains($0.key) }
+                let part = VectorFloatPart(layerID: layerID, celID: cel.id,
+                                           insideIDs: lift.insideIDs,
+                                           liftedInside: Dictionary(uniqueKeysWithValues: carried.map { ($0.id, $0) }),
+                                           poses: poses, baseTransform: vector.transform,
+                                           elementsBeforeLift: vector.elements,
+                                           sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
+                                           isShown: celIndex == shownCelIndex)
+                guard part.isShown else {
+                    elsewhere.append(part)
+                    continue
+                }
+                shown.append(part)
+                // Measured on the ink where it is *shown* — `VectorFloatPart.poses`, the lasso arm's reason.
+                posedByShownPart.append(Self.posed(carried, by: poses))
+            }
         }
-        guard let first = parts.first, let firstCanvas = vectorCanvas(of: first) else { return false }
-        // **One box over every part, in the first part's space.** A part stored under another canvas
-        // transform is carried into it before it is measured — the identity, and untouched, on every
-        // document Move has written since it stopped writing that transform.
+        guard let first = shown.first, let firstCanvas = vectorCanvas(of: first) else { return false }
+        // **One box over every part on the glass, in the first part's space.** A part stored under
+        // another canvas transform is carried into it before it is measured — the identity, and
+        // untouched, on every document Move has written since it stopped writing that transform.
         var measured: [VectorElement] = []
-        for (part, posed) in zip(parts, posedByPart) {
+        for (part, posed) in zip(shown, posedByShownPart) {
             let into = Self.localDeltaFactors(for: part, against: first.baseTransform).prefix
             measured += into.isIdentity ? posed : posed.map { VectorCanvas.mapping($0, throughStretch: into) }
         }
@@ -981,21 +1041,44 @@ extension CanvasManager {
         guard let bounds = ink.bounds() else { return false }
         // Assigning the suppression is the one invalidation of the lift, and it bumps the version —
         // so each part's `sourceVersion` is read *after* it, or the first nudge would read the
-        // document as having moved under the float and cancel it.
-        for index in parts.indices {
-            guard let vector = vectorCanvas(of: parts[index]) else { continue }
-            vector.suppressedElementIDs = parts[index].insideIDs
-            parts[index].sourceVersion = vector.contentVersion
+        // document as having moved under the float and cancel it. Only the parts on the glass are
+        // suppressed: a part on another frame is drawn by no host the float is on, and a hole in it
+        // would show in that frame's thumbnail and onion skin for as long as the box is up.
+        for index in shown.indices {
+            guard let vector = vectorCanvas(of: shown[index]) else { continue }
+            vector.suppressedElementIDs = shown[index].insideIDs
+            shown[index].sourceVersion = vector.contentVersion
         }
         let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
-        vectorFloat = Self.float(parts: parts, ink: ink, bounds: bounds,
+        vectorFloat = Self.float(parts: shown + elsewhere, ink: ink, bounds: bounds,
                                  boxTransform: firstCanvas.layerTransform(pivot: pivot),
-                                 selectionBeforeLift: nil)
-        for part in parts {
+                                 selectionBeforeLift: nil,
+                                 folder: FolderLift(folderID: folderID, scope: scope))
+        for part in shown {
             celContentChangedOutsideStroke(layerID: part.layerID, celID: part.celID)
         }
         refreshUndoRedoState()
         return true
+    }
+
+    /// **Chooses which cels a folder's Move carries** (TODO (135)) — the Move bar's picker — and, while
+    /// a folder's box is up under the other scope, lifts the folder again under the new one.
+    ///
+    /// **The re-lift is `beginVectorFolderMove`'s own first statement doing its job**:
+    /// `commitAllInteractiveState()` bakes the standing float exactly as Done would — what has been
+    /// moved stays moved, on the undo stack a nudge at a time — and the lift that follows measures a
+    /// fresh box around the ink where it now is. One rule, with no `nudges == 0` arm: a float nobody
+    /// dragged bakes to nothing, and one that was dragged is settled under the scope it was dragged
+    /// under (`FolderLift.scope`, read by `commitPoseFromFloat`), not the one just chosen.
+    func setFolderMoveScope(_ scope: FolderMoveScope) {
+        folderMoveScope = scope
+        guard let lift = vectorFloat?.folder, lift.scope != scope else { return }
+        beginVectorFolderMove(lift.folderID)
+    }
+
+    /// The frame of `cel`'s span nearest `playhead` — `playhead` itself while it is inside the span.
+    private static func frame(of cel: Cel, nearest playhead: Int) -> Int {
+        min(max(playhead, cel.startFrame), cel.startFrame + cel.frameCount - 1)
     }
 
     /// **The Move box, raised over exactly the drawing one pose channel moves** — KEYFRAMES.md
@@ -1096,7 +1179,8 @@ extension CanvasManager {
                                    insideIDs: lift.insideIDs, liftedInside: lifted, poses: poses,
                                    baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
-                                   sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge)
+                                   sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
+                                   isShown: true)
         vectorFloat = Self.float(parts: [part], ink: ink, bounds: bounds,
                                  boxTransform: vector.layerTransform(pivot: pivot),
                                  selectionBeforeLift: nil)
@@ -1134,7 +1218,7 @@ extension CanvasManager {
         float.latchedAspect = float.frame.aspect
         float.latchedStretchAxis = float.frame.stretchAxis
         float.latchedDistort = float.distort
-        for index in float.parts.indices {
+        for index in float.parts.indices where float.parts[index].isShown {
             guard let vector = vectorCanvas(of: float.parts[index]) else { continue }
             vector.suppressedElementIDs = float.parts[index].insideIDs
             float.parts[index].sourceVersion = vector.contentVersion
@@ -1580,8 +1664,14 @@ extension CanvasManager {
     /// The committed float, read as a pose — once per part, since each part's ink is its own cel's
     /// and a pose channel belongs to a cel. Nil-safe on every field it needs, because the arms below
     /// it treat "no answer" as "this was an ordinary Move".
+    ///
+    /// **A folder's All Frames Move writes no keys, on any cel** (TODO (135)). A key is a pose *at a
+    /// frame*, and routing one at the playhead would make the cel under it an edit to one frame of an
+    /// animation while its neighbours are shifted whole — the artist asked for every frame to move,
+    /// not for one to be keyed. So this Move is geometry throughout, which is also what keeps "the
+    /// same map on every cel" true of the cel it was lifted at.
     private func commitPoseFromFloat(_ float: VectorFloat) {
-        guard float.nudges > 0 else { return }
+        guard float.nudges > 0, float.folder?.scope != .allFrames else { return }
         // The same expression `applyToVectorFloat` builds, at the pose the box finished on — so the
         // key holds exactly the map the geometry was baked through and the two cannot disagree.
         //

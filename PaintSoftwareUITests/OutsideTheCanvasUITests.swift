@@ -17,24 +17,6 @@ import XCTest
 /// A small class on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
 final class OutsideTheCanvasUITests: PaintUITestCase {
 
-    /// The document is square (`launchIntoEditor` takes the 2048×2048 default) and the host is not,
-    /// so the paper is a centred square of side `min(w, h)` and the rest of the host is black
-    /// surround. **Everything below is measured against this rather than against the host**, because
-    /// "off the canvas" is the whole subject and a normalized offset that turned out to be on the
-    /// paper would make every assertion here vacuous.
-    private func paperRect(in canvas: XCUIElement) -> CGRect {
-        let frame = canvas.frame
-        let side = min(frame.width, frame.height)
-        return CGRect(x: (frame.width - side) / 2, y: (frame.height - side) / 2,
-                      width: side, height: side).applying(
-                        CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
-    }
-
-    /// A point given in fractions of the **paper** (which may be negative — off it), as host fractions.
-    private func onHost(_ paper: CGRect, _ x: Double, _ y: Double) -> CGVector {
-        CGVector(dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)
-    }
-
     /// The topmost row of the paper carrying ink, as a fraction of the paper's own height — 1 when
     /// the paper is blank.
     private func inkTopRowInPaper(_ probe: (Double, Double) -> Bool, _ paper: CGRect) -> Double {

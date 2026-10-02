@@ -124,6 +124,29 @@ final class BottomDockLogicTests: XCTestCase {
         XCTAssertEqual(parts, BottomDock.preferredWidth, accuracy: 1e-9)
     }
 
+    // MARK: - What the canvas is covered by
+
+    /// **The strip of the canvas the artist cannot see**: the timeline, plus the docked card and the
+    /// gap that keeps the two apart — so what the canvas draws for the artist to read (the angle pill)
+    /// clears both. With nothing docked it is the timeline alone, which is where the Move bar's box
+    /// stood before it was up.
+    func testTheCoveredStripIsTheTimelineAndTheDockedCardWithTheGapBetween() {
+        XCTAssertEqual(BottomDock.coveredBottom(timeline: 250, card: 0), 250, accuracy: 1e-9,
+                       "no card: the timeline alone")
+        XCTAssertEqual(BottomDock.coveredBottom(timeline: 250, card: 120), 250 + BottomDock.timelineGap + 120,
+                       accuracy: 1e-9, "a card rides on the timeline and its gap")
+        XCTAssertEqual(BottomDock.coveredBottom(timeline: -4, card: 0), 0, accuracy: 1e-9, "never negative")
+    }
+
+    /// Cards on screen at once add up — they stack in the dock's column.
+    func testTheCardHeightPreferenceSumsTheCardsOnScreen() {
+        var value = BottomDockCardHeightKey.defaultValue
+        BottomDockCardHeightKey.reduce(value: &value) { 120 }
+        BottomDockCardHeightKey.reduce(value: &value) { 80 }
+        XCTAssertEqual(value, 200, accuracy: 1e-9)
+        XCTAssertEqual(BottomDockCardHeightKey.defaultValue, 0, accuracy: 1e-9, "no card is zero, not a guess")
+    }
+
     // MARK: - The preference that carries the anchor
 
     /// `reduce` takes the **largest** report, not the last. Both the interpolate strip and the panel

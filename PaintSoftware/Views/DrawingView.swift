@@ -66,6 +66,9 @@ struct DrawingView: View {
     /// result of that decision. The initial value is a first-frame guess only — the preference
     /// arrives on the first layout pass — and it is the timeline's own default so nothing jumps.
     @State private var timelineOccupiedHeight: CGFloat = 250
+    /// How tall the docked card is, reported by `bottomDockCard` through `BottomDockCardHeightKey` —
+    /// zero while nothing is docked. With the timeline's, what the canvas is told it is covered by.
+    @State private var dockedCardHeight: CGFloat = 0
 
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyDrawing`.
@@ -87,7 +90,9 @@ struct DrawingView: View {
 
             ZStack {
                 CanvasView(canvasManager: canvasManager, activePanel: activePanel,
-                           onEditorOpened: { activePanel = $0.panel })
+                           onEditorOpened: { activePanel = $0.panel },
+                           coveredBottom: BottomDock.coveredBottom(timeline: timelineOccupiedHeight,
+                                                                   card: dockedCardHeight))
 
                 // GeometryReader to tell the timeline how much room it may claim when the user drags
                 // it taller, and the notice below how much of the width the layer rail has taken —
@@ -230,6 +235,9 @@ struct DrawingView: View {
         // dock, not its parent, and neither owns the other.
         .onPreferenceChange(TimelineOccupiedHeightKey.self) { height in
             timelineOccupiedHeight = height
+        }
+        .onPreferenceChange(BottomDockCardHeightKey.self) { height in
+            dockedCardHeight = height
         }
         .background(Color.black)
         // **Above everything, including the side toolbar** — which is why it is an overlay on the

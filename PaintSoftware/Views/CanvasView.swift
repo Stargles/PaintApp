@@ -8,6 +8,10 @@ struct CanvasView: UIViewRepresentable {
     /// Told when a canvas gesture opened an object's editor (Select → Tap), so the dock can be handed
     /// to the panel that editor lives in.
     var onEditorOpened: (EditableKind) -> Void = { _ in }
+    /// How much of the canvas area's bottom lies under chrome drawn over it — the timeline and a
+    /// docked panel (`BottomDock.coveredBottom`). The canvas host extends beneath both, so anything
+    /// the host draws for the artist to *read* keeps clear of this much (`RotationReadoutView`).
+    var coveredBottom: CGFloat = 0
 
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView()
@@ -44,7 +48,7 @@ struct CanvasView: UIViewRepresentable {
         let rotationReadout = RotationReadoutView()
         host.addSubview(rotationReadout)
         context.coordinator.rotationReadout = rotationReadout
-        rotationReadout.onTextChanged = { [weak coordinator = context.coordinator] in
+        rotationReadout.onChanged = { [weak coordinator = context.coordinator] in
             coordinator?.rotationReadoutChanged()
         }
 
@@ -458,6 +462,7 @@ struct CanvasView: UIViewRepresentable {
     private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
         context.coordinator.activePanel = activePanel
         context.coordinator.onEditorOpened = onEditorOpened
+        context.coordinator.rotationReadout?.coveredBottom = coveredBottom
         PlaybackTrace.span(.overlays) { context.coordinator.updatePaper() }
         context.coordinator.reconcileLayers()
         // Immediately after `reconcileLayers`, and before every overlay that re-fronts itself: the
@@ -1303,6 +1308,7 @@ struct CanvasView: UIViewRepresentable {
                 // **The angle readout as it is drawn** (TODO (151)): the pill's own text, `none`
                 // while it is hidden — the host hides the pill from XCUITest like every descendant.
                 + " readout:\(rotationReadout?.text ?? "none")"
+                + " readoutbox:\(rotationReadoutBox())"
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
@@ -1321,6 +1327,17 @@ struct CanvasView: UIViewRepresentable {
         /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.
         func rotationReadoutChanged() {
             publishCanvasState()
+        }
+
+        /// Where the angle pill stands, in the host's unit square as `x,y,w,h`, or `none` while it is
+        /// hidden — the pill's frame as drawn, for a test to hold against the chrome it must clear.
+        /// Current as of the last time the knob was let go (`RotationReadoutView.onChanged`).
+        private func rotationReadoutBox() -> String {
+            guard let pill = rotationReadout, pill.text != nil, let host = hostView,
+                  host.bounds.width > 0, host.bounds.height > 0 else { return "none" }
+            return String(format: "%.4f,%.4f,%.4f,%.4f", pill.frame.minX / host.bounds.width,
+                          pill.frame.minY / host.bounds.height, pill.frame.width / host.bounds.width,
+                          pill.frame.height / host.bounds.height)
         }
 
         /// The Move box's four corners' axis-aligned hull in the host's unit square, as `x,y,w,h` —
@@ -2391,8 +2408,9 @@ struct CanvasView: UIViewRepresentable {
             }
             // **One latch per part, on that part's own host** — a folder Move (TODO (71)) carries
             // several layers under one box, and each layer's host shows its own share of the piece
-            // under the one transform `showVectorFloat` writes to all of them.
-            for part in float.parts {
+            // under the one transform `showVectorFloat` writes to all of them. A part on another
+            // frame (`isShown` false: a folder's All Frames Move, TODO (135)) has no host showing it.
+            for part in float.parts where part.isShown {
                 guard let host = layerHosts[part.layerID], !host.strokeView.hasVectorFloat,
                       let vector = canvasManager.vectorCanvas(of: part) else { continue }
                 // `latchedFrameTransform`, not the lift's: a `mayDiverge` float drops its latch
@@ -2447,7 +2465,7 @@ struct CanvasView: UIViewRepresentable {
             // `latchedFrameTransform`, or a stretch already in the bitmap would be applied twice.
             // Every part's host takes the same transform: the box is one box, and each latched
             // bitmap was measured from the same base.
-            for part in float.parts {
+            for part in float.parts where part.isShown {
                 layerHosts[part.layerID]?.strokeView.updateVectorFloat(placement)
             }
             // The ants are measured from where the *model's* selection path sits, which is the last
@@ -2477,7 +2495,7 @@ struct CanvasView: UIViewRepresentable {
                                                         distort: float.latchedDistort)
             let size = canvasManager.canvasSize ?? .zero
             if let view = LiveLayerTransform.viewMap(from: latched, to: live, inBoundsOfSize: size) {
-                for part in float.parts {
+                for part in float.parts where part.isShown {
                     layerHosts[part.layerID]?.strokeView.updateVectorFloat(projective: view.catransform3D)
                 }
             }

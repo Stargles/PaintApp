@@ -142,19 +142,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (151) follow-up: the angle pill hides under the timeline
-
-**Status** — not started. Found by (151)'s worker (`752df7d`): the canvas host extends beneath the timeline
-panel, so a rotate knob near the panel's edge draws its `RotationReadoutView` pill behind the panel. A
-readout that can be hidden is a defect, not a design question — keep it inside the visible area.
-
-## (135) Folder Move: every frame or this cel
-
-**Status** — not started. *"If you click on edit on a folder and then click on move, you can move
-everything inside the folder. However that only moves everything that is in the current cel. Make the
-user have the option in the move menu for folders (the one that has keep stroke width, etc.) to select
-between moving things in all frames, or just that cel."*
-
 ## (132) Direction-following brushes: messy stroke start and end
 
 **Status** — not started. *"For brushes which rotation follows the direction of the stroke, the start
