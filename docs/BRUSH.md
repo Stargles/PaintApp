@@ -966,13 +966,11 @@ roughly three times the nib's width with a hairy edge, and at `scatterAlong` 1.2
 0 the band is **exactly the nib's width** and the ink along it is bunched and gapped instead. That
 side-by-side is the ruling's own sentence, drawn.
 
-**One live/replay asymmetry is real and is asserted rather than tolerated.** At pen-down the live walk
-has exactly one sample, so it has no direction and its **first dab** scatters about `+x` while the
-replay scatters about the fitted tangent — the same shape as `taper` (§12 stage 7: *"the live walk
-genuinely cannot and answers the neutral"*), and it already applied to a direction-following tip's
-first dab before this. Every dab after it agrees to the refit's own angular error, MEASURED at
-**0.020 pt** on a 10 pt brush scattering 0.6 diameters, and the offset *magnitudes* — which are
-frame-free — agree at **4e-14**. `DabRandomLogicTests` pins all three.
+**Live and replay agree about the frame, first dab included.** The live walk holds its first sample
+until the second says which way the stroke goes (and a brush that reads the direction holds it for a
+margin, §3.4), so every dab agrees to the refit's own angular error, MEASURED at **0.020 pt** on a 10 pt
+brush scattering 0.6 diameters, and the offset *magnitudes* — which are frame-free — agree at **4e-14**.
+`DabRandomLogicTests` pins both.
 
 ---
 
@@ -1053,19 +1051,45 @@ curve now.
 plainly because the obvious reading of §2.3 is that it buys fidelity. It does not: the chord is *more*
 faithful to the drawn path (0.250 pt against 0.391 pt), because the fit is defined against the chord. The
 curve is for the tangent, and for not polygonising a stroke walked at a spacing wider than it was drawn
-at. The first dab sits on the first stored point and takes the outgoing tangent.
+at. The first dab sits on the first stored point.
 
 **The live walk is the same march on a chord** — `BrushStamper.LiveWalk`, a two-point `StrokePath` per
 touch sample with the `WalkCarry` crossing the calls, so a dab lands where the pen's own path has
-travelled one spacing and the first dab, held for one input interval, faces the way the stroke goes.
-Both were TODO (84): the live walk hopped from the last dab straight to the next sample, so a
-wide-spaced brush cut every corner it turned, and its first dab faced `+x`. MEASURED
+travelled one spacing. TODO (84): the live walk used to hop from the last dab straight to the next
+sample, so a wide-spaced brush cut every corner it turned. MEASURED
 (`StrokeLiftParityLogicTests`): the live walk and the replay of its own samples are now byte-identical
 for every brush that does not read the stroke's frame, and what is left between the stroke under the
 pen and the baked one is the refit alone — every round tip under 0.010/255 mean channel delta, the
 widest-spaced sprites 0.015–0.049/255. That residue cannot be closed from the live side: the stored
 stroke is a curve through knots the walk has not received yet, and the only walk that would agree with
 it would trail the nib by up to a knot spacing.
+
+**Direction is held at both ends of a stroke — TODO (132).** A direction-following nib faces the
+tangent, and a drawn path's tangent is only trustworthy away from its ends: the pen lands and wobbles for
+its first few points, and lifts with a hook. Three of the five strokes in the owner's
+`recording-20261001-002122` end in a 0.7–2.9 pt segment 85–170° off the stroke, the dabs laid on it
+turned with it, and every one began with a dab or two turned 10–20° by the landing — *"the start and end
+of those brushes are messy"*. `StrokeHeading` is the rule, and it is one distance: direction is read no
+nearer than a **margin** — a quarter of the brush's width, never under 5 pt — to either end, and a dab
+nearer than that faces the direction the stroke had *at* the margin. The lead-in takes the direction
+established once the path has travelled the margin; the tail takes the one it held until a margin before
+the lift. Between the two a dab faces the curve's own tangent exactly as before, so no stroke's interior
+moves. `stampStroke` builds the two anchors from the whole path (`StrokePath.heading`) and only for a
+brush that reads the direction (`Brush.readsDirection`), the gate `taper` already has. The scatter's
+frame reads the same held direction (`StrokeSensors.direction(at:)`), so §2.30's one-function rule stands
+at the ends too; a brush that scatters without following a direction is not touched.
+
+**The live walk cannot know where the stroke ends, so for such a brush it lays a segment down only once
+the pen is a margin past it** and flushes the rest at the lift with the tail held. The ink trails the pen
+by the margin and one input step — inside the nib of any brush wide enough to have a direction worth
+following, which is why the margin scales with the brush — and the first dab waits for the same margin to
+say which way the stroke is heading. Every other brush is laid down on arrival. MEASURED
+(`StrokeHeadingLogicTests`): on the recording's strokes every dab inside either margin now faces one
+direction where the unheld reading spread 19° at the start and 113–140° at the end, and on synthetic
+strokes with a 1.2 pt landing wobble, a 2.5 pt lift hook and 0.03–0.08 pt of digitiser noise a quarter
+brings a 36 pt nib's lead and tail to 6–12° of error — the noise floor of its own interior, 8–11° — where
+a sixth left 12–17°. **Left as it was: the interior of a live stroke still reads one chord per input
+sample**, which is noisy where the pen is slow and which this does not touch.
 
 ### 3.5 Stamp — built, §12 stage 3
 

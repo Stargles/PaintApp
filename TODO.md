@@ -142,12 +142,6 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
-## (132) Direction-following brushes: messy stroke start and end
-
-**Status** — not started. *"For brushes which rotation follows the direction of the stroke, the start
-and end of those brushes are messy. I have left a recording to prove this ending in 02122, 50kb."* The
-recording is `recording-20261001-002122.jsonl`, pulled to `~/PaintWork/evidence/`.
-
 ---
 
 ## (27) Stream the computer's screen as a layer

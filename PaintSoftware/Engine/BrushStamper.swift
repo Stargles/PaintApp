@@ -29,50 +29,51 @@ enum BrushStamper {
     /// nothing and would change the ink a raster stroke lays down. The refit belongs where samples
     /// are kept: `StrokeCanvasView.recordVectorSample`. At input density the straight line between
     /// two samples and `StrokePath`'s curve through them are the same line to well under a pixel,
-    /// which is why this walk is a `StrokePath` of two points per call — the same march as
+    /// which is why this walk is a `StrokePath` of two points per segment — the same march as
     /// `stampStroke`'s, on a chord.
     ///
     /// **§12 stage 7: this walk resolves §6's matrix, through §5.5's funnel, exactly as
     /// `stampStroke` does.** It has to — on a raster layer these dabs are the cel's pixels and
     /// nothing re-stamps them at lift, so a sensor the live walk could not read would be a feature
-    /// the raster half of the app does not have. The sensors are built over the **one segment** a
-    /// call bridges: a two-sample run from the previous sample to this one, and the straight line
-    /// through them as the curve. That is the same geometry the walk already draws, so `direction`
-    /// reads the line it is stamping along and `velocity` reads the interval that actually elapsed.
-    /// `taper` answers its neutral, because `totalArcWidths` is nil for a walk that cannot know how
-    /// long the stroke will be.
+    /// the raster half of the app does not have. The sensors are built over the **one segment** being
+    /// laid down: a two-sample run from the previous sample to the next and the straight line through
+    /// them as the curve. That is the geometry the walk already draws, so `direction` reads the line
+    /// it is stamping along and `velocity` reads the interval that actually elapsed. `taper` answers
+    /// its neutral, because `totalArcWidths` is nil for a walk that cannot know how long the stroke
+    /// will be.
     ///
-    /// Pressure ramps across a call, as it does across a replayed segment: `stampStroke` has always
+    /// Pressure ramps across a segment, as it does across a replayed one: `stampStroke` has always
     /// ramped, and the staircase the ramp exists to prevent was visible live on a fast flick with a
     /// wide brush.
     ///
-    /// **Two things about this walk were what changed on lift, and both are TODO (84).** Measured on
-    /// a hand-drawn arc in `StrokeLiftParityLogicTests`, the walk the artist watched against the
-    /// stored stroke's replay of the same samples:
+    /// The march is `StrokePath.advance`, with its `WalkCarry` crossing the segments, so a dab lands
+    /// where the pen's own path has travelled one spacing — which is where the replay puts it, to
+    /// within the refit. The first dab sits on the first sample.
     ///
-    /// - **It hopped from the last dab straight to the next sample**, so its arc length was the
-    ///   chord from wherever the last dab landed rather than the path the pen took, and a
-    ///   wide-spaced brush cut every corner: on a 48 pt splatter at 0.46 spacing the drops landed
-    ///   inside the curve and fewer of them, a mean channel delta of 0.082/255 over 1,402 pixels
-    ///   against the replay of the very same samples. The march is `StrokePath.advance` now, with
-    ///   its `WalkCarry` crossing the per-sample calls, so a dab lands where the pen's own path has
-    ///   travelled one spacing — which is where the replay puts it, to within the refit.
-    /// - **The first dab faced `+x`**, because a stroke one point long has no direction, while the
-    ///   replay's faces the fitted curve's outgoing tangent: on a 36 pt square nib that was one
-    ///   whole dab turning on lift, 417 pixels at a channel delta of 240/255. The first sample is
-    ///   held for one input interval — about 8 ms — and stamped facing the second, which is what the
-    ///   outgoing tangent at the first knot is to within the refit's tolerance. A tap never gets a
-    ///   second sample and stamps its one dab at `finish`, facing `+x`.
+    /// ## A brush that reads the direction lags the pen by `StrokeHeading.margin`
+    ///
+    /// Direction is held at both ends of a stroke (`StrokeHeading`), and the live walk cannot know
+    /// where the end is. So for a brush that reads it (`Brush.readsDirection`) a segment is laid down
+    /// only once the pen is a margin past its end — by then nothing the pen does can change what the
+    /// segment faces except lifting, and `finish` settles that. The ink trails the pen by that margin
+    /// and one input step, which for a brush wide enough to have a direction worth following is inside
+    /// its own nib; the start waits for the same margin to say which way the stroke is heading. Every
+    /// other brush is laid down on arrival, with no wait at all.
     struct LiveWalk {
         /// The stroke's own field, minted at pen-down, so what the pen lays down and what the
         /// stored stroke replays are drawn from the same randomness — BRUSH.md §4.
         let random: DabRandom
-        /// The sample the walk is stamping **from** — the other end of the segment `stamp` bridges.
-        /// Held alone, unstamped, until the second sample arrives.
-        private var lastSample: VectorSample?
+        /// The samples not yet laid down. `received[0]` is where the next segment starts: the stroke's
+        /// first sample until one has been laid down, the end of the last one after.
+        private var received: [VectorSample] = []
+        /// How far along the pen's path each of `received` is, in canvas points from the stroke's
+        /// first sample — never rebased, so an arc here is an arc anywhere in the stroke.
+        private var arcs: [CGFloat] = []
+        /// Where the stroke's direction is held, as far as the pen has travelled to say.
+        private var heading = StrokeHeading()
         /// Where the march left off — the distance travelled since the last dab and the gap that dab
-        /// asked for — carried across calls exactly as `stampStroke` carries it across segments.
-        /// Nil until the first dab.
+        /// asked for — carried across segments exactly as `stampStroke` carries it. Nil until the
+        /// first dab.
         private var carry: WalkCarry?
         /// How far the walk has travelled, in brush widths — `DabRandom`'s coordinate, advanced one
         /// dab's worth per dab exactly as `stampStroke` advances its own.
@@ -82,39 +83,87 @@ enum BrushStamper {
             random = DabRandom(seed: seed)
         }
 
-        /// Lays down the dabs from the previous sample up to `sample`. The very first sample of a
-        /// gesture is held rather than stamped; see the header.
+        /// Takes the next sample, and lays down every segment that is now settled.
         mutating func stamp(to sample: VectorSample, into target: DabTarget, brush: Brush,
                             color: UIColor, brushSize: CGFloat) {
-            guard let previous = lastSample else {
-                lastSample = sample
+            arcs.append((arcs.last ?? 0) + (received.last.map { hypot(sample.x - $0.x, sample.y - $0.y) } ?? 0))
+            received.append(sample)
+            guard brush.readsDirection else {
+                while received.count > 1 {
+                    layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+                }
                 return
             }
+            let margin = StrokeHeading.margin(brushSize: brushSize)
+            let settled = arcs[arcs.count - 1] - margin
+            while received.count > 1, arcs[1] < settled {
+                if heading.lead == nil { heading.lead = anchor(atArc: margin) }
+                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            }
+        }
+
+        /// The lift. The stroke's length is known now, so the tail is held and what is still waiting
+        /// is laid down. A gesture that never got a second sample — a tap — stamps its one dab,
+        /// facing `+x` for want of a direction.
+        mutating func finish(into target: DabTarget, brush: Brush, color: UIColor, brushSize: CGFloat) {
+            if brush.readsDirection, received.count > 1 {
+                let read = StrokeHeading.readArcs(length: arcs[arcs.count - 1],
+                                                  margin: StrokeHeading.margin(brushSize: brushSize))
+                if heading.lead == nil { heading.lead = anchor(atArc: read.lead) }
+                heading.tail = read.tail <= (heading.lead?.arc ?? -1) ? heading.lead : anchor(atArc: read.tail)
+            }
+            while received.count > 1 {
+                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            }
+            guard carry == nil, let held = received.first else { return }
+            let run = StrokeSamples([held, held], channels: .captured)
+            let path = StrokePath(points: run.positions)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
+            let resolved = brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: 0, arcWidths: arcWidths)) }
+            BrushStamper.stampDab(into: target, at: held.point, brush: brush, values: resolved,
+                                  color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
+                                  tangent: sensors.direction(at: DabSite(parameter: 0, arcWidths: arcWidths)))
+            carry = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
+        }
+
+        /// The direction the pen's path is going `arc` along it — the chord it is on there.
+        private func anchor(atArc arc: CGFloat) -> StrokeHeading.Anchor? {
+            guard let at = ArcTable(arcs).locate(arc) else { return nil }
+            let a = received[at.segment], b = received[at.segment + 1]
+            let length = hypot(b.x - a.x, b.y - a.y)
+            return StrokeHeading.Anchor(arc: arc, direction: CGPoint(x: (b.x - a.x) / length,
+                                                                    y: (b.y - a.y) / length))
+        }
+
+        /// Lays down the dabs from `received[0]` up to `received[1]`, and drops `received[0]`.
+        private mutating func layDownFirstSegment(into target: DabTarget, brush: Brush, color: UIColor,
+                                                  brushSize: CGFloat) {
+            let previous = received[0], sample = received[1]
+            defer { received.removeFirst(); arcs.removeFirst() }
             // Two samples and the line through them. `.captured` because `StrokeInput` always
             // reports every channel — a finger reports the neutrals, which is what `compacted()`
             // later drops.
             let run = StrokeSamples([previous, sample], channels: .captured)
             let path = StrokePath(points: run.positions)
-            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize,
+                                        heading: heading)
             func values(at parameter: CGFloat, arcWidths: CGFloat) -> BrushDabValues {
                 brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: parameter, arcWidths: arcWidths)) }
             }
 
-            defer { lastSample = sample }
             var walked = arcWidths
             var march: WalkCarry
             if let carry {
                 march = carry
             } else {
-                // The held first sample, stamped now that the stroke has a direction: BRUSH.md
-                // §2.30's stroke frame off this two-point path is the chord from it to `sample`,
-                // which is what the fitted curve's outgoing tangent at the first knot is to within
-                // the refit's tolerance.
+                // The first dab, on the first sample, facing what BRUSH.md §2.30's stroke frame off
+                // this segment says: the chord from it to `sample`, which is what the fitted curve's
+                // outgoing tangent at the first knot is to within the refit's tolerance.
                 let resolved = values(at: 0, arcWidths: walked)
                 BrushStamper.stampDab(into: target, at: previous.point, brush: brush, values: resolved,
                                       color: color, brushSize: brushSize,
                                       random: random, arcWidths: walked,
-                                      tangent: path.tangent(at: 0))
+                                      tangent: sensors.direction(at: DabSite(parameter: 0, arcWidths: walked)))
                 march = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize,
                                                                      fraction: resolved.spacing))
             }
@@ -125,31 +174,17 @@ enum BrushStamper {
                 // tolerance.
                 walked += brushSize > 0 ? step / brushSize : step
                 let resolved = values(at: u, arcWidths: walked)
-                // The same `StrokePath.tangent` the replay walk reads, off this walk's own two-point
-                // path — so the live tier and the stored stroke differ in the scatter's *frame* only
-                // by the refit's geometry, which is the difference BRUSH.md §4 already names.
+                // The same reading the replay walk takes, off this walk's own two-point path — so
+                // the live tier and the stored stroke differ in the scatter's *frame* only by the
+                // refit's geometry, which is the difference BRUSH.md §4 already names.
                 BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
                                       color: color, brushSize: brushSize,
                                       random: random, arcWidths: walked,
-                                      tangent: path.tangent(at: u))
+                                      tangent: sensors.direction(at: DabSite(parameter: u, arcWidths: walked)))
                 return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
             arcWidths = walked
             carry = march
-        }
-
-        /// The lift. A gesture that never got a second sample — a tap — stamps its one dab now,
-        /// facing `+x` for want of a direction; a gesture that did has nothing left to lay down.
-        mutating func finish(into target: DabTarget, brush: Brush, color: UIColor, brushSize: CGFloat) {
-            guard carry == nil, let held = lastSample else { return }
-            let run = StrokeSamples([held, held], channels: .captured)
-            let path = StrokePath(points: run.positions)
-            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
-            let resolved = brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: 0, arcWidths: arcWidths)) }
-            BrushStamper.stampDab(into: target, at: held.point, brush: brush, values: resolved,
-                                  color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                                  tangent: path.tangent(at: 0))
-            carry = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         }
     }
 
@@ -254,10 +289,14 @@ enum BrushStamper {
         // tapers, and is written down rather than papered over.
         let totalArcWidths: CGFloat? = brush.modulations.readsTaper && brushSize > 0
             ? path.arcLength(to: path.domainEnd) / brushSize : nil
+        // The stroke's two ends, where `direction` is held rather than read — built, like the length
+        // above, only for a brush that asks, because it too is a pass over the curve.
+        let heading = brush.readsDirection
+            ? path.heading(margin: StrokeHeading.margin(brushSize: brushSize)) : StrokeHeading()
         // BRUSH.md §5.5: every sensor this walk reads resolves here, and a channel the stroke does not
         // carry answers a defined neutral rather than whatever a field defaulted to.
         let sensors = StrokeSensors(samples: samples, path: path, random: random,
-                                    brushSize: brushSize, totalArcWidths: totalArcWidths)
+                                    brushSize: brushSize, totalArcWidths: totalArcWidths, heading: heading)
 
         func draws(at parameter: CGFloat) -> Bool { visibleRange?.contains(parameter) ?? true }
 
@@ -269,11 +308,12 @@ enum BrushStamper {
         // The first dab sits on the first stored point — the anchor the whole lattice hangs from, what
         // `visibleRange` counts from, and arc length zero.
         var arcWidths: CGFloat = 0
-        var resolved = values(at: DabSite(parameter: 0, arcWidths: 0))
+        let first = DabSite(parameter: 0, arcWidths: 0)
+        var resolved = values(at: first)
         if draws(at: 0) {
             stampDab(into: raster, at: samples.positions[0], brush: brush, values: resolved,
                      color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                     tangent: path.tangent(at: 0))
+                     tangent: sensors.direction(at: first))
         }
         var carry = WalkCarry(spacing: stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         for index in 0..<max(samples.count - 1, 0) {
@@ -292,12 +332,12 @@ enum BrushStamper {
                 // in both width and opacity. The ramp is the funnel's, so a stroke with no pressure
                 // channel gets the neutral here and nowhere else.
                 if draws(at: site.parameter) {
-                    // BRUSH.md §2.30's frame, from the same `StrokePath.tangent` the `direction`
-                    // sensor reads through `StrokeSensors` — one function, so the scatter's axes and
-                    // a direction-following tip cannot disagree about which way the stroke is going.
+                    // BRUSH.md §2.30's frame, from the same reading the `direction` sensor takes
+                    // through `StrokeSensors` — one function, so the scatter's axes and a
+                    // direction-following tip cannot disagree about which way the stroke is going.
                     stampDab(into: raster, at: dab, brush: brush, values: resolved,
                              color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                             tangent: path.tangent(at: site.parameter))
+                             tangent: sensors.direction(at: site))
                 }
                 return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
@@ -322,8 +362,8 @@ enum BrushStamper {
     /// **`tangent` is the fourth thing, and it is a geometry rather than a draw** — BRUSH.md §2.30
     /// resolves the scatter onto the *stroke's* frame, so the direction the walk is travelling in has
     /// to arrive here. It is a **unit** vector; both walks take it from the same place the `direction`
-    /// sensor does (`StrokePath.tangent(at:)`), so the two cannot drift apart by having two ways to
-    /// compute it. Its default is `+x`, which is the honest answer for the callers that stamp one dab
+    /// sensor does (`StrokeSensors.direction(at:)`), so the two cannot drift apart by having two ways
+    /// to compute it. Its default is `+x`, which is the honest answer for the callers that stamp one dab
     /// with no stroke around it at all — the size preview and the contact sheet — and is exactly the
     /// heading `BrushInput.direction`'s own neutral of 0 turns names.
     ///

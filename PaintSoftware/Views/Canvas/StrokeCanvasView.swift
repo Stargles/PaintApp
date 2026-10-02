@@ -218,7 +218,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// evenly-spaced dabs between input samples rather than one dot per sample (otherwise a fast
     /// drag draws a gappy line that a bucket fill can leak through) and carries its rhythm, its
     /// arc length and the sample it is stamping from across the per-sample calls. Minted with the
-    /// gesture's seed at pen-down.
+    /// gesture's seed at pen-down. For a brush that follows the stroke's direction it also holds back
+    /// the last margin of the pen's path until it knows which way the stroke ends — the lift flushes it
+    /// (`StrokeHeading`), so every path that ends the gesture must call `finish`.
     private var liveWalk = BrushStamper.LiveWalk(seed: 0)
 
     /// **The random field this gesture's dabs are drawn from** — BRUSH.md §4, minted at pen-down

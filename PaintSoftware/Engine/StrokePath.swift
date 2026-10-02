@@ -246,6 +246,30 @@ struct StrokePath {
         return total
     }
 
+    /// The inverse of `length(ofSegment:upTo:)`: how far through segment `index`, as `u ∈ [0, 1]`,
+    /// the curve has travelled `distance` along it.
+    ///
+    /// Read off the same flattened polyline, so a point found this way is where the dab march would
+    /// put a dab at that distance — which is what `u` is for a dab, and the only reason this is not
+    /// `distance / length`: a Hermite segment is not travelled at a constant speed.
+    func parameter(ofSegment index: Int, atDistance distance: CGFloat) -> CGFloat {
+        let p1 = points[index], p2 = points[index + 1]
+        let (m1, m2) = tangents(segment: index)
+        let steps = StrokePath.subdivisions(p1: p1, p2: p2, m1: m1, m2: m2)
+        var remaining = max(distance, 0)
+        var previous = p1
+        for step in 1...steps {
+            let next = StrokePath.hermite(p1: p1, p2: p2, m1: m1, m2: m2, u: CGFloat(step) / CGFloat(steps))
+            let length = hypot(next.x - previous.x, next.y - previous.y)
+            if remaining <= length, length > 0 {
+                return (CGFloat(step - 1) + remaining / length) / CGFloat(steps)
+            }
+            remaining -= length
+            previous = next
+        }
+        return 1
+    }
+
     /// **The curve as a polyline, at `flatness`** — the same subdivision `length(ofSegment:)` and the
     /// dab march walk, so anything derived from this sits where the dabs sit rather than near them.
     ///

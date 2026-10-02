@@ -1373,6 +1373,20 @@ class PaintUITestCase: XCTestCase {
         try SynthesizedTouch.synthesize([dragging, held], named: "drag with a finger held beside")
     }
 
+    /// **One finger through `points`, in order** — the stroke shapes the public drag cannot make: a pen
+    /// that lands and wanders before it commits to a direction, one that lifts with a hook. Each point
+    /// is reported `interval` seconds after the one before, by the synthesiser the gestures above use,
+    /// and the call returns once the finger has lifted.
+    func fingerStroke(through points: [CGPoint], interval: TimeInterval = 0.02) throws {
+        guard let first = points.first else { return }
+        let path = try SynthesizedTouch.path(at: first, offset: 0)
+        for (index, point) in points.enumerated().dropFirst() {
+            try SynthesizedTouch.move(path, to: point, at: Double(index) * interval)
+        }
+        try SynthesizedTouch.lift(path, at: Double(points.count) * interval)
+        try SynthesizedTouch.synthesize([path], named: "one-finger stroke")
+    }
+
     /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the
     /// widest empty stretch of the top toolbar, measured from the bar as it is laid out.
     ///

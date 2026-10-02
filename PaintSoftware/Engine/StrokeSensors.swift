@@ -164,6 +164,9 @@ struct StrokeSensors {
     /// at the fit's knot spacing a chord direction is a step function of the parameter and a
     /// direction-follow built on one would rotate in visible jumps.
     let path: StrokePath
+    /// Where `direction` is held rather than read off `path` — the stroke's two ends. Empty holds
+    /// nothing, which is what a brush that does not read `direction` is given.
+    let heading: StrokeHeading
     /// The stroke's random field — `VectorStroke.dabRandom` for stored geometry, the seed minted at
     /// pen-down for live drawing.
     let random: DabRandom
@@ -186,12 +189,13 @@ struct StrokeSensors {
     static let referenceSpeed: CGFloat = 40
 
     init(samples: StrokeSamples, path: StrokePath, random: DabRandom,
-         brushSize: CGFloat, totalArcWidths: CGFloat? = nil) {
+         brushSize: CGFloat, totalArcWidths: CGFloat? = nil, heading: StrokeHeading = StrokeHeading()) {
         self.samples = samples
         self.path = path
         self.random = random
         self.brushSize = brushSize
         self.totalArcWidths = totalArcWidths
+        self.heading = heading
     }
 
     /// The value of `input` at `site`, or its **neutral** where this stroke carries no data for it.
@@ -217,7 +221,7 @@ struct StrokeSensors {
         case .tiltDirection:
             return SampleChannel.wrappedAngle(channelValue(.tiltAzimuth, at: site.parameter)) / (2 * .pi)
         case .direction:
-            let tangent = path.tangent(at: site.parameter)
+            let tangent = direction(at: site)
             guard tangent.x != 0 || tangent.y != 0 else { return BrushInput.direction.neutral }
             return SampleChannel.wrappedAngle(atan2(tangent.y, tangent.x)) / (2 * .pi)
         case .taper:
@@ -230,6 +234,16 @@ struct StrokeSensors {
         case let .random(channel, randomiser):
             return random.unit(channel, at: site.arcWidths, randomiser: randomiser)
         }
+    }
+
+    /// **The unit direction the stroke is travelling at `site`** — the curve's tangent, held at the
+    /// stroke's two ends (`StrokeHeading`). The one reading of it: the `direction` sensor turns it into
+    /// a fraction of a turn and `BrushStamper` hands it to the scatter as its frame, so a
+    /// direction-following tip and the scatter about it cannot disagree about which way the stroke is
+    /// going — at the ends included.
+    func direction(at site: DabSite) -> CGPoint {
+        heading.held(atArc: site.arcWidths * (brushSize > 0 ? brushSize : 1))
+            ?? path.tangent(at: site.parameter)
     }
 
     /// One channel interpolated to `parameter`, by that channel's own rule — angles the short way

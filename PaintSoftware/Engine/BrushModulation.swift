@@ -610,6 +610,17 @@ struct BrushDabValues: Equatable {
 
 extension Brush {
 
+    /// Whether any dab of this brush asks which way the stroke is going — a tip that follows the
+    /// direction, or a row driven by it. The question both walks ask before spending anything on the
+    /// stroke's `StrokeHeading`: a brush that does not read it is laid down as the pen moves, with no
+    /// margin at either end, exactly as before.
+    ///
+    /// **Every position in a row's chain is asked**, for `readsTaper`'s reason: a `.scale` module
+    /// reaches the funnel by the same door as the input.
+    var readsDirection: Bool {
+        dab.angle.directionFollow != 0 || modulations.rows.contains { $0.readInputs.contains(.direction) }
+    }
+
     /// **BRUSH.md §6's matrix, evaluated once at one dab.**
     ///
     /// `reading` answers a sensor. `BrushStamper` hands it `StrokeSensors.value(of:at:)` — §5.5's one

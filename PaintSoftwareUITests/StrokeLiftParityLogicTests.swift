@@ -19,7 +19,8 @@ import CoreGraphics
 /// Two causes, both in `LiveWalk`'s header: the walk hopped from the last dab straight to the next
 /// sample, cutting every corner a wide-spaced brush turned, and the first dab faced `+x` because a
 /// stroke one point long has no direction. Both are closed — the walk marches the pen's own path by
-/// arc length and holds its first sample until the second says which way the stroke goes — and
+/// arc length and holds its first sample until the second says which way the stroke goes (a brush
+/// that follows the direction holds it for a margin, `StrokeHeading`) — and
 /// `testTheLiveWalkAndTheReplayOfItsOwnSamplesAreByteIdentical` is the pin.
 ///
 /// **What is left is the refit, and it cannot be closed from the live side**: the stored stroke is a
@@ -112,10 +113,9 @@ final class StrokeLiftParityLogicTests: XCTestCase {
     /// and the curve disagree about at input density. A tip that follows the direction turns with
     /// it; a scatter is resolved onto it (BRUSH.md §2.30).
     private static func readsTheFrame(_ brush: Brush) -> Bool {
-        brush.dab.angle.directionFollow > 0
+        brush.readsDirection
             || brush.dab.scatterAcross > 0 || brush.dab.scatterAlong > 0
             || brush.modulations.drives(.scatterAcross) || brush.modulations.drives(.scatterAlong)
-            || brush.modulations.rows.contains { $0.readInputs.contains(.direction) }
     }
 
     /// **The live walk and the replay of its own samples draw the same picture, to the byte**, for
