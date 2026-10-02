@@ -170,7 +170,7 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
   under a different spelling, or two genuinely different devices) cannot evict each other forever
   the way they used to — each cycle every ~1 s, the evicted side discovering the close as an
   ordinary drop and reconnecting to reclaim the slot, which evicted the other, endlessly. The
-  parked state shows "Paused — another connection took the stream" and only a deliberate
+  parked state shows "Another connection took the stream" (not "Paused": nothing is) and only a deliberate
   reconnect (the address button) revives it. Independently, `machineId` above lets the coordinator
   collapse two spellings of the *same* laptop onto one client before this contention can happen at
   all — see §5's discussion and §6.
@@ -740,7 +740,7 @@ outgoing manager's coordinator. No leak found.
    genuinely dead peer cannot hang a disposal forever) before cancelling anything.
    `ScreenStreamClient` recognizes the exact reason string and moves to a new terminal state,
    `.replaced(reason:)`, instead of running it through `fail(_:)` — no reconnect timer is armed.
-   The bar reads this as `StreamBarState.pausedByOther`, "Paused — another connection took the
+   The bar reads this as `StreamBarState.takenByAnother`, "Another connection took the
    stream," distinct from `.reconnecting`'s wording precisely because nothing is retrying. Only a
    deliberate reconnect (the address button, `ScreenStreamCoordinator.connect(to:)`, which now
    calls `client.start()` on a parked client rather than silently registering a continuation

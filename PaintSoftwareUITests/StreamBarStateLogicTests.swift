@@ -669,11 +669,11 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertEqual(client.state, .connected, "an ordinary STATUS never moves the connection state")
     }
 
-    /// The bar reads a replaced connection as "Paused — another connection took the stream,"
-    /// never as an ordinary reconnect: the artist did not cause this, and the word must not
-    /// suggest the client is about to retry on its own, because it is not (STREAM.md's fix for
-    /// "even two real devices never ping-pong").
-    func testTheBarReadsAReplacedConnectionAsPausedByOtherNotReconnecting() throws {
+    /// The bar reads a replaced connection as "Another connection took the stream," never as an
+    /// ordinary reconnect and never as a pause: the artist did not cause this, nothing is paused, and
+    /// the word must not suggest the client is about to retry on its own, because it is not
+    /// (STREAM.md's fix for "even two real devices never ping-pong").
+    func testTheBarReadsAReplacedConnectionAsTakenByAnotherNotReconnecting() throws {
         let (manager, element) = streaming()
         let coordinator = manager.streamCoordinator
         coordinator.stateChanged(.connected, at: Self.endpoint)
@@ -682,7 +682,7 @@ final class StreamBarStateLogicTests: XCTestCase {
 
         coordinator.stateChanged(.replaced(reason: ScreenStreamClient.replacedByAnotherConnectionReason),
                                  at: Self.endpoint)
-        XCTAssertEqual(coordinator.barState(for: element), .pausedByOther)
-        XCTAssertEqual(StreamBarState.pausedByOther.word, "Paused — another connection took the stream")
+        XCTAssertEqual(coordinator.barState(for: element), .takenByAnother)
+        XCTAssertEqual(StreamBarState.takenByAnother.word, "Another connection took the stream")
     }
 }

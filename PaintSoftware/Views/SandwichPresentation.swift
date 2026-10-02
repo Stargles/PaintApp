@@ -79,7 +79,8 @@ enum SandwichPresentation: String {
     /// - **A live stream keeps the canvas on the pair** whatever the bake says: a bake is the picture
     ///   that cannot carry a frame, so it is not the picture to wait for. The pair is shown once it is
     ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
-    ///   moment its pair is current rather than when a bake lands.
+    ///   moment its pair is current rather than when a bake lands. A pair cut around other hosts at
+    ///   this frame (`.regrouped`) is kept on screen until the new cut's pair lands.
     /// - Otherwise a lifted stroke stays on its pair while the pair is cut here (trap 2).
     /// - Otherwise an edit's pair is shown if it is for this key, and **kept** if it is merely stale —
     ///   one edit behind, at most, and that edit's rebuild is already on its way. Falling back to the
@@ -97,7 +98,7 @@ enum SandwichPresentation: String {
             switch livePair {
             case .current: return .moving
             case .stale: return current == .moving ? .moving : .rest
-            case .none: return .rest
+            case .none, .regrouped: return .rest
             }
         }
         if bakeIsCurrent, !streamIsLive { return .rest }
@@ -105,6 +106,8 @@ enum SandwichPresentation: String {
         switch livePair {
         case .none:
             return .rest
+        case .regrouped:
+            return streamIsLive && current.activeHostDrawsItself ? current : .rest
         case .stale, .current:
             if current == .midStroke, !(streamIsLive && livePair == .current) { return .midStroke }
             return livePair == .current || current == .live ? .live : .rest
@@ -120,6 +123,13 @@ enum LivePairFit: Equatable {
     /// other layers' ink from that frame beside the active layer's from this one; both are worse than
     /// the previous frame's bake, which is RENDER.md §2.10's picture for a frame not yet baked.
     case none
+
+    /// **Cut for this frame around other hosts** — a layer switch, or a stream going live or frozen,
+    /// moved the cut while the content stood still. The held pair is still a coherent picture of this
+    /// frame (every host it names draws itself, every other layer is in a half), so a live stream —
+    /// which has no bake to fall back on that is not a stale frame — keeps it on screen while the pair
+    /// for the new cut is minted. Everything else treats it as `.none`: the bake is the picture on hand.
+    case regrouped
 
     /// Cut here, minted for an older key. It differs from the current picture by exactly the edits
     /// made since, and each of them has moved the key and so is on its way.
@@ -142,6 +152,8 @@ enum LivePairFit: Equatable {
             self = .current
         } else if held.cut == cut {
             self = .stale
+        } else if let frame = held.cut.hostFrame, frame == cut.hostFrame {
+            self = .regrouped
         } else {
             self = .none
         }
@@ -164,6 +176,12 @@ enum LivePairCut: Equatable {
     /// **Without a frame**: every band is a picture of one moment, so bands from the previous frame
     /// of a take are one coherent picture a frame stale — §2.10's previous picture — not a mixture.
     case aroundRuns([[UUID]])
+
+    /// The frame a cut around hosts was made at, or nil for a transform edit's bands.
+    var hostFrame: Int? {
+        if case .aroundHost(let frame, _) = self { return frame }
+        return nil
+    }
 
     /// Around a host both, at any frame; or around the same runs both.
     func isSameKind(as other: LivePairCut) -> Bool {

@@ -16,7 +16,7 @@ import SwiftUI
 final class SandwichPresentationLogicTests: XCTestCase {
 
     private static let all: [SandwichPresentation] = [.disengaged, .rest, .live, .moving, .midStroke]
-    private static let fits: [LivePairFit] = [.none, .stale, .current]
+    private static let fits: [LivePairFit] = [.none, .stale, .current, .regrouped]
 
     /// `SandwichPresentation.next` with every fact not under test at its quiet value: no transform
     /// edit, no bands held of this frame, and no live stream.
@@ -284,13 +284,34 @@ final class SandwichPresentationLogicTests: XCTestCase {
                        .stale)
     }
 
-    func testAnOlderPairCutAtAnotherFrameOrLayerDoesNotFit() {
+    func testAnOlderPairCutAtAnotherFrameDoesNotFitAndOneCutAroundOtherHostsIsRegrouped() {
         let held = (key: key(0), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA]))
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 4, layerIDs: [layerA])),
                        .none, "another frame")
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerB])),
-                       .none, "another layer between the halves")
+                       .regrouped, "other hosts between the halves, at this frame")
+        XCTAssertEqual(LivePairFit(held: held, key: key(1),
+                                   cut: LivePairCut.aroundHost(frame: 3, layerIDs: [layerA, layerB])),
+                       .regrouped, "a stream joining the run")
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: nil), .none, "no active layer")
+    }
+
+    /// **A layer switch under a live stream keeps the live picture on screen** while the pair for the
+    /// new cut is minted — the held pair names every host that draws, so it is a coherent picture of
+    /// this frame — and **everything else treats a regrouped pair as no pair**: the bake is the
+    /// picture on hand, exactly as before TODO (112).
+    func testARegroupedPairIsKeptOnlyUnderALiveStreamAndOnlyWhereItIsAlreadyOnScreen() {
+        for bake in [false, true] {
+            XCTAssertEqual(next(.live, bake: bake, pair: .regrouped, stream: true), .live)
+            XCTAssertEqual(next(.midStroke, bake: bake, pair: .regrouped, stream: true), .midStroke)
+            XCTAssertEqual(next(.rest, bake: bake, pair: .regrouped, stream: true), .rest, "never entered from the bake")
+            XCTAssertEqual(next(.disengaged, bake: bake, pair: .regrouped, stream: true), .rest)
+            for current in Self.all {
+                XCTAssertEqual(next(current, bake: bake, pair: .regrouped, stream: false),
+                               next(current, bake: bake, pair: .none, stream: false),
+                               "with no live stream it is no pair: from \(current)")
+            }
+        }
     }
 
     // MARK: - LivePairFit across the two cuts

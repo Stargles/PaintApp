@@ -141,7 +141,7 @@ struct StreamBar: View {
         case .notStreaming: return .orange
         // The ping-pong fix: not retrying, and not the artist's own doing either — distinct from
         // both the yellow "trying" states and the orange "connected but told not now" one.
-        case .pausedByOther: return .red
+        case .takenByAnother: return .red
         }
     }
 
@@ -153,7 +153,7 @@ struct StreamBar: View {
         case .connecting: return "connecting"
         case .reconnecting: return "reconnecting"
         case .notStreaming: return "notStreaming"
-        case .pausedByOther: return "pausedByOther"
+        case .takenByAnother: return "takenByAnother"
         }
     }
 }

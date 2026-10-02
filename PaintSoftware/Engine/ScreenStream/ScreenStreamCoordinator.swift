@@ -680,7 +680,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             // The ping-pong fix: the server evicted this connection for another one and said so —
             // the artist did not do this, and unlike `.reconnecting` nothing here is retrying on
             // its own, so the word must not read like an ordinary drop.
-            return .pausedByOther
+            return .takenByAnother
         case .connected?:
             guard let status = statuses[endpoint] else { return .connecting }
             return status.streaming ? .live : .notStreaming(reason: status.reason ?? "no source is picked")
@@ -821,7 +821,7 @@ enum StreamBarState: Equatable {
     /// spelling of the laptop — and said so before closing the socket. Unlike `.reconnecting`, this
     /// is not retrying: the artist must reconnect deliberately (the address button), or the two
     /// would just trade the eviction back and forth forever, which is the bug this fixes.
-    case pausedByOther
+    case takenByAnother
 
     var word: String {
         switch self {
@@ -830,7 +830,7 @@ enum StreamBarState: Equatable {
         case .connecting: return "Connecting…"
         case .reconnecting(let detail): return "Reconnecting… \(detail)"
         case .notStreaming(let reason): return "Not streaming — \(reason)"
-        case .pausedByOther: return "Paused — another connection took the stream"
+        case .takenByAnother: return "Another connection took the stream"
         }
     }
 }
