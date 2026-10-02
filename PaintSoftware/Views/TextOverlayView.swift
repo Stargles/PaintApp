@@ -18,12 +18,7 @@ import UIKit
 /// **Nothing in the live path is canvas-sized and nothing in it allocates per frame** (§4 rules 1
 /// and 2). The glyph bitmap is the *box*, re-rendered only when the recipe or the box size changes
 /// and coalesced to one render per run-loop turn; a box drag assigns a frame and rasterizes nothing.
-///
-/// **Scribble is the one thing on that list the text view does *not* get.** See
-/// `scribbleInteraction(_:shouldBeginAt:)` — on a drawing canvas the pencil is the brush, and iPadOS
-/// handing a pencil touch to handwriting instead is what ADD_TEXT.md:208 predicted and the owner
-/// reported.
-final class TextOverlayView: CanvasPlaneView, UITextViewDelegate, UIScribbleInteractionDelegate {
+final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
 
     // MARK: - Callbacks
 
@@ -71,8 +66,7 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate, UIScribbleInte
 
     // MARK: - Subviews
 
-    /// The caret, the selection and the keyboard. **Not Scribble, and not the glyphs** — see the
-    /// class comment for the glyphs and `scribbleInteraction(_:shouldBeginAt:)` for Scribble.
+    /// The caret, the selection and the keyboard. **Not the glyphs** — see the class comment.
     let textView: UITextView = {
         let view = UITextView()
         view.backgroundColor = .clear
@@ -154,68 +148,10 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate, UIScribbleInte
         layer.addSublayer(outlineLayer)
 
         textView.delegate = self
-        // **The only way to turn Scribble off.** There is no `isScribbleEnabled` anywhere in the SDK
-        // — iOS attaches handwriting to every editable `UITextInput` unconditionally, and an added
-        // interaction whose delegate refuses is the documented veto. The interaction is retained by
-        // the text view and holds its delegate weakly, so this is not a cycle.
-        textView.addInteraction(UIScribbleInteraction(delegate: self))
         addSubview(textView)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    // MARK: - UIScribbleInteractionDelegate
-
-    /// **Refuses iPadOS Scribble inside the text box, everywhere and always.**
-    ///
-    /// ADD_TEXT.md:208 left "whether iOS's own Scribble recognizer fights the canvas's" as a debt
-    /// owed to the owner's iPad, and the answer came back as a bug report: a pencil tap spawned the
-    /// box but no keyboard, and *"clicking with pencil brings up that write to text thing which is
-    /// annoying"*. The app side of that path is clean — `handleTextPress` calls `focusEditor()`,
-    /// which calls `becomeFirstResponder()`, for a pencil exactly as for a finger. What follows is
-    /// iOS's: the pencil is still on the glass when an editable `UITextInput` materialises under it,
-    /// handwriting is what iPadOS assumes a pencil over text means, and it offers Scribble in the
-    /// keyboard's place.
-    ///
-    /// `UIScribbleInteraction`'s own header names this case twice — *"if a text view also supports
-    /// drawing with Apple Pencil"* and *"views that handle Pencil events directly, like a drawing
-    /// canvas, since nearby text fields could take over the Pencil events for writing"*. This view is
-    /// both: it is a text input sitting **inside** `CanvasView`'s container, over the artwork, in an
-    /// app whose pencil is the brush.
-    ///
-    /// **Unconditional, and there is no finer seam available.** The wanted behaviour — a pencil *tap*
-    /// raises the keyboard, a pencil *stroke* still writes — is not expressible: this callback is
-    /// asked once, before either has happened, and is handed a location and nothing else. No later
-    /// callback can revise the answer (`scribbleInteractionWillBeginWriting` is a notification, and
-    /// `shouldDelayFocus` only postpones focus Scribble has already taken). Even with a seam it would
-    /// be the wrong trade here — a pencil stroke over the canvas is a brush stroke, and one that
-    /// silently became a word would be a worse bug than the one this fixes.
-    ///
-    /// **Scoped to this text view alone.** The app's other text inputs are SwiftUI `TextField`s in
-    /// panels and dialogs — palette and layer names, the hex field, the canvas size, and (TODO (102),
-    /// since the owner's *"it frequently activates the scribble write mode"* report) the scene name,
-    /// now reached through a tap-to-rename alert rather than a `TextField` anchored in the top bar.
-    /// None of the app's other text inputs sit over the artwork and none compete with a brush, so
-    /// handwriting one of them is a good use of a pencil and they keep Scribble — the scene name's
-    /// alert included, since a modal alert cannot sit over the canvas either. `TopToolbar`'s own doc
-    /// comment on `isRenamingProject` has the fuller reasoning, including the measured regression
-    /// that ruled out giving the always-visible label a live `UITextField` of its own to veto.
-    ///
-    /// Rejected: **`UITextInputContext.current.pencilInputExpected = false`**. It exists, and it is
-    /// `readwrite`, which makes it look like the direct switch for "show the keyboard anyway". It is
-    /// process-wide rather than per-view, it is undocumented as a setter, and it treats the symptom
-    /// (which input the keyboard expects) rather than the cause (Scribble owning the touch). Vetoing
-    /// the interaction leaves every other text field in the app exactly as it was.
-    func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
-        // The one on-device proof that this path runs. iOS asking at all is the evidence that
-        // Scribble *was* about to take the pencil; the line is absent from a recording made before
-        // this veto existed only because nothing was there to write it, so read it as "iOS asked,
-        // and we said no" — CLAUDE.md's action-recorder section is how it gets off the iPad.
-        ActionRecorder.ifRecording {
-            $0.note("scribble.veto x=\(Int(location.x.rounded())) y=\(Int(location.y.rounded()))")
-        }
-        return false
-    }
 
     // MARK: - Driving it
 
@@ -578,7 +514,7 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate, UIScribbleInte
         // turned box is tapping the canvas, exactly as it is when the object is committed.
         if frameModel.contains(point) {
             // Inside the box is the text view's: tap to place the caret. The band is what moves the
-            // box. (Writing into it is not on the list — see `scribbleInteraction(_:shouldBeginAt:)`.)
+            // box.
             //
             // Delegated to the text view's own `hitTest` rather than returned directly. `UITextView`
             // keeps its selection recognizers on private subviews, and a hit test that stops at the

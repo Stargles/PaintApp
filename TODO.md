@@ -88,21 +88,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that
 already merged are follow-ups named for their item.
 
-## (148) No Scribble anywhere in the app — one mechanism
-
-**Status** — not started. *"In the colour picker, when i try to adjust the opacity, it automatically
-just registers my apple pencil near the hex code and calls on apple scribble, meaning I adjust the
-scribble instead of adjusting opacity. Its very annoying. A while back I had the same issue for the
-title, and further back, I believe it was layer titles, and maybe other stuff. This makes it the third
-or fourth time I am asking this: there should be no scribble (draw to write) in this app. It should be
-completely disabled. Many features independently have fixes to block it, which violates the clean
-architecture priority. Seems like the title and layer titles use the same method, so just confirm that
-it isnt two separate things doing the same thing, and also make the hex code follow that standard."*
-
-- [ ] Scribble disabled app-wide by **one** mechanism every text input goes through (hex field
-      included); every per-feature blocker deleted; the report confirms the title and layer-title paths
-      were (or now are) the same one.
-
 ## Text follow-ups: a stray box after Edit Text, and the panel stays live while typing
 
 **Status** — not started. Both on (116)'s Select → Edit Text (`d1dd0dd`) and the text tool.

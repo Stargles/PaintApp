@@ -111,16 +111,9 @@ struct TopToolbar: View {
 
     /// The scene's name, which opens the rename sheet.
     ///
-    /// **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The name sits where a
-    /// pencil resting near the top of the canvas lands, and a text field there starts Scribble. The
-    /// always-visible label is a `Text`, which Scribble cannot engage on at all — there is no
-    /// `UITextInput` for iPadOS to hand a pencil touch to — so keeping Scribble off it is true by
-    /// construction rather than by veto. The sheet's own `TextField` keeps Scribble on deliberately,
-    /// matching `LayerOptionsPanel`'s "Rename Layer" alert: neither a sheet nor an alert can sit over
-    /// the canvas, so a pencil there is never competing with a brush stroke, and handwriting a name is
-    /// the same "good use of a pencil" that doc comment grants a layer's. Still the app's only
-    /// title-editing control, and since TODO (57) part 2 the only way to rename a project's folder on
-    /// disk.
+    /// **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The bar's label is a
+    /// plain `Text`; the sheet's `TextField` is the app's only title-editing control, and since TODO
+    /// (57) part 2 the only way to rename a project's folder on disk.
     ///
     /// **A `.sheet`, not an `.alert`** — `.alert` is the one presentation kind nothing in this app had
     /// ever driven end to end through XCUITest before this feature, and it MEASURED as unreliable

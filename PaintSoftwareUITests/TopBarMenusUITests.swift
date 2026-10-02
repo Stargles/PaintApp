@@ -70,9 +70,7 @@ final class TopBarMenusUITests: PaintUITestCase {
     /// than at the bottom of the animation bar.)
     ///
     /// **It is a button that opens a rename sheet, not a live `TextField` anchored in the bar** — see
-    /// `TopToolbar.sceneNameButton` for the measured reason. That is what makes "Scribble cannot start
-    /// on it" true by construction rather than by a veto this test could probe: the always-visible
-    /// label is a `Text`, which has no `UITextInput` for iPadOS to hand a pencil touch to at all.
+    /// `TopToolbar.sceneNameButton`.
     /// `ProjectStorageUITests.testRetitlingAProjectInTheEditorRenamesItsTileAndItStillOpens` is the
     /// existing coverage that the rename itself still works end to end.
     ///

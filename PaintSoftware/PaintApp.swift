@@ -3,6 +3,9 @@ import SwiftUI
 @main
 struct PaintApp: App {
     init() {
+        // Scribble is refused for every text input the app ever shows, by the hook that has to be in
+        // place before the first one is created. See `ScribbleRefusal`.
+        ScribbleRefusal.install()
         // RENDER.md §2.11: **the bake is dumped between launches by default.** Synchronous and
         // before anything else, because the alternative is a race with the first document's own
         // baker — the process-lifetime bake key is built from object identities and in-memory
