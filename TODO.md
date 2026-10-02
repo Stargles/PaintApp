@@ -56,19 +56,10 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## Rulings of 2026-10-02 on merged work — four follow-ups
+## Rulings of 2026-10-02 on merged work — ruled as built, no work
 
-**Status** — not started. Each is the owner's answer to a question a merged item left open.
-
-- **Inline renaming.** Scribble is refused app-wide since (148), so the tap-to-rename sheet / alert for
-  the document title and for layer (and folder) names goes whole; both are edited inline where they are
-  shown.
-- **Select → Tap gets Single / Add / Subtract** — *"a slider similar to cut/enclosed/touching for the tap
-  that switches between single/add/subtract"* ((147), `8aa76c9`).
-- **The canvas scrolls to keep the text box being typed visible** above the Text panel and keyboard,
-  and back after.
-- **A smart-shape line's end handles snap to 15° with a finger down**, by (151)'s shared
-  `RotationAngle` rule.
+**Status** — nothing left to build: the four follow-ups the owner ruled on (inline renaming, Select → Tap's
+Single / Add / Subtract, the canvas following the text box, the smart-shape line's snap) have merged.
 
 Ruled as built, no work: folder Move's All Frames on keyed cels (exact at the current frame) and its
 remembered scope; the plain look of a blending layer above an edit until the bake; the tight Select tabs.

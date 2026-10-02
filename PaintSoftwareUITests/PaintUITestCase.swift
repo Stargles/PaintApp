@@ -1437,8 +1437,11 @@ class PaintUITestCase: XCTestCase {
             XCTFail("tapAway: no `toolbar.galleryButton` on screen, so there is no top toolbar to tap", file: file, line: line)
             return
         }
+        // Buttons and the scene's name field: the name sits in the middle of the bar, so a gap measured
+        // without it would be the one it stands in.
         let rowButtons = nodes
-            .filter { $0.elementType == .button && $0.frame.midY > anchor.minY && $0.frame.midY < anchor.maxY }
+            .filter { ($0.elementType == .button || $0.elementType == .textField)
+                && $0.frame.midY > anchor.minY && $0.frame.midY < anchor.maxY }
             .map(\.frame)
             .sorted { $0.minX < $1.minX }
         let gaps = zip(rowButtons, rowButtons.dropFirst()).map { (from: $0.maxX, to: $1.minX) }

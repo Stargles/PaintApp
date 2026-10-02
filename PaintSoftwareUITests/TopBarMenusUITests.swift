@@ -94,9 +94,9 @@ final class TopBarMenusUITests: PaintUITestCase {
             previous = (identifier, button.frame)
         }
 
-        let nameField = app.buttons["timeline.projectNameField"]
+        let nameField = app.textFields["timeline.projectNameField"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 5), "the scene name is in the top bar")
-        XCTAssertEqual(nameField.label, "Untitled", "PREMISE: a fresh document is named Untitled")
+        XCTAssertEqual(nameField.value as? String, "Untitled", "PREMISE: a fresh document is named Untitled")
         let move = app.buttons["toolbar.moveButton"].frame
         XCTAssertGreaterThan(nameField.frame.minX, move.maxX,
                              "the scene name must be right of all six icons, the last of which is Move")

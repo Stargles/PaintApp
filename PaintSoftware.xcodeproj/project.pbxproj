@@ -556,8 +556,11 @@
 		EC6A1FF0CBC7C61944BDB78C /* PaintSoftware/Models/TimelineRulerLabels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD832AEB6F3C908553BEA9C /* PaintSoftware/Models/TimelineRulerLabels.swift */; };
 		B75C30A58272ECFCF4AB6451 /* TimelineRulerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */; };
 		C22E6537891D093E6DA00AB4 /* PaintSoftware/Utilities/ScribbleRefusal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */; };
+		6854117B2DA3B34FDBB41CD3 /* PaintSoftware/Views/InlineNameField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */; };
 		08E80CC1479500DEFC328863 /* PaintSoftware/Models/ViewportFollow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */; };
 		C6A71BA050DFF338B92638E5 /* ScribbleRefusalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED8F0919D4414CB74EC6C0E /* ScribbleRefusalLogicTests.swift */; };
+		1CCB6AED8F4FED7A19F67B8C /* InlineRenameUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */; };
+		DD55F90432C897982BA82994 /* InlineNameFieldLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C717AEFA898BA9FD78D69010 /* InlineNameFieldLogicTests.swift */; };
 		D95F111531A26851B70D2719 /* ViewportFollowLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 934AE15F8D3904DB9063F227 /* ViewportFollowLogicTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -1123,8 +1126,11 @@
 		5FD832AEB6F3C908553BEA9C /* PaintSoftware/Models/TimelineRulerLabels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineRulerLabels.swift; sourceTree = "<group>"; };
 		9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRulerUITests.swift; sourceTree = "<group>"; };
 		7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ScribbleRefusal.swift; sourceTree = "<group>"; };
+		6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/InlineNameField.swift; sourceTree = "<group>"; };
 		AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ViewportFollow.swift; sourceTree = "<group>"; };
 		1ED8F0919D4414CB74EC6C0E /* ScribbleRefusalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribbleRefusalLogicTests.swift; sourceTree = "<group>"; };
+		8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineRenameUITests.swift; sourceTree = "<group>"; };
+		C717AEFA898BA9FD78D69010 /* InlineNameFieldLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineNameFieldLogicTests.swift; sourceTree = "<group>"; };
 		934AE15F8D3904DB9063F227 /* ViewportFollowLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewportFollowLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -1414,6 +1420,8 @@
 				7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */,
 				5230B311496C20C0BD62EE70 /* ColorPickerLogicTests.swift */,
 				1ED8F0919D4414CB74EC6C0E /* ScribbleRefusalLogicTests.swift */,
+				8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */,
+				C717AEFA898BA9FD78D69010 /* InlineNameFieldLogicTests.swift */,
 				934AE15F8D3904DB9063F227 /* ViewportFollowLogicTests.swift */,
 				310524B7CF74F69409010E1D /* ColorPickerUITests.swift */,
 				BED9770C82E47F862983C82F /* VectorCutPreviewLogicTests.swift */,
@@ -1723,6 +1731,7 @@
 				DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */,
 				DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */,
 				7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */,
+				6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */,
 				AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */,
 				DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */,
 				6821B3D844A703EA08DC6D76 /* PaintSoftware/Utilities/TouchTypeResolution.swift */,
@@ -2101,6 +2110,8 @@
 				7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */,
 				02FE34D73AF061377D7A2881 /* ColorPickerLogicTests.swift in Sources */,
 				C6A71BA050DFF338B92638E5 /* ScribbleRefusalLogicTests.swift in Sources */,
+				1CCB6AED8F4FED7A19F67B8C /* InlineRenameUITests.swift in Sources */,
+				DD55F90432C897982BA82994 /* InlineNameFieldLogicTests.swift in Sources */,
 				D95F111531A26851B70D2719 /* ViewportFollowLogicTests.swift in Sources */,
 				21C08F7A40DD4FBA12FCA96B /* ColorPickerUITests.swift in Sources */,
 				82E47F862983C82F3033DD4A /* VectorCutPreviewLogicTests.swift in Sources */,
@@ -2373,6 +2384,7 @@
 				DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */,
 				DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */,
 				C22E6537891D093E6DA00AB4 /* PaintSoftware/Utilities/ScribbleRefusal.swift in Sources */,
+				6854117B2DA3B34FDBB41CD3 /* PaintSoftware/Views/InlineNameField.swift in Sources */,
 				08E80CC1479500DEFC328863 /* PaintSoftware/Models/ViewportFollow.swift in Sources */,
 				DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */,
 				A6AF64FEBB766643C446D78B /* PaintSoftware/Utilities/TouchTypeResolution.swift in Sources */,

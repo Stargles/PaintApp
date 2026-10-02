@@ -32,6 +32,10 @@ final class LayerStackCell: UITableViewCell {
     /// toggle, Rename) hangs off this button instead of "tap the already-selected row again", which
     /// is how a layer row opens the same menu.
     var onOpenFolderOptions: (() -> Void)?
+    /// The artist typed a new name for this row — non-empty, trimmed, and not the one it had.
+    var onRename: ((String) -> Void)?
+    /// The row's name is no longer being edited, whether or not it changed.
+    var onRenameEnded: (() -> Void)?
     /// §6.5's source pick: whether this row clips the node whose options menu is open.
     var onToggleMaskSource: (() -> Void)?
     /// §6.6's fill boundary for this row's own layer — a per-layer property rather than anything to
@@ -47,6 +51,11 @@ final class LayerStackCell: UITableViewCell {
     private let thumbnailView = UIImageView()
     private let folderIconView = UIImageView()
     private let nameLabel = UILabel()
+    /// **The name, while the artist is typing a new one** — hidden the rest of the time, laid over the
+    /// label's own place. The label stays the row's static text (every test and VoiceOver read the row
+    /// through it) and the field is only ever the editor: it is not the row's tap target, which is the
+    /// row's own — select, and a second tap for its options.
+    private let renameField = InlineNameField()
     private let subtitleLabel = UILabel()
     private let opacitySlider = UISlider()
     /// **The percentage, while the artist is dragging the slider** — TODO (59), the owner
@@ -108,7 +117,7 @@ final class LayerStackCell: UITableViewCell {
 
     private func buildHierarchy() {
         for view in [guideContainer, disclosureButton, visibilityButton, thumbnailView, folderIconView,
-                     nameLabel, subtitleLabel, opacitySlider, opacityReadoutLabel, currentMarker,
+                     nameLabel, renameField, subtitleLabel, opacitySlider, opacityReadoutLabel, currentMarker,
                      folderOptionsButton,
                      maskSourceButton, fillReferenceButton, bakedMarker, vectorMarker, folderMarker,
                      blendModeMarker, compositorMarker, effectMarker] {
@@ -144,6 +153,12 @@ final class LayerStackCell: UITableViewCell {
         nameLabel.textColor = .white
         nameLabel.isAccessibilityElement = true
         nameLabel.accessibilityTraits = .staticText
+
+        renameField.font = nameLabel.font
+        renameField.isHidden = true
+        renameField.accessibilityIdentifier = "layerPanel.renameField"
+        renameField.onCommit = { [weak self] name in self?.onRename?(name) }
+        renameField.onEndEditing = { [weak self] in self?.endRenaming() }
 
         subtitleLabel.font = .systemFont(ofSize: 11)
         subtitleLabel.textColor = .lightGray
@@ -249,6 +264,13 @@ final class LayerStackCell: UITableViewCell {
             fillReferenceButton.widthAnchor.constraint(equalToConstant: 30),
             fillReferenceButton.heightAnchor.constraint(equalToConstant: 34),
 
+            // Over the label, a little wider each side for the field's own insets, and as long as the
+            // label may be: up to the slider.
+            renameField.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor, constant: -6),
+            renameField.trailingAnchor.constraint(equalTo: opacitySlider.leadingAnchor, constant: -8),
+            renameField.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            renameField.heightAnchor.constraint(equalToConstant: 28),
+
             subtitleLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: opacitySlider.leadingAnchor, constant: -8),
@@ -326,6 +348,7 @@ final class LayerStackCell: UITableViewCell {
 
         nameLabel.text = title(for: model)
         nameLabel.accessibilityLabel = model.name
+        renameField.name = model.name
 
         visibilityButton.setImage(UIImage(systemName: model.isVisible ? "eye" : "eye.slash"), for: .normal)
         visibilityButton.tintColor = model.isVisible ? .white : .gray
@@ -763,12 +786,34 @@ final class LayerStackCell: UITableViewCell {
         // The name gives way rather than being pushed: the rail is 300 points wide and the name
         // column is ~40 of them, so a readout that made room for itself would truncate the name to
         // nothing anyway — and during a drag the number is what the artist is reading.
-        nameLabel.alpha = isShowingOpacityReadout ? 0 : 1
-        subtitleLabel.alpha = isShowingOpacityReadout ? 0 : 1
+        let giveWay = isShowingOpacityReadout || isRenaming
+        nameLabel.alpha = giveWay ? 0 : 1
+        subtitleLabel.alpha = giveWay ? 0 : 1
+    }
+
+    // MARK: - Renaming in place
+
+    private var isRenaming: Bool { !renameField.isHidden }
+
+    /// **Puts the row's name into editing, where it is shown.** The field takes the label's place and the
+    /// keyboard, with the name selected (`InlineNameField`); the label and the subtitle give way for as long
+    /// as it is there, as they do to the opacity readout.
+    func beginRenaming() {
+        renameField.isHidden = false
+        refreshOpacityReadout()
+        renameField.becomeFirstResponder()
+    }
+
+    private func endRenaming() {
+        renameField.isHidden = true
+        refreshOpacityReadout()
+        onRenameEnded?()
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // A row scrolled away mid-edit commits to the row it was, through the callbacks it still has.
+        if renameField.isFirstResponder { renameField.resignFirstResponder() }
         // A cell recycled mid-linger would carry another row's percentage, over another row's
         // hidden name.
         opacityReadoutHide?.cancel()

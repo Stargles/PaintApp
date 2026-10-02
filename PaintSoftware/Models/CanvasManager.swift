@@ -2153,6 +2153,18 @@ final class CanvasManager: ObservableObject {
     /// pumping at all.
     let thumbnailInstalled = PassthroughSubject<CelLocation, Never>()
 
+    /// **The Rename command's request: the layer or folder with this id is to be edited in its row.**
+    /// Sent by the options panels' Rename and heard by the layer rail
+    /// (`LayerStackListView.Coordinator`), which scrolls the row into view and hands its name to the
+    /// keyboard (`LayerStackCell.beginRenaming`). A `PassthroughSubject` for `thumbnailInstalled`'s
+    /// reason: the request is an event rather than a state, and a published property would wake every
+    /// observer of this object for what one table cares about. The rename itself is `renameLayer` /
+    /// `renameFolder`, called with what the artist typed.
+    let rowRenameRequested = PassthroughSubject<UUID, Never>()
+
+    /// Asks the rail to put the row with `id` — a layer, a folder or a node — into editing.
+    func requestRowRename(_ id: UUID) { rowRenameRequested.send(id) }
+
     private var cancellables = Set<AnyCancellable>()
 
     /// Holds this document's registration with `MemoryPressure`; releasing it unregisters, so a

@@ -57,7 +57,7 @@ struct LayerStackListView: UIViewRepresentable {
         var canvasManager: CanvasManager {
             didSet {
                 guard canvasManager !== oldValue else { return }
-                observeThumbnailInstalls()
+                observeCanvasManager()
             }
         }
         var onRequestOptions: ((UUID) -> Void)?
@@ -165,7 +165,14 @@ struct LayerStackListView: UIViewRepresentable {
         init(canvasManager: CanvasManager) {
             self.canvasManager = canvasManager
             super.init()
+            observeCanvasManager()
+        }
+
+        /// What the rail listens to on the document: tiles installing, and the Rename command.
+        private func observeCanvasManager() {
             observeThumbnailInstalls()
+            renameSubscription = canvasManager.rowRenameRequested
+                .sink { [weak self] id in self?.beginRenaming(rowID: id) }
         }
 
         /// Holds the `thumbnailInstalled` subscription. One, replaced rather than added to, so a
@@ -222,6 +229,8 @@ struct LayerStackListView: UIViewRepresentable {
                     // (`onRequestOptions`/`layerOptionsID`) either way; which panel renders is
                     // resolved from the id in `DrawingView.layerPanelRail`.
                     cell.onOpenFolderOptions = { [weak self] in self?.onRequestOptions?(model.id) }
+                    cell.onRename = { [weak self] name in self?.rename(model, to: name) }
+                    cell.onRenameEnded = { [weak self] in self?.renameEnded() }
                     // §6.5's picker, now a per-row control rather than the row's whole tap. Routed
                     // through `maskEditAllows` — the same `canMask` call the row's own glyph used to
                     // decide whether to offer itself — so a stale row still on screen from just
@@ -328,6 +337,61 @@ struct LayerStackListView: UIViewRepresentable {
                 snapshot.reconfigureItems(changed)
                 dataSource.apply(snapshot, animatingDifferences: false)
             }
+        }
+
+        // MARK: - Renaming a row in place
+
+        private var renameSubscription: AnyCancellable?
+        private var keyboardSubscription: AnyCancellable?
+        /// The row being typed into, or nil — what the keyboard's inset and the end of the edit are about.
+        private var renamingRowID: UUID?
+
+        /// **The Rename command: the row's name becomes a field, and the keyboard is its.** The row is
+        /// scrolled into view first — it may be off the rail — and the rail is kept clear of the
+        /// keyboard while the edit lasts (`keyboardFrameChanged`), because the rail runs to the bottom
+        /// of the screen and the keyboard is drawn over it.
+        private func beginRenaming(rowID: UUID) {
+            guard let tableView, let row = rows.firstIndex(where: { $0.id == rowID }) else { return }
+            let path = IndexPath(row: row, section: 0)
+            tableView.scrollToRow(at: path, at: .none, animated: false)
+            tableView.layoutIfNeeded()
+            guard let cell = tableView.cellForRow(at: path) as? LayerStackCell else { return }
+            renamingRowID = rowID
+            keyboardSubscription = NotificationCenter.default
+                .publisher(for: UIResponder.keyboardWillChangeFrameNotification)
+                .sink { [weak self] note in self?.keyboardFrameChanged(note) }
+            cell.beginRenaming()
+        }
+
+        /// What the artist typed, through the model's own rename — which records that the name is theirs
+        /// (`Layer.hasCustomName`) and one undo step. By id, since rows move between the edit's start and
+        /// its end.
+        private func rename(_ model: LayerRowModel, to name: String) {
+            if let folderID = model.folderID {
+                canvasManager.renameFolder(folderID, to: name)
+            } else if let index = canvasManager.layers.firstIndex(where: { $0.id == model.id }) {
+                canvasManager.renameLayer(at: index, to: name)
+            }
+        }
+
+        private func renameEnded() {
+            renamingRowID = nil
+            keyboardSubscription = nil
+            tableView?.contentInset.bottom = 0
+            tableView?.verticalScrollIndicatorInsets.bottom = 0
+        }
+
+        /// **Keeps the row being typed into above the keyboard.** The inset is how much of the rail the
+        /// keyboard's frame covers, and the row is scrolled to inside what is left.
+        private func keyboardFrameChanged(_ note: Notification) {
+            guard let tableView, let renamingRowID, let row = rows.firstIndex(where: { $0.id == renamingRowID }),
+                  let screenFrame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+            else { return }
+            let covered = tableView.convert(screenFrame, from: UIScreen.main.coordinateSpace)
+            let overlap = max(0, tableView.bounds.maxY - max(covered.minY, tableView.bounds.minY))
+            tableView.contentInset.bottom = overlap
+            tableView.verticalScrollIndicatorInsets.bottom = overlap
+            tableView.scrollToRow(at: IndexPath(row: row, section: 0), at: .none, animated: true)
         }
 
         private func toggleVisibility(_ model: LayerRowModel) {

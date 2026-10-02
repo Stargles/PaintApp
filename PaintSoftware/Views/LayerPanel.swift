@@ -278,8 +278,6 @@ struct LayerOptionsPanel: View {
     @Binding var showingTransformSettings: Bool
     var onClose: () -> Void
 
-    @State private var draftName: String = ""
-    @State private var isRenaming = false
     /// Whether the Mask row's menu has replaced the edit rows. Reset when `layerID` changes — the
     /// menu belongs to the node whose row was tapped, so opening layer A's mask menu, going back, and
     /// then opening layer B must not land on B's.
@@ -342,19 +340,6 @@ struct LayerOptionsPanel: View {
         // `onDismiss` however the presentation ends. Two of them would have been worse than none —
         // each closes the bracket, and closing it twice decrements `structureGestureDepth` past
         // zero, which is the leak wearing the other sign.
-        .alert("Rename Layer", isPresented: $isRenaming) {
-            TextField("Name", text: $draftName)
-                .accessibilityIdentifier("layerOptions.nameField")
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                guard let index = layerIndex, canvasManager.layers.indices.contains(index) else { return }
-                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-                // Through `renameLayer` rather than writing `name` here, so the rename records that
-                // it was the artist's — see `Layer.hasCustomName`. The folder alert below has always
-                // routed through `renameFolder`; this is the same shape.
-                if !trimmed.isEmpty { canvasManager.renameLayer(at: index, to: trimmed) }
-            }
-        }
     }
 
     /// The menu proper: what the panel shows until the Mask row swaps it for the mask menu.
@@ -446,9 +431,11 @@ struct LayerOptionsPanel: View {
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
         }
 
+        // The name is edited in its row (`InlineNameField`): this closes the panel and hands the row the
+        // keyboard.
         optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
-            draftName = canvasManager.layers[index].name
-            isRenaming = true
+            let id = canvasManager.layers[index].id
+            leavingMaskEdit { canvasManager.requestRowRename(id) }
         }
         optionsAction("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
             leavingMaskEdit { canvasManager.duplicateLayer(at: index) }
@@ -1499,8 +1486,6 @@ struct FolderOptionsPanel: View {
     @Binding var showingEffectSettings: Bool
     var onClose: () -> Void
 
-    @State private var draftName: String = ""
-    @State private var isRenaming = false
     /// `LayerOptionsPanel.showingMaskMenu`'s twin — the mask menu is reachable from a folder's and a
     /// node's options too, since §6.2 gives all three the same `alphaMask`.
     @State private var showingMaskMenu = false
@@ -1617,9 +1602,12 @@ struct FolderOptionsPanel: View {
                     Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
                 }
 
+                // Edited in its row, as a layer's name is — see `LayerOptionsPanel`.
                 optionsAction("Rename", systemImage: "pencil", identifier: "layerOptions.rename") {
-                    draftName = canvasManager.folders[index].name
-                    isRenaming = true
+                    let id = canvasManager.folders[index].id
+                    canvasManager.endMaskEdit()
+                    canvasManager.requestRowRename(id)
+                    onClose()
                 }
                 // Plain "Delete", on a node as on any folder: §4.3's first owner decision makes
                 // deleting a node a promote like every other folder deletion, so there is no longer
@@ -1650,15 +1638,6 @@ struct FolderOptionsPanel: View {
         // effect bar.
         .onChange(of: folderID) { _, _ in
             showingMaskMenu = false
-        }
-        .alert("Rename Folder", isPresented: $isRenaming) {
-            TextField("Name", text: $draftName)
-                .accessibilityIdentifier("layerOptions.nameField")
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { canvasManager.renameFolder(folderID, to: trimmed) }
-            }
         }
     }
 

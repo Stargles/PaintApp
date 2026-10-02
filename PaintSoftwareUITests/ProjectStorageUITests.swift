@@ -221,26 +221,18 @@ final class ProjectStorageUITests: PaintUITestCase {
         shot(app, "1-gallery-before-the-retitle")
 
         app.staticTexts["Untitled"].tap()
-        // TODO (102) moved the field to the top bar and turned the always-visible control into a
-        // button that opens a `RenameProjectSheet` — `TopToolbar`'s own doc comment on
-        // `isRenamingProject` says why it is a `.sheet` rather than a live `TextField` anchored here
-        // (MEASURED as a regression in an unrelated Bloom-effect test) or an `.alert` (MEASURED as
-        // unreliable under XCUITest specifically, in this exact reopened-project scenario).
-        let nameButton = app.buttons["timeline.projectNameField"]
-        XCTAssertTrue(nameButton.waitForExistence(timeout: 20),
+        // The scene's name is its own field in the top bar — tap it, type, Return — and not a button
+        // that opens a sheet: Scribble is refused for every text input, so a sheet had no work left.
+        let nameField = app.textFields["timeline.projectNameField"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 20),
                       "the app's only title-editing control is reachable — it had no identifier at "
                       + "all before (57), so nothing could drive the feature the owner asked for")
-        XCTAssertEqual(nameButton.label, "Untitled", "PREMISE: it shows the project's current name")
+        XCTAssertEqual(nameField.value as? String, "Untitled", "PREMISE: it shows the project's current name")
 
-        nameButton.tap()
-        let field = app.textFields["timeline.projectNameField.input"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10), "the button opens the rename sheet")
-        field.tap()
-        let existing = (field.value as? String) ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count)
-                       + "Rooftop Chase")
-        app.buttons["renameProject.saveButton"].tap()
-        XCTAssertEqual(nameButton.label, "Rooftop Chase", "the button now shows the new name")
+        nameField.tap()
+        // The whole name is selected on the way in, so typing replaces it.
+        nameField.typeText("Rooftop Chase\n")
+        XCTAssertEqual(nameField.value as? String, "Rooftop Chase", "the field now shows the new name")
         shot(app, "2-editor-after-the-retitle")
 
         returnToGallery(app)
@@ -256,9 +248,9 @@ final class ProjectStorageUITests: PaintUITestCase {
         app.staticTexts["Rooftop Chase"].tap()
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25),
                       "the renamed project reopens rather than failing at its manifest read")
-        let reopened = app.buttons["timeline.projectNameField"]
+        let reopened = app.textFields["timeline.projectNameField"]
         XCTAssertTrue(reopened.waitForExistence(timeout: 10))
-        XCTAssertEqual(reopened.label, "Rooftop Chase",
+        XCTAssertEqual(reopened.value as? String, "Rooftop Chase",
                        "and it is the project that was retitled, not a fresh one beside it")
         shot(app, "4-reopened-under-the-new-name")
     }

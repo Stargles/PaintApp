@@ -28,9 +28,6 @@ struct TopToolbar: View {
     @Binding var activePanel: ActivePanel
     var onOpenGallery: () -> Void
 
-    @State private var draftProjectName: String = ""
-    @State private var isRenamingProject = false
-
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyToolbars`.
     /// The split is a wrapper around the unchanged body below it, so nothing about what is
@@ -70,7 +67,7 @@ struct TopToolbar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            sceneNameButton
+            sceneNameField
 
             HStack(spacing: 10) {
                 iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
@@ -112,35 +109,14 @@ struct TopToolbar: View {
         .background(Color.black)
     }
 
-    /// The scene's name, which opens the rename sheet.
-    ///
-    /// **A tap-to-rename sheet, not a live `TextField` anchored in the bar.** The bar's label is a
-    /// plain `Text`; the sheet's `TextField` is the app's only title-editing control, and since TODO
-    /// (57) part 2 the only way to rename a project's folder on disk.
-    ///
-    /// **A `.sheet`, not an `.alert`** — `.alert` is the one presentation kind nothing in this app had
-    /// ever driven end to end through XCUITest before this feature, and it MEASURED as unreliable
-    /// there: a synthesized tap on the button that presents it, immediately after reopening a project
-    /// from the gallery, did not raise it within three retried taps and fifteen seconds apiece, on a
-    /// fresh device, in isolation. `.sheet` is the presentation this app's own
-    /// `CanvasResizeSheet`/`ExportSheet`/`StreamConnectSheet` already use and `ToolsAndSelectionUITests`
-    /// already drives successfully.
-    private var sceneNameButton: some View {
-        Button {
-            draftProjectName = canvasManager.projectName
-            isRenamingProject = true
-        } label: {
-            Text(canvasManager.projectName)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .frame(maxWidth: 240)
-        }
-        .accessibilityIdentifier("timeline.projectNameField")
-        .sheet(isPresented: $isRenamingProject) {
-            RenameProjectSheet(name: $draftProjectName) { trimmed in
-                canvasManager.projectName = trimmed
-            }
-        }
+    /// The scene's name, edited where it is shown — tap it, type, Return (or touch anywhere else).
+    /// Scribble is refused for every text input (`ScribbleRefusal`), so there is no field of its own to
+    /// give handwriting and no reason for a sheet: the name is its own field, `InlineNameField`, whose one
+    /// rule says what an empty or unchanged name does. Since TODO (57) part 2 it is also the only way to
+    /// rename a project's folder on disk, which the save follows.
+    private var sceneNameField: some View {
+        InlineNameFieldView(name: canvasManager.projectName) { canvasManager.projectName = $0 }
+            .accessibilityIdentifier("timeline.projectNameField")
     }
 
     /// Brush/eraser/fill are mutually exclusive with Select and Move: only one of these "which tool is
@@ -299,44 +275,5 @@ struct TopToolbar: View {
         // Exposes the same highlight state UI tests can't read off `.foregroundColor` directly —
         // also lets VoiceOver announce which tool is current.
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
-    }
-}
-
-/// TODO (102)'s rename dialog — `CanvasResizeSheet`'s shape (a title, one field, Cancel/Save), for
-/// the reason `TopToolbar.bodyContent`'s own doc comment on `isRenamingProject` gives: this app's
-/// `.sheet`s already have a working XCUITest precedent and its one attempt at `.alert` did not.
-struct RenameProjectSheet: View {
-    @Binding var name: String
-    var onSave: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("Rename Scene")
-                .font(.title2).fontWeight(.bold)
-
-            TextField("Name", text: $name)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .focused($isFocused)
-                .accessibilityIdentifier("timeline.projectNameField.input")
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .accessibilityIdentifier("renameProject.cancelButton")
-                Spacer()
-                Button("Save") {
-                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty { onSave(trimmed) }
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("renameProject.saveButton")
-            }
-        }
-        .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear { isFocused = true }
     }
 }
