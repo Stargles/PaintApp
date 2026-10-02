@@ -4,6 +4,15 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Two UI tests red on `main` before `854a727`, cause unknown (2026-10-02)
+
+Found by the (125) worker: both fail with identical values on the commit before its own work, so not
+(125). Unbisected; this session's merges since `9704384` are the first suspects (the timeline is 125 pt
+taller since (122); the gradient blends in Oklab since `aa5c384`).
+
+- The bake-wiring class's keyframed-Move test.
+- `TransformLayerModesUITests`' Rotate test.
+
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main

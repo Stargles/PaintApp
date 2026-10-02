@@ -59,8 +59,9 @@ Oklab gradient, and defects found on the way (three UI reds bisected to this ses
 fixed; the keyboard squeeze; panel touch fall-through). **The owner's iPad has `c8562ca`** (installed
 2026-10-01); everything after it is not on the device yet.
 
-**In flight**: an Opus worker on `tmp/livetransform` — (125)+(136)+(140), one live-preview mechanism
-for transform edits, plus the ruled plain-layer fast picture. The cap is one Opus *or* two Sonnet.
+**(125)+(136)+(140) merged** (`854a727`): one live-preview mechanism (`LiveTransformEdit`) for transform
+edits, the baker held until release, the plain-layer fast picture. **Folder Move's lag did not reproduce
+in the simulator — measure it on the iPad.** The cap is one Opus *or* two Sonnet.
 **Check `git worktree list` before trusting this.**
 
 **Next, in order** (fresh Sonnet workers, two at a time — never continue a worker whose context is
@@ -73,8 +74,10 @@ duplicated mechanisms and bolted-on fixes (the owner rejected per-item reviewers
 
 - **Design notes for (139), (131)** are at `~/PaintWork/design/survey-1001.md` (rulings in TODO.md
   override it). The brief every worker reads is `~/PaintWork/brief-common.md`.
-- **Question queued for the owner**: since Scribble is now refused app-wide, should the document title
-  (and layer names) be inline editable fields again instead of tap-to-rename sheets?
+- **Questions queued for the owner**: (1) since Scribble is now refused app-wide, should the document
+  title (and layer names) be inline editable fields again instead of tap-to-rename sheets? (2) when a
+  layer *above* the edited one blends, the instant picture draws it plain until the bake (built in
+  `854a727`) — keep, or wait for the exact bake there?
 
 **Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
 an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
