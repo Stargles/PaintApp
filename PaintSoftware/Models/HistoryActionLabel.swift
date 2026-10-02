@@ -89,12 +89,12 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// history reads as what the artist did; both are still one step for the whole session.
     /// `ADD_TEXT.md` stage 3.
     case editText
-    /// Add → Rectangle and Add → Ellipse: a solid shape laid down as the fill tool's own kind of
-    /// object. Two cases rather than one "add shape" because the history row says what the artist
+    /// Add → Rectangle and Add → Ellipse: a solid shape dragged out with the pen, laid down as the fill
+    /// tool's own kind of object. Two cases rather than one "add shape" because the history row says what the artist
     /// asked for, as `.insertImage` and `.insertVideo` do.
     case addRectangle
     case addEllipse
-    /// Add → Linear Gradient: a gradient fill covering the artwork.
+    /// Add → Linear Gradient: a gradient fill dragged out as a band from the press to the lift.
     case addGradient
     /// A gradient panel session — the two colours and the direction, however many times each was
     /// changed while the panel was open. One step for the whole session, as a text session is.

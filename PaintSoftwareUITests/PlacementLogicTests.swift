@@ -349,6 +349,38 @@ final class PlacementLogicTests: XCTestCase {
         XCTAssertNotNil(manager.gradientEdit, "the panel is open on it")
     }
 
+    /// **A gradient dragged out at an angle is stored turned along the line**, not as the axis-aligned
+    /// box the line spans: its stored corners run from the press to the lift along the line and
+    /// half the width to either side, and its ramp ends are the press and the lift. Mutation caught:
+    /// laying down the band's unrotated path leaves it horizontal whatever way the pen went.
+    func testADiagonalGradientIsStoredTurnedAlongTheDrag() throws {
+        let (manager, vector) = vectorFixture()
+        manager.gradientWidthFraction = 0.25   // 16 points
+        let from = pen(10, 10), to = pen(40, 50)
+        XCTAssertTrue(manager.dragOut(.gradient, from: from, to: to))
+
+        let fill = try XCTUnwrap(vector.elements.compactMap(\.fill).first)
+        let length = hypot(to.x - from.x, to.y - from.y)
+        let axis = pen((to.x - from.x) / length, (to.y - from.y) / length)
+        var corners: [CGPoint] = []
+        try XCTUnwrap(fill.cgPath).applyWithBlock { element in
+            if element.pointee.type == .moveToPoint || element.pointee.type == .addLineToPoint {
+                corners.append(element.pointee.points[0])
+            }
+        }
+        let along = corners.map { ($0.x - from.x) * axis.x + ($0.y - from.y) * axis.y }
+        let sideways = corners.map { ($0.x - from.x) * -axis.y + ($0.y - from.y) * axis.x }
+        XCTAssertEqual(along.min() ?? .nan, 0, accuracy: 0.01, "starts at the press")
+        XCTAssertEqual(along.max() ?? .nan, length, accuracy: 0.01, "ends at the lift")
+        XCTAssertEqual(sideways.min() ?? .nan, -8, accuracy: 0.01)
+        XCTAssertEqual(sideways.max() ?? .nan, 8, accuracy: 0.01)
+        let ramp = try XCTUnwrap(fill.gradient)
+        XCTAssertEqual(ramp.from.x, from.x, accuracy: 0.01)
+        XCTAssertEqual(ramp.from.y, from.y, accuracy: 0.01)
+        XCTAssertEqual(ramp.to.x, to.x, accuracy: 0.01)
+        XCTAssertEqual(ramp.to.y, to.y, accuracy: 0.01)
+    }
+
     /// A gradient is an object in a vector layer and nothing else: dragged out on a raster layer it
     /// gets a layer of its own.
     func testAGradientDraggedOutOnARasterLayerLandsOnAFreshVectorLayer() throws {

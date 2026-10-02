@@ -103,7 +103,7 @@ extension CanvasManager {
     /// added object, which is made in canvas points (what the pen dragged out), taken through
     /// the inverse of the pose its layer is shown through (`inkPose(forLayerID:)`, TODO (124)'s one
     /// source), path and gradient ends together. Under a transformation layer the object is then
-    /// *shown* centred on the artwork, rather than a pose away from it; on a layer nothing poses it
+    /// *shown* where the pen put it, rather than a pose away from it; on a layer nothing poses it
     /// is the object unchanged.
     ///
     /// A fill element is built only to be carried by `inLayerSpace`, the one mapping every other input
