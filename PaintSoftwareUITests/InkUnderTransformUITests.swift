@@ -308,7 +308,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
         }
         attach(canvas, "gradient-added-under-the-moved-transform-layer")
         XCTAssertLessThan(red(0.04, 0.2), 60, "the left edge of the shown artwork is not the dark end of the ramp")
-        XCTAssertGreaterThan(red(0.96, 0.2), 200, "the right edge of the shown artwork is not the light end")
+        XCTAssertGreaterThan(red(0.96, 0.2), 220, "the right edge of the shown artwork is not the light end")
         let mid = red(0.5, 0.2)
         XCTAssertTrue((100...160).contains(mid), "the middle of the shown artwork is not the middle of the ramp (red \(mid))")
     }
