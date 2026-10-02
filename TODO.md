@@ -102,20 +102,6 @@ already merged are follow-ups named for their item.
 - [ ] The Text panel stays bound to the box being written; changing font/size/colour after typing
       changes that box.
 
-## (113) follow-up: Mend Reach is its own setting, default 12 px
-
-**Status** — not started. The owner retracted the earlier "keep tied" ruling after trying it, 2026-10-01:
-*"Make it its own slider that isnt visible in the left menu, but is visible in the fill tool's dropdown
-menu, with a default set to 12px. If it already doesnt, the mend expand should be applied on top of the
-edge overlap expand. Right now the smart mend literally does nothing, probably because the mend distance
-is the same distance as edge overlap, and thus it gets overshadowed by edge overlap."* (Today the reach is
-twice Gap Closing, `79c892d`.)
-
-- [ ] A Mend Reach slider in the fill dropdown only (not the rail), default 12 px; the reach no longer
-      reads Gap Closing.
-- [ ] Mend measured from the Edge-Overlap-expanded fill, so it always adds reach; reproduce "does
-      nothing" first and pin it with rendered pixels.
-
 ## (149) Add-menu shapes are primed, then dragged out with the pen
 
 **Status** — not started. Replaces (129)'s "lands centred in a Move box" (`d1dd0dd`), which goes whole.

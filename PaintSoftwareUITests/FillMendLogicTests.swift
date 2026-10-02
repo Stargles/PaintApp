@@ -276,24 +276,96 @@ final class FillMendLogicTests: XCTestCase {
                        "With paper between them no run of ink joins the two fills, so the option changes nothing")
     }
 
-    /// The reach is Gap Closing's: twice it. A divider 12 px wide is bridged by 8 (a reach of 16 spans
-    /// the 13 px from one fill to the other) and not by 5 (10), and by 0 there is no mend at all.
-    func testTheReachIsTwiceGapClosing() throws {
+    /// **The reach is Mend Reach's and nothing else's** (TODO (113)'s follow-up). It used to be twice Gap
+    /// Closing, which left the mend with no reach at all for an artist who keeps Gap Closing low — the
+    /// owner's *"right now the smart mend literally does nothing"* — and at 0 it was off. A 12 px
+    /// divider is a seam of exactly 12 px: a reach of 12 mends it at **every** Gap Closing, including 0
+    /// and 2, and a reach of 11 leaves it bare at every one. "Exactly the seam" is the slider's number
+    /// meaning what it says.
+    func testTheReachIsMendReachAndDoesNotReadGapClosing() throws {
         let columns = Self.dividerColumns(width: 12)
-        for (gap, mends) in [(CGFloat(8), true), (5, false), (0, false)] {
-            let manager = sceneManager(dividerWidth: 12, mend: true)
-            manager.fillGapClosingDistance = gap
-            bucket(manager, at: leftSeed, colour: Self.red)
-            bucket(manager, at: rightSeed, colour: Self.blue)
+        for gap in [CGFloat(0), 2, 8] {
+            for (reach, mends) in [(CGFloat(12), true), (11, false)] {
+                let manager = sceneManager(dividerWidth: 12, gapClosing: gap, mend: true)
+                manager.fillMendReach = reach
+                bucket(manager, at: leftSeed, colour: Self.red)
+                bucket(manager, at: rightSeed, colour: Self.blue)
 
-            let pixels = try fillLayerPixels(manager)
-            for y in 16...48 {
-                for x in columns {
-                    XCTAssertEqual(pixels.isCovered(x, y), mends,
-                                   "Gap Closing \(Int(gap)): (\(x),\(y)) of a 12 px divider is \(mends ? "mended" : "left bare")")
+                let pixels = try fillLayerPixels(manager)
+                for y in 16...48 {
+                    for x in columns {
+                        XCTAssertEqual(pixels.isCovered(x, y), mends,
+                                       "Gap Closing \(Int(gap)), Mend Reach \(Int(reach)): (\(x),\(y)) of a 12 px divider is \(mends ? "mended" : "left bare")")
+                    }
                 }
             }
         }
+    }
+
+    /// **The reach counts from the fill as Edge Overlap leaves it, so the two add** — the owner's
+    /// *"the mend expand should be applied on top of the edge overlap expand"*. A 14 px divider is
+    /// wider than a reach of 10 can cross on its own and wider than Edge Overlap's 2 px a side can
+    /// cover on its own; together they close it, because each fill's edge is already 2 px under the
+    /// line when the mend starts counting.
+    func testMendReachIsCountedFromWhereEdgeOverlapLeavesTheFill() throws {
+        let columns = Self.dividerColumns(width: 14)
+        func layer(overlap: CGFloat, mend: Bool) throws -> Pixels {
+            let manager = sceneManager(dividerWidth: 14, mend: mend)
+            manager.fillExpand = overlap
+            manager.fillMendReach = 10
+            bucket(manager, at: leftSeed, colour: Self.red)
+            bucket(manager, at: rightSeed, colour: Self.blue)
+            return try fillLayerPixels(manager)
+        }
+        let overlapOnly = try layer(overlap: 2, mend: false)
+        let mendOnly = try layer(overlap: 0, mend: true)
+        let both = try layer(overlap: 2, mend: true)
+        let middle = columns.lowerBound + 7
+        XCTAssertTrue(overlapOnly.isBare(middle, 32), "Edge Overlap alone leaves the middle of the line bare")
+        XCTAssertTrue(mendOnly.isBare(middle, 32), "a reach of 10 alone cannot cross 14 px")
+        for y in 16...48 {
+            for x in columns { XCTAssertTrue(both.isCovered(x, y), "(\(x),\(y)) is closed by the two together") }
+        }
+    }
+
+    /// **The real-looking case, at the settings an artist has on a fresh install**: two cells either
+    /// side of an antialiased brush line (a stroked line at a fractional position, so its edges are
+    /// partial coverage rather than hard), Gap Closing 8, Edge Overlap 2, Threshold 15%, Mend Reach 12.
+    /// With the option off the line leaves a bare strip down the middle; with it on that strip is the
+    /// second fill's colour — and every pixel the option did not need to touch is what it was.
+    func testAnAntialiasedBrushLineBetweenTwoCellsIsMendedAtTheDefaultSettings() throws {
+        func layer(mend: Bool) throws -> Pixels {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            let art = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+                let cg = ctx.cgContext
+                cg.setStrokeColor(UIColor.black.cgColor)
+                cg.setLineCap(.round)
+                cg.setLineWidth(2)
+                cg.stroke(Self.frame.insetBy(dx: 1, dy: 1))
+                cg.setLineWidth(8)
+                cg.move(to: CGPoint(x: 32.37, y: 5))
+                cg.addLine(to: CGPoint(x: 32.37, y: 59))
+                cg.strokePath()
+            }
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
+            manager.addLayer()
+            XCTAssertEqual(manager.fillGapClosingDistance, 8, "Fixture check: Gap Closing is at its default")
+            XCTAssertEqual(manager.fillExpand, 2, "…and Edge Overlap")
+            XCTAssertEqual(manager.fillMendReach, 12, "…and Mend Reach")
+            manager.setFillMendsNeighbourGap(mend)
+            bucket(manager, at: leftSeed, colour: Self.red)
+            bucket(manager, at: rightSeed, colour: Self.blue)
+            return try fillLayerPixels(manager)
+        }
+        let off = try layer(mend: false)
+        let on = try layer(mend: true)
+
+        let seam = (28...36).filter { off.isBare($0, 32) }
+        XCTAssertGreaterThanOrEqual(seam.count, 4, "Control: with the option off the line leaves a bare strip, columns \(seam)")
+        assertTheOptionOnlyAdds(on, to: off, seam: { x, _ in (28...36).contains(x) },
+                                mustMend: { x, y in (16...48).contains(y) && off.isBare(x, y) },
+                                "the strip under the line is mended and nothing outside it moved")
+        for x in seam { XCTAssertTrue(on.isBlue(x, 32), "column \(x) took the second fill's colour") }
     }
 
     /// Nothing to grow toward, nothing grows: a fill laid down first, on an empty layer, is the fill it
@@ -328,12 +400,24 @@ final class FillMendLogicTests: XCTestCase {
         for x in columns { XCTAssertTrue(pixels.isBlue(x, 32), "column \(x) is mended after the switch") }
     }
 
-    func testTheMendIsPartOfTheKeyTheFillRendersWith() {
+    /// The render reads the reach only through the key, so the key has to carry it: 0 while the option
+    /// is off — which is also why a slider moved with the option off schedules nothing — and the
+    /// slider's value once it is on.
+    func testTheMendReachIsPartOfTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
         XCTAssertFalse(manager.fillMendsNeighbourGap, "An option, off until the artist asks")
-        XCTAssertFalse(manager.currentFillKey().mend)
+        XCTAssertEqual(manager.fillMendReach, 12, "Mend Reach defaults to 12 px")
+        XCTAssertEqual(manager.currentFillKey().mendReach, 0)
+        manager.setFillMendReach(30)
+        XCTAssertEqual(manager.currentFillKey().mendReach, 0, "A slider moved with the option off changes nothing the render reads")
         manager.setFillMendsNeighbourGap(true)
-        XCTAssertTrue(manager.currentFillKey().mend, "The render must see it, or the live re-run is a no-op")
+        XCTAssertEqual(manager.currentFillKey().mendReach, 30, "The render must see it, or the live re-run is a no-op")
+        manager.setFillMendReach(5.4)
+        XCTAssertEqual(manager.currentFillKey().mendReach, 5, "Whole pixels")
+        manager.setFillMendReach(500)
+        XCTAssertEqual(manager.fillMendReach, CanvasManager.fillMendReachRange.upperBound, "clamped to the slider's range")
+        manager.fillGapClosingDistance = 0
+        XCTAssertEqual(manager.currentFillKey().mendReach, 40, "…and Gap Closing has no say in it")
     }
 
     // MARK: - Lasso fills

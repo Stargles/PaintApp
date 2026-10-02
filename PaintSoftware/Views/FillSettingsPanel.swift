@@ -121,7 +121,25 @@ struct FillSettingsPanel: View {
                     }
                     .tint(Self.selectedTint)
                     .accessibilityIdentifier("fillPanel.mendGapToggle")
-                    Text("Where a fill on this layer sits across a line from this one, the colour grows under the line to meet it, so no seam is left between them. It reaches twice Gap Closing, only crosses line, and never covers the other fill or open paper.")
+                    Text("Where a fill on this layer sits across a line from this one, the colour grows under the line to meet it, so no seam is left between them. It only crosses line, and never covers the other fill or open paper.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+
+                    // **Its own slider, shown here and nowhere else** — not one of the three the fill
+                    // tool's sideways drag adjusts, so it is not in the left rail. Dimmed while the
+                    // option is off, like the Extension Buffer below: present, so the artist can see
+                    // what the option has, and saying by its colour that it does nothing yet.
+                    Text("Mend Reach: \(Int(canvasManager.fillMendReach)) px")
+                        .foregroundColor(canvasManager.fillMendsNeighbourGap ? .white : .gray)
+                        .padding(.top, 4)
+                    Slider(value: Binding(
+                        get: { canvasManager.fillMendReach },
+                        set: { canvasManager.setFillMendReach($0) }
+                    ), in: CanvasManager.fillMendReachRange, step: 1)
+                        .tint(Self.selectedTint)
+                        .disabled(!canvasManager.fillMendsNeighbourGap)
+                        .accessibilityIdentifier("fillPanel.mendReachSlider")
+                    Text("The widest strip of line the mend will close, counted from where Edge Overlap leaves each fill.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

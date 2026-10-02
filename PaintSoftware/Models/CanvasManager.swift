@@ -1353,9 +1353,16 @@ final class CanvasManager: ObservableObject {
     /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). Off by
     /// default: it is an option, and what it changes is where a fill's edge lands.
     ///
-    /// It reaches **twice Gap Closing** and no further, so that slider is its range as well as the
-    /// close's — see `MetalFillSession.fill(mendsNeighbours:)`. Both fill types honour it.
+    /// How far it reaches is `fillMendReach`, its own setting. Both fill types honour it.
     @Published var fillMendsNeighbourGap: Bool = false
+
+    /// **Mend Reach**, in canvas pixels: the widest strip of ink between a fill and its neighbour that
+    /// the mend will close, counted from the fill's edge *after* Edge Overlap has tucked it under the
+    /// line — so the two add, and a mend that Edge Overlap already covered has nothing left to do
+    /// rather than hiding behind it. The owner's *"its own slider … with a default set to 12px"*
+    /// (TODO (113)): it was twice Gap Closing, which left the mend with no reach at all for an artist
+    /// who keeps Gap Closing low. Only read while `fillMendsNeighbourGap` is on.
+    @Published var fillMendReach: CGFloat = 12
     @Published var isFilling: Bool = false
 
     @Published var canvasBackgroundColor: Color = .white
@@ -3547,14 +3554,15 @@ final class CanvasManager: ObservableObject {
     static let fillGapRange: ClosedRange<CGFloat> = 0...40
     static let fillThresholdRange: ClosedRange<CGFloat> = 0...1
     static let fillExpandRange: ClosedRange<CGFloat> = 0...6
+    static let fillMendReachRange: ClosedRange<CGFloat> = 1...40
 
     /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means
     /// the GPU session and render bookkeeping below are only ever touched from one thread, letting
     /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
-    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0, mend: false)
-    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min, mend: false)
+    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0, mendReach: 0)
+    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min, mendReach: 0)
     var fillWorkerScheduled = false
 
     /// **Which gesture `fillQueue` is working for.** Bumped by every `begin*Fill`, and again by

@@ -601,15 +601,15 @@ final class MetalFillSession {
     ///   already treats the canvas edge as part of the fence. The rect may extend past the buffer —
     ///   the buffer is a window of the canvas (`FillWindow`) — and a degenerate one is treated as
     ///   nil, because a zero-area rect would fence the flood into nothing.
-    /// - Parameter mendsNeighbours: grow the finished fill into the ink between it and the paint
+    /// - Parameter mendReach: grow the finished fill into the ink between it and the paint
     ///   `installNeighbours` named, so two fills either side of one line meet under it instead of
     ///   leaving the strip the flood could not enter (TODO (113); the rule and why it is a corridor
-    ///   are above `mendInit` in Fill.metal). Reaches **twice `gapRadius`** — a seam is one more than
-    ///   the pixels it holds, and the close beside it bridges up to twice its radius too — so Gap
-    ///   Closing at 0 mends nothing. A session with no neighbours installed ignores it.
+    ///   are above `mendGap` in Fill.metal). The widest strip it closes, in working pixels, **counted
+    ///   from the fill as Edge Overlap leaves it** — the mend runs after the overlap, so the two add.
+    ///   0 is no mend, and so is a session with no neighbours installed.
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
               gapRadius: Float, edgeOverlap: Float, artworkRect: CGRect? = nil,
-              mendsNeighbours: Bool = false, fillColor: SIMD4<Float>) -> [UInt8]? {
+              mendReach: Float = 0, fillColor: SIMD4<Float>) -> [UInt8]? {
         // A lasso session works from its mask, so there is no tapped pixel to be in bounds.
         guard isLasso || isSeedInBounds(x: seedX, y: seedY) else { return nil }
         let p = engine.pipelines
@@ -639,10 +639,7 @@ final class MetalFillSession {
             memcpy(params2Buf.contents(), &params2, MemoryLayout<MetalFillEngine.FillParams>.size)
         }
 
-        // Twice the gap radius, in working pixels. Zero reach is no mend, which is what Gap Closing at
-        // 0 means.
-        let mendReach = 2 * gapRadius
-        let mends = mendsNeighbours && hasNeighbours && Int(mendReach.rounded()) >= 1
+        let mends = hasNeighbours && Int(mendReach.rounded()) >= 1
 
         // Stage 1: walls, gap-closing disk close, flood init.
         guard let cb1 = engine.makeCommandBuffer(), let enc1 = cb1.makeComputeCommandEncoder() else { return nil }

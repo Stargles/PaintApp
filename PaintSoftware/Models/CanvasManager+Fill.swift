@@ -41,10 +41,12 @@ extension CanvasManager {
     /// mid-gesture (`setCanvasPadding` calls `commitAllInteractiveState` first); the extension can,
     /// from its slider, and that is a re-render of the live fill like any other setting.
     ///
-    /// `mend` is `fillMendsNeighbourGap`.
+    /// `mendReach` is `fillMendReach` while `fillMendsNeighbourGap` is on and 0 while it is off — one
+    /// field for both, so a slider moved with the option off changes nothing the render reads and
+    /// schedules no work.
     struct FillKey: Equatable {
         var gap: Int; var threshold: Int; var edge: Int; var edgeIsWall: Bool; var inset: Int
-        var mend: Bool
+        var mendReach: Int
     }
 
     /// Everything a `fillQueue` render needs from the gesture that asked for it, snapshotted on the
@@ -124,7 +126,7 @@ extension CanvasManager {
         let generation = fillGeneration
         fillPending = currentFillKey()
         fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min,
-                               mend: false)
+                               mendReach: 0)
         fillRenderedRegion = nil
         // Claimed here so early drag updates don't spawn a second worker. Every caller enqueues a
         // worker of this generation immediately after, which is what lets a *superseded* worker
@@ -393,7 +395,7 @@ extension CanvasManager {
                 edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
                 edgeIsWall: fillCanvasEdgeIsBoundary,
                 inset: Int(max(0, canvasPadding - fillCanvasEdgeExtension).rounded()),
-                mend: fillMendsNeighbourGap)
+                mendReach: fillMendsNeighbourGap ? Int(fillMendReach.rounded()) : 0)
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -422,6 +424,17 @@ extension CanvasManager {
     func setFillMendsNeighbourGap(_ enabled: Bool) {
         guard fillMendsNeighbourGap != enabled else { return }
         fillMendsNeighbourGap = enabled
+        if fillGestureActive { scheduleFillRender() }
+    }
+
+    /// Sets how far the mend reaches and re-runs an adjustable fill so the seam is seen closing as the
+    /// slider moves. Whole pixels, within `fillMendReachRange`. **Not a `FillAxis`**: the left rail's
+    /// sideways drag adjusts Gap Closing, Threshold and Edge Overlap, and the mend's reach is set from
+    /// the fill dropdown alone.
+    func setFillMendReach(_ pixels: CGFloat) {
+        let v = min(max(pixels.rounded(), Self.fillMendReachRange.lowerBound), Self.fillMendReachRange.upperBound)
+        guard fillMendReach != v else { return }
+        fillMendReach = v
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -946,7 +959,7 @@ extension CanvasManager {
                 // worth of drawing the artist who has not asked for it should not pay for. Here rather
                 // than where the session is made so that switching the mend on over a fill already
                 // on screen, and a window grown for a bigger flood, both find it in place.
-                if key.mend, !session.hasNeighbours {
+                if key.mendReach > 0, !session.hasNeighbours {
                     session.installNeighbours(Self.neighbourMask(of: fillGestureNeighbours, in: window))
                 }
                 bytes = Self.runFill(session, in: window, key: key, context: context, seedColor: fillSeedColor)
@@ -1073,7 +1086,7 @@ extension CanvasManager {
         return session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColor,
                             threshold: Float(Double(key.threshold) / 1000.0),
                             gapRadius: Float(key.gap) * scale, edgeOverlap: Float(key.edge) * scale,
-                            artworkRect: paper, mendsNeighbours: key.mend, fillColor: context.color)
+                            artworkRect: paper, mendReach: Float(key.mendReach) * scale, fillColor: context.color)
     }
 
     /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel

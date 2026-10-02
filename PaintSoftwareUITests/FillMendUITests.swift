@@ -40,12 +40,19 @@ final class FillMendUITests: PaintUITestCase {
     /// Brings a control of the open fill panel into view. The panel is a scroll view of its own that
     /// holds more than its height, and **a swipe has to start on it** — one aimed at "the first scroll
     /// view" lands on the canvas, where a vertical drag is the fill tool's own Gap Closing gesture.
+    ///
+    /// **Anchored on the scroll view's own frame, and in its left gutter.** The frame stays put while
+    /// the rows move, where a row's frame (the title's, which an earlier version offset from) scrolls
+    /// off the top and carries the swipe's start with it — onto a slider, which a drag moves rather
+    /// than scrolls. The gutter holds no control at all, so the swipe scrolls whatever is under it.
     private func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement) {
-        let title = app.staticTexts["Fill"].firstMatch
+        let panel = app.scrollViews.containing(.staticText, identifier: "Fill").firstMatch
         var drags = 0
-        while !(control.exists && control.isHittable) && drags < 6, title.exists {
-            let from = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 330))
-            let to = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 60))
+        while !(control.exists && control.isHittable) && drags < 8, panel.exists {
+            let frame = panel.frame
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let from = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))
+            let to = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY - frame.height * 0.35))
             from.press(forDuration: 0.1, thenDragTo: to)
             drags += 1
         }
@@ -118,8 +125,16 @@ final class FillMendUITests: PaintUITestCase {
         scrollFillPanel(app, to: mend)
         XCTAssertTrue(mend.waitForExistence(timeout: 5), "The mend option is in the fill menu")
         XCTAssertEqual(mend.value as? String, "0", "Off until the artist asks")
+        // Its reach is its own slider, in this menu: there from the start, dim until the option is on,
+        // and 12 px by default — not read off Gap Closing, whose slider is the rail's.
+        let reach = app.sliders["fillPanel.mendReachSlider"]
+        scrollFillPanel(app, to: reach)
+        XCTAssertTrue(reach.waitForExistence(timeout: 5), "Mend Reach has a slider in the fill menu")
+        XCTAssertFalse(reach.isEnabled, "…which does nothing while the option is off")
+        XCTAssertTrue(app.staticTexts["Mend Reach: 12 px"].exists, "…and reads 12 px by default")
         mend.tap()
         XCTAssertEqual(mend.value as? String, "1", "The option is on")
+        XCTAssertTrue(reach.isEnabled, "Mend Reach is live once the option is on")
         fillButton.tap()
 
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.667, dy: 0.5)).tap()

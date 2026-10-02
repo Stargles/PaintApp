@@ -599,7 +599,7 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
 // uniform disk: grow *only* where the colour on the other side of the line already is.
 //
 // **The rule: a pixel is mended when, along some straight line through it, ink runs unbroken from
-// this fill to the neighbour — and no longer than the reach.** That is the seam, exactly: the
+// this fill to the neighbour — and no wider than the reach.** That is the seam, exactly: the
 // divider's own pixels between two cells qualify, and nothing else does. A radius cannot say it — a
 // dilation by half the reach leaves a strip against each side of a seam wider than that — and neither
 // can a distance to the nearest fill, which paints the outline of a shape whose far side is *paper*
@@ -610,6 +610,10 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
 //
 // Four axes, each walked both ways, find a crossing at whatever angle the line was drawn: some axis is
 // within 22.5 degrees of square on to it, so the run is at most 8% longer than the line is thick.
+//
+// **The reach counts from the fill as Edge Overlap leaves it.** The mend runs after the overlap has
+// tucked each fill under the line, so the two add: a fill's own overlap never eats into the reach, and
+// a seam the overlap already closed is simply one with nothing left to mend.
 //
 // **The neighbour is not painted over.** Its pixels end a run and are never mended themselves.
 
@@ -668,6 +672,8 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
         if (ahead.x == 0) continue;
         uint2 behind = mendRun(gid, -axes[a].x, -axes[a].y, limit, onPaper, painted, neighbour, wall, wall2, params, refCount);
         bool joins = ((ahead.x & 1u) != 0 && (behind.x & 2u) != 0) || ((ahead.x & 2u) != 0 && (behind.x & 1u) != 0);
-        if (joins && float(ahead.y + behind.y) * stride <= reach) { mended[i] = 255; return; }
+        // The two steps both land on a painted pixel, so the ink between them is one pixel fewer than
+        // the steps: a seam of `reach` pixels is mended, which is what the slider's number says.
+        if (joins && float(ahead.y + behind.y - 1u) * stride <= reach) { mended[i] = 255; return; }
     }
 }
