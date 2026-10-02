@@ -67,6 +67,13 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// are only comparable in coordinates relative to the paper each one shows. The paper is one
     /// solid white rectangle with the host's centre inside it, so its edges are where whitish stops
     /// along the centre row and the centre column.
+    ///
+    /// **This is the *visible* paper, and its bottom edge is the timeline panel's top, not the
+    /// paper's.** The panel overlays the host's lower part (375 pt since TODO (122), which covers the
+    /// paper's lower third on this device), so the centre of this rectangle is not the centre of the
+    /// canvas — the canvas is centred on the host (`CanvasView.Coordinator.baseCenter`), and that is
+    /// where a box turns about. A measurement that depends on the canvas's centre takes it from the
+    /// host's own centre, `(0.5, 0.5)` in these coordinates, and never from this rectangle's.
     private func paperBounds(_ pixels: (bytes: [UInt8], width: Int, height: Int)) -> (minX: Double, maxX: Double, minY: Double, maxY: Double)? {
         let (buf, w, h) = pixels
         func whitish(_ x: Int, _ y: Int) -> Bool {
@@ -342,20 +349,19 @@ final class TransformLayerModesUITests: PaintUITestCase {
         guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
         attach(app, "0-launch")
 
-        // A band a quarter of the paper right of its centre, on the centre row.
-        let at = hostPoint(blank.paper, u: 0.75, v: 0.5)
+        // A band 0.15 of the paper right of the middle of what is visible — near enough the centre
+        // that a quarter turn lands it well clear of the timeline panel, which covers the paper's
+        // lower third.
+        let at = hostPoint(blank.paper, u: 0.65, v: 0.5)
         drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
         attach(app, "0-band-drawn")
         guard let rest = currentPaper(canvas, "after drawing"),
-              let restCentroid = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.04, v1: 0.96))
-                  .map({ paperRelative($0, in: rest.paper) }) else {
+              let restInk = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.04, v1: 0.96)) else {
             return XCTFail("The band did not land: paper at launch \(blank.paper), drawn at \(at)")
         }
-        XCTAssertEqual(restCentroid.u, 0.75, accuracy: 0.04, "Sanity: the band is right of centre")
-        XCTAssertEqual(restCentroid.v, 0.5, accuracy: 0.04, "Sanity: …on the centre row")
-        // The paper's aspect, which is what a quarter turn trades width for height by.
-        let aspect = (rest.paper.maxX - rest.paper.minX) * Double(rest.pixels.width)
-            / ((rest.paper.maxY - rest.paper.minY) * Double(rest.pixels.height))
+        let restCentroid = paperRelative(restInk, in: rest.paper)
+        XCTAssertEqual(restCentroid.u, 0.65, accuracy: 0.04, "Sanity: the band is right of centre")
+        XCTAssertEqual(restCentroid.v, 0.5, accuracy: 0.04, "Sanity: …where it was aimed")
 
         openLayerPanel(app)
         addTransformLayerFromAddMenu(app)
@@ -390,30 +396,40 @@ final class TransformLayerModesUITests: PaintUITestCase {
                        "frame 1: the band is where it was drawn (paper \(first.paper), rest paper \(rest.paper))")
         XCTAssertEqual(atFirst.v, restCentroid.v, accuracy: 0.03)
 
-        // Six frames in: a quarter turn clockwise puts what was to the right of centre below it —
-        // as far below, in canvas units, as it was to the right.
+        // Six frames in: a quarter turn clockwise about the box's centre — which is the canvas's, and
+        // the canvas is centred on the host, so it is the host's own centre — puts what was to the
+        // right of it directly below it, as far below as it was to the right. Worked in the capture's
+        // own pixels, where that is a rotation of the vector from the centre; the visible paper's
+        // centre is not the canvas's (`paperBounds`), and its fractions would not turn.
         scrub(app, toFrame: 7, total: total)
-        let expectedU = 0.5 - (restCentroid.v - 0.5) / aspect
-        let expectedV = 0.5 + (restCentroid.u - 0.5) * aspect
+        let width = Double(rest.pixels.width), height = Double(rest.pixels.height)
+        let fromCentre = (x: (Double(restInk.x) - 0.5) * width, y: (Double(restInk.y) - 0.5) * height)
+        let expected = CGPoint(x: 0.5 - fromCentre.y / width, y: 0.5 + fromCentre.x / height)
+        // The tolerance is 0.04 of the paper's width, which is what it was when it was 0.04 of the paper.
+        let tolerance = 0.04 * (rest.paper.maxX - rest.paper.minX)
+        func misses(_ read: CGPoint) -> (x: Double, y: Double) {
+            (Double(read.x - expected.x), Double(read.y - expected.y) * height / width)
+        }
         // The posed frame reaches the canvas through the compositor a beat after the scrub, so the
         // probe is repeated until the picture settles — and reports the last reading if it never does.
-        var atSeventh = atFirst
+        var atSeventh = restInk
         let deadline = Date().addingTimeInterval(8)
         repeat {
             guard let turned = currentPaper(canvas, "at the seventh frame"),
-                  let read = inkCentroid(turned.pixels, in: paperRegion(turned.paper, v0: 0.04, v1: 0.96))
-                      .map({ paperRelative($0, in: turned.paper) }) else {
+                  let read = inkCentroid(turned.pixels, in: paperRegion(turned.paper, v0: 0.04, v1: 0.96)) else {
                 return XCTFail("The band vanished at the seventh frame")
             }
             atSeventh = read
-            if abs(read.u - expectedU) < 0.04, abs(read.v - expectedV) < 0.04 { break }
+            if abs(misses(read).x) < tolerance, abs(misses(read).y) < tolerance { break }
             Thread.sleep(forTimeInterval: 0.4)
         } while Date() < deadline
         attach(app, "2-rotate-six-frames-in")
-        XCTAssertEqual(atSeventh.u, expectedU, accuracy: 0.04,
-                       "frame 7: the band is on the centre column — turned about the box's centre, not slid")
-        XCTAssertEqual(atSeventh.v, expectedV, accuracy: 0.04,
-                       "frame 7: …and below it, as far below as it was to the right (aspect \(aspect))")
+        XCTAssertEqual(misses(atSeventh).x, 0, accuracy: tolerance,
+                       "frame 7: the band is on the centre column — turned about the box's centre, not slid "
+                       + "(read \(atSeventh), expected \(expected))")
+        XCTAssertEqual(misses(atSeventh).y, 0, accuracy: tolerance,
+                       "frame 7: …and below it, as far below as it was to the right "
+                       + "(read \(atSeventh), expected \(expected))")
     }
 
     // MARK: - Shake

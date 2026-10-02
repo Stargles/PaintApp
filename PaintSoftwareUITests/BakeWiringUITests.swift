@@ -332,8 +332,13 @@ final class BakeWiringUITests: PaintUITestCase {
     /// twentieth of the scan excludes a knob and a glyph and keeps the paper, whose two runs either
     /// side of the ink are each far longer than that.
     ///
-    /// One screenshot for both scans, down the middle column for the paper's vertical span and then
-    /// across the row at the centre of it: `rgbaPixel` captures once per sample, which is far too
+    /// **The row is the host's own centre row, not the middle of the white that is visible.** The
+    /// canvas is centred on the host (`CanvasView.Coordinator.baseCenter`) and the seeded stroke is
+    /// at its mid-height, so the host's centre row is the stroke's row. The visible white's middle
+    /// is not: the timeline panel overlays the host's lower part (375 pt since TODO (122)) and cuts
+    /// the paper short, which moved that middle off the stroke and made this ruler find no ink.
+    ///
+    /// One screenshot, then across that row: `rgbaPixel` captures once per sample, which is far too
     /// slow to sweep with and steps clean over anything thin.
     private func inkSpanOnPaper(_ canvas: XCUIElement) -> (left: Int, right: Int, paperWidth: Int)? {
         guard let cg = canvas.screenshot().image.cgImage else { return nil }
@@ -363,9 +368,7 @@ final class BakeWiringUITests: PaintUITestCase {
             if let s = start { found.append((s, count - 1)) }
             return found.filter { $0.last - $0.first >= count / 20 }
         }
-        let down = runs(height) { isPaper(width / 2, $0) }
-        guard let top = down.first?.first, let bottom = down.last?.last else { return nil }
-        let row = (top + bottom) / 2
+        let row = height / 2
         let across = runs(width) { isPaper($0, row) }
         guard let paperLeft = across.first?.first, let paperRight = across.last?.last,
               paperRight - paperLeft > width / 4 else { return nil }
