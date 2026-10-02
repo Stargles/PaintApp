@@ -40,7 +40,9 @@ struct ContentView: View {
                 GalleryView(onOpenProject: openProject, onCreateNew: startNewProject,
                            initialPath: galleryReturnPath)
             case .sizePicker:
-                CanvasSizePickerView(canvasManager: canvasManager, onCreated: { screen = .editor })
+                CanvasSizePickerView(canvasManager: canvasManager,
+                                     onCreated: { screen = .editor },
+                                     onCancel: { screen = .gallery })
             case .editor:
                 DrawingView(canvasManager: canvasManager,
                             onOpenGallery: returnToGallery,
@@ -130,7 +132,9 @@ struct ContentView: View {
     /// **TODO (87): where the gallery reopens when this document is left.** Derived from
     /// `canvasManager`'s own URL rather than tracked separately — there is then nothing to keep in
     /// sync, and `returnToGallery` always sets `screen` after its save has landed a URL, so the
-    /// document just closed is still the one this reads.
+    /// document just closed is still the one this reads. **A New Canvas that was cancelled has no URL
+    /// and answers with the folder it was started in** (TODO (152)): the artist chose that folder by
+    /// standing in it, and Cancel puts them back there.
     ///
     /// `GalleryView`'s `path` is already root-first folder *names*, not URLs, precisely so a storage
     /// relocation re-roots instead of pointing at a stale absolute path — `folderComponents(of:under:)`
@@ -140,9 +144,8 @@ struct ContentView: View {
     /// `Projects/` altogether. If the folder was since deleted or moved, `GalleryView.refresh()`'s own
     /// walk back to the nearest surviving ancestor handles it — no second mechanism needed here.
     private var galleryReturnPath: [String] {
-        guard let url = canvasManager.projectURL else { return [] }
-        return ProjectBackupManager.folderComponents(of: url.deletingLastPathComponent(),
-                                                      under: ProjectStore.projectsDirectory) ?? []
+        guard let folder = canvasManager.projectURL?.deletingLastPathComponent() ?? newProjectFolder else { return [] }
+        return ProjectBackupManager.folderComponents(of: folder, under: ProjectStore.projectsDirectory) ?? []
     }
 
     private func startNewProject(in folder: URL) {

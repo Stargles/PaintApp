@@ -175,6 +175,7 @@
 		F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */; };
 		9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */; };
 		1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */; };
+		FB29ABBA949DBB7BADCAC4BE /* CanvasSizePresetLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9AA9DEE8E7F23B334555F6D /* CanvasSizePresetLogicTests.swift */; };
 		E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */; };
 		784DE625260FC51433D7100A /* CanvasSizePickerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */; };
 		7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */; };
@@ -237,6 +238,7 @@
 		DEC0DE000000000000000057 /* PaintSoftware/Models/CanvasManager+LayerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000056 /* PaintSoftware/Models/CanvasManager+LayerTree.swift */; };
 		DEC0DE000000000000000055 /* PaintSoftware/Models/CanvasManager+Document.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000054 /* PaintSoftware/Models/CanvasManager+Document.swift */; };
 		DEC0DE000000000000000053 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000052 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift */; };
+		52713AB6E092467DBDEA27E8 /* PaintSoftware/Models/CanvasSizePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA3249152A62B89D13A1DD3 /* PaintSoftware/Models/CanvasSizePreset.swift */; };
 		0725550A4EB4ABCB7DA9B5C8 /* PaintSoftware/Models/BrushSizeCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A4BE1A756E44ED0525E024 /* PaintSoftware/Models/BrushSizeCurve.swift */; };
 		8CFCFA755CEE005DADD73BEB /* PaintSoftware/Models/CanvasManager+BrushSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6E9D1FBEC27BB633717D9A /* PaintSoftware/Models/CanvasManager+BrushSize.swift */; };
 		DEC0DE000000000000000051 /* PaintSoftware/Models/CanvasManager+Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000050 /* PaintSoftware/Models/CanvasManager+Timeline.swift */; };
@@ -706,6 +708,7 @@
 		A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchOwnerLogicTests.swift; sourceTree = "<group>"; };
 		E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionPersistenceLogicTests.swift; sourceTree = "<group>"; };
 		EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasGeometryLogicTests.swift; sourceTree = "<group>"; };
+		A9AA9DEE8E7F23B334555F6D /* CanvasSizePresetLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "CanvasSizePresetLogicTests.swift"; sourceTree = "<group>"; };
 		56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasResizeLogicTests.swift; sourceTree = "<group>"; };
 		81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasSizePickerUITests.swift; sourceTree = "<group>"; };
 		7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorMathOklabLogicTests.swift; sourceTree = "<group>"; };
@@ -768,6 +771,7 @@
 		DEC0DE000000000000000056 /* PaintSoftware/Models/CanvasManager+LayerTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+LayerTree.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000054 /* PaintSoftware/Models/CanvasManager+Document.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Document.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000052 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+ViewPresets.swift"; sourceTree = "<group>"; };
+		BBA3249152A62B89D13A1DD3 /* PaintSoftware/Models/CanvasSizePreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasSizePreset.swift; sourceTree = "<group>"; };
 		65A4BE1A756E44ED0525E024 /* PaintSoftware/Models/BrushSizeCurve.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/BrushSizeCurve.swift"; sourceTree = "<group>"; };
 		8C6E9D1FBEC27BB633717D9A /* PaintSoftware/Models/CanvasManager+BrushSize.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+BrushSize.swift"; sourceTree = "<group>"; };
 		DEC0DE000000000000000050 /* PaintSoftware/Models/CanvasManager+Timeline.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Timeline.swift"; sourceTree = "<group>"; };
@@ -1318,6 +1322,7 @@
 				A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */,
 				E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */,
 				EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */,
+				A9AA9DEE8E7F23B334555F6D /* CanvasSizePresetLogicTests.swift */,
 				56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */,
 				81D0457F34733162202E05FF /* CanvasSizePickerUITests.swift */,
 				7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */,
@@ -1552,6 +1557,7 @@
 				DEC0DE000000000000000056 /* PaintSoftware/Models/CanvasManager+LayerTree.swift */,
 				DEC0DE000000000000000054 /* PaintSoftware/Models/CanvasManager+Document.swift */,
 				DEC0DE000000000000000052 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift */,
+				BBA3249152A62B89D13A1DD3 /* PaintSoftware/Models/CanvasSizePreset.swift */,
 				DEC0DE000000000000000050 /* PaintSoftware/Models/CanvasManager+Timeline.swift */,
 				DEC0DE000000000000000090 /* PaintSoftware/Models/CanvasManager+BlockDrag.swift */,
 				DEC0DE000000000000000094 /* PaintSoftware/Models/RenderTree.swift */,
@@ -1972,6 +1978,7 @@
 				F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */,
 				9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */,
 				1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */,
+				FB29ABBA949DBB7BADCAC4BE /* CanvasSizePresetLogicTests.swift in Sources */,
 				E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */,
 				784DE625260FC51433D7100A /* CanvasSizePickerUITests.swift in Sources */,
 				7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */,
@@ -2118,6 +2125,7 @@
 				DEC0DE000000000000000057 /* PaintSoftware/Models/CanvasManager+LayerTree.swift in Sources */,
 				DEC0DE000000000000000055 /* PaintSoftware/Models/CanvasManager+Document.swift in Sources */,
 				DEC0DE000000000000000053 /* PaintSoftware/Models/CanvasManager+ViewPresets.swift in Sources */,
+				52713AB6E092467DBDEA27E8 /* PaintSoftware/Models/CanvasSizePreset.swift in Sources */,
 				0725550A4EB4ABCB7DA9B5C8 /* PaintSoftware/Models/BrushSizeCurve.swift in Sources */,
 				8CFCFA755CEE005DADD73BEB /* PaintSoftware/Models/CanvasManager+BrushSize.swift in Sources */,
 				DEC0DE000000000000000051 /* PaintSoftware/Models/CanvasManager+Timeline.swift in Sources */,

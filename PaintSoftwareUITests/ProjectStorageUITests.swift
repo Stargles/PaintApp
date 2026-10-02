@@ -117,6 +117,34 @@ final class ProjectStorageUITests: PaintUITestCase {
                        + "which is what it would do if the folder were decoration")
     }
 
+    /// **TODO (152): cancelling a new canvas puts the artist back in the folder they started it in.**
+    /// The gallery is rebuilt when the sheet closes, so without this it reopens at the top of the tree
+    /// and the artist has walked out of the folder by changing their mind. Made from a folder, with
+    /// the breadcrumb as the evidence of where the gallery landed.
+    func testCancellingANewCanvasReturnsToTheFolderItWasStartedIn() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+
+        makeFolder(app, named: "Scene 2")
+        let tile = app.buttons["gallery.folderTile.Scene 2"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10))
+        tile.tap()
+        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label, "Projects / Scene 2",
+                       "PREMISE: the gallery is showing the folder")
+
+        app.buttons["gallery.newCanvasButton"].tap()
+        let cancel = app.buttons["sizePicker.cancelButton"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        cancel.tap()
+
+        let crumb = app.staticTexts["gallery.breadcrumbPath"]
+        XCTAssertTrue(crumb.waitForExistence(timeout: 10),
+                      "Cancel lands on the gallery inside the folder, not at the top of the tree")
+        XCTAssertEqual(crumb.label, "Projects / Scene 2")
+    }
+
     /// Renaming a folder is on the tile, and the tile redraws under the new name. Asserted through
     /// what is drawn, because a rename that moved the directory and left the grid stale is a bug the
     /// model cannot see.

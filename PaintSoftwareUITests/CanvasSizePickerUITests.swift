@@ -69,6 +69,76 @@ final class CanvasSizePickerUITests: PaintUITestCase {
         XCTAssertTrue(createButton.isEnabled, "and Create re-enables")
     }
 
+    /// **TODO (152): the sheet has a way out, and taking it creates nothing.** From a fresh install:
+    /// New Canvas opens the sheet, Cancel closes it onto the gallery it came from. The editor never
+    /// appeared and no project tile was minted — the two things "creates nothing" can be wrong about,
+    /// since a half-made document is either on screen or on disk.
+    func testCancelLeavesTheSheetAndCreatesNoDocument() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery"]
+        app.launch()
+
+        let newCanvas = app.buttons["gallery.newCanvasButton"]
+        XCTAssertTrue(newCanvas.waitForExistence(timeout: 10))
+        newCanvas.tap()
+
+        let cancel = app.buttons["sizePicker.cancelButton"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10), "the sheet offers a Cancel")
+        XCTAssertTrue(app.buttons["sizePicker.createButton"].exists, "PREMISE: this is the size sheet")
+        attachScreenshot(app, "size-sheet-with-cancel")
+        cancel.tap()
+
+        XCTAssertTrue(newCanvas.waitForExistence(timeout: 10), "Cancel lands on the gallery")
+        XCTAssertFalse(app.buttons["sizePicker.createButton"].exists, "and the sheet is gone")
+        XCTAssertFalse(app.staticTexts["timeline.frameLabel"].exists, "no editor was opened")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'gallery.tileMenu.'")).count, 0,
+                       "and no project was made")
+    }
+
+    /// **TODO (152): a preset is a size the artist can pick without typing it.** Reaches the sheet from
+    /// a cold start, picks 1920×1080, and follows the size into the document it makes — read where the
+    /// artist reads it, the Resize Canvas row's own title, rather than from the field it was typed in.
+    ///
+    /// Also what is drawn: every preset the device can open has a button, and the one picked says it
+    /// is selected, so a preset that fills the fields but looks untouched is a failure here.
+    func testAPresetFillsTheFieldsAndTheNewDocumentHasThatSize() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery"]
+        app.launch()
+
+        let newCanvas = app.buttons["gallery.newCanvasButton"]
+        XCTAssertTrue(newCanvas.waitForExistence(timeout: 10))
+        newCanvas.tap()
+
+        let widthField = app.textFields["sizePicker.widthField"]
+        let heightField = app.textFields["sizePicker.heightField"]
+        XCTAssertTrue(widthField.waitForExistence(timeout: 10))
+
+        let cap = Int(CanvasManager.maxCanvasExtent)
+        for preset in CanvasSizePreset.offered(withinExtent: cap) {
+            XCTAssertTrue(app.buttons["sizePicker.preset.\(preset.id)"].exists,
+                          "\(preset.dimensions) (\(preset.name)) should be a button on the sheet")
+        }
+
+        let preset = app.buttons["sizePicker.preset.1920x1080"]
+        XCTAssertFalse(preset.isSelected, "PREMISE: the sheet opens on the default size, not on 1080p")
+        preset.tap()
+        XCTAssertEqual(widthField.value as? String, "1920", "a preset fills the width")
+        XCTAssertEqual(heightField.value as? String, "1080", "and the height")
+        XCTAssertTrue(preset.isSelected, "and says which preset the fields now match")
+        XCTAssertTrue(app.buttons["sizePicker.createButton"].isEnabled)
+        attachScreenshot(app, "size-sheet-1080p-picked")
+
+        app.buttons["sizePicker.createButton"].tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15), "the editor opens")
+
+        app.buttons["toolbar.settingsButton"].tap()
+        let row = app.buttons["settings.resizeCanvasRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("1920 × 1080"),
+                      "the document is the size the preset named — the Resize Canvas row reads \"\(row.label)\"")
+    }
+
     /// Cleared with `delete` presses rather than a select-all, matching `CanvasResizeSheet`'s own
     /// UI test (`ToolsAndSelectionUITests.testResizeCanvasIsInTheActionsMenuAndAppliesTheTypedSize`):
     /// the field raises a number pad, which has no selection affordances at all.

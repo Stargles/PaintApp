@@ -3,9 +3,13 @@ import SwiftUI
 struct CanvasSizePickerView: View {
     @ObservedObject var canvasManager: CanvasManager
     var onCreated: () -> Void
+    /// Leaves the sheet without making a document — TODO (152). Nothing has been created by the time
+    /// the artist is looking at this sheet (`createCanvas` is what makes the canvas), so the caller's
+    /// whole answer is to show the gallery again.
+    var onCancel: () -> Void
 
-    @State private var widthText: String = "2048"
-    @State private var heightText: String = "2048"
+    @State private var widthText: String = String(CanvasSizePreset.initial.width)
+    @State private var heightText: String = String(CanvasSizePreset.initial.height)
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -24,6 +28,10 @@ struct CanvasSizePickerView: View {
     private var width: Int? { Int(widthText) }
     private var height: Int? { Int(heightText) }
 
+    /// The presets this device can open — `CanvasSizePreset.all` held to the same ceiling the typed
+    /// fields are, so no button here is a size the sheet would then refuse.
+    private var presets: [CanvasSizePreset] { CanvasSizePreset.offered(withinExtent: maxDimension) }
+
     private var isValid: Bool {
         guard let width, let height else { return false }
         return (minDimension...maxDimension).contains(width) && (minDimension...maxDimension).contains(height)
@@ -41,6 +49,25 @@ struct CanvasSizePickerView: View {
     }
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            // A scroll view that only scrolls when it must: on a small iPad with the number pad up the
+            // presets would otherwise push Create off the bottom of the screen. `minHeight` keeps the
+            // content centred whenever it does fit.
+            GeometryReader { proxy in
+                ScrollView {
+                    content
+                        .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+            Button("Cancel", action: onCancel)
+                .padding()
+                .accessibilityIdentifier("sizePicker.cancelButton")
+        }
+        .onAppear { focusedField = .width }
+    }
+
+    private var content: some View {
         VStack(spacing: 30) {
             Text("Create New Canvas")
                 .font(.largeTitle)
@@ -80,6 +107,8 @@ struct CanvasSizePickerView: View {
                 }
             }
 
+            presetGrid
+
             Button(action: createCanvas) {
                 Text("Create Canvas")
                     .font(.headline)
@@ -94,7 +123,44 @@ struct CanvasSizePickerView: View {
             .padding(.horizontal, 50)
         }
         .padding()
-        .onAppear { focusedField = .width }
+    }
+
+    /// TODO (152): a preset *fills the two fields* and creates nothing, so the artist can still nudge
+    /// a number before Create, and the fields stay the single place the size is read from.
+    private var presetGrid: some View {
+        VStack(spacing: 12) {
+            Text("Presets")
+                .font(.headline)
+                .foregroundColor(.gray)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                ForEach(presets) { preset in presetButton(preset) }
+            }
+        }
+        .padding(.horizontal, 50)
+    }
+
+    private func presetButton(_ preset: CanvasSizePreset) -> some View {
+        let isSelected = width == preset.width && height == preset.height
+        return Button {
+            widthText = String(preset.width)
+            heightText = String(preset.height)
+            // The number pad has nothing left to do, and it is covering the rest of the sheet.
+            focusedField = nil
+        } label: {
+            VStack(spacing: 2) {
+                Text(preset.dimensions)
+                    .font(.subheadline.weight(.semibold))
+                Text(preset.name)
+                    .font(.caption)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.blue : Color.white.opacity(0.12))
+            .cornerRadius(10)
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("sizePicker.preset.\(preset.id)")
     }
 
     private func dimensionField(_ title: String, text: Binding<String>, field: Field) -> some View {
