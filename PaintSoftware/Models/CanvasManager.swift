@@ -27,6 +27,13 @@ final class CanvasManager: ObservableObject {
     /// `setCanvasPadding`, which resizes every buffer to keep existing content centred.
     @Published var canvasPadding: CGFloat = 0
 
+    /// TODO (133) — whether the padding is drawn **over** the artwork's ink (the default) or under it.
+    /// On, the margin covers anything drawn into it, so the artwork's edge is always the edge of the
+    /// grey and a stroke across it cannot hide it; off, ink drawn into the margin shows over the grey.
+    /// Display only: nothing in a render or an export reads it — the export's own "Include Padding"
+    /// decides what a file carries. A property of the document beside `canvasPadding`, saved with it.
+    @Published var isPaddingOnTop: Bool = true
+
     /// The largest coordinate a canvas dimension may reach — **memory-bound, not format-bound.**
     /// TODO.md item (8)'s signed 16-bit quarter-pixel sample coordinate addresses
     /// -8192.0...+8191.75 (a span of 16383.75 pt, not 16384), so the *format* can still carry a

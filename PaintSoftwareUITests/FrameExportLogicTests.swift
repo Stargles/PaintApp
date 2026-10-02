@@ -2,6 +2,7 @@ import XCTest
 import AVFoundation
 import CoreGraphics
 import ImageIO
+import Photos
 import UIKit
 
 /// RENDER.md §5 stage 6's pin on the **pure** half of export: which frames, what the bytes become,
@@ -217,6 +218,80 @@ final class FrameExportLogicTests: XCTestCase {
                 return XCTFail("Expected a size refusal, got \(error).")
             }
         }
+    }
+
+    // MARK: - The padding cut (TODO (127))
+
+    /// A 4×3 frame whose pixel `i` is the four bytes `i, i, i, 255` — so a byte read back says which
+    /// source pixel it came from. `bytesPerRow` is wider than the pixels, as a texture readback may
+    /// legitimately be: a cut that assumed `width * 4` would shear.
+    private func numberedFrame(paddedRowBytes: Int = 4 * 4 + 8) -> DecodedFrame {
+        var pixels = Data(count: paddedRowBytes * 3)
+        for y in 0..<3 {
+            for x in 0..<4 {
+                let i = UInt8(y * 4 + x)
+                for c in 0..<3 { pixels[y * paddedRowBytes + x * 4 + c] = i }
+                pixels[y * paddedRowBytes + x * 4 + 3] = 255
+            }
+        }
+        return DecodedFrame(width: 4, height: 3, bytesPerRow: paddedRowBytes, pixels: pixels)
+    }
+
+    /// **The cut takes the pixels it names and no others**, read as the number of the source pixel each
+    /// destination pixel came from — over a strided source, which is where a sheared copy would show.
+    func testACutFrameHoldsExactlyTheNamedPixels() throws {
+        let cut = try XCTUnwrap(numberedFrame().cropped(to: CGRect(x: 1, y: 1, width: 2, height: 2)))
+        XCTAssertEqual([cut.width, cut.height, cut.bytesPerRow], [2, 2, 8], "Tightly packed at the cut's size.")
+        let source = (0..<4).map { cut.pixels[$0 * 4] }
+        XCTAssertEqual(source, [5, 6, 9, 10], "Row 1 columns 1–2, then row 2 columns 1–2.")
+    }
+
+    /// Cutting nothing copies nothing — the export path calls this on every frame whether or not the
+    /// artist asked for the padding, and the common case must not cost a frame-sized copy.
+    func testCuttingTheWholeFrameReturnsTheFrameItself() throws {
+        let whole = numberedFrame()
+        let cut = try XCTUnwrap(whole.cropped(to: CGRect(x: 0, y: 0, width: 4, height: 3)))
+        XCTAssertEqual(cut.pixels, whole.pixels)
+        XCTAssertEqual(cut.bytesPerRow, whole.bytesPerRow, "No repack: the same frame, not a copy of it.")
+    }
+
+    /// A rect that is not wholly inside the frame, or not whole pixels, is a refusal. Clamping it would
+    /// hand back a picture of a different size than the one a movie was opened for.
+    func testACutOutsideTheFrameOrBetweenPixelsIsRefused() {
+        let frame = numberedFrame()
+        XCTAssertNil(frame.cropped(to: CGRect(x: 3, y: 0, width: 2, height: 2)), "Reaches past the right edge.")
+        XCTAssertNil(frame.cropped(to: CGRect(x: -1, y: 0, width: 2, height: 2)), "Starts before the left edge.")
+        XCTAssertNil(frame.cropped(to: CGRect(x: 0, y: 0, width: 0, height: 2)), "Empty.")
+        XCTAssertNil(frame.cropped(to: CGRect(x: 0.5, y: 0, width: 2, height: 2)), "Between pixels.")
+    }
+
+    // MARK: - What a file is, and where Photos files it (TODO (126))
+
+    /// **One classification for every destination**: the stream's `FILE_BEGIN` kind and Save to Photos
+    /// read the same table, so a file cannot be an image to one and nothing to the other. The two an
+    /// export produces, then the spellings Photos also takes, then what it has no word for.
+    func testAFilesKindComesFromItsExtensionAndIsCaseBlind() {
+        XCTAssertEqual(FrameExport.Kind(pathExtension: "png"), .image)
+        XCTAssertEqual(FrameExport.Kind(pathExtension: "PNG"), .image)
+        XCTAssertEqual(FrameExport.Kind(pathExtension: "mp4"), .video)
+        for ext in ["jpg", "jpeg", "heic", "gif"] {
+            XCTAssertEqual(FrameExport.Kind(pathExtension: ext), .image, ext)
+        }
+        for ext in ["mov", "m4v"] {
+            XCTAssertEqual(FrameExport.Kind(pathExtension: ext), .video, ext)
+        }
+        XCTAssertEqual(FrameExport.Kind(pathExtension: "txt"), .other)
+        XCTAssertEqual(FrameExport.Kind(pathExtension: ""), .other)
+        XCTAssertEqual(FrameExport.Kind.image.rawValue, "image", "The raw values are the stream protocol's own words.")
+        XCTAssertEqual(FrameExport.Kind.video.rawValue, "video")
+    }
+
+    /// Photos files a still as a photo and a movie as a video, and refuses anything else outright — a
+    /// file with no resource type never reaches the library as something it is not.
+    func testPhotosFilesAStillAsAPhotoAndAMovieAsAVideo() {
+        XCTAssertEqual(PhotoLibraryDestination.resourceType(for: .image), .photo)
+        XCTAssertEqual(PhotoLibraryDestination.resourceType(for: .video), .video)
+        XCTAssertNil(PhotoLibraryDestination.resourceType(for: .other))
     }
 
     // MARK: - Names

@@ -347,9 +347,10 @@ struct RenderBackground: Equatable {
     /// engages the sandwich. Insetting keeps the margin exactly what it is today in both cases, and
     /// leaves `paddingBackdrop`'s grey showing through a composite that is still transparent there.
     ///
-    /// The margin is also not part of the picture anywhere else: an exported or thumbnailed composite
-    /// leaves it transparent, and the grey is a live-canvas affordance drawn by a view. Filling it
-    /// would have made the paper mean one thing on screen and another in the file.
+    /// The margin is also not part of the picture anywhere else: a thumbnailed composite — and an
+    /// export that includes its padding (TODO (127)) — leaves it transparent, and the grey is a
+    /// live-canvas affordance drawn by a view. Filling it would have made the paper mean one thing on
+    /// screen and another in the file.
     ///
     /// **Symmetric on all four sides, which is what keeps it out of the flip.** CoreGraphics fills in
     /// UIKit's y-down space and Metal writes in texture space; a rect inset equally everywhere is the
@@ -773,8 +774,20 @@ extension CanvasManager {
     /// should be harmless rather than a parity bug.
     @MainActor
     func canvasBackground(renderedInto renderSize: CGSize) -> RenderBackground? {
-        guard isCanvasBackgroundVisible, let canvasSize,
-              canvasSize.width > 0, canvasSize.height > 0,
+        guard isCanvasBackgroundVisible, let rect = artworkPixelRect(renderedInto: renderSize) else { return nil }
+        return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
+    }
+
+    /// **Which pixels of a `renderSize`-sized render of the whole canvas are the artwork** — the
+    /// paper's rect, and the rect an export without its padding is cut to (TODO (127)). One
+    /// derivation for both, because an export that cut at a pixel the paper did not stop at would
+    /// carry a sliver of margin, or lose a column of artwork, with nothing to say so.
+    ///
+    /// Nil before a canvas exists. Whole pixels, derived from `RenderRequest.wholePixels(renderSize)`
+    /// — see `canvasBackground`, which was this function's body before the export needed it too.
+    @MainActor
+    func artworkPixelRect(renderedInto renderSize: CGSize) -> CGRect? {
+        guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
               renderSize.width > 0, renderSize.height > 0 else { return nil }
         let buffer = RenderRequest.wholePixels(renderSize)
         // `min(…, half)` for the degenerate document a hand-written or pre-2026-08-27 manifest can
@@ -794,10 +807,19 @@ extension CanvasManager {
         // backends index rows y-down from the top, which `testTheGPUMatchesTheCPUReferenceExactly`
         // already proves on vertically asymmetric content) but it buys nothing: the residual against
         // the true artwork rect is ≤0.5 px per edge either way.
-        let rect = CGRect(x: insetX, y: insetY,
-                          width: max(0, buffer.width - 2 * insetX),
-                          height: max(0, buffer.height - 2 * insetY))
-        return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
+        return CGRect(x: insetX, y: insetY,
+                      width: max(0, buffer.width - 2 * insetX),
+                      height: max(0, buffer.height - 2 * insetY))
+    }
+
+    /// **What an export delivers of a `renderSize`-sized render of the whole canvas** (TODO (127)): the
+    /// whole buffer when the artist asked for the padding, otherwise the artwork rect. The one answer
+    /// to "how big will this export be", read by the export driver to cut each frame and by the sheet
+    /// to say the pixel size before anything runs.
+    @MainActor
+    func exportRect(renderedInto renderSize: CGSize, includingPadding: Bool) -> CGRect {
+        if !includingPadding, let artwork = artworkPixelRect(renderedInto: renderSize) { return artwork }
+        return CGRect(origin: .zero, size: RenderRequest.wholePixels(renderSize))
     }
 
     /// The recipe §5.2's sandwich is assembled from, cut at the active layer — the stroke's cut, and

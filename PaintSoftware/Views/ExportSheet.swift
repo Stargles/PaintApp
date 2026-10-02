@@ -14,9 +14,13 @@ import SwiftUI
 /// must say which frame it is on, and must end somewhere the artist can pick the file up from. That
 /// is a modal, and it is the same argument `CanvasResizeSheet` makes two rows above it.
 ///
-/// Delivery is `ShareLink` (§3.9's *"system share sheet"*), which is what `ActionRecorderControls`
-/// already uses to get a file off the device: AirDrop, Files, Photos, Mail, all without this app
-/// asking for a single permission.
+/// ## Where a finished export goes
+///
+/// **"Save to Photos" is the primary action** (TODO (126)) and `ShareLink` (§3.9's *"system share
+/// sheet"*) stays beside it. Photos is the one the owner reaches for — an export lands in the camera
+/// roll, and in whatever syncs it, in one tap — and it needs the app's only Photos permission, which
+/// is add-only. The share sheet is kept because it is the way to Files, AirDrop and Mail, and "Send to
+/// Computer" is a third, independent destination; none of the three replaces another.
 struct ExportSheet: View {
 
     @ObservedObject var canvasManager: CanvasManager
@@ -25,6 +29,7 @@ struct ExportSheet: View {
     /// object for its own connected/not word, and `connectionStates` is `@Published` there.
     @ObservedObject private var streamCoordinator: ScreenStreamCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     init(canvasManager: CanvasManager) {
         self.canvasManager = canvasManager
@@ -67,6 +72,8 @@ struct ExportSheet: View {
 
     private var choices: some View {
         VStack(alignment: .leading, spacing: 12) {
+            includePaddingOption
+
             Button {
                 session.exportVideo()
             } label: {
@@ -112,7 +119,7 @@ struct ExportSheet: View {
 
     private func finished(_ url: URL) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Ready to share", systemImage: "checkmark.circle.fill")
+            Label("Export ready", systemImage: "checkmark.circle.fill")
                 .foregroundColor(.green)
                 .accessibilityIdentifier("export.status")
 
@@ -122,10 +129,21 @@ struct ExportSheet: View {
                 .lineLimit(1)
                 .truncationMode(.head)
 
+            Button {
+                session.saveToPhotos(using: PhotoLibraryDestination())
+            } label: {
+                Label(saveToPhotosTitle, systemImage: saveToPhotosIcon)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSaveToPhotos)
+            .accessibilityIdentifier("export.saveToPhotos")
+
+            photosNotice
+
             ShareLink(item: url) {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .accessibilityIdentifier("export.share")
 
             // STREAM.md §5.8. Beside Share rather than replacing it: the two destinations are
@@ -181,6 +199,73 @@ struct ExportSheet: View {
     private var sendResultIsFailure: Bool {
         if case .failed = session.sendState { return true }
         return false
+    }
+
+    /// TODO (127). Shown on a canvas with no padding too, saying so — a hidden option is a feature with
+    /// no signpost, and the artist who adds padding later finds it waiting.
+    private var includePaddingOption: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle("Include Padding", isOn: $session.includePadding)
+                .accessibilityIdentifier("export.includePaddingToggle")
+            Text(canvasManager.canvasPadding > 0
+                 ? "Off: the file is the artwork alone. On: the whole canvas, with the padding around it "
+                   + "empty — transparent in an image, black in a video."
+                 : "This canvas has no padding, so the file is the whole canvas either way.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// TODO (126). One tap on a saved file again would add it to the library twice, so a save that
+    /// worked leaves the button done rather than armed.
+    private var canSaveToPhotos: Bool {
+        switch session.photosState {
+        case .saving, .saved: return false
+        case .idle, .denied, .failed: return true
+        }
+    }
+
+    private var saveToPhotosTitle: String {
+        switch session.photosState {
+        case .saving: return "Saving to Photos…"
+        case .saved: return "Saved to Photos"
+        case .idle, .denied, .failed: return "Save to Photos"
+        }
+    }
+
+    private var saveToPhotosIcon: String {
+        session.photosState == .saved ? "checkmark.circle.fill" : "photo.on.rectangle.angled"
+    }
+
+    /// What to do when Photos did not take the file. The denial names the way back — the system asks
+    /// only once, so after a "Don't Allow" the only door is Settings, and the artist should not have
+    /// to know that.
+    @ViewBuilder
+    private var photosNotice: some View {
+        switch session.photosState {
+        case .denied:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("PaintSoftware is not allowed to add to Photos. Open Settings, choose Photos, "
+                     + "and allow adding photos, then come back and try again.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("export.photosNotice")
+                if let settings = URL(string: UIApplication.openSettingsURLString) {
+                    Button("Open Settings") { openURL(settings) }
+                        .accessibilityIdentifier("export.openSettings")
+                }
+            }
+        case .failed(let sentence):
+            Text(sentence)
+                .font(.caption)
+                .foregroundColor(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("export.photosNotice")
+        case .idle, .saving, .saved:
+            EmptyView()
+        }
     }
 
     private static func byteCount(_ bytes: Int) -> String {
@@ -240,11 +325,13 @@ struct ExportSheet: View {
     }
 
     /// The size the export will actually be, read the way the baker reads it rather than
-    /// recomputed — `liveCompositeSize` is where the knob is applied and there is one of it.
+    /// recomputed — `liveCompositeSize` is where the knob is applied and there is one of it — and cut
+    /// the way the driver cuts it: `exportRect` is the one answer to what the padding option leaves.
     private var exportSize: CGSize? {
         guard let canvasSize = canvasManager.canvasSize else { return nil }
         let tree = canvasManager.renderTree(atFrame: canvasManager.currentFrame)
-        return canvasManager.liveCompositeSize(of: tree, canvasSize: canvasSize)
+        let rendered = canvasManager.liveCompositeSize(of: tree, canvasSize: canvasSize)
+        return canvasManager.exportRect(renderedInto: rendered, includingPadding: session.includePadding).size
     }
 
     private var statusLine: String {

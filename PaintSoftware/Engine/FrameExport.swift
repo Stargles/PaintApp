@@ -188,6 +188,28 @@ enum FrameExport {
         return data as Data
     }
 
+    // MARK: - What a file is
+
+    /// What a finished export's file is, by its extension — the one classification the screen
+    /// stream's `FILE_BEGIN` `kind` and "Save to Photos" both read, so the two destinations cannot
+    /// disagree about a file. The raw values are the stream protocol's own words.
+    ///
+    /// **Exactly `tools/stream/fake-streamer.py`'s `classify_kind`**, so both sides of the stream
+    /// agree on every extension either one might see — which is wider than what an export produces
+    /// (a PNG and an `.mp4`): the extra spellings are Photos' own, since a GIF or a HEIC is an image
+    /// to it as well.
+    enum Kind: String, Equatable {
+        case image, video, other
+
+        init(pathExtension ext: String) {
+            switch ext.lowercased() {
+            case "jpg", "jpeg", "png", "heic", "gif": self = .image
+            case "mp4", "mov", "m4v": self = .video
+            default: self = .other
+            }
+        }
+    }
+
     // MARK: - Names
 
     /// A filename stem safe on every filesystem this app reaches, built from a document name.

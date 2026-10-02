@@ -372,6 +372,7 @@ enum ProjectStore {
         let projectName: String
         let canvasSize: CGSize
         let canvasPadding: Double
+        let isPaddingOnTop: Bool
         let fps: Int
         let backgroundColor: CodableColor
         let isBackgroundVisible: Bool
@@ -410,6 +411,7 @@ enum ProjectStore {
             projectName = canvasManager.projectName
             canvasSize = canvasManager.canvasSize ?? .zero
             canvasPadding = Double(canvasManager.canvasPadding)
+            isPaddingOnTop = canvasManager.isPaddingOnTop
             fps = canvasManager.fps
             backgroundColor = canvasManager.canvasBackgroundColor.codable
             isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
@@ -1270,6 +1272,7 @@ enum ProjectStore {
             canvasWidth: Double(snapshot.canvasSize.width),
             canvasHeight: Double(snapshot.canvasSize.height),
             canvasPadding: snapshot.canvasPadding,
+            isPaddingOnTop: snapshot.isPaddingOnTop,
             fps: snapshot.fps,
             layers: layerManifests,
             modifiedAt: Date(),
@@ -2143,6 +2146,7 @@ enum ProjectStore {
         // No resize on load: the buffers were saved at the full padded canvasSize; padding only drives
         // the paper inset that reveals the grey margin.
         manager.canvasPadding = CGFloat(manifest.canvasPadding)
+        manager.isPaddingOnTop = manifest.isPaddingOnTop
         manager.fps = manifest.fps
         manager.canvasBackgroundColor = manifest.backgroundColor.color
         manager.isCanvasBackgroundVisible = manifest.isBackgroundVisible

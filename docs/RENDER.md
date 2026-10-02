@@ -712,7 +712,8 @@ tell.
 Video: walk the store in frame order, hand each decoded BGRA frame to `AVAssetWriter` as a `CVPixelBuffer`, H.264 in
 `.mp4` at the document's fps and the knob's resolution, no alpha. Frame: the baked frame as PNG (alpha survives when
 the paper is hidden). Both wait for missing bakes with visible progress and neither composites anything. Delivery is
-the system share sheet. One store serves both (§2.9); nothing so far forces a second renderer.
+**Save to Photos** (the primary button), the system share sheet and Send to Computer, side by side. One store serves
+both (§2.9); nothing so far forces a second renderer.
 
 **Built 2026-09-02 (stage 6). `Engine/FrameExport.swift` is the pure half, `Engine/FrameExportSession.swift` the
 driver, `Views/ExportSheet.swift` the sheet. Nothing forced a second renderer** — the export file imports no
@@ -752,6 +753,18 @@ not say.
 - **`AVAssetWriter` takes an odd frame size**, MEASURED: 63x33 in, 63x33 back out of `AVAssetReader`. That matters
   because three quarters of an odd canvas is odd, and a movie one pixel wider than the artwork would be a wrong file
   with no error.
+
+**Amended 2026-10-02 — where an export goes and what it carries (TODO (126), (127)).** *Save to Photos* adds the
+finished file to the Photos library with add-only access (`PHPhotoLibrary`, `.addOnly`, `PhotoLibraryDestination`): a
+PNG goes in as a photo and an `.mp4` as a video — the two kinds an export makes; there is no GIF or image-sequence
+export, so Photos has no third case to decide. The share sheet stays, because Files, AirDrop and Mail are not Photos;
+a refused permission says where to allow it and offers Settings. The extension → kind table is one
+(`FrameExport.Kind`), read by Photos and by the stream's `FILE_BEGIN` alike. *Include Padding*, **off by default**, is
+an option of every export: the bake always holds the whole canvas buffer, and the export **cuts each frame to the
+artwork rect** (`CanvasManager.exportRect`, the same whole-pixel derivation the paper is filled into, so the cut and the
+paper agree at every Render Resolution) unless the artist asks for the padding, in which case the file is the whole
+buffer with the margin transparent (black in a video). Before this the export was always the whole buffer. Toggling it
+re-bakes nothing.
 
 **The driver is tested, and writing the tests found two shipped defects.** `FrameExportSessionLogicTests` is 13
 green over it: §2.1 counted with `CompositeProbe` — zero composites on a warm export, with four frames read back

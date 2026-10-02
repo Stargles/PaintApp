@@ -51,7 +51,7 @@ struct CanvasView: UIViewRepresentable {
         // Light-grey backing for the drawable padding margin: shows through wherever the paper is
         // inset by `canvasPadding`. Never seen at padding 0.
         let paddingBackdrop = UIView()
-        paddingBackdrop.backgroundColor = UIColor(white: 0.85, alpha: 1)
+        paddingBackdrop.backgroundColor = PaddingCoverView.tint
         paddingBackdrop.isUserInteractionEnabled = false
         paddingBackdrop.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paddingBackdrop)
@@ -61,6 +61,14 @@ struct CanvasView: UIViewRepresentable {
         paper.isUserInteractionEnabled = false
         paper.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paper)
+
+        // TODO (133): the same margin drawn over the ink instead of under it. Added here and lifted by
+        // `updatePaddingCover` every pass, because the layer hosts are added after it.
+        let paddingCover = PaddingCoverView()
+        paddingCover.isHidden = true
+        paddingCover.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(paddingCover)
+        context.coordinator.paddingCoverView = paddingCover
 
         // §5.2's sandwich: two views, three images from two producers. At rest the lower one carries
         // the **baked frame** and the upper one is empty; mid-stroke they carry `below` and `above`
@@ -252,6 +260,10 @@ struct CanvasView: UIViewRepresentable {
             paddingBackdrop.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             paddingBackdrop.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             paperTop, paperBottom, paperLeading, paperTrailing,
+            paddingCover.topAnchor.constraint(equalTo: container.topAnchor),
+            paddingCover.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            paddingCover.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            paddingCover.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             onionSkin.topAnchor.constraint(equalTo: container.topAnchor),
             onionSkin.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             onionSkin.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -453,6 +465,9 @@ struct CanvasView: UIViewRepresentable {
         // this line then lands above it. Ordering, not preference — moved here when placement
         // arrived.
         PlaybackTrace.span(.onionSkin) { context.coordinator.updateOnionSkin() }
+        // Above the ghost and every layer host, below every chrome overlay: the margin covers what
+        // was drawn, never the box the artist is moving it with.
+        context.coordinator.updatePaddingCover()
         PlaybackTrace.span(.overlays) { context.coordinator.updateActiveLayerAndTool() }
         PlaybackTrace.span(.derivedPreview) { context.coordinator.updateInterpolationPreviews() }
         // **From here down the order is a hit-testing rule, not a drawing one.** Two of these views
@@ -502,6 +517,8 @@ struct CanvasView: UIViewRepresentable {
         private var liveGuidePoints: [CGPoint] = []
         var onionSkinSource: OnionSkinSource = OnionSkinSettingsSource()
         weak var paperView: UIView?
+        /// The padding drawn over the ink — `updatePaddingCover`.
+        weak var paddingCoverView: PaddingCoverView?
         /// The four constraints pinning the paper to the container; constants are the
         /// `canvasPadding` inset on each side.
         var paperInsetConstraints: (top: NSLayoutConstraint, bottom: NSLayoutConstraint, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)?
@@ -681,6 +698,23 @@ struct CanvasView: UIViewRepresentable {
         /// `sandwichPresentation`, and only after the images are actually installed.
         private var compositeCarriesThePaper = false
 
+        /// The padding in whole canvas pixels — the paper's inset and the cover's, which are the same
+        /// rect and so the same number.
+        private var paddingInset: CGFloat { canvasManager.canvasPadding.rounded() }
+
+        /// TODO (133) — shows the margin over the artwork's ink when the document asks for it
+        /// (`isPaddingOnTop`, the default) and there is a margin to show. Fronted every pass the
+        /// way `updateOnionSkin` fronts the ghost: a layer host added since the last pass sits above
+        /// anything that was not.
+        func updatePaddingCover() {
+            guard let cover = paddingCoverView else { return }
+            let inset = paddingInset
+            let shown = canvasManager.isPaddingOnTop && inset > 0
+            if cover.isHidden == shown { cover.isHidden = !shown }
+            if cover.inset != inset { cover.inset = inset }
+            if shown { cover.superview?.bringSubviewToFront(cover) }
+        }
+
         func updatePaper() {
             guard let paperView else { return }
             paperView.backgroundColor = UIColor(canvasManager.canvasBackgroundColor)
@@ -701,7 +735,7 @@ struct CanvasView: UIViewRepresentable {
             // resolution the composite is magnified with `.linear` so its paper edge is soft anyway,
             // and `paperView` is hidden throughout.
             if let c = paperInsetConstraints {
-                let p = canvasManager.canvasPadding.rounded()
+                let p = paddingInset
                 if c.top.constant != p { c.top.constant = p }
                 if c.leading.constant != p { c.leading.constant = p }
                 if c.bottom.constant != -p { c.bottom.constant = -p }

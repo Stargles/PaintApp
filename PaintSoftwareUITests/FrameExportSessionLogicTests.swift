@@ -590,7 +590,256 @@ final class FrameExportSessionLogicTests: XCTestCase {
         await unwind()
     }
 
+    // MARK: - Include Padding (TODO (127))
+
+    /// A 64×64 canvas with 8 pt of padding, so a 48×48 artwork, whose every frame is a flat grey over
+    /// **the artwork rect only** — the margin is left transparent, which is what lets a test tell a
+    /// file that carries it from one that does not by a pixel and not only by a size.
+    private func paddedDocument() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasPadding = 8
+        let artwork = manager.artworkRect ?? .zero
+        CanvasFixture.setBakedContent(
+            manager, layerIndex: 0,
+            CanvasFixture.solidImage(UIColor(white: 0.5, alpha: 1), rect: artwork))
+        return manager
+    }
+
+    /// The PNG at `url`, and the alpha of the pixel at `(x, y)` — 0 where the margin is, 255 where the
+    /// artwork is, so the pixel says which of the two the file is a picture of.
+    private static func png(at url: URL) throws -> (width: Int, height: Int, alpha: (Int, Int) -> UInt8) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &buffer, width: image.width, height: image.height,
+                                              bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let width = image.width
+        return (image.width, image.height, { x, y in buffer[(y * width + x) * 4 + 3] })
+    }
+
+    /// **The export is the artwork unless the artist asks for the padding** — one baked frame, two
+    /// answers, and no second bake between them. Pinned in the file's own pixels: the default is a
+    /// 48×48 picture whose corner is artwork, and with the padding it is the whole 64×64 canvas whose
+    /// corner is the transparent margin and whose artwork sits where the padding says.
+    func testAFrameExportIsCutToTheArtworkUnlessThePaddingIsAskedFor() async throws {
+        let manager = paddedDocument()
+        XCTAssertEqual(manager.artworkRect, CGRect(x: 8, y: 8, width: 48, height: 48), "Setup: the artwork rect.")
+        await warm(manager)
+
+        let session = FrameExportSession(manager: manager)
+        XCTAssertFalse(session.includePadding, "The padding is off until the artist turns it on.")
+        CompositeProbe.begin()
+        session.exportFrame(0)
+        guard case .finished(let without) = await settle(session) else {
+            return XCTFail("The export must finish, and it stopped at \(session.phase).")
+        }
+        let cut = try Self.png(at: without)
+        XCTAssertEqual([cut.width, cut.height], [48, 48], "Without the padding the file is the artwork alone.")
+        XCTAssertEqual(cut.alpha(0, 0), 255, "…so its first pixel is artwork, not margin.")
+
+        session.reset()
+        session.includePadding = true
+        session.exportFrame(0)
+        guard case .finished(let with) = await settle(session) else {
+            return XCTFail("The export must finish, and it stopped at \(session.phase).")
+        }
+        XCTAssertEqual(CompositeProbe.end().count, 0, "The option cuts the bake; it re-renders nothing.")
+        let whole = try Self.png(at: with)
+        XCTAssertEqual([whole.width, whole.height], [64, 64], "With the padding the file is the whole canvas.")
+        XCTAssertEqual(whole.alpha(0, 0), 0, "…its corner is the transparent margin")
+        XCTAssertEqual(whole.alpha(8, 8), 255, "…and the artwork starts where the padding ends.")
+        XCTAssertEqual(whole.alpha(7, 32), 0, "…one pixel short of it is still margin.")
+    }
+
+    /// The movie is cut the way the image is, and its **size** is the cut's — a movie opened at the
+    /// whole canvas and fed artwork-sized frames would be refused as a size change, and one opened at
+    /// the artwork and fed whole frames the same.
+    func testAMovieIsTheSizeOfWhatThePaddingOptionLeaves() async throws {
+        let manager = paddedDocument()
+        await warm(manager)
+        let session = FrameExportSession(manager: manager)
+
+        session.exportVideo()
+        guard case .finished(let without) = await settle(session) else {
+            return XCTFail("The export must finish, and it stopped at \(session.phase).")
+        }
+        let artworkSize = try await Self.movieSize(without)
+        XCTAssertEqual(artworkSize, CGSize(width: 48, height: 48))
+
+        session.reset()
+        session.includePadding = true
+        session.exportVideo()
+        guard case .finished(let with) = await settle(session) else {
+            return XCTFail("The export must finish, and it stopped at \(session.phase).")
+        }
+        let wholeSize = try await Self.movieSize(with)
+        XCTAssertEqual(wholeSize, CGSize(width: 64, height: 64))
+    }
+
+    /// **The edge is the paper's edge, in every resolution** — `exportRect`'s artwork is, pixel for
+    /// pixel, the rect the compositor filled the paper into, because both come out of one derivation.
+    /// A cut that disagreed with the paper by a pixel would carry a sliver of margin or lose a column
+    /// of artwork at exactly the sizes (the Half and Quarter knobs) nobody looks at.
+    func testTheCutIsTheRectThePaperIsFilledInto() throws {
+        let manager = paddedDocument()
+        for side in [64.0, 48.0, 32.0, 17.0] {
+            let size = CGSize(width: side, height: side)
+            let paper = try XCTUnwrap(manager.canvasBackground(renderedInto: size)).rect
+            XCTAssertEqual(manager.exportRect(renderedInto: size, includingPadding: false), paper,
+                           "At \(Int(side)) px the artwork cut and the paper rect are one rect.")
+            XCTAssertEqual(manager.exportRect(renderedInto: size, includingPadding: true),
+                           CGRect(origin: .zero, size: size), "With the padding it is the whole render.")
+        }
+        XCTAssertEqual(manager.exportRect(renderedInto: CGSize(width: 32, height: 32), includingPadding: false),
+                       CGRect(x: 4, y: 4, width: 24, height: 24), "Half size: the inset halves with the canvas.")
+    }
+
+    // MARK: - Save to Photos (TODO (126))
+
+    /// What the library would answer, and what it was asked, without a library or a permission prompt.
+    private final class FakePhotos: PhotosDestination, @unchecked Sendable {
+        private let lock = NSLock()
+        private var answers: [PhotosSaveResult]
+        private var asked: [(file: URL, kind: FrameExport.Kind)] = []
+        private var held: CheckedContinuation<Void, Never>?
+        private var holding: Bool
+
+        init(answers: [PhotosSaveResult], holding: Bool = false) {
+            self.answers = answers
+            self.holding = holding
+        }
+
+        var calls: [(file: URL, kind: FrameExport.Kind)] { lock.withLock { asked } }
+
+        func save(_ file: URL, as kind: FrameExport.Kind) async -> PhotosSaveResult {
+            lock.withLock { asked.append((file, kind)) }
+            if lock.withLock({ holding }) {
+                await withCheckedContinuation { continuation in lock.withLock { held = continuation } }
+            }
+            return lock.withLock { answers.isEmpty ? .saved : answers.removeFirst() }
+        }
+
+        /// Lets a held save answer.
+        func release() {
+            let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+                holding = false
+                defer { held = nil }
+                return held
+            }
+            continuation?.resume()
+        }
+    }
+
+    private func finishedFrameExport(_ manager: CanvasManager) async -> (FrameExportSession, URL)? {
+        await warm(manager)
+        let session = FrameExportSession(manager: manager)
+        session.exportFrame(0)
+        guard case .finished(let url) = await settle(session) else { return nil }
+        return (session, url)
+    }
+
+    /// **The file the sheet is showing is the file Photos is handed, and as the right kind** — a PNG
+    /// goes in as an image, an `.mp4` as a video — and a save that worked leaves the session saying so.
+    func testSavingAFinishedExportHandsPhotosThatFileAsItsKind() async throws {
+        let manager = greyDocument(frames: 2)
+        let finished = await finishedFrameExport(manager)
+        let (session, still) = try XCTUnwrap(finished)
+        let library = FakePhotos(answers: [.saved])
+
+        session.saveToPhotos(using: library)
+        XCTAssertEqual(session.photosState, .saving, "The button is busy the moment it is tapped.")
+        _ = await settle(until: { session.photosState != .saving })
+
+        XCTAssertEqual(session.photosState, .saved)
+        XCTAssertEqual(library.calls.map(\.file), [still])
+        XCTAssertEqual(library.calls.map(\.kind), [.image], "A frame is a PNG, and Photos files a PNG as an image.")
+
+        session.reset()
+        XCTAssertEqual(session.photosState, .idle, "Exporting something else starts the destination over.")
+        session.exportVideo()
+        guard case .finished(let movie) = await settle(session) else {
+            return XCTFail("The export must finish, and it stopped at \(session.phase).")
+        }
+        session.saveToPhotos(using: library)
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(library.calls.last?.file, movie)
+        XCTAssertEqual(library.calls.last?.kind, .video, "…and an `.mp4` goes in as a video.")
+    }
+
+    /// There is nothing to save until an export has finished, and a second tap while one is running is
+    /// ignored rather than queued — two assets for one tap is the defect.
+    func testPhotosIsNotAskedBeforeAnExportIsFinishedNorTwiceForOneTap() async throws {
+        let manager = greyDocument(frames: 2)
+        let idle = FrameExportSession(manager: manager)
+        let never = FakePhotos(answers: [.saved])
+        idle.saveToPhotos(using: never)
+        XCTAssertEqual(idle.photosState, .idle)
+        XCTAssertTrue(never.calls.isEmpty, "No finished export, no save.")
+
+        let finished = await finishedFrameExport(manager)
+        let (session, _) = try XCTUnwrap(finished)
+        let slow = FakePhotos(answers: [.saved], holding: true)
+        session.saveToPhotos(using: slow)
+        session.saveToPhotos(using: slow)
+        _ = await settle(until: { slow.calls.count >= 1 })
+        XCTAssertEqual(slow.calls.count, 1, "The second tap was ignored while the first was in flight.")
+        slow.release()
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(session.photosState, .saved)
+    }
+
+    /// **A refusal says which kind it is.** Denied is the one the artist can fix and the sheet says how;
+    /// a failure is the library's own sentence. Neither locks the button: after allowing access in
+    /// Settings the same file goes in on the next tap.
+    func testADeniedOrFailedSaveCanBeTriedAgain() async throws {
+        let manager = greyDocument(frames: 2)
+        let finished = await finishedFrameExport(manager)
+        let (session, _) = try XCTUnwrap(finished)
+        let library = FakePhotos(answers: [.denied, .failed("Photos would not take the file."), .saved])
+
+        session.saveToPhotos(using: library)
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(session.photosState, .denied)
+
+        session.saveToPhotos(using: library)
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(session.photosState, .failed("Photos would not take the file."))
+
+        session.saveToPhotos(using: library)
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(session.photosState, .saved, "The third tap went through, for the same file.")
+        XCTAssertEqual(Set(library.calls.map(\.file)).count, 1)
+    }
+
+    /// An answer that arrives after the sheet has moved on is about a file it has let go of, and must
+    /// not mark the next export as saved.
+    func testASaveAnsweringAfterTheSheetWasResetIsDropped() async throws {
+        let manager = greyDocument(frames: 2)
+        let finished = await finishedFrameExport(manager)
+        let (session, _) = try XCTUnwrap(finished)
+        let slow = FakePhotos(answers: [.saved], holding: true)
+
+        session.saveToPhotos(using: slow)
+        _ = await settle(until: { slow.calls.count == 1 })
+        session.reset()
+        slow.release()
+        await unwind()
+
+        XCTAssertEqual(session.photosState, .idle, "The late answer was dropped.")
+    }
+
     // MARK: - Readback
+
+    /// The movie's pixel size, as the file declares it.
+    private static func movieSize(_ url: URL) async throws -> CGSize {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        return try await track.load(.naturalSize)
+    }
 
     /// Every frame of the movie, as the grey level of its top-left pixel.
     ///

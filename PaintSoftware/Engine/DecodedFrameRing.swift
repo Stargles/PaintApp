@@ -39,6 +39,34 @@ struct DecodedFrame {
         self.init(width: width, height: height, bytesPerRow: width * 4, pixels: pixels)
     }
 
+    /// The frame cut to `rect`, in whole pixels from the top-left, tightly packed — the artwork out of
+    /// a canvas that carries padding (TODO (127)). Self when `rect` is the whole frame, so cutting
+    /// nothing copies nothing.
+    ///
+    /// Nil when `rect` is empty or reaches outside the frame, or the buffer disagrees with the
+    /// dimensions: a cut that silently clamped would hand back a picture of a different size than
+    /// the one the caller sized a movie for.
+    func cropped(to rect: CGRect) -> DecodedFrame? {
+        let x = Int(rect.minX), y = Int(rect.minY)
+        let cutWidth = Int(rect.width), cutHeight = Int(rect.height)
+        guard CGFloat(x) == rect.minX, CGFloat(y) == rect.minY,
+              CGFloat(cutWidth) == rect.width, CGFloat(cutHeight) == rect.height,
+              x >= 0, y >= 0, cutWidth > 0, cutHeight > 0,
+              x + cutWidth <= width, y + cutHeight <= height,
+              bytesPerRow >= width * 4, pixels.count >= bytesPerRow * height else { return nil }
+        if x == 0, y == 0, cutWidth == width, cutHeight == height { return self }
+        var out = Data(count: cutWidth * cutHeight * 4)
+        out.withUnsafeMutableBytes { destination in
+            pixels.withUnsafeBytes { source in
+                guard let dst = destination.baseAddress, let src = source.baseAddress else { return }
+                for row in 0..<cutHeight {
+                    memcpy(dst + row * cutWidth * 4, src + (y + row) * bytesPerRow + x * 4, cutWidth * 4)
+                }
+            }
+        }
+        return DecodedFrame(width: cutWidth, height: cutHeight, pixels: out)
+    }
+
     /// The frame as a `CGImage`, **without copying the pixels**: the provider is built over the
     /// `Data` itself, so this is a retain and a header rather than a `bytesPerRow * height` memcpy.
     /// At 2048² that is 16.8 MB not moved, per displayed frame, at 24 fps.

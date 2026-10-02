@@ -51,6 +51,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.projectName = "Async Save"
         manager.fps = 18
         manager.canvasPadding = 7
+        manager.isPaddingOnTop = false   // the default is on, so a dropped field reads as a changed value
 
         for layerIndex in 0..<2 {
             let raster = manager.layers[layerIndex].cels[0].raster
@@ -268,6 +269,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.fps, 18)
         XCTAssertEqual(reloaded.contentEndFrame, 14, "The scene is derived from the cels, and layer 0's second block ends at 14")
         XCTAssertEqual(reloaded.canvasPadding, 7)
+        XCTAssertFalse(reloaded.isPaddingOnTop, "The padding's draw order is the document's, saved beside the padding")
         XCTAssertEqual(reloaded.canvasSize, CanvasFixture.canvasSize)
 
         XCTAssertEqual(reloaded.layers.count, 3, "All three layers should survive the round trip")
@@ -282,6 +284,23 @@ final class ProjectSaveLogicTests: XCTestCase {
                       "The second raster layer's content should come back too")
         XCTAssertEqual(reloaded.layers[2].cels[0].vector?.strokes.count, 1,
                        "The vector layer's stroke should round-trip through its JSON payload")
+    }
+
+    /// TODO (133): a package written before the setting existed has no such key, and opens with the
+    /// padding on top — the default — rather than failing to decode or opening with it off.
+    func testAManifestWrittenBeforePaddingOnTopOpensWithItOn() throws {
+        let manifest = ProjectManifest(id: UUID(), name: "Legacy", canvasWidth: 64, canvasHeight: 64,
+                                       canvasPadding: 4, isPaddingOnTop: false, fps: 24, layers: [],
+                                       modifiedAt: Date())
+        let data = try JSONEncoder().encode(manifest)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["isPaddingOnTop"] as? Bool, false, "Setup: the key is written when off.")
+        object.removeValue(forKey: "isPaddingOnTop")
+
+        let legacy = try JSONDecoder().decode(ProjectManifest.self,
+                                              from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(legacy.isPaddingOnTop)
+        XCTAssertEqual(legacy.canvasPadding, 4, "…and nothing else about the padding moved.")
     }
 
     /// The specific race the async write introduces: a caller that reloads the project the instant

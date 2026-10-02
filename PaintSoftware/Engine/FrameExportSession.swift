@@ -103,6 +103,12 @@ final class FrameExportSession: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// TODO (127) — whether the export carries the canvas padding around the artwork, for every kind
+    /// of export. Off by default, and an export is then cut to the artwork rect; on, it is the whole
+    /// canvas buffer, the margin transparent. The sheet's toggle writes it and an export reads it
+    /// once, when it starts walking.
+    @Published var includePadding = false
+
     /// STREAM.md §5.8: what "Send to Computer" is doing, once there is a file to send. Separate
     /// from `phase` because it can only ever apply on top of `.finished` — the sheet keeps `phase`'s
     /// own share/again/done row and adds this beside it, rather than inventing a sixth `Phase` case
@@ -118,6 +124,21 @@ final class FrameExportSession: ObservableObject {
     }
 
     @Published private(set) var sendState: SendState = .idle
+
+    /// TODO (126): what "Save to Photos" is doing, once there is a file to save. Beside `sendState`
+    /// for the same reason it is: it only ever applies on top of `.finished`, so it is not a `Phase`
+    /// case every other switch over `Phase` would have to grow an arm for.
+    enum PhotosState: Equatable {
+        case idle
+        case saving
+        case saved
+        /// The artist has not allowed this app to add to Photos. The sheet says where to allow it.
+        case denied
+        /// The library refused the file; the string is the artist's sentence.
+        case failed(String)
+    }
+
+    @Published private(set) var photosState: PhotosState = .idle
 
     /// The frames the current or last export covers — for the sheet's caption and for a test.
     private(set) var frames: ClosedRange<Int>?
@@ -185,7 +206,7 @@ final class FrameExportSession: ObservableObject {
             sendState = .failed("Not connected to a computer.")
             return
         }
-        let kind = Self.fileKind(forPathExtension: url.pathExtension)
+        let kind = FrameExport.Kind(pathExtension: url.pathExtension).rawValue
         sendState = .sending(bytesSent: 0, totalBytes: 0)
         client.sendFile(url: url, kind: kind, onProgress: { [weak self] sent, total in
             self?.sendState = .sending(bytesSent: sent, totalBytes: total)
@@ -199,13 +220,26 @@ final class FrameExportSession: ObservableObject {
         })
     }
 
-    /// The `kind` FILE_BEGIN carries — exactly `tools/stream/fake-streamer.py`'s own
-    /// `classify_kind`, so the two sides agree on every extension either one might see.
-    static func fileKind(forPathExtension ext: String) -> String {
-        switch ext.lowercased() {
-        case "jpg", "jpeg", "png", "heic", "gif": return "image"
-        case "mp4", "mov", "m4v": return "video"
-        default: return "other"
+    /// TODO (126) — puts the finished export in the Photos library, so it is in the camera roll and
+    /// in whatever syncs the camera roll (Google Photos) without a trip through the share sheet. A
+    /// no-op while nothing is finished or while a save is already running.
+    ///
+    /// `destination` is the caller's rather than a stored default, so this file names no framework a
+    /// logic test would have to link: the sheet passes `PhotoLibraryDestination`, a test passes its own.
+    func saveToPhotos(using destination: any PhotosDestination) {
+        guard case .finished(let url) = phase, photosState != .saving else { return }
+        photosState = .saving
+        let kind = FrameExport.Kind(pathExtension: url.pathExtension)
+        Task { [weak self] in
+            let result = await destination.save(url, as: kind)
+            // Not `.saving` any more means `reset()` ran while the library was working: the result
+            // is about a file the sheet has already let go of.
+            guard let self, self.photosState == .saving else { return }
+            switch result {
+            case .saved: self.photosState = .saved
+            case .denied: self.photosState = .denied
+            case .failed(let sentence): self.photosState = .failed(sentence)
+            }
         }
     }
 
@@ -232,6 +266,7 @@ final class FrameExportSession: ObservableObject {
         cancel()
         phase = .idle
         sendState = .idle
+        photosState = .idle
     }
 
     private func start(_ product: Product) {
@@ -294,10 +329,11 @@ final class FrameExportSession: ObservableObject {
         case .frame(let frame):
             let decoded = try await bakedFrame(frame, within: range, index: 0, of: 1)
             phase = .writing(done: 0, total: 1)
+            let cut = try delivered(of: decoded, includingPadding: includePadding)
             let stem = FrameExport.safeStem(try liveDocument().projectName) + "-frame-\(frame)"
             let url = Self.outputURL(stem: stem, extension: "png")
             try await offMain {
-                guard let png = FrameExport.pngData(decoded) else {
+                guard let picture = decoded.cropped(to: cut), let png = FrameExport.pngData(picture) else {
                     throw Failure.unreadableFrame(frame)
                 }
                 do { try png.write(to: url, options: .atomic) }
@@ -311,29 +347,40 @@ final class FrameExportSession: ObservableObject {
             let url = Self.outputURL(stem: FrameExport.safeStem(try liveDocument().projectName),
                                      extension: "mp4")
             let fps = try liveDocument().fps
+            let includingPadding = includePadding
             var writer: VideoFrameWriter?
             for (index, frame) in range.enumerated() {
                 try Task.checkCancellation()
                 let decoded = try await bakedFrame(frame, within: range, index: index, of: total)
                 phase = .writing(done: index, total: total)
+                let cut = try delivered(of: decoded, includingPadding: includingPadding)
                 if writer == nil {
-                    // **The movie's size is the first baked frame's own size**, never a second
-                    // computation of what the knob means. §2.8 makes the export the knob's
-                    // resolution, and the store's pixels already *are* that; recomputing it here
-                    // would be a second account of one number, which is how the two come to differ.
-                    writer = try VideoFrameWriter(url: url,
-                                                  size: CGSize(width: decoded.width,
-                                                               height: decoded.height),
-                                                  fps: fps)
+                    // **The movie's size is the first baked frame's own size**, cut the way every
+                    // frame is cut — never a second computation of what the knob means. §2.8 makes
+                    // the export the knob's resolution, and the store's pixels already *are* that;
+                    // recomputing it here would be a second account of one number, which is how the
+                    // two come to differ.
+                    writer = try VideoFrameWriter(url: url, size: cut.size, fps: fps)
                 }
                 guard let live = writer else { throw Failure.couldNotWrite("The movie would not open.") }
-                try await offMain { try live.append(decoded, at: index) }
+                try await offMain {
+                    guard let picture = decoded.cropped(to: cut) else { throw Failure.unreadableFrame(frame) }
+                    try live.append(picture, at: index)
+                }
             }
             guard let live = writer else { throw Failure.nothingToExport }
             try await offMain { try live.finish() }
             phase = .writing(done: total, total: total)
             return url
         }
+    }
+
+    /// The part of a baked frame this export hands on — `CanvasManager.exportRect`, read against the
+    /// frame's own pixel size so it is the knob's resolution that decides where the artwork's edge
+    /// falls, exactly as it did when the baker laid the paper down.
+    private func delivered(of decoded: DecodedFrame, includingPadding: Bool) throws -> CGRect {
+        try liveDocument().exportRect(renderedInto: CGSize(width: decoded.width, height: decoded.height),
+                                      includingPadding: includingPadding)
     }
 
     /// One frame's pixels out of the store, waiting on the baker for as long as it takes.
@@ -514,4 +561,21 @@ final class FrameExportSession: ObservableObject {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent(stem + "." + ext, isDirectory: false)
     }
+}
+
+// MARK: - The Photos library (TODO (126))
+
+/// Where "Save to Photos" puts a finished export. The app's is `PhotoLibraryDestination`, which asks
+/// for add-only access and writes the file as a new asset; `FrameExportSessionLogicTests` hands the
+/// session one of its own, so the states the sheet shows are driven without a library or a prompt.
+protocol PhotosDestination: Sendable {
+    func save(_ file: URL, as kind: FrameExport.Kind) async -> PhotosSaveResult
+}
+
+enum PhotosSaveResult: Equatable {
+    case saved
+    /// Add-only access is refused or restricted — the artist said no once and the system will not
+    /// ask again, so the only way back is Settings.
+    case denied
+    case failed(String)
 }

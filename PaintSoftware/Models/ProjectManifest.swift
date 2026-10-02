@@ -8,6 +8,9 @@ struct ProjectManifest: Codable {
     /// Light-grey drawable margin around the artwork. Folded into canvasWidth/Height (buffers save
     /// at the full padded size); restoring it just redraws the paper inset — no resize on load.
     var canvasPadding: Double
+    /// `CanvasManager.isPaddingOnTop` (TODO (133)). Absent means on — the default, and what every
+    /// package written before the setting existed opens as.
+    var isPaddingOnTop: Bool = true
     var fps: Int
     /// **There is no `sceneFrameCount` here and there must not be one.** It was a stored
     /// high-water mark that only ever rose, so a document carried a wrong end across save and
@@ -59,8 +62,8 @@ struct ProjectManifest: Codable {
     /// written before it existed, which opens at the defaults exactly as it did.
     var editorState: EditorStateManifest? = nil
 
-    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int,
-         layers: [LayerManifest], modifiedAt: Date,
+    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, isPaddingOnTop: Bool = true,
+         fps: Int, layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
          vectorEraserMode: VectorEraserMode = .erase, universalEraser: Bool = false,
@@ -73,6 +76,7 @@ struct ProjectManifest: Codable {
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
         self.canvasPadding = canvasPadding
+        self.isPaddingOnTop = isPaddingOnTop
         self.fps = fps
         self.layers = layers
         self.modifiedAt = modifiedAt
@@ -101,6 +105,7 @@ struct ProjectManifest: Codable {
         canvasWidth = try container.decode(Double.self, forKey: .canvasWidth)
         canvasHeight = try container.decode(Double.self, forKey: .canvasHeight)
         canvasPadding = try container.decodeIfPresent(Double.self, forKey: .canvasPadding) ?? 0
+        isPaddingOnTop = try container.decodeIfPresent(Bool.self, forKey: .isPaddingOnTop) ?? true
         fps = try container.decode(Int.self, forKey: .fps)
         layers = try container.decode([LayerManifest].self, forKey: .layers)
         modifiedAt = try container.decode(Date.self, forKey: .modifiedAt)
@@ -134,6 +139,7 @@ struct ProjectManifest: Codable {
         try container.encode(canvasWidth, forKey: .canvasWidth)
         try container.encode(canvasHeight, forKey: .canvasHeight)
         try container.encode(canvasPadding, forKey: .canvasPadding)
+        try container.encode(isPaddingOnTop, forKey: .isPaddingOnTop)
         try container.encode(fps, forKey: .fps)
         try container.encode(layers, forKey: .layers)
         try container.encode(modifiedAt, forKey: .modifiedAt)
@@ -155,7 +161,7 @@ struct ProjectManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, canvasWidth, canvasHeight, canvasPadding, fps, layers,
+        case id, name, canvasWidth, canvasHeight, canvasPadding, isPaddingOnTop, fps, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
              vectorEraserMode, universalEraser, folders, viewPresets, motionGroups, guideStrokes,
              animationGroups, brushTableFileName, editorState

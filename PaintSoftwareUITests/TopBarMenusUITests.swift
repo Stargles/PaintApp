@@ -188,4 +188,67 @@ final class TopBarMenusUITests: PaintUITestCase {
         shot.lifetime = .keepAlways
         add(shot)
     }
+
+    /// **TODO (133) — the padding covers what is drawn into it, and the artwork's edge stays an edge.**
+    /// *"Add the option to render canvas padding on top (not below), default on. This means that the
+    /// canvas border wont get covered up by the drawings."*
+    ///
+    /// Driven from a fresh document the way the artist reaches it: Settings, the padding slider, close,
+    /// draw one stroke from the margin across the artwork's edge, then read **pixels** — a stored flag
+    /// would agree with a toggle that drew nothing. With the toggle on (its default) the margin pixels
+    /// under the stroke read the margin's grey and the part inside the artwork reads ink; turned off,
+    /// the same margin pixels read ink. The artwork half is what keeps the on-state assertion from
+    /// being satisfied by a stroke that never landed.
+    func testPaddingOnTopCoversInkDrawnIntoTheMarginAndTurningItOffShowsIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        app.buttons["toolbar.settingsButton"].tap()
+        let padding = app.sliders["settings.paddingSlider"]
+        XCTAssertTrue(padding.waitForExistence(timeout: 5))
+        padding.adjust(toNormalizedSliderPosition: 0.2)
+        let toggle = app.switches["settings.paddingOnTopToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Padding On Top is in the Settings menu, with the padding")
+        XCTAssertEqual(toggle.value as? String, "1", "…and it is on by default")
+        app.buttons["toolbar.settingsButton"].tap()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // The visible canvas is the padded square the host letterboxes; at a 0.2 slider the margin is
+        // about 8% of its width a side, so 2% is inside it and 20% is well inside the artwork.
+        let bounds = visibleCanvasBounds(canvas)
+        let width = bounds.maxX - bounds.minX
+        func x(_ fraction: Double) -> Double { bounds.minX + width * fraction }
+        dragOnCanvas(app, from: CGVector(dx: x(0.02), dy: 0.5), to: CGVector(dx: x(0.20), dy: 0.5))
+        Thread.sleep(forTimeInterval: 1.0)
+
+        func darkest(_ fractions: [Double]) -> Int {
+            fractions.compactMap { rgbaPixel(of: canvas, dx: x($0), dy: 0.5) }
+                .map { Int($0.r) }.min() ?? 255
+        }
+        let marginSamples = [0.04, 0.05, 0.06, 0.07]
+        let artworkSamples = [0.14, 0.16, 0.18]
+        attachScreenshot(app, "padding-on-top-on")
+        XCTAssertLessThan(darkest(artworkSamples), 100,
+                          "PREMISE: the stroke landed and is ink inside the artwork — without it the margin reads below prove nothing")
+        XCTAssertGreaterThan(darkest(marginSamples), 190, """
+            With Padding On Top on, the stroke's part inside the margin is covered by the margin. Its \
+            darkest sampled pixel read \(darkest(marginSamples)); ink reads under 100 and the margin's \
+            grey about 217.
+            """)
+
+        app.buttons["toolbar.settingsButton"].tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+        app.buttons["toolbar.settingsButton"].tap()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        attachScreenshot(app, "padding-on-top-off")
+        XCTAssertLessThan(darkest(marginSamples), 100, """
+            With Padding On Top off, the same stroke shows over the margin. Its darkest sampled \
+            pixel there read \(darkest(marginSamples)).
+            """)
+    }
 }

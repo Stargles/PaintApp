@@ -376,6 +376,113 @@ final class ToolPanelsUITests: PaintUITestCase {
         // ambiguous, which MEASURED as a failed tap rather than a clean close.
     }
 
+    // MARK: - Where an export goes, and what it carries (TODO (126), (127))
+
+    private func openExportSheet(_ app: XCUIApplication) {
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.exportRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Export is a row in the Actions menu")
+        row.tap()
+        XCTAssertTrue(app.buttons["export.frameButton"].waitForExistence(timeout: 5), "the export sheet opens")
+    }
+
+    /// Taps Save to Photos and waits for it to say it worked, answering the system's add-only prompt if
+    /// this run is the first to ask. The prompt belongs to SpringBoard rather than to the app, so it is
+    /// polled for there instead of through an interruption monitor, which only fires on the *next*
+    /// interaction with the app and so never fires while this is waiting for a label.
+    private func saveToPhotosAndWaitForItToLand(_ app: XCUIApplication, file: StaticString = #filePath,
+                                                line: UInt = #line) {
+        let save = app.buttons["export.saveToPhotos"]
+        XCTAssertTrue(save.waitForExistence(timeout: 120), "the export finished and offers Save to Photos",
+                      file: file, line: line)
+        XCTAssertTrue(app.buttons["export.share"].exists,
+                      "…and the share sheet stays beside it — Files, AirDrop and Mail are still reachable",
+                      file: file, line: line)
+        save.tap()
+
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, !save.label.contains("Saved to Photos") {
+            for label in ["Allow", "Allow Access to All Photos", "OK"] {
+                let button = springboard.alerts.buttons[label]
+                if button.exists { button.tap(); break }
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTAssertTrue(save.label.contains("Saved to Photos"), """
+            Save to Photos never reported success — the button reads "\(save.label)"\
+            \(app.staticTexts["export.photosNotice"].exists ? " and says: \(app.staticTexts["export.photosNotice"].label)" : "").
+            """, file: file, line: line)
+        XCTAssertFalse(save.isEnabled,
+                       "A saved export leaves the button done, so one tap cannot add the same file twice",
+                       file: file, line: line)
+        XCTAssertFalse(app.staticTexts["export.photosNotice"].exists, file: file, line: line)
+    }
+
+    /// **TODO (126) — *"saved as an image (like in the camera roll) directly from the menu."*** A frame
+    /// export finishes, Save to Photos is the prominent button, and one tap puts the PNG in the
+    /// library. Run against the real Photos library of the simulator it is on: the permission is
+    /// granted by `simctl privacy` before the run or answered at the prompt during it.
+    func testAFrameExportIsSavedToThePhotosLibraryFromTheSheet() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openExportSheet(app)
+        app.buttons["export.frameButton"].tap()
+        saveToPhotosAndWaitForItToLand(app)
+        attachScreenshot(app, "export-saved-to-photos-frame")
+    }
+
+    /// The same for the movie — the other kind of file an export makes, filed as a video.
+    func testAVideoExportIsSavedToThePhotosLibraryFromTheSheet() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openExportSheet(app)
+        app.buttons["export.videoButton"].tap()
+        saveToPhotosAndWaitForItToLand(app)
+        attachScreenshot(app, "export-saved-to-photos-video")
+    }
+
+    /// **TODO (127) — *"an option to include the padding in the render (default off)."*** From a fresh
+    /// document: give it padding in Settings, open Export, and the sheet's promised pixel size is the
+    /// artwork's until Include Padding is turned on, and the whole padded canvas after.
+    func testIncludePaddingDefaultsOffAndGrowsTheExportToTheWholeCanvas() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.settingsButton"].tap()
+        let padding = app.sliders["settings.paddingSlider"]
+        XCTAssertTrue(padding.waitForExistence(timeout: 5))
+        padding.adjust(toNormalizedSliderPosition: 0.2)
+        app.buttons["toolbar.settingsButton"].tap()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        openExportSheet(app)
+        let toggle = app.switches["export.includePaddingToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Include Padding is an option on the export sheet")
+        XCTAssertEqual(toggle.value as? String, "0", "…and it is off by default")
+
+        let caption = app.staticTexts["export.caption"]
+        func promisedSize() -> (width: Int, height: Int)? {
+            let numbers = caption.label.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+            return numbers.count >= 2 ? (numbers[0], numbers[1]) : nil
+        }
+        let artwork = try XCTUnwrap(promisedSize(), "the caption states a pixel size: \(caption.label)")
+        XCTAssertEqual(artwork.width, 2048, "Off: the artwork alone — the new document's 2048 canvas, padding or not")
+        attachScreenshot(app, "export-include-padding-off")
+
+        // The switch is at the row's trailing edge; the row's middle is its label, which is not a
+        // control in a plain stack.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        let flipped = Date().addingTimeInterval(5)
+        while Date() < flipped, (toggle.value as? String) != "1" { Thread.sleep(forTimeInterval: 0.1) }
+        XCTAssertEqual(toggle.value as? String, "1", "the tap turned Include Padding on")
+        let whole = try XCTUnwrap(promisedSize(), "the caption still states a size: \(caption.label)")
+        XCTAssertGreaterThan(whole.width, artwork.width, "On: the padding is in the file, so it is wider")
+        XCTAssertEqual(whole.width, whole.height, "…on every side, since the canvas is square")
+        XCTAssertEqual((whole.width - artwork.width) % 2, 0, "…by the same margin on both sides")
+        attachScreenshot(app, "export-include-padding-on")
+    }
+
 }
 
 final class SelectionAndMoveUITests: PaintUITestCase {

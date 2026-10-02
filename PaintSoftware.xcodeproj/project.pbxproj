@@ -439,6 +439,7 @@
 		4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */; };
 		1FE665D13B8F254480571944 /* PaintSoftware/Engine/FrameExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */; };
 		6DB909B5C01970AEA627306E /* PaintSoftware/Engine/FrameExportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA6FD066DB909B5C01970AE /* PaintSoftware/Engine/FrameExportSession.swift */; };
+		773E16EA1529A78549883A2C /* PaintSoftware/Services/PhotoLibraryDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18C5361C3619B24DCD181378 /* PaintSoftware/Services/PhotoLibraryDestination.swift */; };
 		570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */; };
 		761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */; };
 		35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */; };
@@ -988,6 +989,7 @@
 		845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BakeQueue.swift; sourceTree = "<group>"; };
 		D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameExport.swift; sourceTree = "<group>"; };
 		3FA6FD066DB909B5C01970AE /* PaintSoftware/Engine/FrameExportSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameExportSession.swift; sourceTree = "<group>"; };
+		18C5361C3619B24DCD181378 /* PaintSoftware/Services/PhotoLibraryDestination.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/PhotoLibraryDestination.swift; sourceTree = "<group>"; };
 		8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/DecodedFrameRing.swift; sourceTree = "<group>"; };
 		57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeQueueLogicTests.swift; sourceTree = "<group>"; };
 		58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DecodedFrameRingLogicTests.swift; sourceTree = "<group>"; };
@@ -1527,6 +1529,7 @@
 				845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */,
 				D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */,
 				3FA6FD066DB909B5C01970AE /* PaintSoftware/Engine/FrameExportSession.swift */,
+				18C5361C3619B24DCD181378 /* PaintSoftware/Services/PhotoLibraryDestination.swift */,
 				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */,
 				97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */,
@@ -2081,6 +2084,7 @@
 				4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */,
 				1FE665D13B8F254480571944 /* PaintSoftware/Engine/FrameExport.swift in Sources */,
 				6DB909B5C01970AEA627306E /* PaintSoftware/Engine/FrameExportSession.swift in Sources */,
+				773E16EA1529A78549883A2C /* PaintSoftware/Services/PhotoLibraryDestination.swift in Sources */,
 				570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */,
 				761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */,
 				35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */,
@@ -2475,6 +2479,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "PaintSoftware-Info.plist";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PaintSoftware finds and connects to PaintStreamer on your computer over the local network.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "PaintSoftware saves the images and videos you export to your Photos library.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -2523,6 +2528,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "PaintSoftware-Info.plist";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PaintSoftware finds and connects to PaintStreamer on your computer over the local network.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "PaintSoftware saves the images and videos you export to your Photos library.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

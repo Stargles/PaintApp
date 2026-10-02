@@ -155,23 +155,6 @@ everything inside the folder. However that only moves everything that is in the 
 user have the option in the move menu for folders (the one that has keep stroke width, etc.) to select
 between moving things in all frames, or just that cel."*
 
-## (126) Export straight to Photos
-
-**Status** — not started. *"The export right now saves to files, if possible I'd like it to be saved as
-an image (like in the camera roll) directly from the menu. It just needs to pop up in google photos so I
-can access it easily."*
-
-## (127) Export: include the padding (default off)
-
-**Status** — not started. *"When I render, there should be an option to include the padding in the
-render (default off)."*
-
-## (133) Settings: draw the canvas padding over the artwork (default on)
-
-**Status** — not started. *"In the settings menu as part of canvas padding, add the option to render
-canvas padding on top (not below), default on. This means that the canvas border wont get covered up by
-the drawings."*
-
 ## (132) Direction-following brushes: messy stroke start and end
 
 **Status** — not started. *"For brushes which rotation follows the direction of the stroke, the start

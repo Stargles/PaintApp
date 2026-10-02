@@ -41,6 +41,7 @@ struct SettingsMenu: View {
 
             resizeCanvasRow
             paddingControl
+            paddingOnTopToggle
             bakePrecisionRow
 
             Rectangle()
@@ -125,6 +126,34 @@ struct SettingsMenu: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .onAppear { paddingDraft = Double(canvasManager.canvasPadding) }
+    }
+
+    /// TODO (133) — *"as part of canvas padding, add the option to render canvas padding on top (not
+    /// below), default on. This means that the canvas border wont get covered up by the drawings."*
+    /// Directly under the slider it belongs to. It is a property of the document, like the padding
+    /// itself, and changes only what the canvas shows: an export's own "Include Padding" decides what
+    /// a file carries.
+    private var paddingOnTopToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $canvasManager.isPaddingOnTop) {
+                HStack {
+                    Image(systemName: "square.inset.filled").frame(width: 24)
+                    Text("Padding On Top")
+                }
+                .foregroundColor(.white)
+            }
+            .tint(.blue)
+            .accessibilityIdentifier("settings.paddingOnTopToggle")
+
+            Text("The padding covers anything drawn into it, so the canvas edge always shows. Turn it "
+                 + "off to see ink you drew in the margin.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 24)   // clears the row's icon column, as "Add Text" does
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     /// **TODO item (14) — the other half of the Move bar's "Keep Full Precision".** Snaps every stroke
