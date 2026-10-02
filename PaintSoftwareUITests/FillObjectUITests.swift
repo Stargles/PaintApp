@@ -271,8 +271,8 @@ final class FillObjectUITests: PaintUITestCase {
     // MARK: - (128) The gradient is an object
 
     /// **A gradient is dragged out as a band from the press to the lift**, and the left rail offers its
-    /// one dial while it is primed: the Width slider, in place of the brush's own. Width 50%: the ramp
-    /// runs from dark at the press to light at the lift, the band is half the paper across, and neither
+    /// one dial while it is primed: the Width slider, in place of the brush's own. Turned well down: the ramp
+    /// runs from dark at the press to light at the lift, the band is narrower than the paper, and neither
     /// end runs on past the points the pen marked. Its panel opens with it.
     func testADraggedGradientIsABandFromThePressToTheLiftAsWideAsTheRailSays() throws {
         let (app, canvas) = launch()
@@ -281,7 +281,9 @@ final class FillObjectUITests: PaintUITestCase {
         let width = app.sliders["sideToolbar.gradientWidthSlider"]
         XCTAssertTrue(width.waitForExistence(timeout: 5), "the left rail shows the Width slider while a gradient is primed")
         XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists, "…in place of the brush's size")
-        dragRailSlider(width, fromNormalizedDy: 0.09, toNormalizedDy: 0.5)   // the thumb starts at 100%, the top
+        // The thumb starts at 100%, the top; this drags it well down. Where it lands is the harness's own
+        // slack (about a tenth either way), so the probes below sit far from the band's edge on both sides.
+        dragRailSlider(width, fromNormalizedDy: 0.09, toNormalizedDy: 0.65)
 
         dragOnCanvas(app, from: paperPoint(canvas, 0.2, 0.5), to: paperPoint(canvas, 0.8, 0.5))
 
@@ -297,10 +299,10 @@ final class FillObjectUITests: PaintUITestCase {
             XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, x, y).dx, dy: paperPoint(canvas, x, y).dy)),
                           "the gradient is the length of the line: bare paper \(what)")
         }
-        XCTAssertFalse(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.32).dx, dy: paperPoint(canvas, 0.5, 0.32).dy)),
-                       "inside the band, a quarter of the paper above the line")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.2).dx, dy: paperPoint(canvas, 0.5, 0.2).dy)),
-                      "outside the band, which is half the paper across")
+        XCTAssertFalse(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.42).dx, dy: paperPoint(canvas, 0.5, 0.42).dy)),
+                       "inside the band, a little above the line")
+        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.12).dx, dy: paperPoint(canvas, 0.5, 0.12).dy)),
+                      "outside the band, which is narrower than the paper: the Width slider set it")
         XCTAssertFalse(width.exists, "once placed, the rail is the brush's again")
         XCTAssertTrue(app.sliders["sideToolbar.brushSizeSlider"].exists)
         attach(app, "gradient-band")
