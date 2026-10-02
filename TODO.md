@@ -100,6 +100,109 @@ down unmapped, and **the magic wand on a vector layer** samples the unposed pict
 
 - [ ] Both read through `inkPose` / `layerSpacePath` like every other input; a cold-start UI test each.
 
+## The owner's second 2026-10-01 message — (147)–(152) and three follow-ups
+
+Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that
+already merged are follow-ups named for their item.
+
+## (148) No Scribble anywhere in the app — one mechanism
+
+**Status** — not started. *"In the colour picker, when i try to adjust the opacity, it automatically
+just registers my apple pencil near the hex code and calls on apple scribble, meaning I adjust the
+scribble instead of adjusting opacity. Its very annoying. A while back I had the same issue for the
+title, and further back, I believe it was layer titles, and maybe other stuff. This makes it the third
+or fourth time I am asking this: there should be no scribble (draw to write) in this app. It should be
+completely disabled. Many features independently have fixes to block it, which violates the clean
+architecture priority. Seems like the title and layer titles use the same method, so just confirm that
+it isnt two separate things doing the same thing, and also make the hex code follow that standard."*
+
+- [ ] Scribble disabled app-wide by **one** mechanism every text input goes through (hex field
+      included); every per-feature blocker deleted; the report confirms the title and layer-title paths
+      were (or now are) the same one.
+
+## Text follow-ups: a stray box after Edit Text, and the panel stays live while typing
+
+**Status** — not started. Both on (116)'s Select → Edit Text (`d1dd0dd`) and the text tool.
+- *"Select a text, click edit text, then click anywhere on the canvas. A new textbox for some reason
+  comes up for some reason, which has entirely no reason to be there."* — tapping away should end the
+  edit, never place a new box.
+- *"When I create a text, then click on the board to place the box and start writing, I want to still be
+  able to adjust the things on that menu after I make the text without having to select the text
+  again."* — the Text panel's controls keep applying to the box just written.
+
+- [ ] A tap away from an edited box commits it and places nothing; a cold-start UI test.
+- [ ] The Text panel stays bound to the box being written; changing font/size/colour after typing
+      changes that box.
+
+## (113) follow-up: Mend Reach is its own setting, default 12 px
+
+**Status** — not started. The owner retracted the earlier "keep tied" ruling after trying it, 2026-10-01:
+*"Make it its own slider that isnt visible in the left menu, but is visible in the fill tool's dropdown
+menu, with a default set to 12px. If it already doesnt, the mend expand should be applied on top of the
+edge overlap expand. Right now the smart mend literally does nothing, probably because the mend distance
+is the same distance as edge overlap, and thus it gets overshadowed by edge overlap."* (Today the reach is
+twice Gap Closing, `79c892d`.)
+
+- [ ] A Mend Reach slider in the fill dropdown only (not the rail), default 12 px; the reach no longer
+      reads Gap Closing.
+- [ ] Mend measured from the Edge-Overlap-expanded fill, so it always adds reach; reproduce "does
+      nothing" first and pin it with rendered pixels.
+
+## (149) Add-menu shapes are primed, then dragged out with the pen
+
+**Status** — not started. Replaces (129)'s "lands centred in a Move box" (`d1dd0dd`), which goes whole.
+*"for the shapes in the add menu (rectangle, ellipse, image, linear gradient), make clicking on them
+prime it, and the next time the pen is touched to the screen, it spawns the shape. For ellipses, the
+circle starts on the pen press, and when the pen is dragged it expands its size. Same thing for
+rectangle, except its a square, and its rotation is locked (dragging only increases size, does not
+rotate it). For image and video, same thing as rectangle. For gradient, the direction of the gradient is
+the direction of the stroke from when it was placed to its current dragged position. The length is the
+length of that line. For the width, lets have the left menu show the width slider, being % of canvas
+size. You could probably reuse code from the smart shapes (square and ellipse smart shape) ,and the line
+smart shape for the gradient."*
+
+- [ ] Rectangle / Ellipse / Image / Video / Linear Gradient prime; the next pen-down places and the drag
+      sizes (gradient: drag sets direction and length; the rail shows a width slider in % of canvas).
+- [ ] Reuses the smart-shape drag geometry rather than a second copy.
+
+## Linear gradient blends in Oklab
+
+**Status** — not started. *"is the linear gradient oklab?"* — it was not (a two-stop sRGB `CGGradient` in
+`VectorLayer`'s `drawGradient`); ruled 2026-10-01: **blend in Oklab**, reusing `ColorMath`'s Oklab — the
+(10a) code the gradient map already uses.
+
+## (150) Center and 1:1 for a moved image, video or stream
+
+**Status** — not started. *"When an image/video/stream is selected and moved (only an image or video or
+stream), have additional options to center the image/video/stream which will reset its position to the
+screen center. Also have an option to make the size 1 to 1, as in every pixel of the image is a pixel on
+the screen, and resets the rotation."* Ruled: **Center = the canvas centre**; **1:1 = one image pixel per
+canvas pixel**, rotation reset.
+
+## (151) Rotation snaps to 15° with a finger down, and shows its angle
+
+**Status** — not started. *"Remember the behaviour where if a user creates a line smartshape and then
+presses their finger, it snaps in 15 degree increments? make it so the user can also do that when
+rotating any rotate node. Also have a degree indicator when a rotate node is selected. (Example:
+23.72(degree symbol))"*
+
+- [ ] Every rotate handle snaps to 15° while a finger is down — the smart-shape snap's own rule, shared.
+- [ ] A live angle readout (two decimals, °) while a rotate handle is held.
+
+## (147) Tap to select an object
+
+**Status** — not started. *"a new select mode which is simple: you just tap on anything and it selects
+whatever object you tapped on. If it is a text, it instantly opens the edit text menu, vice versa for
+gradients, brushstrokes/fill shapes, etc."*
+
+- [ ] A Tap mode beside the Select panel's loop modes; a tap selects the topmost object under it; text
+      and gradient open their Edit panels at once; a stroke or fill opens the selection's own options.
+
+## (152) New canvas: Cancel and size presets
+
+**Status** — not started. *"When a user creates a new canvas, add a cancel button. Also add many presets
+including 2048x1024, 1920, 1080p, etc."*
+
 ## (112) The stream says "paused" and stops updating until the artist draws
 
 **Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to
