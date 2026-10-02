@@ -74,17 +74,12 @@ duplicated mechanisms and bolted-on fixes (the owner rejected per-item reviewers
 
 - **Design notes for (139), (131)** are at `~/PaintWork/design/survey-1001.md` (rulings in TODO.md
   override it). The brief every worker reads is `~/PaintWork/brief-common.md`.
-- **Questions queued for the owner** (ask through the question tool):
-  1. Since Scribble is refused app-wide, should the document title and layer names be inline editable
-     fields again instead of tap-to-rename sheets?
-  2. When a layer *above* the edited one blends, the instant picture draws it plain until the bake
-     (built in `854a727`) — keep, or wait for the exact bake there?
-  3. Select → Tap replaces the selection on each tap — should it honour Add / Subtract?
-  4. The Select panel's four mode tabs are tight at 56 pt — keep, shrink the loop-rule picker, or move
-     the Paint Outside switch?
-  5. With the keyboard up, the docked Text panel covers a box placed low on the paper — scroll the
-     canvas to keep the box visible, or leave it?
-  6. Should a pending smart-shape line's endpoint handles also snap to 15° with a finger down?
+- **Questions for the owner**: none open — the 2026-10-02 batch is answered and recorded in TODO's
+  "Rulings of 2026-10-02" entry. After the next install, ask how (132)'s held stroke ends feel (the ink
+  trails the pen by up to a quarter of the brush width) and whether a live stroke's interior wants
+  smoothing too.
+- **The laptop streamer needs `tools/windows/streamer-remote.sh deploy`** when the laptop is on:
+  `f84776f`'s C# half (clear a stale pause on connect, idempotent resume) is merged uncompiled.
 
 **Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
 an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
