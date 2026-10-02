@@ -140,6 +140,13 @@ struct CanvasView: UIViewRepresentable {
             coordinator?.touchesOnCanvas(counting: touch) ?? 0
         }
 
+        // The live picture of a primed object being dragged out (TODO (149)). Never interactive, so
+        // where it sits in the stack decides nothing about who owns a touch.
+        let placementPreview = PlacementPreviewView()
+        placementPreview.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(placementPreview)
+        context.coordinator.placementPreview = placementPreview
+
         // The live text editor (`ADD_TEXT.md` stage 1). Above the shape overlay because the text
         // overlay is the one the artist is looking at while a session is live, and because
         // `beginCanvasEdit` commits text *after* the shape for the same reason. It claims only its
@@ -296,6 +303,10 @@ struct CanvasView: UIViewRepresentable {
             shapeOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             shapeOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             shapeOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            placementPreview.topAnchor.constraint(equalTo: container.topAnchor),
+            placementPreview.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            placementPreview.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            placementPreview.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             textOverlay.topAnchor.constraint(equalTo: container.topAnchor),
             textOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             textOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -598,6 +609,8 @@ struct CanvasView: UIViewRepresentable {
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
+        /// The primed object as it is dragged out — see `handlePlacementPress`.
+        weak var placementPreview: PlacementPreviewView?
         /// The live text editor. `ADD_TEXT.md` stage 1.
         weak var textOverlay: TextOverlayView?
         /// Its nine grips, in a sibling view above it. `ADD_TEXT.md` stage 4.
@@ -605,6 +618,9 @@ struct CanvasView: UIViewRepresentable {
         /// The text tool's placement tap. A fourth `TouchTypePressRecognizer`, not a fourth
         /// mechanism — see `setUpGestures`.
         weak var textTapRecognizer: TouchTypePressRecognizer?
+        /// The placement tool's press-and-drag (TODO (149)) — a fifth `TouchTypePressRecognizer`, for
+        /// the reasons the text tool's gives.
+        weak var placementPressRecognizer: TouchTypePressRecognizer?
         /// True while the two-finger snap constraint is engaged. Owned here rather than by the
         /// overlay, since the engaging touches usually land on the canvas, not the overlay.
         private(set) var isShapeConstraintEngaged = false
@@ -2913,7 +2929,11 @@ struct CanvasView: UIViewRepresentable {
             let touch = canvasTouchInputs()
             eyedropperTapRecognizer?.isEnabled = touch.eyedropperPressIsEnabled
             textTapRecognizer?.isEnabled = touch.textPressIsEnabled
+            placementPressRecognizer?.isEnabled = touch.placementPressIsEnabled
             fillTapRecognizer?.isEnabled = touch.fillPressIsEnabled
+            // A drag cut short by the tool changing under it (a cancelled touch, a second finger)
+            // leaves nothing on screen.
+            if canvasManager.placementPlan == nil { placementPreview?.hide() }
             // A fourth alongside them, added with the Move box's tap-away commit — see
             // `handleMoveBoxCommit`. Above the active-layer guard with the other three, and for the
             // fill's reason: the states it has to switch *off* in include ones where that guard
@@ -4083,6 +4103,23 @@ struct CanvasView: UIViewRepresentable {
             install(textPress, on: view)
             textTapRecognizer = textPress
 
+            // The primed object's press-and-drag (TODO (149)): the press starts it, the drag sizes it
+            // and the lift lays it down. A fifth `TouchTypePressRecognizer` for the same reason the
+            // text tool's is the fourth, and with `minimumPressDuration = 0` because the press must
+            // begin the instant the pen lands — a recognizer that waited would lose the first
+            // millimetres of the drag, which is where the shape's size is decided. Nothing is applied
+            // until the lift, so there is nothing a mistaken contact could do that cancelling does not
+            // undo.
+            let placementPress = TouchTypePressRecognizer(target: self, action: #selector(handlePlacementPress(_:)))
+            placementPress.minimumPressDuration = 0
+            placementPress.numberOfTouchesRequired = 1
+            placementPress.delegate = self
+            placementPress.cancelsTouchesInView = false
+            placementPress.isEnabled = false
+            placementPress.name = "canvas.placementPress"
+            install(placementPress, on: view)
+            placementPressRecognizer = placementPress
+
             // The tap **away** from the vector Move box, which puts the box down — the vector half of
             // what `FloatingPieceOverlayView`'s own tap-outside already does for a raster piece.
             //
@@ -4304,7 +4341,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer, moveBoxCommitRecognizer]
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer, placementPressRecognizer, moveBoxCommitRecognizer]
             if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
                 return true
             }
@@ -4772,6 +4809,54 @@ struct CanvasView: UIViewRepresentable {
             default:
                 break
             }
+        }
+
+        /// **The primed object's press, drag and lift** (TODO (149)). The press anchors it, every pen
+        /// position re-derives the plan the model holds, and the lift lays it down as one undo step.
+        ///
+        /// **The preview is pushed from here, not published.** The pen samples at the hardware's rate and
+        /// a SwiftUI pass per sample (`updateUIView` is not cheap) would buy nothing the overlay does not
+        /// already know — `placementPlan` is the model's own answer, which is also what the lift lays
+        /// down, so what the artist watches grow is what lands.
+        ///
+        /// **Gated exactly as the fill's, the eyedropper's and the text tool's presses are**: the pencil-
+        /// only test, then rule (i) — whatever chrome the artist grabbed wins — through the one
+        /// `owner(in:)`. A press declined at `.began` leaves no drag, so `.changed` and `.ended` find
+        /// nothing to continue or lay down.
+        @objc func handlePlacementPress(_ recognizer: TouchTypePressRecognizer) {
+            guard let container = containerView else { return }
+            switch recognizer.state {
+            case .began:
+                canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
+                guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+                let canvasPoint = recognizer.location(in: container)
+                guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .placementPress,
+                      canvasManager.beginPlacement(at: canvasPoint) else { return }
+                showPlacementPreview()
+            case .changed:
+                guard canvasManager.placementDrag != nil else { return }
+                canvasManager.updatePlacement(to: recognizer.location(in: container))
+                showPlacementPreview()
+            case .ended:
+                guard canvasManager.placementDrag != nil else { return }
+                canvasManager.updatePlacement(to: recognizer.location(in: container))
+                placementPreview?.hide()
+                canvasManager.endPlacement()
+            case .cancelled, .failed:
+                guard canvasManager.placementDrag != nil else { return }
+                canvasManager.cancelPlacement()
+                placementPreview?.hide()
+            default:
+                break
+            }
+        }
+
+        /// Draws what the pen has dragged out so far, in the brush colour a shape will land in.
+        private func showPlacementPreview() {
+            guard let plan = canvasManager.placementPlan, let container = containerView,
+                  let preview = placementPreview else { return }
+            container.bringSubviewToFront(preview)
+            preview.show(plan, color: canvasManager.brushColor.resolvedUIColor(opacity: canvasManager.brushOpacity))
         }
 
         /// The eyedropper's tap: take the colour under it as the brush colour, then go back to the

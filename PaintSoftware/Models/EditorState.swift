@@ -125,13 +125,13 @@ struct EditorPreferences: Codable, Equatable {
 
 extension Tool {
     /// Whether this tool is one the artist can be handed back on their next document. The
-    /// eyedropper and the text tool are both entered for one action and leave through their own
-    /// exit paths (`toolBeforeEyedropper`, the text session), so restoring either would open the
-    /// editor mid-gesture with nothing to finish.
+    /// eyedropper, the text tool and a primed object are all entered for one action and leave through
+    /// their own exit paths (`toolBeforeEyedropper`, the text session, `leavePlacement`), so restoring
+    /// any of them would open the editor mid-gesture with nothing to finish.
     var restoresAcrossDocuments: Bool {
         switch self {
         case .pen, .pencil, .eraser, .fill: return true
-        case .eyedropper, .text:            return false
+        case .eyedropper, .text, .place:    return false
         }
     }
 }

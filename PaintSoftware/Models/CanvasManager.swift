@@ -583,17 +583,48 @@ final class CanvasManager: ObservableObject {
     /// element of `vector.images` instead would be a guess about ordering that
     /// `VectorCanvas.insertionIndex(forKind:in:)` is free to change.
     private func importedImageElement(_ image: UIImage) -> VectorImageElement? {
+        guard let canvasSize, image.size.width > 0, image.size.height > 0 else { return nil }
+        let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
+        return addedImageElement(image) { vector in
+            vector.addImage(canvasSpaceElement: image,
+                            canvasPosition: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                            canvasFit: fit)
+        }
+    }
+
+    /// **A picture, laid on the active vector layer exactly where the artist dragged it out** — Add →
+    /// Insert Photo's placement (TODO (149)): centred on `centre`, `width` canvas points across, upright.
+    /// No cascade and no Move box, which are the centred import's own answers to "the artist did not
+    /// say where". A layer that cannot take it (a raster, value or transform layer) gets a fresh vector
+    /// layer first, a separate preceding undo step, as `insertImage` does.
+    ///
+    /// - Returns: whether the picture landed.
+    @discardableResult
+    func placeImage(_ image: UIImage, centre: CGPoint, width: CGFloat) -> Bool {
+        guard image.size.width > 0, image.size.height > 0 else { return false }
+        func place() -> VectorImageElement? {
+            addedImageElement(image) { vector in
+                vector.addPlacedImage(canvasSpaceElement: image, canvasPosition: centre,
+                                      canvasFit: width / image.size.width)
+            }
+        }
+        if place() != nil { return true }
+        addVectorLayer()
+        return place() != nil
+    }
+
+    /// The shared body of the two verbs above: `add` puts the element on the active vector cel's
+    /// canvas, and this registers the one undo step that takes it back and does the refresh. Nil when
+    /// the active layer is not a vector layer or has no cel to put it in.
+    private func addedImageElement(_ image: UIImage,
+                                   adding add: (VectorCanvas) -> VectorImageElement) -> VectorImageElement? {
         beginCanvasEdit()
-        guard let canvasSize, layers.indices.contains(currentLayerIndex),
+        guard canvasSize != nil, layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
               let celIdx = displayedCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              let vector = layers[currentLayerIndex].cels[celIdx].vector,
-              image.size.width > 0, image.size.height > 0 else { return nil }
-        let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
+              let vector = layers[currentLayerIndex].cels[celIdx].vector else { return nil }
         let imagesBefore = vector.images
-        let element = vector.addImage(canvasSpaceElement: image,
-                                      canvasPosition: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
-                                      canvasFit: fit)
+        let element = add(vector)
         scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()
@@ -611,11 +642,15 @@ final class CanvasManager: ObservableObject {
         return element
     }
 
-    /// Inserts a photo as a movable vector element — images are always vector content (resolution-
-    /// independent, move/rotate/scale with the rest of that layer's transform), never raster pixels.
-    /// Adds to the active layer if it's already a vector layer; otherwise creates a fresh vector layer
-    /// first (a separate, preceding undo step — see `addVectorLayer`). Replaces the old dedicated
-    /// "object layer" concept (a whole layer pinned to one image).
+    /// Inserts a picture from the pasteboard as a movable vector element — images are always vector
+    /// content (resolution-independent, move/rotate/scale with the rest of that layer's transform),
+    /// never raster pixels. Adds to the active layer if it's already a vector layer; otherwise creates
+    /// a fresh vector layer first (a separate, preceding undo step — see `addVectorLayer`). Replaces
+    /// the old dedicated "object layer" concept (a whole layer pinned to one image).
+    ///
+    /// **Add → Insert Photo no longer comes through here**: the artist says where and how big by
+    /// dragging it out (`placeImage`, TODO (149)). A paste has no gesture to read a place from, which
+    /// is why it is still centred and held in the Move box.
     ///
     /// **The picture arrives already held** — TODO item (34), the owner's *"when you import images
     /// they appear in the center of the canvas with no move box. Make them have the move box."* The
@@ -629,9 +664,8 @@ final class CanvasManager: ObservableObject {
     /// **Here rather than in `addImageToActiveVectorLayer`, and that seam is the decision.** The box
     /// belongs to the artist's *import*, not to "put this image on that layer": the second is a
     /// primitive that a future paste or drop path may want to call several times, and a lift per call
-    /// would settle the previous one at each step. **TODO (104) gave this a second caller** —
-    /// `ActionsMenu`'s Paste row, which reads a `UIImage` off `UIPasteboard.general` — beside
-    /// `AddMenu`'s photo picker, which is what this comment used to call the only one.
+    /// would settle the previous one at each step. **TODO (104) gave this its Paste caller** —
+    /// `ActionsMenu`'s Paste row, which reads a `UIImage` off `UIPasteboard.general`.
     ///
     /// **Silent on an in-between**, which is the one frame where Move refuses. `beginVectorMove`
     /// routes through `activeVectorMoveTarget()`, which raises `.cannotMoveDerivedFrame` when it
@@ -677,8 +711,13 @@ final class CanvasManager: ObservableObject {
     /// False when the file will not open as a video, holds no frames, or cannot be staged.
     /// - Parameter consumingSource: true when the caller owns `pickedURL` and it may be *moved*
     ///   into the staging directory rather than copied — see `VideoImportStore.stage`.
+    /// - Parameter placement: where the clip's frame goes and how wide it is, in canvas points —
+    ///   what Add → Insert Video's drag measures (TODO (149)). Nil is the import's own default, for
+    ///   a caller with no gesture to read it from (a saved stream, a seeded document): centred, and
+    ///   fitted to 80% of the canvas.
     @discardableResult
-    func insertVideo(at pickedURL: URL, consumingSource: Bool = false) -> Bool {
+    func insertVideo(at pickedURL: URL, consumingSource: Bool = false,
+                     placement: (centre: CGPoint, width: CGFloat)? = nil) -> Bool {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
               let info = VideoFrameSource.shared.info(for: pickedURL),
               info.decodedSize.width > 0, info.decodedSize.height > 0,
@@ -711,8 +750,10 @@ final class CanvasManager: ObservableObject {
         let sourceEnd = end < info.duration ? end : info.duration
 
         let transform = info.preferredTransform
-        let fit = min(canvasSize.width / info.displaySize.width,
-                      canvasSize.height / info.displaySize.height) * 0.8
+        let centre = placement?.centre ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        let fit = placement.map { $0.width / info.displaySize.width }
+            ?? min(canvasSize.width / info.displaySize.width,
+                   canvasSize.height / info.displaySize.height) * 0.8
         let element = VectorVideoElement(
             id: id,
             assetURL: assetURL,
@@ -721,9 +762,7 @@ final class CanvasManager: ObservableObject {
             sourceStart: .zero,
             sourceEnd: sourceEnd,
             speed: 1,
-            transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2,
-                                                        y: canvasSize.height / 2),
-                                      scale: fit, rotation: info.rotation),
+            transform: LayerTransform(position: centre, scale: fit, rotation: info.rotation),
             mirrored: transform.a * transform.d - transform.b * transform.c < 0,
             // TODO (105): frozen at insertion, so a later fps change plays this clip slower or
             // faster instead of always at real wall-clock speed — see the field's own doc comment.
@@ -1033,12 +1072,46 @@ final class CanvasManager: ObservableObject {
         didSet {
             guard oldValue != selectedTool else { return }
             ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
+            // **A primed object lives exactly as long as `.place` does** — except behind the
+            // eyedropper armed straight from it, which hands back to it (`Tool.place`). Any other tool
+            // taking over ends the priming, so no door that switches tools has to remember to.
+            let parkedBehindEyedropper = selectedTool == .eyedropper && oldValue == .place
+            if selectedTool != .place, !parkedBehindEyedropper { primedObject = nil }
         }
     }
     /// The tool to return to when the eyedropper finishes its one tap — see `Tool.eyedropper` and
     /// `CanvasManager+Eyedropper.swift`. Not `@Published`: nothing renders it, and republishing on a
     /// field the artist cannot see would invalidate every observer of this object for nothing.
     var toolBeforeEyedropper: Tool?
+
+    /// **The object the Add menu primed for the next pen-down** — `Tool.place`'s payload, TODO (149).
+    /// Nil whenever the tool is not `.place` (see `selectedTool`'s `didSet`), and `@Published` because
+    /// the Add icon, the Add rows and the left rail's gradient Width slider all render it. Written
+    /// through `primeObject` and cleared through `leavePlacement`; the file that does both is
+    /// `CanvasManager+Placement.swift`.
+    ///
+    /// **It owns a primed clip's picked file**: a clip that is replaced or dropped without being
+    /// placed is deleted here, so no door out of priming has to remember to.
+    @Published var primedObject: PrimedObject? {
+        didSet {
+            if primedObject == nil { toolBeforePlacement = nil }
+            if case .media(let old)? = oldValue, case .video(let url) = old.source,
+               primedObject?.mediaFileURL != url {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+    /// The tool to hand back to once the primed object is down — the eyedropper's memory, for the
+    /// placement tool. Not `@Published`, for `toolBeforeEyedropper`'s reason.
+    var toolBeforePlacement: Tool?
+    /// The press and the pen of the placement in progress — nil between touches. Not `@Published`:
+    /// the pen moves at the hardware's rate and the preview is pushed to its overlay directly
+    /// (`CanvasView.Coordinator.handlePlacementPress`), so a SwiftUI pass per sample would buy nothing.
+    var placementDrag: PlacementDrag?
+    /// **How wide a dragged-out gradient is, as a fraction of the artwork's longer side** — the left
+    /// rail's Width slider while a gradient is primed. Held here rather than on the slider so it
+    /// outlives the priming: the next gradient starts as wide as the last one ended.
+    @Published var gradientWidthFraction: Double = 1
     /// **Where the next pick lands** — the brush swatch, or one end of a recolour pair (TODO (60)).
     /// `@Published`, unlike the field above, because the recolour panel *does* render it: the
     /// eyedropper button beside the swatch that is armed is highlighted so the artist can see which

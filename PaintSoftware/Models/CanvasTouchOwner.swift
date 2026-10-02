@@ -48,6 +48,7 @@ import Foundation
 /// | recognizer `isEnabled` | `reconcileLayers` catch-all | `catchAllIsEnabled` |
 /// | | `updateActiveLayerAndTool` eyedropper | `eyedropperPressIsEnabled` |
 /// | | `updateActiveLayerAndTool` text | `textPressIsEnabled` |
+/// | | `updateActiveLayerAndTool` primed object | `placementPressIsEnabled` |
 /// | | `updateActiveLayerAndTool` fill | `fillPressIsEnabled` |
 /// | | `updateActiveLayerAndTool` Move-box commit | `moveBoxCommitIsEnabled` (added 2026-08-22) |
 /// | `isUserInteractionEnabled` | `reconcileLayers`' `shouldInteract` | `activeHostIsInteractive` |
@@ -72,7 +73,7 @@ import Foundation
 /// Two mechanisms can still be *offered* one touch: every container-mounted recognizer carries
 /// `cancelsTouchesInView = false`, and a recognizer attached to an ancestor still receives a touch
 /// that a descendant's `hitTest` claimed. What changed is that they no longer both *act*. Each of the
-/// five container recognizers now asks `owner(in:)` before it does anything and stands down when the
+/// six container recognizers now asks `owner(in:)` before it does anything and stands down when the
 /// answer is not itself — the rule the owner settled on that day: **whatever chrome the artist
 /// actually grabbed wins, and the tool underneath does not also fire.** `contenders(in:)` still
 /// returns everything the gates offer the touch to, because that is what the fourteen gates say;
@@ -97,6 +98,10 @@ enum CanvasTouchOwner: String, CaseIterable, Hashable {
 
     /// The text tool's `textTapRecognizer`, which places a new box.
     case textPress
+
+    /// The placement tool's `placementPressRecognizer`: the press that starts a primed object and
+    /// the drag that sizes it (TODO (149)).
+    case placementPress
 
     /// `FloatingPieceOverlayView`. **A total claim**: it is pinned to the whole container, has no
     /// `hitTest` override, and goes interactive the moment a piece is floating, so every touch
@@ -454,6 +459,13 @@ extension CanvasTouchInputs {
     /// pins the order.
     var textPressIsEnabled: Bool { tool == .text && !selectPanelIsOpen && !hasFloatingPiece }
 
+    /// The primed object's press-and-drag. Suspended while Select is engaged or a piece is floating,
+    /// for the fill's and the text tool's reason — those overlays own the canvas's single-touch
+    /// gestures while they are up. Priming settles a floating piece on the way in
+    /// (`CanvasManager.primeObject`) and every door into it closes the Select panel, so the two
+    /// clauses cannot both be true through the menu; they are the guard for a door nobody has built.
+    var placementPressIsEnabled: Bool { tool == .place && !selectPanelIsOpen && !hasFloatingPiece }
+
     /// `reconcileLayers`' `needsCatch`, verbatim: no layers, the active layer not effectively
     /// visible, or the active layer holding no pixels.
     var catchAllIsEnabled: Bool {
@@ -583,6 +595,7 @@ extension CanvasTouchOwner {
         if i.textPressIsEnabled, i.chrome != .textBoxOrBand, i.chrome != .textHandle {
             result.append(.textPress)
         }
+        if i.placementPressIsEnabled { result.append(.placementPress) }
         if i.catchAllRaisesNotice { result.append(.catchAllNotice) }
 
         // **Last, deliberately — it takes the touch nobody else wanted.**
@@ -603,7 +616,7 @@ extension CanvasTouchOwner {
 
     /// Whether this mechanism stands down when `owner(in:)` names somebody else.
     ///
-    /// True for the five recognizers mounted on the container, each of which now opens its handler
+    /// True for the six recognizers mounted on the container, each of which now opens its handler
     /// with that question. False for every *view*, and not because a view is privileged: a view is
     /// only ever offered a touch UIKit already decided was its, so it is always the owner when it is
     /// a contender at all — `testEveryContenderAfterTheFirstStandsDown` is what holds that
@@ -617,7 +630,7 @@ extension CanvasTouchOwner {
     /// tidying — it is not needed for either rule settled here.
     var yieldsToTheOwner: Bool {
         switch self {
-        case .eyedropper, .fillPress, .textPress, .catchAllNotice, .moveBoxCommit:
+        case .eyedropper, .fillPress, .textPress, .placementPress, .catchAllNotice, .moveBoxCommit:
             return true
         case .activeLayerStroke, .selectionOverlay, .lassoFill, .floatingPiece,
              .shapeOverlay, .textOverlay, .textTransformOverlay, .objectTransformOverlay,
@@ -640,14 +653,14 @@ extension CanvasTouchOwner {
 
     /// The single mechanism entitled to act on this touch.
     ///
-    /// **Five handlers read this, and that is the settling of the conflict rows.** This function and
+    /// **Six handlers read this, and that is the settling of the conflict rows.** This function and
     /// the precedence in `contenders(in:)` used to be deliberately ahead of their callers — written
     /// as the proposal for how the rows should be settled, with a note to delete them if they were
     /// settled some other way. On 2026-08-22 the owner settled them exactly this way: *whatever
     /// chrome the artist actually grabbed wins, and the tool underneath does not also fire.* So
-    /// `handleFillPress`, `handleEyedropperPress`, `handleTextPress`, `handleCatchAllTap` and
-    /// `handleMoveBoxCommit` each open with `owner(in:) == <its own case>`, which is one line apiece
-    /// and is why the settling was one line apiece.
+    /// `handleFillPress`, `handleEyedropperPress`, `handleTextPress`, `handlePlacementPress`,
+    /// `handleCatchAllTap` and `handleMoveBoxCommit` each open with `owner(in:) == <its own case>`,
+    /// which is one line apiece and is why the settling was one line apiece.
     ///
     /// **A bespoke guard per site is the shape that produced the defect**, so the precedence is the
     /// one place the answer is chosen. Reading down `contenders(in:)`'s appends is reading the
@@ -686,6 +699,8 @@ extension Tool {
             return .eyedropper
         case .text:
             return .textPress
+        case .place:
+            return .placementPress
         }
     }
 }

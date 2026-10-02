@@ -120,11 +120,13 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
 
-        // 1. The gradient: Add → Linear Gradient, then Done.
-        app.buttons["toolbar.addButton"].tap()
-        let gradientRow = app.buttons["add.linearGradientRow"]
-        XCTAssertTrue(gradientRow.waitForExistence(timeout: 5))
-        gradientRow.tap()
+        // 1. The gradient: Add → Linear Gradient, dragged across the paper, then Done.
+        let paper = visibleCanvasBounds(canvas)
+        func onPaper(_ x: Double, _ y: Double) -> CGVector {
+            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * x, dy: paper.minY + (paper.maxY - paper.minY) * y)
+        }
+        placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
+                            from: onPaper(0.1, 0.5), to: onPaper(0.9, 0.5))
         let gradientDone = app.buttons["gradientPanel.doneButton"]
         XCTAssertTrue(gradientDone.waitForExistence(timeout: 5), "PREMISE: the gradient's card is up")
         gradientDone.tap()

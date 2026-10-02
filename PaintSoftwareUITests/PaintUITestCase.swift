@@ -267,6 +267,30 @@ class PaintUITestCase: XCTestCase {
         start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
     }
 
+    /// **The artist's whole gesture for an Add-menu object** (TODO (149)): tap Add, tap `row` — which
+    /// primes the object and closes the menu — then press on the canvas at `from` and drag to `to`, the
+    /// pen that places it and sizes it. `primedName` is what the Add icon announces while it is primed
+    /// (`PrimedObject.name`); both ends of the gesture assert it, so a fixture that reached the canvas
+    /// without priming, or left the object primed after placing it, fails here and not three assertions
+    /// later. Offsets are normalised in `canvas.host`, as `dragOnCanvas`'s are.
+    func placeFromTheAddMenu(_ app: XCUIApplication, row: String, primedName: String,
+                             from: CGVector, to: CGVector) {
+        app.buttons["toolbar.addButton"].tap()
+        let button = app.buttons[row]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "the Add menu lists \(row)")
+        XCTAssertTrue(button.isEnabled, "\(row) is available on a fresh document")
+        button.tap()
+        XCTAssertTrue(button.waitForNonExistence(timeout: 5), "choosing \(row) closes the Add menu")
+        XCTAssertEqual(primedObjectName(app), primedName, "\(row) primed the pen, and the Add icon says so")
+        dragOnCanvas(app, from: from, to: to)
+        XCTAssertEqual(primedObjectName(app), "", "the lift placed it, so nothing is primed any more")
+    }
+
+    /// What the Add icon announces: the name of the object primed for the pen, or "" when none is.
+    func primedObjectName(_ app: XCUIApplication) -> String {
+        app.buttons["toolbar.addButton"].value as? String ?? ""
+    }
+
     /// Drags the element with the given accessibility identifier by `totalDelta` points in one
     /// motion. XCUITest's synthetic drags can undershoot their intended distance by a
     /// timing-dependent amount (a harness quirk — verified by direct instrumentation that the

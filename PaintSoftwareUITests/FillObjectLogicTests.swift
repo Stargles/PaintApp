@@ -4,7 +4,8 @@ import UIKit
 
 /// **TODO (129) and (128) — Add → Rectangle, Ellipse and Linear Gradient as objects of the fill
 /// tool's own kind.** `CanvasManager+FillObjects.swift` lays each down as a `VectorFillElement`
-/// (a flat or gradient `FillPaint`), and every assertion about *drawn* content here reads pixels —
+/// (a flat or gradient `FillPaint`) at the geometry the pen dragged out (`CanvasManager.dragOut`, the
+/// TODO (149) gesture), and every assertion about *drawn* content here reads pixels —
 /// `PixelOps.rasterize` for the cel, `Compositor.composite` for the frame — rather than the stored
 /// field, because the stored field is exactly what a render path that never read it would leave
 /// correct. `FillObjectUITests` drives the same features from a fresh document through the menu.
@@ -56,30 +57,42 @@ final class FillObjectLogicTests: XCTestCase {
 
     private let red = Color(red: 1, green: 0, blue: 0)
 
+    /// A square or circle of half-extent 19.2 centred on the 64-point canvas — the shape the Add menu's
+    /// first version laid down on its own (60% of the side, centred), now dragged out from its centre.
+    @discardableResult
+    private func dragShape(_ object: PrimedObject, on manager: CanvasManager) -> Bool {
+        manager.dragOut(object, from: CGPoint(x: 32, y: 32), to: CGPoint(x: 32 + 19.2, y: 32))
+    }
+
+    /// A gradient from the artwork's left edge to its right, the full height — what Add → Linear
+    /// Gradient laid down on its own before the pen dragged it out.
+    @discardableResult
+    private func dragGradientAcrossTheCanvas(_ manager: CanvasManager) -> Bool {
+        manager.dragOut(.gradient, from: CGPoint(x: 0, y: 32), to: CGPoint(x: 64, y: 32))
+    }
+
     // MARK: - (129) Rectangle and Ellipse
 
-    /// **The object is the fill tool's own kind, in the brush colour, centred on the artwork.** A
+    /// **The object is the fill tool's own kind, in the brush colour, centred on the press.** A
     /// stored-field assertion on purpose — the picture is the next two tests' — because "what kind of
     /// element" is the whole of the ruling: *"make it the same type of shape as what the fill tool
     /// lays down."*
     ///
     /// Mutation caught: laying the rectangle down as anything but a `VectorFillElement` (a stroke, a
     /// smart shape) leaves `fills` empty.
-    func testARectangleIsAFillElementOfTheBrushColourCentredOnTheArtwork() throws {
+    func testARectangleIsAFillElementOfTheBrushColourCentredOnThePress() throws {
         let (manager, _, vector) = vectorFixture()
         manager.brushColor = red
-        XCTAssertTrue(manager.addSolidShape(.rectangle))
+        XCTAssertTrue(dragShape(.rectangle, on: manager))
 
         let fill = try XCTUnwrap(vector.elements.compactMap(\.fill).first, "the rectangle is a fill element")
         XCTAssertEqual(vector.elements.count, 1, "…and nothing else was laid down")
         XCTAssertEqual(fill.solidColor, CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
                        "the brush colour, as the fill tool paints it")
         let box = try XCTUnwrap(fill.cgPath).boundingBoxOfPath
-        let expected = try XCTUnwrap(manager.defaultShapeRect)
-        XCTAssertEqual(box.midX, expected.midX, accuracy: 0.01)
-        XCTAssertEqual(box.midY, expected.midY, accuracy: 0.01)
-        XCTAssertEqual(box.width, 0.6 * CGFloat(side), accuracy: 0.01,
-                       "60% of the artwork's shorter side")
+        XCTAssertEqual(box.midX, 32, accuracy: 0.01)
+        XCTAssertEqual(box.midY, 32, accuracy: 0.01)
+        XCTAssertEqual(box.width, 38.4, accuracy: 0.01, "twice the distance the pen travelled")
         XCTAssertEqual(box.width, box.height, accuracy: 0.01, "a square")
     }
 
@@ -90,13 +103,11 @@ final class FillObjectLogicTests: XCTestCase {
     func testARectangleAndAnEllipseAreSolidAndTheEllipseLeavesItsCorners() throws {
         let rect = vectorFixture()
         rect.manager.brushColor = red
-        rect.manager.addSolidShape(.rectangle)
-        rect.manager.commitAllInteractiveState()   // settle the Move box the shape arrives held in
+        XCTAssertTrue(dragShape(.rectangle, on: rect.manager))
         let rectImage = try XCTUnwrap(flattened(rect.manager, layerIndex: rect.layerIndex))
         let ellipse = vectorFixture()
         ellipse.manager.brushColor = red
-        ellipse.manager.addSolidShape(.ellipse)
-        ellipse.manager.commitAllInteractiveState()
+        XCTAssertTrue(dragShape(.ellipse, on: ellipse.manager))
         let ellipseImage = try XCTUnwrap(flattened(ellipse.manager, layerIndex: ellipse.layerIndex))
 
         // The shape spans 12.8…51.2; (16, 16) is inside the square and outside the circle.
@@ -107,21 +118,17 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(pixel(rectImage, 4, 4)[3], 0, "nothing outside the shape is inked")
     }
 
-    /// **On a vector layer the shape arrives held in the Move box, so it can be sized at once**, and
-    /// the box is around the shape alone — not the layer's other ink.
-    func testAShapeOnAVectorLayerIsHeldInTheMoveBoxAroundItAlone() throws {
+    /// **A placed shape raises no Move box**: the pen sized it as it went down, so there is nothing
+    /// left to size, and the lift hands the canvas back to the tool the artist had.
+    func testAPlacedShapeRaisesNoMoveBoxAndHandsTheToolBack() throws {
         let (manager, _, vector) = vectorFixture()
-        let before = VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
-                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 3, opacity: 1,
-                                  samples: [VectorSample(x: 2, y: 2, pressure: 1), VectorSample(x: 8, y: 2, pressure: 1)],
-                                  composite: .paint)
-        vector.addStroke(before)
-        manager.addSolidShape(.rectangle)
+        manager.selectedTool = .pencil
+        XCTAssertTrue(dragShape(.rectangle, on: manager))
 
-        let float = try XCTUnwrap(manager.vectorFloat, "the Move box is up")
-        let shapeID = try XCTUnwrap(vector.elements.compactMap(\.fill).first?.id)
-        XCTAssertEqual(float.parts.flatMap { $0.insideIDs }, [shapeID],
-                       "the box carries the new shape and no other element")
+        XCTAssertNil(manager.vectorFloat, "no Move box is raised")
+        XCTAssertEqual(vector.elements.compactMap(\.fill).count, 1, "the shape is on the layer")
+        XCTAssertEqual(manager.selectedTool, .pencil, "the tool the artist had is back")
+        XCTAssertNil(manager.primedObject, "and nothing is primed any more")
     }
 
     /// **A raster layer gets pixels through the fill tool's raster arm, and no box.** There is no
@@ -131,7 +138,7 @@ final class FillObjectLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.brushColor = red
         let baseline = steps(manager)
-        XCTAssertTrue(manager.addSolidShape(.rectangle))
+        XCTAssertTrue(dragShape(.rectangle, on: manager))
 
         XCTAssertNil(manager.vectorFloat, "a raster shape raises no Move box")
         XCTAssertEqual(manager.layers.count, 1, "and needs no new layer")
@@ -149,7 +156,7 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(manager.activeLayerKind, .value, "PREMISE: the active layer has no drawing surface")
         let layerCount = manager.layers.count
 
-        XCTAssertTrue(manager.addSolidShape(.ellipse))
+        XCTAssertTrue(dragShape(.ellipse, on: manager))
 
         XCTAssertEqual(manager.layers.count, layerCount + 1)
         XCTAssertEqual(manager.activeLayerKind, .vector)
@@ -157,24 +164,10 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements.compactMap(\.fill).count, 1, "the shape is on it")
     }
 
-    /// **The default rectangle is the artwork's, not the buffer's**: with padding the paper is inset,
-    /// and centring on `origin: .zero, size: artworkSize` was off by the padding on both axes.
-    func testTheDefaultShapeIsCentredOnTheArtworkRectWhenThereIsPadding() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.canvasPadding = 8
-        let artwork = try XCTUnwrap(manager.artworkRect)
-        XCTAssertEqual(artwork, CGRect(x: 8, y: 8, width: 48, height: 48))
-        let shape = try XCTUnwrap(manager.defaultShapeRect)
-        XCTAssertEqual(shape.midX, 32, accuracy: 0.001)
-        XCTAssertEqual(shape.midY, 32, accuracy: 0.001)
-        XCTAssertEqual(shape.width, 28.8, accuracy: 0.001, "60% of the artwork's 48, not of the buffer's 64")
-    }
-
     /// One undo step takes the shape away, and a redo puts it back.
     func testAShapeIsOneUndoStep() throws {
         let (manager, _, vector) = vectorFixture()
-        manager.addSolidShape(.rectangle)
-        manager.commitAllInteractiveState()
+        XCTAssertTrue(dragShape(.rectangle, on: manager))
         let baseline = steps(manager)
         manager.undo()
         XCTAssertEqual(vector.elements.compactMap(\.fill).count, 0, "undo takes the shape away")
@@ -200,16 +193,16 @@ final class FillObjectLogicTests: XCTestCase {
 
     // MARK: - (128) The gradient is an object
 
-    /// **Add → Linear Gradient lays a gradient fill over the artwork and the pixels ramp along its
-    /// axis** — black at the left edge, white at the right, mid-grey between, and constant down any
-    /// column. The two-operands trap applied: a fixture that checked `paint` would stay green against
+    /// **Add → Linear Gradient, dragged from edge to edge, lays a gradient fill over the artwork and the
+    /// pixels ramp along its axis** — black at the left edge, white at the right, mid-grey between, and
+    /// constant down any column. The two-operands trap applied: a fixture that checked `paint` would stay green against
     /// a draw path that never read it.
     ///
     /// Mutation caught: drawing `.linearGradient` with the solid arm's fill leaves every pixel one
     /// colour and the ramp assertions go red.
     func testALinearGradientRampsAcrossTheArtworkAndIsConstantDownAColumn() throws {
         let (manager, layerIndex, vector) = vectorFixture()
-        XCTAssertTrue(manager.addGradient())
+        XCTAssertTrue(dragGradientAcrossTheCanvas(manager))
         manager.commitAllInteractiveState()
 
         XCTAssertEqual(vector.elements.compactMap(\.fill).compactMap(\.gradient).count, 1,
@@ -245,7 +238,7 @@ final class FillObjectLogicTests: XCTestCase {
     /// in the middle and every assertion below goes red.
     func testALinearGradientBlendsInOklabNotInSRGB() throws {
         let (manager, layerIndex, _) = vectorFixture()
-        XCTAssertTrue(manager.addGradient())
+        XCTAssertTrue(dragGradientAcrossTheCanvas(manager))
         manager.setGradientColour(.start, to: Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1))
         manager.setGradientColour(.end, to: Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1))
         manager.commitAllInteractiveState()
@@ -301,7 +294,7 @@ final class FillObjectLogicTests: XCTestCase {
     /// left-to-right gradient exactly.
     func testTurningTheAngleRunsTheRampDownTheCanvasAsOneUndoStep() throws {
         let (manager, layerIndex, vector) = vectorFixture()
-        manager.addGradient()
+        dragGradientAcrossTheCanvas(manager)
         let baseline = steps(manager)
         let original = try XCTUnwrap(manager.editedGradient)
 
@@ -334,7 +327,7 @@ final class FillObjectLogicTests: XCTestCase {
     /// records nothing.
     func testTheSwatchesWriteTheirOwnEndAndAnUntouchedPanelRecordsNothing() throws {
         let (manager, _, _) = vectorFixture()
-        manager.addGradient()
+        dragGradientAcrossTheCanvas(manager)
         let baseline = steps(manager)
         XCTAssertFalse(manager.commitGradientEdit(), "nothing was changed")
         XCTAssertEqual(steps(manager), baseline, "…so no step")
@@ -358,7 +351,7 @@ final class FillObjectLogicTests: XCTestCase {
     /// served with the old colours.
     func testEditingAGradientMovesTheLayerContentVersionAndTheBakeKey() throws {
         let (manager, layerIndex, _) = vectorFixture()
-        manager.addGradient()
+        dragGradientAcrossTheCanvas(manager)
         manager.commitAllInteractiveState()
         let id = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector?.elements.first?.id)
 
@@ -389,7 +382,7 @@ final class FillObjectLogicTests: XCTestCase {
         try XCTSkipIf(CompositorMetalEngine.shared == nil,
                       "No Metal device or no compositor shader library in this test bundle")
         let (manager, _, _) = vectorFixture()
-        manager.addGradient()
+        dragGradientAcrossTheCanvas(manager)
         manager.setGradientColour(.start, to: Color(red: 0.9, green: 0.2, blue: 0.1))
         manager.setGradientColour(.end, to: Color(red: 0.1, green: 0.3, blue: 0.9, opacity: 0.5))
         manager.setGradientAngle(.pi / 6)

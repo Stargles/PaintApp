@@ -238,68 +238,60 @@ final class InkUnderTransformUITests: PaintUITestCase {
 
     // MARK: - The Add menu's objects and the wand, under the same Move layer
 
-    /// Add menu → `row`, then the new object's own chrome out of the way: a vector layer's rectangle
-    /// arrives held in the Move box (Done puts it down), a gradient arrives with its card up (Done
-    /// closes it) — `done` names the button either of them has.
-    private func addFromTheAddMenu(_ app: XCUIApplication, row: String, done: String) {
-        app.buttons["toolbar.addButton"].tap()
-        let button = app.buttons[row]
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "the Add menu lists \(row)")
-        button.tap()
-        let finish = app.buttons[done]
-        XCTAssertTrue(finish.waitForExistence(timeout: 5), "\(row) raised its own chrome (\(done))")
-        finish.tap()
-        XCTAssertTrue(finish.waitForNonExistence(timeout: 5), "\(done) put the chrome away")
-    }
-
-    /// **Add → Rectangle under a moved transformation layer appears centred where the artwork is
-    /// shown** — TODO (124)'s follow-up for the Add menu. The Move layer carries what is stored on the
-    /// drawing layer a fifth of the paper right, so a rectangle stored at the artwork's centre would be
-    /// shown over 0.4–1.0 of the paper; written through the pose's inverse it is shown over 0.2–0.8,
-    /// the 60% square centred on the paper the artist is looking at.
-    func testAddRectangleUnderAMovedTransformLayerIsCentredOnTheShownArtwork() throws {
+    /// **A rectangle dragged out under a moved transformation layer is shown where the pen put it** —
+    /// TODO (124)'s follow-up for the Add menu. The Move layer carries what is stored on the drawing
+    /// layer a fifth of the paper right, so a rectangle stored where the pen went down would be shown
+    /// over 0.4–1.0 of the paper; written through the pose's inverse it is shown over 0.2–0.8, the
+    /// square centred on the paper the artist pressed on.
+    func testADraggedRectangleUnderAMovedTransformLayerIsShownWhereThePenPutIt() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         try moveATransformLayerAboveTheDrawing(app, canvas)
 
-        addFromTheAddMenu(app, row: "add.rectangleRow", done: "moveBar.doneButton")
-
         let paper = paperRect(in: canvas)
+        placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
+                            from: onHost(paper, 0.5, 0.5), to: onHost(paper, 0.8, 0.5))
+
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "rectangle-added-under-the-moved-transform-layer")
-        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.22...0.78).count, 330,
-                             "the rectangle is not solid across the centred square the artwork shows")
+        attach(canvas, "rectangle-dragged-out-under-the-moved-transform-layer")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.26...0.74).count, 280,
+                             "the rectangle is not solid across the square the pen dragged out")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.17).isEmpty,
-                      "ink left of the centred square")
+                      "ink left of the square")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.84...0.96).isEmpty,
-                      "the Move layer carried the rectangle a fifth of the paper right of the centre it was added at")
+                      "the Move layer carried the rectangle a fifth of the paper right of where the pen put it")
     }
 
-    /// **Add → Linear Gradient the same**: it covers the artwork *as shown*, so the dark end of the
-    /// ramp is at the left edge of the paper and the light end at the right. Stored unmapped, the Move
-    /// layer would show the paper's left fifth bare and the ramp 0.2 of the paper too far along.
-    func testAddLinearGradientUnderAMovedTransformLayerCoversTheShownArtwork() throws {
+    /// **A gradient dragged out the same**: the ramp is shown from where the pen went down to where it
+    /// was lifted, so the dark end is at the press and the light end at the lift. Stored unmapped, the
+    /// Move layer would show the ramp 0.2 of the paper too far along.
+    func testADraggedLinearGradientUnderAMovedTransformLayerRunsFromThePressToTheLift() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         try moveATransformLayerAboveTheDrawing(app, canvas)
 
-        addFromTheAddMenu(app, row: "add.linearGradientRow", done: "gradientPanel.doneButton")
-
         let paper = paperRect(in: canvas)
+        placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
+                            from: onHost(paper, 0.05, 0.5), to: onHost(paper, 0.95, 0.5))
+        let done = app.buttons["gradientPanel.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the lift opened the gradient's card")
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+
         func red(_ x: Double, _ y: Double) -> Int {
             Int(rgbaPixel(of: canvas, dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)?.r ?? 255)
         }
-        attach(canvas, "gradient-added-under-the-moved-transform-layer")
-        XCTAssertLessThan(red(0.04, 0.2), 60, "the left edge of the shown artwork is not the dark end of the ramp")
-        XCTAssertGreaterThan(red(0.96, 0.2), 220, "the right edge of the shown artwork is not the light end")
+        attach(canvas, "gradient-dragged-out-under-the-moved-transform-layer")
+        XCTAssertLessThan(red(0.09, 0.2), 60, "the press is not the dark end of the ramp where it is shown")
+        XCTAssertGreaterThan(red(0.91, 0.2), 220, "the lift is not the light end where it is shown")
         let mid = red(0.5, 0.2)
-        XCTAssertTrue((80...118).contains(mid),
-                      "the middle of the shown artwork is not the middle of the ramp — Oklab's 99 for black to white, not sRGB's 128 (red \(mid))")
+        XCTAssertTrue((78...120).contains(mid),
+                      "the middle of the drag is not the middle of the ramp — Oklab's 99 for black to white, not sRGB's 128 (red \(mid))")
     }
 
     /// **The wand on a vector layer selects the ink the artist tapped.** Two marks drawn on the

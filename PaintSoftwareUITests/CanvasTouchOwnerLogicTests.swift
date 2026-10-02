@@ -377,7 +377,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         forEachReachableInput { inputs in
             let contenders = CanvasTouchOwner.contenders(in: inputs)
             guard contenders.contains(.activeLayerStroke) else { return }
-            for recognizer in [CanvasTouchOwner.fillPress, .lassoFill, .eyedropper, .textPress] {
+            for recognizer in [CanvasTouchOwner.fillPress, .lassoFill, .eyedropper, .textPress, .placementPress] {
                 XCTAssertFalse(contenders.contains(recognizer),
                                "\(recognizer.rawValue) alongside the stroke at \(self.signature(inputs))")
             }
@@ -518,6 +518,18 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             "objectTransformOverlay+fillPress",
             "objectTransformOverlay+textPress",
             "objectTransformOverlay+catchAllNotice",
+            // A primed object's press (TODO (149)) is offered every touch the other tools'
+            // recognizers are, and stands down to the chrome like them — whatever the artist grabbed
+            // wins, and the object is placed by the touch that grabs nothing. The text overlays are
+            // here too, unlike `textPress`: that tap would commit the box it landed in, where a
+            // placement under a text box's own grips is simply outranked.
+            "shapeOverlay+placementPress",
+            "textOverlay+placementPress",
+            "textTransformOverlay+placementPress",
+            "objectTransformOverlay+placementPress",
+            "guideOverlay+placementPress",
+            "guideOverlay+placementPress+moveBoxCommit",
+            "placementPress+moveBoxCommit",
             // (j)'s own rows, on plain canvas away from the box. `moveBoxCommit` is last in every one
             // of them, which is the whole of its precedence argument: it takes what is left.
             "catchAllNotice+moveBoxCommit",
@@ -722,6 +734,31 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         // tap commit this box and place the next.
         let beside = CanvasTouchInputs(tool: .text, activeLayer: .raster, chrome: .none)
         XCTAssertEqual(CanvasTouchOwner.owner(in: beside), .textPress)
+    }
+
+    /// **A primed object's press is the placement recognizer's, and its alone** (TODO (149)): on plain
+    /// canvas nothing else is offered the touch — the layer host declines it (`Tool.paintsOnCanvas`) so the
+    /// pen that sizes a rectangle does not also draw a line — and whatever chrome the artist grabbed wins,
+    /// as it does over every tool's recognizer. The Select panel and a floating piece suspend it, as they
+    /// do the fill's and the text tool's.
+    func testAPrimedObjectOwnsItsPressOnPlainCanvasAndYieldsToChromeAndToSelect() {
+        for layer in [CanvasActiveLayer.raster, .vector] {
+            let plain = CanvasTouchInputs(tool: .place, activeLayer: layer)
+            XCTAssertEqual(CanvasTouchOwner.contenders(in: plain), [.placementPress], "layer \(layer.rawValue)")
+            XCTAssertFalse(plain.activeHostIsInteractive, "the layer host declines a placement's touch")
+        }
+        let onAGrip = CanvasTouchInputs(tool: .place, activeLayer: .raster, chrome: .guideGrip)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: onAGrip), .guideOverlay, "a grabbed grip wins")
+        XCTAssertFalse(CanvasTouchOwner.actors(in: onAGrip).contains(.placementPress),
+                       "…and the placement does not also fire under it")
+        XCTAssertFalse(CanvasTouchInputs(tool: .place, panel: .select, activeLayer: .raster).placementPressIsEnabled,
+                       "the Select panel owns the canvas's single touch while it is open")
+        XCTAssertFalse(CanvasTouchInputs(tool: .place, hasFloatingPiece: true, activeLayer: .raster).placementPressIsEnabled,
+                       "and so does a floating piece")
+        for tool in Tool.allCases where tool != .place {
+            XCTAssertFalse(CanvasTouchInputs(tool: tool, activeLayer: .raster).placementPressIsEnabled,
+                           "\(tool) must not enable the placement press")
+        }
     }
 
     // MARK: - The fifteenth question

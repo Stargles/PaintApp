@@ -58,8 +58,11 @@ struct TopToolbar: View {
                     .accessibilityIdentifier("toolbar.actionsButton")
                 // TODO (103) — the "Add" submenu TODO (100) had put inside Actions, promoted to its own
                 // icon. See `AddMenu`.
-                iconButton(system: "plus", isActive: activePanel == .add) { toggle(.add) }
+                // Lit while an object is primed (TODO (149)) so the artist can see that their next
+                // pen-down places it, and carrying its name as its value.
+                iconButton(system: "plus", isActive: activePanel == .add || canvasManager.primedObject != nil) { toggle(.add) }
                     .accessibilityIdentifier("toolbar.addButton")
+                    .accessibilityValue(canvasManager.primedObject?.name ?? "")
                 iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                     .accessibilityIdentifier("toolbar.selectButton")
                 iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }

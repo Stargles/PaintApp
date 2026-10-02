@@ -161,7 +161,16 @@ enum UITestSeeds {
     /// more than one cel, and for each resulting cel's picture to be told apart from its neighbours
     /// by a single pixel probe.
     static func seedVideoIfRequested(into canvasManager: CanvasManager) {
-        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedVideo") else { return }
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedVideo"),
+              let url = writeSeedClip() else { return }
+        canvasManager.insertVideo(at: url, consumingSource: true)
+    }
+
+    /// The clip `-uiTestSeedVideo` and `-uiTestPrimeVideo` both start from: four frames at four flat
+    /// grey levels, square, one second at 4 fps. Nil when the write fails — nothing a seed can do
+    /// about that, and the test that armed it finds no video and fails loudly there, which is the
+    /// honest outcome rather than a silently-empty seed pretending to have worked.
+    private static func writeSeedClip() -> URL? {
         let levels: [UInt8] = [40, 110, 180, 250]
         let side = 64
         let url = FileManager.default.temporaryDirectory
@@ -173,12 +182,9 @@ enum UITestSeeds {
             }
             try writer.finish()
         } catch {
-            // Nothing this seam can do about a write failure — the test that armed it will find no
-            // video on the timeline and fail loudly there, which is the honest outcome rather than
-            // a silently-empty seed pretending to have worked.
-            return
+            return nil
         }
-        canvasManager.insertVideo(at: url, consumingSource: true)
+        return url
     }
 
     /// **A full Recent strip** — `-uiTestSeedColorHistory`, for TODO's colour-panel fit.
@@ -201,9 +207,9 @@ enum UITestSeeds {
     /// `-uiTestSeedImage`, for TODO (120).
     ///
     /// The photo picker is `seedVideoIfRequested`'s wall: system UI in another process, driven by no
-    /// XCUITest in this suite. This calls the verb the picker's own caller does, `insertImage`, on a
-    /// picture the app draws itself, so everything from there — the placement, the fit, the lift into
-    /// the Move box — is a real import's.
+    /// XCUITest in this suite. This calls the verb Actions → Paste calls, `insertImage`, on a picture
+    /// the app draws itself, so everything from there — the placement, the fit, the lift into the Move
+    /// box — is a real paste's. (Add → Insert Photo primes the pen instead: `-uiTestPrimeImage`.)
     ///
     /// **Four times wider than tall and black**, for what a test has to tell apart: the Move box of a
     /// wide picture is a wide rectangle, where a box that circumscribed it would be a square, and a
@@ -216,6 +222,29 @@ enum UITestSeeds {
             context.fill(CGRect(origin: .zero, size: size))
         }
         canvasManager.insertImage(picture)
+    }
+
+    /// **A picture primed for the pen, the way Add → Insert Photo leaves it** — `-uiTestPrimeImage`, for
+    /// TODO (149)'s cold-start test. The picker is the wall `seedImageIfRequested` describes; this calls
+    /// the verb the picker's caller calls, `primeImage`, on a black picture four times wider than tall, so
+    /// a test can tell the picture's own shape from a square: the drag keeps the aspect.
+    static func primeImageIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestPrimeImage") else { return }
+        let size = CGSize(width: 240, height: 60)
+        let picture = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        canvasManager.primeImage(picture)
+    }
+
+    /// **A clip primed for the pen** — `-uiTestPrimeVideo`, the video twin of `primeImageIfRequested`:
+    /// the same clip `-uiTestSeedVideo` writes, handed to the verb Add → Insert Video's caller calls,
+    /// `primeVideo`, which owns the file from there.
+    static func primeVideoIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestPrimeVideo"),
+              let url = writeSeedClip() else { return }
+        if !canvasManager.primeVideo(at: url) { try? FileManager.default.removeItem(at: url) }
     }
 
     /// **TODO (53)'s document, which is the owner's own `AnimationTest`**: ink on a vector layer that

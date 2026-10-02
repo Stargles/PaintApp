@@ -527,3 +527,17 @@ enum TestBrushes {
 
     static let all: [Brush] = [softRound, hardRound, pencil, pen, square]
 }
+
+
+extension CanvasManager {
+    /// **The pen's whole gesture on an Add-menu object** — prime it, press at `anchor`, drag to `pen`,
+    /// lift (TODO (149)). What a logic test calls where an artist would tap a row and drag, so a fixture
+    /// reaches an object through the same four verbs the canvas does. Whether the object was placed.
+    @discardableResult
+    func dragOut(_ object: PrimedObject, from anchor: CGPoint, to pen: CGPoint) -> Bool {
+        primeObject(object)
+        guard beginPlacement(at: anchor) else { return false }
+        updatePlacement(to: pen)
+        return endPlacement()
+    }
+}

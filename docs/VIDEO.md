@@ -109,8 +109,9 @@ element reuses that geometry verbatim; the only new state is which source frame 
 exports — and tags no colour space, inheriting `PixelOps.deviceRGBColorSpace`. `import AVFoundation` appears
 in that one file; there is no reader anywhere.
 
-**Import lands on the `PhotosPicker` seam.** `ActionsMenu.swift` picks a photo, loads it as `Transferable`
-`Data`, and calls `CanvasManager.insertImage`, which creates a vector layer if the active one is not vector.
+**Import lands on the `PhotosPicker` seam.** `AddMenu.swift` picks a photo, loads it as `Transferable`
+`Data`, and primes the pen with it (`CanvasManager.primeImage`); the artist's drag places it
+(`placeImage`, which creates a vector layer if the active one is not vector). `insertImage` is Paste's.
 `matching: .videos` on a picker beside it is the whole import gesture. (TODO (27)'s claim that the app has zero
 `Transferable` code is wrong in this one respect; it is right about `fileImporter`, `UTType`, `NSItemProvider`
 and drag-and-drop.)
@@ -356,8 +357,8 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    `VideoFrameReaderLogicTests` are its suites, and their clips are generated at test time with the app's
    own `VideoFrameWriter` so a test can say *which* frame came back.
 4. ~~**Import.**~~ **Built.** `matching: .videos` beside the existing picker in `ActionsMenu`, calling
-   `CanvasManager.insertVideo` — its own new vector layer per §2.1 (**always**, unlike `insertImage`,
-   which joins an active vector layer), clipped to the scene per §2.4 with `sourceEnd` written to
+   `CanvasManager.insertVideo` (primed by `AddMenu`, placed where the pen drags it — TODO (149)) — its own
+   new vector layer per §2.1 (**always**, unlike `insertImage`, which joins an active vector layer), clipped to the scene per §2.4 with `sourceEnd` written to
    match so the block and the crop agree from the first instant. `VideoImportLogicTests` is its suite.
    Two things the survey did not say. **A clip is loaded as a file and never as `Data`** — a video's
    payload is a file for its whole life, and `loadTransferable(type: Data.self)` on a half-gigabyte

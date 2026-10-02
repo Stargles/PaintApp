@@ -57,16 +57,10 @@ final class TapSelectUITests: PaintUITestCase {
         tap.tap()
     }
 
-    /// Add → Rectangle, then Done: a solid square at the middle of the paper, put down.
-    private func addRectangle(_ app: XCUIApplication) {
-        app.buttons["toolbar.addButton"].tap()
-        let row = app.buttons["add.rectangleRow"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "the Add menu lists Rectangle")
-        row.tap()
-        let done = app.buttons["moveBar.doneButton"]
-        XCTAssertTrue(done.waitForExistence(timeout: 5), "the new shape arrives held in the Move box")
-        done.tap()
-        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done puts the box down")
+    /// Add → Rectangle, dragged out from the middle of the paper: a solid square, put down by the lift.
+    private func addRectangle(_ app: XCUIApplication, _ canvas: XCUIElement) {
+        placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
+                            from: paperPoint(canvas, 0.5, 0.5), to: paperPoint(canvas, 0.8, 0.5))
     }
 
     // MARK: - Text
@@ -99,10 +93,8 @@ final class TapSelectUITests: PaintUITestCase {
     /// **Tapping a gradient opens Edit Gradient at once** — its card, on the gradient tapped.
     func testTappingAGradientOpensEditGradientAtOnce() throws {
         let (app, canvas) = launch()
-        app.buttons["toolbar.addButton"].tap()
-        let row = app.buttons["add.linearGradientRow"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.tap()
+        placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
+                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
         let done = app.buttons["gradientPanel.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "PREMISE: the gradient's card is up")
         done.tap()
@@ -154,7 +146,7 @@ final class TapSelectUITests: PaintUITestCase {
     /// bare paper puts the selection down.
     func testTappingAShapeSelectsItAndATapOnBareCanvasClearsTheSelection() throws {
         let (app, canvas) = launch()
-        addRectangle(app)
+        addRectangle(app, canvas)
         let centre = paperPoint(canvas, 0.5, 0.5)
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "PREMISE: the rectangle is on the paper")
 

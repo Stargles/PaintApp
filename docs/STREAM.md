@@ -31,8 +31,10 @@ the laptop.
   its doc comment says why), then the swap of the element for a `VectorImageElement` with the same
   placement fields, every element `reidentified()`, refusals returned as an outcome enum and
   surfaced through `CanvasNotice`, never a silent `Bool`.
-- **Import entry points**: `ActionsMenu` (`Views/ActionsMenu.swift`) → `CanvasManager.insertImage(_:)`
-  (joins the active vector layer or makes one, then lifts the element into the Move box) and
+- **Import entry points**: `ActionsMenu` (`Views/ActionsMenu.swift`)'s Paste → `CanvasManager.insertImage(_:)`
+  (joins the active vector layer or makes one, then lifts the element into the Move box); Add → Insert
+  Photo / Insert Video prime the pen instead (`primeImage` / `primeVideo`, TODO (149)) and the drag places
+  through `placeImage` and `insertVideo(at:consumingSource:placement:)`; and
   `insertVideo(at:consumingSource:)` (always a new layer, VIDEO.md §2.1; the cel spans
   `min(clip, contentEndFrame)` **from frame 0**, not from the current frame — `addVectorLayer`'s cel
   starts at 0 and `VideoImportLogicTests` pins `startFrame == 0`; this file said "from the current

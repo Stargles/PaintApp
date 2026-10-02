@@ -55,6 +55,9 @@ final class ToolLogicTests: XCTestCase {
         // that lives above the layers, so the host must decline it or the same touch paints a stroke
         // *and* opens a text box, which is the eyedropper's bug wearing a different name.
         .text: false,
+        // A primed object's drag is a placement through a recognizer of its own on the container; if
+        // the host stayed interactive the pen that sizes a rectangle would draw a line under it.
+        .place: false,
     ]
 
     func testEveryToolStatesWhetherItPaintsOnTheCanvas() {
@@ -136,6 +139,8 @@ final class ToolLogicTests: XCTestCase {
         // only its own exit path commits.
         .eyedropper: false,
         .text: false,
+        // A primed object is entered for one placement and leaves through `leavePlacement`.
+        .place: false,
     ]
 
     func testEveryToolStatesWhetherABrushPresetRetargetsIt() {

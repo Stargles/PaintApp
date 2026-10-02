@@ -28,6 +28,17 @@ enum Tool: String, Codable, CaseIterable {
     /// the shared plumbing it needs (`ActivePanel.text`, the `activePanel` binding into
     /// `AddMenu`) lands where it can be bisected to.
     case text
+
+    /// **An object the Add menu primed, waiting for the pen** — TODO (149). Tapping Rectangle,
+    /// Ellipse, Linear Gradient, Insert Photo or Insert Video selects this tool with that object held
+    /// in `CanvasManager.primedObject`; the next pen-down places it and dragging sizes it.
+    ///
+    /// **Momentary, like the eyedropper, and for the same reason**: the artist reaches for it in the
+    /// middle of drawing and wants to carry on drawing once the object is down. A placement hands
+    /// back to the tool that was selected before it (`CanvasManager.leavePlacement`), and picking any
+    /// other tool ends the priming instead (`CanvasManager.selectedTool`'s `didSet`). The eyedropper is
+    /// the one tool that does not: armed over a primed object, it hands back to it.
+    case place
 }
 
 extension Tool {
@@ -57,7 +68,11 @@ extension Tool {
             // The eraser included: it is a stroke like any other, `.destinationOut` on a raster
             // layer and a real gesture on a vector one, and it goes through the same recognizer.
             return true
-        case .fill, .eyedropper, .text:
+        case .fill, .eyedropper, .text, .place:
+            // A primed object sits with the fill too: its drag is a *placement*, never a stroke, so
+            // the host must decline it exactly as it declines the fill's — or the pen that sizes a
+            // rectangle would also draw a line under it.
+            //
             // Text sits with the fill, not with the brushes, and the smart shapes are the reason
             // the answer is not obvious. A shape *is* a brush stroke — it comes out of holding a
             // pen/pencil stroke still (`CanvasView.startShapeDetection`, gated on `.pen`/`.pencil`),
@@ -113,11 +128,11 @@ extension Tool {
             // the paint-brush panel while erasing must not silently put the artist back to painting.
             // The original rule, unchanged.
             return false
-        case .fill, .eyedropper, .text:
-            // None of the three is a stroke tool, so none of them has a brush preset to follow — and
-            // all three carry state that only their own exit path settles: the fill's interactive
-            // gesture, the eyedropper's `toolBeforeEyedropper` memory, and the live text session.
-            // Retargeting `selectedTool` from underneath any of them strands that state.
+        case .fill, .eyedropper, .text, .place:
+            // None of the four is a stroke tool, so none of them has a brush preset to follow — and
+            // all four carry state that only their own exit path settles: the fill's interactive
+            // gesture, the eyedropper's `toolBeforeEyedropper` memory, the live text session and the
+            // primed object. Retargeting `selectedTool` from underneath any of them strands that state.
             return false
         }
     }

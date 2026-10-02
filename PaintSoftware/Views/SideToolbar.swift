@@ -18,6 +18,9 @@ struct SideToolbar: View {
     /// state while erasing, otherwise the paint brush's).
     private var isFillMode: Bool { canvasManager.selectedTool == .fill }
     private var isEraserMode: Bool { canvasManager.selectedTool == .eraser }
+    /// A gradient is primed (TODO (149)): the rail offers the one dial it has, how wide it is dragged
+    /// out, where it would otherwise offer the brush's.
+    private var isGradientPrimed: Bool { canvasManager.primedObject == .gradient }
 
     /// Fill mode has three sliders instead of two, so they're a little shorter to fit the rail.
     private var sliderHeight: CGFloat { isFillMode ? 120 : 150 }
@@ -65,6 +68,16 @@ struct SideToolbar: View {
                         value: Binding(get: { Double(canvasManager.fillEdgeOverlap) }, set: { canvasManager.setFillSetting(.edgeOverlap, CGFloat($0)) }),
                         range: Double(CanvasManager.fillExpandRange.lowerBound)...Double(CanvasManager.fillExpandRange.upperBound),
                         identifier: "sideToolbar.edgeOverlapSlider"
+                    )
+                } else if isGradientPrimed {
+                    // `gradientWidthFraction` is a share of the artwork's longer side, so the slider's
+                    // own percentage readout is the "% of canvas size" the owner asked for.
+                    labeledSlider(
+                        title: "Width",
+                        value: $canvasManager.gradientWidthFraction,
+                        range: 0.01...1,
+                        identifier: "sideToolbar.gradientWidthSlider",
+                        showsPercentWhileAdjusting: true
                     )
                 } else if isEraserMode {
                     // TODO (79)(a): the same `BrushSizeCurve` the brush's slider uses, via

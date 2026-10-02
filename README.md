@@ -264,10 +264,15 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 - **Settings menu**: resize the canvas, adjust canvas padding (a drawable margin around the artwork),
   bake precise strokes, fingers-can-paint, render resolution.
 - **Add menu**: insert a photo/video, stream a computer's screen, add text, or add a solid
-  rectangle, a solid ellipse or a linear gradient — each an object of the fill tool's own kind
-  (a rectangle or ellipse arrives held in the Move box on a vector layer; a gradient arrives with its
-  panel up: two colours and an angle). A gradient is an object in a vector layer, not a layer of its
-  own. The text panel's font list shows every family set in itself.
+  rectangle, a solid ellipse or a linear gradient. The rectangle, ellipse, photo, video and gradient
+  rows **prime the pen**: the Add icon lights, and the next pen-down on the canvas places the object and
+  dragging sizes it, centred on the press with the pen on its edge (a rectangle is a square and an
+  ellipse a circle, never turned; a picture or clip keeps its own shape). A gradient is the band from
+  the press to the lift — its direction and length are the stroke's, and its width is the left rail's
+  Width slider, a share of the canvas — and arrives with its panel up: two colours and an angle. Tap the
+  primed row again, or pick another tool, to put it down. A rectangle, ellipse or gradient is an object of
+  the fill tool's own kind; a gradient is an object in a vector layer, not a layer of its own. The text
+  panel's font list shows every family set in itself.
 - The document name is editable in the middle of the top bar.
 - **Pinch** to zoom, **two-finger rotate/drag** to rotate/pan the canvas.
 

@@ -11,6 +11,10 @@ import Combine   // objectWillChange.send()
 /// make: a solid rectangle, a solid ellipse and a gradient, each of the fill tool's own kind
 /// (`CanvasManager+FillObjects.swift`).
 ///
+/// **Every object row here primes rather than places** (TODO (149), `CanvasManager+Placement.swift`):
+/// a tap arms the placement tool with that object, and the artist's next pen-down on the canvas puts
+/// it down and drags it to size. The photo and video rows pick first and prime with what was picked.
+///
 /// **The one panel besides `ActionsMenu` that needs the `activePanel` binding**, and for the same
 /// reason `ActionsMenu` first grew it: "Add Text" is a mode change, not a direct action, and entering
 /// it swaps this menu for the text tool's own settings panel.
@@ -47,7 +51,7 @@ struct AddMenu: View {
             }
             .accessibilityIdentifier("add.insertPhotoRow")
             .onChange(of: photoPickerItem) { _, newItem in
-                Task { await insertPhoto(newItem) }
+                Task { await primePhoto(newItem) }
             }
 
             // **VIDEO.md stage 4, and it is deliberately the picker beside the photo one rather than
@@ -59,7 +63,7 @@ struct AddMenu: View {
             }
             .accessibilityIdentifier("add.insertVideoRow")
             .onChange(of: videoPickerItem) { _, newItem in
-                Task { await insertVideo(newItem) }
+                Task { await primeVideo(newItem) }
             }
 
             streamScreenRow
@@ -150,46 +154,35 @@ struct AddMenu: View {
         }
     }
 
-    /// TODO (129) — *"the rectangle and ellipse objects in the add menu should not be smart shapes.
-    /// They should be entirely solid shapes."* A solid object in the brush colour, of the fill tool's
-    /// own kind (`CanvasManager.addSolidShape`), held in the Move box on a vector layer so it can be
-    /// sized at once — which is why the menu closes: the box is what the artist reaches for next.
+    /// **The three objects with no file behind them — TODO (129), (128), (149).** Tapping one *primes* it:
+    /// the next pen-down on the canvas places it and dragging sizes it (`CanvasManager.primeObject`),
+    /// which is why the menu closes — the canvas is what the artist reaches for next. Tapping the row
+    /// that is already primed puts it down again, and the row says which one that is.
+    private func primeRow(_ object: PrimedObject, icon: String, title: String, identifier: String) -> some View {
+        let primed = canvasManager.primedObject == object
+        return Button {
+            canvasManager.togglePrimedObject(object)
+            activePanel = .none
+        } label: {
+            row(icon: icon, title: title, enabled: canvasManager.canvasSize != nil, primed: primed)
+        }
+        .disabled(canvasManager.canvasSize == nil)
+        .accessibilityIdentifier(identifier)
+        .accessibilityAddTraits(primed ? [.isSelected] : [])
+    }
+
     private var rectangleRow: some View {
-        Button {
-            canvasManager.addSolidShape(.rectangle)
-            activePanel = .none
-        } label: {
-            row(icon: "rectangle", title: "Rectangle", enabled: canvasManager.canvasSize != nil)
-        }
-        .disabled(canvasManager.canvasSize == nil)
-        .accessibilityIdentifier("add.rectangleRow")
+        primeRow(.rectangle, icon: "rectangle", title: "Rectangle", identifier: "add.rectangleRow")
     }
 
-    /// `rectangleRow`'s twin: the same call with the other shape.
     private var ellipseRow: some View {
-        Button {
-            canvasManager.addSolidShape(.ellipse)
-            activePanel = .none
-        } label: {
-            row(icon: "circle", title: "Ellipse", enabled: canvasManager.canvasSize != nil)
-        }
-        .disabled(canvasManager.canvasSize == nil)
-        .accessibilityIdentifier("add.ellipseRow")
+        primeRow(.ellipse, icon: "circle", title: "Ellipse", identifier: "add.ellipseRow")
     }
 
-    /// TODO (128) — a gradient is an object in a vector layer, not a layer of its own: this lays one
-    /// down over the artwork (`CanvasManager.addGradient`) and opens its panel, where the two colours
-    /// and the direction are chosen. It closes this menu for the reason `addTextRow` hands off to the
-    /// text panel — the panel is what comes next.
+    /// TODO (128) — a gradient is an object in a vector layer, not a layer of its own. Its panel (the
+    /// two colours and the direction) opens once it has been dragged out.
     private var linearGradientRow: some View {
-        Button {
-            canvasManager.addGradient()
-            activePanel = .none
-        } label: {
-            row(icon: "square.lefthalf.filled", title: "Linear Gradient", enabled: canvasManager.canvasSize != nil)
-        }
-        .disabled(canvasManager.canvasSize == nil)
-        .accessibilityIdentifier("add.linearGradientRow")
+        primeRow(.gradient, icon: "square.lefthalf.filled", title: "Linear Gradient", identifier: "add.linearGradientRow")
     }
 
     /// Nil when "Add Text" is usable on the layer the artist is standing on. Recomputed per render
@@ -202,23 +195,30 @@ struct AddMenu: View {
     /// `enabled` greys the row itself rather than leaning on `.disabled`'s own dimming, which this
     /// row never gets: the explicit `.foregroundColor(.white)` below wins over it, so a disabled row
     /// left to SwiftUI would look exactly like a working one and simply ignore taps.
-    private func row(icon: String, title: String, enabled: Bool = true) -> some View {
+    ///
+    /// `primed` tints the row blue: it is the object the next pen-down will place.
+    private func row(icon: String, title: String, enabled: Bool = true, primed: Bool = false) -> some View {
         HStack {
             Image(systemName: icon).frame(width: 24)
             Text(title)
             Spacer()
         }
-        .foregroundColor(enabled ? .white : Color.white.opacity(0.35))
+        .foregroundColor(primed ? .blue : (enabled ? .white : Color.white.opacity(0.35)))
         .padding(.horizontal)
         .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
-    private func insertPhoto(_ item: PhotosPickerItem?) async {
+    /// **A picked photo primes the placement tool rather than landing** (TODO (149)): the artist drags it
+    /// out where they want it. The picker's selection is cleared once it is read, so choosing the same
+    /// photo a second time — after putting the first priming down, say — still fires.
+    private func primePhoto(_ item: PhotosPickerItem?) async {
         guard let item else { return }
-        guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+        let image = (try? await item.loadTransferable(type: Data.self)).flatMap(UIImage.init(data:))
         await MainActor.run {
-            canvasManager.insertImage(image)
+            photoPickerItem = nil
+            guard let image, canvasManager.primeImage(image) else { return }
+            activePanel = .none
         }
     }
 
@@ -228,16 +228,19 @@ struct AddMenu: View {
     /// and `loadTransferable(type: Data.self)` on a half-gigabyte clip is a half-gigabyte of resident
     /// memory on the device this app's `Compositor` header already documents jetsam killing.
     ///
-    /// `consumingSource: true` because the file handed back here is `PickedMovie`'s own copy: the
-    /// system deletes its export the moment the transfer closure returns, so that copy is ours to
-    /// move rather than copy again.
-    private func insertVideo(_ item: PhotosPickerItem?) async {
+    /// The primed object owns the file from here (`CanvasManager.primeVideo`): the placement *moves* it
+    /// into the document, and a priming that ends first deletes it. The system deletes its own export the
+    /// moment the transfer closure returns, so the copy `PickedMovie` made is the only one.
+    private func primeVideo(_ item: PhotosPickerItem?) async {
         guard let item else { return }
         guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else {
             return await MainActor.run { notice = "That video could not be read." }
         }
         await MainActor.run {
-            if !canvasManager.insertVideo(at: movie.url, consumingSource: true) {
+            videoPickerItem = nil
+            if canvasManager.primeVideo(at: movie.url) {
+                activePanel = .none
+            } else {
                 try? FileManager.default.removeItem(at: movie.url)
                 notice = "That video could not be read."
             }
@@ -248,7 +251,7 @@ struct AddMenu: View {
 /// **A picked movie, as a file rather than as bytes** — the `Transferable` the video picker loads.
 ///
 /// `PhotosPickerItem` will hand a clip over as `Data`, and doing that is what this type exists to
-/// avoid: see `AddMenu.insertVideo`. The import closure has to copy, because the file it is
+/// avoid: see `AddMenu.primeVideo`. The import closure has to copy, because the file it is
 /// given is deleted as soon as it returns; `CanvasManager.insertVideo` then *moves* that copy into
 /// `VideoImportStore`, so the picked clip is written twice on its way in and not three times.
 struct PickedMovie: Transferable {

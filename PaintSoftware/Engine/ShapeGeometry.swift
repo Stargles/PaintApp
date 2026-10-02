@@ -673,6 +673,51 @@ struct ShapeGeometry: Equatable {
     }
 }
 
+// MARK: - Dragged out from a press
+
+extension ShapeGeometry {
+
+    /// **A shape grown from a press by dragging the pen away from it** — what the Add menu's primed
+    /// rectangle, ellipse, picture and gradient are while the pen is down (TODO (149)).
+    ///
+    /// `anchor` is where the pen went down and `pen` is where it is now. A closed shape is **centred
+    /// on the press and upright** (no `rotation`: dragging only sizes it) with **the pen always on its
+    /// outline**, so the shape the artist sees is the shape the pen is pointing at:
+    ///
+    ///  * a rectangle is the smallest centred box of the given `aspect` (width over height) that holds
+    ///    the pen — at `aspect` 1 a square, which is the box `constrained` makes of a rectangle;
+    ///  * an oval's outline is the ellipse of that aspect through the pen — at `aspect` 1 a circle, so
+    ///    the pen rides the circle's edge however the drag turns (`constrained`'s circle is
+    ///    `max(width, height)` across, which on a diagonal drag would leave the pen outside it);
+    ///  * a line is the two points themselves, the direction and the length a gradient is dragged out as.
+    static func dragged(_ kind: Kind, from anchor: CGPoint, to pen: CGPoint, aspect: CGFloat = 1) -> ShapeGeometry {
+        switch kind {
+        case .line:
+            return ShapeGeometry(kind: .line, startPoint: anchor, endPoint: pen)
+        case .rectangle, .oval:
+            let dx = abs(pen.x - anchor.x), dy = abs(pen.y - anchor.y)
+            let halfHeight = kind == .oval ? hypot(dx / aspect, dy) : max(dx / aspect, dy)
+            let halfWidth = halfHeight * aspect
+            return ShapeGeometry(kind: kind,
+                                 startPoint: CGPoint(x: anchor.x - halfWidth, y: anchor.y - halfHeight),
+                                 endPoint: CGPoint(x: anchor.x + halfWidth, y: anchor.y + halfHeight))
+        }
+    }
+
+    /// **The rectangle a line is the axis of**, `width` across and exactly as long as the line — the
+    /// band a dragged gradient fills. Turned by the line's own direction about its midpoint, so
+    /// `rotatedCGPath` is the band in canvas space. Only a line has an axis; any other kind is read by
+    /// its two anchors, as everything else here reads them.
+    func band(width: CGFloat) -> ShapeGeometry {
+        let mid = center
+        let length = hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
+        return ShapeGeometry(kind: .rectangle,
+                             startPoint: CGPoint(x: mid.x - length / 2, y: mid.y - width / 2),
+                             endPoint: CGPoint(x: mid.x + length / 2, y: mid.y + width / 2),
+                             rotation: atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x))
+    }
+}
+
 /// Nothing persists a `ShapeGeometry` today — it is live gesture state, and what reaches disk is the
 /// baked `VectorStroke`, a flat list of samples with no shape identity at all. The conformance is
 /// written now anyway so that the day a live shape is autosaved, or shapes become re-editable, this

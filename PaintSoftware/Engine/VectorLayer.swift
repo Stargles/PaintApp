@@ -611,6 +611,13 @@ struct LinearGradientPaint: Codable, Equatable {
     static let defaultStart = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
     static let defaultEnd = CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
 
+    /// **The gradient a newly placed object starts as**: the default black-to-white ramp between two
+    /// points. The one spelling of it, so the object Add lays down and the live picture of it while the
+    /// pen is still dragging it out cannot start as different ramps.
+    static func fresh(from: CGPoint, to: CGPoint) -> LinearGradientPaint {
+        LinearGradientPaint(start: defaultStart, end: defaultEnd, from: from, to: to)
+    }
+
     /// How many evenly spaced stops the Oklab ramp is handed to Core Graphics as — 256 intervals, one
     /// per 8-bit step of the ramp's length. Core Graphics can only interpolate in a straight line
     /// through the components it is given, so the curve has to be sampled finely enough that the
@@ -3189,9 +3196,26 @@ final class VectorCanvas {
     func addImage(canvasSpaceElement image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat) -> VectorImageElement {
         lock.lock()
         defer { lock.unlock() }
+        return insertImageLocked(image, canvasPosition: canvasPosition, canvasFit: canvasFit,
+                                 cascadeSteps: _elements.compactMap(\.image).count)
+    }
+
+    /// An image **exactly where the artist put it** — `addImage(canvasSpaceElement:…)` without the
+    /// cascade, whose whole job is to keep two *centred* imports apart. A picture the artist dragged
+    /// out to a place and a size has already been told apart from its neighbours by being put there.
+    @discardableResult
+    func addPlacedImage(canvasSpaceElement image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat) -> VectorImageElement {
+        lock.lock()
+        defer { lock.unlock() }
+        return insertImageLocked(image, canvasPosition: canvasPosition, canvasFit: canvasFit, cascadeSteps: 0)
+    }
+
+    /// The shared tail of the two above. Caller holds `lock`.
+    private func insertImageLocked(_ image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat,
+                                   cascadeSteps: Int) -> VectorImageElement {
         let scale = Self.scale(of: _transform)
         let localScale = scale > 0 ? canvasFit / scale : canvasFit
-        let cascade = CGFloat(_elements.compactMap(\.image).count) * Self.importCascadeStep / (scale > 0 ? scale : 1)
+        let cascade = CGFloat(cascadeSteps) * Self.importCascadeStep / (scale > 0 ? scale : 1)
         var localPosition = canvasPosition.applying(_transform.inverted())
         localPosition.x += cascade
         localPosition.y += cascade

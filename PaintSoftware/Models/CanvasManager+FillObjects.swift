@@ -11,108 +11,77 @@ import UIKit
 // left. It is supposed to be an object in the vector layer."*
 //
 // **All three are one kind of object: a `VectorFillElement`**, the fill tool's own output, differing
-// only in the path (a rectangle, an ellipse, the artwork's rectangle) and the paint (a flat colour or
-// a gradient). So each is selected, moved, cut by the eraser, warped by an interpolation and
-// animated by a channel exactly as a filled region is, with nothing written for it in any of those —
-// the paint travels inside the element, through the one `reshaped(to:paint:)` that every
-// rebuild-from-a-mapped-path site already calls.
+// only in the path (a rectangle, an ellipse, a band) and the paint (a flat colour or a gradient). So
+// each is selected, moved, cut by the eraser, warped by an interpolation and animated by a channel
+// exactly as a filled region is, with nothing written for it in any of those — the paint travels
+// inside the element, through the one `reshaped(to:paint:)` that every rebuild-from-a-mapped-path
+// site already calls.
+//
+// **What they are laid down *at* is the pen's** (TODO (149), `CanvasManager+Placement.swift`): the
+// two verbs here take the geometry a drag has already measured, in canvas points.
 
 extension CanvasManager {
 
     // MARK: - Solid shapes
 
-    /// The shapes Add offers as solid objects.
-    enum SolidShape: Equatable {
-        case rectangle
-        case ellipse
-
-        /// The shape's outline in `rect`.
-        func path(in rect: CGRect) -> CGPath {
-            switch self {
-            case .rectangle: return CGPath(rect: rect, transform: nil)
-            case .ellipse: return CGPath(ellipseIn: rect, transform: nil)
-            }
-        }
-
-        var label: HistoryActionLabel {
-            switch self {
-            case .rectangle: return .addRectangle
-            case .ellipse: return .addEllipse
-            }
-        }
-    }
-
-    /// **Add → Rectangle and Add → Ellipse.** A solid shape in the brush colour, centred on the
-    /// artwork, laid down through the fill tool's own add path (`layDownSolidFill`): a
-    /// `VectorFillElement` on a vector layer, painted pixels on a raster layer.
+    /// **Add → Rectangle and Add → Ellipse, at the geometry the pen dragged out.** A solid shape in the
+    /// brush colour, laid down through the fill tool's own add path (`layDownSolidFill`): a
+    /// `VectorFillElement` on a vector layer, painted pixels on a raster layer. One undo step.
     ///
-    /// **Where, and how big.** Centred in the *artwork* rect — the canvas inset by its padding, which
-    /// is the paper the artist is looking at and not the margin around it — at 60% of that rect's
-    /// shorter side, so it is a square or a circle every handle of which is on screen whatever the
-    /// document's aspect. Not the visible viewport: the model does not know it, and an object that
-    /// lands at the same place every time is one the artist can predict, which beats one that lands
-    /// wherever the last pinch left them.
+    /// **A raster layer has no object to lift**, so the shape lands as pixels and the lasso-and-Move
+    /// route is the way to move it; that asymmetry is the raster tier's, not this feature's. **A layer
+    /// with no drawing surface** (a value or transform layer) gets a fresh vector layer to put the shape
+    /// on, as an imported photo does — a refusal here would be an Add row that does nothing on the layers
+    /// where the artist most often stands to add a backdrop.
     ///
-    /// **On a vector layer the new shape arrives held in the Move box**, exactly as an imported photo
-    /// does (`insertImage`, TODO (34)): a default-sized shape is only useful if it can be sized, and
-    /// Move's own box is the sizing tool — corners scale, the knob turns, the stretch handles
-    /// distort — so there is nothing new to learn and nothing new to build. A raster layer has no
-    /// object to lift, so the shape lands as pixels and the lasso-and-Move route is the way to size
-    /// it; that asymmetry is the raster tier's, not this feature's.
-    ///
-    /// **A layer with no drawing surface** (a value or transform layer) gets a fresh vector layer to
-    /// put the shape on, as an imported photo does — a refusal here would be an Add row that does
-    /// nothing on the layers where the artist most often stands to add a backdrop.
-    ///
-    /// - Returns: whether a shape was laid down.
+    /// - Parameter shape: a rectangle or an oval, in canvas points.
+    /// - Returns: whether a shape was laid down — false for a `.line`, which has no inside to fill.
     @discardableResult
-    func addSolidShape(_ shape: SolidShape) -> Bool {
+    func placeSolidShape(_ shape: ShapeGeometry) -> Bool {
+        let label: HistoryActionLabel
+        switch shape.kind {
+        case .rectangle: label = .addRectangle
+        case .oval: label = .addEllipse
+        case .line: return false
+        }
         let color = brushColor.resolvedUIColor(opacity: brushOpacity)
-        guard let rect = defaultShapeRect,
-              let surface = drawingSurfaceForNewObject(vectorOnly: false),
-              let stored = layerSpaceFill(shape.path(in: rect), paint: .solid(CodableColor(color)),
-                                          onLayerAt: surface.layerIndex),
-              let landing = layDownSolidFill(stored.path, color: color,
-                                             layerIndex: surface.layerIndex, celIndex: surface.celIndex,
-                                             label: shape.label) else { return false }
-        if case .element(let id) = landing { raiseMoveBox(onNewElement: id) }
-        return true
-    }
-
-    /// The default rectangle a solid shape is laid in: a square centred on the artwork at 60% of its
-    /// shorter side. Nil before a canvas exists.
-    var defaultShapeRect: CGRect? {
-        guard let artwork = artworkRect else { return nil }
-        let side = min(artwork.width, artwork.height) * 0.6
-        return CGRect(x: artwork.midX - side / 2, y: artwork.midY - side / 2, width: side, height: side)
+        guard let surface = drawingSurfaceForNewObject(vectorOnly: false),
+              let stored = layerSpaceFill(shape.rotatedCGPath, paint: .solid(CodableColor(color)),
+                                          onLayerAt: surface.layerIndex) else { return false }
+        return layDownSolidFill(stored.path, color: color, layerIndex: surface.layerIndex,
+                                celIndex: surface.celIndex, label: label) != nil
     }
 
     // MARK: - Linear gradient
 
-    /// **Add → Linear Gradient.** A gradient fill covering the artwork, black to white and running
-    /// left to right, on the active vector layer — or on a fresh vector layer when the active one is
-    /// not one, because a gradient is an object in a vector layer and nothing else.
+    /// **Add → Linear Gradient, as the band the pen dragged out.** A gradient fill, black to white,
+    /// whose ramp runs from `from` to `to` and **ends there**: the object is the band itself, so the
+    /// length of the line is the length of the gradient and the colours do not run on past it. On the
+    /// active vector layer — or on a fresh vector layer when the active one is not one, because a
+    /// gradient is an object in a vector layer and nothing else.
     ///
-    /// **Its panel opens with it.** What the artist does next is choose the two colours and the
-    /// direction, which is what the panel is for, so it is up by the time the gradient is — the way
-    /// Add Text opens the text panel. No Move box: a gradient that covers the artwork has a box the
-    /// size of the screen, which is a box nobody can grab, and the panel is the thing it needs.
+    /// **Its panel opens with it.** What the artist does next is choose the two colours, which is what
+    /// the panel is for, so it is up by the time the gradient is — the way Add Text opens the text
+    /// panel. (The direction it also offers is the one the drag just set; turning it afterwards re-spans
+    /// the ramp over the band's bounds, as it does for any filled shape.)
     ///
+    /// - Parameters:
+    ///   - band: the rectangle the gradient occupies, in canvas points.
+    ///   - from: where the ramp starts (the pen's press), in canvas points.
+    ///   - to: where it ends (the pen's lift).
     /// - Returns: whether a gradient was laid down.
     @discardableResult
-    func addGradient() -> Bool {
-        guard let artwork = artworkRect,
-              let surface = drawingSurfaceForNewObject(vectorOnly: true),
-              let stored = layerSpaceFill(CGPath(rect: artwork, transform: nil),
-                                          paint: .linearGradient(.spanning(artwork, angle: 0)),
-                                          onLayerAt: surface.layerIndex),
+    func placeGradient(band: ShapeGeometry, from: CGPoint, to: CGPoint) -> Bool {
+        let paint = FillPaint.linearGradient(.fresh(from: from, to: to))
+        guard let surface = drawingSurfaceForNewObject(vectorOnly: true),
+              let stored = layerSpaceFill(band.rotatedCGPath, paint: paint, onLayerAt: surface.layerIndex),
               let id = placeVectorFill(stored.path, paint: stored.paint,
                                        layerIndex: surface.layerIndex, celIndex: surface.celIndex,
                                        label: .addGradient) else { return false }
         return beginGradientEdit(elementID: id)
     }
 
-    // MARK: - Shared by the three
+    // MARK: - Shared by the two
 
     /// The cel an added object lands on, minting what it needs: the active layer when it can take the
     /// object, otherwise a fresh vector layer (a separate, preceding undo step — `insertImage`'s
@@ -131,7 +100,7 @@ extension CanvasManager {
     }
 
     /// **What the artist sees laid down, written where the layer will show it** — the geometry of an
-    /// added object, which is made in canvas points (`defaultShapeRect`, `artworkRect`), taken through
+    /// added object, which is made in canvas points (what the pen dragged out), taken through
     /// the inverse of the pose its layer is shown through (`inkPose(forLayerID:)`, TODO (124)'s one
     /// source), path and gradient ends together. Under a transformation layer the object is then
     /// *shown* centred on the artwork, rather than a pose away from it; on a layer nothing poses it
@@ -146,14 +115,6 @@ extension CanvasManager {
         guard case .fill(let fill)? = Self.inLayerSpace(drawn, shownThrough: inkPose(forLayerID: layers[layerIndex].id)),
               let stored = fill.cgPath else { return nil }
         return (stored, fill.paint)
-    }
-
-    /// Holds a newly added element in the Move box. **Silent on an in-between**, which is the one
-    /// frame where Move refuses: `beginVectorMove` would raise a banner for a Move the artist did
-    /// not ask for, and the object itself has landed — `insertImage`'s rule, for its reason.
-    private func raiseMoveBox(onNewElement id: UUID) {
-        guard !activeCelIsInBetween else { return }
-        beginVectorMove(ofElementIDs: [id])
     }
 
     // MARK: - Editing a gradient
