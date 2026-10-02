@@ -115,23 +115,28 @@ final class StreamLiveEngagedUITests: StreamUITestCase {
         waitForSandwichState(app, "rest", "engaged under a still stream, the canvas rests on its bake")
         waitForPicture(.black, on: canvas, "once still, the exact picture multiplies the stream over the stroke")
 
-        // The computer moves: a change every 0.1 s for four seconds, from another thread so the
-        // samples below cannot starve the settle.
+        // The computer moves: a change every 0.1 s until the samples below are taken, from another
+        // thread — a screenshot of the canvas takes about a second on a loaded Mac, so a burst of a
+        // fixed length would be over before the first sample.
         let colours: [FakeLaptopStreamer.Screen] = [.green, .blue]
-        for step in 0..<40 {
-            DispatchQueue.global().asyncAfter(deadline: .now() + Double(step) * 0.1) {
-                self.laptop.show(colours[step % 2])
-            }
+        let moving = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "StreamLiveEngagedUITests.moving"))
+        var step = 0
+        moving.schedule(deadline: .now(), repeating: 0.1)
+        moving.setEventHandler {
+            self.laptop.show(colours[step % 2])
+            step += 1
         }
+        moving.resume()
+        defer { moving.cancel() }
         waitForPicture(.green, on: canvas, "the first change goes live: the computer's colour, not multiplied")
         for sample in 0..<4 {
-            Thread.sleep(forTimeInterval: 0.2)
             let pixel = try XCTUnwrap(centre(canvas))
             XCTAssertFalse(Colour.black.matches(pixel),
                            "sample \(sample): while the computer moves the stream is drawn plain, and the middle reads \(pixel)")
             XCTAssertEqual(sandwichState(app), "live", "sample \(sample): moving, the canvas stands on its pair")
             if sample == 0 { attachScreenshot(app, "moving-the-stream-is-live-and-plain") }
         }
+        moving.cancel()
 
         // The computer stops; the multiplied picture replaces the live one.
         waitForPicture(.black, on: canvas, timeout: 15, "once the computer has been still the exact picture lands")
