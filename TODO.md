@@ -56,28 +56,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## The owner's second 2026-10-01 message — (147)–(152) and three follow-ups
-
-Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that
-already merged are follow-ups named for their item.
-
-## (149) Add-menu shapes are primed, then dragged out with the pen
-
-**Status** — not started. Replaces (129)'s "lands centred in a Move box" (`d1dd0dd`), which goes whole.
-*"for the shapes in the add menu (rectangle, ellipse, image, linear gradient), make clicking on them
-prime it, and the next time the pen is touched to the screen, it spawns the shape. For ellipses, the
-circle starts on the pen press, and when the pen is dragged it expands its size. Same thing for
-rectangle, except its a square, and its rotation is locked (dragging only increases size, does not
-rotate it). For image and video, same thing as rectangle. For gradient, the direction of the gradient is
-the direction of the stroke from when it was placed to its current dragged position. The length is the
-length of that line. For the width, lets have the left menu show the width slider, being % of canvas
-size. You could probably reuse code from the smart shapes (square and ellipse smart shape) ,and the line
-smart shape for the gradient."*
-
-- [ ] Rectangle / Ellipse / Image / Video / Linear Gradient prime; the next pen-down places and the drag
-      sizes (gradient: drag sets direction and length; the rail shows a width slider in % of canvas).
-- [ ] Reuses the smart-shape drag geometry rather than a second copy.
-
 ## Rulings of 2026-10-02 on merged work — five follow-ups
 
 **Status** — not started. Each is the owner's answer to a question a merged item left open.
