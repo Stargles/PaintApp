@@ -133,9 +133,7 @@ extension CanvasManager {
     /// The matrix is read back into the box's own fields the way a stretched placement is
     /// (`VectorCanvas.placed(_:through:)`, `ObjectTransformFrame.decompose`), because the answer is
     /// not always a similarity: a picture the artist has Freeform-stretched needs its stretch undone
-    /// too. **A rounding residue is not a stretch**, though — a product of similarities is one to
-    /// within an ulp or two, and handing that residue to `aspect` would leave a picture nobody
-    /// stretched carrying `aspect = 1.0000000000000002` and an axis chosen by noise.
+    /// too.
     private static func boxFields(placing target: CGAffineTransform, media: FloatedMedia, in float: VectorFloat)
         -> (transform: LayerTransform, aspect: CGFloat, stretchAxis: CGFloat)? {
         guard let unmirror = invertedAffine(float.mirror), let unlift = invertedAffine(media.shownAtLift) else {
@@ -145,11 +143,7 @@ extension CanvasManager {
         guard let pose = ObjectTransformFrame.decompose(box, preferringAxisNear: float.frame.stretchAxis) else {
             return nil
         }
-        let position = float.pivot.applying(box)
-        if abs(pose.x - pose.y) <= 1e-9 * max(pose.x, pose.y) {
-            return (LayerTransform(position: position, scale: pose.scale, rotation: pose.rotation), 1, 0)
-        }
-        return (LayerTransform(position: position, scale: pose.scale, rotation: pose.rotation),
+        return (LayerTransform(position: float.pivot.applying(box), scale: pose.scale, rotation: pose.rotation),
                 pose.aspect, pose.stretchAxis)
     }
 

@@ -154,14 +154,6 @@ smart shape for the gradient."*
 `VectorLayer`'s `drawGradient`); ruled 2026-10-01: **blend in Oklab**, reusing `ColorMath`'s Oklab — the
 (10a) code the gradient map already uses.
 
-## (150) Center and 1:1 for a moved image, video or stream
-
-**Status** — not started. *"When an image/video/stream is selected and moved (only an image or video or
-stream), have additional options to center the image/video/stream which will reset its position to the
-screen center. Also have an option to make the size 1 to 1, as in every pixel of the image is a pixel on
-the screen, and resets the rotation."* Ruled: **Center = the canvas centre**; **1:1 = one image pixel per
-canvas pixel**, rotation reset.
-
 ## (151) Rotation snaps to 15° with a finger down, and shows its angle
 
 **Status** — not started. *"Remember the behaviour where if a user creates a line smartshape and then
@@ -180,11 +172,6 @@ gradients, brushstrokes/fill shapes, etc."*
 
 - [ ] A Tap mode beside the Select panel's loop modes; a tap selects the topmost object under it; text
       and gradient open their Edit panels at once; a stroke or fill opens the selection's own options.
-
-## (152) New canvas: Cancel and size presets
-
-**Status** — not started. *"When a user creates a new canvas, add a cancel button. Also add many presets
-including 2048x1024, 1920, 1080p, etc."*
 
 ## (112) The stream says "paused" and stops updating until the artist draws
 
