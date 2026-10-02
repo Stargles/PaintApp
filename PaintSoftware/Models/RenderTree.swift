@@ -918,11 +918,17 @@ extension CanvasManager {
     /// (a leaf's opacity and effect are numbers by the time they are nodes), so what a repeated leaf
     /// needs is for its cel, its derivation and its version to be looked up at the source frame,
     /// which is `leafSnapshots`' job and not the compositor's.
-    func renderTreeAndPoses(atFrame frame: Int) -> RenderWalk {
+    ///
+    /// **`excluded` is a transformation layer the walk pretends is not there** — TODO (131): Bake
+    /// removes one, and the picture that has to stay is the one the *other* layers make, so the bake
+    /// asks the same walk twice, with the layer and without it, and carries the difference into the
+    /// drawings. Asked on the walk rather than by hiding the layer in the model, so nothing is
+    /// mutated to find out. Nil — every other caller — is the walk that has always run.
+    func renderTreeAndPoses(atFrame frame: Int, excluding excluded: UUID? = nil) -> RenderWalk {
         var poses: [Int: PoseMap] = [:]
         var frames: [Int: Int] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame, documentFrame: frame,
-                               inheriting: nil, poses: &poses, frames: &frames)
+                               inheriting: nil, excluding: excluded, poses: &poses, frames: &frames)
         return (tree, poses, frames)
     }
 
@@ -1088,7 +1094,7 @@ extension CanvasManager {
     /// `leafSnapshots` compares it to — recorded against `frame` a leaf inside such a folder would
     /// read as its own source and be looked up at the playhead.
     private func renderNodes(inContainer container: UUID?, atFrame frame: Int, documentFrame: Int,
-                             inheriting inherited: PoseMap?,
+                             inheriting inherited: PoseMap?, excluding excluded: UUID?,
                              poses: inout [Int: PoseMap],
                              frames: inout [Int: Int]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
@@ -1177,7 +1183,7 @@ extension CanvasManager {
             for position in stride(from: stack.count - 1, through: 0, by: -1) {
                 carriedFrame[position] = current
                 guard !containerIsNode, case .layer(let index) = stack[position],
-                      layers[index].isVisible,
+                      layers[index].isVisible, layers[index].id != excluded,
                       let pose = layers[index].layerTransform, pose.repeats,
                       let celIndex = activeCelIndex(inLayer: index, atFrame: current) else { continue }
                 current = TransformLayerMode.repeatSourceFrame(
@@ -1197,7 +1203,7 @@ extension CanvasManager {
             }
             let entryFrame = carriedFrame[position]
             guard !containerIsNode, case .layer(let index) = stack[position],
-                  layers[index].isVisible,
+                  layers[index].isVisible, layers[index].id != excluded,
                   let celIndex = activeCelIndex(inLayer: index, atFrame: entryFrame),
                   let pose = layers[index].layerTransform else { continue }
             let layer = layers[index]
@@ -1334,7 +1340,7 @@ extension CanvasManager {
                 // it.
                 let children = renderNodes(
                     inContainer: folder.id, atFrame: entryFrame, documentFrame: documentFrame,
-                    inheriting: carried[position], poses: &poses, frames: &frames)
+                    inheriting: carried[position], excluding: excluded, poses: &poses, frames: &frames)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps

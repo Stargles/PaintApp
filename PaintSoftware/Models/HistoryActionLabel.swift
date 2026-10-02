@@ -79,6 +79,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Bake on an animated block — KEYFRAMES.md §2.9 and §6. One step however many drawings the
     /// animation became, for `.bakeVideoToImages`' reason.
     case bakePoseToCels
+    /// Bake on an effect, flat-colour or transformation layer — TODO (131). One step however many
+    /// layers and drawings it rewrote, and the layer's removal.
+    case bakeLayer
     /// A whole text session baking down — **one step per session, never one per keystroke.**
     /// `UndoHistory`'s `cost` accounting was never sized for 200 entries out of one sentence, and
     /// `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, and §5.1 for the
@@ -289,6 +292,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .adjustVideoSpeed: return "adjust video speed"
         case .bakeVideoToImages: return "bake to images"
         case .bakePoseToCels: return "bake animation to drawings"
+        case .bakeLayer: return "bake layer"
         case .addText: return "add text"
         case .editText: return "edit text"
         case .addRectangle: return "add rectangle"

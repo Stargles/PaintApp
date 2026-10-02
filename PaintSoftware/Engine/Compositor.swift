@@ -1328,48 +1328,50 @@ enum CoreGraphicsCompositor {
     }
 }
 
-// MARK: - Merging one layer into the one below it
+// MARK: - Carrying one layer's contribution into pixels
 
-/// **What a single layer contributes to a merge** — the same three shapes
-/// `CanvasManager.leafSnapshots` already resolves a layer into at a frame, with the render request
-/// left behind.
+/// **What a single layer contributes to the pixels beneath it** — the same shapes
+/// `CanvasManager.leafSnapshots` resolves a layer into at a frame, with the render request left
+/// behind.
 ///
-/// A merge is not a composite of a document: it has no paper, no layers beneath, no mask stacks and
-/// no tree, so `Compositor.composite` is the wrong shape for it (a `RenderRequest` would have to be
-/// invented, and its `sources` array is indexed by the document's layer indices). What it *does*
-/// share with a composite is the arithmetic — 25 blend modes and 13 grades — and that is what
-/// `CoreGraphicsCompositor.mergedDown` reaches for rather than re-spelling.
+/// It is the vocabulary of two verbs. Merge Down carries a drawing layer's contribution into the one
+/// layer below; Bake (`BakeOperation`) carries an effect or flat-colour layer's into every drawing
+/// beneath it. Neither has a paper, a stack, mask stacks or a tree, so `Compositor.composite` is the
+/// wrong shape for them (a `RenderRequest` would have to be invented, and its `sources` array is
+/// indexed by the document's layer indices). What they *do* share with a composite is the arithmetic
+/// — 25 blend modes and every grade — and that is what `CoreGraphicsCompositor.mergedDown` reaches
+/// for rather than re-spelling.
 enum MergeContribution {
-    /// Pixels, blended in `mode` at `opacity`. A raster or vector layer's flattened cel, or §4.5's
+    /// Pixels, blended in `mode` at `opacity`. A raster or vector layer's flattened cel, or a
     /// flat-colour value layer resolved into the canvas-sized sheet it is.
     case pixels(UIImage, mode: BlendMode, opacity: Double)
     /// §4.4's grade over whatever is beneath it, crossfaded back by `opacity` — and by `coverage`,
-    /// which is a vector layer's own ink (TODO (92), EFFECT_BACKDROP.md §2.4) and nil for a value
+    /// which is a vector layer's own ink (TODO (92), EFFECT_BACKDROP.md §2.4) and nil for an effect
     /// layer's grade, which has none.
     ///
     /// No blend mode travels with it, and the omission is `RenderTree.renderNodes`' rule rather than
     /// a field dropped on the way: a leaf in effect mode is pinned to `.normal` whatever it stores,
     /// because a grade replaces the pixels it graded and there are not two things to compose.
     case grade(Effect, opacity: Double, coverage: ResolvedMask?)
-    /// Nothing this merge can bake — a layer that holds no pixels *and* has nothing inside the merge
-    /// to act on. §4.4's transformation layer, and a grading layer in the *lower* position, whose
+    /// Nothing the merge can bake — a hidden layer, or a grading layer in the *lower* position, whose
     /// backdrop is everything the merge deliberately excludes.
     case nothing
 }
 
 extension CoreGraphicsCompositor {
 
-    /// **One layer baked into the layer directly below it, and nothing else** — the pixel side of
-    /// `CanvasManager.mergeLayers`, and EFFECT_BACKDROP.md §2.3's ruling expressed as a function.
+    /// **One layer's contribution carried into the pixels of one other, and nothing else** — the
+    /// pixel side of `CanvasManager.mergeLayers` and of `BakeOperation`, and EFFECT_BACKDROP.md §2.3's
+    /// ruling expressed as a function.
     ///
     /// EFFECT_BACKDROP.md §1 makes an adjustment layer grade, and a blend mode blend against, the
-    /// whole accumulator: the paper and every layer beneath. A merge reaches one layer, so the merged
-    /// result **cannot** be the picture the artist was looking at. The owner chose Photoshop's answer
-    /// over reproducing that picture: *"The merged layer is that one layer's colours, transformed."*
-    /// Gaps where paper or another drawing showed through change appearance, because the paper stops
-    /// being graded once the adjustment layer is gone, and that is accepted. The rejected alternative
-    /// — baking the paper and the stack below into the result — makes the merged layer opaque and
-    /// hides everything under it.
+    /// whole accumulator: the paper and every layer beneath. A merge or a bake reaches one layer, so
+    /// the result **cannot** be the picture the artist was looking at. The owner chose Photoshop's
+    /// answer over reproducing that picture: *"The merged layer is that one layer's colours,
+    /// transformed."* Gaps where paper or another drawing showed through change appearance, because
+    /// the paper stops being graded once the adjustment layer is gone, and that is accepted. The
+    /// rejected alternative — baking the paper and the stack below into the result — makes the layer
+    /// opaque and hides everything under it.
     ///
     /// So the backdrop here is `bottom` alone, on transparency. Which is also why an `.ink` effect
     /// needs no re-walk: EFFECT_BACKDROP.md §3's whole reason for one is that the accumulator holds
@@ -1382,20 +1384,21 @@ extension CoreGraphicsCompositor {
     /// under it exactly as it did. The mode being *baked* is the upper layer's, which is the one with
     /// nothing left to blend against once its layer is gone.
     ///
-    /// **A mask on either layer is not applied and not preserved**, which is unchanged from before
-    /// this function existed. `AlphaMask` names other layers by id and resolving one needs a whole
-    /// `RenderRequest`; `mergeLayers` says so at its own call site.
+    /// **A mask on either layer is not applied and not preserved.** `AlphaMask` names other layers by
+    /// id and resolving one needs a whole `RenderRequest`; `mergeLayers` says so at its own call
+    /// site, and Bake leaves a masked layer as it was.
     ///
     /// **CoreGraphics, deliberately, and there is no Metal twin to keep in step.** The GPU backend's
     /// whole surface is `MetalCompositor.composite(_:)`/`attempt(_:)` — both take a `RenderRequest`,
-    /// so a merge would have to invent a document to reach either. Its one genuinely equivalent path
-    /// is `MetalEffects.apply(_:to:width:height:)`, the grade over a byte buffer, and the road is not
+    /// so a merge or a bake would have to invent a document to reach either. Its one genuinely
+    /// equivalent path is `MetalEffects.apply(_:to:width:height:)`, the grade over a byte buffer, and
+    /// the road is not
     /// taken for the reason `EffectParityLogicTests` exists: the two implementations agree to within a
     /// byte rather than exactly, and this result is written into the artist's document rather than
     /// onto a frame that is redrawn. Two further reasons point the same way — `Compositor.composite`
     /// may answer nil when `CompositorBudget` declines, which is fine for a frame that retries and not
-    /// for a destructive one-shot; and the GPU's win is "every frame after the first", where a merge is
-    /// cold by definition. `MergeBakeLogicTests.testMergingIsUnaffectedByWhichBackendTheCanvasIsUsing`
+    /// for a destructive one-shot; and the GPU's win is "every frame after the first", where a merge or
+    /// a bake is cold by definition. `MergeBakeLogicTests.testMergingIsUnaffectedByWhichBackendTheCanvasIsUsing`
     /// holds this to it.
     static func mergedDown(bottom: MergeContribution, top: MergeContribution,
                            canvasSize: CGSize) -> UIImage {

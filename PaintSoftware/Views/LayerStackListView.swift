@@ -491,14 +491,12 @@ struct LayerStackListView: UIViewRepresentable {
                                               maxY: tableView.rectForRow(at: IndexPath(row: index, section: 0)).maxY,
                                               isFolder: rows[index].isFolder)
                 }
-                // Only two plain layers merge — folders would need their contents flattened first.
-                // A `.value` layer (§4.4's grade, §4.5's flat colour) is still a plain layer here and
-                // pinches like any other; it is not excluded. An earlier version of this fix did
-                // exclude it, on the reasoning that merging one discards a whole grade/colour — true
-                // then, no longer true now the merge bakes it, and the remedy was wrong either way:
-                // it made the pinch a silent no-op on a pair that looks perfectly mergeable, which is
-                // the exact "control that does nothing with no feedback" shape this owner has flagged
-                // repeatedly elsewhere.
+                // Only two plain layers pinch — folders would need their contents flattened first. A
+                // layer that holds no pixels (§4.4's grade, §4.5's flat colour, a transformation
+                // layer) is still a plain row here and pinches like any other: `requestMerge` turns the
+                // pinch into a Bake of it, or says why not, so the gesture is never a silent no-op on a
+                // pair that looks perfectly workable — the "control that does nothing with no feedback"
+                // shape this owner has flagged repeatedly elsewhere.
                 guard let picked = PinchMergeGate.pair(firstY: firstY, secondY: secondY, rows: layout) else { return }
                 pinchPair = (rows[picked.upper].id, rows[picked.lower].id)
                 // The same touch-down positions the pair was picked from, kept as the baseline the

@@ -174,17 +174,19 @@ extension CanvasManager {
     /// composition per element as `posed(_:through:)`, committed through `VectorCanvas.baking` so it
     /// survives a save, and every element under a fresh id whether the pose moved it or not.
     ///
-    /// **No `inheriting` parameter, and that is the scope §6 settles for now.** A bake consumes the
-    /// cel's *own* channels — what the bake then clears from the cel. A container pose above it (a
-    /// folder's, a transformation layer's) is not consumed and keeps posing the baked cels exactly as
-    /// it posed the animated one, so the picture at every frame is unchanged by the bake — and new
-    /// ink keeps landing where it is drawn, because every input surface reads that live pose
-    /// (`inkPose(forLayerID:)`). Baking the composed pose instead would have to lift the cel out
-    /// from under its container, which is a restructure this verb does not make.
+    /// **`inherited` is the part of a container pose the bake consumes, and Bake Animation passes
+    /// none.** That bake consumes the cel's *own* channels — what it then clears from the cel — and a
+    /// container pose above it (a folder's, a transformation layer's) is not consumed: it keeps posing
+    /// the baked cels exactly as it posed the animated one, so the picture at every frame is
+    /// unchanged by the bake, and new ink keeps landing where it is drawn, because every input surface
+    /// reads that live pose (`inkPose(forLayerID:)`). Baking a transformation layer *is* consuming
+    /// part of the container pose — its own share — and `CanvasManager.bakeLayer` hands exactly that
+    /// share in; composed after the cel's channels, as `posed` composes it.
     static func baked(_ elements: [VectorElement],
-                      through mappings: [(TransformChannelID, PoseMap)]) -> [VectorElement] {
+                      through mappings: [(TransformChannelID, PoseMap)],
+                      inheriting inherited: PoseMap? = nil) -> [VectorElement] {
         elements.map { element in
-            guard let composed = composedPose(of: element, through: mappings, inheriting: nil) else {
+            guard let composed = composedPose(of: element, through: mappings, inheriting: inherited) else {
                 return element.reidentified()
             }
             return (VectorCanvas.baking(element, through: composed) ?? element).reidentified()

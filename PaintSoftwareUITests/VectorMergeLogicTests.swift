@@ -758,31 +758,6 @@ final class VectorMergeLogicTests: XCTestCase {
                      "The recipe pointed at cels of the layer this merge just deleted — carrying it across would leave a frame deriving from nothing")
     }
 
-    /// **The frame a `.value` layer's grade is resolved at is the playhead's, for the cel the playhead
-    /// is on.** It is what keeps a one-cel merge byte-identical to what it was before the per-frame
-    /// loop existed — and the only thing in a merge that reads a frame at all.
-    func testAnAnimatedGradeIsBakedAtThePlayheadRatherThanAtTheCelStart() {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        CanvasFixture.setBakedContent(manager, layerIndex: 0,
-                                      CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
-        manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 0)))
-        manager.layers[1].effectTracks = ["hsvShift.hue": AnimationCurve(keys: [
-            .init(frame: 0, value: 0, interpolation: .linear),
-            .init(frame: 8, value: 120, interpolation: .linear)])]
-        manager.currentFrame = 8
-        guard let expected = compositedBytes(manager, atFrame: 8) else { return XCTFail("no composite at frame 8") }
-
-        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
-
-        guard let got = survivorBytes(manager, atFrame: 8) else { return XCTFail("no survivor pixels") }
-        let (worst, differing) = compare(got, expected)
-        XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
-                                 "the grade was baked at the wrong frame — worst channel \(worst) across \(differing) pixels")
-        // Red rotated 120° is green; red is the byte the frame-0 grade would have left.
-        XCTAssertEqual(Array(got[0..<4]), [0, 255, 0, 255],
-                       "Frame 8's grade is a third of a turn of hue, so the floor is exactly green")
-    }
-
     /// A merge across a whole timeline is still **one** undo step, and undo puts both timelines back.
     func testUndoingAMultiFrameMergeRestoresBothTimelines() {
         let manager = animatedPair(

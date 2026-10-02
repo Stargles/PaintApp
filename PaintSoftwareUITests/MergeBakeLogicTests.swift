@@ -1,30 +1,24 @@
 import XCTest
 import UIKit
 
-/// **What a merge bakes** — TODO (32), the owner's report that a value layer set to HSV merged down
-/// into a vector layer *"does nothing"*, and that *"this may be an issue other blend modes"*.
+/// **What a merge bakes** — the blend mode of the layer being merged in.
 ///
-/// It was both, from one cause. The merge composited `.normal` unconditionally, and read each layer's
-/// pixels out of its *cel* — which a `.value` layer's content is not, because §4.4's grade and §4.5's
-/// flat colour live on the `Layer` and the cel such a layer carries for the timeline's sake is blank.
-/// So a grade merged to nothing and a Screen layer merged to Normal's answer, and the two halves of
-/// the owner's report were one line apart. EFFECT_BACKDROP.md §2.3 is the ruling that settles what the
-/// merged layer should be instead.
+/// The merge used to composite `.normal` unconditionally, so a Screen layer merged down gave Normal's
+/// answer. It composites through `CoreGraphicsCompositor.draw` now — the one place a blend meets
+/// pixels — and these tests pin that. A layer that holds no pixels (an effect, a flat colour) is not
+/// merged but baked into every drawing beneath it, and `BakeLogicTests` is where that is pinned.
 ///
 /// **The owner's ruling is what these tests are pinned against, and it is not "the picture does not
-/// change".** EFFECT_BACKDROP.md §1 makes an adjustment layer grade, and a blend mode blend against,
-/// the whole accumulator — the paper and every layer beneath — so a merge that reaches one layer
-/// *cannot* reproduce what the artist was looking at. Asked which to have, the owner took Photoshop's
-/// answer: **the merged layer is that one layer's colours, transformed.** Gaps where the paper or
-/// another drawing showed through do change appearance, and that is accepted; the rejected
-/// alternative — baking the paper and the stack below in — makes the merged layer opaque and hides
-/// everything under it. `testAMergedGradeLeavesTheUpperLayersGapsTransparent` is that ruling's other
-/// half, and it is the assertion the rejected option would have broken.
+/// change".** EFFECT_BACKDROP.md §1 makes a blend mode blend against the whole accumulator — the paper
+/// and every layer beneath — so a merge that reaches one layer *cannot* reproduce what the artist was
+/// looking at. Asked which to have, the owner took Photoshop's answer: **the merged layer is that one
+/// layer's colours, transformed.** Gaps where the paper or another drawing showed through do change
+/// appearance, and that is accepted.
 ///
 /// **Three kinds of test here, and the third is the one that would survive a rewrite.**
 ///
-/// 1. The owner's two reported cases, in exact bytes, end to end through `CanvasManager.mergeLayers`.
-///    Red under an HSV Shift of +120° is green; red under a blue Screen layer is magenta.
+/// 1. The owner's reported case, in exact bytes, end to end through `CanvasManager.mergeLayers`: red
+///    under a blue Screen layer is magenta.
 /// 2. A handful of blend modes whose answer over these two colours is a number a reader can derive
 ///    from the W3C compositing formula without running the app.
 /// 3. **`testEveryBlendModeMergesToWhatTheCompositorMakesOfThePairAlone`** — the merged pixels
@@ -41,11 +35,6 @@ final class MergeBakeLogicTests: XCTestCase {
     private let side = Int(CanvasFixture.canvasSize.width)
     private let red = UIColor(red: 1, green: 0, blue: 0, alpha: 1)
     private let blue = UIColor(red: 0, green: 0, blue: 1, alpha: 1)
-
-    /// +120° of hue with saturation and value untouched — the owner's own setting. Pure red is
-    /// `h = 0, s = 1, v = 1`, so a third of a turn lands exactly on green, which is why this is the
-    /// grade a test can state in bytes.
-    private static let hueRotate = Effect.hsvShift(Effect.HSVShift(hueDegrees: 120))
 
     override func setUp() {
         super.setUp()
@@ -71,22 +60,18 @@ final class MergeBakeLogicTests: XCTestCase {
     /// The right three quarters.
     private var rightBias: CGRect { CGRect(x: CGFloat(side) * 0.25, y: 0, width: CGFloat(side) * 0.75, height: CGFloat(side)) }
 
-    /// A two-layer document: `bottom` painted into layer 0, `top` (when given) into layer 1.
+    /// A two-layer document: `bottom` painted into layer 0, `top` into layer 1.
     ///
     /// Flat rectangles rather than brush output, for `CompositorParityLogicTests`' reason — a failure
     /// reads as geometry or as arithmetic rather than as the brush engine's business.
-    private func pair(bottom: (UIColor, CGRect), top: (UIColor, CGRect)?,
-                      topEffect: Effect? = nil, topMode: BlendMode = .normal) -> CanvasManager {
+    private func pair(bottom: (UIColor, CGRect), top: (UIColor, CGRect),
+                      topMode: BlendMode = .normal) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(bottom.0, rect: bottom.1))
-        if let topEffect {
-            manager.addValueLayer(effect: topEffect)
-        } else if let top {
-            manager.addLayer()
-            CanvasFixture.setBakedContent(manager, layerIndex: 1,
-                                          CanvasFixture.solidImage(top.0, rect: top.1))
-        }
+        manager.addLayer()
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(top.0, rect: top.1))
         manager.layers[1].blendMode = topMode
         return manager
     }
@@ -95,8 +80,7 @@ final class MergeBakeLogicTests: XCTestCase {
     ///
     /// **Through `mergeLayers` rather than through `CoreGraphicsCompositor.mergedDown` directly**, so
     /// what is measured is the merge the artist performs — including the cel tier the result is
-    /// written into and read back out of, which is where the *previous* half of this defect lived
-    /// (a survivor left `.value` renders its cel nowhere at all).
+    /// written into and read back out of.
     private func mergedBytes(_ manager: CanvasManager) -> [UInt8]? {
         let survivorID = manager.layers[0].id
         XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id),
@@ -127,26 +111,10 @@ final class MergeBakeLogicTests: XCTestCase {
     private var bottomOnly: (Int, Int) { (side / 8, side / 2) }
     private var topOnly: (Int, Int) { (side * 7 / 8, side / 2) }
 
-    // MARK: - (1) The owner's two reported cases, in bytes
+    // MARK: - (1) The owner's reported case, in bytes
 
-    /// > *"a vector layer and a value layer above it set to HSV … The expected outcome is that the HSV
-    /// > gets baked into the vector layer (colors get transformed). Right now it does nothing."*
-    ///
-    /// Red is `h = 0`; +120° is a third of a turn; `ColorMath.hsbToRGB` at `h = 1/3, s = 1, v = 1`
-    /// returns `(p, v, t) = (0, 1, 0)`. So the merged floor is **exactly green**, and 255,0,0 — the
-    /// byte this returned before the fix — is the whole bug in one number.
-    func testRedUnderAnHSVShiftOfAHundredAndTwentyDegreesMergesToGreen() {
-        let manager = pair(bottom: (red, whole), top: nil, topEffect: Self.hueRotate)
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(pixel(bytes, side / 2, side / 2), [0, 255, 0, 255],
-                       "The grade is baked into the layer below: red rotated a third of a turn is green")
-    }
-
-    /// The other half of the same report: *"This may be an issue other blend modes."* Screen over an
-    /// opaque backdrop is `1 - (1 - cb)(1 - cs)`, so red under blue is magenta. 0,0,255 — Normal's
-    /// answer — is what this returned before the fix.
+    /// *"This may be an issue other blend modes."* Screen over an opaque backdrop is
+    /// `1 - (1 - cb)(1 - cs)`, so red under blue is magenta. 0,0,255 is Normal's answer.
     func testRedUnderABlueScreenLayerMergesToMagenta() {
         let manager = pair(bottom: (red, whole), top: (blue, whole), topMode: .screen)
 
@@ -156,25 +124,11 @@ final class MergeBakeLogicTests: XCTestCase {
                        "Screen, not Normal — 0,0,255 here is the upper layer's mode being ignored")
     }
 
-    // MARK: - (2) The ruling's other half: gaps stay gaps
+    // MARK: - (2) Gaps stay gaps
 
     /// **The assertion the rejected option would have broken.** Reproducing the picture exactly means
     /// baking the paper and the layers beneath into the result, which makes the merged layer opaque —
-    /// so this is the pin that says the owner's choice is the one implemented.
-    ///
-    /// The floor covers three quarters of the canvas and the grade covers all of it; the quarter the
-    /// floor never reached has to come out **transparent**, not paper-coloured and not black.
-    func testAMergedGradeLeavesTheUpperLayersGapsTransparent() {
-        let manager = pair(bottom: (red, leftBias), top: nil, topEffect: Self.hueRotate)
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(pixel(bytes, bottomOnly.0, bottomOnly.1), [0, 255, 0, 255], "Where there was ink, the grade")
-        XCTAssertEqual(pixel(bytes, topOnly.0, topOnly.1), [0, 0, 0, 0],
-                       "Where there was none, nothing — a merge that baked the paper in would be opaque here")
-    }
-
-    /// The same claim for a blend rather than a grade, and one region further: where *neither* layer
+    /// so this is the pin that says the owner's choice is the one implemented: where *neither* layer
     /// drew, the merged layer is still empty.
     func testAMergedBlendLeavesTheRegionNeitherLayerDrewInTransparent() {
         let narrow = CGRect(x: 0, y: 0, width: CGFloat(side) / 4, height: CGFloat(side))
@@ -239,8 +193,8 @@ final class MergeBakeLogicTests: XCTestCase {
     /// (`BlendMode.clipToBelow`'s own note says so): the tree resolves it into `.normal` plus an
     /// `AlphaMask` naming the entry below, and a mask goes through `MaskResolver`'s threshold and
     /// smoothstep, which needs a whole `RenderRequest` a merge does not build. So a merge bakes the
-    /// `.normal` and drops the mask, unchanged from before this fix and stated in `mergedDown`'s doc
-    /// beside the same omission for a declared mask.
+    /// `.normal` and drops the mask, stated in `mergedDown`'s doc beside the same omission for a
+    /// declared mask.
     ///
     /// The two rectangles overlap across the middle half, so every mode is exercised over a backdrop
     /// that is opaque in one region, transparent in another and absent in a third — a fixture where
@@ -257,159 +211,6 @@ final class MergeBakeLogicTests: XCTestCase {
             }
             assertBytesEqual(merged, expected, mode.displayName)
         }
-    }
-
-    /// The same sweep for the other kind of upper layer: a `.value` layer grading rather than
-    /// blending, over every grade that is a single pass with no neighbourhood in it.
-    ///
-    /// A grade's own mode is deliberately not varied — `RenderTree.renderNodes` pins a leaf in effect
-    /// mode to `.normal` whatever it stores, because a grade replaces the pixels it graded and there
-    /// are not two things to compose, and `MergeContribution.grade` carries no mode for that reason.
-    func testEveryGradeMergesToWhatTheCompositorMakesOfThePairAlone() {
-        let grades: [Effect] = [
-            Self.hueRotate,
-            .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)),
-            .hsvShift(Effect.HSVShift(hueDegrees: -40, saturation: 0.3, value: 1.4)),
-            .posterize(Effect.Posterize(levels: 3)),
-            // TODO (60): the owner's own ask — *"works with the merge layer under it like the HSV to
-            // bake them"*. Red → blue with a tolerance wide enough to take the whole red rectangle.
-            .recolor(Effect.Recolor(entries: [
-                RecolorEntry(from: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
-                             to: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
-                             tolerance: 0.2, softness: 0.5),
-            ])),
-            // TODO (63): the owner's *"the same pinch to merge into ability for these like the HSV
-            // so I can bake them to the actual colors"*. Red is Oklab `L` ≈ 0.63 — a midtone with a
-            // little Highlights weight — so a Midtones push toward green with a Global lift reaches
-            // it through two wheels, and the row goes red if either is left out of the bake.
-            .colorWheels(Effect.ColorWheels(
-                midtones: Effect.ColorWheels.Wheel(hue: 142, saturation: 0.8, luminance: 0.1),
-                global: Effect.ColorWheels.Wheel(hue: 30, saturation: 0.3, luminance: 0.15, strength: 0.7))),
-            // TODO (63)'s other half: Glare is not a grade — it reshapes coverage and reads `.ink` —
-            // and the merge still reaches it through the same `EffectReference.apply`. On a pair
-            // composited onto transparency the ink and the backdrop are the same buffer, so the merge
-            // and the composite agree here too; a threshold low enough that red (Lum 0.3) glows.
-            .glare(Effect.Glare(type: .streaks, threshold: 0.2, intensity: 1, streaks: 2, length: 12)),
-            // TODO (74): a gather that reads `.ink`, like Glare, reached through the same seam —
-            // a threshold low enough that the red rectangle's own brightness weights its samples.
-            .lensBlur(Effect.LensBlur(radius: 4, blades: 6, threshold: 0.2, boost: 3)),
-            // TODO (88): a grade of position, reached through the same seam; a grid dense enough
-            // to cross the red rectangle.
-            .guide(Effect.Guide(spacing: 8, lineWidth: 1, opacity: 0.7)),
-        ]
-
-        for grade in grades {
-            let manager = pair(bottom: (red, leftBias), top: nil, topEffect: grade)
-            guard let expected = compositedBytes(manager) else {
-                return XCTFail("Fixture must composite for \(grade.displayName)")
-            }
-            guard let merged = mergedBytes(manager) else {
-                return XCTFail("Merge must produce pixels for \(grade.displayName)")
-            }
-            assertBytesEqual(merged, expected, grade.displayName)
-        }
-    }
-
-    // MARK: - What the merge must *not* reach
-
-    /// **The owner's ruling, stated as an independence.** A merge reaches the two layers and nothing
-    /// else, so a third layer beneath the pair cannot change a single byte of the result — which is
-    /// exactly what makes the merged picture differ from the canvas, and is accepted.
-    ///
-    /// The paper needs no test of its own: `CoreGraphicsCompositor.mergedDown` has no background
-    /// parameter to pass one through, and `testAMergedGradeLeavesTheUpperLayersGapsTransparent` is
-    /// the observable consequence.
-    func testALayerBeneathThePairChangesNothingAboutTheMergedResult() {
-        let alone = pair(bottom: (red, leftBias), top: nil, topEffect: Self.hueRotate)
-        guard let withoutFloor = mergedBytes(alone) else { return XCTFail("Merge must produce pixels") }
-
-        let stacked = CanvasFixture.manager(layerCount: 1)
-        CanvasFixture.setBakedContent(stacked, layerIndex: 0, CanvasFixture.solidImage(blue, rect: whole))
-        stacked.addLayer()
-        CanvasFixture.setBakedContent(stacked, layerIndex: 1, CanvasFixture.solidImage(red, rect: leftBias))
-        stacked.addValueLayer(effect: Self.hueRotate)
-        let floorID = stacked.layers[0].id
-        let survivorID = stacked.layers[1].id
-
-        XCTAssertTrue(stacked.mergeLayers(stacked.layers[1].id, stacked.layers[2].id))
-        guard let survivor = stacked.layers.firstIndex(where: { $0.id == survivorID }),
-              let cel = stacked.layers[survivor].cels.first,
-              let image = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize).cgImage,
-              let withFloor = CanvasFixture.rgbaBytes(image)
-        else { return XCTFail("Merge must produce pixels") }
-
-        assertBytesEqual(withFloor, withoutFloor, "a blue floor beneath the merged pair")
-        XCTAssertEqual(stacked.layers.first?.id, floorID, "…and the floor itself is still a layer of its own")
-    }
-
-    // MARK: - Both kinds of value layer, in both positions
-
-    /// §4.5's flat colour is the other mode of the same kind, and it merged to nothing for the same
-    /// reason the grade did: its content is `Layer.fill`, not its cel.
-    ///
-    /// Mid-grey at full alpha is `addValueLayer`'s default, so this is what an artist gets by adding
-    /// a value layer and merging it down without touching anything.
-    func testAFlatColourValueLayerMergesAsItsColourRatherThanAsNothing() {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: whole))
-        manager.addValueLayer()
-        XCTAssertNotNil(manager.layers[1].valueFill, "Setup: the upper layer is in flat-colour mode")
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(pixel(bytes, side / 2, side / 2), [128, 128, 128, 255],
-                       "The sheet of colour is composited over the floor — 255,0,0 is the floor with the colour lost")
-    }
-
-    /// **The other half of the same defect, from the other side of the pair.** `rasterizeLayer` only
-    /// converts `.vector`, so a `.value` layer in the *lower* position kept its kind through a merge —
-    /// and `leafSnapshots` elides a value layer's cel, so the pixels the merge had just baked into it
-    /// rendered nowhere. The survivor comes out `.raster` now, and the three payloads go with the
-    /// kind so nothing can resurrect them.
-    func testAValueLayerInTheLowerPositionSurvivesAsARasterLayerHoldingTheMergedPixels() {
-        let manager = CanvasFixture.manager()
-        manager.layers.removeAll()
-        manager.addValueLayer(name: "Floor")           // flat mid-grey, the lower layer
-        manager.addLayer(name: "Ink")
-        CanvasFixture.setBakedContent(manager, layerIndex: 1,
-                                      CanvasFixture.solidImage(red, rect: leftBias))
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(manager.layers.count, 1)
-        XCTAssertEqual(manager.layers[0].kind, .raster, "A `.value` survivor renders no cel at all")
-        XCTAssertNil(manager.layers[0].fill, "…and the payload goes with the kind")
-        XCTAssertEqual(pixel(bytes, bottomOnly.0, bottomOnly.1), [255, 0, 0, 255], "Ink over the grey sheet")
-        XCTAssertEqual(pixel(bytes, topOnly.0, topOnly.1), [128, 128, 128, 255],
-                       "…and the sheet itself where the ink did not reach — which a discarded lower fill would lose")
-    }
-
-    // MARK: - Opacity
-
-    /// A grade's opacity is an **amount**, not coverage — `mixBack`'s crossfade — so half of the
-    /// hue rotation is the midpoint between red and green rather than a half-transparent green.
-    ///
-    /// 255 → 0 and 0 → 255, each half way, is 128 on both channels: `.toNearestOrEven` takes 127.5 up.
-    func testTheUpperLayersOpacityCrossfadesTheGradeItBakes() {
-        let manager = pair(bottom: (red, whole), top: nil, topEffect: Self.hueRotate)
-        manager.layers[1].opacity = 0.5
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(pixel(bytes, side / 2, side / 2), [128, 128, 0, 255],
-                       "Half way from red to green, still fully opaque")
-    }
-
-    /// A hidden upper layer contributes nothing, which is what hiding it means and what the old
-    /// `isVisible ? opacity : 0` ternary said. Worth pinning because the visibility test moved into
-    /// `mergeContribution`, where a `.value` layer now reaches it too.
-    func testAHiddenUpperGradeContributesNothingToTheMerge() {
-        let manager = pair(bottom: (red, whole), top: nil, topEffect: Self.hueRotate)
-        manager.layers[1].isVisible = false
-
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
-
-        XCTAssertEqual(pixel(bytes, side / 2, side / 2), [255, 0, 0, 255], "The floor, ungraded")
     }
 
     // MARK: - Which backend

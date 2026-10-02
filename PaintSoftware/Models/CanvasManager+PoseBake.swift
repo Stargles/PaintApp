@@ -37,15 +37,6 @@ extension CanvasManager {
         }
     }
 
-    /// **One run of frames over which the animation shows one picture** — the unit a bake writes a
-    /// cel for. `localStart` and `length` are cel-local; `mappings` is what `poseMappings` resolved
-    /// at every frame of the run, identical across it by construction.
-    struct PoseBakeSegment {
-        var localStart: Int
-        var length: Int
-        var mappings: [(TransformChannelID, PoseMap)]
-    }
-
     /// **Where the bake cuts, resolved on the cel as it stands.** §2.10 says a channel holds its
     /// evaluated pose for `step` frames, and §6 says a bake must honour that — *"a cel animated on
     /// twos bakes to 24 cels, not 48"*. Rather than reading `step` off each track and intersecting
@@ -66,27 +57,13 @@ extension CanvasManager {
     /// enough. Every segment's maps come from the uncut track.
     ///
     /// `frameCount` is the span in frames; `tracks` the cel's own channels. Empty for a cel with no
-    /// span.
+    /// span. Every segment carries a treatment — Bake Animation consumes the whole cel — so this is
+    /// `bakeSegments` over the poses a frame resolves to, written as the optional it takes.
     static func poseBakeSegments(tracks: [String: TransformTrack],
-                                 frameCount: Int) -> [PoseBakeSegment] {
-        guard frameCount > 0 else { return [] }
-        var segments: [PoseBakeSegment] = []
-        for local in 0..<frameCount {
-            let mappings = poseMappings(tracks, atCelLocalFrame: local)
-            if let last = segments.last, Self.sameMappings(last.mappings, mappings) {
-                segments[segments.count - 1].length += 1
-            } else {
-                segments.append(PoseBakeSegment(localStart: local, length: 1, mappings: mappings))
-            }
+                                 frameCount: Int) -> [BakeSegment<BakeTreatment?>] {
+        bakeSegments(frameCount: frameCount) { local in
+            .pose(PoseRun(mappings: poseMappings(tracks, atCelLocalFrame: local), inherited: nil))
         }
-        return segments
-    }
-
-    private static func sameMappings(_ a: [(TransformChannelID, PoseMap)],
-                                     _ b: [(TransformChannelID, PoseMap)]) -> Bool {
-        guard a.count == b.count else { return false }
-        for (x, y) in zip(a, b) where x.0 != y.0 || x.1 != y.1 { return false }
-        return true
     }
 
     /// Whether the cel menu offers Bake on this block: the cel carries a pose channel. Interpolated
@@ -124,13 +101,12 @@ extension CanvasManager {
     /// other field, the group tags included: the artist's grouping outlives the motion it was made
     /// for, so a later Move on a baked cel finds the group it expects.
     ///
-    /// **One undo step, `bakeVideoToCels`'s bracket for `bakeVideoToCels`'s reason.** `splitCel`
-    /// never copies the *left* half's canvas, so the first baked cel keeps mutating the very
-    /// `VectorCanvas` the block had; a `[Layer]` snapshot restores a cel that still points at that
-    /// object, now holding baked ink. `withInterpolationUndo(touching:)` snapshots and restores its
-    /// `elements` explicitly. Every other baked cel's canvas was minted after the snapshot and is
-    /// dropped by restoring the array. The nested `withStructureUndo` in each `splitCel` is a no-op
-    /// bracket while this one is open, which is the re-entrancy §6 says to rely on deliberately.
+    /// **One undo step, and every baked cel gets a canvas of its own.** `splitCel` never copies the
+    /// *left* half's canvas, so rewriting a display list in place would leave the structure snapshot
+    /// restoring a cel that still points at the baked ink. `bakeCel` writes a brand-new `VectorCanvas`
+    /// into each baked cel instead — the way Bake does — so the one snapshot of `layers` is enough, and
+    /// the nested `withStructureUndo` in each `splitCel` is a no-op bracket while this one is open,
+    /// which is the re-entrancy §6 says to rely on deliberately.
     ///
     /// **The channels go with the motion.** `transformTracks` and `pendingPoseBaselines` are cleared
     /// on every baked cel: the bake replaced the derivation with the thing it derived, and a live rig
@@ -166,28 +142,8 @@ extension CanvasManager {
         let segments = Self.poseBakeSegments(tracks: cel.transformTracks, frameCount: cel.frameCount)
         guard !segments.isEmpty else { return .refused(.notAnimated) }
 
-        withInterpolationUndo(label: .bakePoseToCels, touching: [vector]) {
-            // Cut the block at each segment boundary, left to right. Each nested `withStructureUndo`
-            // is a no-op bracket, because this one is already open.
-            for segment in segments.dropFirst() {
-                let cut = startFrame + segment.localStart
-                guard let idx = activeCelIndex(inLayer: layerIndex, atFrame: cut - 1) else { continue }
-                splitCel(layerIndex: layerIndex, celIndex: idx, atFrame: cut)
-            }
-
-            // Every cel now spans exactly one segment. Write each one's picture and take its
-            // channels away.
-            for segment in segments {
-                let frame = startFrame + segment.localStart
-                guard let idx = activeCelIndex(inLayer: layerIndex, atFrame: frame),
-                      let bakedVector = layers[layerIndex].cels[idx].vector else { continue }
-                let bakedCel = layers[layerIndex].cels[idx]
-                bakedVector.elements = Self.baked(bakedVector.elements, through: segment.mappings)
-                bakedVector.bumpVersion()
-                layers[layerIndex].cels[idx].transformTracks = [:]
-                layers[layerIndex].cels[idx].pendingPoseBaselines = [:]
-                celContentChangedOutsideStroke(layerID: layerID, celID: bakedCel.id)
-            }
+        withStructureUndo(label: .bakePoseToCels) {
+            bakeCel(layerID: layerID, celID: cel.id, segments: segments, canvasSize: vector.size)
         }
 
         return .baked(cels: segments.count)
@@ -221,8 +177,12 @@ extension CanvasManager {
     /// **The sentence's cost clause, computed from the count** — never a typed number. `added` is
     /// how many cels the bake makes beyond the one it replaces; `perCel` is the measured rate.
     static func saveCostPhrase(addedCels added: Int, millisecondsPerCel perCel: Double) -> String {
-        let ms = Double(added) * perCel
-        return ms >= 1000
+        saveCostPhrase(milliseconds: Double(added) * perCel)
+    }
+
+    /// The same sentence for a cost already summed — Bake adds both kinds of cel at once.
+    static func saveCostPhrase(milliseconds ms: Double) -> String {
+        ms >= 1000
             ? String(format: "about %.1f s", ms / 1000)
             : "about \(Int(ms.rounded())) ms"
     }

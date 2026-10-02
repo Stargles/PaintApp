@@ -224,6 +224,37 @@ enum Effect: Equatable {
         }
     }
 
+    /// **How Bake carries this effect into the drawings beneath it** — TODO (131).
+    enum BakeRoute: Equatable {
+        /// One colour in, one colour out, wherever it sits: the effect is a function of the colour of
+        /// the pixel and nothing else, so it can be applied to the colour of each stroke, fill and
+        /// piece of text, and the drawing stays a drawing.
+        case colour
+        /// The result depends on where the pixel is or on its neighbours, so no per-object colour
+        /// stands for it: the layer's pixels are graded, and a vector layer becomes a raster layer.
+        case pixels
+    }
+
+    /// **The route Bake takes for this effect.** Exhaustive with no `default:`, for `input`'s reason:
+    /// an effect added later must be forced to say whether it is a function of colour alone.
+    ///
+    /// `.pixels` is the eight effects that `reshapesCoverage` names — which have to, a blur has no
+    /// colour — **and five more that do not reshape coverage but still cannot be a colour**: Noise,
+    /// Guide and a dithered or halftoned Posterize are functions of the pixel's *position*, Chromatic
+    /// Aberration fringes by *neighbour*, and Duplicate Offset paints a copy of the drawing slid
+    /// sideways. Only a flat Posterize quantises colour alone.
+    var bakeRoute: BakeRoute {
+        switch self {
+        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .recolor, .colorWheels:
+            return .colour
+        case .posterize(let posterize):
+            return posterize.screen == .none ? .colour : .pixels
+        case .blur, .bloom, .sobel, .sharpen, .outline, .crtScreen, .glare, .lensBlur,
+             .chromaticAberration, .noise, .guide, .duplicateOffset:
+            return .pixels
+        }
+    }
+
     /// **Which image an effect is handed** — EFFECT_BACKDROP.md §4.
     ///
     /// Until 2026-08-27 there was only one answer and so no property: the live canvas painted the

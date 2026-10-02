@@ -804,7 +804,7 @@ struct DrawingView: View {
              .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
              .mergedAsPixels, .fillNeedsMoreMemory, .outOfMemoryToDraw, .videoBakeRefused, .streamBakeRefused,
-             .poseBakeRefused,
+             .poseBakeRefused, .bakeRefused, .bakedWithLeftovers, .mergeNeedsADrawingBelow,
              .recordingRefused,
              .recordingArmed, .animationGroupMembershipChanged, .animationGroupEditRefused,
              .keyframesCropped, .moveOutsideTransformBlock, .effectBoxOutsideBlock:

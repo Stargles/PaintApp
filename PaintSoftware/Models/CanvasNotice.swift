@@ -218,6 +218,20 @@ struct CanvasNotice: Identifiable, Equatable {
         /// cel with channels and no vector tier, which nothing in the app writes today.
         case poseBakeRefused(CanvasManager.PoseBakeRefusal)
 
+        /// TODO (131): Bake on an effect, flat-colour or transformation layer refused — the layer is
+        /// kept, and the sentence says why in the artist's own terms.
+        case bakeRefused(CanvasManager.BakeRefusal)
+
+        /// **A bake ran and left some of what was beneath it exactly as it was** — TODO (131), the
+        /// owner's *"left as it was, the rest bakes, and a notice says so."* The layer that carried
+        /// the effect is gone, so a drawing that did not take it will no longer match the rest, and
+        /// the artist is told which and why rather than finding out by eye.
+        case bakedWithLeftovers([CanvasManager.BakeLeftover])
+
+        /// Merge Down on a drawing laid onto a layer that holds no pixels — nothing to merge into. The
+        /// row is hidden there; this is the pinch's answer, which would otherwise do nothing silently.
+        case mergeNeedsADrawingBelow
+
         /// A live take could not start, or ended having caught nothing — KEYFRAMES.md §5, stage 7.
         ///
         /// **The refused-with-nothing case is why this exists at all.** A recorder that runs for
@@ -376,6 +390,11 @@ struct CanvasNotice: Identifiable, Equatable {
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
+        case .bakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
+        case .bakedWithLeftovers(let leftovers):
+            let named = leftovers.map { "\($0.name) (\($0.reason.phrase))" }.joined(separator: ", ")
+            return "Baked. Left as they were: \(named)."
+        case .mergeNeedsADrawingBelow: return "Can't merge into this layer — it holds no drawing."
         case .recordingRefused(let refusal): return refusal.message
         // **The canvas is named first and the slider second** — KEYFRAMES.md §7, stage 10. The order
         // is the ranking an artist reads as "the usual thing": drawing the timing is what the
@@ -498,6 +517,10 @@ struct CanvasNotice: Identifiable, Equatable {
         case .streamBakeRefused: return nil
         // Nor this one, for the same reason: neither of its cases names a thing a button could do.
         case .poseBakeRefused: return nil
+        // Nor these three. A refusal names a state of the layer, not a tap; the leftover list reports
+        // what already happened (undo is on the top toolbar); and a drawing laid onto a layer with no
+        // drawing has no other layer to be offered.
+        case .bakeRefused, .bakedWithLeftovers, .mergeNeedsADrawingBelow: return nil
         // Nor this one, and each of its six cases fails the button test for its own reason. Two
         // name a thing to do *while recording* — open a layer's effect settings, move the slider —
         // which is not an action after the fact; one says the take was too short, whose fix is to
@@ -553,6 +576,9 @@ struct CanvasNotice: Identifiable, Equatable {
         case .videoBakeRefused: return "videoBakeRefused"
         case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"
+        case .bakeRefused: return "bakeRefused"
+        case .bakedWithLeftovers: return "bakedWithLeftovers"
+        case .mergeNeedsADrawingBelow: return "mergeNeedsADrawingBelow"
         // One code for all four, matching `videoBakeRefused`'s precedent: a test asserting a take was
         // refused reads this, and a test that cares *which* refusal reads `RecordingRefusal` off the
         // model, where the fast tier can compare the case itself rather than a string.

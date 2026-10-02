@@ -75,6 +75,21 @@ struct LayerPanel: View {
             // being discarded outright.
             Text(pending.lossKind.confirmationMessage)
         }
+        // Bake's own prompt (`CanvasManager.pendingBake`) — raised only when the bake would turn a layer
+        // into pixels or add drawings, and worded from the plan so it says exactly what a tap will do.
+        .alert(canvasManager.pendingBake?.title ?? "Bake?",
+               isPresented: Binding(
+                   get: { canvasManager.pendingBake != nil },
+                   set: { isPresented in if !isPresented { canvasManager.cancelPendingBake() } }
+               ),
+               presenting: canvasManager.pendingBake) { _ in
+            Button("Cancel", role: .cancel) { canvasManager.cancelPendingBake() }
+                .accessibilityIdentifier("layerPanel.bakeConfirm.cancel")
+            Button("Bake") { canvasManager.confirmPendingBake() }
+                .accessibilityIdentifier("layerPanel.bakeConfirm.bake")
+        } message: { pending in
+            Text(pending.message)
+        }
     }
 
     // MARK: - Header
@@ -440,7 +455,14 @@ struct LayerOptionsPanel: View {
         optionsAction("Duplicate", systemImage: "plus.square.on.square", identifier: "layerOptions.duplicate") {
             leavingMaskEdit { canvasManager.duplicateLayer(at: index) }
         }
-        if let target = mergeTargetIndex {
+        // **A layer that holds no pixels is baked, not merged** — TODO (131). An effect, a flat colour
+        // or a transformation layer acts on every drawing beneath it in its group, so one verb carries
+        // it into all of them and removes it; Merge Down is for a drawing onto the drawing below it.
+        if canvasManager.layers[index].kind.bakesIntoLayersBelow {
+            optionsAction("Bake", systemImage: "arrow.down.to.line", identifier: "layerOptions.bake") {
+                leavingMaskEdit { canvasManager.requestBake(layerID: canvasManager.layers[index].id) }
+            }
+        } else if let target = mergeTargetIndex, canvasManager.layers[target].kind.holdsPixels {
             optionsAction("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
                 leavingMaskEdit {
                     // `requestMerge`, not `mergeLayers`: the pinch has always asked before a lossy

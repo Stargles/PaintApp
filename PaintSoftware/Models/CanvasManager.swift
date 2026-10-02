@@ -2022,6 +2022,12 @@ final class CanvasManager: ObservableObject {
     /// pair today.
     @Published var pendingMergeConfirmation: PendingMergeConfirmation?
 
+    /// A Bake the layer panel is holding for the artist's yes — set when the plan would turn a vector
+    /// layer into pixels or add drawings (`BakePlan.needsConfirmation`), and driven into an `.alert` for
+    /// `pendingMergeConfirmation`'s reason: it has to pause the bake until answered, which a banner
+    /// cannot do. `confirmPendingBake` and `cancelPendingBake` answer it.
+    @Published var pendingBake: PendingBake?
+
     struct PendingMergeConfirmation: Identifiable, Equatable {
         let id = UUID()
         let firstID: UUID
@@ -2029,27 +2035,22 @@ final class CanvasManager: ObservableObject {
         let lossKind: MergeLossKind
     }
 
-    /// What a pinch-merge would lose, as answered by `mergeLossKind`.
+    /// What a merge would lose, as answered by `mergeLossKind`.
     ///
-    /// **Neither of the two cases this enum shipped with is here, because EFFECT_BACKDROP.md §2.3's
-    /// ruling took both away.** A blend mode and a `.value` layer's grade or colour are baked into the
-    /// merged result now (`CoreGraphicsCompositor.mergedDown`), so neither is a loss to warn about.
-    /// What is left is the reading `mergeContribution` answers `.nothing` for, and the clip on the
-    /// upper layer that `mergeContribution` has always dropped in as many words without anything
-    /// telling the artist.
+    /// Neither a blend mode nor a flat colour is a loss: a blend is baked into the merged result
+    /// (`CoreGraphicsCompositor.mergedDown`), and a layer that holds no pixels is not merged at all
+    /// but baked (`bakeLayer`). What is left is the reading `mergeContribution` answers `.nothing`
+    /// for, and the clip on the upper layer that it has always dropped in as many words without
+    /// anything telling the artist.
     ///
-    /// A confirmation rather than a silent refusal, which is the part of the earlier design that
-    /// survives: refusing the gesture on a pair that looks mergeable is the same "control that does
-    /// nothing" shape the owner has flagged elsewhere.
+    /// A confirmation rather than a silent refusal: refusing the gesture on a pair that looks
+    /// mergeable is the same "control that does nothing" shape the owner has flagged elsewhere.
     enum MergeLossKind: Equatable {
-        /// A layer with no pixels of its own whose contribution a pixel bake cannot express: §4.4's
-        /// grade in the **lower** position, whose backdrop is everything beneath the pair and so
-        /// outside the merge; or a transformation layer in either position, whose contribution is a
-        /// pose on the layers beneath rather than anything to composite.
-        ///
-        /// A grade in the *upper* position is deliberately not here: that is the owner's own reported
-        /// case, and it is baked.
-        case unbakeableLayer
+        /// **The lower layer grades the layers beneath it through its own ink, and the merge cannot
+        /// carry that** — TODO (92). Its grade acts on everything beneath the pair, which is outside
+        /// the merge, so it reaches the result as nothing. A grade in the *upper* position is not
+        /// here: that one is baked through its ink.
+        case gradeInLowerPosition
 
         /// **The upper layer is clipped, and the merge cannot carry the clip** — an `AlphaMask`, or
         /// `.clipToBelow`, on the layer being consumed.
@@ -2072,8 +2073,8 @@ final class CanvasManager: ObservableObject {
         /// it belongs to, one place, rather than duplicated at every presenting call site.
         var confirmationMessage: String {
             switch self {
-            case .unbakeableLayer:
-                return "One of these layers has no pixels of its own — an adjustment layer whose effect is on the layers underneath the pair, or a transformation layer. Merging cannot bake that in, so it will be discarded."
+            case .gradeInLowerPosition:
+                return "The lower layer applies an effect through its own drawing to the layers underneath the pair. Merging cannot bake that in, so it will be discarded."
             case .clipDropped:
                 return "The upper layer is clipped — by an alpha mask, or to the layer below it. Merging cannot keep that, so the clip is discarded and its drawing will show everywhere it was drawn."
             }

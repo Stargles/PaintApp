@@ -116,6 +116,11 @@ struct CanvasNoticeBanner: View {
         case .videoBakeRefused: return "exclamationmark.triangle"
         // And a fifth of the same shape: Bake on an animated block, refused.
         case .poseBakeRefused: return "exclamationmark.triangle"
+        // A sixth: Bake on an effect, colour or transformation layer, refused.
+        case .bakeRefused, .mergeNeedsADrawingBelow: return "exclamationmark.triangle"
+        // Not a warning: the bake ran. The glyph is Bake's own, because the sentence is about what the
+        // bake did not reach.
+        case .bakedWithLeftovers: return "arrow.down.to.line"
         // Not a warning: nothing went wrong, the laptop simply has not sent a picture yet. The
         // screen glyph, which is what the artist is waiting on.
         case .streamBakeRefused: return "display"

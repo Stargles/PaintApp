@@ -62,6 +62,17 @@ extension LayerKind {
         }
     }
 
+    /// Whether a layer of this kind acts on the layers beneath it rather than being drawn — an effect
+    /// or a flat colour blended into them, a pose carried onto them — and so is **baked into them**
+    /// (TODO (131)) where a drawing layer is merged. Today it is the pixel-less kinds, and a `switch`
+    /// for `holdsPixels`' reason: the next kind has to say which verb is its own.
+    var bakesIntoLayersBelow: Bool {
+        switch self {
+        case .value, .transform: return true
+        case .raster, .vector: return false
+        }
+    }
+
     /// The word a new layer of this kind is named with, before the number — `Layer 3`, `Raster 1`.
     ///
     /// **The vector kind takes the plain word and the pixel kind says what it is** — TODO (142), the

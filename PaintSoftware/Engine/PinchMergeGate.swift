@@ -24,8 +24,9 @@ import CoreGraphics
 struct PinchMergeGate {
     /// One row's vertical extent in the table's own coordinate space, and whether it may take part in
     /// a merge at all — folders can't (they'd need their contents flattened first; see
-    /// `LayerStackListView.Coordinator.handlePinch`'s own comment on why a `.value` layer is *not*
-    /// excluded here despite being lossy, which stays that caller's call, not this gate's).
+    /// `LayerStackListView.Coordinator.handlePinch`'s own comment on why a layer that holds no pixels
+    /// is *not* excluded here — it pinches into a Bake — which stays that caller's call, not this
+    /// gate's).
     struct RowLayout: Equatable {
         var minY: CGFloat
         var maxY: CGFloat
