@@ -78,26 +78,6 @@ smart shape for the gradient."*
       sizes (gradient: drag sets direction and length; the rail shows a width slider in % of canvas).
 - [ ] Reuses the smart-shape drag geometry rather than a second copy.
 
-## (112) The stream says "paused" and stops updating until the artist draws
-
-**Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to
-update until I draw something on the canvas. It says stream paused. I wonder where that message even
-comes from, because it is separate to it being frozen manually through the freeze button. I'm not even
-sure why it exists at all. There could be a lot of other bugs with it not updating when it is supposed
-to, so an investigate. I will just explain the ideal behaviour: The streamer should update when the
-computer screen is changed. Whatever is shown on the computer screen should be on the ipad when the
-streamer is not frozen manually. There could be a lot of edge cases with this such as the streaming
-layer being hidden and then shown again, etc."*
-
-**Folds in (101)'s last check** — (101)'s reconnect loop and LAN discovery are fixed and
-owner-confirmed (`4b0da3c`, 2026-09-25: *"LAN works"*); what was left was the owner's word that a stream
-stays Live instead of reading "Paused", and this report is that word.
-
-- [ ] Every source of a "Paused" state found and named; any not owed to the manual Freeze removed or
-      made self-healing.
-- [ ] The stream redraws on every laptop frame while visible and unfrozen — hide/show, layer switch,
-      background/foreground, laptop lock/unlock — tested against `tools/stream/fake-streamer.py`.
-
 ## (139) Keys, not keyframes — every channel component independent
 
 **Status** — ruled, not started. *"An update has to be done to the graph editor and key
