@@ -77,7 +77,7 @@ Sonnet lanes — (119) (120) (146), (134) (135), (122) (123), (126) (127) (133),
 an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
 Fill Mend's reach stays twice Gap Closing; the editor keeps shrinking above the keyboard while typing.
 
-**Owner-side, unchanged**: (27) stage 5 and BUGS.md's palette-row question.
+**Owner-side, unchanged**: (27) stage 5 (the blend-mode limitation is ruled: keep it).
 
 ## What shipped this session
 

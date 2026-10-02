@@ -115,6 +115,18 @@ belonged in)."* Also ruled: **Recolour's "to" eyedropper follows the same Layer/
       layer is selected; the `nothingToPickOnLayer` miss only where no layer has content.
 - [ ] Recolour's "to" pick honours the switch.
 
+## The colour panel grows downward: Recent and the whole palette in view
+
+**Status** — not started. Answers BUGS.md's palette-row question (since (106) the panel showed one
+palette row above the fold). The owner, 2026-10-01: *"the color picker should be extended downwards. I
+want both the recent and color palette to be fully shown in horizontal mode. Seems you have alot of room
+to extend it downwards too. The position of the switch also should not take up much space. I think a good
+place to fit it can be on the top right, the same row as the previous/current color indicator."* — the
+switch is (119)'s Layer/Canvas eyedropper switch.
+
+- [ ] The panel is taller, so the Recent strip and the selected palette show whole without scrolling in
+      landscape; the eyedropper switch sits compactly on the previous/current colour row, top right.
+
 ## (112) The stream says "paused" and stops updating until the artist draws
 
 **Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to
@@ -284,8 +296,9 @@ device figure §5.3 asks for.
 - [ ] The redraw tick's cost MEASURED on the iPad (STREAM.md §8 names the outlet: the
       `ScreenStream` log line or the bar's `streamBar.tickSummary` marker).
 - [ ] Owner-verified: Ctrl+V of a bitmap into the drop box (not exercisable over SSH).
-- [ ] Known limitation to rule on: a stream layer under a blend mode or effect is not live (46–73 ms
-      a tick); the bar says so. Opacity is fine.
+
+**Ruled 2026-10-01: keep the limitation** — a stream layer under a blend mode or effect is not live
+(46–73 ms a tick); the bar says so. Opacity is fine.
 
 ---
 
