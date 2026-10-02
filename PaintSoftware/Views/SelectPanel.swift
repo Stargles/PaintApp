@@ -140,11 +140,18 @@ struct SelectPanel: View {
                 // every assertion about the dock's *bottom* edge stayed green through.
                 Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
 
-                membershipPicker
+                // **One rule slot, filled by the mode**: a loop mode answers *what the loop catches* and
+                // *how the next loop meets the last*; Tap has neither a loop nor a region, and answers
+                // *how the next tap meets the objects already selected* in the same place and style.
+                if canvasManager.selectionMode == .tap {
+                    tapCompositionPicker
+                } else {
+                    membershipPicker
 
-                Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
 
-                subtractToggle
+                    subtractToggle
+                }
 
                 Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1, height: 48)
 
@@ -475,11 +482,11 @@ struct SelectPanel: View {
     /// paint-outside switch keeps three: "Subtract" over a switch in a row of selection rules
     /// already says what it subtracts from.
     ///
-    /// **Off in Tap mode, which selects one object and composes nothing** — a tap replaces what was
-    /// selected, so a switch for how the next loop meets the last has no loop to act on.
+    /// **Not shown in Tap mode**, whose taps compose under their own picker (`tapCompositionPicker`):
+    /// a switch for how the next *loop* meets the last has no loop to act on there, and beside a Subtract
+    /// segment it would be a second Subtract that does something else.
     private var subtractToggle: some View {
         let isOn = canvasManager.selectionComposition == .subtract
-        let tapSelects = canvasManager.selectionMode == .tap
         return Button {
             canvasManager.selectionComposition = isOn ? .add : .subtract
         } label: {
@@ -492,8 +499,6 @@ struct SelectPanel: View {
             }
             .contentShape(Rectangle())
         }
-        .disabled(tapSelects)
-        .opacity(tapSelects ? 0.45 : 1)
         .accessibilityIdentifier("selectPanel.subtractToggle")
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
@@ -541,6 +546,31 @@ struct SelectPanel: View {
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("selectPanel.membershipCaption")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 6)
+    }
+
+    /// **How a tap meets the objects already selected** — the owner, 2026-10-02: *"a slider similar to
+    /// cut/enclosed/touching for the tap that switches between single/add/subtract."* The membership
+    /// picker's shape in the membership picker's place, and its habit of a line underneath saying what
+    /// the selected segment does. Tap mode only; it is never off, since a tap needs no layer to be of a
+    /// kind (the verbs that read the objects say their own refusals).
+    private var tapCompositionPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("How a Tap Selects", selection: $canvasManager.tapComposition) {
+                ForEach(TapComposition.allCases) { composition in
+                    Text(composition.displayName).tag(composition)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("selectPanel.tapCompositionPicker")
+
+            Text(canvasManager.tapComposition.explanation)
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("selectPanel.tapCompositionCaption")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, 6)

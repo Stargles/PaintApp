@@ -171,4 +171,61 @@ final class TapSelectUITests: PaintUITestCase {
         clear.tap()
         XCTAssertTrue(waitUntil(canvas, centre, isPaper), "Clear took away the rectangle that was selected")
     }
+    // MARK: - Single, Add, Subtract
+
+    /// **The picker that stands where Cut / Enclosed / Touching does, driven from a fresh document** — the
+    /// owner: *"a slider similar to cut/enclosed/touching for the tap that switches between
+    /// single/add/subtract."* Three strokes are drawn, all three are added by tapping them, the middle one
+    /// is subtracted, and Clear takes away exactly the two that are left in the selection — which is what
+    /// tells the artist, and this test, that Add joined rather than replaced and that Subtract took out the
+    /// stroke it was aimed at.
+    ///
+    /// What the artist does next at each step: Single is selected, so a tap selects one stroke and the
+    /// panel's verbs come alive; choosing Add turns the next taps into a set; choosing Subtract takes one
+    /// out; Clear (or any verb) acts on what is left.
+    func testTheTapPickerAddsThreeStrokesAndSubtractsTheMiddleOne() throws {
+        let (app, canvas) = launch()
+        // Above the dock: the paper's lower rows run under the Select panel and the timeline, where a tap
+        // is on the chrome and not on the stroke.
+        let rows = [0.2, 0.35, 0.5]
+        for row in rows {
+            drawLine(on: canvas, from: paperPoint(canvas, 0.25, row), to: paperPoint(canvas, 0.75, row))
+        }
+        for row in rows {
+            XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, row), isInk), "PREMISE: the stroke at \(row) is on the paper")
+        }
+
+        chooseTapMode(app)
+        let picker = app.segmentedControls["selectPanel.tapCompositionPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Tap mode has its own picker, where the membership picker was")
+        XCTAssertEqual(picker.buttons.count, 3, "Single, Add and Subtract")
+        XCTAssertTrue(picker.buttons["Single"].isSelected, "a fresh document selects one object per tap")
+        XCTAssertFalse(app.segmentedControls["selectPanel.membershipPicker"].exists,
+                       "the loop's rule stood aside for it rather than staying beside it, dim")
+        XCTAssertFalse(app.buttons["selectPanel.subtractToggle"].exists, "…and so did the loop's Subtract switch")
+        attachScreenshot(app, "tap-picker-on-single")
+
+        picker.buttons["Add"].tap()
+        XCTAssertTrue(picker.buttons["Add"].isSelected)
+        for row in rows { tapPaper(canvas, 0.5, row) }
+        let clear = app.buttons["selectPanel.clearButton"]
+        XCTAssertTrue(clear.isEnabled, "the taps selected strokes")
+        XCTAssertFalse(app.buttons["textPanel.fontButton"].exists, "…and no editor opened")
+        attachScreenshot(app, "tap-picker-after-three-adds")
+
+        picker.buttons["Subtract"].tap()
+        XCTAssertTrue(picker.buttons["Subtract"].isSelected)
+        tapPaper(canvas, 0.5, 0.35)
+        XCTAssertTrue(clear.isEnabled, "two strokes are still selected")
+        attachScreenshot(app, "tap-picker-after-subtracting-the-middle")
+
+        clear.tap()
+        XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, 0.2), isPaper), "Clear took away the first stroke")
+        XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, 0.5), isPaper), "…and the last")
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.35).dx, dy: paperPoint(canvas, 0.5, 0.35).dy)),
+                      "…and left the stroke that was subtracted from the selection")
+        XCTAssertFalse(clear.isEnabled, "the selection went with what it held")
+        attachScreenshot(app, "tap-picker-after-clear")
+    }
+
 }

@@ -8073,11 +8073,11 @@ struct LassoLoops {
     private let paths: [UUID: CGPath]
     private let boundsByID: [UUID: CGRect]
 
-    /// **The one element this loop answers for, or nil when it answers for all of them** — a Tap
-    /// selection's (`Selection.element`). Every other element is tested against nothing, which every
-    /// membership rule reads as "not inside", so the object the artist tapped is the whole of what the
-    /// selection catches and the strokes and fills lying under or inside its outline are not.
-    private let only: UUID?
+    /// **The elements this loop answers for, or nil when it answers for all of them** — a Tap
+    /// selection's (`Selection.elements`). Every other element is tested against nothing, which every
+    /// membership rule reads as "not inside", so the objects the artist tapped are the whole of what the
+    /// selection catches and the strokes and fills lying under or inside their outlines are not.
+    private let only: Set<UUID>?
 
     /// The base loop's own box, kept apart from `searchBounds` so an un-posed element on a posed cel
     /// is rejected against the loop it is actually tested with rather than against the union.
@@ -8085,7 +8085,7 @@ struct LassoLoops {
 
     /// `perElement` names only the elements whose stored space differs from the drawn one; an empty
     /// dictionary is the ordinary cel and makes every accessor below a dictionary miss.
-    init(_ loop: CGPath, perElement: [UUID: CGPath] = [:], only: UUID? = nil) {
+    init(_ loop: CGPath, perElement: [UUID: CGPath] = [:], only: Set<UUID>? = nil) {
         self.loop = loop
         self.paths = perElement
         self.only = only
@@ -8110,8 +8110,10 @@ struct LassoLoops {
             union = union.isNull ? box : (box.isNull ? union : union.union(box))
         }
         self.boundsByID = byID
-        // The one element a loop answers for is the only one the broad phase has to find.
-        self.searchBounds = only.map { byID[$0] ?? base } ?? union
+        // The elements a loop answers for are the only ones the broad phase has to find.
+        self.searchBounds = only.map { ids in
+            ids.reduce(CGRect.null) { $0.union(byID[$1] ?? base) }
+        } ?? union
     }
 
     /// The loop `id` is tested against — nothing at all for an element this loop does not answer for.
@@ -8127,7 +8129,7 @@ struct LassoLoops {
         return boundsByID[id] ?? loopBounds
     }
 
-    private func answers(for id: UUID) -> Bool { only == nil || only == id }
+    private func answers(for id: UUID) -> Bool { only?.contains(id) ?? true }
 
     private static let nothing: CGPath = CGMutablePath()
 }

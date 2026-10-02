@@ -156,7 +156,7 @@ final class TapSelectLogicTests: XCTestCase {
         vector.addStroke(line)
 
         XCTAssertNil(manager.selectObject(at: CGPoint(x: 30, y: 30)), "a stroke has no editor of its own")
-        XCTAssertEqual(manager.selection?.element, line.id, "the tap named the stroke")
+        XCTAssertEqual(manager.selection?.elements, [line.id], "the tap named the stroke")
         XCTAssertEqual(manager.selectionStyle.size, 4, "the readout is the stroke's, not the fill's")
 
         let blue = Color(red: 0, green: 0, blue: 1)
@@ -196,7 +196,7 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertEqual(manager.textEditingElementID, words.id, "Edit Text is open on that box")
         XCTAssertTrue(manager.textGestureActive)
         XCTAssertEqual(manager.selectedTool, .text)
-        XCTAssertEqual(manager.selection?.element, words.id, "the selection outlives the editor it opened")
+        XCTAssertEqual(manager.selection?.elements, [words.id], "the selection outlives the editor it opened")
         XCTAssertNil(manager.gradientEdit, "and no gradient session opened")
     }
 
@@ -207,7 +207,7 @@ final class TapSelectLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.selectObject(at: CGPoint(x: 30, y: 30)), .gradient)
         XCTAssertNotNil(manager.gradientEdit, "the gradient's card is open")
-        XCTAssertEqual(manager.selection?.element, id)
+        XCTAssertEqual(manager.selection?.elements, [id])
         XCTAssertFalse(manager.textGestureActive)
     }
 
@@ -218,7 +218,7 @@ final class TapSelectLogicTests: XCTestCase {
         let id = flatFill(vector, CGRect(x: 10, y: 10, width: 30, height: 30))
 
         XCTAssertNil(manager.selectObject(at: CGPoint(x: 20, y: 20)))
-        XCTAssertEqual(manager.selection?.element, id)
+        XCTAssertEqual(manager.selection?.elements, [id])
         XCTAssertNil(manager.gradientEdit)
         XCTAssertFalse(manager.textGestureActive)
         XCTAssertNotEqual(manager.selectedTool, .text)
@@ -251,7 +251,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.selectObject(at: CGPoint(x: 30, y: 30))
         XCTAssertEqual(manager.currentLayerIndex, lower, "the tap switched to the object's layer")
         XCTAssertEqual(manager.selection?.layerID, manager.layers[lower].id)
-        XCTAssertEqual(manager.selection?.element, line.id)
+        XCTAssertEqual(manager.selection?.elements, [line.id])
     }
 
     /// **The topmost layer wins where two layers have an object under the finger**, and a hidden layer is
@@ -266,12 +266,12 @@ final class TapSelectLogicTests: XCTestCase {
         upperVector.addStroke(top)
 
         manager.selectObject(at: CGPoint(x: 30, y: 30))
-        XCTAssertEqual(manager.selection?.element, top.id, "the layer on top answers first")
+        XCTAssertEqual(manager.selection?.elements, [top.id], "the layer on top answers first")
 
         manager.layers[upper].isVisible = false
         manager.selectObject(at: CGPoint(x: 30, y: 30))
         XCTAssertEqual(manager.currentLayerIndex, lower, "with it hidden the tap goes through to the layer below")
-        XCTAssertNotEqual(manager.selection?.element, top.id)
+        XCTAssertNotEqual(manager.selection?.elements, [top.id])
     }
 
     /// **The object is where it is shown, not where it is stored.** A cel channel slides the drawing 20
@@ -293,7 +293,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.currentFrame = 12
 
         manager.selectObject(at: CGPoint(x: 45, y: 30))
-        XCTAssertEqual(manager.selection?.element, line.id, "the stroke is selected where it is drawn (x 30…50)")
+        XCTAssertEqual(manager.selection?.elements, [line.id], "the stroke is selected where it is drawn (x 30…50)")
         manager.selectObject(at: CGPoint(x: 12, y: 30))
         XCTAssertNil(manager.selection, "…and a tap where it is stored selects nothing")
     }
@@ -303,21 +303,223 @@ final class TapSelectLogicTests: XCTestCase {
         let (manager, _, vector) = vectorFixture()
         let id = flatFill(vector, CGRect(x: 10, y: 10, width: 20, height: 20))
         manager.selectObject(at: CGPoint(x: 20, y: 20))
-        XCTAssertEqual(manager.selection?.element, id)
+        XCTAssertEqual(manager.selection?.elements, [id])
 
         manager.finishSelection(path: rect(CGRect(x: 40, y: 40, width: 20, height: 20)))
         XCTAssertNotNil(manager.selection)
-        XCTAssertNil(manager.selection?.element, "the loop is a region, and replaced the tapped object")
+        XCTAssertNil(manager.selection?.elements, "the loop is a region, and replaced the tapped object")
         XCTAssertEqual(manager.selection?.bounds, CGRect(x: 40, y: 40, width: 20, height: 20))
     }
+    // MARK: - Single, Add, Subtract
 
-    /// The loop's rule means nothing to a tap, and the panel says so rather than showing a picker that
-    /// changes nothing.
-    func testTheLoopRuleIsOffInTapModeAndSaysWhy() {
-        let (manager, _, _) = vectorFixture()
-        XCTAssertEqual(manager.selectionMode, .tap)
-        XCTAssertEqual(manager.selectionMembershipUnavailableReason, "A tap selects the whole object.")
-        manager.selectionMode = .rectangle
-        XCTAssertNil(manager.selectionMembershipUnavailableReason, "a loop mode has the rule back")
+    /// A fixture for the picker's three rules: two strokes side by side and a fill lying under both,
+    /// which a selection that caught "everything inside the outlines" would also take.
+    private func twoStrokesOverAFill() -> (manager: CanvasManager, vector: VectorCanvas,
+                                           left: VectorStroke, right: VectorStroke, fill: UUID) {
+        let (manager, _, vector) = vectorFixture()
+        let fill = flatFill(vector, CGRect(x: 0, y: 0, width: 64, height: 64))
+        let left = stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 26, y: 20))
+        let right = stroke(from: CGPoint(x: 6, y: 44), to: CGPoint(x: 26, y: 44))
+        vector.addStroke(left)
+        vector.addStroke(right)
+        return (manager, vector, left, right, fill)
     }
+
+    private let onLeft = CGPoint(x: 16, y: 20)
+    private let onRight = CGPoint(x: 16, y: 44)
+
+    /// **The three rules are set arithmetic and nothing else** — the picker's whole meaning, with no
+    /// canvas to confuse it. Single is the default, which is what Tap did before it had a picker.
+    func testTheThreeRulesAreWhatTheirNamesSay() {
+        let a = UUID(), b = UUID(), c = UUID()
+        XCTAssertEqual(TapComposition.single.result(of: c, onto: [a, b]), [c])
+        XCTAssertEqual(TapComposition.add.result(of: c, onto: [a, b]), [a, b, c])
+        XCTAssertEqual(TapComposition.add.result(of: a, onto: [a, b]), [a, b], "adding what is held changes nothing")
+        XCTAssertEqual(TapComposition.subtract.result(of: a, onto: [a, b]), [b])
+        XCTAssertEqual(TapComposition.subtract.result(of: c, onto: [a, b]), [a, b], "subtracting what is not held changes nothing")
+        XCTAssertEqual(CanvasFixture.manager(layerCount: 1).tapComposition, .single, "a fresh document selects one object per tap")
+    }
+
+    /// **Add puts a second object in the selection, and the verbs reach both and nothing else.** Asserted
+    /// through Recolour (both strokes change, the fill under them does not) and through the outline the
+    /// selection is drawn with, which holds both strokes.
+    func testAddJoinsASecondObjectAndTheVerbsReachBothAndNothingUnderThem() throws {
+        let (manager, vector, left, right, fill) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        manager.tapComposition = .add
+        XCTAssertNil(manager.selectObject(at: onRight), "a stroke has no editor of its own")
+
+        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "the second tap joined the first")
+        let held = try XCTUnwrap(manager.selection)
+        XCTAssertTrue(held.path.contains(onLeft) && held.path.contains(onRight), "the outline holds both strokes")
+        XCTAssertFalse(held.path.contains(CGPoint(x: 50, y: 32)), "…and not the fill between and around them")
+        XCTAssertGreaterThan(held.bounds.height, 24, "the bounds span both")
+
+        let blue = Color(red: 0, green: 0, blue: 1)
+        XCTAssertTrue(manager.recolorSelection(to: blue))
+        XCTAssertEqual(element(left.id, in: vector)?.stroke?.color.blue, 1, "the first stroke was recoloured")
+        XCTAssertEqual(element(right.id, in: vector)?.stroke?.color.blue, 1, "…and the second")
+        XCTAssertEqual(element(fill, in: vector)?.fill?.solidColor?.red, 1, "…and the fill under both was not")
+    }
+
+    /// And Move lifts exactly the two: the float carries both strokes and not the fill.
+    func testMoveLiftsEveryTappedObjectAndNothingUnderThem() throws {
+        let (manager, _, left, right, _) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        manager.selectObject(at: onLeft)
+        manager.selectObject(at: onRight)
+
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(Set(manager.vectorFloat?.parts.flatMap(\.insideIDs) ?? []), [left.id, right.id],
+                       "the float carries both tapped strokes and the fill is left")
+    }
+
+    /// **Subtract takes one object out and leaves the rest selected**, and what is left is what the
+    /// verbs reach: Recolour changes the stroke that stayed and not the one that went.
+    func testSubtractTakesTheTappedObjectOutOfTheSelection() throws {
+        let (manager, vector, left, right, _) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        manager.selectObject(at: onLeft)
+        manager.selectObject(at: onRight)
+        manager.tapComposition = .subtract
+
+        XCTAssertNil(manager.selectObject(at: onLeft))
+        XCTAssertEqual(manager.selection?.elements, [right.id], "the left stroke left the selection")
+        let held = try XCTUnwrap(manager.selection)
+        XCTAssertTrue(held.path.contains(onRight))
+        XCTAssertFalse(held.path.contains(onLeft), "the outline no longer holds it")
+
+        XCTAssertTrue(manager.recolorSelection(to: Color(red: 0, green: 0, blue: 1)))
+        XCTAssertEqual(element(right.id, in: vector)?.stroke?.color.blue, 1)
+        XCTAssertEqual(element(left.id, in: vector)?.stroke?.color.blue, 0, "the stroke that was taken out is untouched")
+    }
+
+    /// **Subtracting the last object is a deselect**, not an empty selection the artist is still holding.
+    func testSubtractingTheLastObjectDeselects() {
+        let (manager, _, _, _, _) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        manager.tapComposition = .subtract
+        manager.selectObject(at: onLeft)
+        XCTAssertNil(manager.selection)
+    }
+
+    /// **Subtract asks the selected objects alone.** A stroke that is not selected lies over the one that
+    /// is; a tap there takes out the selected one beneath it rather than finding the stroke on top and
+    /// doing nothing.
+    func testSubtractFindsTheSelectedObjectBeneathAnUnselectedOne() throws {
+        let (manager, _, left, _, _) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        let over = stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 26, y: 20), size: 8)
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        vector.addStroke(over)
+        XCTAssertEqual(VectorHitTest.topmost(in: vector.elements, at: onLeft)?.id, over.id, "PREMISE: the new stroke is on top")
+        XCTAssertEqual(manager.selection?.elements, [left.id])
+
+        manager.tapComposition = .subtract
+        manager.selectObject(at: onLeft)
+        XCTAssertNil(manager.selection, "the selected stroke under the unselected one was the one taken out")
+    }
+
+    /// **A miss never costs a set that took several taps to build** — under Add and Subtract. Under Single
+    /// a miss clears, as it always did.
+    func testAMissChangesNothingUnderAddAndSubtractAndClearsUnderSingle() {
+        let (manager, _, left, right, _) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        manager.selectObject(at: onLeft)
+        manager.selectObject(at: onRight)
+        let bare = CGPoint(x: 90, y: 90)
+
+        manager.selectObject(at: bare)
+        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "an Add that found nothing kept the set")
+        manager.tapComposition = .subtract
+        manager.selectObject(at: bare)
+        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "…and so did a Subtract")
+        manager.selectObject(at: CGPoint(x: 50, y: 32))
+        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "…a fill is not a selected object to take out")
+        manager.tapComposition = .single
+        manager.selectObject(at: bare)
+        XCTAssertNil(manager.selection, "a Single that found nothing put the selection down")
+    }
+
+    /// **A Subtract with nothing tapped to take from says so**: with no selection at all, and with a
+    /// region drawn by a loop, which holds no tapped objects.
+    func testSubtractWithNothingTappedToTakeFromSaysSo() {
+        let (manager, _, _, _, _) = twoStrokesOverAFill()
+        manager.tapComposition = .subtract
+        manager.selectObject(at: onLeft)
+        XCTAssertEqual(manager.notice?.code, "nothingTappedToSubtractFrom", "no selection at all")
+        XCTAssertNil(manager.selection)
+
+        manager.notice = nil
+        manager.finishSelection(path: rect(CGRect(x: 0, y: 0, width: 40, height: 30)))
+        let region = manager.selection
+        XCTAssertNotNil(region)
+        manager.selectObject(at: onLeft)
+        XCTAssertEqual(manager.notice?.code, "nothingTappedToSubtractFrom", "a drawn region is not a set of tapped objects")
+        XCTAssertEqual(manager.selection?.bounds, region?.bounds, "…and it was left as it was")
+    }
+
+    /// **Add and Subtract open no editor** — the artist is building a set, and the Select panel's Edit
+    /// entries are one tap away. Single is the rule that opens text at once.
+    func testOnlySingleOpensAnObjectsEditor() {
+        let (manager, _, vector) = vectorFixture()
+        vector.upsertText(text("Hello"))
+        manager.tapComposition = .add
+        XCTAssertNil(manager.selectObject(at: CGPoint(x: 30, y: 28)), "Add selected the words and opened nothing")
+        XCTAssertFalse(manager.textGestureActive)
+        XCTAssertNotNil(manager.selection)
+        XCTAssertTrue(manager.selectionStyle.editableKinds.contains(.text), "…the panel's Edit Text is what is offered")
+
+        manager.deselect()
+        manager.tapComposition = .single
+        XCTAssertEqual(manager.selectObject(at: CGPoint(x: 30, y: 28)), .text)
+        XCTAssertTrue(manager.textGestureActive)
+    }
+
+    /// **An Add on another cel starts a new set there**: one selection holds the objects of one cel, and
+    /// walking to another has always put the selection down.
+    func testAnAddOnAnotherLayerStartsANewSetThere() throws {
+        let (manager, lower, lowerVector) = vectorFixture()
+        let below = stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10))
+        lowerVector.addStroke(below)
+        manager.addVectorLayer()
+        let upper = manager.currentLayerIndex
+        let above = stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 50, y: 50))
+        try XCTUnwrap(manager.layers[upper].cels[0].vector).addStroke(above)
+
+        manager.tapComposition = .add
+        manager.selectObject(at: CGPoint(x: 30, y: 10))
+        XCTAssertEqual(manager.currentLayerIndex, lower)
+        manager.selectObject(at: CGPoint(x: 30, y: 50))
+        XCTAssertEqual(manager.currentLayerIndex, upper, "the tap's layer is the active one")
+        XCTAssertEqual(manager.selection?.elements, [above.id], "the set is the object tapped, on its own layer")
+        XCTAssertEqual(manager.selection?.layerID, manager.layers[upper].id)
+    }
+
+    /// **A set and a region replace each other**: a loop over a tapped set (the existing rule), and an Add
+    /// over a drawn region, which is not a set an object can join.
+    func testATapAddedOverADrawnRegionStartsASet() {
+        let (manager, _, _, right, _) = twoStrokesOverAFill()
+        manager.finishSelection(path: rect(CGRect(x: 0, y: 0, width: 40, height: 30)))
+        XCTAssertNil(manager.selection?.elements, "PREMISE: a drawn region")
+
+        manager.tapComposition = .add
+        manager.selectObject(at: onRight)
+        XCTAssertEqual(manager.selection?.elements, [right.id], "the Add made a set of the tapped object alone")
+    }
+
+    /// **Clear deletes the whole set and the selection goes with it**, as it did for one object.
+    func testClearTakesEveryTappedObjectAwayAndTheSelectionWithThem() {
+        let (manager, vector, left, right, fill) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        manager.selectObject(at: onLeft)
+        manager.selectObject(at: onRight)
+
+        manager.clearSelectionPixels()
+        XCTAssertNil(element(left.id, in: vector))
+        XCTAssertNil(element(right.id, in: vector))
+        XCTAssertNotNil(element(fill, in: vector), "the fill under them stays")
+        XCTAssertNil(manager.selection)
+    }
+
 }

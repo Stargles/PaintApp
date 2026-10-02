@@ -11,7 +11,8 @@ enum SelectionMode: String, CaseIterable, Identifiable {
     /// is simple: you just tap on anything and it selects whatever object you tapped on."* The only
     /// mode that names what it selects rather than a region of the canvas
     /// (`CanvasManager.selectObject(at:)`), so it is also the only one the loop's rule and the
-    /// Add/Subtract switch have nothing to say about.
+    /// Add/Subtract switch have nothing to say about: its own picker, `TapComposition`, takes their
+    /// place in the Select panel.
     case tap
 
     var id: String { rawValue }
@@ -171,6 +172,54 @@ enum SelectionComposition {
     case subtract
 }
 
+/// **How a tap in Select → Tap meets the objects already selected** — the owner, 2026-10-02: *"a slider
+/// similar to cut/enclosed/touching for the tap that switches between single/add/subtract."* The
+/// Select panel's rule row carries the picker in the membership picker's place
+/// (`SelectPanel.tapCompositionPicker`) while Tap is the mode; `CanvasManager.selectObject(at:)` is the
+/// one place it is read.
+///
+/// A tapped selection is a **set of objects on one cel** (`Selection.elements`), and the three rules are
+/// the three things a tap can do to that set. They do not combine with a drawn loop: a loop is a region
+/// and a set is not, so whichever was made last replaces the other (`CanvasManager.finishSelection`,
+/// `selectObject(at:)`).
+enum TapComposition: String, CaseIterable, Identifiable {
+    /// The tapped object is the selection, and what was selected is put down. What Tap did before it had
+    /// a picker, and the default — and the only rule that opens an object's own editor.
+    case single
+    /// The tapped object joins the selection.
+    case add
+    /// The tapped object leaves the selection.
+    case subtract
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .single: return "Single"
+        case .add: return "Add"
+        case .subtract: return "Subtract"
+        }
+    }
+
+    /// What the selected rule does, in the line under the picker — the membership picker's habit: the
+    /// difference between three segments is not visible until something has been tapped.
+    var explanation: String {
+        switch self {
+        case .single: return "A tap selects one object and puts down the last."
+        case .add: return "A tap adds the object under it to the selection."
+        case .subtract: return "A tap removes the object under it from the selection."
+        }
+    }
+
+    /// The objects selected after a tap names `tapped`, with `current` selected before it.
+    func result(of tapped: UUID, onto current: Set<UUID>) -> Set<UUID> {
+        switch self {
+        case .single: return [tapped]
+        case .add: return current.union([tapped])
+        case .subtract: return current.subtracting([tapped])
+        }
+    }
+}
+
 /// A finalized selection: a closed path in canvas point space, stamped with the (layer, cel) it
 /// belongs to so a layer/frame switch can tell whether it's still valid (see
 /// `CanvasManager.handleActiveContextChanged`). Keyed by stable UUID rather than array index —
@@ -186,18 +235,19 @@ enum SelectionComposition {
 /// asks under `lassoFillRule` (LASSO_MOVE.md §5.23–§5.26) — with no set of loops to walk and no
 /// second rule to keep in step with the first.
 ///
-/// **A Tap selection is the same value with one more field** (`element`): its path is the outline of
-/// the object the artist tapped (`VectorHitTest.outline(of:)`), and its loops answer for that one
-/// element only (`LassoLoops`), so Move, Recolour, Clear, Edit and every other reader of a selection
-/// act on the object and on nothing lying under or inside its outline.
+/// **A Tap selection is the same value with one more field** (`elements`): its path is the union of the
+/// outlines of the objects the artist tapped (`VectorHitTest.outline(of:)`), and its loops answer for
+/// those elements only (`LassoLoops`), so Move, Recolour, Clear, Edit and every other reader of a
+/// selection act on the objects and on nothing lying under or inside their outlines.
 struct Selection {
     var path: CGPath
     var bounds: CGRect
     var layerID: UUID
     var celID: UUID
-    /// The element a tap named, or nil for a selection drawn as a region — the loop modes' and the
-    /// wand's. A tapped selection is not a region the next loop can be added to or taken from.
-    var element: UUID? = nil
+    /// The objects taps named, all on this cel, or nil for a selection drawn as a region — the loop
+    /// modes' and the wand's. A set of tapped objects is not a region the next loop can be added to or
+    /// taken from, and a region is not a set a tap can add to: each replaces the other.
+    var elements: Set<UUID>? = nil
 
     /// This selection with `loop` added to it or taken from it — the composed path, normalized, and
     /// its bounds re-measured against the canvas exactly as a fresh loop's are. Nil when nothing is
@@ -817,8 +867,8 @@ extension CanvasManager {
     /// `.subtract`. Starting over is the Deselect tab or a tap on the Select icon itself (TODO (94)).
     /// A subtract that takes everything away is a deselect; one drawn with nothing up says so
     /// (`CanvasNotice.nothingToSubtractFrom`) rather than becoming a selection under a switch that
-    /// promised the opposite. **A tapped object is not a region a loop can be added to**
-    /// (`Selection.element`), so a loop drawn over one replaces it.
+    /// promised the opposite. **Tapped objects are not a region a loop can be added to**
+    /// (`Selection.elements`), so a loop drawn over them replaces them.
     func finishSelection(path: CGPath) {
         // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
         // more concretely: the selection is stamped with the cel it belongs to and immediately
@@ -833,7 +883,7 @@ extension CanvasManager {
         // `handleActiveContextChanged` clears a selection the moment the active cel changes, so one
         // that is up is on this cel; the check is what keeps that a fact rather than an assumption.
         if let existing = selection, existing.layerID == layerID, existing.celID == celID,
-           existing.element == nil {
+           existing.elements == nil {
             selection = existing.composed(with: path, by: selectionComposition, within: canvasRect)
             return
         }
@@ -1574,7 +1624,7 @@ extension CanvasManager {
     var selectionMembershipUnavailableReason: String? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
         switch layers[currentLayerIndex].kind {
-        case .vector: return selectionMode == .tap ? "A tap selects the whole object." : nil
+        case .vector: return nil
         case .raster: return "A pixel layer can only cut at the selection."
         case .value:  return "A value layer holds nothing a lasso can catch."
         case .transform: return "A transform layer holds nothing a lasso can catch."
@@ -1979,9 +2029,9 @@ extension CanvasManager {
             // that function's shape rather than a guarantee — so it is asked for explicitly, as the
             // recolour and `bakePreciseStrokes` both do.
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
-            // A tapped object is its own selection (`Selection.element`), and Clear has just deleted
-            // it; a loop is a region and outlives what it cleared.
-            if selection.element != nil { self.selection = nil }
+            // Tapped objects are their own selection (`Selection.elements`), and Clear has just
+            // deleted them; a loop is a region and outlives what it cleared.
+            if selection.elements != nil { self.selection = nil }
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base,

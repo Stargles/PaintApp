@@ -1001,6 +1001,10 @@ final class CanvasManager: ObservableObject {
     /// Not persisted, for `selectionMembership`'s reason one line up — per-drawing intent, and a
     /// switch that came back on across launches would eat the first loop of the next session.
     @Published var selectionComposition: SelectionComposition = .add
+    /// **How the next tap in Select → Tap meets the objects already selected** — the picker that stands
+    /// where the membership picker does while Tap is the mode. Read in one place,
+    /// `selectObject(at:)`. Not persisted, for `selectionComposition`'s reason one line up.
+    @Published var tapComposition: TapComposition = .single
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection? {
         didSet {

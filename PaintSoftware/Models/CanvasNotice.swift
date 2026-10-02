@@ -90,6 +90,12 @@ struct CanvasNotice: Identifiable, Equatable {
         /// nothing and says nothing reads as broken (§5.24's rule, one switch over). The fix is one
         /// tap on the switch the artist is already looking at, or a first loop under Add.
         case nothingToSubtractFrom
+        /// A tap was made under the Select panel's **Subtract** with no tapped objects selected to take
+        /// it from — Tap's counterpart of `nothingToSubtractFrom`, which says the same of a loop.
+        /// Subtract acts on the objects earlier taps selected; a region drawn with a loop holds none, so
+        /// that is refused too, and the fix is one tap on the picker already on screen, then the
+        /// objects to take from.
+        case nothingTappedToSubtractFrom
         /// Move was tapped on an **interpolated in-between** — a frame whose picture is derived from
         /// the two cels either side of it rather than stored.
         ///
@@ -364,6 +370,7 @@ struct CanvasNotice: Identifiable, Equatable {
             return "Nothing is painted there. The colour panel's switch picks from the whole picture instead."
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .nothingToSubtractFrom: return "There is no selection to subtract from — switch to Add, or draw a selection first."
+        case .nothingTappedToSubtractFrom: return "No tapped objects are selected to subtract from — switch to Add, or tap an object first."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
         // **Each now names the second way out as well**, and that is TODO (21)'s membership editing
         // rather than a rewording. Until 2026-09-10 the only fix either sentence could offer was to
@@ -482,6 +489,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return nil
         // Nor this one: the fix is a switch the artist is already looking at.
         case .nothingToSubtractFrom: return nil
+        // Nor this one, for its twin's reason: the picker is already on screen.
+        case .nothingTappedToSubtractFrom: return nil
         // Nor this one, and for the same reason once more: the fix is to scrub to a drawn cel, which
         // is a move on the timeline the artist can already see.
         case .cannotMoveDerivedFrame: return nil
@@ -564,6 +573,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingEnclosed:  return "nothingEnclosed"
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .nothingToSubtractFrom: return "nothingToSubtractFrom"
+        case .nothingTappedToSubtractFrom: return "nothingTappedToSubtractFrom"
         case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
         case .onlyPartOfAnAnimationGroup: return "onlyPartOfAnAnimationGroup"
         case .animationGroupNotAlone: return "animationGroupNotAlone"

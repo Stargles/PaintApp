@@ -375,7 +375,7 @@ extension CanvasManager {
     /// One `CGPath` per *distinct* pose rather than one per element — a cel channel carries every
     /// element through the same map, so the common posed cel maps the loop once however much ink is
     /// on it, and `LassoLoops` memoizes its bounding boxes on the same object identity.
-    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: PoseMap], only: UUID? = nil) -> LassoLoops {
+    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: PoseMap], only: Set<UUID>? = nil) -> LassoLoops {
         guard !poses.isEmpty else { return LassoLoops(loop, only: only) }
         var byMap: [[CGFloat]: CGPath] = [:]
         var perElement: [UUID: CGPath] = [:]
@@ -407,11 +407,11 @@ extension CanvasManager {
     /// on every layer Move has already touched; and Core Graphics leaves `intersection`/`subtracting`
     /// **undefined** on the self-intersecting path a lasso becomes the moment the artist loops back
     /// over their own line — and then pulled back per element through the poses the cel is shown
-    /// under, with a Tap selection's loops answering for its one element (`Selection.element`).
+    /// under, with a Tap selection's loops answering for its tapped elements (`Selection.elements`).
     static func lassoLoops(of selection: Selection, in vector: VectorCanvas,
                            posedBy poses: [UUID: PoseMap]) -> LassoLoops {
         let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        return lassoLoops(drawn, posedBy: poses, only: selection.element)
+        return lassoLoops(drawn, posedBy: poses, only: selection.elements)
     }
 
     /// **The affine the channels applied *after* `channel` carry its members through at `frame`.**
