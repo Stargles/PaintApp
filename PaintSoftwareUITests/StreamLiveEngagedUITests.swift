@@ -130,11 +130,13 @@ final class StreamLiveEngagedUITests: StreamUITestCase {
             XCTAssertFalse(Colour.black.matches(pixel),
                            "sample \(sample): while the computer moves the stream is drawn plain, and the middle reads \(pixel)")
             XCTAssertEqual(sandwichState(app), "live", "sample \(sample): moving, the canvas stands on its pair")
+            if sample == 0 { attachScreenshot(app, "moving-the-stream-is-live-and-plain") }
         }
 
         // The computer stops; the multiplied picture replaces the live one.
         waitForPicture(.black, on: canvas, timeout: 15, "once the computer has been still the exact picture lands")
         waitForSandwichState(app, "rest", "and the canvas rests on the bake that holds it")
+        attachScreenshot(app, "still-the-stream-is-multiplied-over-the-stroke")
 
         // The next change goes live again, and settles again.
         laptop.show(.red)
