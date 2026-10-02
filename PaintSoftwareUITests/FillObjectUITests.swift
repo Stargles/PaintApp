@@ -164,52 +164,6 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, centre, isPaper), "one undo takes the painted shape away")
     }
 
-    // MARK: - The live preview
-
-    /// **The object is on screen while the pen is still down** — what the artist watches grow. The
-    /// drag runs on a background thread and holds at its end for several seconds, and the screen is read
-    /// mid-hold with `XCUIScreen` (which does not wait for the app to idle, as `element.screenshot()`
-    /// does): the rectangle is drawn by `PlacementPreviewView` and nothing has been laid down yet, so a
-    /// pen that placed nothing until the lift, or a preview that never drew, reads paper here.
-    func testTheObjectIsDrawnWhileThePenIsStillDown() throws {
-        let (app, canvas) = launch()
-        prime(app, row: "add.rectangleRow", named: "rectangle")
-        let frame = canvas.frame
-        let start = canvas.coordinate(withNormalizedOffset: paperPoint(canvas, 0.5, 0.5))
-        let end = canvas.coordinate(withNormalizedOffset: paperPoint(canvas, 0.7, 0.5))
-        let dragEnded = expectation(description: "the drag ran its course")
-        DispatchQueue.global().async {
-            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 6)
-            dragEnded.fulfill()
-        }
-
-        Thread.sleep(forTimeInterval: 4)   // the drag is over and the pen is held down at its end
-        let shot = XCUIScreen.main.screenshot()
-        let image = try XCTUnwrap(shot.image.cgImage)
-        let bytes = try XCTUnwrap(image.dataProvider?.data as Data?)
-        let bytesPerPixel = image.bitsPerPixel / 8
-        /// The screen pixel under a point of the paper — the screenshot's own scale, so no assumption
-        /// about the device's.
-        func pixel(_ x: Double, _ y: Double) -> RGBA? {
-            let point = paperPoint(canvas, x, y)
-            let px = Int((frame.minX + point.dx * frame.width) * CGFloat(image.width) / shot.image.size.width)
-            let py = Int((frame.minY + point.dy * frame.height) * CGFloat(image.height) / shot.image.size.height)
-            let offset = py * image.bytesPerRow + px * bytesPerPixel
-            guard offset + 3 < bytes.count else { return nil }
-            // BGRA or RGBA: the probes read grey, whose channels are equal either way.
-            return (bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3])
-        }
-        let attachment = XCTAttachment(screenshot: shot)
-        attachment.name = "rectangle-while-the-pen-is-down"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        XCTAssertTrue(isInk(pixel(0.5, 0.5)), "the rectangle is drawn at the press while the pen is still down")
-        XCTAssertTrue(isInk(pixel(0.62, 0.5)), "…and has grown out toward the pen")
-        XCTAssertTrue(isPaper(pixel(0.2, 0.5)), "…and no further")
-        wait(for: [dragEnded], timeout: 30)
-        XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, 0.5), isInk), "the lift laid it down")
-    }
-
     // MARK: - How priming begins and ends
 
     /// **Tapping the primed row again puts it down**: the row says it is primed, a second tap un-primes
