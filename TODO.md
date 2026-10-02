@@ -142,6 +142,12 @@ this case, it is both the layers below. Add the same feature for transform layer
 
 - [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
 
+## (151) follow-up: the angle pill hides under the timeline
+
+**Status** — not started. Found by (151)'s worker (`752df7d`): the canvas host extends beneath the timeline
+panel, so a rotate knob near the panel's edge draws its `RotationReadoutView` pill behind the panel. A
+readout that can be hidden is a defect, not a design question — keep it inside the visible area.
+
 ## (135) Folder Move: every frame or this cel
 
 **Status** — not started. *"If you click on edit on a folder and then click on move, you can move
