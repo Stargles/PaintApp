@@ -58,7 +58,9 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     /// anchor is derivable from the quad alone.
     var onHandleDragBegan: ((ObjectTransformFrame.Handle, CGPoint) -> Void)?
     /// A drag in progress, in canvas space (this view's own coordinates are canvas coordinates).
-    var onHandleDragged: ((CGPoint) -> Void)?
+    /// `snapsAngle` is true while a touch has joined a knob's drag: the turn lands on a round angle
+    /// (`PrecisionDrag`, TODO (151)). A drag on any other handle never asks for it.
+    var onHandleDragged: ((_ point: CGPoint, _ snapsAngle: Bool) -> Void)?
     var onHandleDragEnded: (() -> Void)?
 
     /// **A finger landed on this box** — KEYFRAMES.md §5.1 step 1, the same hook
@@ -79,11 +81,15 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
 
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
     /// `CanvasView` from the host's `TouchCountRecognizer`, which sees every touch however it landed.
-    /// A touch that joins mid-drag is what slows the drag (`PrecisionDrag`, TODO (146)).
+    /// A touch that joins mid-drag is what slows the drag, or snaps a turn (`PrecisionDrag`, TODO
+    /// (146), (151)).
     ///
     /// The touch asked about is counted whether or not the counter has heard of it, which is how the
     /// baseline is taken at the drag's own touch-down; nil asks for the count as it stands.
     var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
+
+    /// The pill that says what angle a held knob has the box at (TODO (151)), pushed down by `CanvasView`.
+    weak var rotationReadout: RotationReadoutView?
 
     // MARK: - Chrome, in screen points
 
@@ -192,6 +198,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         let sameShape = frameModel == frame && self.distorting == distorting
         frameModel = frame
         self.distorting = distorting
+        showReadoutIfTurning()
         // Rebuild only when the box moved; otherwise leave the layers alone. Tearing sublayers down
         // and re-adding them on every pass is what made the shape overlay's handles blink.
         if sameShape, !handles.isEmpty { return }
@@ -204,6 +211,8 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         isHidden = true
         isUserInteractionEnabled = false
         frameModel = nil
+        // The pill is shared with the other overlays, so only the one holding it takes it down.
+        if activeHandle?.turns == true { rotationReadout?.hide() }
         activeHandle = nil
         draggingTouch = nil
         precision = nil
@@ -286,7 +295,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
             case .boxRotation: colour = .systemYellow
             default:           colour = distorting ? .systemOrange : .white
             }
-            let isKnob = entry.handle == .rotation || entry.handle == .boxRotation
+            let isKnob = entry.handle.turns
             let size = isKnob ? rotationHandleSize : handleSize
             let dot = CALayer()
             dot.backgroundColor = colour.cgColor
@@ -341,7 +350,8 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         guard let handle = target(at: point) else { return }
         activeHandle = handle
         draggingTouch = touch
-        precision = PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas(touch))
+        precision = PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas(touch), turns: handle.turns)
+        showReadoutIfTurning()
         // **Before the drag's own latch and its undo bracket**, which is §5.1's load-bearing ordering:
         // the take's bracket has to be the outer one or the undo step takes the inner surface's label.
         onBoxTouchDown?()
@@ -355,7 +365,7 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         // The pen's point as the drag is to read it — slowed while another touch is down.
         let point = drag.point(for: touch.location(in: self), touchesDown: touchesOnCanvas(nil))
         precision = drag
-        onHandleDragged?(point)
+        onHandleDragged?(point, drag.snapsAngle)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -382,8 +392,20 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         activeHandle = nil
         draggingTouch = nil
         precision = nil
+        rotationReadout?.release()
         onHandleDragEnded?()
         onBoxTouchUp?()
+    }
+
+    /// While a knob is held, the angle the box is drawn at, beside that knob. Read off `frameModel`,
+    /// which the consumer re-fits on every delta (`CanvasView.Coordinator.objectTransformDragged`), so
+    /// the pill follows the box's own angle — snap included — and never the finger's.
+    private func showReadoutIfTurning() {
+        guard let handle = activeHandle, handle.turns, let frameModel else { return }
+        let knob = handle == .rotation
+            ? frameModel.rotationHandlePosition(offset: rotationOffset)
+            : frameModel.boxRotationHandlePosition(offset: rotationOffset)
+        rotationReadout?.show(angle: frameModel.drawnAngle, knob: knob, centre: frameModel.centre, in: self)
     }
 
     // MARK: - Test seam

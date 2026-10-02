@@ -92,22 +92,8 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        addRasterLayer(app)
-
         // `DistortUITests`' own set-up, so the geometry is the one that already drives this box.
-        app.buttons["toolbar.selectButton"].tap()
-        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
-        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
-        rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.22), to: CGVector(dx: 0.80, dy: 0.40))
-        let fillButton = app.buttons["selectPanel.fillButton"]
-        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
-        fillButton.tap()
-        let filled = try inkTopLeft(try settledProbe(canvas),
-                                    in: CGRect(x: 0.50, y: 0.19, width: 0.36, height: 0.27))
-        app.buttons["toolbar.moveButton"].tap()
-        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
-                      "Move lifts the filled block")
+        let filled = try liftAFilledBlockIntoTheRasterMoveBox(app, on: canvas)
         attachScreen("raster-before-the-drags")
 
         let window = CGRect(x: 0.40, y: 0.16, width: 0.55, height: 0.50)

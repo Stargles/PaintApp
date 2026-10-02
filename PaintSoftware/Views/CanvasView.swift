@@ -38,6 +38,16 @@ struct CanvasView: UIViewRepresentable {
         container.isMultipleTouchEnabled = true
         host.addSubview(container)
 
+        // **The angle a held rotate handle has its box at** (TODO (151)): one pill in the host's own
+        // screen space, above the canvas plane, that whichever overlay's knob is held drives. Its text
+        // is published on the host's label (`publishCanvasState`).
+        let rotationReadout = RotationReadoutView()
+        host.addSubview(rotationReadout)
+        context.coordinator.rotationReadout = rotationReadout
+        rotationReadout.onTextChanged = { [weak coordinator = context.coordinator] in
+            coordinator?.rotationReadoutChanged()
+        }
+
         // Light-grey backing for the drawable padding margin: shows through wherever the paper is
         // inset by `canvasPadding`. Never seen at padding 0.
         let paddingBackdrop = UIView()
@@ -113,6 +123,10 @@ struct CanvasView: UIViewRepresentable {
         shapeOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
+        shapeOverlay.rotationReadout = rotationReadout
+        shapeOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
+            coordinator?.touchesOnCanvas(counting: touch) ?? 0
+        }
 
         // The live text editor (`ADD_TEXT.md` stage 1). Above the shape overlay because the text
         // overlay is the one the artist is looking at while a session is live, and because
@@ -163,11 +177,15 @@ struct CanvasView: UIViewRepresentable {
         textTransformOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(textTransformOverlay)
         context.coordinator.textTransformOverlay = textTransformOverlay
+        textTransformOverlay.rotationReadout = rotationReadout
+        textTransformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
+            coordinator?.touchesOnCanvas(counting: touch) ?? 0
+        }
         textTransformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle in
             coordinator?.canvasManager.beginTextHandleDrag(handle)
         }
-        textTransformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point in
-            coordinator?.canvasManager.dragTextHandle(to: point)
+        textTransformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point, snapsAngle in
+            coordinator?.canvasManager.dragTextHandle(to: point, snapsRotation: snapsAngle)
         }
         textTransformOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.endTextHandleDrag()
@@ -307,19 +325,23 @@ struct CanvasView: UIViewRepresentable {
         transformOverlay.onBoxTouchUp = { [weak coordinator = context.coordinator] in
             coordinator?.moveBoxTouchUp()
         }
-        // **A touch that joins a Move-box drag slows it** — TODO (146). Both Move overlays read the
-        // count through this one closure, so the rule has one source: the host's own touch counter.
+        // **A touch that joins a handle's drag makes it more precise** — slower on a move or a scale
+        // (TODO (146)), a round angle on a turn (TODO (151)). The four overlays that have a handle to
+        // hold read the count through the one closure, so the rule has one source: the host's own touch
+        // counter.
         transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
             coordinator?.touchesOnCanvas(counting: touch) ?? 0
         }
         floatingOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
             coordinator?.touchesOnCanvas(counting: touch) ?? 0
         }
+        transformOverlay.rotationReadout = rotationReadout
+        floatingOverlay.rotationReadout = rotationReadout
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
         }
-        transformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point in
-            coordinator?.objectTransformDragged(to: point)
+        transformOverlay.onHandleDragged = { [weak coordinator = context.coordinator] point, snapsAngle in
+            coordinator?.objectTransformDragged(to: point, snapsRotation: snapsAngle)
         }
         transformOverlay.onHandleDragEnded = { [weak coordinator = context.coordinator] in
             coordinator?.endObjectTransformDrag()
@@ -534,12 +556,14 @@ struct CanvasView: UIViewRepresentable {
             return (counter?.activeCount ?? 0) + unheard
         }
 
-        /// **Whether a Move box is being dragged right now**, by either overlay. While it is, the box
-        /// owns the canvas: another touch makes the drag precise (`PrecisionDrag`) and nothing else —
-        /// it starts no pan, pinch or rotation, and a finger that lifts away from the box is not a tap
-        /// that commits it. Both gates below ask this.
-        private var moveBoxDragIsLive: Bool {
+        /// **Whether a drag that a joined touch assists is live right now** — a Move box dragged by
+        /// either overlay, or a text box's or a shape's rotate knob held (`PrecisionDrag`). While it
+        /// is, the handle owns the canvas: another touch makes the drag precise and nothing else — it
+        /// starts no pan, pinch or rotation, no stroke (`StrokeGestureRecognizer.isBesideAHandleDrag`),
+        /// and a finger that lifts away is not a tap that commits the box. The gates ask this.
+        private var assistedDragIsLive: Bool {
             (transformOverlay?.isDragging ?? false) || (floatingOverlay?.isDragging ?? false)
+                || (textTransformOverlay?.isTurning ?? false) || (shapeOverlay?.isTurning ?? false)
         }
         /// Fingers reported by the *active stroke's own* recognizer as accompanying the pen, the
         /// second source `refreshShapeConstraint` folds in. See
@@ -1166,7 +1190,7 @@ struct CanvasView: UIViewRepresentable {
         ///     sandwich:<off|rest|live|moving|stroke> entries:<n> derived:<n> rebuilds:<n> moves:<n>
         ///     rasterizes:<n>
         ///     shape:<none|following|adjustable> xform:<scale>,<rotation>,<dx>,<dy>
-        ///     text:<none|box|editing> movebox:<none|x,y,w,h>
+        ///     text:<none|box|editing> movebox:<none|x,y,w,h> readout:<none|23.72°>
         ///
         /// — read by `LayerUITests` (the first two), `BakeWiringUITests` and `PlaybackBakeUITests`
         /// (the three counts), `CanvasTransformFreezeUITests` (the rest) and `ImageMoveBoxUITests`
@@ -1242,6 +1266,9 @@ struct CanvasView: UIViewRepresentable {
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
                 + " movebox:\(moveBoxHull())"
+                // **The angle readout as it is drawn** (TODO (151)): the pill's own text, `none`
+                // while it is hidden — the host hides the pill from XCUITest like every descendant.
+                + " readout:\(rotationReadout?.text ?? "none")"
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
@@ -1253,6 +1280,14 @@ struct CanvasView: UIViewRepresentable {
 
         /// The last string `publishCanvasState` wrote, so an unchanged pass costs a comparison.
         private var lastPublishedCanvasState: String?
+
+        /// The angle pill (`RotationReadoutView`), whose text `publishCanvasState` carries.
+        weak var rotationReadout: RotationReadoutView?
+
+        /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.
+        func rotationReadoutChanged() {
+            publishCanvasState()
+        }
 
         /// The Move box's four corners' axis-aligned hull in the host's unit square, as `x,y,w,h` —
         /// or `none` when no box is up. Corners rather than the frame's size, so a turned or
@@ -2456,12 +2491,12 @@ struct CanvasView: UIViewRepresentable {
         /// not in it matters as much as what is: no `localContentBounds()`, no `render()`, no
         /// canvas-sized allocation. The model write is an affine assignment, the display is a
         /// `UIView.transform`, and the box redraws five `CALayer`s.
-        func objectTransformDragged(to point: CGPoint) {
+        func objectTransformDragged(to point: CGPoint, snapsRotation: Bool) {
             // **The float's delta writes nothing to the model.** The piece is a latched bitmap under a
             // Core Animation transform and the ants are two `CALayer` transforms; the geometry catches
             // up once, at the gesture's end.
             if let drag = activeVectorFloatDrag, let float = canvasManager.vectorFloat {
-                let pose = drag.pose(draggedTo: point)
+                let pose = drag.pose(draggedTo: point, snapsRotation: snapsRotation)
                 liveVectorFloatPose = pose
                 showVectorFloat(float, at: pose)
                 liveMoveCount += 1
@@ -3703,6 +3738,10 @@ struct CanvasView: UIViewRepresentable {
             recognizer.shouldIgnoreAdditionalTouches = { [weak self] in
                 self?.canvasManager.isShapeFollowingFinger ?? false
             }
+            // ...and a finger beside a held rotate knob is the knob's, not a stroke.
+            recognizer.isBesideAHandleDrag = { [weak self] in
+                self?.assistedDragIsLive ?? false
+            }
             // ...and having kept it, say so: this is the second source for "a finger joined the pen",
             // read off the recognizer the pen is already driving rather than off the container four
             // views up. See `onAccompanyingFingersChanged`. Only one stroke can be live at a time, so
@@ -4125,7 +4164,7 @@ struct CanvasView: UIViewRepresentable {
             }
             // A finger pressed to steady the pen lifts as a tap, and the tap would put the box down
             // under the pen that is still moving it. Decided here, at touch-down, like the rest.
-            guard !moveBoxDragIsLive else { return false }
+            guard !assistedDragIsLive else { return false }
             let canvasPoint = touch.location(in: container)
             let inputs = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             return CanvasTouchOwner.owner(in: inputs) == .moveBoxCommit
@@ -4194,15 +4233,15 @@ struct CanvasView: UIViewRepresentable {
             textOverlay?.focusEditor()
         }
 
-        /// **The canvas's pan, pinch and rotation do not begin under a Move-box drag.** The pen on the
-        /// box is a touch on the container, and a finger beside it makes two — exactly what the
-        /// two-finger pan asks for — so without this the finger that was meant to slow the drag would
-        /// move the canvas out from under it (TODO (146)). A pan already in progress when the drag
-        /// begins is left alone; only a beginning is refused.
+        /// **The canvas's pan, pinch and rotation do not begin under an assisted drag.** The pen on the
+        /// handle is a touch on the container, and a finger beside it makes two — exactly what the
+        /// two-finger pan asks for — so without this the finger that was meant to slow the drag, or
+        /// snap the turn, would move the canvas out from under it (TODO (146), (151)). A pan already in
+        /// progress when the drag begins is left alone; only a beginning is refused.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
             guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return true }
-            return !moveBoxDragIsLive
+            return !assistedDragIsLive
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {

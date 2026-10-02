@@ -928,10 +928,13 @@ struct TextFrameDrag: Equatable {
     /// sizing grips and knob on a frame that needs box-space sizing. Stage 4's parallelogram
     /// arithmetic on an unstretched `.affine` frame always answers, exactly as it did before stage 5
     /// existed.
-    func clampedFrame(draggedTo point: CGPoint) -> TextFrame? {
+    ///
+    /// `snapsRotation` lands the box's angle on `RotationAngle.snapped`, and means something to the
+    /// rotation knob only.
+    func clampedFrame(draggedTo point: CGPoint, snapsRotation: Bool = false) -> TextFrame? {
         if isDistort { return distortedFrame(draggedTo: point) }
-        if start.needsBoxSpaceSizing { return warpedFrame(draggedTo: point) }
-        return handle == .rotation ? rotated(towards: point) : resized(towards: point)
+        if start.needsBoxSpaceSizing { return warpedFrame(draggedTo: point, snapsRotation: snapsRotation) }
+        return handle == .rotation ? rotated(towards: point, snapping: snapsRotation) : resized(towards: point)
     }
 
     /// The frame with this drag's corner moved to `point` and the other three left alone — or **nil
@@ -1009,10 +1012,10 @@ struct TextFrameDrag: Equatable {
     /// `Homography.isValidQuad` is winding-agnostic (`Quad.area` is an absolute value, `isConvex`
     /// accepts four right turns as readily as four left ones, and a parallelogram's four box weights
     /// are all exactly 1), so a **mirrored** frame passes it unchanged.
-    func warpedFrame(draggedTo point: CGPoint) -> TextFrame? {
+    func warpedFrame(draggedTo point: CGPoint, snapsRotation: Bool = false) -> TextFrame? {
         guard !isDistort, start.needsBoxSpaceSizing, let homography = start.homography else { return nil }
         let candidate = handle == .rotation
-            ? turnedInPlane(towards: point)
+            ? turnedInPlane(towards: point, snapping: snapsRotation)
             : sizedInBoxSpace(towards: point, through: homography)
         guard var next = candidate, let quad = next.quad,
               Homography.isValidQuad(quad, boxSize: next.size) else { return nil }
@@ -1068,17 +1071,17 @@ struct TextFrameDrag: Equatable {
     /// valid. `size` and `autoSize` do not move, for stage 4's stated reason: turning a box is not
     /// sizing it.
     ///
-    /// The angle convention is stage 4's, reused rather than re-derived: the knob stands off the top
-    /// edge, so `atan2(finger − centre) + π/2` is where the box's own +x is asked to point, and the
-    /// quad is turned by the difference from where it points now. On an `.affine` frame that produces
-    /// the same quad `rotated(towards:)` does; on a warped one the knob can sit slightly off the
-    /// finger, because a warped quad's edge midpoint is not the image of its box's edge midpoint —
-    /// the same half-texel honesty the edge grips already carry, and far less than the ~80 pt jump
-    /// this replaced.
-    private func turnedInPlane(towards point: CGPoint) -> TextFrame? {
+    /// The angle convention is stage 4's, reused rather than re-derived (`RotationAngle.boxAngle`): the
+    /// knob stands off the top edge, so the finger's bearing from the centre plus a quarter turn is
+    /// where the box's own +x is asked to point, and the quad is turned by the difference from where
+    /// it points now. On an `.affine` frame that produces the same quad `rotated(towards:)` does; on
+    /// a warped one the knob can sit slightly off the finger, because a warped quad's edge midpoint is
+    /// not the image of its box's edge midpoint — the same half-texel honesty the edge grips already
+    /// carry, and far less than the ~80 pt jump this replaced.
+    private func turnedInPlane(towards point: CGPoint, snapping: Bool) -> TextFrame? {
         guard let basis, let quad = start.quad else { return nil }
         let c = start.centre
-        let target = atan2(point.y - c.y, point.x - c.x) + .pi / 2
+        let target = RotationAngle.boxAngle(forKnobAt: point, about: c, snapping: snapping)
         let delta = target - atan2(basis.u.dy, basis.u.dx)
         let cosD = cos(delta), sinD = sin(delta)
         var turned = start
@@ -1092,12 +1095,10 @@ struct TextFrameDrag: Equatable {
     /// Turns the box about its own centre. Neither `size` nor `autoSize` moves: a rotation is not a
     /// resize, and freezing a pristine box's growth because it was turned would clip the artist's
     /// next keystroke for no reason they could name. See `CanvasManager.dragTextHandle`.
-    private func rotated(towards point: CGPoint) -> TextFrame {
+    private func rotated(towards point: CGPoint, snapping: Bool) -> TextFrame {
         guard let basis else { return start }
         let c = start.centre
-        // `+ π/2` because the knob stands off the *top* edge: dragging it straight up from the centre
-        // is the box upright, which is angle zero. `ShapeOverlayView.report`'s rotation arm, verbatim.
-        let angle = atan2(point.y - c.y, point.x - c.x) + .pi / 2
+        let angle = RotationAngle.boxAngle(forKnobAt: point, about: c, snapping: snapping)
         let cosA = cos(angle), sinA = sin(angle)
         let u = CGVector(dx: cosA, dy: sinA)
         let v = CGVector(dx: -sinA, dy: cosA)

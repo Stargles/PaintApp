@@ -381,9 +381,40 @@ enum UITestSeeds {
             return VectorSample(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t,
                                 pressure: 1)
         }
+        seedPendingShape(ShapeGeometry(kind: .line, startPoint: start, endPoint: end), samples: samples,
+                         into: canvasManager, size: size)
+    }
+
+    /// **TODO (151)'s smart-shape rotate knob: a rectangle, pending and adjustable, in the middle of a
+    /// fresh document** — `-uiTestSeedPendingRectangle`. A line has no rotate knob, and a rectangle is
+    /// the shape a test cannot make the artist's way for `-uiTestSeedPendingLine`'s reason. The drawn
+    /// samples are the rectangle's own outline, which is what a pen drawing one would have left.
+    static func seedPendingRectangleIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedPendingRectangle"),
+              let size = canvasManager.canvasSize else { return }
+        let rect = CGRect(x: size.width * 0.3, y: size.height * 0.4, width: size.width * 0.4,
+                          height: size.height * 0.2)
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
+                       CGPoint(x: rect.minX, y: rect.minY)]
+        let samples = zip(corners, corners.dropFirst()).flatMap { from, to in
+            (0..<24).map { step -> VectorSample in
+                let t = CGFloat(step) / 24
+                return VectorSample(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t,
+                                    pressure: 1)
+            }
+        }
+        seedPendingShape(ShapeGeometry(kind: .rectangle, startPoint: CGPoint(x: rect.minX, y: rect.minY),
+                                       endPoint: CGPoint(x: rect.maxX, y: rect.maxY)),
+                         samples: samples, into: canvasManager, size: size)
+    }
+
+    /// The two verbs the hold and the lift call, with the shape the detector would hand them — and a
+    /// brush a sixty-fourth of the canvas wide, so a pixel probe at fit zoom finds the ink.
+    private static func seedPendingShape(_ shape: ShapeGeometry, samples: [VectorSample],
+                                         into canvasManager: CanvasManager, size: CGSize) {
         canvasManager.brushSize = size.width / 64
-        canvasManager.beginInteractiveShape(ShapeGeometry(kind: .line, startPoint: start, endPoint: end),
-                                            samples: samples)
+        canvasManager.beginInteractiveShape(shape, samples: samples)
         canvasManager.endInteractiveShape()
     }
 

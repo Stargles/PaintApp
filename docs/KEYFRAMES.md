@@ -1430,11 +1430,15 @@ then has is the ordinary Move they were making.
 pen, it makes the move more precise, like 5x less than the pen's movement. This should work with
 recording movement too."*). The slowing is in the point both Move overlays hand to a drag
 (`PrecisionDrag`), upstream of every handle, so the poses `updateFloatingPose` reports — and this
-section's samples are exactly those — are the slowed ones with nothing for the recorder to know. Two
-things the recording needed that the move did not: a finger landing beside the pen is already inert to
-`canvasInteractionBegan` (a second touch is `CanvasTouchSettle`'s `.transform`, never an edit), so the
-take keeps running; and the canvas's own two-finger pan, pinch and rotation do not *begin* while a Move
-box is being dragged, which a pen plus a finger would otherwise satisfy.
+section's samples are exactly those — are the slowed ones with nothing for the recorder to know.
+**The rotate knobs are the exception** (owner, 2026-10-02, TODO (151): *"snaps in 15 degree increments
+… when rotating any rotate node"*): a joined touch does not slow a turn, it lands the box's angle on a
+multiple of 15° (`RotationAngle`, the smart-shape line's own rule), and the pose the recorder samples is
+the snapped one just the same. Two things the recording needed that the move did not: a finger landing
+beside the pen is already inert to `canvasInteractionBegan` (a second touch is `CanvasTouchSettle`'s
+`.transform`, never an edit), so the take keeps running; and the canvas's own two-finger pan, pinch and
+rotation do not *begin* while a Move box is being dragged, which a pen plus a finger would otherwise
+satisfy.
 
 ---
 

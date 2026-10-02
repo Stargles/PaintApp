@@ -78,16 +78,6 @@ smart shape for the gradient."*
       sizes (gradient: drag sets direction and length; the rail shows a width slider in % of canvas).
 - [ ] Reuses the smart-shape drag geometry rather than a second copy.
 
-## (151) Rotation snaps to 15° with a finger down, and shows its angle
-
-**Status** — not started. *"Remember the behaviour where if a user creates a line smartshape and then
-presses their finger, it snaps in 15 degree increments? make it so the user can also do that when
-rotating any rotate node. Also have a degree indicator when a rotate node is selected. (Example:
-23.72(degree symbol))"*
-
-- [ ] Every rotate handle snaps to 15° while a finger is down — the smart-shape snap's own rule, shared.
-- [ ] A live angle readout (two decimals, °) while a rotate handle is held.
-
 ## (112) The stream says "paused" and stops updating until the artist draws
 
 **Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to

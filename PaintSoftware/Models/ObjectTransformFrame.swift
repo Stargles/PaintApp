@@ -283,10 +283,11 @@ struct ObjectTransformFrame: Equatable {
     /// about which way the box is pointing, and five copies of `transform.rotation + boxAngle` are
     /// five chances for one of them to drift.
     ///
-    /// **Private on purpose.** It is the angle the box is *drawn* at; nothing outside this type has
-    /// any business with it, and the field it is built from is chrome (see `boxAngle`). At
-    /// `boxAngle == 0` it is `transform.rotation` to the bit.
-    private var drawnAngle: CGFloat { transform.rotation + boxAngle }
+    /// It is the angle the box is *drawn* at — the one an artist reads off the screen, which is why
+    /// the knobs' turn lands *this* on a round angle (`ObjectTransformDrag`) and the angle readout
+    /// shows *this* (`ObjectTransformOverlayView`), whichever knob is held. At `boxAngle == 0` it is
+    /// `transform.rotation` to the bit.
+    var drawnAngle: CGFloat { transform.rotation + boxAngle }
 
     /// The box's two axis scales. **The one place `scale` and `aspect` are turned back into a pair**,
     /// so the projection, its inverse and `VectorCanvas.affine(from:aspect:pivot:)` cannot disagree
@@ -515,6 +516,10 @@ struct ObjectTransformFrame: Equatable {
         /// The four that scale. Kept as a property rather than a set literal at each call site so a
         /// seventh case cannot be silently omitted from one of them.
         var isCorner: Bool { cornerIndex != nil }
+
+        /// The two knobs, whose drag turns the box. What a finger joining the drag does depends on it:
+        /// a turn snaps to a round angle, anything else is slowed (`PrecisionDrag`).
+        var turns: Bool { self == .rotation || self == .boxRotation }
 
         /// Which corner of a `Quad` this handle is, in `Quad`'s own order, or nil for the two knobs
         /// and the move band. The two orders are the same one — top-left, top-right, bottom-right,
@@ -788,8 +793,9 @@ struct ObjectTransformDrag: Equatable {
     /// gesture produces no transform.
     func transform(draggedTo point: CGPoint) -> LayerTransform { pose(draggedTo: point).transform }
 
-    /// The pose this drag produces with the finger at `point`.
-    func pose(draggedTo point: CGPoint) -> Pose {
+    /// The pose this drag produces with the finger at `point`. `snapsRotation` lands the angle the box
+    /// is drawn at on `RotationAngle.snapped` — it means something to the two knobs only.
+    func pose(draggedTo point: CGPoint, snapsRotation: Bool = false) -> Pose {
         switch handle {
         case .body:
             var moved = start
@@ -807,7 +813,7 @@ struct ObjectTransformDrag: Equatable {
             return stretched(to: point)
         case .rotation:
             var turned = start
-            turned.rotation = start.rotation + turnedBy(point)
+            turned.rotation = start.rotation + turnedBy(point, snapping: snapsRotation)
             // **A rotation of the ink leaves the stretch axis alone, and that is arithmetic rather
             // than a choice.** The map is `R(ρ+φ)·S·R(−φ)`, so adding δ to ρ pre-multiplies the whole
             // thing by `R(δ)` — a rigid turn of the piece about its centre, whatever it has been
@@ -821,7 +827,7 @@ struct ObjectTransformDrag: Equatable {
             // at all — not scaled by 1, not rotated by 0, just passed through. `stretchAxis` is
             // passed through with it, which is what keeps a turn free of ink *after* a stretch too.
             return Pose(transform: start, aspect: startAspect,
-                        boxAngle: startBoxAngle + turnedBy(point),
+                        boxAngle: startBoxAngle + turnedBy(point, snapping: snapsRotation),
                         stretchAxis: startStretchAxis, distort: startDistort)
         }
     }
@@ -868,10 +874,18 @@ struct ObjectTransformDrag: Equatable {
     /// How far the finger has swept about the anchor since touch-down. **Shared by both knobs**, so
     /// the box-only turn feels identical to the one that carries the ink and neither can drift from
     /// the other; which field the answer lands in is the only difference between them.
-    private func turnedBy(_ point: CGPoint) -> CGFloat {
+    ///
+    /// **Snapping rounds the angle the box ends up drawn at, not the sweep.** Both knobs add the sweep
+    /// to the drawn angle (`transform.rotation + boxAngle`, one summand each), so the sweep that
+    /// lands that sum on a round angle is the same sweep for either — and a box that began at 7° is
+    /// found at 15° and 30°, which is what the artist sees, not at 22° and 37°.
+    private func turnedBy(_ point: CGPoint, snapping: Bool) -> CGFloat {
         let startAngle = atan2(startPoint.y - anchor.y, startPoint.x - anchor.x)
         let currentAngle = atan2(point.y - anchor.y, point.x - anchor.x)
-        return currentAngle - startAngle
+        let sweep = currentAngle - startAngle
+        guard snapping else { return sweep }
+        let drawnAtStart = start.rotation + startBoxAngle
+        return RotationAngle.snapped(drawnAtStart + sweep) - drawnAtStart
     }
 
     /// **Uniform**: one factor, the ratio of the two radii, on both axes. Unchanged since the port.

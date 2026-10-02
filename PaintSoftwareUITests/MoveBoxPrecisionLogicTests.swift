@@ -5,11 +5,12 @@ import Combine
 /// **A touch beside the pen makes a Move-box drag a fifth as fast** — TODO (146), the owner's *"if the
 /// user presses a finger onto the canvas while moving the box with their pen, it makes the move more
 /// precise, like 5x less than the pen's movement. This should work with recording movement too."*
+/// (A knob is the exception: a joined touch snaps its turn, `RotationSnapLogicTests`.)
 ///
 /// XCUITest cannot synthesise a Pencil, so the rule is a pure value (`PrecisionDrag`) and everything
 /// that can be said about it is said here: the rate, the re-anchoring that keeps the box from
-/// jumping, which touch counts, that every handle reads the slowed point, and that a take over a
-/// transformation layer's box survives the finger and records the slowed path.
+/// jumping, which touch counts, that every moving or sizing handle reads the slowed point, and that a
+/// take over a transformation layer's box survives the finger and records the slowed path.
 /// `MoveBoxPrecisionUITests` drives the same rule through the real overlays with a finger standing in
 /// for the pen.
 @MainActor
@@ -137,21 +138,11 @@ final class MoveBoxPrecisionLogicTests: XCTestCase {
         XCTAssertEqual(slowed.position.y - 200, (plain.position.y - 200) / 5, accuracy: 1e-9)
     }
 
-    /// **The turn and the scale are slowed too**, with no handle told about it — the point they read
-    /// is the slowed one. A quarter turn of the pen about the box turns it by far less than a quarter;
-    /// a corner pulled 100 points out grows the box far less than it would have.
-    func testTheTurnAndTheScaleAreSlowedBecauseTheyReadTheSamePoint() {
+    /// **The scale is slowed too**, with no handle told about it — the point it reads is the slowed
+    /// one. A corner pulled 100 points out grows the box far less than it would have. (The knobs are
+    /// not slowed: a joined touch snaps their turn instead — `RotationSnapLogicTests`.)
+    func testTheScaleIsSlowedBecauseItReadsTheSamePoint() {
         let frame = boxFrame()
-        let knob = frame.rotationHandlePosition(offset: 36)
-        var turning = PrecisionDrag(startingAt: knob, touchesDown: 1)
-        let turn = ObjectTransformDrag(frame: frame, handle: .rotation, at: knob)
-        _ = turning.point(for: knob, touchesDown: 2)
-        let penAfter = point(knob.x + 120, knob.y + 120)
-        let plainTurn = abs(turn.pose(draggedTo: penAfter).transform.rotation)
-        let slowedTurn = abs(turn.pose(draggedTo: turning.point(for: penAfter, touchesDown: 2)).transform.rotation)
-        XCTAssertGreaterThan(plainTurn, 0.5, "PREMISE: the unslowed pen turns the box a long way")
-        XCTAssertLessThan(slowedTurn, plainTurn / 3, "the slowed pen turns it far less")
-
         let corner = frame.corners[2]
         var pulling = PrecisionDrag(startingAt: corner, touchesDown: 1)
         let scale = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: corner)

@@ -35,13 +35,18 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
 
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
     /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins mid-drag is what slows
-    /// the drag (`PrecisionDrag`, TODO (146)), and a take over a transformation layer's box records
-    /// the slowed poses because they are the ones `apply` reports.
+    /// the drag, or snaps a turn to a round angle (`PrecisionDrag`, TODO (146), (151)), and a take over
+    /// a transformation layer's box records the slowed or snapped poses because they are the ones
+    /// `apply` reports.
     ///
     /// The touch asked about is counted whether or not the counter has heard of it, which is how the
     /// baseline is taken at the drag's own touch-down — this overlay's pans are read before the
     /// counter on some touch-downs; nil asks for the count as it stands.
     var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
+
+    /// The pill that says what angle the rotate knob has the piece at (TODO (151)), pushed down by
+    /// `CanvasView`.
+    weak var rotationReadout: RotationReadoutView?
 
     /// Whether one of the box's pans owns a touch — **from touch-down, not from the pan's `.began`**,
     /// which is a slop's travel later. While it does, the box owns every other touch: a second finger
@@ -51,6 +56,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// that makes a drag precise is often already there when the pen starts to move, and the canvas's
     /// two-finger pan would otherwise begin in the same breath as the pan that is meant to win.
     var isDragging: Bool { activePan != nil }
+    /// Whether the rotate knob is the grip held.
+    private var isTurning: Bool { activePan?.view === rotateHandle }
 
     /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
     /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
@@ -164,6 +171,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         }
         pan.onSequenceEnded = { [weak self, weak pan] in
             guard let self, let pan, self.activePan === pan else { return }
+            if self.isTurning { self.rotationReadout?.release() }
             self.activePan = nil
             self.precision = nil
             self.onBoxTouchUp?()
@@ -191,7 +199,9 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         isUserInteractionEnabled = isInteractive
         guard newPiece != nil else {
             // A piece settled out from under a touch takes the claim with it; the sequence's own end
-            // would clear it too, a moment later.
+            // would clear it too, a moment later. The pill is shared with the other overlays, so only
+            // the one holding it takes it down.
+            if isTurning { rotationReadout?.hide() }
             activePan = nil
             precision = nil
             return
@@ -305,6 +315,16 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         // exactly whenever the quad is the plain box, since an affine carries midpoints to midpoints.
         let topCenter = CGPoint(x: (quad.p0.x + quad.p1.x) / 2, y: (quad.p0.y + quad.p1.y) / 2)
         placeRotateHandle(rotateHandle, line: rotateLine, topCenter: topCenter, rotation: t.rotation)
+        showReadoutIfTurning()
+    }
+
+    /// While the rotate knob is held, the angle the piece is at, beside the knob. Read off the piece's
+    /// own transform, which every arm writes through `apply`, so the pill says the angle the piece
+    /// has — snap included — and never the finger's.
+    private func showReadoutIfTurning() {
+        guard let piece, isTurning else { return }
+        rotationReadout?.show(angle: piece.transform.rotation, knob: rotateHandle.center,
+                              centre: piece.transform.position, in: self)
     }
 
     // MARK: - Move (drag anywhere on the outline)
@@ -336,12 +356,15 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         guard activePan == nil else { return }
         activePan = pan
         precision = PrecisionDrag(startingAt: pan.location(in: self),
-                                  touchesDown: touchesOnCanvas((pan as? TouchDownPanGestureRecognizer)?.landedTouch))
+                                  touchesDown: touchesOnCanvas((pan as? TouchDownPanGestureRecognizer)?.landedTouch),
+                                  turns: pan.view === rotateHandle)
         dragOrigin = pan.location(in: self)
+        showReadoutIfTurning()
     }
 
     /// The point every arm reads for its gesture's current position: the pen's own while the pen is
-    /// alone, a fifth of its travel while another touch is down.
+    /// alone, a fifth of its travel while another touch is down — except on the rotate knob, which
+    /// always gets the pen's own and snaps its angle instead (`PrecisionDrag.snapsAngle`).
     private func precisePoint(_ recognizer: UIPanGestureRecognizer) -> CGPoint {
         guard activePan === recognizer, var drag = precision else { return recognizer.location(in: self) }
         let point = drag.point(for: recognizer.location(in: self), touchesDown: touchesOnCanvas(nil))
@@ -364,6 +387,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
             let currentAngle = atan2(current.y - center.y, current.x - center.x)
             var updated = dragStartTransform
             updated.rotation = dragStartTransform.rotation + (currentAngle - startAngle)
+            if precision?.snapsAngle == true { updated.rotation = RotationAngle.snapped(updated.rotation) }
             apply(updated)
         default:
             break

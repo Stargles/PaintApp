@@ -40,6 +40,13 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     /// never reach `onEnd` and the shape would never reach its adjustable state.
     var shouldIgnoreAdditionalTouches: (() -> Bool)?
 
+    /// When this answers true, a touch that begins a fresh sequence is not a stroke: a handle's drag
+    /// elsewhere on the canvas — a pending smart shape's rotate knob — is held, and this touch is the
+    /// finger beside it that snaps the turn (`PrecisionDrag`, TODO (151)). The Move boxes need no such
+    /// answer, because their hosts are not interactive while a box is up; a pending shape's host is,
+    /// by design, so the finger would otherwise draw a dot and commit the shape it was steadying.
+    var isBesideAHandleDrag: (() -> Bool)?
+
     /// How many **fingers** are down alongside the tracked touch right now — the "keep the pen held
     /// down and put a finger on the canvas" signal, reported from the recognizer that is already
     /// holding the pen.
@@ -209,6 +216,10 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
             return
         }
         guard touches.count == 1, let touch = touches.first else {
+            transition(to: .failed)
+            return
+        }
+        if isBesideAHandleDrag?() == true {
             transition(to: .failed)
             return
         }

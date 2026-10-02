@@ -194,6 +194,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedPendingLine` — TODO (121)'s smart-shape line
         // with one end off the canvas, which a synthetic touch cannot hold still long enough to make.
         UITestSeeds.seedPendingLineIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedPendingRectangle` — TODO (151)'s smart shape with
+        // a rotate knob, for the same reason.
+        UITestSeeds.seedPendingRectangleIfRequested(into: canvasManager)
         onCreated()
     }
 }

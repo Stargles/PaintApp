@@ -309,9 +309,12 @@ extension CanvasManager {
     /// composed through the homography now (`TextFrameDrag.warpedFrame`), so growing a box towards
     /// the vanishing line can be refused too, and it must stick in exactly the same way. Asking one
     /// question keeps the two from drifting apart.
-    func dragTextHandle(to canvasPoint: CGPoint) {
+    ///
+    /// `snapsRotation` is true while a touch has joined the rotation knob's drag
+    /// (`PrecisionDrag`, TODO (151)): the box lands on a round angle.
+    func dragTextHandle(to canvasPoint: CGPoint, snapsRotation: Bool = false) {
         guard textGestureActive, let drag = textHandleDrag else { return }
-        guard let next = drag.clampedFrame(draggedTo: canvasPoint) else { return }
+        guard let next = drag.clampedFrame(draggedTo: canvasPoint, snapsRotation: snapsRotation) else { return }
         textFrame = next
         objectWillChange.send()
     }

@@ -646,8 +646,9 @@ struct ShapeGeometry: Equatable {
 
     // MARK: - Two-finger constraint
 
-    /// The shape as drawn while the two-finger constraint is engaged: a line snaps to 15°
-    /// increments, a rectangle/oval becomes a square/circle about its own centre.
+    /// The shape as drawn while the two-finger constraint is engaged: a line snaps to
+    /// `RotationAngle.snapIncrement` (15°), a rectangle/oval becomes a square/circle about its own
+    /// centre.
     ///
     /// One implementation shared by the on-screen preview and the commit path — when these were
     /// separate, a snapped shape previewed snapped but baked unsnapped.
@@ -655,7 +656,7 @@ struct ShapeGeometry: Equatable {
         switch kind {
         case .line:
             let angle = atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x)
-            let snapped = Self.snapAngle(angle, toIncrement: .pi / 12)
+            let snapped = RotationAngle.snapped(angle)
             let distance = hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
             var result = self
             result.endPoint = CGPoint(x: startPoint.x + cos(snapped) * distance,
@@ -669,12 +670,6 @@ struct ShapeGeometry: Equatable {
             result.endPoint = CGPoint(x: r.midX + side / 2, y: r.midY + side / 2)
             return result
         }
-    }
-
-    /// Snaps an angle (radians) to the nearest multiple of `increment`.
-    static func snapAngle(_ angle: CGFloat, toIncrement increment: CGFloat) -> CGFloat {
-        guard increment > 0 else { return angle }
-        return (angle / increment).rounded() * increment
     }
 }
 

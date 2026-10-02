@@ -536,6 +536,29 @@ class PaintUITestCase: XCTestCase {
         app.buttons["toolbar.layersButton"].tap()
     }
 
+    /// **A filled block on a raster layer, lifted into the raster Move box** — the setup
+    /// `DistortUITests` made its own and every raster-box test since has repeated. A rectangle is
+    /// selected over the right of the canvas and filled, then Move lifts it. Answers the block's
+    /// measured top-left in the host's unit square, which is what the box's own geometry is read from:
+    /// the box has no published frame, but the piece it carries is drawn where the box is.
+    func liftAFilledBlockIntoTheRasterMoveBox(_ app: XCUIApplication, on canvas: XCUIElement) throws -> CGPoint {
+        addRasterLayer(app)
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.22), to: CGVector(dx: 0.80, dy: 0.40))
+        let fillButton = app.buttons["selectPanel.fillButton"]
+        XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
+        fillButton.tap()
+        let filled = try inkTopLeft(try settledProbe(canvas),
+                                    in: CGRect(x: 0.50, y: 0.19, width: 0.36, height: 0.27))
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                      "Move lifts the filled block")
+        return filled
+    }
+
     /// Opens the layer panel, reads the vector marker, and closes it again — the panel overlays the
     /// canvas, so tests that alternate between drawing and counting need it shut in between.
     func vectorMarkerViaPanel(_ app: XCUIApplication, layerIndex: Int) -> (isVector: Bool, strokes: Int, erases: Int)? {
