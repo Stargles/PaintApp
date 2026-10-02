@@ -18,6 +18,11 @@ struct PaletteSwatchGrid: View {
     let idPrefix: String
     var onPick: (Color) -> Void = { _ in }
 
+    /// The grid's geometry, shared with the colour panel's Recent strip so the two read as one
+    /// arrangement of one size of swatch.
+    static let spacing: CGFloat = 6
+    static let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: Palette.columns)
+
     private var emptyCount: Int {
         let filled = palette.colors.count
         let remainder = filled % Palette.columns
@@ -26,10 +31,7 @@ struct PaletteSwatchGrid: View {
     }
 
     var body: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: Palette.columns),
-            spacing: 6
-        ) {
+        LazyVGrid(columns: Self.columns, spacing: Self.spacing) {
             ForEach(Array(palette.colors.enumerated()), id: \.element.id) { index, swatch in
                 RoundedRectangle(cornerRadius: 5)
                     .fill(swatch.color)

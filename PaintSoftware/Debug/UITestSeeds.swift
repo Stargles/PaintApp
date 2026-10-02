@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import SwiftUI
 import UIKit
 
 /// **Test-only seams, each armed by its own launch argument and inert on every ordinary launch.**
@@ -178,6 +179,22 @@ enum UITestSeeds {
             return
         }
         canvasManager.insertVideo(at: url, consumingSource: true)
+    }
+
+    /// **A full Recent strip** — `-uiTestSeedColorHistory`, for TODO's colour-panel fit.
+    ///
+    /// The strip is "the last colours actually used to paint" (`ColorHistoryStore`), so the only way
+    /// to a full one is `capacity` strokes in `capacity` colours — a few minutes of hex-field typing
+    /// to assert one layout fact. This records twenty distinct colours through the store's own
+    /// `record`, the verb a stroke's end calls, oldest first so the strip reads newest-first as it
+    /// does for an artist.
+    static func seedColorHistoryIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedColorHistory") else { return }
+        ColorHistoryStore.shared.clear()
+        for step in 0..<ColorHistoryStore.capacity {
+            let hue = Double(step) / Double(ColorHistoryStore.capacity)
+            ColorHistoryStore.shared.record(Color(hue: hue, saturation: 0.8, brightness: 0.9))
+        }
     }
 
     /// **A picture on a fresh document, the way an import leaves it — held in the Move box** —

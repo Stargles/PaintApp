@@ -18,6 +18,9 @@ struct PaintApp: App {
         // Inert unless an XCUITest passed `-uiTestSlowBakeMillis`, and simulator-only; before the
         // first document's baker exists, which reads it at every mint.
         UITestSeeds.applyBakeDelayIfRequested()
+        // Inert unless an XCUITest passed `-uiTestSeedColorHistory`: a full Recent strip, which only
+        // twenty painted strokes in twenty colours would otherwise fill.
+        UITestSeeds.seedColorHistoryIfRequested()
         // TODO (36): resolve the artist's chosen projects folder **before** anything reads
         // `ProjectBackupManager.documentsDirectory`. Synchronous and on the main thread on purpose —
         // it is one bookmark resolve, and every line below this one asks where the library is. The

@@ -919,10 +919,10 @@ struct DrawingView: View {
     private var panelMaxHeight: CGFloat {
         switch activePanel {
         case .brush, .eraser: return 640
-        // TODO (73): tied to `ColorPickerPanel.popoverSize` rather than a sixth hand-typed number —
-        // this file already argued against that shape once, for the four popover call sites this
-        // dropdown isn't one of.
-        case .color: return ColorPickerPanel.popoverSize.height
+        // TODO (73): the panel's own constant rather than a sixth hand-typed number — this file
+        // already argued against that shape once, for the popover call sites this dropdown isn't one
+        // of, which keep `popoverSize`.
+        case .color: return ColorPickerPanel.dropdownHeight
         default: return 420
         }
     }

@@ -91,18 +91,6 @@ each** — "Edit Text" and "Edit Gradient" side by side, each opening its own pa
 
 - [ ] The Select panel lists one Edit button per editable kind the loop caught.
 
-## The colour panel grows downward: Recent and the whole palette in view
-
-**Status** — not started. Answers BUGS.md's palette-row question (since (106) the panel showed one
-palette row above the fold). The owner, 2026-10-01: *"the color picker should be extended downwards. I
-want both the recent and color palette to be fully shown in horizontal mode. Seems you have alot of room
-to extend it downwards too. The position of the switch also should not take up much space. I think a good
-place to fit it can be on the top right, the same row as the previous/current color indicator."* — the
-switch is (119)'s Layer/Canvas eyedropper switch.
-
-- [ ] The panel is taller, so the Recent strip and the selected palette show whole without scrolling in
-      landscape; the eyedropper switch sits compactly on the previous/current colour row, top right.
-
 ## (124) follow-up: Add-menu fill objects and the wand under a transform layer
 
 **Status** — not started. Found by the worker that finished (124)'s raster arm (`4332a17`): two input

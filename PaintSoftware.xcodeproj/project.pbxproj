@@ -385,6 +385,7 @@
 		16A68D1EFD90D0606ED44802 /* PaintSoftware/Engine/ImageWarp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A68D1EFD90D0606ED44801 /* PaintSoftware/Engine/ImageWarp.swift */; };
 		060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */; };
 		1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACD68660078E6C48908F501 /* DistortUITests.swift */; };
+		F97F5104F45A81759EF86B49 /* ColorPanelFitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3E779AE50385139119E7EA /* ColorPanelFitUITests.swift */; };
 		9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */; };
 		7CC3BA1E3F48A7D7EAAA6128 /* MoveBoxPrecisionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */; };
 		8E34D79CC4756C6F7D6835C6 /* MoveBoxPrecisionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */; };
@@ -907,6 +908,7 @@
 		16A68D1EFD90D0606ED44801 /* PaintSoftware/Engine/ImageWarp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ImageWarp.swift; sourceTree = "<group>"; };
 		060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomographyLogicTests.swift; sourceTree = "<group>"; };
 		1ACD68660078E6C48908F501 /* DistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortUITests.swift; sourceTree = "<group>"; };
+		7B3E779AE50385139119E7EA /* ColorPanelFitUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ColorPanelFitUITests.swift"; sourceTree = "<group>"; };
 		7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ImageMoveBoxUITests.swift"; sourceTree = "<group>"; };
 		CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MoveBoxPrecisionUITests.swift"; sourceTree = "<group>"; };
 		28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MoveBoxPrecisionLogicTests.swift"; sourceTree = "<group>"; };
@@ -1136,6 +1138,7 @@
 				0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */,
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
 				1ACD68660078E6C48908F501 /* DistortUITests.swift */,
+				7B3E779AE50385139119E7EA /* ColorPanelFitUITests.swift */,
 				7578A1DD9F6A3D7A4BB3BAE5 /* ImageMoveBoxUITests.swift */,
 				CBE799CF7CF45201DC65044F /* MoveBoxPrecisionUITests.swift */,
 				28EA8BE45689D9CF7853152B /* MoveBoxPrecisionLogicTests.swift */,
@@ -1770,6 +1773,7 @@
 				16A68D1EFD90D0606ED44802 /* PaintSoftware/Engine/ImageWarp.swift in Sources */,
 				060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */,
 				1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */,
+				F97F5104F45A81759EF86B49 /* ColorPanelFitUITests.swift in Sources */,
 				9C8B25995308BFC530F1E173 /* ImageMoveBoxUITests.swift in Sources */,
 				7CC3BA1E3F48A7D7EAAA6128 /* MoveBoxPrecisionUITests.swift in Sources */,
 				8E34D79CC4756C6F7D6835C6 /* MoveBoxPrecisionLogicTests.swift in Sources */,

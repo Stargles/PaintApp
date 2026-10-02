@@ -42,7 +42,7 @@ import SwiftUI
 /// round trip — see `applyTriangleSL`, the same achromatic-hue guard `applyHSBA` already needed).
 /// `previousColor` (this file), `ColorHistoryStore.shared` and `PaletteStore.shared` are the other
 /// three things (73) named as shared rather than per-tab, and every type tab still shows all three
-/// (`header`, `typeTabBody`) — one previous swatch, one history strip, one palette grid, never a
+/// (`header`, `typeTabBody`) — one previous swatch, one history grid, one palette grid, never a
 /// second copy.
 ///
 /// ## Which type it opens on
@@ -75,9 +75,21 @@ struct ColorPickerPanel: View {
     /// only *reads* it (recording happens at the stroke, in `CanvasManager.strokeEnded`).
     @ObservedObject private var historyStore: ColorHistoryStore = .shared
 
-    /// The frame the popover call sites give this panel (the top-toolbar dropdown sizes itself
-    /// separately, in `DrawingView`, off this same constant — see `panelMaxHeight`).
+    /// The frame the popover call sites give this panel — anchored presentations, which have an arrow
+    /// and a keyboard to share the screen with, so the Recent strip and the palette scroll in the room
+    /// left under the controls.
     static let popoverSize = CGSize(width: 300, height: 560)
+
+    /// **How tall the top-toolbar dropdown may grow** (`DrawingView.panelMaxHeight`) — tall enough that
+    /// the Recent strip and the whole selected palette are in view without a scroll. The owner,
+    /// 2026-10-01: *"the color picker should be extended downwards. I want both the recent and color
+    /// palette to be fully shown in horizontal mode."* Measured from the layout rather than guessed:
+    /// the header, the 280 pt ring, the opacity and hex rows and the tab bar are ~480 pt, and the two
+    /// swatch sections under them are ~200 pt for twenty Recent colours (two rows of ten) and a
+    /// twenty-colour palette with its row of empty cells (three). At 700 the dropdown ends 760 pt down,
+    /// inside the 810 pt of a 9th-generation iPad in landscape; a screen shorter than that proposes
+    /// less than this and the sections scroll, as they always did.
+    static let dropdownHeight: CGFloat = 700
 
     @State private var hue: Double = 0
     @State private var saturation: Double = 0
@@ -418,17 +430,18 @@ struct ColorPickerPanel: View {
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(Array(historyStore.colors.enumerated()), id: \.element.id) { index, swatch in
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(swatch.color)
-                                .frame(width: 26, height: 26)
-                                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.25), lineWidth: 1))
-                                .accessibilityIdentifier("colorPanel.history.swatch.\(index)")
-                                .accessibilityValue(swatch.hex)
-                                .onTapGesture { selectSwatch(swatch.color) }
-                        }
+                // **A grid on the palette's own columns, not a strip that scrolls sideways** — the
+                // twenty colours the history holds are two rows of ten, all in view, and each swatch is
+                // the size of the palette's below it.
+                LazyVGrid(columns: PaletteSwatchGrid.columns, spacing: PaletteSwatchGrid.spacing) {
+                    ForEach(Array(historyStore.colors.enumerated()), id: \.element.id) { index, swatch in
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(swatch.color)
+                            .aspectRatio(1, contentMode: .fit)
+                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.25), lineWidth: 1))
+                            .accessibilityIdentifier("colorPanel.history.swatch.\(index)")
+                            .accessibilityValue(swatch.hex)
+                            .onTapGesture { selectSwatch(swatch.color) }
                     }
                 }
             }
