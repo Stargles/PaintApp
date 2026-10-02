@@ -313,5 +313,42 @@ final class MediaPlacementLogicTests: XCTestCase {
         XCTAssertEqual(afterOneToOne.c, 0, accuracy: 1e-6)
         assertPoint(CGPoint(x: afterOneToOne.tx, y: afterOneToOne.ty), canvasCentre, accuracy: 1e-5,
                     "about the centre Center gave it")
+        // The pose is solved from four corners, so it is a similarity only to within rounding; the box
+        // must still come out unstretched rather than carrying that residue as a stretch.
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect, 1, "the box is not stretched by rounding noise")
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis, 0, "and has no stretch axis")
+    }
+
+    /// **The same, for a transformation layer above the picture's layer** — the pose a Move layer
+    /// carries over everything beneath it. `celPoseMaps` composes that container pose after the cel's
+    /// own channels, so the float's `poses` hold it and both placements measure the picture as the
+    /// Move layer shows it.
+    func testBothPlacementsMeasureThePictureAsItIsShownThroughATransformationLayer() throws {
+        let (manager, vector) = manager()
+        manager.commitVectorFloatIfNeeded()
+        let pictureLayer = manager.currentLayerIndex
+        manager.addTransformLayer()
+        let mover = manager.layers.count - 1
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        let quad = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: -4, y: 6).rotated(by: -0.4)
+                                                   .scaledBy(x: 0.75, y: 0.75))
+        manager.layers[mover].transform = LayerPose(pose: quad, track: TransformTrack(keys: [.init(frame: 0, pose: quad)]))
+        manager.currentLayerIndex = pictureLayer
+        let pose = try XCTUnwrap(manager.containerPose(ofLayerAt: pictureLayer, atFrame: 0)?.affine,
+                                 "setup: the transformation layer poses the picture's layer")
+        XCTAssertFalse(pose.isIdentity)
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "setup: Move lifts the picture a Move layer is carrying")
+        XCTAssertTrue(manager.floatHoldsPlacedMedia)
+
+        manager.placeFloatedMedia(.centred)
+        assertPoint(shownCentre(try picture(vector), through: pose), canvasCentre, accuracy: 1e-5,
+                    "Center puts the picture as the Move layer shows it on the canvas centre")
+
+        manager.placeFloatedMedia(.actualSize)
+        let shown = try picture(vector).placement.concatenating(pose)
+        XCTAssertEqual(shown.a, 1, accuracy: 1e-6, "one pixel per pixel as shown")
+        XCTAssertEqual(shown.d, 1, accuracy: 1e-6)
+        XCTAssertEqual(shown.b, 0, accuracy: 1e-6, "and upright as shown")
+        XCTAssertEqual(shown.c, 0, accuracy: 1e-6)
     }
 }
