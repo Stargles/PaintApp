@@ -7,6 +7,7 @@ import UIKit
 final class SelectionOverlayView: CanvasPlaneView {
     var onFinishPath: ((CGPath) -> Void)?
     var onAutomaticTap: ((CGPoint) -> Void)?
+    var onObjectTap: ((CGPoint) -> Void)?
 
     var mode: SelectionMode = .lasso
 
@@ -356,7 +357,7 @@ final class SelectionOverlayView: CanvasPlaneView {
         switch mode {
         case .lasso: handleLassoPan(recognizer)
         case .rectangle: handleRectanglePan(recognizer)
-        case .automatic: break // automatic selection is a tap, not a drag
+        case .automatic, .tap: break // the wand and Tap select by a tap, not a drag
         }
     }
 
@@ -423,9 +424,13 @@ final class SelectionOverlayView: CanvasPlaneView {
     }
 
     @objc private func handleTap(_ recognizer: TouchTypeTapGestureRecognizer) {
-        guard isCapturingGestures, mode == .automatic else { return }
-        guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-        onAutomaticTap?(recognizer.location(in: self))
+        guard isCapturingGestures, !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+        let point = recognizer.location(in: self)
+        switch mode {
+        case .automatic: onAutomaticTap?(point)
+        case .tap: onObjectTap?(point)
+        case .lasso, .rectangle: break
+        }
     }
 }
 

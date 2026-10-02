@@ -61,20 +61,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that
 already merged are follow-ups named for their item.
 
-## Text follow-ups: a stray box after Edit Text, and the panel stays live while typing
-
-**Status** — not started. Both on (116)'s Select → Edit Text (`d1dd0dd`) and the text tool.
-- *"Select a text, click edit text, then click anywhere on the canvas. A new textbox for some reason
-  comes up for some reason, which has entirely no reason to be there."* — tapping away should end the
-  edit, never place a new box.
-- *"When I create a text, then click on the board to place the box and start writing, I want to still be
-  able to adjust the things on that menu after I make the text without having to select the text
-  again."* — the Text panel's controls keep applying to the box just written.
-
-- [ ] A tap away from an edited box commits it and places nothing; a cold-start UI test.
-- [ ] The Text panel stays bound to the box being written; changing font/size/colour after typing
-      changes that box.
-
 ## (149) Add-menu shapes are primed, then dragged out with the pen
 
 **Status** — not started. Replaces (129)'s "lands centred in a Move box" (`d1dd0dd`), which goes whole.
@@ -101,15 +87,6 @@ rotating any rotate node. Also have a degree indicator when a rotate node is sel
 
 - [ ] Every rotate handle snaps to 15° while a finger is down — the smart-shape snap's own rule, shared.
 - [ ] A live angle readout (two decimals, °) while a rotate handle is held.
-
-## (147) Tap to select an object
-
-**Status** — not started. *"a new select mode which is simple: you just tap on anything and it selects
-whatever object you tapped on. If it is a text, it instantly opens the edit text menu, vice versa for
-gradients, brushstrokes/fill shapes, etc."*
-
-- [ ] A Tap mode beside the Select panel's loop modes; a tap selects the topmost object under it; text
-      and gradient open their Edit panels at once; a stroke or fill opens the selection's own options.
 
 ## (112) The stream says "paused" and stops updating until the artist draws
 

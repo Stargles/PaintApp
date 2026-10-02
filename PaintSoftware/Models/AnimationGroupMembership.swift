@@ -192,7 +192,7 @@ extension CanvasManager {
         if let memo = selectionAnimationGroupMemo, memo.matches(key) { return memo.answer }
 
         let loops = CanvasManager.lassoLoops(
-            vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule),
+            of: selection, in: vector,
             posedBy: celPoseMaps(elements, layerID: selection.layerID, celID: selection.celID,
                                  atFrame: currentFrame))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
@@ -251,12 +251,10 @@ extension CanvasManager {
         // Both preconditions `splitForLassoMove` states, and the per-element pull-back LASSO_MOVE.md
         // §5.27 rules: a lasso means what it means **on screen**, including on a frame where a pose
         // channel is showing the drawing somewhere other than where it is stored.
-        let drawn = vector.localPath(fromCanvas: selection.path)
-                          .normalized(using: VectorCanvas.lassoFillRule)
         let elementsBefore = vector.elements
         let loops = CanvasManager.lassoLoops(
-            drawn, posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID,
-                                        atFrame: currentFrame))
+            of: selection, in: vector,
+            posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID, atFrame: currentFrame))
 
         // **The one branch the three rules cost**, `recolorSelection`'s verbatim: membership belongs to
         // the selection with no exception (LASSO_MOVE.md §5.26), and this is a fifth consumer of it

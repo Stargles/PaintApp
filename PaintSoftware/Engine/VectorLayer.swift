@@ -5796,35 +5796,11 @@ final class VectorCanvas {
     // MARK: - Hit testing
 
     /// The **topmost** paint stroke whose ink covers `point`, or nil for a tap on bare canvas. Used by
-    /// the retagging gesture (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`).
-    ///
-    /// Measured against the stroke's **ink**: the query rect is grown by the layer's widest half-width
-    /// and each candidate tested against its own stamp radius. `slop` widens the target beyond the ink
-    /// for a fingertip, added to the stroke's own radius so a hairline stays tappable.
-    ///
-    /// Erasers are skipped. Fills and placed images cannot carry a tag at all (see
+    /// the retagging gesture (`CanvasManager.assignArmedMotionGroup(atCanvasPoint:)`). Erasers are
+    /// skipped, and so are fills and placed images, which cannot carry a tag at all (see
     /// `VECTOR_INTERPOLATION.md` §4 item 11).
-    func topmostStroke(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorStroke? {
-        lock.lock()
-        defer { lock.unlock() }
-        let reach = maxPaintReach() + slop
-        guard reach > 0 else { return nil }
-        let box = CGRect(x: point.x - reach, y: point.y - reach, width: reach * 2, height: reach * 2)
-
-        var best: Int?
-        for ref in strokeIndex().segments(near: box) {
-            if let best, ref.elementIndex <= best { continue }
-            guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
-                  stroke.samples.indices.contains(ref.sampleIndex) else { continue }
-            let a = stroke.samples[ref.sampleIndex].point
-            let b = stroke.samples[min(ref.sampleIndex + 1, stroke.samples.count - 1)].point
-            let limit = slop + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
-                                                          size: stroke.size)
-            if StrokeGeometry.distanceSquared(from: point, toSegment: a, b) <= limit * limit {
-                best = ref.elementIndex
-            }
-        }
-        return best.flatMap { _elements[$0].stroke }
+    func topmostStroke(atCanvasPoint point: CGPoint, slop: CGFloat = VectorHitTest.fingertip) -> VectorStroke? {
+        topmostElement(atCanvasPoint: point, slop: slop) { $0.stroke != nil }?.stroke
     }
 
     /// The **topmost** text object whose box covers `point`, or nil for a tap on bare canvas. What
@@ -5839,19 +5815,26 @@ final class VectorCanvas {
     /// box plus the four canvas points its corners map to; the inverse of that map sends `point` back
     /// into box-local space, where the test is `0…width × 0…height`. Containment in the *quad* is the
     /// same predicate written without the matrix — a homography maps the box onto the quad and takes
-    /// straight lines to straight lines, so "inside the box" and "inside the quad" are one statement —
-    /// which is why stage 3 can answer it exactly with no `Homography` type, a stage before that type
-    /// exists. Testing `frame.boundingBox` instead would claim the empty corners of a rotated box,
-    /// and `TextHitTestLogicTests` pins exactly that difference.
+    /// straight lines to straight lines, so "inside the box" and "inside the quad" are one statement.
+    /// Testing `frame.boundingBox` instead would claim the empty corners of a rotated box, and
+    /// `TextHitTestLogicTests` pins exactly that difference (`TextFrame.contains(_:slop:)` is the
+    /// predicate, shared with the live editor's own hit test so the two cannot disagree about where
+    /// the text is).
     ///
     /// `slop` widens the target by a fingertip, measured to the quad's edges rather than to a
     /// rectangle's, so a rotated box is no harder to hit than an upright one.
+    func topmostText(atCanvasPoint point: CGPoint, slop: CGFloat = VectorHitTest.fingertip) -> VectorTextElement? {
+        topmostElement(atCanvasPoint: point, slop: slop) { $0.text != nil }?.text
+    }
+
+    /// The topmost element `accepts` whose drawn shape covers the canvas-space `point` — the one
+    /// question every tap above asks, answered by `VectorHitTest` against the stored list.
     ///
-    /// **The point is mapped into local space first**, unlike `topmostStroke(atCanvasPoint:)` beside
-    /// it, which tests a canvas-space point against local geometry and is therefore off by the
-    /// layer's transform on a layer that has been moved. That is a pre-existing gap in a query used
-    /// only by the motion-group retagging tap; it is not repeated here.
-    func topmostText(atCanvasPoint point: CGPoint, slop: CGFloat = 6) -> VectorTextElement? {
+    /// **The point is mapped into local space first**, because that is where a `VectorCanvas` stores
+    /// its geometry: a canvas-space point tested against local geometry is off by the layer's
+    /// transform on a layer that has been moved.
+    private func topmostElement(atCanvasPoint point: CGPoint, slop: CGFloat,
+                                accepting accepts: (VectorElement) -> Bool) -> VectorElement? {
         lock.lock()
         defer { lock.unlock() }
         var point = point
@@ -5861,23 +5844,7 @@ final class VectorCanvas {
             let s = Self.scale(of: _transform)
             if s > 0 { slop /= s }
         }
-        for element in _elements.reversed() {
-            guard let text = element.text else { continue }
-            if Self.frame(text.frame, contains: point, slop: slop) { return text }
-        }
-        return nil
-    }
-
-    /// Point-in-quad with a slop collar. Space-agnostic: `point` and `frame.corners` must simply be
-    /// in the *same* space — `topmostText(atCanvasPoint:)` maps the tap into local space first,
-    /// because that is where a `VectorCanvas` stores its geometry. See there for why this is the
-    /// `H⁻¹` test and not an approximation of one.
-    /// **Stage 4 moved the body onto `TextFrame.contains(_:slop:)`** and left this as the name the
-    /// display list calls it by. The live overlay needs the identical predicate for its own hit test
-    /// (`TextOverlayView.hitTest`), and two copies of a point-in-quad test are two chances for the
-    /// re-open query and the editor to disagree about where the text is.
-    static func frame(_ frame: TextFrame, contains point: CGPoint, slop: CGFloat = 0) -> Bool {
-        frame.contains(point, slop: slop)
+        return VectorHitTest.topmost(in: _elements, at: point, slop: slop, accepting: accepts)
     }
 
     // MARK: - Rendering
@@ -8068,22 +8035,24 @@ struct LassoLoops {
     private let paths: [UUID: CGPath]
     private let boundsByID: [UUID: CGRect]
 
+    /// **The one element this loop answers for, or nil when it answers for all of them** — a Tap
+    /// selection's (`Selection.element`). Every other element is tested against nothing, which every
+    /// membership rule reads as "not inside", so the object the artist tapped is the whole of what the
+    /// selection catches and the strokes and fills lying under or inside its outline are not.
+    private let only: UUID?
+
     /// The base loop's own box, kept apart from `searchBounds` so an un-posed element on a posed cel
     /// is rejected against the loop it is actually tested with rather than against the union.
     private let loopBounds: CGRect
 
     /// `perElement` names only the elements whose stored space differs from the drawn one; an empty
     /// dictionary is the ordinary cel and makes every accessor below a dictionary miss.
-    init(_ loop: CGPath, perElement: [UUID: CGPath] = [:]) {
+    init(_ loop: CGPath, perElement: [UUID: CGPath] = [:], only: UUID? = nil) {
         self.loop = loop
         self.paths = perElement
+        self.only = only
         let base = loop.boundingBoxOfPath
         self.loopBounds = base
-        guard !perElement.isEmpty else {
-            self.boundsByID = [:]
-            self.searchBounds = base
-            return
-        }
         // Memoized on the *path object*, because `CanvasManager.lassoLoops` shares one `CGPath`
         // between every element carried by the same pose — so a five-hundred-element cel under one
         // cel channel measures one bounding box rather than five hundred.
@@ -8103,12 +8072,24 @@ struct LassoLoops {
             union = union.isNull ? box : (box.isNull ? union : union.union(box))
         }
         self.boundsByID = byID
-        self.searchBounds = union
+        // The one element a loop answers for is the only one the broad phase has to find.
+        self.searchBounds = only.map { byID[$0] ?? base } ?? union
     }
 
-    /// The loop `id` is tested against.
-    func path(for id: UUID) -> CGPath { paths[id] ?? loop }
+    /// The loop `id` is tested against — nothing at all for an element this loop does not answer for.
+    func path(for id: UUID) -> CGPath {
+        guard answers(for: id) else { return Self.nothing }
+        return paths[id] ?? loop
+    }
 
-    /// That loop's bounding box.
-    func bounds(for id: UUID) -> CGRect { boundsByID[id] ?? loopBounds }
+    /// That loop's bounding box — null for an element this loop does not answer for, which no box
+    /// intersects.
+    func bounds(for id: UUID) -> CGRect {
+        guard answers(for: id) else { return .null }
+        return boundsByID[id] ?? loopBounds
+    }
+
+    private func answers(for id: UUID) -> Bool { only == nil || only == id }
+
+    private static let nothing: CGPath = CGMutablePath()
 }

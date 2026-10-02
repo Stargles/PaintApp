@@ -38,3 +38,23 @@ enum ActivePanel: Equatable, CaseIterable {
     /// Linear Gradient. See `AddMenu`.
     case add
 }
+
+extension ActivePanel {
+
+    /// **Whether a canvas touch leaves this panel open for the tool the artist has armed.** The rule
+    /// is `DrawingView`'s: a touch on the canvas closes whatever dropdown is standing over it, so the
+    /// first touch both closes the menu and does its work.
+    ///
+    /// **The Text panel is the exception, because it is not a dropdown over the canvas but the text
+    /// tool's own controls — and the touch is the tool at work.** The tap that places a box is what
+    /// the panel's font, size and colour are *for*: closing it on that tap left the artist writing in
+    /// a box whose menu had gone, to be got back by selecting the words again. The owner: *"When I
+    /// create a text, then click on the board to place the box and start writing, I want to still be
+    /// able to adjust the things on that menu after I make the text without having to select the text
+    /// again."* The panel is bound to whichever box is open (`CanvasManager.textRecipe` is that box's
+    /// draft) and to the next one when none is, and it goes with the tool: picking another tool
+    /// closes it.
+    func survivesACanvasTouch(withTool tool: Tool) -> Bool {
+        self == .text && tool == .text
+    }
+}

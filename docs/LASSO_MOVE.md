@@ -334,6 +334,18 @@ with the source's inside removed, as one undo step; the vector arm floats the mo
 layer as Duplicate floats its copy. Starting a selection over is the Deselect tab or a tap on the
 Select icon itself (TODO (94)), which now clears the loop as it puts the panel away.
 
+**Select ▸ Tap (TODO (147), 2026-10-02) is a fourth way to make the same `Selection`, naming one
+object instead of a region.** The path is the object's own outline (`VectorHitTest.outline(of:)`, a
+quad for text and placed pictures and the box round its ink for a stroke or a fill, standing 2 pt off
+it) and `Selection.element` names it, so every consumer — which all read the selection through
+`CanvasManager.lassoLoops(of:in:posedBy:)` — catches that element and nothing lying under or inside
+the outline: a tap on a stroke over a fill moves, recolours and clears the stroke alone. The loop's
+rule (§5.26) therefore means nothing to a tapped selection and the panel says so; Add/Subtract
+composes nothing either, and a loop drawn over a tapped object replaces it. *Which* object is the
+topmost one under the finger on any visible vector layer (the layer becomes the active one),
+hit-tested on its drawn shape through the pose it is shown under (§5.27); a tap on bare canvas puts
+the selection down. Text and gradients open their editors at once.
+
 **A second, separate defect found while scoping, and since fixed as TODO item (33).**
 `SelectPanel`'s Duplicate button calls `beginDuplicate()`, which had no vector branch and always
 rasterized onto a brand-new raster layer. It takes `beginVectorLassoDuplicate` on a vector layer

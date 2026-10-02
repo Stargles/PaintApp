@@ -325,4 +325,17 @@ final class ToolLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - What a canvas touch closes
+
+    /// **The Text panel is the text tool's own controls, so the tap that places a box leaves it up** —
+    /// and only for the text tool: every other open panel is a dropdown over the canvas and a touch
+    /// closes it, and the Text panel under any other tool is no one's controls.
+    func testTheTextPanelSurvivesACanvasTouchOnlyWithTheTextToolArmed() {
+        for panel in ActivePanel.allCases {
+            for tool in Tool.allCases {
+                XCTAssertEqual(panel.survivesACanvasTouch(withTool: tool), panel == .text && tool == .text,
+                               "\(panel) with \(tool)")
+            }
+        }
+    }
 }

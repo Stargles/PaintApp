@@ -1068,6 +1068,104 @@ class PaintUITestCase: XCTestCase {
         add(shot)
     }
 
+    // MARK: - Measuring in screen points (shared by the text editor's UI tests)
+    //
+    // **Everything is in absolute screen points, converted to `canvas.host`'s normalised space only at
+    // the instant of a reading.** Once the software keyboard is up the editor's *accessibility* frame
+    // shrinks (973 pt against 1356 here) while the picture stays exactly where it was, so a normalised
+    // coordinate means two different screen points before and after — which is how this test's first
+    // drafts aimed a drag 100 pt above the words and measured the Text panel's card as ink. Points are
+    // the one currency that does not move.
+
+    /// `rect` (screen points) as a window of `canvas.host`'s own frame *now*.
+    func canvasWindow(_ rect: CGRect, in canvas: XCUIElement) -> CGRect {
+        let frame = canvas.frame
+        return CGRect(x: (rect.minX - frame.minX) / frame.width, y: (rect.minY - frame.minY) / frame.height,
+                      width: rect.width / frame.width, height: rect.height / frame.height)
+    }
+
+    /// What the words look like inside `rect`: where the ink starts, where it ends, and how much of it
+    /// there is — all in screen points, off one settled screenshot.
+    func inkReading(_ canvas: XCUIElement, in rect: CGRect) throws -> (topLeft: CGPoint, right: CGFloat, ink: Int) {
+        let frame = canvas.frame
+        let win = canvasWindow(rect, in: canvas)
+        let probe = try settledProbe(canvas, window: win)
+        let tl = try inkTopLeft(probe, in: win)
+        var right = win.minX, ink = 0
+        let columns = 320, rows = 120
+        for xi in 0..<columns {
+            let x = win.minX + win.width * Double(xi) / Double(columns)
+            for yi in 0..<rows where probe(x, win.minY + win.height * Double(yi) / Double(rows)) {
+                right = max(right, x)
+                ink += 1
+            }
+        }
+        return (CGPoint(x: frame.minX + tl.x * frame.width, y: frame.minY + tl.y * frame.height),
+                frame.minX + right * frame.width, ink)
+    }
+
+    /// A drag between two screen points — `dragOnCanvas`'s press-and-drag, aimed in points.
+    func dragInPoints(_ app: XCUIApplication, from: CGPoint, to: CGPoint) {
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: from.x, dy: from.y))
+            .press(forDuration: 0.15, thenDragTo: origin.withOffset(CGVector(dx: to.x, dy: to.y)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
+    /// **A tap synthesised while the keyboard is still leaving lands where a control *was*.** The
+    /// editor is laid out above the software keyboard and its dismissal animates the layout back;
+    /// XCUITest reads a button's frame and then taps a point, and the undo button at the bottom of
+    /// the side toolbar moves a few hundred points during that animation — MEASURED: an undo tapped
+    /// one second after leaving text mode did nothing at all, and the recording showed the layout
+    /// still settling. So wait for the keyboard to be gone and the host's frame to be back where it
+    /// started before pressing anything — and fail if it never is, since a layout that stays
+    /// compressed is the defect `EditorKeyboardLayoutUITests` pins.
+    func waitForTheLayoutToSettle(_ app: XCUIApplication, _ canvas: XCUIElement, restoring host: CGRect) {
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            let frame = canvas.frame
+            if app.keyboards.count == 0 && abs(frame.minY - host.minY) < 1 && abs(frame.height - host.height) < 1 {
+                Thread.sleep(forTimeInterval: 0.6)
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTFail("canvas.host's frame did not return to \(host) within 15 s of the keyboard leaving; it reads "
+                + "\(canvas.frame), keyboards: \(app.keyboards.count)")
+    }
+
+    // MARK: - Writing words
+
+    /// **Where the first words go, and why it is high.** With the keyboard up the editor is laid out
+    /// above it and the docked Text panel covers the lower part of the visible paper — MEASURED, from
+    /// 0.24 of the host's height down — so a box placed lower than that is written under its own menu
+    /// and a pixel probe reads the panel's dark card instead of the words.
+    static let wordsOffset = CGVector(dx: 0.55, dy: 0.16)
+
+    /// The words' window on the host, in screen points — above the Text panel's top edge, so a probe
+    /// measures ink and not the panel's dark card.
+    func wordsWindow(in host: CGRect) -> CGRect {
+        CGRect(x: host.minX + 0.45 * host.width, y: host.minY + 0.145 * host.height,
+               width: 0.54 * host.width, height: 0.09 * host.height)
+    }
+
+    /// Add → Add Text, a tap where the words go (`wordsOffset`) and `string` typed into the box — the
+    /// box left open, the keyboard up. Returns the point (screen points) the box's top-left sits at.
+    func writeWords(_ string: String, _ app: XCUIApplication, _ canvas: XCUIElement) -> CGPoint {
+        let offset = Self.wordsOffset
+        let host = canvas.frame
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
+        let topLeft = CGPoint(x: host.minX + offset.dx * host.width, y: host.minY + offset.dy * host.height)
+        canvas.coordinate(withNormalizedOffset: offset).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
+        typeIntoTextBox(string, app, at: CGPoint(x: topLeft.x + 0.01 * host.width, y: topLeft.y + 0.01 * host.height))
+        return topLeft
+    }
+
     // MARK: - The timeline's size
 
     /// Drags the timeline's grab handle up by `points` — down for a negative number — and answers how far

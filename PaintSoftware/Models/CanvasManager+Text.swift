@@ -49,14 +49,29 @@ extension CanvasManager {
         }
     }
 
-    /// The text tool's placement tap. Puts an empty box at `canvasPoint` on the active cel — **or, on
-    /// a vector layer, re-opens the text object already sitting under the tap.**
+    /// **The text tool's tap on the canvas outside any box — one rule, for every box.** A tap while a
+    /// box is open ends that session and places nothing; a tap with none open places one
+    /// (`beginTextSession(at:)`).
+    ///
+    /// The rule does not ask how the box came to be open: a box placed a moment ago and a box
+    /// re-opened by Select → Edit Text (TODO (116)) are the same session. The owner, on the second:
+    /// *"Select a text, click edit text, then click anywhere on the canvas. A new textbox for some
+    /// reason comes up … which has entirely no reason to be there."* A tap away from a box is the
+    /// artist putting it down, and the next tap is what places the next one.
+    func textToolTapped(at canvasPoint: CGPoint) {
+        guard !textGestureActive else {
+            commitInteractiveText()
+            return
+        }
+        beginTextSession(at: canvasPoint)
+    }
+
+    /// Puts an empty box at `canvasPoint` on the active cel — **or, on a vector layer, re-opens the
+    /// text object already sitting under the tap.**
     ///
     /// **`beginCanvasEdit()` first**, exactly as `beginInteractiveShape` and `beginInteractiveFill`
-    /// do: placing a new box is a canvas edit, so whatever was still pending — including a previous
-    /// text session — bakes before this one starts. Only one draft is tracked at a time, so tapping
-    /// away to start a second box is what commits the first, which is also the gesture an artist
-    /// expects from every other editor.
+    /// do: placing a new box is a canvas edit, so whatever was still pending — a fill or a shape the
+    /// artist left adjustable — bakes before this one starts. Only one draft is tracked at a time.
     ///
     /// The tap is the box's *top-left*, not its centre. An empty box has no measured extent to
     /// centre on, and growing rightward-and-downward from the point touched is what the caret

@@ -5,6 +5,9 @@ import Combine
 struct CanvasView: UIViewRepresentable {
     @ObservedObject var canvasManager: CanvasManager
     var activePanel: ActivePanel = .none
+    /// Told when a canvas gesture opened an object's editor (Select → Tap), so the dock can be handed
+    /// to the panel that editor lives in.
+    var onEditorOpened: (EditableKind) -> Void = { _ in }
 
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView()
@@ -340,6 +343,12 @@ struct CanvasView: UIViewRepresentable {
         selectionOverlay.onAutomaticTap = { [weak coordinator = context.coordinator] point in
             coordinator?.canvasManager.finishAutomaticSelection(at: point)
         }
+        // A tap that opened an object's editor hands the dock to it, as the Select panel's own Edit
+        // entries do — the panel is the view's state (`DrawingView.activePanel`), not the model's.
+        selectionOverlay.onObjectTap = { [weak coordinator = context.coordinator] point in
+            guard let coordinator, let kind = coordinator.canvasManager.selectObject(at: point) else { return }
+            coordinator.onEditorOpened(kind)
+        }
         floatingOverlay.onPoseChange = { [weak coordinator = context.coordinator] transform, distortQuad in
             coordinator?.canvasManager.updateFloatingPose(transform: transform, distortQuad: distortQuad)
         }
@@ -393,6 +402,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         context.coordinator.activePanel = activePanel
+        context.coordinator.onEditorOpened = onEditorOpened
         context.coordinator.reconcileLayers()
         context.coordinator.updateTransformOverlay()
         context.coordinator.updateSelectionOverlay()
@@ -413,6 +423,7 @@ struct CanvasView: UIViewRepresentable {
 
     private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
         context.coordinator.activePanel = activePanel
+        context.coordinator.onEditorOpened = onEditorOpened
         PlaybackTrace.span(.overlays) { context.coordinator.updatePaper() }
         context.coordinator.reconcileLayers()
         // Immediately after `reconcileLayers`, and before every overlay that re-fronts itself: the
@@ -478,6 +489,7 @@ struct CanvasView: UIViewRepresentable {
         /// KEYFRAMES.md §7 stage 10's live trail — see `makeTimingInkView` and `updateTimingInk`.
         weak var timingInkView: UIImageView?
         var activePanel: ActivePanel = .none
+        var onEditorOpened: (EditableKind) -> Void = { _ in }
         var layerHosts: [UUID: LayerHostView] = [:]
 
         weak var panRecognizer: UIPanGestureRecognizer?
@@ -4119,13 +4131,15 @@ struct CanvasView: UIViewRepresentable {
             return CanvasTouchOwner.owner(in: inputs) == .moveBoxCommit
         }
 
-        /// The text tool's placement tap: put a box where the artist tapped and raise the keyboard.
+        /// The text tool's tap on the canvas: with no box open, put one where the artist tapped and
+        /// raise the keyboard; with one open, put it down and place nothing
+        /// (`CanvasManager.textToolTapped(at:)`).
         ///
         /// **A tap that lands on the live box does nothing here**, and the guard is the whole
         /// subtlety: `TextOverlayView` has already taken that touch (its `hitTest` claims the box and
         /// the band), but this recognizer sits on the *container* with `cancelsTouchesInView = false`
         /// and therefore sees it too. Without the guard, tapping into your own text to move the caret
-        /// would commit that text and open a fresh empty box on top of it.
+        /// would put that text down.
         ///
         /// **Gated on pencil-only drawing** like the fill and the eyedropper, and for the same
         /// reason stated there: placing text changes what the artist's next action does, and a
@@ -4171,7 +4185,7 @@ struct CanvasView: UIViewRepresentable {
             // to be discovered.
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             guard CanvasTouchOwner.owner(in: touch) == .textPress else { return }
-            canvasManager.beginTextSession(at: canvasPoint)
+            canvasManager.textToolTapped(at: canvasPoint)
             guard canvasManager.textGestureActive else { return }
             updateTextOverlay()
             // After `updateTextOverlay`, which is what un-hides the editor: `becomeFirstResponder`

@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		71F151DE4A87F102F1E4E356 /* TapSelectUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */; };
+		9EA574C053D114AA75EF6A74 /* TapSelectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */; };
+		BD3C86C595ECD393F35718B9 /* PaintSoftware/Models/CanvasManager+TapSelect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2107396FB2B6DF85F6B33948 /* PaintSoftware/Models/CanvasManager+TapSelect.swift */; };
+		770D4AC1F571857C3490C298 /* PaintSoftware/Engine/VectorHitTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A3ED2A503A9D74041244A6 /* PaintSoftware/Engine/VectorHitTest.swift */; };
+		4BCFB562E6B13D3B293FCE9F /* TextSessionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EAD819554BAC2098782140 /* TextSessionUITests.swift */; };
 		66E8831AAE8E8361D2157D0F /* UnlandedInkUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B478F546F64167BCA8DD04E /* UnlandedInkUITests.swift */; };
 		424F758C02439CF296959F64 /* UnlandedInkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A996758C2A2576AD7441D64C /* UnlandedInkLogicTests.swift */; };
 		1BB8E2166CA3DF7056054588 /* UnlandedInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB903836ADFA18C63BA3FB0 /* PaintSoftware/Views/UnlandedInk.swift */; };
@@ -544,6 +549,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TapSelectUITests.swift; sourceTree = "<group>"; };
+		3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TapSelectLogicTests.swift; sourceTree = "<group>"; };
+		2107396FB2B6DF85F6B33948 /* PaintSoftware/Models/CanvasManager+TapSelect.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+TapSelect.swift"; sourceTree = "<group>"; };
+		63A3ED2A503A9D74041244A6 /* PaintSoftware/Engine/VectorHitTest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/VectorHitTest.swift"; sourceTree = "<group>"; };
+		A0EAD819554BAC2098782140 /* TextSessionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextSessionUITests.swift; sourceTree = "<group>"; };
 		0B478F546F64167BCA8DD04E /* UnlandedInkUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnlandedInkUITests.swift; sourceTree = "<group>"; };
 		A996758C2A2576AD7441D64C /* UnlandedInkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnlandedInkLogicTests.swift; sourceTree = "<group>"; };
 		5CB903836ADFA18C63BA3FB0 /* PaintSoftware/Views/UnlandedInk.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/UnlandedInk.swift; sourceTree = "<group>"; };
@@ -1199,8 +1209,11 @@
 				E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */,
 				127FAEBA9BC32A0606957932 /* TextFontListUITests.swift */,
 				7186549102F48EFD65C89E17 /* EditSelectedObjectUITests.swift */,
+				A0EAD819554BAC2098782140 /* TextSessionUITests.swift */,
+				7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */,
 				5AC93EFC402EAACF4E81539C /* FillObjectUITests.swift */,
 				B52B97CA02A09585F3CBCA3B /* EditSelectedObjectLogicTests.swift */,
+				3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */,
 				85EC77660A0C5D615E3D10E9 /* FillObjectLogicTests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				83948202EDBA65AEB06FD0A5 /* BrushTableLogicTests.swift */,
@@ -1601,6 +1614,8 @@
 				DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */,
 				DEC0DE00000000000000003E /* PaintSoftware/Models/Layer.swift */,
 				DEC0DE9F0000000000000001 /* PaintSoftware/Models/Effect.swift */,
+				2107396FB2B6DF85F6B33948 /* PaintSoftware/Models/CanvasManager+TapSelect.swift */,
+				63A3ED2A503A9D74041244A6 /* PaintSoftware/Engine/VectorHitTest.swift */,
 				DEC0DE9F0000000000000003 /* PaintSoftware/Engine/EffectKernels.swift */,
 				DEC0DE9F0000000000000005 /* PaintSoftware/Engine/MetalEffects.swift */,
 				DEC0DE6A0000000000000001 /* PaintSoftware/Models/AlphaMask.swift */,
@@ -1870,8 +1885,11 @@
 				A294C0D1404FCC75CF0BE14F /* AnchoredMenuLogicTests.swift in Sources */,
 				2E14DBD492313FD0989FA1BB /* TextFontListUITests.swift in Sources */,
 				C6F38EC0B2C0C9F7A58FC026 /* EditSelectedObjectUITests.swift in Sources */,
+				4BCFB562E6B13D3B293FCE9F /* TextSessionUITests.swift in Sources */,
+				71F151DE4A87F102F1E4E356 /* TapSelectUITests.swift in Sources */,
 				3FF2D452FA87432F5626E7EA /* FillObjectUITests.swift in Sources */,
 				6F2AC6D7ABA2EDE406623C58 /* EditSelectedObjectLogicTests.swift in Sources */,
+				9EA574C053D114AA75EF6A74 /* TapSelectLogicTests.swift in Sources */,
 				682E34F06A42B0ADDC6AA905 /* FillObjectLogicTests.swift in Sources */,
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,
 				043A4C1856CFB84247FD383E /* VectorCanvasDataLogicTests.swift in Sources */,
@@ -2167,6 +2185,8 @@
 				1B7DB41EDE745888FB405323 /* SandwichKeyLogicTests.swift in Sources */,
 				DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */,
 				DEC0DE9F0000000000000002 /* PaintSoftware/Models/Effect.swift in Sources */,
+				BD3C86C595ECD393F35718B9 /* PaintSoftware/Models/CanvasManager+TapSelect.swift in Sources */,
+				770D4AC1F571857C3490C298 /* PaintSoftware/Engine/VectorHitTest.swift in Sources */,
 				DEC0DE9F0000000000000004 /* PaintSoftware/Engine/EffectKernels.swift in Sources */,
 				DEC0DE9F0000000000000006 /* PaintSoftware/Engine/MetalEffects.swift in Sources */,
 				DEC0DE9F0000000000000008 /* EffectParityLogicTests.swift in Sources */,

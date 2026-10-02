@@ -7,6 +7,12 @@ enum SelectionMode: String, CaseIterable, Identifiable {
     case lasso
     case automatic
     case rectangle
+    /// **A tap on an object selects that object** — TODO (147), the owner: *"a new select mode which
+    /// is simple: you just tap on anything and it selects whatever object you tapped on."* The only
+    /// mode that names what it selects rather than a region of the canvas
+    /// (`CanvasManager.selectObject(at:)`), so it is also the only one the loop's rule and the
+    /// Add/Subtract switch have nothing to say about.
+    case tap
 
     var id: String { rawValue }
     var displayName: String {
@@ -14,6 +20,7 @@ enum SelectionMode: String, CaseIterable, Identifiable {
         case .lasso: return "Freehand"
         case .automatic: return "Automatic"
         case .rectangle: return "Rectangle"
+        case .tap: return "Tap"
         }
     }
     var systemImage: String {
@@ -21,6 +28,7 @@ enum SelectionMode: String, CaseIterable, Identifiable {
         case .lasso: return "lasso"
         case .automatic: return "wand.and.rays"
         case .rectangle: return "rectangle.dashed"
+        case .tap: return "hand.tap"
         }
     }
 }
@@ -149,11 +157,19 @@ enum SelectionComposition {
 /// `PixelOps.maskedPiece`'s clip, and the three membership rules `VectorCanvas.splitForLassoMove`
 /// asks under `lassoFillRule` (LASSO_MOVE.md §5.23–§5.26) — with no set of loops to walk and no
 /// second rule to keep in step with the first.
+///
+/// **A Tap selection is the same value with one more field** (`element`): its path is the outline of
+/// the object the artist tapped (`VectorHitTest.outline(of:)`), and its loops answer for that one
+/// element only (`LassoLoops`), so Move, Recolour, Clear, Edit and every other reader of a selection
+/// act on the object and on nothing lying under or inside its outline.
 struct Selection {
     var path: CGPath
     var bounds: CGRect
     var layerID: UUID
     var celID: UUID
+    /// The element a tap named, or nil for a selection drawn as a region — the loop modes' and the
+    /// wand's. A tapped selection is not a region the next loop can be added to or taken from.
+    var element: UUID? = nil
 
     /// This selection with `loop` added to it or taken from it — the composed path, normalized, and
     /// its bounds re-measured against the canvas exactly as a fresh loop's are. Nil when nothing is
@@ -773,7 +789,8 @@ extension CanvasManager {
     /// `.subtract`. Starting over is the Deselect tab or a tap on the Select icon itself (TODO (94)).
     /// A subtract that takes everything away is a deselect; one drawn with nothing up says so
     /// (`CanvasNotice.nothingToSubtractFrom`) rather than becoming a selection under a switch that
-    /// promised the opposite.
+    /// promised the opposite. **A tapped object is not a region a loop can be added to**
+    /// (`Selection.element`), so a loop drawn over one replaces it.
     func finishSelection(path: CGPath) {
         // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
         // more concretely: the selection is stamped with the cel it belongs to and immediately
@@ -787,7 +804,8 @@ extension CanvasManager {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         // `handleActiveContextChanged` clears a selection the moment the active cel changes, so one
         // that is up is on this cel; the check is what keeps that a fact rather than an assumption.
-        if let existing = selection, existing.layerID == layerID, existing.celID == celID {
+        if let existing = selection, existing.layerID == layerID, existing.celID == celID,
+           existing.element == nil {
             selection = existing.composed(with: path, by: selectionComposition, within: canvasRect)
             return
         }
@@ -1528,7 +1546,7 @@ extension CanvasManager {
     var selectionMembershipUnavailableReason: String? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
         switch layers[currentLayerIndex].kind {
-        case .vector: return nil
+        case .vector: return selectionMode == .tap ? "A tap selects the whole object." : nil
         case .raster: return "A pixel layer can only cut at the selection."
         case .value:  return "A value layer holds nothing a lasso can catch."
         case .transform: return "A transform layer holds nothing a lasso can catch."
@@ -1881,21 +1899,15 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
-            // Both preconditions `splitForLassoMove` states, and neither is optional. Stored geometry
-            // is local while `selection.path` is canvas space, so an unmapped loop is correct on an
-            // untransformed layer and silently wrong on every layer Move has already touched; and
-            // Core Graphics leaves `intersection`/`subtracting` **undefined** on the self-intersecting
-            // path a lasso becomes the moment the artist loops back over their own line.
-            let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
-                                    .normalized(using: VectorCanvas.lassoFillRule)
-            // **And pulled back per element**, for the reason `beginVectorLassoMove` gives: on a cel a
-            // pose channel is carrying, the loop was drawn around ink that is not where it is stored.
-            // §5.26 rules that all three consumers of a selection obey one answer with no exception,
-            // so Clear asks in the same space Move does. Empty overrides on an ordinary cel.
+            // The loop in the space the ink is stored in — local, normalized, and **pulled back per
+            // element**, for the reason `beginVectorLassoMove` gives: on a cel a pose channel is
+            // carrying, the loop was drawn around ink that is not where it is stored. §5.26 rules that
+            // all three consumers of a selection obey one answer with no exception, so Clear asks in
+            // the same space Move does. Empty overrides on an ordinary cel.
             let loops = CanvasManager.lassoLoops(
-                drawn, posedBy: celPoseMaps(vectorCanvas.elements,
-                                            layerID: layers[currentLayerIndex].id, celID: cel.id,
-                                            atFrame: currentFrame))
+                of: selection, in: vectorCanvas,
+                posedBy: celPoseMaps(vectorCanvas.elements, layerID: layers[currentLayerIndex].id,
+                                     celID: cel.id, atFrame: currentFrame))
             let elementsBefore = vectorCanvas.elements
             // **The rule the artist picked, with no exception** (LASSO_MOVE.md §5.26). Under Cut this
             // is the same call it has always been and cuts at the loop; under Enclosed and Touching
@@ -1939,6 +1951,9 @@ extension CanvasManager {
             // that function's shape rather than a guarantee — so it is asked for explicitly, as the
             // recolour and `bakePreciseStrokes` both do.
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
+            // A tapped object is its own selection (`Selection.element`), and Clear has just deleted
+            // it; a loop is a region and outlives what it cleared.
+            if selection.element != nil { self.selection = nil }
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base,
@@ -2015,13 +2030,10 @@ extension CanvasManager {
               layers[currentLayerIndex].cels[celIndex].id == selection.celID,
               let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
 
-        let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
-                                .normalized(using: VectorCanvas.lassoFillRule)
         let loops = CanvasManager.lassoLoops(
-            drawn, posedBy: celPoseMaps(vectorCanvas.elements,
-                                        layerID: layers[currentLayerIndex].id,
-                                        celID: layers[currentLayerIndex].cels[celIndex].id,
-                                        atFrame: currentFrame))
+            of: selection, in: vectorCanvas,
+            posedBy: celPoseMaps(vectorCanvas.elements, layerID: layers[currentLayerIndex].id,
+                                 celID: layers[currentLayerIndex].cels[celIndex].id, atFrame: currentFrame))
 
         let membership = selectionMembership
         let elementsBefore = vectorCanvas.elements

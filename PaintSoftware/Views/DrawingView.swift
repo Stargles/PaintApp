@@ -86,7 +86,8 @@ struct DrawingView: View {
                 .padding(.leading, 12)
 
             ZStack {
-                CanvasView(canvasManager: canvasManager, activePanel: activePanel)
+                CanvasView(canvasManager: canvasManager, activePanel: activePanel,
+                           onEditorOpened: { activePanel = $0.panel })
 
                 // GeometryReader to tell the timeline how much room it may claim when the user drags
                 // it taller, and the notice below how much of the width the layer rail has taken —
@@ -301,12 +302,15 @@ struct DrawingView: View {
         //
         // **And a panel standing down behind a floating piece is not on screen, so there is nothing
         // for the touch to close** — see `openPanelIsStandingDown`.
+        //
+        // **And the text tool's own panel, whose controls the touch is about to put to work** — see
+        // `ActivePanel.survivesACanvasTouch(withTool:)`.
         .onReceive(canvasManager.interactionBegan) {
             if canvasManager.selectedTool == .eyedropper
                 && (activePanel == .select || canvasManager.eyedropperDestination.picksIntoAnOpenPanel) {
                 return
             }
-            if openPanelIsStandingDown { return }
+            if openPanelIsStandingDown || activePanel.survivesACanvasTouch(withTool: canvasManager.selectedTool) { return }
             if activePanel != .none { activePanel = .none }
         }
         // The layer options menu belongs to the layer panel — it can't outlive it.

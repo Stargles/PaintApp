@@ -127,7 +127,7 @@ struct SelectPanel: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                HStack(spacing: 6) {
+                HStack(spacing: 3) {
                     ForEach(SelectionMode.allCases) { mode in
                         modeTab(mode)
                     }
@@ -474,8 +474,12 @@ struct SelectPanel: View {
     /// column is the switch's own 44 points and the picker reads whole. One word, where the
     /// paint-outside switch keeps three: "Subtract" over a switch in a row of selection rules
     /// already says what it subtracts from.
+    ///
+    /// **Off in Tap mode, which selects one object and composes nothing** — a tap replaces what was
+    /// selected, so a switch for how the next loop meets the last has no loop to act on.
     private var subtractToggle: some View {
         let isOn = canvasManager.selectionComposition == .subtract
+        let tapSelects = canvasManager.selectionMode == .tap
         return Button {
             canvasManager.selectionComposition = isOn ? .add : .subtract
         } label: {
@@ -488,6 +492,8 @@ struct SelectPanel: View {
             }
             .contentShape(Rectangle())
         }
+        .disabled(tapSelects)
+        .opacity(tapSelects ? 0.45 : 1)
         .accessibilityIdentifier("selectPanel.subtractToggle")
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
@@ -709,10 +715,13 @@ struct SelectPanel: View {
                     .font(.caption2)
             }
             .foregroundColor(isActive ? .blue : .white)
-            // A fixed width rather than `maxWidth: .infinity`: the three tabs now share a row with
-            // the membership picker instead of a band of their own, so there is no width for them
-            // to divide, and ragged tabs would read as three different controls.
-            .frame(width: 74)
+            // A fixed width rather than `maxWidth: .infinity`: the four tabs share a row with the
+            // membership picker instead of a band of their own, so there is no width for them to
+            // divide, and ragged tabs would read as four different controls. 56 is what the longest
+            // label ("Automatic") needs, and four of them with the gap between come to the width
+            // three 74-point tabs took — which is what keeps the membership picker and its caption
+            // the width, and the panel the height, TODO (59) and (137) measured.
+            .frame(width: 56)
             .padding(.vertical, 6)
             .background(isActive ? Color.white.opacity(0.15) : Color.clear)
             .cornerRadius(8)

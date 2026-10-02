@@ -483,10 +483,9 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
     // MARK: - Hit testing
 
     /// Claims **only** the box and the move band around it. Everything else falls through to the
-    /// canvas underneath, which is what lets a tap somewhere else place the next box — the touch
-    /// commits this one on its way past (`beginTextSession` → `beginCanvasEdit`) and places the new
-    /// one, instead of being swallowed as a dismiss the artist then has to follow with a second tap.
-    /// `ShapeOverlayView` makes itself transparent for the same reason.
+    /// canvas underneath, which is what lets a tap somewhere else put this box down
+    /// (`CanvasManager.textToolTapped(at:)`) rather than being swallowed by an overlay that covers the
+    /// whole canvas. `ShapeOverlayView` makes itself transparent for the same reason.
     ///
     /// **The ownership half of `hitTest`, asked on its own.** `hitTest` answers two questions at
     /// once — *is this touch mine* and *which view of mine is hit* — and only the first is the

@@ -595,9 +595,9 @@ extension TextFrame {
 
     /// Point-in-quad with a slop collar, in the frame's own space.
     ///
-    /// `VectorCanvas.frame(_:contains:slop:)` is this — it delegates here — so the display list's
-    /// re-open query and the live overlay's hit test cannot come to disagree about what "inside the
-    /// text" means. Space-agnostic: `point` and `corners` must simply be in the same space.
+    /// `VectorHitTest.covers` asks this for a text object, so the display list's re-open query and the
+    /// live overlay's hit test cannot come to disagree about what "inside the text" means.
+    /// Space-agnostic: `point` and `corners` must simply be in the same space.
     func contains(_ point: CGPoint, slop: CGFloat = 0) -> Bool {
         guard corners.count == 4 else { return false }
         // Winding sign, taken from the whole quad rather than per edge: a degenerate (zero-area) quad

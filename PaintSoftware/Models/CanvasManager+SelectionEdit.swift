@@ -411,7 +411,7 @@ extension CanvasManager {
 
         let elements = vector.elements
         let loops = CanvasManager.lassoLoops(
-            vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule),
+            of: selection, in: vector,
             posedBy: celPoseMaps(elements, layerID: selection.layerID, celID: selection.celID,
                                  atFrame: currentFrame))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
@@ -463,12 +463,10 @@ extension CanvasManager {
         // per-element pull-back LASSO_MOVE.md §5.27 rules: a lasso means what it means on screen,
         // including on a frame where a pose channel shows the drawing somewhere other than where it
         // is stored.
-        let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
-                                .normalized(using: VectorCanvas.lassoFillRule)
         let elementsBefore = vectorCanvas.elements
         let loops = CanvasManager.lassoLoops(
-            drawn, posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID,
-                                        atFrame: currentFrame))
+            of: selection, in: vectorCanvas,
+            posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID, atFrame: currentFrame))
         let membership = selectionMembership
         let working: [VectorElement]
         let caught: Set<UUID>

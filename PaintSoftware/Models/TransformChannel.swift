@@ -360,8 +360,8 @@ extension CanvasManager {
     /// One `CGPath` per *distinct* pose rather than one per element — a cel channel carries every
     /// element through the same map, so the common posed cel maps the loop once however much ink is
     /// on it, and `LassoLoops` memoizes its bounding boxes on the same object identity.
-    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: PoseMap]) -> LassoLoops {
-        guard !poses.isEmpty else { return LassoLoops(loop) }
+    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: PoseMap], only: UUID? = nil) -> LassoLoops {
+        guard !poses.isEmpty else { return LassoLoops(loop, only: only) }
         var byMap: [[CGFloat]: CGPath] = [:]
         var perElement: [UUID: CGPath] = [:]
         for (id, pose) in poses {
@@ -381,7 +381,22 @@ extension CanvasManager {
             byMap[key] = pulled
             perElement[id] = pulled
         }
-        return LassoLoops(loop, perElement: perElement)
+        return LassoLoops(loop, perElement: perElement, only: only)
+    }
+
+    /// **What a selection catches, as loops** — the one door every consumer of a selection reads it
+    /// through: Move and Duplicate, Recolour, Size, Opacity, Apply Brush, Clear, To New Layer and the
+    /// animation-group edits. The selection's canvas-space path in the cel's local space and normalized
+    /// — both preconditions `VectorCanvas.splitForLassoMove` states, and neither is optional: stored
+    /// geometry is local, so an unmapped loop is correct on an untransformed layer and silently wrong
+    /// on every layer Move has already touched; and Core Graphics leaves `intersection`/`subtracting`
+    /// **undefined** on the self-intersecting path a lasso becomes the moment the artist loops back
+    /// over their own line — and then pulled back per element through the poses the cel is shown
+    /// under, with a Tap selection's loops answering for its one element (`Selection.element`).
+    static func lassoLoops(of selection: Selection, in vector: VectorCanvas,
+                           posedBy poses: [UUID: PoseMap]) -> LassoLoops {
+        let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
+        return lassoLoops(drawn, posedBy: poses, only: selection.element)
     }
 
     /// **The affine the channels applied *after* `channel` carry its members through at `frame`.**

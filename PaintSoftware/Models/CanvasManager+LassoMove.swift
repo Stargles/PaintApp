@@ -448,20 +448,10 @@ extension CanvasManager {
               selection.layerID == target.layerID, selection.celID == target.celID else { return false }
         let vector = target.vector
 
-        // `selection.path` is canvas space — `SelectionOverlayView` is pinned to the transformed
-        // container — and stored geometry is local. Mapping is correct on an untransformed layer by
-        // accident and silently wrong on every layer Move has already touched.
-        //
-        // Normalizing is the other half, and it is not optional: Core Graphics leaves
-        // `intersection`/`subtracting` **undefined** for a non-simple path, and a lasso built from
-        // raw touch samples self-intersects the moment the artist loops back over their own line.
-        // `handleLassoPan` appends one point per sample with no decimation and no simplification.
-        let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        // **And the loop pulled back into each element's own stored space**, which is the other half
-        // of "map the canvas-space loop into local space" for a cel a pose channel is carrying: the
-        // artist drew around ink they can see, and the display list this is about to test is at rest.
-        // Empty overrides on an ordinary cel, so this is the same one path it has always been.
-        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        // The loop in the space the ink is stored in, pulled back into each element's own space for a
+        // cel a pose channel is carrying (`lassoLoops(of:in:posedBy:)`): the artist drew around ink
+        // they can see, and the display list this is about to test is at rest.
+        let loops = Self.lassoLoops(of: selection, in: vector, posedBy: target.poses)
         guard let split = vector.splitForLassoMove(insideLoops: loops,
                                                    membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: vector, loops: loops)
@@ -581,10 +571,7 @@ extension CanvasManager {
         guard let selection, let target = activeVectorMoveTarget(),
               selection.layerID == target.layerID, selection.celID == target.celID else { return false }
         let source = target.vector
-        // The lasso arm's two lines, for its two reasons: the loop is canvas space and storage is
-        // local, and a loop built from raw touch samples self-intersects the moment it crosses itself.
-        let drawn = source.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: source, loops: loops)
             return false
@@ -657,8 +644,7 @@ extension CanvasManager {
         guard let selection, let target = activeVectorMoveTarget(),
               selection.layerID == target.layerID, selection.celID == target.celID else { return false }
         let source = target.vector
-        let drawn = source.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: source, loops: loops)
             return false

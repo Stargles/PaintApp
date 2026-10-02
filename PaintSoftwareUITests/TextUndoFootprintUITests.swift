@@ -186,27 +186,6 @@ final class TextUndoFootprintUITests: PaintUITestCase {
                       + "(text:\(readTextState(app)))")
     }
 
-    /// **A tap synthesised while the keyboard is still leaving lands where a control *was*.** The
-    /// editor is laid out above the software keyboard and its dismissal animates the layout back;
-    /// XCUITest reads a button's frame and then taps a point, and the undo button at the bottom of
-    /// the side toolbar moves a few hundred points during that animation — MEASURED: an undo tapped
-    /// one second after leaving text mode did nothing at all, and the recording showed the layout
-    /// still settling. So wait for the keyboard to be gone and the host's frame to be back where it
-    /// started before pressing anything — and fail if it never is, since a layout that stays
-    /// compressed is the defect `EditorKeyboardLayoutUITests` pins.
-    private func waitForTheLayoutToSettle(_ app: XCUIApplication, _ canvas: XCUIElement, restoring host: CGRect) {
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline {
-            let frame = canvas.frame
-            let settled = app.keyboards.count == 0
-                && abs(frame.minY - host.minY) < 1 && abs(frame.height - host.height) < 1
-            if settled { return }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        XCTFail("canvas.host's frame did not return to \(host) within 10 s of the keyboard leaving; it reads "
-                + "\(canvas.frame), keyboards: \(app.keyboards.count)")
-    }
-
     // MARK: - Reading what is drawn
 
     /// The patch of screen the words land in: the box's top-left is the tap, the words run right

@@ -553,4 +553,45 @@ final class TextBakeCharacterizationTests: XCTestCase {
         XCTAssertFalse(manager.textGestureActive)
         XCTAssertEqual(vectorElements(manager).count, 1)
     }
+
+    // MARK: - The tap on the canvas
+
+    /// **One rule for every box: a tap while a box is open puts it down and places nothing.** The words
+    /// are committed as they stood and no second session opens under the finger.
+    func testATapWhileABoxIsOpenPutsItDownAndPlacesNothing() {
+        let manager = vectorManager()
+        placeText(manager, "written")
+
+        manager.textToolTapped(at: CGPoint(x: 50, y: 50))
+
+        XCTAssertFalse(manager.textGestureActive, "the tap put the open box down")
+        XCTAssertEqual(vectorElements(manager).count, 1, "…committing the words, as they stood")
+        XCTAssertEqual(vectorElements(manager).first?.text?.recipe.string, "written")
+    }
+
+    /// The same, whether the box was placed a moment ago or **re-opened by Select → Edit Text** — the
+    /// owner's report (*"click anywhere on the canvas. A new textbox … comes up"*).
+    func testATapWhileAReopenedBoxIsOpenAlsoPlacesNothing() {
+        let manager = vectorManager()
+        placeText(manager, "reopened")
+        manager.commitInteractiveText()
+        let id = vectorElements(manager)[0].id
+        XCTAssertTrue(manager.beginEditingText(elementID: id))
+        XCTAssertTrue(manager.textGestureActive, "PREMISE: the box is open for editing")
+
+        manager.textToolTapped(at: CGPoint(x: 50, y: 50))
+
+        XCTAssertFalse(manager.textGestureActive, "the tap put the edited box down")
+        XCTAssertEqual(vectorElements(manager).count, 1, "…and no second box was placed")
+    }
+
+    /// And with no box open the tap places one — the next tap is what places the next box.
+    func testATapWithNoBoxOpenPlacesOne() {
+        let manager = vectorManager()
+
+        manager.textToolTapped(at: CGPoint(x: 50, y: 50))
+
+        XCTAssertTrue(manager.textGestureActive)
+        XCTAssertEqual(manager.textFrame[.topLeft], CGPoint(x: 50, y: 50), "the box is where the finger was")
+    }
 }
