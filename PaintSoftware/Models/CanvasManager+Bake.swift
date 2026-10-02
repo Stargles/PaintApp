@@ -112,19 +112,15 @@ extension CanvasManager {
     }
 
     private func bake(_ layerBake: LayerBake, memo: BakeColourMemo) {
-        guard let canvasSize, var at = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return }
+        guard let canvasSize, let at = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return }
         switch layerBake.medium {
         case .flatColour(let operation):
             guard let fill = layers[at].fill else { return }
             let baked = operation.baked(fill.color.color.codable)
             layers[at].fill = ValueFill(color: PaletteColor(color: baked.color))
         case .ink, .pixels:
-            if layerBake.rasterizes {
-                rasterizeLayer(layerIndex: at)
-                // `rasterizeLayer` does not move a layer, but the index is not worth trusting across it.
-                guard let moved = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return }
-                at = moved
-            }
+            // The cels are addressed by id from here on, so nothing depends on the layer keeping its index.
+            if layerBake.rasterizes { rasterizeLayer(layerIndex: at) }
             for cel in layerBake.cels {
                 bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
                         canvasSize: canvasSize, memo: memo)
@@ -297,6 +293,10 @@ extension CanvasManager {
                 } else if holdsMovie {
                     // Turning the layer into pixels would flatten the movie to one still frame.
                     plan.leftovers.append(BakeLeftover(name: layer.name, reason: .cannotTakeColour))
+                    continue
+                } else if layer.cels.contains(where: { !$0.transformTracks.isEmpty }) {
+                    // …and a pose channel to the frame the cel starts on.
+                    plan.leftovers.append(BakeLeftover(name: layer.name, reason: .animatedDrawing))
                     continue
                 } else {
                     medium = .pixels(rasterizes: true)

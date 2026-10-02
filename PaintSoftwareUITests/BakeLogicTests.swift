@@ -525,6 +525,35 @@ final class BakeLogicTests: XCTestCase {
         XCTAssertEqual(after, before, "The raster layer shows the blurred picture the effect layer made")
     }
 
+    /// **A drawing animated by pose channels takes a colour effect and keeps its animation** — the
+    /// colours are in the strokes, the channel is untouched — **and is left alone by an effect that
+    /// needs pixels**, because painting it would flatten the motion to the frame the cel starts on.
+    func testAnAnimatedDrawingKeepsItsAnimationThroughAColourBakeAndIsLeftByAPixelsOne() {
+        func animated() -> (CanvasManager, UUID) {
+            let manager = document()
+            let floor = addVector(manager, "Floor", [(leftHalf, red)])
+            let rest = PoseQuad(restingIn: whole)
+            let moved = PoseQuad(box: whole, mappedBy: CGAffineTransform(translationX: 8, y: 0))
+            manager.layers[index(floor, manager)].cels[0].transformTracks = [
+                TransformChannelID.cel.id: TransformTrack(keys: [
+                    .init(frame: 0, pose: rest, interpolation: .linear),
+                    .init(frame: 11, pose: moved, interpolation: .linear)])]
+            return (manager, floor)
+        }
+
+        let (colour, floor) = animated()
+        let grade = addEffect(colour, Self.hueRotate)
+        XCTAssertNotNil(bakePlan(colour.bakeLayer(id: grade)))
+        assertColour(colours(of: floor, colour).first, 0, 1, 0, "the colour is in the stroke")
+        XCTAssertFalse(colour.layers[index(floor, colour)].cels[0].transformTracks.isEmpty, "…and the animation is untouched")
+
+        let (pixels, drawing) = animated()
+        let blur = addEffect(pixels, .blur(Effect.Blur(radius: 3)))
+        XCTAssertEqual(pixels.bakeLayer(id: blur),
+                       .refused(.nothingToBake([CanvasManager.BakeLeftover(name: "Floor", reason: .animatedDrawing)])))
+        XCTAssertEqual(pixels.layers[index(drawing, pixels)].kind, .vector, "Left exactly as it was")
+    }
+
     /// **`Effect.bakeRoute` is exhaustive, and the property the owner's ruling rests on holds for every
     /// case**: whatever `reshapesCoverage` names is a pixels effect, and a colour effect is a function
     /// of colour alone — the same colour at two positions comes out the same.
@@ -611,6 +640,36 @@ final class BakeLogicTests: XCTestCase {
         assertColour(baked.last, 0, 1, 0, "Frame 3: a third of a turn, so green")
         let distinct = Set(baked.map { String(format: "%.3f,%.3f", $0.red, $0.green) })
         XCTAssertEqual(distinct.count, 4, "Every frame is its own colour, so every frame is its own drawing: \(distinct)")
+    }
+
+    /// **The sentence's numbers come out of the plan, each at its own kind's measured rate** — a vector
+    /// cel is a display list (2.4 ms a save) and a raster cel a canvas-sized picture (15.2 ms), so three
+    /// of the first and one of the second cost 3 × 2.4 + 15.2 = 22.4 ms, and the layer that becomes
+    /// pixels is named.
+    func testTheConfirmationSentenceIsComputedFromThePlanAtEachKindsOwnRate() {
+        let first = BakeOperation.grade(Self.hueRotate, opacity: 1)
+        let second = BakeOperation.grade(Self.hueRotate, opacity: 0.5)
+        func cuts(_ runs: Int) -> CanvasManager.CelBake {
+            CanvasManager.CelBake(celID: UUID(), segments: (0..<runs).map {
+                CanvasManager.BakeSegment(localStart: $0, length: 1,
+                                          treatment: .operation($0 % 2 == 0 ? first : second))
+            })
+        }
+        let plan = CanvasManager.BakePlan(
+            bakerID: UUID(), bakerName: "Grade",
+            layers: [CanvasManager.LayerBake(layerID: UUID(), name: "Ink", medium: .ink, cels: [cuts(4)]),
+                     CanvasManager.LayerBake(layerID: UUID(), name: "Sky", medium: .pixels(rasterizes: true), cels: [cuts(2)])],
+            leftovers: [])
+
+        XCTAssertEqual(plan.addedCels.vector, 3)
+        XCTAssertEqual(plan.addedCels.raster, 1)
+        XCTAssertTrue(plan.needsConfirmation)
+        let message = plan.confirmationMessage
+        XCTAssertTrue(message.contains("Sky will become a raster layer"), message)
+        XCTAssertFalse(message.contains("Ink will become"), "A layer that stays strokes is not announced as pixels: \(message)")
+        XCTAssertTrue(message.contains("adds 4 drawings"), message)
+        XCTAssertTrue(message.contains("about 22 ms longer"), message)
+        XCTAssertTrue(message.contains("Grade is removed. This can be undone."), message)
     }
 
     /// **A grade that holds across the whole cel is one drawing.** The same layer, the same cel, a static

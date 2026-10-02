@@ -84,9 +84,7 @@ struct LayerPanel: View {
                ),
                presenting: canvasManager.pendingBake) { _ in
             Button("Cancel", role: .cancel) { canvasManager.cancelPendingBake() }
-                .accessibilityIdentifier("layerPanel.bakeConfirm.cancel")
             Button("Bake") { canvasManager.confirmPendingBake() }
-                .accessibilityIdentifier("layerPanel.bakeConfirm.bake")
         } message: { pending in
             Text(pending.message)
         }

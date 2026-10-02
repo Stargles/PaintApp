@@ -117,6 +117,56 @@ final class LayerBakeUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5), "…as the third row")
     }
 
+    /// **An effect that works on pixels asks first, says what it will do, and changes nothing until the
+    /// artist answers** — then the drawing beneath comes out a raster layer. Driven from a fresh
+    /// document: draw, add a value layer, pick Gaussian Blur from its Blend Mode menu, Bake.
+    func testABlurLayerAsksBeforeTurningTheDrawingIntoPixelsAndCancelChangesNothing() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let start = safeOutsideCornerPoint(canvas)
+        drawLine(on: canvas, from: start, to: CGVector(dx: start.dx + 0.12, dy: start.dy))
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Setup: the value layer is the second row")
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let blur = scrollMenuTo(app, identifier: "layerOptions.blendMode.gaussianblur")
+        XCTAssertTrue(blur.waitForExistence(timeout: 5), "The Blend Mode menu lists the effects")
+        blur.tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "Setup: the drawing is a vector layer")
+
+        let bake = app.buttons["layerOptions.bake"]
+        XCTAssertTrue(bake.waitForExistence(timeout: 5), "A layer that grades offers Bake")
+        bake.tap()
+
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "A bake that turns a layer into pixels asks first")
+        let sentence = ask.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        XCTAssertTrue(sentence.contains("Layer 1"), "It names the layer it will turn into pixels: \(sentence)")
+        XCTAssertTrue(sentence.contains("raster layer"), "…and says what it becomes: \(sentence)")
+        XCTAssertTrue(sentence.contains("undone"), "…and that it can be undone: \(sentence)")
+        attachScreenshot(app, "3-the-prompt")
+        ask.buttons["Cancel"].tap()
+        XCTAssertTrue(ask.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].exists, "Cancel keeps the layer")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "…and the drawing is still strokes")
+
+        if !bake.exists { app.staticTexts["layerPanel.row.1"].tap() }   // the options menu may have closed behind the prompt
+        XCTAssertTrue(bake.waitForExistence(timeout: 5), "The layer's menu still offers Bake")
+        bake.tap()
+        XCTAssertTrue(ask.waitForExistence(timeout: 5))
+        ask.buttons["Bake"].tap()
+
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 5), "The blur layer is gone")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, false,
+                       "The drawing is painted into pixels: a raster layer now")
+    }
+
     func testATransformationLayerOffersBakeAndAnAtRestOneSaysWhyItCannot() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]

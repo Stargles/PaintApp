@@ -131,6 +131,9 @@ extension CanvasManager {
             case inBetween
             /// A pose that collapses the layer to a line, which cannot be carried around.
             case cannotBeCarried
+            /// Its drawings are animated by pose channels, which painting them into pixels would flatten
+            /// to one frame — Bake Animation turns the motion into drawings first.
+            case animatedDrawing
 
             var phrase: String {
                 switch self {
@@ -143,6 +146,7 @@ extension CanvasManager {
                 case .flatColourNeedsAColourEffect: return "this effect can't be applied to one flat colour"
                 case .inBetween: return "it is an in-between, which is worked out from the drawings either side"
                 case .cannotBeCarried: return "the pose squashes it flat"
+                case .animatedDrawing: return "its drawings are animated, so bake that animation first"
                 }
             }
         }
