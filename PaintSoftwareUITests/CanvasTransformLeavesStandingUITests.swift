@@ -109,7 +109,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         // THE CONTROL: a genuine single-finger touch on the canvas is an edit, and still closes it —
         // the gate defers the touch, it does not make it harmless. (Layer 0, the document's own
         // vector layer, is still current and drawable: opening a node's options selects nothing.)
-        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.5), to: CGVector(dx: 0.6, dy: 0.5))
+        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.3), to: CGVector(dx: 0.6, dy: 0.3))
         XCTAssertTrue(title.waitForNonExistence(timeout: 5),
                       "CONTROL: a single-finger touch on the canvas must still close a node's bar")
     }
@@ -282,7 +282,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                           "THE BUG: a two-finger pan with \(shape) closed \(what)", file: file, line: line)
         }
         let before = readTransform(app)
-        canvas.pinch(withScale: 1.4, velocity: 1.0)
+        try pinchAboveTheDock(canvas, scale: 1.4)
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas",
                           file: file, line: line)
         XCTAssertTrue(stillOnScreen(), "THE BUG: a pinch closed \(what)", file: file, line: line)

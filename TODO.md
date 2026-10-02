@@ -171,19 +171,6 @@ everything inside the folder. However that only moves everything that is in the 
 user have the option in the move menu for folders (the one that has keep stroke width, etc.) to select
 between moving things in all frames, or just that cel."*
 
-## (122) Timeline: a sticky frame row, seconds when zoomed out, 1.5× taller
-
-**Status** — not started. *"the animation timeline shows the frame number in the top row. When there
-are a lot of layers, this top row should still remain on the top and not disappear when scrolling down.
-When the timeline iszoomed out it should display seconds instead of frames. Also make it around 1.5x
-taller."*
-
-## (123) Timeline: pinch-zoom while panning, as the canvas does
-
-**Status** — not started. *"The animation timeline supports zooming in and out with two fingers, but it
-seems that it does not support zooming while panning sideways like the canvas move. Make it do so. I
-wonder if you can reuse the canvas pan/zoom code for this to cut clutter."*
-
 ## (126) Export straight to Photos
 
 **Status** — not started. *"The export right now saves to files, if possible I'd like it to be saved as

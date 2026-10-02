@@ -44,10 +44,10 @@ final class TimelineZoomPanUITests: PaintUITestCase {
     }
 
     /// **The reported defect, on the rows**: spread two fingers over the first cel while moving them
-    /// sideways, and the frame that was under them is under them still, 140 pt further along, with the
-    /// track zoomed in. Then again the other way. The first of the two is the one the old pinch could
-    /// not do at all — MEASURED before this change: the same gesture left the zoom at exactly 1.0 and
-    /// the track bounced 9.5 pt, because the scroll view's pan won.
+    /// sideways, and the frame that was under them is under them still, wherever they have travelled to,
+    /// with the track zoomed in. Once with a short travel to the right and once with a long one to the
+    /// left. The long one matters most: the scroll view's own pan reaches its threshold well before the
+    /// pinch does, so a track whose pinch is not recognised beside that pan scrolls and does not zoom.
     func testAPinchThatTravelsSidewaysZoomsAndKeepsTheFrameUnderTheFingers() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

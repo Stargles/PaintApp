@@ -1079,8 +1079,8 @@ class PaintUITestCase: XCTestCase {
         XCTAssertTrue(handle.waitForExistence(timeout: 5))
         let before = handle.frame.minY
         // An empty stretch of the top bar, between the left group of buttons and the transport: the whole
-        // bar is the grab handle, and a drag that began on a button was seen to *press* it — one started
-        // beside the collapse chevron opened the frame-rate panel, one at the bar's centre started playback.
+        // bar is the grab handle, and a drag that begins on a button presses it — beside the collapse
+        // chevron that opens the frame-rate panel, at the bar's centre it starts playback.
         let panel = app.otherElements["timeline.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         let window = app.windows.firstMatch
@@ -1129,6 +1129,24 @@ class PaintUITestCase: XCTestCase {
             paths.append(path)
         }
         try SynthesizedTouch.synthesize(paths, named: "two-finger gesture")
+    }
+
+    /// **A pinch in the upper-left of `element`, where no docked panel and no rail's menu reaches.**
+    /// `XCUIElement.pinch` straddles the element's middle, and the canvas element is the whole window:
+    /// with a tall panel docked above the timeline (Text, the colour wheels, an effect's settings) or the
+    /// layer rail's menus open, the middle of it is *theirs*, one of the two fingers lands on one of
+    /// them, and the canvas never sees a pinch. A test that is about the canvas moving while such a panel
+    /// is up pinches where none is — the stretch left of the rail and above the dock, which
+    /// `CanvasTransformLeavesStandingUITests` already names for its two-finger pans. Both fingers land in
+    /// one event, as `pinch` lands them.
+    func pinchAboveTheDock(_ element: XCUIElement, scale: CGFloat) throws {
+        let frame = element.frame
+        let centre = CGPoint(x: frame.minX + frame.width * 0.16, y: frame.minY + frame.height * 0.25)
+        let spread: CGFloat = 40
+        try twoFingerGesture(from: (CGPoint(x: centre.x - spread, y: centre.y), CGPoint(x: centre.x + spread, y: centre.y)),
+                             to: (CGPoint(x: centre.x - spread * scale, y: centre.y),
+                                  CGPoint(x: centre.x + spread * scale, y: centre.y)),
+                             stagger: 0, duration: 0.5)
     }
 
     /// **A two-finger drag whose fingers land in two separate touch events, `stagger` seconds apart —

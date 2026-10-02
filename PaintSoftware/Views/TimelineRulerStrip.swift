@@ -5,11 +5,9 @@ import UIKit
 /// **The timeline's pinned top row** — TODO (122): *"When there are a lot of layers, this top row should
 /// still remain on the top and not disappear when scrolling down."*
 ///
-/// The ruler used to be the first thing inside the track's scrolling content, so the vertical scroll
-/// that brings a lower layer into view carried it away. It is a view of its own now, sitting above the
-/// vertically scrolling rows and **not inside them**, which is the only arrangement in which it cannot
-/// scroll away — a sticky header faked by moving a scrolled view back by the scroll offset would lag
-/// the scroll by a frame and depend on the hierarchy of a scroll view SwiftUI owns.
+/// It sits above the vertically scrolling rows and **not inside them**, which is the only arrangement
+/// in which it cannot scroll away — a sticky header faked by moving a scrolled view back by the scroll
+/// offset would lag the scroll by a frame and depend on the hierarchy of a scroll view SwiftUI owns.
 ///
 /// **It scrolls horizontally with the track and nothing else does the driving**: the track
 /// (`TimelineTrackView.Coordinator`) owns the zoom, the extent and the scroll offset, and pushes each of
@@ -59,8 +57,8 @@ final class TimelineRulerStripView: UIView, UIGestureRecognizerDelegate {
         ruler.onNumberTap = { [weak self] frame, rect in self?.onNumberTap?(frame, rect) }
 
         // **Two fingers on the ruler move the track as they do on the rows**, and the ruler needs
-        // recognizers of its own for it: it is no longer inside the track's scroll view, so it cannot
-        // borrow that view's two-finger pan. A one-finger touch is the scrub's, and these ask for two.
+        // recognizers of its own for it: it is outside the track's scroll view, so it cannot borrow
+        // that view's two-finger pan. A one-finger touch is the scrub's, and these ask for two.
         pan.minimumNumberOfTouches = 2
         pan.maximumNumberOfTouches = 2
         pinch.name = "timeline.rulerPinch"
@@ -82,9 +80,8 @@ final class TimelineRulerStripView: UIView, UIGestureRecognizerDelegate {
     /// **The pinch and the pan are one gesture** — two fingers spreading and travelling at once — **and
     /// both recognise alongside the scrub.** The scrub begins on the first finger's touch-down (it has
     /// no minimum duration, so it feels immediate), which would otherwise hold the strip's recognizers
-    /// off for good: MEASURED, a pinch and a two-finger drag on the ruler both did nothing. The scrub
-    /// itself stands down once a second finger is down (`TimelineRulerView.handleTouch`), so the
-    /// playhead does not chase the centroid of a zoom.
+    /// off for good. The scrub itself stands down once a second finger is down
+    /// (`TimelineRulerView.handleTouch`), so the playhead does not chase the centroid of a zoom.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         zoomRecognizers.contains { $0 === gestureRecognizer }
@@ -282,11 +279,11 @@ private final class TimelineRulerView: UIView {
         return convert(rect, to: nil)
     }
 
-    /// **Draws the labels in `rect`, not all of them.** This used to loop `0..<frameCount` and lay
-    /// out an `NSAttributedString` per frame of the whole scene regardless of how much of the ruler
-    /// was actually being asked for — O(scene length) CoreText work, and one of the two costs
-    /// `PERFORMANCE.md` classifies as area-independent: it is identical at 2048×1024 and at 4096²,
-    /// which is exactly why no canvas-scaled benchmark ever saw it.
+    /// **Draws the labels in `rect`, not all of them.** Laying out an `NSAttributedString` per frame of
+    /// the whole scene regardless of how much of the ruler is being asked for would be O(scene length)
+    /// CoreText work, and one of the two costs `PERFORMANCE.md` classifies as area-independent: it is
+    /// identical at 2048×1024 and at 4096², which is exactly why no canvas-scaled benchmark would see
+    /// it.
     ///
     /// **Two things this does and does not buy, stated plainly so the next reader does not
     /// over-credit it.** UIKit hands a full-bounds `rect` when the whole view is invalidated, which

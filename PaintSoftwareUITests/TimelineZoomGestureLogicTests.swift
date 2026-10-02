@@ -63,10 +63,10 @@ final class TimelineZoomGestureLogicTests: XCTestCase {
         }
     }
 
-    /// **The case the old pinch could not do**: the fingers spread *and* travel sideways. The old
-    /// handler held the fingers' landing position fixed, so a pinch that also moved left the frame
-    /// where the fingers *had been*. Zoom 30→60 with the fingers 100 pt to the right leaves the frame
-    /// that was under them at landing 100 pt further along the viewport, as well as twice as wide.
+    /// **The fingers spread *and* travel sideways.** A zoom that held the fingers' landing position
+    /// fixed would leave the frame where the fingers *had been*. Zoom 30→60 with the fingers 100 pt to
+    /// the right leaves the frame that was under them at landing 100 pt further along the viewport, as
+    /// well as twice as wide.
     func testAPinchThatAlsoTravelsCarriesTheFrameWithTheFingers() {
         let gesture = TimelineZoomGesture(fingersInViewportX: 200, contentOffsetX: 500, pixelsPerFrame: 30)
         let zoom = gesture.pixelsPerFrame(scale: 2)

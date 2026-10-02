@@ -1791,7 +1791,7 @@ frame of it — the same argument interpolation's identity already makes for omi
   coordinator can map frame N to an x**, and a drawer placed like `InterpolateBar` — above the panel,
   which is otherwise the right precedent for growing the timeline upward — would drift out of register
   with the frames the instant the artist pinch-zooms or scrolls. Sharing the ruler and the playhead means
-  living **inside that scroll content**, or hoisting those three things out. Five things follow, and each
+  living **inside that scroll content**, or hoisting those three things out. Four things follow, and each
   fails silently:
   - **`relayout()` early-returns whenever `TimelineLayoutKey` is unchanged** (`:194-217`), and the key
     holds no curve data and no `currentFrame`. Drawer state that is not in the key renders once and never
@@ -1799,16 +1799,11 @@ frame of it — the same argument interpolation's identity already makes for omi
   - **The content-height formula exists twice** — `contentHeight` in SwiftUI (`AnimationTimeline.swift:161`)
     sizes the host, `totalHeight` in `relayout` (`TimelineTrackView.swift`) sizes the scroll content,
     the playhead and the row bands. A drawer added to one clips or leaves dead space.
-  - **The pinned name column aligns by a hard-coded `Color.clear.frame(height: rulerHeight)` spacer**
-    (`AnimationTimeline.swift:553-554`). Anything inserted above the ruler shifts every row down while the
-    names stay, so layer names label the wrong tracks until that spacer grows by the same amount.
   - **Any drag inside the scroll content is eaten** unless it calls
     `scrollView.panGestureRecognizer.require(toFail:)`, which both existing interactive views do (`:232`, `:254`).
   - **The shared playhead is a *column*, not a hairline** — width `pixelsPerFrame`, so 10.5 to 120 pt of
     35%-blue over everything, re-fronted every layout (`:331-337`, `:795`). A curve drawn under it is tinted.
-  Two more, outside the scroll view: the ruler is **not pinned** — it sits at y=0 inside content that a
-  SwiftUI vertical `ScrollView` sized to the full `contentHeight` scrolls, so with enough layers the ruler
-  and anything above it scroll away while the tracks stay; and `bottomDock` — which carries
+  One more, outside the scroll view: `bottomDock` — which carries
   `EffectSettingsBar`, the exact surface Animate mode records from — is pinned with a literal
   `.padding(.bottom, 100)` (`DrawingView.swift:404`) while `timelineHeight` is `@State private` and
   defaults to 250, so **growing the timeline upward puts more of the bar over the panel and nothing can
@@ -1856,14 +1851,13 @@ inside the scroll *content* grows the scrollable area instead, and the collision
 `Models/TimelineRowLayout.swift` owns the geometry: an array of heights in, and out of it a row's y
 origin (a prefix sum), a row's height, the content height, the drop strip a finger's y resolves
 against, how far a row slides to open a reorder gap, and how many rows a drag has crossed. Both halves
-of the timeline build one from `TimelineRowLayout.make(rows:rulerHeight:rowHeight:)` — the **single**
+of the timeline build one from `TimelineRowLayout.make(rows:rowHeight:)` — the **single**
 derivation, which is what stops the pinned name column and the UIKit track from disagreeing about
 where a row starts. Every row is still 34 pt, so no pixel moved.
 
 **Give a row extra height in `make` and both sides take it.** That is the seam D2 attaches to. What
 still has to be decided there is whether the band is part of the row's height or a sibling view — the
-name column has no gap to insert into (it is a `VStack` of one row per `LayerStackRow` under a
-hard-coded `Color.clear.frame(height: rulerHeight)`), so a band the track has and the column does not
+name column has no gap to insert into (it is a `VStack` of one row per `LayerStackRow`), so a band the track has and the column does not
 shifts every track down while the names stay and names label the wrong layers. Routing it through the
 row's own height is what makes that impossible rather than merely remembered.
 
@@ -1885,7 +1879,7 @@ moves again. §11.3's first bullet, reached from the geometry side. **D2 confirm
 added carries the row's height as well as the curves, and each half fails on its own.**
 
 **The seam took an `Expansion`, and one thing it also had to grow was a way to say *not* the whole
-row.** `make(rows:rulerHeight:rowHeight:expansion:)` resolves a layer index to a row position and
+row.** `make(rows:rowHeight:expansion:)` resolves a layer index to a row position and
 gives that row the extra height, so `height(ofRow:)`, `dropBand`, `rowsCrossed` and `contentHeight`
 are all right about a tall row without being touched. What D1 could not have predicted is
 `blockHeight(ofRow:)`, the complement: `TimelineRowView` measures **both** a cel block's rect and the

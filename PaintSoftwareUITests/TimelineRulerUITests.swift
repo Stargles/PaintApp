@@ -105,7 +105,7 @@ final class TimelineRulerUITests: PaintUITestCase {
 
     // MARK: - Taller
 
-    /// **The panel opens 1.5× the height it used to** — 250 pt, so 375 — and the canvas above it is still
+    /// **The panel opens 1.5× the 250 pt it was asked to be taller than** — 375 — and the canvas above it is still
     /// a canvas. Read off the panel's own frame (`timeline.panel`), which is what the artist sees.
     func testTheTimelineOpensOneAndAHalfTimesTaller() throws {
         let app = XCUIApplication()

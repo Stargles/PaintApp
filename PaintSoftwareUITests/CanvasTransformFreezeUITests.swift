@@ -51,7 +51,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         let app = XCUIApplication()
         let canvas = try launchWithAnEmptySlot(app)
 
-        assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
+        try assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
 
         let slot = try emptySlotCoordinate(app)
         // Two taps, not one: the empty slot's menu is gated the same way a block's is (tap once to
@@ -69,8 +69,8 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         // dismisses the popover and starts the stroke, which is the whole trigger.
         drawShortStroke(on: canvas)
 
-        assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: the canvas stopped transforming after a stroke that began while the slot popover was open")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "THE BUG: the canvas stopped transforming after a stroke that began while the slot popover was open")
     }
 
     /// THE CONTROL. Identical, except the menu is dismissed before the stroke. Must keep passing —
@@ -80,7 +80,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         let app = XCUIApplication()
         let canvas = try launchWithAnEmptySlot(app)
 
-        assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
+        try assertPinchMovesCanvas(app, canvas, "Setup: the canvas pinches before any of this")
 
         let slot = try emptySlotCoordinate(app)
         // See the matching comment in the test above: two taps to open the slot menu, not one.
@@ -94,8 +94,8 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
 
         drawShortStroke(on: canvas)
 
-        assertPinchMovesCanvas(app, canvas,
-                               "The canvas should still transform after a stroke drawn with no popover open")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "The canvas should still transform after a stroke drawn with no popover open")
     }
 
     /// The second instance the owner reported, reached with no popover and no timeline at all: with
@@ -107,7 +107,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any tool switch")
+        try assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any tool switch")
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
@@ -115,8 +115,8 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertTrue(fillButton.isSelected, "PREMISE: the Fill tool has to actually be selected")
         XCTAssertFalse(brushIsSelected(app), "PREMISE: and the brush deselected with it")
 
-        assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "THE BUG: two-finger pinch/pan/rotate is dead while the Fill tool is selected")
     }
 
     // MARK: - A presentation torn down under a two-finger gesture (2026-09-16, TODO (110))
@@ -153,8 +153,8 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         canvas.pinch(withScale: 2.0, velocity: 1.5)
 
         closeMenusAndRail(app)
-        assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: the canvas stopped transforming after a two-finger pinch under a presentation")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "THE BUG: the canvas stopped transforming after a two-finger pinch under a presentation")
 
         // The stroke half: `lastVectorGestureTrace` stays "none,0" if the recognizer never fed a
         // vector stroke, and reads a live scratch role once one lands.
@@ -199,7 +199,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
 
         // Left of the rail, the options panel and every menu that hangs off them, and above the
         // effect layer's settings bar, which is up beside the rail with the layer current.
-        let first = CGVector(dx: 0.10, dy: 0.20), second = CGVector(dx: 0.22, dy: 0.33)
+        let first = CGVector(dx: 0.10, dy: 0.12), second = CGVector(dx: 0.22, dy: 0.24)
         let menus: [(name: String, open: (XCUIApplication) -> Void)] = [
             ("the Blend Mode / Effect menu", openEffectMenu),
             ("the Views menu", openViewsMenu),
@@ -215,13 +215,13 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                 XCTAssertNotEqual(readTransform(app), before, "PREMISE (\(shape)): the drag under the menu pans the canvas")
 
                 closeMenusAndRail(app)
-                assertPinchMovesCanvas(app, canvas,
-                                       "THE BUG (\(shape)): nothing transforms the canvas after a two-finger drag under an open menu")
+                try assertPinchMovesCanvas(app, canvas,
+                                           "THE BUG (\(shape)): nothing transforms the canvas after a two-finger drag under an open menu")
                 // The same drag with nothing open is the control: it has to leave the canvas alive.
                 try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
                                            delta: CGVector(dx: -30, dy: -20))
-                assertPinchMovesCanvas(app, canvas,
-                                       "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
+                try assertPinchMovesCanvas(app, canvas,
+                                           "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
             }
         }
         // What is drawn, not only what is stored: the canvas the four drags and eight pinches left.
@@ -313,12 +313,12 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
+        try assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
 
         placeATextBox(app, on: canvas)
 
-        assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: two-finger pinch/pan/rotate is dead with a text box open")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "THE BUG: two-finger pinch/pan/rotate is dead with a text box open")
     }
 
     /// The owner's sequence to its end: leave the text keyboard by picking the brush, then try to
@@ -339,7 +339,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
+        try assertPinchMovesCanvas(app, canvas, "Setup: the canvas should pinch before any of this")
 
         placeATextBox(app, on: canvas)
 
@@ -361,8 +361,8 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
             `CanvasTouchInputs.transformDependencyIsUnresolvable`.
             """)
 
-        assertPinchMovesCanvas(app, canvas,
-                               "THE BUG: the canvas stopped transforming after leaving text mode for the brush")
+        try assertPinchMovesCanvas(app, canvas,
+                                   "THE BUG: the canvas stopped transforming after leaving text mode for the brush")
     }
 
     /// Actions -> Add Text, then a tap on the canvas to put a box down. Leaves the text settings
@@ -388,7 +388,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
                       "PREMISE: Add Text opens the text settings panel")
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.55)).tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.35)).tap()
 
         // **Not optional politeness — without it both tests pass having placed nothing, which is what
         // the first draft of this class did.** The whole premise is a live text session on screen
@@ -535,9 +535,9 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// Pinches the canvas and asserts its published transform actually moved. Returns the state
     /// after the gesture so a caller can compare two of them.
     @discardableResult
-    private func assertPinchMovesCanvas(_ app: XCUIApplication, _ canvas: XCUIElement, _ message: String) -> String {
+    private func assertPinchMovesCanvas(_ app: XCUIApplication, _ canvas: XCUIElement, _ message: String) throws -> String {
         let before = readTransform(app)
-        canvas.pinch(withScale: 2.0, velocity: 1.5)
+        try pinchAboveTheDock(canvas, scale: 2.0)
         let after = readTransform(app)
         XCTAssertNotEqual(before, after, "\(message) (xform \(before) -> \(after))")
         return after

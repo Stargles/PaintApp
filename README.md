@@ -126,7 +126,7 @@ PaintSoftware/
     ├── CanvasView.swift, DrawingView.swift, ContentView-adjacent panels
     ├── TopToolbar.swift, SideToolbar.swift
     ├── LayerPanel.swift, LayerStackListView.swift, LayerStackCell.swift, EffectSection.swift
-    ├── AnimationTimeline.swift, TimelineTrackView.swift
+    ├── AnimationTimeline.swift, TimelineTrackView.swift (the rows), TimelineRulerStrip.swift (the pinned ruler)
     ├── ColorPickerPanel.swift, ColorPickerShapePickers.swift, PalettesLibraryView.swift,
     │   BrushSettingsPanel.swift, EraserSettingsPanel.swift, FillSettingsPanel.swift, SelectPanel.swift
     ├── ObjectTransformOverlayView.swift, FloatingPieceOverlayView.swift, SelectionOverlayView.swift

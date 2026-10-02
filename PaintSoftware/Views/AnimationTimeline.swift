@@ -14,10 +14,10 @@ struct AnimationTimeline: View {
     /// respects Split View instead of assuming the whole screen.
     var availableHeight: CGFloat = 1024
 
-    /// **How tall the panel opens** — TODO (122), the owner: *"make it around 1.5x taller."* It was 250
-    /// and is 375 with the same chrome above it (grab handle, toolbar, ruler), so the whole of the
-    /// extra 125 pt is rows: about four more layers in view before the tracks scroll. The artist can
-    /// still drag it to anywhere between the collapsed bar and `maxTimelineHeight`.
+    /// **How tall the panel opens** — TODO (122), the owner: *"make it around 1.5x taller"*, of the 250
+    /// pt it opened at, so 375. The chrome above the rows (grab handle, toolbar, ruler) is a fixed 71 pt,
+    /// so everything the extra height adds is rows: about eight layers in view before the tracks scroll.
+    /// The artist can still drag it to anywhere between the collapsed bar and `maxTimelineHeight`.
     static let defaultHeight: CGFloat = 375
 
     private let rowHeight: CGFloat = 34
