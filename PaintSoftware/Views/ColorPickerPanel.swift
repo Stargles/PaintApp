@@ -536,7 +536,7 @@ extension Eyedropper.Mode {
     /// What reading it hands the artist, for VoiceOver — the sentence the two words stand for.
     var hint: String {
         switch self {
-        case .layer: return "The eyedropper picks the colour of the active layer alone, ignoring effects and blend modes above it."
+        case .layer: return "The eyedropper picks the colour an object was painted in, on whichever layer it is, ignoring effects and blend modes above it."
         case .composite: return "The eyedropper picks the colour you see on the canvas, effects and blend modes included."
         }
     }

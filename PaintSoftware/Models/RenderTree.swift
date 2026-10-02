@@ -386,6 +386,26 @@ extension RenderNode {
 
 extension Array where Element == RenderNode {
 
+    /// **Every leaf a viewer can see, topmost first** — the painter's order read from the top, folders
+    /// included. A leaf's own flag gates only itself and a node's gates its whole subtree, so a layer
+    /// inside a hidden folder is not here whatever its own eye says. Slots of a multi-input node are
+    /// read in order, as `leafLayerIndices` reads them. What the eyedropper's Layer mode walks to find
+    /// the topmost object under a point.
+    var visibleLeavesTopmostFirst: [RenderNode] {
+        func bottomToTop(_ nodes: [RenderNode]) -> [RenderNode] {
+            nodes.flatMap { node -> [RenderNode] in
+                guard node.isVisible else { return [] }
+                switch node.content {
+                case .leaf:
+                    return [node]
+                case .node(_, let inputs):
+                    return inputs.flatMap(bottomToTop)
+                }
+            }
+        }
+        return bottomToTop(self).reversed()
+    }
+
     /// The flat bottom-to-top leaf order of a whole stack — what today's `for layer in layers` walk
     /// is, once the tree is flattened back down.
     var leafLayerIndices: [Int] {

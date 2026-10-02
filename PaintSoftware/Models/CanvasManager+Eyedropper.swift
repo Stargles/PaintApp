@@ -8,6 +8,15 @@ import UIKit
 // a byte buffer holds there — live in `Engine/Eyedropper.swift`; this file is the three steps that
 // need the document, split at the two thread boundaries the work actually has.
 
+/// **What one pick reads, frozen on the main actor** — recipes tried in order, and the first that holds
+/// a colour at the point answers. One recipe for the composite and for a recolour pair's `from` end;
+/// one per visible pixel layer, topmost first, for `Eyedropper.Mode.layer`
+/// (`CanvasManager.objectRecipes(under:in:)`). A value, so the composites it asks for can run off the
+/// main thread against a document the artist is free to keep editing.
+struct EyedropperProbe {
+    let recipes: [FrameRecipe]
+}
+
 extension CanvasManager {
 
     /// **Where a pick lands.** The sidebar's eyedropper fills the brush swatch; the recolour panel's
@@ -18,13 +27,20 @@ extension CanvasManager {
         /// `brushColor`, sampled from the composite the artist is looking at.
         case brushColor
         /// One end of `entry` on `target`'s recolour. **The `from` end samples what is UNDER the
-        /// effect** — see `eyedropperRecipe()` — because the picture on screen may already carry an
+        /// effect** — see `eyedropperProbe(for:atCanvasPoint:)` — because the picture on screen may already carry an
         /// earlier entry's replacement, and a mapping whose source no longer exists once the artist's
         /// own list is applied does nothing and cannot say why. The `to` end samples the screen.
         case recolorEntry(target: KeyframeTarget, index: Int, end: RecolorEnd)
 
         /// Which end of a recolour pair a pick fills.
         enum RecolorEnd: Equatable { case from, to }
+
+        /// Whether this is a recolour pair's `from` end — the one pick that reads what is UNDER an
+        /// effect, in either mode, because that is the colour the mapping has to name.
+        var readsUnderTheEffect: Bool {
+            if case .recolorEntry(_, _, .from) = self { return true }
+            return false
+        }
 
         /// **Whether the pick is being made *for* an open panel**, which is what decides that the
         /// canvas tap must not close it. A pick for the brush is momentary and the Select-panel
@@ -74,7 +90,9 @@ extension CanvasManager {
 
     // MARK: - The three steps
 
-    /// Step 1, on the main actor: the composite the artist is looking at, captured as a value.
+    /// Step 1, on the main actor: what the pick will read — by default the composite the artist is
+    /// looking at — captured as a value. The rest of this note is about that composite; which picture a
+    /// pick reads at all is `eyedropperProbe(for:atCanvasPoint:)`'s.
     ///
     /// **`includeBackground: true` is the whole "what does the artist see" decision in one argument.**
     /// Sampling without the paper would make a tap on an unpainted patch of a white canvas return
@@ -113,95 +131,128 @@ extension CanvasManager {
     /// a pick stops being proportional to canvas area, and the composite that follows is chunked under
     /// the same memory ceiling everything else is.
     @MainActor
-    func eyedropperRecipe() -> FrameRecipe? {
-        eyedropperRecipe(for: eyedropperDestination)
+    func eyedropperProbe(atCanvasPoint point: CGPoint) -> EyedropperProbe? {
+        eyedropperProbe(for: eyedropperDestination, atCanvasPoint: point)
     }
 
-    /// Step 1 for a stated destination — `eyedropperRecipe()` reads the armed one.
+    /// Step 1 for a stated destination — `eyedropperProbe(atCanvasPoint:)` reads the armed one.
     ///
-    /// **Three of the four destinations sample the screen; a recolour pair's `from` end samples what
-    /// is UNDER the effect.** TODO (60): a recolour layer grades the layers below it, so the composite
-    /// the artist is looking at may already carry an earlier entry's replacement. Sampling that
-    /// assigns a mapping whose source no longer exists once their own list is applied — the entry
-    /// does nothing, or chains off another entry unpredictably, and neither failure says why. So the
-    /// `from` end composites **everything beneath the recolour node, with the recolour not applied**:
+    /// **Which picture a pick reads is the destination's and the document's mode, decided here once.**
     ///
-    /// - For a value layer that is `split(atLeaf:).below` — the same cut the compositor's own `.ink`
-    ///   sub-walk uses (`CoreGraphicsCompositor.gradedInkOverPaper`) — **with the paper**, because
-    ///   the recolour's input is `.backdrop` and `accumulator == paper ⊕ split(atLeaf:).below` is
-    ///   exactly the buffer the kernel is handed. So a from-colour picked off the paper matches the
-    ///   paper, which is what the effect will then recolour.
-    /// - For a folder node it is the node's own assembled composite: its children over
-    ///   **transparency**, at opacity 1 with no mask and no grade, because a node's grade mixes in
-    ///   place over what its inputs assembled and that buffer never had the paper in it.
+    /// - **A recolour pair's `from` end samples what is UNDER the effect** (TODO (60)), in either mode.
+    ///   A recolour layer grades the layers below it, so the composite the artist is looking at may
+    ///   already carry an earlier entry's replacement. Sampling that assigns a mapping whose source no
+    ///   longer exists once their own list is applied — the entry does nothing, or chains off another
+    ///   entry unpredictably, and neither failure says why. So the `from` end composites
+    ///   **everything beneath the recolour node, with the recolour not applied**:
+    ///   - For a value layer that is `split(atLeaf:).below` — the same cut the compositor's own `.ink`
+    ///     sub-walk uses (`CoreGraphicsCompositor.gradedInkOverPaper`) — **with the paper**, because
+    ///     the recolour's input is `.backdrop` and `accumulator == paper ⊕ split(atLeaf:).below` is
+    ///     exactly the buffer the kernel is handed. So a from-colour picked off the paper matches the
+    ///     paper, which is what the effect will then recolour.
+    ///   - For a folder node it is the node's own assembled composite: its children over
+    ///     **transparency**, at opacity 1 with no mask and no grade, because a node's grade mixes in
+    ///     place over what its inputs assembled and that buffer never had the paper in it.
+    /// - **Everything else follows `Eyedropper.Mode`** — the brush and a recolour pair's `to` end
+    ///   alike (the owner, 2026-10-01: *"Recolour's to eyedropper follows the same Layer/Canvas
+    ///   switch"*). `.composite` is the picture the artist is looking at; `.layer` is the object under
+    ///   the point, in the colour it was painted — see `objectRecipes(under:in:)`.
     ///
-    /// Sampled at native size, one pixel, off the same striped composite every other pick uses. The
-    /// `to` end has no such constraint and samples the screen like the brush does.
+    /// Sampled at native size, one pixel, off the same striped composite every other pick uses.
     @MainActor
-    func eyedropperRecipe(for destination: EyedropperDestination) -> FrameRecipe? {
+    func eyedropperProbe(for destination: EyedropperDestination,
+                         atCanvasPoint point: CGPoint) -> EyedropperProbe? {
         guard let full = makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
         else { return nil }
         guard case .recolorEntry(let target, _, .from) = destination else {
-            if destination == .brushColor, eyedropperMode == .layer { return activeLayerRecipe(from: full) }
-            return full
+            return EyedropperProbe(recipes: eyedropperMode == .layer
+                                   ? Self.objectRecipes(under: point, in: full) : [full])
         }
 
         switch target {
         case .layer(let id):
             guard let index = layers.firstIndex(where: { $0.id == id }),
                   let below = full.tree.split(atLeaf: index)?.below else { return nil }
-            return FrameRecipe(tree: below, leaves: full.leaves, maskStacks: full.maskStacks,
-                               frame: full.frame, canvasSize: full.canvasSize,
-                               background: full.background, quality: full.quality)
+            return EyedropperProbe(recipes: [FrameRecipe(
+                tree: below, leaves: full.leaves, maskStacks: full.maskStacks,
+                frame: full.frame, canvasSize: full.canvasSize,
+                background: full.background, quality: full.quality)])
         case .folder(let id):
             guard let node = RenderNode.find(id, in: full.tree),
                   case .node(let op, let inputs) = node.content else { return nil }
             let ungraded = RenderNode(id: node.id, content: .node(op: op, inputs: inputs),
                                       opacity: 1, isVisible: true, blendMode: .normal,
                                       isIsolated: node.isIsolated, masks: [], effect: nil)
-            return FrameRecipe(tree: [ungraded], leaves: full.leaves, maskStacks: full.maskStacks,
-                               frame: full.frame, canvasSize: full.canvasSize,
-                               background: nil, quality: full.quality)
+            return EyedropperProbe(recipes: [FrameRecipe(
+                tree: [ungraded], leaves: full.leaves, maskStacks: full.maskStacks,
+                frame: full.frame, canvasSize: full.canvasSize,
+                background: nil, quality: full.quality)])
         }
     }
 
-    /// **The active layer alone, as its own pixels** — what a brush-colour pick reads in
-    /// `Eyedropper.Mode.layer` (TODO (119)).
+    /// **The objects under a point, topmost first, each as its own layer's pixels** — what a pick reads
+    /// in `Eyedropper.Mode.layer` (TODO (119), and its follow-up: the owner meant the layer *the
+    /// picked object* is in, whichever layer is selected).
     ///
-    /// It is the same cut (60)'s `from` end makes — a node's own composite, with the grading taken
-    /// off — and **`RenderNode.asInkLeaf(forOwnMask: true)` is that cut for a leaf**: opacity 1,
-    /// blend mode Normal, no masks and no effect. Four things stand aside, each for a reason the
-    /// owner's *"if I add an effect or blend mode on top, it does not affect it"* implies:
+    /// One recipe per candidate and the first that holds a colour answers, because "the topmost
+    /// content under the point" is a question about each layer alone: a composite of the stack mixes a
+    /// soft or anti-aliased edge into whatever is beneath it, and the colour that was painted is not
+    /// that mixture.
     ///
-    /// - **everything above the layer** — it is the only node in the tree, so no adjustment layer,
-    ///   Multiply value layer or folder grade has anything to act on;
-    /// - **the paper** (`background: nil`), which is not on any layer — a tap on a patch this layer
-    ///   has not painted is a miss and says so, rather than reading white off the sheet;
-    /// - **the layer's own opacity, blend mode and masks** — the colour is the artist's paint, not
-    ///   what a 30% layer or a clip made of it. (The sampled alpha is dropped regardless — see
-    ///   `sampledColor` — so opacity could never have changed the colour, only whether a faint layer
-    ///   read as transparent and missed.)
-    /// - **its own effect**, for a layer that grades: the ink is what it has to give, as it is for a
-    ///   mask that names it.
+    /// **Each recipe is the cut TODO (60)'s `from` end makes for a node, taken for a leaf**:
+    /// `RenderNode.asInkLeaf(forOwnMask: true)` — opacity 1, blend mode Normal, no masks, no effect —
+    /// alone in its tree with no paper. So nothing above it reaches it (an adjustment layer, a Multiply
+    /// layer, a folder's grade), and none of its own layer's blend, effect, opacity or clip changes
+    /// what it reads — the colour is the artist's paint, not what a 30% layer or a mask made of it.
     ///
-    /// **What stays is where the layer is *shown*.** The leaf snapshots carry a layer's pose, so a
-    /// layer a transformation layer above it has moved is sampled where the artist sees it, not where
-    /// it is stored — the grade stands aside and the geometry does not. Nil when the active layer is
-    /// not in the tree at all.
-    @MainActor
-    private func activeLayerRecipe(from full: FrameRecipe) -> FrameRecipe? {
-        guard layers.indices.contains(currentLayerIndex),
-              let node = RenderNode.find(layers[currentLayerIndex].id, in: full.tree) else { return nil }
-        return FrameRecipe(tree: [node.asInkLeaf(forOwnMask: true)], leaves: full.leaves,
-                           maskStacks: full.maskStacks, frame: full.frame, canvasSize: full.canvasSize,
-                           background: nil, quality: full.quality)
+    /// **What counts as an object, and the order, are decisions and are written here:**
+    ///
+    /// - **Only a layer that holds pixels and does not grade with them** (`LeafSnapshot.Content.cel`,
+    ///   no `effect`). A flat-colour value layer, an effect layer and a transformation layer hold none;
+    ///   a vector layer in effect mode holds ink, but only as the mask its grade acts through. They are
+    ///   what grades, tints and moves the objects, which is the *"effect or blend mode on top"* the
+    ///   owner wants a pick to see through. A flat colour is still there to take in `.composite`.
+    /// - **Only what is visible**: a layer with its eye off, or inside a folder with its eye off, is not
+    ///   under the point (`RenderNode.visibleLeavesTopmostFirst`). A layer at 0% opacity is, because
+    ///   its opacity is one of the things that stand aside.
+    /// - **Topmost is the painter's order, folders included** — the order the compositor draws, read
+    ///   from the top — not the selected layer's and not the layer panel's row index.
+    /// - **Where it is shown.** The leaf snapshots carry a layer's pose, so an object a transformation
+    ///   layer above it has moved is found where the artist sees it, not where it is stored.
+    ///
+    /// **A one-row band of the frame, not the frame** (`FrameRecipe.windowed(to:)`, RENDER.md §3.8's
+    /// strip): the pick is one pixel, and a probe per candidate layer over a whole canvas would be a
+    /// full composite for every layer the point misses. Empty when the point is off the canvas.
+    static func objectRecipes(under point: CGPoint, in full: FrameRecipe) -> [FrameRecipe] {
+        guard let pixel = Eyedropper.pixel(at: point, canvasSize: full.canvasSize) else { return [] }
+        let row = CGRect(x: 0, y: CGFloat(pixel.y), width: full.canvasSize.width, height: 1)
+        return full.tree.visibleLeavesTopmostFirst.compactMap { node in
+            guard node.effect == nil, case .leaf(let index) = node.content,
+                  full.leaves.indices.contains(index), case .cel? = full.leaves[index]?.content
+            else { return nil }
+            return FrameRecipe(tree: [node.asInkLeaf(forOwnMask: true)], leaves: full.leaves,
+                               maskStacks: full.maskStacks, frame: full.frame,
+                               canvasSize: full.canvasSize, background: nil, quality: full.quality)
+                .windowed(to: row)
+        }
     }
 
     /// Step 2, pure and safe from any thread — the same contract `Compositor.composite` states, and
     /// the reason the gesture can do this off the main thread while the test does it inline.
     ///
-    /// `point` is canvas space, top-left origin, which is what `location(in: container)` returns
-    /// (see `Eyedropper`'s note on why there is no zoom arithmetic anywhere in this feature).
+    /// The probe's recipes are tried in order and the first that holds a colour at the point answers;
+    /// none answering is "nothing to pick".
+    static func sampledColor(from probe: EyedropperProbe, atCanvasPoint point: CGPoint) -> Color? {
+        for recipe in probe.recipes {
+            if let color = sampledColor(from: recipe, atCanvasPoint: point) { return color }
+        }
+        return nil
+    }
+
+    /// One recipe's colour at `point`, which is in canvas space, top-left origin — what
+    /// `location(in: container)` returns (see `Eyedropper`'s note on why there is no zoom arithmetic
+    /// anywhere in this feature). **A windowed recipe is read at the point's place inside its window**:
+    /// a one-row band's buffer starts at `window.origin`, not at the canvas's corner.
     ///
     /// **The point is mapped into the composited image's own grid rather than assumed equal to it.**
     /// Today they are equal for *this* caller — `eyedropperRequest` takes `RenderSizing.native` — so
@@ -213,7 +264,7 @@ extension CanvasManager {
     ///
     /// Nil means "nothing to pick": off the canvas, or a fully transparent pixel. `Eyedropper` decides
     /// which; this only carries the answer.
-    static func sampledColor(from recipe: FrameRecipe, atCanvasPoint point: CGPoint) -> Color? {
+    private static func sampledColor(from recipe: FrameRecipe, atCanvasPoint point: CGPoint) -> Color? {
         let canvasSize = recipe.canvasSize
         guard canvasSize.width > 0, canvasSize.height > 0,
               let image = recipe.composite(),
@@ -228,8 +279,9 @@ extension CanvasManager {
         else { return nil }
 
         let imageSize = CGSize(width: image.width, height: image.height)
-        let mapped = CGPoint(x: point.x * imageSize.width / canvasSize.width,
-                             y: point.y * imageSize.height / canvasSize.height)
+        let origin = recipe.window?.origin ?? .zero
+        let mapped = CGPoint(x: (point.x - origin.x) * imageSize.width / canvasSize.width,
+                             y: (point.y - origin.y) * imageSize.height / canvasSize.height)
 
         guard let sample = Eyedropper.sample(at: mapped, canvasSize: imageSize,
                                              premultipliedRGBA: bytes) else { return nil }
@@ -265,8 +317,8 @@ extension CanvasManager {
     func applyEyedropperResult(_ picked: Color?, revertTool: Bool = true) -> Bool {
         defer { if revertTool { leaveEyedropper() } }
         guard let picked else {
-            raise(eyedropperDestination == .brushColor && eyedropperMode == .layer
-                  ? .nothingToPickOnLayer : .nothingToPick)
+            raise(eyedropperMode == .layer && !eyedropperDestination.readsUnderTheEffect
+                  ? .nothingPaintedThere : .nothingToPick)
             return false
         }
         switch eyedropperDestination {
@@ -310,10 +362,10 @@ extension CanvasManager {
     @MainActor
     @discardableResult
     func pickColor(atCanvasPoint point: CGPoint) -> Bool {
-        guard let recipe = eyedropperRecipe() else {
+        guard let probe = eyedropperProbe(atCanvasPoint: point) else {
             leaveEyedropper()
             return false
         }
-        return applyEyedropperResult(Self.sampledColor(from: recipe, atCanvasPoint: point))
+        return applyEyedropperResult(Self.sampledColor(from: probe, atCanvasPoint: point))
     }
 }

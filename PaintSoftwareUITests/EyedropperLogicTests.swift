@@ -341,11 +341,12 @@ final class EyedropperLogicTests: XCTestCase {
         XCTAssertEqual(manager.selectedTool, .pencil)
     }
 
-    // MARK: - The mode (TODO (119))
+    // MARK: - The mode (TODO (119) and its follow-up)
 
     /// A red square on layer 0, a mid-grey **Multiply** value layer over it and a hue-shifting
     /// **effect** layer over that — so the picture the artist sees is a different colour from the one
-    /// they painted, twice over. Layer 0 is left active.
+    /// they painted, twice over. **The effect layer is left active**, the one that holds no pixels: a
+    /// pick must not care which layer is selected.
     private func gradedStack() -> CanvasManager {
         let manager = CanvasFixture.manager()
         let red = UIColor(red: 1, green: 0, blue: 0, alpha: 1)
@@ -354,7 +355,17 @@ final class EyedropperLogicTests: XCTestCase {
         manager.addValueLayer(color: PaletteColor(hex: "808080"))
         manager.layers[1].blendMode = .multiply
         manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 120)))
-        manager.currentLayerIndex = 0
+        manager.brushColor = .black
+        return manager
+    }
+
+    /// Layer 0 solid red over the whole canvas, layer 1 solid green over its left half.
+    private func redUnderGreenOnTheLeft() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         manager.brushColor = .black
         return manager
     }
@@ -364,6 +375,14 @@ final class EyedropperLogicTests: XCTestCase {
         return (c.r, c.g, c.b)
     }
 
+    private func pick(_ manager: CanvasManager, at point: CGPoint,
+                      file: StaticString = #filePath, line: UInt = #line) -> (r: Double, g: Double, b: Double)? {
+        manager.brushColor = .black
+        manager.selectEyedropper()
+        guard manager.pickColor(atCanvasPoint: point) else { return nil }
+        return channels(manager)
+    }
+
     /// The owner's default, and the document's: a new manager reads the layer, and so does a manifest
     /// that never mentioned it.
     func testTheDefaultIsTheLayer() {
@@ -371,98 +390,229 @@ final class EyedropperLogicTests: XCTestCase {
         XCTAssertEqual(EditorStateManifest().eyedropperMode, .layer)
     }
 
-    /// **The colour that was painted, whatever is composited over it** — *"if I add an effect or blend
-    /// mode on top, it does not affect it."* Both operands are asserted: the composite really is
-    /// something else (the same stack, picked in `.composite`), and the layer read is exactly red.
-    func testTheLayerModePicksThePaintedColourUnderAMultiplyAndAnEffect() {
+    /// **The colour that was painted, whatever is composited over it and whichever layer is
+    /// selected** — *"regardless of the selected layer … it should return the original color that the
+    /// shape was."* Three layers hold the pick's candidates in turn as the active one — the object's
+    /// own, the Multiply layer and the effect layer — and the answer never moves. The premise is
+    /// asserted too: the same stack picked in `.composite` is a different colour.
+    func testTheLayerModePicksThePaintedColourUnderAMultiplyAndAnEffectWhicheverLayerIsSelected() {
         let manager = gradedStack()
+        let inside = CGPoint(x: 16, y: 16)
 
         manager.eyedropperMode = .composite
-        manager.selectEyedropper()
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)))
-        let seen = channels(manager)
-        XCTAssertLessThan(seen.r, 0.2, "PREMISE: the multiply and the hue shift have taken the red out of the composite")
-        XCTAssertGreaterThan(seen.g, 0.3, "PREMISE: the hue shift has rotated what the multiply left towards green")
+        let seen = pick(manager, at: inside)
+        XCTAssertLessThan(seen?.r ?? 1, 0.2, "PREMISE: the multiply and the hue shift have taken the red out of the composite")
+        XCTAssertGreaterThan(seen?.g ?? 0, 0.3, "PREMISE: the hue shift has rotated what the multiply left towards green")
 
-        manager.brushColor = .black
         manager.eyedropperMode = .layer
-        manager.selectEyedropper()
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)))
-        let painted = channels(manager)
-        XCTAssertEqual(painted.r, 1, accuracy: 1.0 / 255, "The layer's own red")
-        XCTAssertEqual(painted.g, 0, accuracy: 1.0 / 255)
-        XCTAssertEqual(painted.b, 0, accuracy: 1.0 / 255)
+        for active in 0..<manager.layers.count {
+            manager.currentLayerIndex = active
+            let painted = pick(manager, at: inside)
+            XCTAssertEqual(painted?.r ?? -1, 1, accuracy: 1.0 / 255, "layer \(active) selected: the object's own red")
+            XCTAssertEqual(painted?.g ?? -1, 0, accuracy: 1.0 / 255, "layer \(active) selected")
+            XCTAssertEqual(painted?.b ?? -1, 0, accuracy: 1.0 / 255, "layer \(active) selected")
+        }
     }
 
-    /// **Under another layer's ink** — the plainest "unaffected by what is on top": the composite
-    /// shows the green that covers it, the layer reads the red that is under it.
-    func testTheLayerModeReadsThroughAnotherLayersInk() {
-        let manager = CanvasFixture.manager(layerCount: 2)
-        CanvasFixture.setBakedContent(manager, layerIndex: 0,
-                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 1,
-                                      CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
-        manager.currentLayerIndex = 0
+    /// **The object under the point is the topmost one, on whatever layer it is** — the plainest
+    /// reading of *"the layer the shape belonged in"*. Where the green layer paints, the green is the
+    /// shape under the finger (with layer 0 selected); where it does not, the red beneath is — with
+    /// the green layer selected. The selected layer decides nothing.
+    func testTheLayerModeReadsTheTopmostObjectUnderThePointOnWhicheverLayerItIs() {
+        let manager = redUnderGreenOnTheLeft()
 
-        manager.selectEyedropper()
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 10, y: 10)))
-        XCTAssertEqual(channels(manager).r, 1, accuracy: 1.0 / 255, "Layer 0's red, under layer 1's green")
-        XCTAssertEqual(channels(manager).g, 0, accuracy: 1.0 / 255)
+        manager.currentLayerIndex = 0
+        XCTAssertEqual(pick(manager, at: CGPoint(x: 10, y: 10))?.g ?? -1, 1, accuracy: 1.0 / 255,
+                       "layer 1's green is the shape under the finger, though layer 0 is selected")
+        XCTAssertEqual(channels(manager).r, 0, accuracy: 1.0 / 255)
 
         manager.currentLayerIndex = 1
-        manager.selectEyedropper()
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 10, y: 10)))
-        XCTAssertEqual(channels(manager).g, 1, accuracy: 1.0 / 255,
-                       "…and with the green layer active the same tap reads green: it is the active layer's pixel")
+        let right = pick(manager, at: CGPoint(x: 50, y: 10))
+        XCTAssertEqual(right?.r ?? -1, 1, accuracy: 1.0 / 255,
+                       "layer 0's red is the shape under the finger, though layer 1 — which has nothing there — is selected")
+        XCTAssertEqual(right?.g ?? -1, 0, accuracy: 1.0 / 255)
+    }
+
+    /// **A layer that is not on screen is not under the point**: its own eye, or the eye of the folder
+    /// it is in. Both take the green out of the answer and leave the red beneath it.
+    func testAHiddenLayerAndALayerInAHiddenFolderAreNotUnderThePoint() {
+        let manager = redUnderGreenOnTheLeft()
+        let onGreen = CGPoint(x: 10, y: 10)
+        XCTAssertEqual(pick(manager, at: onGreen)?.g ?? -1, 1, accuracy: 1.0 / 255, "PREMISE: green is on top there")
+
+        manager.layers[1].isVisible = false
+        XCTAssertEqual(pick(manager, at: onGreen)?.r ?? -1, 1, accuracy: 1.0 / 255,
+                       "a layer with its eye off is not an object")
+        manager.layers[1].isVisible = true
+
+        let folder = manager.addFolder(name: "Group")
+        manager.layers[1].parentFolderID = folder
+        XCTAssertEqual(pick(manager, at: onGreen)?.g ?? -1, 1, accuracy: 1.0 / 255,
+                       "PREMISE: a layer in a visible folder is still on top")
+        manager.toggleFolderVisibility(folder)
+        XCTAssertEqual(pick(manager, at: onGreen)?.r ?? -1, 1, accuracy: 1.0 / 255,
+                       "a layer in a hidden folder is not an object, whatever its own eye says")
     }
 
     /// The layer's own opacity and blend mode are not part of the colour it holds — a 20% Multiply
-    /// layer would otherwise read as a washed-out, darkened version of what was painted, or as
-    /// nothing at all.
-    func testTheLayerModeIgnoresTheLayersOwnOpacityAndBlendMode() {
+    /// layer would otherwise read as a washed-out, darkened version of what was painted.
+    func testTheLayersOwnOpacityAndBlendModeStandAside() {
         let manager = gradedStack()
         manager.layers[0].opacity = 0.2
         manager.layers[0].blendMode = .multiply
-        manager.selectEyedropper()
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)))
-        XCTAssertEqual(channels(manager).r, 1, accuracy: 1.0 / 255)
-        XCTAssertEqual(channels(manager).g, 0, accuracy: 1.0 / 255)
+        let painted = pick(manager, at: CGPoint(x: 16, y: 16))
+        XCTAssertEqual(painted?.r ?? -1, 1, accuracy: 1.0 / 255)
+        XCTAssertEqual(painted?.g ?? -1, 0, accuracy: 1.0 / 255)
     }
 
-    /// **A point the layer has not painted is a miss**, even where the picture shows plenty — the paper
-    /// is not on any layer, and neither is another layer's ink. The notice names the layer and the way
-    /// out, and the brush colour is left alone.
-    func testALayerModeMissSaysWhichLayerHadNothingThere() {
-        let manager = gradedStack()
+    /// **A flat colour and a grade are not objects.** A Normal value layer covers the whole canvas and
+    /// is visible content in the plainest sense, and an effect layer is visible too; neither is the
+    /// *shape* the owner means. So a point with nothing painted under it is a miss that says so — it
+    /// does not read the flat colour — while `.composite` still reads it.
+    func testAFlatColourLayerAndAnEffectLayerAreNotObjects() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 32, height: 32)))
+        manager.addValueLayer(color: PaletteColor(hex: "808080"))
+        manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 120)))
+        let empty = CGPoint(x: 56, y: 56)
+
+        manager.eyedropperMode = .composite
+        XCTAssertNotNil(pick(manager, at: empty), "PREMISE: the flat grey is there to take in the composite")
+
+        manager.eyedropperMode = .layer
         manager.notice = nil
-        manager.selectEyedropper()
-
-        XCTAssertFalse(manager.pickColor(atCanvasPoint: CGPoint(x: 56, y: 56)),
-                       "Layer 0 is empty there; the stack above it is not")
-        XCTAssertEqual(manager.notice?.kind, .nothingToPickOnLayer)
-        XCTAssertEqual(manager.brushColor.hexString, Color.black.hexString)
-        XCTAssertTrue(manager.notice?.message.contains("this layer") == true,
-                      "The sentence names the layer, which the composite's cannot")
+        manager.brushColor = .black
+        XCTAssertNil(pick(manager, at: empty), "…and is not an object")
+        XCTAssertEqual(manager.notice?.kind, .nothingPaintedThere)
+        XCTAssertEqual(manager.brushColor.hexString, Color.black.hexString, "A miss leaves the brush colour alone")
+        XCTAssertTrue(manager.notice?.message.contains("painted") == true,
+                      "The sentence says what is missing, and the way out is the panel's switch")
+        XCTAssertEqual(CanvasNotice(.nothingToPick).message, "Nothing to pick up there.",
+                       "…while the composite's own miss keeps its own sentence")
     }
 
-    /// The mode is the brush's. A recolour pair's ends keep (60)'s rules in either mode: `from` is
-    /// what is under the effect and `to` is what is on screen, and neither is the active layer's.
-    func testARecolourPairsToEndKeepsReadingTheScreenInLayerMode() {
+    /// **A layer that grades is not an object even where it holds ink**: a vector layer in effect mode
+    /// keeps its strokes as the mask its grade acts through, and `leafSnapshots` rasterizes them, so
+    /// only the node's `effect` tells them from a drawing. Counted at the recipe level, where the
+    /// candidates are.
+    func testAVectorLayerThatGradesIsNotAnObjectEvenWhereItHoldsInk() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        let drawing = manager.currentLayerIndex
+        manager.addVectorLayer()
+        let grading = manager.currentLayerIndex
+        for index in [drawing, grading] {
+            let vector = try XCTUnwrap(manager.layers[index].cels[0].vector)
+            vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
+                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 12,
+                                          opacity: 1,
+                                          samples: [VectorSample(x: 10, y: 20, pressure: 1),
+                                                    VectorSample(x: 50, y: 20, pressure: 1)],
+                                          composite: .paint))
+        }
+        manager.layers[grading].effect = .hsvShift(Effect.HSVShift(hueDegrees: 120))
+        XCTAssertNotNil(manager.layers[grading].layerEffect, "PREMISE: the layer grades")
+
+        let full = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, quality: .full, includeBackground: true))
+        let candidates = CanvasManager.objectRecipes(under: CGPoint(x: 30, y: 20), in: full)
+        XCTAssertEqual(candidates.count, 1, "the drawing is a candidate and the grading layer is not")
+    }
+
+    /// **The colour that was painted, not its mixture with what is beneath it.** A half-transparent
+    /// green over solid blue composites to a blue-green; the shape the artist is over is green. The
+    /// composite is picked beside it as the premise.
+    func testASoftEdgeReadsThePaintedColourAndNotTheMixWithWhatIsBeneathIt() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(UIColor(red: 0, green: 1, blue: 0, alpha: 0.5),
+                                                               rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        let edge = CGPoint(x: 10, y: 10)
+
+        manager.eyedropperMode = .composite
+        XCTAssertGreaterThan(pick(manager, at: edge)?.b ?? 0, 0.3, "PREMISE: the composite carries the blue through")
+
+        manager.eyedropperMode = .layer
+        let painted = pick(manager, at: edge)
+        XCTAssertEqual(painted?.g ?? -1, 1, accuracy: 2.0 / 255, "the shape's own green")
+        XCTAssertEqual(painted?.b ?? -1, 0, accuracy: 2.0 / 255, "with none of the layer beneath it")
+    }
+
+    /// **An object a transformation layer has moved is found where it is shown**, not where it is
+    /// stored — the leaf snapshots carry the pose, and the grade standing aside is not the geometry
+    /// standing aside.
+    func testAnObjectUnderATransformLayerIsFoundWhereItIsShown() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 16, height: 16)))
+        manager.addTransformLayer()
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 24, y: 0)), mode: .move)
+
+        XCTAssertEqual(pick(manager, at: CGPoint(x: 40, y: 16))?.r ?? -1, 1, accuracy: 1.0 / 255,
+                       "the red is shown 24 points to the right of where it is stored")
+        XCTAssertNil(pick(manager, at: CGPoint(x: 12, y: 16)),
+                     "…and nothing is shown where it is stored")
+    }
+
+    /// **The one-row band reads the same pixel the whole frame would**, at every column — the left
+    /// edge, the right edge and the middle — and every row. A 4 × 4 grid of distinct colours, picked
+    /// in both modes where the paper cannot show: the two answers must agree cell by cell.
+    func testTheBandReadsTheSamePixelAsTheWholeFrameAtEveryColumnAndRow() throws {
+        let manager = CanvasFixture.manager()
+        manager.isCanvasBackgroundVisible = false
+        let size = CanvasFixture.canvasSize
+        let grid = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            for column in 0..<4 {
+                for row in 0..<4 {
+                    UIColor(red: CGFloat(column) / 3, green: CGFloat(row) / 3,
+                            blue: CGFloat((column + row) % 2), alpha: 1).setFill()
+                    context.cgContext.fill(CGRect(x: column * 16, y: row * 16, width: 16, height: 16))
+                }
+            }
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, grid)
+
+        for point in [CGPoint(x: 0.5, y: 0.5), CGPoint(x: 63.5, y: 0.5), CGPoint(x: 0.5, y: 63.5),
+                      CGPoint(x: 63.5, y: 63.5), CGPoint(x: 17, y: 33), CGPoint(x: 32, y: 32),
+                      CGPoint(x: 47.9, y: 15.2), CGPoint(x: 5, y: 50)] {
+            manager.eyedropperMode = .composite
+            let whole = try XCTUnwrap(pick(manager, at: point), "composite at \(point)")
+            manager.eyedropperMode = .layer
+            let band = try XCTUnwrap(pick(manager, at: point), "layer at \(point)")
+            XCTAssertEqual(band.r, whole.r, accuracy: 1.0 / 255, "red at \(point)")
+            XCTAssertEqual(band.g, whole.g, accuracy: 1.0 / 255, "green at \(point)")
+            XCTAssertEqual(band.b, whole.b, accuracy: 1.0 / 255, "blue at \(point)")
+        }
+    }
+
+    /// **Recolour's `to` end follows the switch too** (owner, 2026-10-01): in the layer mode it takes the
+    /// colour the object under the point was painted in; in the composite mode, the one on screen. Its
+    /// `from` end keeps reading under the effect in either.
+    func testARecolourPairsToEndFollowsTheSwitch() {
         let manager = gradedStack()
         manager.addValueLayer(effect: .recolor(Effect.Recolor(entries: [RecolorEntry.blank],
                                                               preserveShading: false)))
-        // The new layer is active, and is inserted above the one that was.
         let target = KeyframeTarget.layer(id: manager.layers[manager.currentLayerIndex].id)
-        manager.eyedropperMode = .layer
+        let inside = CGPoint(x: 16, y: 16)
 
-        manager.selectEyedropper(for: .recolorEntry(target: target, index: 0, end: .to))
-        XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)),
-                      "The recolour layer is active and has no pixels of its own; its `to` end reads the screen")
-        guard case .recolor(let recolor)? = manager.storedEffect(of: target) else {
-            return XCTFail("The target still holds its recolour")
+        func picked(in mode: Eyedropper.Mode) -> CodableColor? {
+            manager.eyedropperMode = mode
+            manager.selectEyedropper(for: .recolorEntry(target: target, index: 0, end: .to))
+            XCTAssertTrue(manager.pickColor(atCanvasPoint: inside), "\(mode): there is paint there")
+            guard case .recolor(let recolor)? = manager.storedEffect(of: target) else { return nil }
+            return recolor.entries[0].to
         }
-        XCTAssertGreaterThan(recolor.entries[0].to.green, 0.3,
-                             "The `to` end took the composite's green, not the (absent) layer's pixel")
-        XCTAssertLessThan(recolor.entries[0].to.red, 0.2)
+
+        let object = picked(in: .layer)
+        XCTAssertEqual(object?.red ?? -1, 1, accuracy: 2.0 / 255, "the object's own red")
+        XCTAssertEqual(object?.green ?? -1, 0, accuracy: 2.0 / 255)
+
+        let screen = picked(in: .composite)
+        XCTAssertLessThan(screen?.red ?? 1, 0.2, "the screen's colour, with the grade over it")
+        XCTAssertGreaterThan(screen?.green ?? 0, 0.3)
     }
 }

@@ -420,9 +420,12 @@ final class RecolorEffectLogicTests: XCTestCase {
                        "…and the other entry is untouched")
     }
 
-    /// The **to** end has no such constraint and samples what is on screen — green here.
-    func testTheToEndSamplesTheScreen() {
+    /// The **to** end has no such constraint and follows the Layer/Canvas switch like the brush: in the
+    /// composite mode it samples what is on screen — green here. (`EyedropperLogicTests` has it taking
+    /// the object's own colour in the layer mode.)
+    func testTheToEndSamplesTheScreenInTheCompositeMode() {
         let (manager, target) = gradedManager()
+        manager.eyedropperMode = .composite
         manager.selectEyedropper(for: .recolorEntry(target: target, index: 1, end: .to))
         XCTAssertTrue(manager.pickColor(atCanvasPoint: CGPoint(x: 16, y: 16)))
         let to = recolour(manager, target)?.entries[1].to
@@ -451,8 +454,10 @@ final class RecolorEffectLogicTests: XCTestCase {
     func testTheFromEndsRecipeIsTheTreeBelowTheRecolourWithThePaper() throws {
         let (manager, target) = gradedManager()
         manager.eyedropperMode = .composite
-        let recipe = try XCTUnwrap(manager.eyedropperRecipe(for: .recolorEntry(target: target, index: 0, end: .from)))
-        let full = try XCTUnwrap(manager.eyedropperRecipe(for: .brushColor))
+        let point = CGPoint(x: 16, y: 16)
+        let recipe = try XCTUnwrap(manager.eyedropperProbe(for: .recolorEntry(target: target, index: 0, end: .from),
+                                                           atCanvasPoint: point)?.recipes.first)
+        let full = try XCTUnwrap(manager.eyedropperProbe(for: .brushColor, atCanvasPoint: point)?.recipes.first)
         XCTAssertNotNil(recipe.background, "The paper is in the backdrop a recolour grades")
         XCTAssertEqual(recipe.canvasSize, full.canvasSize)
         XCTAssertNil(RenderNode.find(manager.layers[1].id, in: recipe.tree),
@@ -537,7 +542,8 @@ final class RecolorEffectLogicTests: XCTestCase {
         ], preserveShading: false)))
         let target = KeyframeTarget.folder(id: folderID)
 
-        let recipe = try XCTUnwrap(manager.eyedropperRecipe(for: .recolorEntry(target: target, index: 1, end: .from)))
+        let recipe = try XCTUnwrap(manager.eyedropperProbe(for: .recolorEntry(target: target, index: 1, end: .from),
+                                                           atCanvasPoint: CGPoint(x: 16, y: 16))?.recipes.first)
         XCTAssertNil(recipe.background, "A node's grade never had the paper in its input")
         XCTAssertNil(RenderNode.find(folderID, in: recipe.tree)?.effect, "…and the grade is off")
 

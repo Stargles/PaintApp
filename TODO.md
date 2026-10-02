@@ -91,20 +91,6 @@ each** — "Edit Text" and "Edit Gradient" side by side, each opening its own pa
 
 - [ ] The Select panel lists one Edit button per editable kind the loop caught.
 
-## (119) follow-up: Layer mode picks the object's own colour on whatever layer it is in
-
-**Status** — not started. **A misreading of (119) shipped at `0e844be`**: the eyedropper's Layer mode
-samples the *active* layer only, and a point that layer has not painted is a miss. The owner meant the
-layer the *picked object* is in, 2026-10-01: *"Lets say there are two layers, the bottom one with a
-colored object, and the top layer selected. Regardless of the selected layer, when the user uses the
-eyedropper on the shape, it should return the original color that the shape was (on the layer the shape
-belonged in)."* Also ruled: **Recolour's "to" eyedropper follows the same Layer/Canvas switch.**
-
-- [ ] Layer mode returns the topmost visible content under the point, in its own layer's colour —
-      without anything composited above it and without its own layer's blend/effect/opacity — whatever
-      layer is selected; the `nothingToPickOnLayer` miss only where no layer has content.
-- [ ] Recolour's "to" pick honours the switch.
-
 ## The colour panel grows downward: Recent and the whole palette in view
 
 **Status** — not started. Answers BUGS.md's palette-row question (since (106) the panel showed one

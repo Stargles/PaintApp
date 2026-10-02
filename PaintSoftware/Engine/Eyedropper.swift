@@ -24,11 +24,12 @@ enum Eyedropper {
     /// the top right which switches the eyedropper between two modes."* Persisted with the document
     /// (`EditorStateManifest.eyedropperMode`), because how a drawing is being worked on goes with it.
     enum Mode: String, Codable, CaseIterable, Equatable {
-        /// **The thing under the finger in the layer it is in** — that layer's own pixels, with no
-        /// paper under them and none of the grading above them: an adjustment or blend layer on top,
-        /// a folder's effect or blend mode around it, and the layer's own opacity, blend mode, effect
-        /// and masks all stand aside. It is the colour the artist painted, whatever the picture
-        /// currently does to it. The default, and the owner's.
+        /// **The object under the finger, in the colour it was painted** — the topmost visible content
+        /// under the point, read from its own layer alone, **whichever layer is selected**: nothing
+        /// composited above it, no paper, and none of its own layer's opacity, blend mode, effect or
+        /// clip. An adjustment or Multiply layer on top does not touch it. The default, and the owner's:
+        /// *"it should return the original color that the shape was (on the layer the shape belonged
+        /// in)."* Which layers count as objects is `CanvasManager.objectRecipes(under:in:)`'s.
         case layer
         /// Today's pick: the finished composite — the paper, every layer, every blend and effect, as
         /// the artist sees it.

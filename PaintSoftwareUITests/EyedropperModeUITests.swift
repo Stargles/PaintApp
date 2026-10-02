@@ -6,15 +6,17 @@ import XCTest
 /// in … This is also one of the things the canvas should remember so if the user exits and enters
 /// back, it sticks."*
 ///
-/// `EyedropperLogicTests` owns the sampling — that the layer mode reads the layer's own pixels under
-/// a Multiply layer and an effect — and `EditorStateLogicTests` owns the manifest round trip. Three
+/// `EyedropperLogicTests` owns the sampling — that the layer mode reads the object under the point in
+/// the colour it was painted, whichever layer is selected, under a Multiply layer and an effect — and
+/// `EditorStateLogicTests` owns the manifest round trip. Three
 /// things only a running app can say, and they are what this file is for: **the switch is on the
 /// colour panel's top right and says which mode is set**, **a pick through the rail's button obeys
 /// it**, and **a document that is left and reopened still has it set**.
 ///
 /// The picture is the smallest that tells the two modes apart: a red line on the drawing layer, and
-/// a flat grey value layer above it that covers the whole canvas. The composite shows grey wherever
-/// the artist taps; the layer is still red under the line.
+/// a flat grey value layer above it that covers the whole canvas — and **selected**, which is the
+/// owner's own case: *"the top layer selected … regardless of the selected layer."* The composite shows
+/// grey wherever the artist taps; the line is still red.
 final class EyedropperModeUITests: PaintUITestCase {
 
     private func closeColorPanel(_ app: XCUIApplication) {
@@ -87,29 +89,28 @@ final class EyedropperModeUITests: PaintUITestCase {
         closeColorPanel(app)
         XCTAssertEqual(brushHex(app), "000000", "Setup: the brush is black before any pick")
 
-        // A flat grey value layer over the drawing, then the drawing layer selected again: from here
-        // the picture shows grey where the line is.
+        // A flat grey value layer over the drawing, left selected: from here the picture shows grey
+        // where the line is, and the layer the artist is on is the one that holds no paint at all.
         openLayerPanel(app)
         addValueLayerFromAddMenu(app)
-        let drawingRow = app.staticTexts["layerPanel.row.0"]
-        XCTAssertTrue(drawingRow.waitForExistence(timeout: 5))
-        drawingRow.tap()
         closeLayerRail(app)
 
-        // Layer mode: the line's own red, with the grey layer over it.
+        // Layer mode: the line's own red, under the grey layer that covers it and with that layer — not
+        // the drawing — selected.
         pick(app, at: CGVector(dx: 0.5, dy: 0.30), from: "000000")
         guard let painted = channels(brushHex(app)) else { return XCTFail("no hex on the rail") }
-        XCTAssertGreaterThan(painted.r, 200, "The layer mode reads the red the drawing layer holds…")
-        XCTAssertLessThan(painted.g, 80, "…under the value layer that covers it")
+        XCTAssertGreaterThan(painted.r, 200, "The layer mode reads the red the shape was painted in…")
+        XCTAssertLessThan(painted.g, 80, "…under the value layer that covers it, though that layer is selected")
         XCTAssertLessThan(painted.b, 80)
 
-        // A point the layer has not painted is a miss that says so, and leaves the colour alone.
+        // A point nothing is painted at is a miss that says so — the flat grey is not a shape — and
+        // leaves the colour alone.
         let red = brushHex(app)
         pick(app, at: CGVector(dx: 0.5, dy: 0.60), from: red, timeout: 3)
         let notice = app.staticTexts["canvasNotice"]
         XCTAssertTrue(notice.waitForExistence(timeout: 5), "A layer-mode miss raises a banner")
-        XCTAssertEqual(notice.value as? String, "nothingToPickOnLayer",
-                       "…the one that names the layer, and not the composite's")
+        XCTAssertEqual(notice.value as? String, "nothingPaintedThere",
+                       "…the one that points at the switch, and not the composite's")
         XCTAssertEqual(brushHex(app), red, "A miss does not move the brush colour")
 
         // The switch to Canvas, from the panel's top right, and the same tap now reads the picture.
