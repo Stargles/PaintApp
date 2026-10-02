@@ -117,6 +117,15 @@ switch is (119)'s Layer/Canvas eyedropper switch.
 - [ ] The panel is taller, so the Recent strip and the selected palette show whole without scrolling in
       landscape; the eyedropper switch sits compactly on the previous/current colour row, top right.
 
+## (124) follow-up: Add-menu fill objects and the wand under a transform layer
+
+**Status** — not started. Found by the worker that finished (124)'s raster arm (`4332a17`): two input
+paths still ignore the pose a layer is shown through (`CanvasManager.inkPose(forLayerID:)`, the one
+source) — **Add → Rectangle / Ellipse / Linear Gradient** (`CanvasManager+FillObjects`) lay their paths
+down unmapped, and **the magic wand on a vector layer** samples the unposed picture.
+
+- [ ] Both read through `inkPose` / `layerSpacePath` like every other input; a cold-start UI test each.
+
 ## (112) The stream says "paused" and stops updating until the artist draws
 
 **Status** — not started. *"The live streamer sometimes does this thing where it pauses and refuses to
