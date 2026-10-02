@@ -78,12 +78,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 Ruled as built, no work: folder Move's All Frames on keyed cels (exact at the current frame) and its
 remembered scope; the plain look of a blending layer above an edit until the bake; the tight Select tabs.
 
-## (149) follow-up: placed photos and clips ignore the pose a layer is shown through
-
-**Status** — not started. Found by (149)'s worker (`7ec1987`): primed Rectangle / Ellipse / Gradient go
-through `layerSpaceFill` / `inkPose(forLayerID:)`, but a placed **picture or clip** does not, so under a
-transformation layer it lands displaced by the pose — the (124) defect class, finished rather than asked.
-
 ## (131) follow-up: Bake on a Repeat layer materialises the loop
 
 **Status** — not started. (131) merged (`2d9fdef`) refusing Bake on a Repeat transformation layer (Repeat

@@ -502,22 +502,33 @@ final class BrushEngineLogicTests: XCTestCase {
     // cascade, so a second image landed exactly on the first — same stored `position`, same `fit` for
     // same-aspect images — and nothing in the app could separate them afterwards: Move only carries the
     // whole cel, and `splitForLassoMove` (below) selects an image purely by its stored centre, so two
-    // bit-identical centres can never be told apart by any loop. `VectorCanvas.addImage(canvasSpaceElement:)`
-    // fixes both halves at once: it maps the canvas-space centre through `_transform.inverted()` before
-    // storing (storage is local, like every other element on this canvas) and cascades by a step
-    // converted to local units, both under the one lock acquisition that reads `_transform`.
+    // bit-identical centres can never be told apart by any loop. The import cascades by a step of canvas
+    // points per picture already on the cel (`CanvasManager.addedImageElement`), and
+    // `VectorCanvas.addImage(canvasSpaceElement:)` maps the canvas-space centre through
+    // `_transform.inverted()` before storing (storage is local, like every other element on this
+    // canvas), under the one lock acquisition that reads `_transform`.
+
+    /// A manager holding one vector layer, active — what an import lands on.
+    private func importFixture() -> (manager: CanvasManager, vector: VectorCanvas)? {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        manager.currentLayerIndex = 0
+        guard let celIdx = manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame),
+              let vector = manager.layers[0].cels[celIdx].vector else { return nil }
+        return (manager, vector)
+    }
 
     /// The bug as the owner saw it: two imports, one canvas, no separation. Not a magic-number check —
     /// just that the two stored positions cannot be the same point, which is the one thing that made
     /// the second image unrecoverable.
-    func testAddingTwoImagesToAVectorLayerPlacesThemAtDistinctPositions() {
-        let canvas = VectorCanvas(size: Self.canvasSize)
-        let first = canvas.addImage(canvasSpaceElement: solidImage(.red),
-                                    canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
-        let second = canvas.addImage(canvasSpaceElement: solidImage(.green),
-                                     canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+    func testAddingTwoImagesToAVectorLayerPlacesThemAtDistinctPositions() throws {
+        let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
+        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.red)))
+        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.green)))
+        let images = fx.vector.images
+        XCTAssertEqual(images.count, 2, "Setup: both imports should have landed")
 
-        XCTAssertNotEqual(first.transform.position, second.transform.position,
+        XCTAssertNotEqual(images[0].transform.position, images[1].transform.position,
                           "A second image centred on the same canvas point as the first must not land "
                           + "on the exact same stored position, or it is permanently indistinguishable from it")
     }
@@ -525,17 +536,17 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The naive fix — adding a step straight to the canvas-centre expression — is wrong because that
     /// value is local-space storage while the centre is computed in canvas space: on a layer with a
     /// non-identity transform it both mis-places the image and bakes the space error into the cascade
-    /// too. This pins the correct mapping directly: an imported image's local position, carried back
-    /// through the very `transform` it was imported under, must land exactly on the canvas point the
-    /// artist imported at (for the first image, before any cascade), and its local `scale` must render
-    /// back out at the `fit` it was given.
+    /// too. This pins the correct mapping directly: an image's local position, carried back through the
+    /// very `transform` it was added under, must land exactly on the canvas point it was given, and its
+    /// local `scale` must render back out at the `fit` it was given.
     func testAddImageCanvasSpaceElementMapsPositionAndScaleThroughTheLayersTransform() {
         let transform = CGAffineTransform(translationX: 100, y: 50).scaledBy(x: 2, y: 2)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [], transform: transform)
         let canvasCentre = CGPoint(x: Self.canvasSize.width / 2, y: Self.canvasSize.height / 2)
         let fit: CGFloat = 0.8
 
-        let element = canvas.addImage(canvasSpaceElement: solidImage(.blue), canvasPosition: canvasCentre, canvasFit: fit)
+        let element = canvas.addImage(canvasSpaceElement: VectorImageElement(
+            image: solidImage(.blue), transform: LayerTransform(position: canvasCentre, scale: fit, rotation: 0)))
 
         let mappedBackToCanvas = element.transform.position.applying(transform)
         XCTAssertEqual(mappedBackToCanvas.x, canvasCentre.x, accuracy: 0.001,
@@ -551,12 +562,11 @@ final class BrushEngineLogicTests: XCTestCase {
     /// purely by an element's stored centre (`VectorLayer.swift`, the `.image` case). A loop drawn
     /// tightly around the first image's own centre must therefore pick up the first image and leave the
     /// second behind — which is only possible at all because the two centres are no longer identical.
-    func testALassoLoopAroundOneImageDoesNotSelectTheOther() {
-        let canvas = VectorCanvas(size: Self.canvasSize)
-        let first = canvas.addImage(canvasSpaceElement: solidImage(.red),
-                                    canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
-        let second = canvas.addImage(canvasSpaceElement: solidImage(.green),
-                                     canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+    func testALassoLoopAroundOneImageDoesNotSelectTheOther() throws {
+        let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
+        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.red)))
+        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.green)))
+        let first = fx.vector.images[0], second = fx.vector.images[1]
         XCTAssertNotEqual(first.transform.position, second.transform.position, "Setup: see the distinct-positions test above")
 
         let radius: CGFloat = 6
@@ -564,7 +574,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                             y: first.transform.position.y - radius,
                                             width: radius * 2, height: radius * 2), transform: nil)
 
-        guard let split = canvas.splitForLassoMove(insideLocalPath: loop) else {
+        guard let split = fx.vector.splitForLassoMove(insideLocalPath: loop) else {
             return XCTFail("A loop drawn around the first image's own centre should select something")
         }
         XCTAssertTrue(split.insideIDs.contains(first.id), "The loop was drawn around the first image's own centre")

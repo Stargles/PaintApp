@@ -302,6 +302,19 @@ extension CanvasManager {
         return VectorCanvas.mapping(element, through: inverse)
     }
 
+    /// **A placed picture, clip or screen the artist put down in canvas points, written where layer
+    /// `index` will show it** — `inLayerSpace` through the pose that layer is shown through, so a picture
+    /// dragged out, pasted or imported under a transformation layer is *shown* where it was put and not a
+    /// pose away (TODO (149)'s follow-up, the (124) defect class reached by another input).
+    ///
+    /// **Never nil, where `inLayerSpace` can be**: a keystone cannot carry a placed rectangle
+    /// (`VectorCanvas.mapping(_:through:)`), and the render leaves one a keystone poses where it rests
+    /// (`posed(_:through:inheriting:)`) — so under a keystone it is stored as put, which is where it is
+    /// shown. Every other pose is an affine, and the element is carried through its inverse.
+    func placedInLayerSpace(_ element: VectorElement, onLayerAt index: Int) -> VectorElement {
+        Self.inLayerSpace(element, shownThrough: inkPose(forLayerID: layers[index].id)) ?? element
+    }
+
     /// `inkPose(forLayerID:)` from a render walk the caller already holds — `frame` is the frame the
     /// layer is showing and `container` its container pose, both read off that walk — so a caller
     /// asking for every layer at once pays one walk rather than one per layer.

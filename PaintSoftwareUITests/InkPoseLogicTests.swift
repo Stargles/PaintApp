@@ -457,6 +457,66 @@ final class InkPoseLogicTests: XCTestCase {
         assertSame(ramp.to, to, "the ramp ends away from where the pen was lifted")
     }
 
+    // MARK: - Placed pictures, pasted pictures and screens
+
+    private func pictureOfShape(width: CGFloat, height: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+    }
+
+    /// **A picture dragged out under a Move layer is shown where the pen put it** — TODO (149)'s
+    /// follow-up. The picture is made in canvas points, so it is written through the pose's inverse like
+    /// every other input: stored at the pen it is shown a pose away. Under a slide, a turn and a scale at
+    /// once it is still shown centred on the press, as wide as the drag made it, and upright.
+    func testADraggedPictureUnderAMoveLayerIsShownCentredOnThePressAtTheDraggedWidthAndUpright() throws {
+        let fx = layerUnderMove(CGAffineTransform(translationX: 30, y: 10).rotated(by: 0.3).scaledBy(x: 1.4, y: 1.4))
+        let picture = pictureOfShape(width: 40, height: 10)
+        let press = CGPoint(x: 100, y: 90)
+        XCTAssertTrue(fx.manager.dragOut(.media(PrimedMedia(source: .image(picture), displaySize: picture.size)),
+                                         from: press, to: CGPoint(x: 110, y: 92)))   // half height 2.5 at aspect 4: 20 wide
+        let stored = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.images.first, "no picture was laid down")
+        XCTAssertNotEqual(stored.transform.position, press, "nothing was pulled back through the pose")
+        let onScreen = try XCTUnwrap(shown(.image(stored), in: fx.manager, layer: fx.ink).image)
+        assertSame(onScreen.transform.position, press, "the picture is shown a pose away from the press")
+        XCTAssertEqual(onScreen.transform.scale * 40, 20, accuracy: 0.01, "…and at the width it was dragged to")
+        XCTAssertEqual(onScreen.transform.rotation, 0, accuracy: 1e-6, "…and upright")
+    }
+
+    /// **A pasted picture is shown centred on the canvas**, held in the Move box where the artist sees
+    /// it — Actions → Paste's `insertImage` shared the defect, and a second paste cascades by the same
+    /// 24 canvas points *as shown*.
+    func testAPastedPictureUnderAMoveLayerIsShownCentredOnTheCanvas() throws {
+        let fx = layerUnderMove(slide80)
+        let canvasCentre = CGPoint(x: Self.size.width / 2, y: Self.size.height / 2)
+        XCTAssertTrue(fx.manager.insertImage(pictureOfShape(width: 40, height: 10)))
+        XCTAssertTrue(fx.manager.insertImage(pictureOfShape(width: 40, height: 10)))
+        let images = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.images)
+        XCTAssertEqual(images.count, 2, "Setup: both pastes landed")
+        let first = try XCTUnwrap(shown(.image(images[0]), in: fx.manager, layer: fx.ink).image)
+        let second = try XCTUnwrap(shown(.image(images[1]), in: fx.manager, layer: fx.ink).image)
+        assertSame(first.transform.position, canvasCentre, "the first paste is not shown at the canvas's centre")
+        assertSame(second.transform.position, CGPoint(x: canvasCentre.x + 24, y: canvasCentre.y + 24),
+                   "the second is not cascaded 24 canvas points as the artist sees it")
+    }
+
+    /// **A screen inserted under a Move layer is shown centred too** — Stream Screen is the same
+    /// centred placement in a layer of its own.
+    func testAStreamInsertedUnderAMoveLayerIsShownCentredOnTheCanvas() throws {
+        let fx = layerUnderMove(slide80)
+        let status = StreamStatus(source: StreamStatus.Source(kind: "window", name: "Blender"),
+                                  width: 160, height: 90, fps: 30, streaming: true)
+        let inserted = try XCTUnwrap(fx.manager.insertStream(host: "laptop", port: 47301, status: status))
+        let layer = fx.manager.currentLayerIndex
+        let stored = try XCTUnwrap(fx.manager.layers[layer].cels[0].vector?.streams.first { $0.id == inserted.id })
+        let onScreen = try XCTUnwrap(shown(.stream(stored), in: fx.manager, layer: layer).stream)
+        assertSame(onScreen.transform.position, CGPoint(x: Self.size.width / 2, y: Self.size.height / 2),
+                   "the screen is shown a pose away from the canvas's centre")
+    }
+
     /// **The wand on a vector layer reads the picture the Move layer shows.** Two strokes stored on
     /// the left and carried 80 points right; a tap on the first *where it is shown* selects that
     /// stroke's shape. Read against the picture before the Move layer carried it, the tap lands on

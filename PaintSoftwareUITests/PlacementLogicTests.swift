@@ -514,4 +514,32 @@ final class PlacementLogicTests: XCTestCase {
         XCTAssertEqual(steps(manager) - baseline, 2, "the new layer, then the clip — insertVideo's two steps")
         XCTAssertNil(manager.primedObject)
     }
+
+    /// **A placed clip under a transformation layer is shown where the pen put it** — TODO (149)'s
+    /// follow-up: its new layer is shown through the Move layer above it, so a clip stored at the pen is
+    /// shown a pose away. Carried through the pose's inverse it is shown centred on the press, as wide
+    /// as the drag made it.
+    func testAPlacedClipUnderAMoveLayerIsShownWhereThePenPutIt() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        manager.addTransformLayer(name: "move")
+        manager.layers[manager.layers.count - 1].transform = LayerPose(
+            pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 12, y: 0)), mode: .move)
+        manager.currentLayerIndex = 0
+        XCTAssertTrue(manager.primeVideo(at: try clip()))
+
+        manager.beginPlacement(at: pen(32, 32))
+        manager.updatePlacement(to: pen(44, 32))   // a square clip, half-extent 12 → 24 across
+        XCTAssertTrue(manager.endPlacement())
+
+        let layer = manager.currentLayerIndex
+        let stored = try XCTUnwrap(manager.layers[layer].cels[0].vector?.videos.first)
+        XCTAssertEqual(stored.transform.position.x, 20, accuracy: 0.01, "stored where the Move layer carries it back from")
+        let walk = manager.renderTreeAndPoses(atFrame: manager.currentFrame)
+        let onScreen = try XCTUnwrap(
+            CanvasManager.posed([.video(stored)], through: [], inheriting: walk.poses[layer])[0].video)
+        XCTAssertEqual(onScreen.transform.position.x, 32, accuracy: 0.01, "the clip is shown a pose away from the press")
+        XCTAssertEqual(onScreen.transform.position.y, 32, accuracy: 0.01)
+        XCTAssertEqual(onScreen.transform.scale * onScreen.naturalSize.width, 24, accuracy: 0.01)
+    }
 }

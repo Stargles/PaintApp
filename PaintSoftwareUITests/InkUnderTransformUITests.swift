@@ -330,4 +330,94 @@ final class InkUnderTransformUITests: PaintUITestCase {
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.3, span: 0.41...0.49).count, 100,
                              "the bystander mark went with it — the wand took more than the tapped mark")
     }
+
+    // MARK: - Pictures and clips, under a Move layer the document starts with
+
+    /// A fresh document whose drawing layer sits under a Move layer that carries it a fifth of the paper
+    /// to the right (`-uiTestSeedMovedTransformLayer`), plus whatever `seeds` primes or places. **Seeded
+    /// rather than authored** because the picker's media is primed at document creation: the by-hand
+    /// route to a pose (`moveATransformLayerAboveTheDrawing`) would have the pen place the primed
+    /// picture on the first touch of the box's drag.
+    private func launchUnderASeededMoveLayer(_ seeds: String...) -> (app: XCUIApplication, canvas: XCUIElement) {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedMovedTransformLayer"] + seeds
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        return (app, canvas)
+    }
+
+    /// Waits until the canvas shows ink at one paper point — a clip's first frame is decoded off the
+    /// main thread, so a probe taken the instant the pen lifts finds the paper.
+    private func waitForInk(_ canvas: XCUIElement, _ paper: CGRect, x: Double, y: Double, timeout: TimeInterval = 20,
+                            _ message: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if try inkProbe(canvas)(paper.minX + paper.width * x, paper.minY + paper.height * y) { return }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTFail("No ink at paper (\(x), \(y)) after \(timeout) s: \(message)", file: file, line: line)
+    }
+
+    /// **A picture dragged out under a moved transformation layer is shown where the pen put it** —
+    /// TODO (149)'s follow-up, from a fresh document: Add's Insert Photo primes the pen (the picture
+    /// is primed by the seed the picker's caller would call), and the drag centres a picture four times
+    /// wider than tall on the press, a tenth of the paper to its right edge. Stored at the pen, the
+    /// Move layer shows it 0.45–0.65 of the paper; carried through the pose's inverse it is shown over
+    /// 0.25–0.45, on the press.
+    func testADraggedPictureUnderAMovedTransformLayerIsShownWhereThePenPutIt() throws {
+        let (app, canvas) = launchUnderASeededMoveLayer("-uiTestPrimeImage")
+        XCTAssertEqual(primedObjectName(app), "image", "PREMISE: the seed primed a picture")
+        let paper = paperRect(in: canvas)
+
+        dragOnCanvas(app, from: onHost(paper, 0.35, 0.5), to: onHost(paper, 0.45, 0.525))
+
+        try waitForInk(canvas, paper, x: 0.35, y: 0.5, "the picture never landed on the press")
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
+                                                            width: paper.width, height: paper.height * 0.2))
+        attach(canvas, "picture-dragged-out-under-the-moved-transform-layer")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.27...0.43).count, 380,
+                             "the picture is not solid across the span the pen dragged out")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.2).isEmpty, "ink left of the picture")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.5...0.62).isEmpty,
+                      "the Move layer carried the picture a fifth of the paper right of where the pen put it")
+    }
+
+    /// **A clip dragged out the same way**: a square, its first frame (dark grey) shown over the paper
+    /// the pen swept, a layer of its own under the Move layer.
+    func testADraggedClipUnderAMovedTransformLayerIsShownWhereThePenPutIt() throws {
+        let (app, canvas) = launchUnderASeededMoveLayer("-uiTestPrimeVideo")
+        XCTAssertEqual(primedObjectName(app), "video", "PREMISE: the seed primed a clip")
+        let paper = paperRect(in: canvas)
+
+        dragOnCanvas(app, from: onHost(paper, 0.35, 0.5), to: onHost(paper, 0.5, 0.5))
+
+        try waitForInk(canvas, paper, x: 0.35, y: 0.5, "the clip's first frame never landed on the press")
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
+                                                            width: paper.width, height: paper.height * 0.2))
+        attach(canvas, "clip-dragged-out-under-the-moved-transform-layer")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.22...0.48).count, 380,
+                             "the clip is not solid across the square the pen swept")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.16).isEmpty, "ink left of the clip")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.56...0.68).isEmpty,
+                      "the Move layer carried the clip a fifth of the paper right of where the pen put it")
+    }
+
+    /// **A pasted picture is shown centred on the paper**, held in the Move box where it is shown —
+    /// Actions → Paste's verb shared the defect, and the box has to be on the picture the artist sees,
+    /// not on the one the Move layer carried away.
+    func testAPastedPictureUnderAMovedTransformLayerIsShownCentredOnThePaper() throws {
+        let (app, canvas) = launchUnderASeededMoveLayer("-uiTestSeedImage")
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 10),
+                      "PREMISE: the paste holds the picture in the Move box")
+        let paper = paperRect(in: canvas)
+
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
+                                                            width: paper.width, height: paper.height * 0.2))
+        attach(canvas, "picture-pasted-under-the-moved-transform-layer")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.2...0.8).count, 380,
+                             "the picture is not solid across the middle of the paper")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.93...0.99).isEmpty,
+                      "the Move layer carried the picture a fifth of the paper right of the centre")
+    }
 }

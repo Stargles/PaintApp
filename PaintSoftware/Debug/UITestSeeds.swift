@@ -203,6 +203,25 @@ enum UITestSeeds {
         }
     }
 
+    /// **A transformation layer above the drawing layer that carries it a fifth of the canvas to the
+    /// right** — `-uiTestSeedMovedTransformLayer`, for the media a picker or a pasteboard hands the app
+    /// and that therefore have to land *after* the pose exists: `-uiTestPrimeImage`, `-uiTestPrimeVideo`
+    /// and `-uiTestSeedImage` (TODO (149)'s follow-up). Authoring it by hand — `+` → Transform Layer, its
+    /// Move row, a drag of the box, Done — leaves the primed object nothing to be primed by, because the
+    /// picture is primed at document creation and the pen would place it on the first touch of that
+    /// drag. The values are the ones `transformMoveRow` ends at, as `seedKeyframedMoveIfRequested`'s are.
+    /// The drawing layer stays active, so everything placed lands under the pose.
+    static func seedMovedTransformLayerIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedMovedTransformLayer"),
+              let size = canvasManager.canvasSize else { return }
+        canvasManager.addTransformLayer()
+        canvasManager.layers[canvasManager.layers.count - 1].transform = LayerPose(
+            pose: PoseQuad(box: CGRect(origin: .zero, size: size),
+                           mappedBy: CGAffineTransform(translationX: size.width * 0.2, y: 0)),
+            mode: .move)
+        canvasManager.currentLayerIndex = 0
+    }
+
     /// **A picture on a fresh document, the way an import leaves it — held in the Move box** —
     /// `-uiTestSeedImage`, for TODO (120).
     ///

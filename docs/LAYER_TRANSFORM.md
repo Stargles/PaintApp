@@ -114,7 +114,7 @@ Twenty-two sites in the app, all but two of them inside `VectorLayer.swift`.
 |---|---|---|
 | `addStroke(canvasSpaceStroke:)` | `:575` | `:579` (samples), `:582` (width ÷ scale) |
 | `localSamples(fromCanvas:)` | `:598` | `:601` — **dead: zero callers in the app and zero in the tests** |
-| `addImage(canvasSpaceElement:canvasPosition:canvasFit:)` | `:670` | `:673`, `:676` (position, scale, and the cascade step) |
+| `addImage(canvasSpaceElement:)` | `:670` | `:673`, `:676` (position and scale) |
 | `localText(fromCanvas:)` | `:803` | `:806` |
 | `addFill(canvasSpacePath:…)` | `:834` | `:837` |
 | `localPath(fromCanvas:)` | `:845` | `:848` |
@@ -415,8 +415,8 @@ perspective"* while the storage is local (`VectorLayer.swift:1636-1641`). **Remo
 transform makes that comment true.** That is the cleanest small proof that the indirection is the wart
 and the object poses are not.
 
-Two concrete simplifications fall out: `addImage(canvasSpaceElement:)` stops dividing `canvasFit` and
-the 24 pt import cascade by the layer scale (`:673-677`), and `localText(fromCanvas:)` /
+Two concrete simplifications fall out: `addImage(canvasSpaceElement:)` stops dividing the element's
+scale by the layer scale (`:673-677`), and `localText(fromCanvas:)` /
 `canvasText(fromLocal:)` collapse to the identity and can be deleted along with `mappingText`.
 
 ---

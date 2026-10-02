@@ -3166,65 +3166,34 @@ final class VectorCanvas {
         invalidate(Self.damage(ofInsertAt: index, into: _elements))
     }
 
-    /// Canvas-point spacing between a freshly-imported image and the one before it — see
-    /// `addImage(canvasSpaceElement:canvasPosition:canvasFit:)`.
-    private static let importCascadeStep: CGFloat = 24
-
-    /// Imports an image whose position/scale were measured in **canvas** space — the import path
-    /// always centers a new image on the canvas the artist is looking at, exactly as a live stroke or
-    /// fill is measured where the finger is — mapping into this canvas's local space before storing,
-    /// for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` both give:
-    /// storage is local, `render()` applies `transform` on top, and a canvas-space value stored
-    /// unmapped would go through the transform twice. `scale` gets the same correction `size` does in
-    /// `addStroke(canvasSpaceStroke:)`: divided by the transform's own scale so it renders back out at
-    /// the canvas-space size it was given.
+    /// **A placed picture, given as the element it is in canvas space, written into this canvas's own
+    /// storage** — the one way a picture the artist put down gets onto a vector cel. The caller says
+    /// where it is shown and how big (and, under a pose, has already carried it into the layer's own
+    /// space: `CanvasManager.placedInLayerSpace`); this takes the last step in through the cel's own
+    /// `transform`, for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` both
+    /// give: storage is local, `render()` applies `transform` on top, and a canvas-space value stored
+    /// unmapped would go through the transform twice. `transform.scale` gets the same correction a
+    /// stroke's `size` does — divided by the transform's own scale so it renders back out at the size
+    /// it was given — and both are read under the one lock acquisition that reads `_transform`.
     ///
-    /// **Also cascades**, offsetting by `importCascadeStep` canvas points per image already on this
-    /// canvas — converted to local units the same way `size` is, so the offset is the right number of
-    /// *screen* points regardless of the layer's own zoom/scale — so a second import does not land
-    /// exactly on top of the first. Without this, two images centered on the same canvas at the same
-    /// `fit` (same aspect ratio) are bit-identical `CGPoint`s: `splitForLassoMove` selects by an
-    /// element's stored centre alone, so no lasso loop could ever contain one without the other, and
-    /// Move only carries the whole cel — there is no way to separate them after the fact. Counting
-    /// this canvas's own images (not a running counter kept elsewhere) is what makes undo → redo
-    /// re-place the same element at the same offset instead of drifting on a later import.
+    /// Inserted by kind (an image goes *below* the first stroke), so on a cel with any line art on it
+    /// this is a middle insert and declares `.everything`; it is an append on a cel that holds only
+    /// images and fills, which is what a placement onto a fresh layer is.
     ///
-    /// Returns the element as actually stored (local space, cascaded, inserted), so the caller can
-    /// bind it once outside its undo/redo closures — recomputing the offset inside redo would replay a
-    /// different value than undo captured whenever another image was imported in between.
+    /// Returns the element as actually stored, so the caller can bind it once outside its undo/redo
+    /// closures.
     @discardableResult
-    func addImage(canvasSpaceElement image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat) -> VectorImageElement {
+    func addImage(canvasSpaceElement element: VectorImageElement) -> VectorImageElement {
         lock.lock()
         defer { lock.unlock() }
-        return insertImageLocked(image, canvasPosition: canvasPosition, canvasFit: canvasFit,
-                                 cascadeSteps: _elements.compactMap(\.image).count)
-    }
-
-    /// An image **exactly where the artist put it** — `addImage(canvasSpaceElement:…)` without the
-    /// cascade, whose whole job is to keep two *centred* imports apart. A picture the artist dragged
-    /// out to a place and a size has already been told apart from its neighbours by being put there.
-    @discardableResult
-    func addPlacedImage(canvasSpaceElement image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat) -> VectorImageElement {
-        lock.lock()
-        defer { lock.unlock() }
-        return insertImageLocked(image, canvasPosition: canvasPosition, canvasFit: canvasFit, cascadeSteps: 0)
-    }
-
-    /// The shared tail of the two above. Caller holds `lock`.
-    private func insertImageLocked(_ image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat,
-                                   cascadeSteps: Int) -> VectorImageElement {
+        var stored = element
         let scale = Self.scale(of: _transform)
-        let localScale = scale > 0 ? canvasFit / scale : canvasFit
-        let cascade = CGFloat(cascadeSteps) * Self.importCascadeStep / (scale > 0 ? scale : 1)
-        var localPosition = canvasPosition.applying(_transform.inverted())
-        localPosition.x += cascade
-        localPosition.y += cascade
-        let element = VectorImageElement(image: image,
-                                         transform: LayerTransform(position: localPosition, scale: localScale, rotation: 0))
+        stored.transform.position = element.transform.position.applying(_transform.inverted())
+        stored.transform.scale = scale > 0 ? element.transform.scale / scale : element.transform.scale
         let index = Self.insertionIndex(forKind: .image, in: _elements)
-        _elements.insert(.image(element), at: index)
+        _elements.insert(.image(stored), at: index)
         invalidate(Self.damage(ofInsertAt: index, into: _elements))
-        return element
+        return stored
     }
 
     /// Puts a fill **on top of everything already on this canvas** — appended to the end of the

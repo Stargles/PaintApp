@@ -176,6 +176,9 @@ struct CanvasSizePickerView: View {
         guard let width, let height, isValid else { return }
         canvasManager.canvasSize = CGSize(width: width, height: height)
         canvasManager.addVectorLayer()
+        // Inert unless an XCUITest passed `-uiTestSeedMovedTransformLayer` — a Move layer above the
+        // drawing layer, first because everything the seeds below place has to land under it.
+        UITestSeeds.seedMovedTransformLayerIfRequested(into: canvasManager)
         // Inert unless an XCUITest passed `-uiTestSeedVideo` — see `UITestSeeds` for why a video
         // has to land here rather than through the picker every real import uses.
         UITestSeeds.seedVideoIfRequested(into: canvasManager)

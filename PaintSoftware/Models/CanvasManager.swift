@@ -563,12 +563,6 @@ final class CanvasManager: ObservableObject {
     /// cascaded off whatever is already there), participating in the layer's overall transform.
     /// Returns false if the active layer isn't a vector layer (`insertImage` below falls back to
     /// creating one). Shapes and video slot in here the same way in future.
-    ///
-    /// Placement and the cascade both happen inside `VectorCanvas.addImage(canvasSpaceElement:...)`,
-    /// under one lock acquisition, rather than here: this method would need `vector.transformScale`
-    /// to convert `canvasSize`-derived numbers into local units, and reading that and then calling
-    /// `addImage` separately is two lock acquisitions around a value that only `VectorCanvas` itself
-    /// can be sure hasn't changed in between.
     @discardableResult
     func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
         importedImageElement(image) != nil
@@ -585,11 +579,8 @@ final class CanvasManager: ObservableObject {
     private func importedImageElement(_ image: UIImage) -> VectorImageElement? {
         guard let canvasSize, image.size.width > 0, image.size.height > 0 else { return nil }
         let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
-        return addedImageElement(image) { vector in
-            vector.addImage(canvasSpaceElement: image,
-                            canvasPosition: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
-                            canvasFit: fit)
-        }
+        return addedImageElement(image, centre: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                                 fit: fit, cascading: true)
     }
 
     /// **A picture, laid on the active vector layer exactly where the artist dragged it out** — Add →
@@ -603,28 +594,46 @@ final class CanvasManager: ObservableObject {
     func placeImage(_ image: UIImage, centre: CGPoint, width: CGFloat) -> Bool {
         guard image.size.width > 0, image.size.height > 0 else { return false }
         func place() -> VectorImageElement? {
-            addedImageElement(image) { vector in
-                vector.addPlacedImage(canvasSpaceElement: image, canvasPosition: centre,
-                                      canvasFit: width / image.size.width)
-            }
+            addedImageElement(image, centre: centre, fit: width / image.size.width, cascading: false)
         }
         if place() != nil { return true }
         addVectorLayer()
         return place() != nil
     }
 
-    /// The shared body of the two verbs above: `add` puts the element on the active vector cel's
-    /// canvas, and this registers the one undo step that takes it back and does the refresh. Nil when
-    /// the active layer is not a vector layer or has no cel to put it in.
-    private func addedImageElement(_ image: UIImage,
-                                   adding add: (VectorCanvas) -> VectorImageElement) -> VectorImageElement? {
+    /// Canvas points between a freshly-imported picture and the one before it — see
+    /// `addedImageElement`.
+    private static let importCascadeStep: CGFloat = 24
+
+    /// The shared body of the two verbs above: the picture is made in canvas points, carried into the
+    /// layer's own space (`placedInLayerSpace` — so under a pose it is *shown* where it was put, as a
+    /// primed rectangle is), and added to the active vector cel, with the one undo step that takes it
+    /// back and the refresh. Nil when the active layer is not a vector layer or has no cel to put it in.
+    ///
+    /// **A centred import cascades**, `importCascadeStep` canvas points per picture already on the cel,
+    /// so a second import does not land exactly on top of the first. Without it two images centred on
+    /// the same canvas at the same `fit` (same aspect ratio) are bit-identical `CGPoint`s:
+    /// `splitForLassoMove` selects by an element's stored centre alone, so no lasso loop could ever
+    /// contain one without the other, and Move only carries the whole cel — there is no way to separate
+    /// them after the fact. Counting this cel's own images (not a running counter kept elsewhere) is
+    /// what makes undo → redo re-place the same element at the same offset instead of drifting on a
+    /// later import. A picture the artist dragged out has already been told apart from its neighbours
+    /// by being put there.
+    private func addedImageElement(_ image: UIImage, centre: CGPoint, fit: CGFloat,
+                                   cascading: Bool) -> VectorImageElement? {
         beginCanvasEdit()
         guard canvasSize != nil, layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
               let celIdx = displayedCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               let vector = layers[currentLayerIndex].cels[celIdx].vector else { return nil }
         let imagesBefore = vector.images
-        let element = add(vector)
+        let cascade = cascading ? CGFloat(imagesBefore.count) * Self.importCascadeStep : 0
+        let drawn = VectorImageElement(image: image,
+                                       transform: LayerTransform(position: CGPoint(x: centre.x + cascade,
+                                                                                   y: centre.y + cascade),
+                                                                 scale: fit, rotation: 0))
+        let shown = placedInLayerSpace(.image(drawn), onLayerAt: currentLayerIndex).image ?? drawn
+        let element = vector.addImage(canvasSpaceElement: shown)
         scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()
@@ -754,7 +763,7 @@ final class CanvasManager: ObservableObject {
         let fit = placement.map { $0.width / info.displaySize.width }
             ?? min(canvasSize.width / info.displaySize.width,
                    canvasSize.height / info.displaySize.height) * 0.8
-        let element = VectorVideoElement(
+        let drawn = VectorVideoElement(
             id: id,
             assetURL: assetURL,
             assetFileName: assetFileName,
@@ -769,6 +778,9 @@ final class CanvasManager: ObservableObject {
             mappedFrameRate: fps)
 
         let layerIndex = currentLayerIndex
+        // Made in canvas points, so under a pose it is carried into the layer's own space and shown
+        // where it was put (`placedInLayerSpace`).
+        let element = placedInLayerSpace(.video(drawn), onLayerAt: layerIndex).video ?? drawn
         let before = vector.elements
         layers[layerIndex].cels[celIndex].frameCount = blockLength
         vector.elements = before + [.video(element)]
@@ -832,7 +844,7 @@ final class CanvasManager: ObservableObject {
 
         let fit = min(canvasSize.width / naturalSize.width,
                       canvasSize.height / naturalSize.height) * 0.8
-        let element = VectorStreamElement(
+        let drawn = VectorStreamElement(
             naturalSize: naturalSize,
             host: host, port: port,
             sourceLabel: status.sourceLabel,
@@ -841,6 +853,9 @@ final class CanvasManager: ObservableObject {
                                       scale: fit, rotation: 0))
 
         let layerIndex = currentLayerIndex
+        // Centred in canvas points, so under a pose it is carried into the layer's own space and
+        // shown centred (`placedInLayerSpace`).
+        let element = placedInLayerSpace(.stream(drawn), onLayerAt: layerIndex).stream ?? drawn
         let before = vector.elements
         layers[layerIndex].cels[0].startFrame = start
         layers[layerIndex].cels[0].frameCount = blockLength
