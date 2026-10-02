@@ -574,14 +574,9 @@ fixed**; ranked by how likely an artist is to hit one.
    the default case. `history.removeAll()` at `:857` then runs unconditionally, so the artist loses their
    whole undo stack and cannot even undo the nothing that happened. **The worst of the three**:
    destructive, on the default kind, with no notice. `resizeRefused` is exactly the notice this wants.
-2. **Merge Down skips the confirmation the pinch path runs, and can refuse in silence.**
-   `LayerPanel.swift:398-403`. The row shows for every layer that is not at the bottom. It drops
-   `mergeLayers`' `Bool`, which is false when either layer has no cel at the playhead — so on a frame the
-   lower layer has a gap in, the row does nothing and says nothing. Worse, the pinch-to-merge path
-   (`LayerStackListView.swift:433`) asks `mergeLossKind` first and routes an unbakeable pair through
-   `pendingMergeConfirmation`; **this row does not**. `mergeLossKind` returns `.unbakeableLayer` when
-   `bottom.layerTransform != nil || top.layerTransform != nil`, so **Merge Down on a transformation layer
-   deletes it and bakes nothing, unprompted** — one row below the Move row this pass just added.
+2. **Merge Down can refuse in silence.** `requestMerge` drops `mergeLayers`' `Bool`, which is false when
+   either layer has no cel at the playhead — so on a frame the lower layer has a gap in, the row (and the
+   pinch) does nothing and says nothing.
 3. **A pose-channel row in the graph editor can close the list and raise no box.**
    `AnimationTimeline.swift:842-846` sets `isGraphChannelListOpen = false` and then discards
    `revealPoseChannel`'s result. The row's `.disabled` predicate tests `PoseChannelID.raisesMoveBox`, which

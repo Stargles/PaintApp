@@ -37,7 +37,7 @@ import Foundation
 /// answer at compile time**: `Tool.textUnavailableReason(onLayerOfKind:)`,
 /// `CanvasManager.selectionMembershipUnavailableReason` and `CanvasActiveLayer.init(kind:)` — plus
 /// `holdsPixels` below, which is the one every other reader should ask instead of `kind == .value`,
-/// and `defaultNameStem`.
+/// `bakesIntoLayersBelow` and `defaultNameStem`.
 /// `LayerKindLogicTests` walks `allCases` through each of them so a fifth case cannot arrive with
 /// a site left answering for four.
 enum LayerKind: String, Codable, Equatable, CaseIterable {

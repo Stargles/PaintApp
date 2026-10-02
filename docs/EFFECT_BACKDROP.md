@@ -236,12 +236,12 @@ The alpha channel of the accumulator *was* the ink coverage, and filling paper i
 information. **Rescuing these three means preserving the coverage somewhere.** The three shaders
 themselves need no change under any option below — what changes is which image they are handed.
 
-### 2.3 A merged adjustment layer cannot reproduce the picture it was part of
+### 2.3 A baked adjustment layer cannot reproduce the picture it was part of
 
 §1 says an adjustment layer grades — and a blend mode blends against — **the whole accumulator**: the
-paper and every layer beneath it. A merge reaches exactly one layer. So the two cannot both be
-honoured, and the merged result is necessarily a different picture from the one the artist was looking
-at when they merged. That is arithmetic, not a bug in the merge.
+paper and every layer beneath it. A merge reaches exactly one layer, and a bake changes drawings and not
+the paper. So the two cannot both be honoured, and the result is necessarily a different picture from the
+one the artist was looking at when they baked. That is arithmetic, not a bug in the verb.
 
 **RULED 2026-09-03**, on the owner's report that a value layer set to HSV merged down into a vector
 layer *"does nothing"*, and that *"this may be an issue other blend modes"* — it was both, and both had
@@ -253,24 +253,31 @@ one cause. The owner, shown the two shapes an answer could take:
 > layer is gone. That is accepted.
 
 The rejected alternative was reproducing the picture exactly, which means baking the paper and the
-whole stack beneath into the merged layer — and that makes it **opaque**, hiding everything under it.
+whole stack beneath into the layer — and that makes it **opaque**, hiding everything under it.
 That is §2.1 arriving in the layer panel: any design that reproduces the correct picture produces an
 opaque one, and here the opacity is not confined to the canvas, it is written into the artist's
 document.
 
-**Where it acts**: `CoreGraphicsCompositor.mergedDown` (the composite: the lower layer alone as the
-backdrop, on transparency, no `RenderBackground` parameter to pass a paper through even by accident),
-`CanvasManager.mergeContribution` (what each layer of the pair *is*, resolved through the same three
-accessors `leafSnapshots` reads), and `MergeBakeLogicTests`, whose
-`testALayerBeneathThePairChangesNothingAboutTheMergedResult` is the ruling stated as an independence
-and whose `testAMergedGradeLeavesTheUpperLayersGapsTransparent` is the assertion the rejected option
-would have broken.
+**RULED 2026-10-01 (TODO (131)): the verb is Bake, and it reaches every drawing.** A layer that holds
+no pixels is no longer merged into the one layer below; Bake carries it into **every drawing beneath it
+in its own group**, in one undo step, and removes it. The ruling above is unchanged and is what Bake
+implements — *the paper stays white* — and `CoreGraphicsCompositor.mergedDown` is still the one place a
+layer's contribution meets pixels. A colour effect and a blend are taken into each element's colour
+(`BakeOperation`); an effect that depends on position or neighbours paints into the pixels of a layer
+that becomes raster, after a prompt; animation is one drawing per run of frames where the result
+changes; and what cannot take it (a video, a stream) or is only partly covered (a mask, an effect in
+between) is left as it was, and a notice says so.
 
-**One case stays a loss, and it is the mirror image**: a grading layer in the *lower* position acts on
-everything beneath the pair, which the ruling excludes, so there is nothing inside the merge for it to
-grade. `CanvasManager.MergeLossKind.unbakeableLayer` is the confirmation that warns about it — and the
-two cases that predicate used to carry, a non-Normal blend mode and a `.value` layer in the upper
-position, are gone, because both are baked now.
+**Where it acts**: `CoreGraphicsCompositor.mergedDown` (the lower layer alone as the backdrop, on
+transparency, no `RenderBackground` parameter to pass a paper through even by accident),
+`CanvasManager+Bake.swift` (what is beneath, and how each layer is carried), and `BakeLogicTests`, whose
+blend sweep asserts that where the layer drew nothing it still draws nothing — the assertion the rejected
+option would have broken.
+
+**One case of Merge Down stays a loss, and it is the mirror image**: a vector layer that grades through
+its own ink (§2.4), in the *lower* position of a merge, acts on everything beneath the pair, which the
+ruling excludes, so there is nothing inside the merge for it to grade.
+`CanvasManager.MergeLossKind.gradeInLowerPosition` is the confirmation that warns about it.
 
 **An `.ink` effect needs no re-walk here**, which is worth stating because §3 exists entirely to give
 one. The whole reason an ink-only input is needed is that the accumulator holds the paper and its alpha

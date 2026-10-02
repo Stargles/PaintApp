@@ -8,8 +8,8 @@ import UIKit
 ///
 /// `EffectParameterCharacterizationTests`, `FrameBakeKeyLogicTests`, `EffectLayerLogicTests`,
 /// `EffectMultiPassLogicTests`, `EffectParameterTrackLogicTests` and `EffectParityLogicTests` own the
-/// hand-typed all-effects sweeps this shipped an eighteenth row into; `MergeBakeLogicTests` carries
-/// the merge-down row. `ColorWheelsUITests` drives the same effect from an empty document and
+/// hand-typed all-effects sweeps this shipped an eighteenth row into; `BakeLogicTests` carries
+/// the bake row. `ColorWheelsUITests` drives the same effect from an empty document and
 /// asserts what the canvas draws.
 final class ColorWheelsEffectLogicTests: XCTestCase {
 

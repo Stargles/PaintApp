@@ -1046,8 +1046,9 @@ extension Effect {
     ///
     /// Every field is a continuous `Double`, keyable through `Effect.parameters` like every other
     /// grade; `input` is `.backdrop` like every grade that reads colour, `reshapesCoverage` false.
-    /// Merge-down bakes it through `EffectReference.apply` like HSV Shift — the owner's *"pinch to
-    /// merge … so I can bake them to the actual colors"* — and `MergeBakeLogicTests` carries the row.
+    /// Bake carries it into the drawings beneath through `EffectReference.apply` like HSV Shift — the
+    /// owner's *"pinch to merge … so I can bake them to the actual colors"* — and `BakeLogicTests`
+    /// carries the row.
     struct ColorWheels: Equatable {
 
         /// One wheel: where its dot sits, and the two sliders beside it. The type's default is the

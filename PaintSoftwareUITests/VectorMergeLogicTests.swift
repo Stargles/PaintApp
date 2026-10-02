@@ -20,7 +20,7 @@ import CoreGraphics
 /// hand would only pin its own arithmetic, and `MergeBakeLogicTests`' header makes the same argument
 /// for the pixel arm.
 ///
-/// **`MergeBakeLogicTests` is not coverage for any of this**: it holds thirteen tests and not one
+/// **`MergeBakeLogicTests` is not coverage for any of this**: it holds five tests and not one
 /// vector fixture, so a `.vector`-gated arm passes the whole of it without executing a line.
 ///
 /// `@MainActor` because `makeRenderRequest` is.

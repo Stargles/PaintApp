@@ -9,7 +9,7 @@ import UIKit
 /// by hand** — a line is a pixel-centred tent `lineWidth/2 + ½` wide on the distance to the nearest
 /// line of a family, families combine by `max`, and the colour is mixed in by `opacity · coverage`.
 /// `EffectParameterCharacterizationTests`, `FrameBakeKeyLogicTests`, `EffectLayerLogicTests`,
-/// `EffectParameterTrackLogicTests` and `MergeBakeLogicTests` own the hand-typed all-effects sweeps
+/// `EffectParameterTrackLogicTests` and `BakeLogicTests` own the hand-typed all-effects sweeps
 /// this shipped a twentieth row into; `GuideUITests` drives the same effect from an empty document
 /// and asserts what the canvas draws.
 final class GuideEffectLogicTests: XCTestCase {

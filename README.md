@@ -218,7 +218,8 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    or a photo as an object layer. The new item lands **directly above the active layer, inside that layer's own
    container** — not at the top of the document.
 3. Adjust opacity with the slider, toggle visibility with the eye icon, tap a row to make it active.
-4. Tap the active row again for its options menu (rename, blend mode, merge, delete). While one is
+4. Tap the active row again for its options menu (rename, blend mode, merge down — or **Bake** on an
+   effect, flat-colour or transform layer — delete). While one is
    open every row carries a checkmark to clip that layer to, and a drop to make it a fill boundary.
    Mask opens as a sub-menu in place, with a Back button; so does a compositor node's Effect
    Settings, docked at the bottom of the screen.

@@ -107,27 +107,6 @@ are what this reverses.
 - [ ] "Add Keyframe" becomes "Add Keys" (priming); commits key only changed components, at every
       primed frame as today.
 
-## (131) Bake an effect, blend or transform layer into the layers below
-
-**Status** — ruled, not started. *"Right now, there is the option to merge down effects
-layers with the layer below them. This is an incomplete implementation. Instead, replace that buttons
-function with baking: lets say you have 2 layers and a blend mode value layer or effect layer above it.
-When that layer bakes, it should adjust the color of all the strokes/objects etc affected below it. In
-this case, it is both the layers below. Add the same feature for transform layers."*
-
-**Ruled 2026-10-01:**
-- Colour effects and blend-mode value layers bake into each element's colour, over every layer beneath
-  in the baking layer's scope.
-- **Shape-changing effects** (blur, bloom, glare, outline, sharpen, sobel, CRT, lens blur) **turn each
-  affected layer into a raster layer** with the effect applied, after a confirm prompt.
-- **Animated effects and moving transforms bake one drawing per frame** the bar covers (unchanged runs
-  stay one cel), count and save cost shown first — Bake Animation's rule.
-- **What cannot take a colour** (video, stream) **or is only partly covered** (a mask, a stencilled
-  effect) **is left as it was, the rest bakes, and a notice says so.**
-- **The paper stays white** — Bake changes the drawings only.
-
-- [ ] Merge Down on effect / value / transform layers replaced by Bake, one undo step.
-
 ---
 
 ## (27) Stream the computer's screen as a layer

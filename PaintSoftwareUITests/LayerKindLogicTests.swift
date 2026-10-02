@@ -42,6 +42,17 @@ final class LayerKindLogicTests: XCTestCase {
         XCTAssertEqual(LayerKind.allCases.filter(\.holdsPixels), [.raster, .vector])
     }
 
+    /// **A kind that holds no pixels acts on the layers beneath it, and so is baked into them
+    /// (TODO (131)) where a drawing layer is merged** — the two verbs split the kinds exactly, so no
+    /// kind is offered both Merge Down and Bake, and none neither.
+    func testEveryKindIsEitherMergedOrBakedAndNeverBoth() {
+        XCTAssertEqual(LayerKind.allCases.filter(\.bakesIntoLayersBelow), [.value, .transform])
+        for kind in LayerKind.allCases {
+            XCTAssertNotEqual(kind.bakesIntoLayersBelow, kind.holdsPixels,
+                              "\(kind): Bake is the verb of a layer with no drawing surface, Merge Down of one with")
+        }
+    }
+
     /// **Every site that answers "does this layer have a drawing surface" agrees with `holdsPixels`.**
     /// Watched failing with `.transform` moved to the `true` arm of `holdsPixels` (the text and lasso
     /// refusals disagreed with it), and with `CanvasActiveLayer.init` returning `.raster` for

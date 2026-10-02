@@ -1507,9 +1507,12 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   layer's pose keeps posing the baked cels exactly as it posed the animated one, so every frame is
   unchanged by the bake, and new ink still lands where it is drawn because every input surface reads
   the live pose (`CanvasManager.inkPose(forLayerID:)`, TODO (124)).
-  Baking the *composed* pose would have to lift the cel out from under its container — not done, and
-  not asked. A Repeat above the cel needs nothing: the cel's channels are numbered in its own frames,
-  which are the source frames the repeat reads (TRANSFORM_LAYER §7), pinned on the loop's frames.
+  Carrying a *transformation layer's* share of the pose into the drawings is **Bake on that layer**
+  (TODO (131), `CanvasManager+Bake.swift`): its share is read off the render walk — the walk with the
+  layer against the walk without it — and written into each cel's geometry through this same
+  `bakeCel`, so a layer is removed rather than a cel lifted out from under it. A Repeat above the cel
+  needs nothing: the cel's channels are numbered in its own frames, which are the source frames the
+  repeat reads (TRANSFORM_LAYER §7), pinned on the loop's frames.
 - **The layer's bare keyframe marks are left alone.** §2.28 already drops a mark wherever a key landed
   on it, so after a bake the union is empty and no diamond remains; a bare mark no key ever landed on
   is the artist's own and stays.

@@ -12,7 +12,7 @@ import UIKit
 /// `Effect.lensBlurFillSampleCount` at the rest — so the reach and the shape are properties of that
 /// array before they are properties of any picture, and the picture tests below only have to show
 /// the kernels honour it. `EffectParameterCharacterizationTests`, `FrameBakeKeyLogicTests`,
-/// `EffectLayerLogicTests`, `EffectParameterTrackLogicTests` and `MergeBakeLogicTests` own the
+/// `EffectLayerLogicTests`, `EffectParameterTrackLogicTests` and `BakeLogicTests` own the
 /// hand-typed all-effects sweeps this shipped a nineteenth row into; `LensBlurUITests` drives the
 /// same effect from an empty document and asserts what the canvas draws.
 final class LensBlurEffectLogicTests: XCTestCase {
