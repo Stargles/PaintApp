@@ -176,7 +176,7 @@ extension CanvasManager {
             case .partialCoverage: return "this layer has a mask, so it reaches only part of what is beneath it"
             case .insideACombiner: return "a layer inside a combiner acts on nothing"
             case .nothingBeneath: return "there is nothing beneath this layer"
-            case .nothingToBake: return "nothing beneath it can take it"
+            case .nothingToBake: return "it has nothing to change in the layers beneath it"
             case .repeatsInTime: return "a Repeat layer loops time rather than moving drawings"
             }
         }
