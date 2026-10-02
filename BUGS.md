@@ -4,6 +4,16 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## Two UI tests red on `main`, cause unknown (2026-10-02)
+
+Found while closing session 46's last lanes; unbisected, neither caused by the lane that saw it.
+
+- `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu` — red identically on clean
+  builds of `3e53cd0` and of `7ec1987`, so older than this session's late merges.
+- `RotationSnapUITests.testThePillStandsAboveTheMoveBarWhenTheKnobIsAtItsEdge` — green at `adadb60`,
+  red on a clean build of `57b115e`: the pill reads `none` after the knob drag. Suspects: `c465d21`
+  (stream settle) and `17881f1` (placed media through the pose).
+
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main

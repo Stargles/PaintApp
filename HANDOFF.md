@@ -51,41 +51,42 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**The owner's 2026-10-01 asks, (111)–(152), are the queue** — TODO.md, in work order (111–146 are
-110 + the owner's ask number; 147–152 came in a second message the same day). **Session 46 merged**
-(117) (118) (130) (143) (142) (137) (141) (138) (144) (111) (129) (128) (116) (115) (113) (114) (121)
-(124) (145) (120) (119) (146) (134) (122) (123) (148) (150) (152), every ruled follow-up on them, the
-Oklab gradient, and defects found on the way (three UI reds bisected to this session's merges and
-fixed; the keyboard squeeze; panel touch fall-through). **The owner's iPad has `c8562ca`** (installed
-2026-10-01); everything after it is not on the device yet.
+**Paused by the owner on 2026-10-02** after the last two lanes merged — *"pause for now until i give you a
+message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deploy`, no `tmp/*` branches.
 
-**(125)+(136)+(140) merged** (`854a727`): one live-preview mechanism (`LiveTransformEdit`) for transform
-edits, the baker held until release, the plain-layer fast picture. **Folder Move's lag did not reproduce
-in the simulator — measure it on the iPad.** The cap is one Opus *or* two Sonnet.
-**Check `git worktree list` before trusting this.**
+**Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
+merged but two. In order, what is next when the owner says continue:
 
-**Next, in order** (fresh Sonnet workers, two at a time — never continue a worker whose context is
-large): the text follow-ups + (147) tap-select; (149) primed Add shapes; (151) 15° rotate snap + angle;
-(135) folder Move all frames / this cel; (126) (127) (133) export and padding; (132) brush ends (recording
-in `~/PaintWork/evidence/`); (112) stream paused; then (139) and (131) (ruled). **Then the full UI suite**
-— not run this session; the taller timeline moved the dock 125 pt and may break tap-by-position tests —
-triaged by a Sonnet worker, and **one** Sonnet audit of the session's whole diff for leftover code,
-duplicated mechanisms and bolted-on fixes (the owner rejected per-item reviewers as too costly).
+1. **The full UI suite** — not run all session (last full run `f509d39`, 2026-09-25). The timeline is
+   125 pt taller since (122), which moved the dock and has already broken tap-by-position tests twice;
+   expect more. Triage by a fresh Sonnet worker per CLAUDE.md, and **pull the per-class table first**.
+   BUGS.md's two newest reds go in the same triage.
+2. **Install on the iPad** — it has `c8562ca` (2026-10-01); everything after it is unfelt. Then ask the
+   owner how (132)'s held stroke ends feel (ink trails the pen by up to a quarter brush width) and
+   whether a live stroke's interior wants smoothing.
+3. **(131) follow-up: Repeat bake materialises the loop**, then **(139) keys, not keyframes** — ruled,
+   Opus, alone; `~/PaintWork/design/survey-1001.md` §(139) is the design starting point, but the pose
+   code has moved a lot this session (`854a727`, `2d9fdef`) — re-verify every symbol.
+4. **One Sonnet audit of the session's whole diff** (`9704384..HEAD`) for leftover code, duplicated
+   mechanisms and bolted-on fixes — report only, fixes batched into one lane. The owner rejected
+   per-item reviewers as too costly.
+5. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on: `f84776f`'s C# half is merged
+   uncompiled.
 
-- **Design notes for (139), (131)** are at `~/PaintWork/design/survey-1001.md` (rulings in TODO.md
-  override it). The brief every worker reads is `~/PaintWork/brief-common.md`.
-- **Questions for the owner**: none open — the 2026-10-02 batch is answered and recorded in TODO's
-  "Rulings of 2026-10-02" entry. After the next install, ask how (132)'s held stroke ends feel (the ink
-  trails the pen by up to a quarter of the brush width) and whether a live stroke's interior wants
-  smoothing too.
-- **The laptop streamer needs `tools/windows/streamer-remote.sh deploy`** when the laptop is on:
-  `f84776f`'s C# half (clear a stale pause on connect, idempotent resume) is merged uncompiled.
+**Questions for the owner** (question tool, plain terms):
+- How should a layer row enter rename? Built: options panel → Rename edits in the row (a plain tap
+  must keep opening options). Alternatives: tap the selected row's name; double-tap the name; edit in
+  the options panel's header.
+- Do the other rename alerts (animation group, saved view, palette, gallery folder, brush group) go
+  inline too?
+- Select → Tap Add over a drawn loop replaces the loop with a new tapped set — right, or should taps and
+  loops combine?
 
-**Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
-an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
-Fill Mend's reach stays twice Gap Closing; the editor keeps shrinking above the keyboard while typing.
-
-**Owner-side, unchanged**: (27) stage 5 (the blend-mode limitation is ruled: keep it).
+**How this session ran, for the next one**: one shared worker brief at `~/PaintWork/brief-common.md`
+(read first by every worker; it carries the owner's clean-architecture rule, including *"when a ruling
+replaces shipped behaviour, the old behaviour goes whole"*); cap one Opus *or* two Sonnet; fresh workers
+per lane — never continue a worker whose context is large (memory `feedback-fresh-agent-over-bloated-
+continuation`).
 
 ## What shipped this session
 

@@ -48,21 +48,12 @@ rather than assuming it still holds.
 
 ---
 
-## The owner's 2026-10-01 brief — (111)–(146)
+## What is left of the owner's 2026-10-01/02 asks
 
-Thirty-six asks in one message. **Each number is 110 + the owner's own ask number**, so the owner's
-"ask 14" is (124). Where the owner said two asks are one task, they share an entry. Queue order below;
-the owner left the order to us. Every entry is the owner's words, then what is left.
+Of (111)–(152) and their ruled follow-ups, two items remain: the Repeat bake below and (139). Every
+other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
 
 ---
-
-## Rulings of 2026-10-02 on merged work — ruled as built, no work
-
-**Status** — nothing left to build: the four follow-ups the owner ruled on (inline renaming, Select → Tap's
-Single / Add / Subtract, the canvas following the text box, the smart-shape line's snap) have merged.
-
-Ruled as built, no work: folder Move's All Frames on keyed cels (exact at the current frame) and its
-remembered scope; the plain look of a blending layer above an edit until the bake; the tight Select tabs.
 
 ## (131) follow-up: Bake on a Repeat layer materialises the loop
 
