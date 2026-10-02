@@ -121,4 +121,135 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         attach(app, "text-put-down-with-the-select-tool")
         XCTAssertTrue(settled, "the editor did not come back after the text was put down: host \(before.host) -> \(geometry(app).host)")
     }
+
+    // MARK: - The canvas follows the box being typed in
+
+    /// The text box on the glass, in screen points, from `canvas.host`'s `textbox:` field (the box's hull
+    /// in the host's unit square) — nil when no session is up.
+    private func textBox(_ app: XCUIApplication, in canvas: XCUIElement) -> CGRect? {
+        let parts = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 4 else { return nil }
+        let host = canvas.frame
+        return CGRect(x: host.minX + parts[0] * host.width, y: host.minY + parts[1] * host.height,
+                      width: parts[2] * host.width, height: parts[3] * host.height)
+    }
+
+    /// The canvas's vertical pan, the `dy` of `xform:` ("scale,rotation,dx,dy").
+    private func verticalPan(_ app: XCUIApplication) -> Double {
+        Double(readTransform(app).split(separator: ",").last ?? "") ?? .nan
+    }
+
+    /// Polls until the box on the glass stands above `limit` or the time is up — the follow animates, and
+    /// the keyboard compresses the layout over its own animation, so the answer arrives, it is not
+    /// instant.
+    private func waitForTheBox(_ app: XCUIApplication, in canvas: XCUIElement, toStandAbove limit: () -> CGFloat,
+                               timeout: TimeInterval = 8) -> CGRect? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last: CGRect?
+        repeat {
+            last = textBox(app, in: canvas)
+            if let box = last, box.maxY <= limit() { return box }
+            Thread.sleep(forTimeInterval: 0.25)
+        } while Date() < deadline
+        return last
+    }
+
+    /// Add → Add Text, a tap low on the paper — a hand's width above the Text panel's top edge, the lowest
+    /// the tap can land and still be on the paper — the keyboard up and still. Answers the Text panel's
+    /// docked card, whose frame is the line the box has to stand above.
+    private func placeABoxLow(_ app: XCUIApplication, _ canvas: XCUIElement) throws -> XCUIElement {
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
+        let card = app.otherElements["bottomDock.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "PREMISE: the Text panel is docked")
+        let lowest = (card.frame.minY - 40 - canvas.frame.minY) / canvas.frame.height
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: lowest)).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
+                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
+        waitForTheKeyboardToStopMoving(keyboard)
+        return card
+    }
+
+    /// **A box placed low is scrolled into view above the Text panel, typed into there, and the canvas
+    /// goes back when the box is put down** — the owner: *"the canvas scrolls to keep the text box being
+    /// typed visible above the Text panel and keyboard, and back after."* Cold from a fresh document, the
+    /// artist's own sequence: Add Text, a tap low on the paper — just above the Text panel's top — and the
+    /// keyboard rises and compresses the layout, which takes the box under the panel; then two letters, then
+    /// the brush to put it down.
+    ///
+    /// What is read is what is drawn: the box's hull on the glass (`textbox:`) held against the panel's own
+    /// frame (`bottomDock.card`), and the canvas's transform (`xform:`) before, during and after. What the
+    /// artist does next: nothing — the words are where they can be read.
+    func testTheCanvasScrollsToKeepTheBoxAboveThePanelAndBackAfter() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let before = geometry(app)
+        let panBefore = verticalPan(app)
+        let transformBefore = readTransform(app)
+
+        let panel = try placeABoxLow(app, canvas)
+
+        let lifted = try XCTUnwrap(waitForTheBox(app, in: canvas, toStandAbove: { panel.frame.minY }),
+                                   "the session has a box on the glass")
+        attach(app, "box-placed-low-with-the-keyboard-up")
+        XCTAssertLessThanOrEqual(lifted.maxY, panel.frame.minY,
+                                 "the box (bottom \(lifted.maxY)) stands above the Text panel (top \(panel.frame.minY)) "
+                                 + "— the canvas scrolled to keep it in view; xform \(readTransform(app))")
+        XCTAssertLessThan(verticalPan(app), panBefore, "…and it did so by panning the canvas up, as the artist does")
+
+        typeIntoTextBox("Hi", app, at: CGPoint(x: lifted.minX + 4, y: lifted.midY))
+        let typed = try XCTUnwrap(textBox(app, in: canvas))
+        XCTAssertLessThanOrEqual(typed.maxY, panel.frame.minY, "still above the panel once the words are typed")
+        attach(app, "words-typed-above-the-panel")
+
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
+        XCTAssertTrue(waitForGeometry(app, toBe: before), "PREMISE: the editor is back at full height")
+        let deadline = Date().addingTimeInterval(6)
+        while readTransform(app) != transformBefore, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+        attach(app, "box-put-down-canvas-back")
+        XCTAssertEqual(readTransform(app), transformBefore, "the canvas went back to where it was before the box")
+    }
+
+    /// **A pan the artist makes while typing is theirs**: the canvas is not pulled back to where it was when
+    /// the box is put down, and the follow does not fight the pan while the keyboard is up.
+    func testAPanMadeWhileTypingIsLeftAlone() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let transformBefore = readTransform(app)
+
+        let panel = try placeABoxLow(app, canvas)
+        XCTAssertNotNil(waitForTheBox(app, in: canvas, toStandAbove: { panel.frame.minY }))
+        let followed = readTransform(app)
+        XCTAssertNotEqual(followed, transformBefore, "PREMISE: the canvas followed the box")
+
+        // The artist pans by hand, where no panel and no keyboard reaches: two fingers, 60 points right.
+        let frame = canvas.frame
+        let at = CGPoint(x: frame.minX + frame.width * 0.2, y: frame.minY + frame.height * 0.12)
+        try twoFingerGesture(from: (CGPoint(x: at.x - 30, y: at.y), CGPoint(x: at.x + 30, y: at.y)),
+                             to: (CGPoint(x: at.x + 30, y: at.y), CGPoint(x: at.x + 90, y: at.y)), stagger: 0)
+        let panned = readTransform(app)
+        XCTAssertNotEqual(panned, followed, "PREMISE: the artist's two fingers moved the canvas")
+
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
+        Thread.sleep(forTimeInterval: 1.0)
+        // The offset, not the whole transform: its first field is the fit scale, which is the host's own
+        // height divided by the paper's and moves when the keyboard leaves, pan or no pan.
+        func offset(_ transform: String) -> [Substring] { Array(transform.split(separator: ",").suffix(2)) }
+        XCTAssertEqual(offset(readTransform(app)), offset(panned),
+                       "the canvas stays where the artist left it, not where it began (\(transformBefore))")
+    }
+
 }

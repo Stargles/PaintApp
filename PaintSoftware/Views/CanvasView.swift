@@ -473,7 +473,7 @@ struct CanvasView: UIViewRepresentable {
     private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
         context.coordinator.activePanel = activePanel
         context.coordinator.onEditorOpened = onEditorOpened
-        context.coordinator.rotationReadout?.coveredBottom = coveredBottom
+        context.coordinator.coveredBottom = coveredBottom
         PlaybackTrace.span(.overlays) { context.coordinator.updatePaper() }
         context.coordinator.reconcileLayers()
         // Immediately after `reconcileLayers`, and before every overlay that re-fronts itself: the
@@ -1321,6 +1321,7 @@ struct CanvasView: UIViewRepresentable {
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
                 + " movebox:\(moveBoxHull())"
+                + " textbox:\(textBoxHull())"
                 // **The angle readout as it is drawn** (TODO (151)): the pill's own text, `none`
                 // while it is hidden — the host hides the pill from XCUITest like every descendant.
                 + " readout:\(rotationReadout?.text ?? "none")"
@@ -1339,6 +1340,13 @@ struct CanvasView: UIViewRepresentable {
 
         /// The angle pill (`RotationReadoutView`), whose text `publishCanvasState` carries.
         weak var rotationReadout: RotationReadoutView?
+
+        /// How much of the host's bottom lies under chrome drawn over it — the timeline and the docked
+        /// panel (`BottomDock.coveredBottom`). Set by `CanvasView` on every pass. What the angle pill and
+        /// the text box's follow (`followTextBox`) both keep clear of.
+        var coveredBottom: CGFloat = 0 {
+            didSet { rotationReadout?.coveredBottom = coveredBottom }
+        }
 
         /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.
         func rotationReadoutChanged() {
@@ -1360,11 +1368,25 @@ struct CanvasView: UIViewRepresentable {
         /// or `none` when no box is up. Corners rather than the frame's size, so a turned or
         /// re-fitted box reads as the rectangle on the glass and not as a number in its own axes.
         private func moveBoxHull() -> String {
-            guard let overlay = transformOverlay, overlay.isActive, let frame = overlay.frameModel,
-                  let container = containerView, let host = hostView,
+            guard let overlay = transformOverlay, overlay.isActive, let frame = overlay.frameModel else { return "none" }
+            return hullInHost(of: frame.corners)
+        }
+
+        /// **The text box being typed in, as drawn** — its four corners' hull in the host's unit square,
+        /// as `x,y,w,h`, or `none` while no session is up. Where the box stands on the glass is what the
+        /// follow (`followTextBox`) is for, and the host hides the editor from XCUITest.
+        private func textBoxHull() -> String {
+            guard canvasManager.textGestureActive else { return "none" }
+            return hullInHost(of: canvasManager.textFrame.corners)
+        }
+
+        /// The axis-aligned hull of `corners`, which are in the canvas's own space, as `x,y,w,h` in the
+        /// host's unit square — the rectangle on the glass, whatever the canvas is turned or zoomed to.
+        private func hullInHost(of corners: [CGPoint]) -> String {
+            guard let container = containerView, let host = hostView,
                   host.bounds.width > 0, host.bounds.height > 0 else { return "none" }
-            let corners = frame.corners.map { container.convert($0, to: host) }
-            let xs = corners.map(\.x), ys = corners.map(\.y)
+            let onGlass = corners.map { container.convert($0, to: host) }
+            let xs = onGlass.map(\.x), ys = onGlass.map(\.y)
             guard let minX = xs.min(), let maxX = xs.max(),
                   let minY = ys.min(), let maxY = ys.max() else { return "none" }
             return String(format: "%.4f,%.4f,%.4f,%.4f", minX / host.bounds.width,
@@ -2834,6 +2856,8 @@ struct CanvasView: UIViewRepresentable {
         /// this runs on every SwiftUI pass like every other `update*` here.
         func updateTextOverlay() {
             guard let overlay = textOverlay, let container = containerView else { return }
+            // However the function leaves: a box that has moved, grown or gone is what the follow reads.
+            defer { followTextBox() }
             let active = canvasManager.textGestureActive
             overlay.update(isActive: active,
                            frame: canvasManager.textFrame,
@@ -2864,6 +2888,41 @@ struct CanvasView: UIViewRepresentable {
             // gesture.
             if let textTransformOverlay { container.bringSubviewToFront(textTransformOverlay) }
         }
+
+        /// **The canvas's own pan, kept in step with the text box being typed in** — `ViewportFollow`
+        /// holds the rule and the session's bookkeeping; this is the one place it touches the view. A
+        /// live session pans the canvas, by the same committed offset the artist's two fingers write, so
+        /// that the box stands above the strip the timeline, the Text panel and (in a layout the keyboard
+        /// has compressed) the keyboard cover; the session's end pans it back. Animated, gently: the
+        /// canvas is moving for the artist, not under them.
+        ///
+        /// Asked on every pass that can have moved the box or the strip — a typed character that grew it,
+        /// the panel arriving, the keyboard compressing the host — and idempotent, since a box that is in
+        /// view asks for no pan. **Not while a finger holds the box or a grip** (`textFingerDown`): the
+        /// drag is measured through the canvas's transform, and a canvas that moved under it would chase
+        /// its own finger.
+        func followTextBox() {
+            guard let host = hostView, let container = containerView, gestureAnchor == nil else { return }
+            let pan: CGFloat
+            if canvasManager.textGestureActive {
+                guard !canvasManager.textFingerDown else { return }
+                let visible = CGRect(x: 0, y: 0, width: host.bounds.width,
+                                     height: max(0, host.bounds.height - coveredBottom))
+                let box = container.convert(canvasManager.textFrame.boundingBox, to: host)
+                pan = textFollow.follow(box: box, within: visible)
+            } else {
+                pan = textFollow.end()
+            }
+            guard pan != 0 else { return }
+            committedOffset.height += pan
+            UIView.animate(withDuration: 0.25, delay: 0,
+                           options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]) {
+                self.applyTransform()
+            }
+        }
+
+        /// The text session's pan, if one has been added — see `followTextBox`.
+        private var textFollow = ViewportFollow()
 
         /// Coalesces preview re-renders to one per run-loop turn — a Pencil delivers several coalesced
         /// samples per frame, and re-stamping a canvas-sized preview per sample costs far more than
@@ -3727,6 +3786,8 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
             applyTransform()
+            // The keyboard compressing or releasing the host is what moves the strip a box is lost in.
+            followTextBox()
         }
 
         /// Snaps to the nearest right angle when close to one, unless held within the snap zone for
@@ -4432,6 +4493,8 @@ struct CanvasView: UIViewRepresentable {
         /// `canvasTouchesChanged`, which is the more precise place for it.
         private func beginAnchorIfNeeded(at location: CGPoint) {
             canvasManager.cancelInteractiveFillDrag()
+            // The artist took the view: a text session's follow leaves it where they put it.
+            textFollow.artistNavigated()
             guard gestureAnchor == nil, let container = containerView else { return }
             gestureAnchor = (ViewportAnchor(fingers: location, contentOrigin: container.center), container.center)
         }
