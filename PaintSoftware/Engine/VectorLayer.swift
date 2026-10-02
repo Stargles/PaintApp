@@ -757,6 +757,13 @@ protocol PlacedRectangle {
     /// The picture's own pixel size, before any of the placement is applied. It is the rect
     /// `placement` maps: `CGRect(x: -width / 2, y: -height / 2, width: width, height: height)`.
     var naturalSize: CGSize { get }
+
+    /// **The source's own pixels, counted** — what "one image pixel is one canvas pixel" is measured
+    /// against. `naturalSize` is the size the placement maps, so it is the same number everywhere
+    /// except a picture whose `UIImage.scale` is not 1, where it is the size in *points* and holds
+    /// `scale` times too few pixels across.
+    var pixelSize: CGSize { get }
+
     var transform: LayerTransform { get set }
 
     /// **How much wider than tall the placement is** — `ObjectTransformFrame.aspect`'s number, stored.
@@ -789,6 +796,10 @@ protocol PlacedRectangle {
 }
 
 extension PlacedRectangle {
+    /// A video's and a stream's size *is* their pixels — see `VectorVideoElement.naturalSize`. A
+    /// picture overrides this, because it carries a scale.
+    var pixelSize: CGSize { naturalSize }
+
     /// **The one place the four fields become a matrix**, so the render, the membership quad and the
     /// lasso's own map cannot come to disagree about where the picture is. It maps the picture's
     /// centred rect — `CGRect(x: -size.width / 2, y: -size.height / 2, ...)` — into layer-local space.
@@ -852,6 +863,8 @@ struct VectorImageElement: Identifiable, PlacedRectangle {
     /// because it carries its picture. A video does not, which is why the protocol asks for it rather
     /// than reading a `UIImage`.
     var naturalSize: CGSize { image.size }
+
+    var pixelSize: CGSize { CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale) }
 }
 
 /// **An exact instant on a video's own clock** — VIDEO.md §4.1's *"as exact rationals"*, and §6's

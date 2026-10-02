@@ -14,7 +14,8 @@ import SwiftUI
 ///
 /// **No control here is allowed to be pressed and do nothing.** One can be unavailable, and it says
 /// so rather than going quietly grey: Reset, when the piece is already sitting exactly where it was
-/// picked up (`CanvasManager.canResetFloating`).
+/// picked up (`CanvasManager.canResetFloating`), and Center and 1:1, when the picture is already
+/// centred or already at its own pixel size (`CanvasManager.canPlaceFloatedMedia`).
 ///
 /// **Mirror and the mode picker were the other two until LASSO_MOVE.md §3 stage 3c.** Both refused a
 /// lassoed piece carrying a **placed image**, whose whole placement was a `LayerTransform` — no flip,
@@ -169,7 +170,40 @@ struct MoveTransformBottomBar: View {
             .tint(.blue)
             .fixedSize()
             .accessibilityIdentifier("moveBar.keepFullPrecisionToggle")
+
+            if canvasManager.floatHoldsPlacedMedia {
+                divider
+                placementButton("Center", symbol: "scope", placement: .centred)
+                    .accessibilityLabel("Center on Canvas")
+                    .accessibilityIdentifier("moveBar.centerButton")
+                placementButton("1:1", symbol: nil, placement: .actualSize)
+                    .accessibilityLabel("Actual Size, One to One")
+                    .accessibilityIdentifier("moveBar.actualSizeButton")
+            }
         }
+    }
+
+    /// **Center and 1:1 — TODO (150).** Offered only while the box holds exactly one picture, video or
+    /// stream (`CanvasManager.floatHoldsPlacedMedia`), and off when the picture is already there,
+    /// which is Reset's rule: a control that is on does something.
+    private func placementButton(_ title: String, symbol: String?, placement: MediaPlacement) -> some View {
+        let enabled = canvasManager.canPlaceFloatedMedia(placement)
+        return Button {
+            canvasManager.placeFloatedMedia(placement)
+        } label: {
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol) }
+                Text(title)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.14))
+            .cornerRadius(8)
+        }
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
     }
 
     /// `enabled: false` uses `.disabled` rather than dropping the button, so the row does not reflow
