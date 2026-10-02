@@ -84,6 +84,14 @@ remembered scope; the plain look of a blending layer above an edit until the bak
 through `layerSpaceFill` / `inkPose(forLayerID:)`, but a placed **picture or clip** does not, so under a
 transformation layer it lands displaced by the pose — the (124) defect class, finished rather than asked.
 
+## (131) follow-up: Bake on a Repeat layer materialises the loop
+
+**Status** — not started. (131) merged (`2d9fdef`) refusing Bake on a Repeat transformation layer (Repeat
+loops time; there is no geometry to carry). Ruled 2026-10-02: **materialise the loop** — the replayed
+frames are written out as real drawings, one per looped frame (unchanged runs stay one cel), replacing
+what the loop hid, through Bake's shared core and its count-and-cost prompt. Also ruled, as built: a
+masked layer beneath a Bake is left as it was and named in the notice.
+
 ## (139) Keys, not keyframes — every channel component independent
 
 **Status** — ruled, not started. *"An update has to be done to the graph editor and key
