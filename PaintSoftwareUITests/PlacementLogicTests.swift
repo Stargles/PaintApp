@@ -274,6 +274,23 @@ final class PlacementLogicTests: XCTestCase {
         XCTAssertNil(manager.placementDrag)
     }
 
+    /// **"Too short" is judged in screen points, so a stray touch is told from a drag at any zoom**: the
+    /// same 20 canvas points of travel is a placement at 100% and a tremor at 10%.
+    func testTooShortIsJudgedOnTheScreenNotOnTheCanvas() {
+        let (manager, vector) = vectorFixture()
+        manager.primeObject(.rectangle)
+        XCTAssertTrue(manager.beginPlacement(at: pen(20, 20)))
+        manager.updatePlacement(to: pen(40, 20))
+        XCTAssertFalse(manager.endPlacement(canvasScale: 0.1), "20 canvas points are two screen points at 10%")
+        XCTAssertTrue(vector.elements.isEmpty)
+        XCTAssertEqual(manager.primedObject, .rectangle)
+
+        XCTAssertTrue(manager.beginPlacement(at: pen(20, 20)))
+        manager.updatePlacement(to: pen(40, 20))
+        XCTAssertTrue(manager.endPlacement(canvasScale: 1), "…and twenty at 100%")
+        XCTAssertEqual(vector.elements.compactMap(\.fill).count, 1)
+    }
+
     /// A cancelled touch — a second finger arrived, the system took it — leaves nothing behind.
     func testACancelledTouchLeavesNoTraceAndTheObjectStaysPrimed() {
         let (manager, vector) = vectorFixture()

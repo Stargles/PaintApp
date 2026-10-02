@@ -4841,7 +4841,7 @@ struct CanvasView: UIViewRepresentable {
                 guard canvasManager.placementDrag != nil else { return }
                 canvasManager.updatePlacement(to: recognizer.location(in: container))
                 placementPreview?.hide()
-                canvasManager.endPlacement()
+                canvasManager.endPlacement(canvasScale: canvasContentScale)
             case .cancelled, .failed:
                 guard canvasManager.placementDrag != nil else { return }
                 canvasManager.cancelPlacement()

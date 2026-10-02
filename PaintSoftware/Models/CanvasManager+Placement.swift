@@ -82,12 +82,16 @@ struct PlacementDrag: Equatable {
     /// Where the pen is now.
     var pen: CGPoint
 
-    /// The shortest drag that is a placement rather than a tap, in canvas points. A press that never
-    /// travelled this far places nothing and leaves the object primed, so a stray touch costs nothing.
-    static let minimumTravel: CGFloat = 4
+    /// The shortest drag that is a placement rather than a tap, **in screen points** — what the artist's
+    /// hand did, so a stray touch is told from a drag at any zoom: eight canvas points is a deliberate
+    /// stroke at 400% and a tremor at 5%. A press that never travelled this far places nothing and
+    /// leaves the object primed, so a stray touch costs nothing.
+    static let minimumTravel: CGFloat = 8
 
-    var isDeliberate: Bool {
-        hypot(pen.x - anchor.x, pen.y - anchor.y) >= Self.minimumTravel
+    /// Whether the pen travelled far enough to be a placement, with `scale` the screen points one canvas
+    /// point measures.
+    func isDeliberate(atScale scale: CGFloat) -> Bool {
+        hypot(pen.x - anchor.x, pen.y - anchor.y) * scale >= Self.minimumTravel
     }
 }
 
@@ -218,11 +222,14 @@ extension CanvasManager {
     /// **A drag too short to be a placement lays nothing down and leaves the object primed**, and so
     /// does an object the document has nowhere to put.
     ///
+    /// - Parameter canvasScale: the screen points one canvas point measures, which is what "too short"
+    ///   is judged in (`PlacementDrag.minimumTravel`). 1 puts canvas and screen points together.
     /// - Returns: whether the object was placed.
     @discardableResult
-    func endPlacement() -> Bool {
+    func endPlacement(canvasScale: CGFloat = 1) -> Bool {
         defer { placementDrag = nil }
-        guard let plan = placementPlan, placementDrag?.isDeliberate == true, layDown(plan) else { return false }
+        guard let plan = placementPlan, placementDrag?.isDeliberate(atScale: canvasScale) == true,
+              layDown(plan) else { return false }
         leavePlacement()
         return true
     }
