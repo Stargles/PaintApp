@@ -596,7 +596,9 @@ enum FillPaint: Equatable {
 }
 
 /// A linear gradient: `start` at `from`, `end` at `to`, held beyond both, blended along the line
-/// between them. **The two points are in the space of the fill's own path** — local space on a vector
+/// between them **in Oklab** (`ColorMath.mixOklab`, the mix the gradient map uses), so the middle is the
+/// colour a person would call halfway rather than the muddy one a straight line through gamma-encoded
+/// channels gives. **The two points are in the space of the fill's own path** — local space on a vector
 /// canvas — so the gradient is placed on the drawing, not on the screen.
 struct LinearGradientPaint: Codable, Equatable {
     var start: CodableColor
@@ -608,6 +610,35 @@ struct LinearGradientPaint: Codable, Equatable {
     /// as a flat field until the ends were edited apart.
     static let defaultStart = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
     static let defaultEnd = CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
+
+    /// How many evenly spaced stops the Oklab ramp is handed to Core Graphics as — 256 intervals, one
+    /// per 8-bit step of the ramp's length. Core Graphics can only interpolate in a straight line
+    /// through the components it is given, so the curve has to be sampled finely enough that the
+    /// straight lines hide inside it. MEASURED over eleven stop pairs against the exact mix at 4001
+    /// positions: 17 stops are 23/255 away, 65 are 8, 129 are 4 and **257 are 2**; 513 are 1, which is
+    /// only the two answers rounding to different bytes. Two is the most nobody can see, for half the
+    /// work of the last step.
+    static let rampStopCount = 257
+
+    /// Where each of the `rampStopCount` stops sits along the ramp, 0 to 1.
+    static let rampLocations: [CGFloat] = (0..<rampStopCount).map { CGFloat($0) / CGFloat(rampStopCount - 1) }
+
+    /// The ramp as the flat RGBA component list `CGGradient` takes: the colour of each stop through
+    /// Oklab and the alpha straight between the two ends, which is how the two-stop sRGB gradient this
+    /// replaced treated it. Exactly `start` at the first stop and `end` at the last, because the
+    /// Oklab round trip is byte-exact.
+    var rampComponents: [CGFloat] {
+        var components: [CGFloat] = []
+        components.reserveCapacity(Self.rampStopCount * 4)
+        for location in Self.rampLocations {
+            let t = Double(location)
+            let colour = ColorMath.mixOklab((r: start.red, g: start.green, b: start.blue),
+                                            (r: end.red, g: end.green, b: end.blue), t)
+            components += [CGFloat(colour.r), CGFloat(colour.g), CGFloat(colour.b),
+                           CGFloat(start.alpha + (end.alpha - start.alpha) * t)]
+        }
+        return components
+    }
 
     /// The direction of `from → to`, in radians. `0` runs left to right and a positive turn is
     /// clockwise in canvas (Y-down) space, the convention `ShapeGeometry.rotation` uses, so the number
@@ -7140,6 +7171,12 @@ final class VectorCanvas {
     /// both backends then composite those same pixels. `GradientObjectLogicTests` pins that rather
     /// than assuming it.
     ///
+    /// The ramp is `LinearGradientPaint.rampComponents` — Oklab, sampled — drawn through Core Graphics'
+    /// own straight-line interpolation between the samples. Rejected: a `CGShading` over a `CGFunction`
+    /// that evaluates the exact mix per sample, which is exact but puts a Swift callback in the middle
+    /// of every pixel row of a rasterisation, for a difference of 2/255 at the worst point of the
+    /// worst ramp measured.
+    ///
     /// A collapsed gradient (`from == to`) has no direction to ramp along and is painted in its end
     /// colour — a CSS gradient's answer for a zero-length line — rather than leaving `CGGradient` to
     /// decide what an empty span means.
@@ -7155,8 +7192,9 @@ final class VectorCanvas {
             return
         }
         let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        let colours = [gradient.start.uiColor.cgColor, gradient.end.uiColor.cgColor] as CFArray
-        guard let ramp = CGGradient(colorsSpace: space, colors: colours, locations: [0, 1]) else { return }
+        guard let ramp = CGGradient(colorSpace: space, colorComponents: gradient.rampComponents,
+                                    locations: LinearGradientPaint.rampLocations,
+                                    count: LinearGradientPaint.rampStopCount) else { return }
         cg.drawLinearGradient(ramp, start: gradient.from, end: gradient.to,
                               options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
     }

@@ -218,7 +218,9 @@ final class FillObjectLogicTests: XCTestCase {
         let left = pixel(image, 0, 32), middle = pixel(image, side / 2, 32), right = pixel(image, side - 1, 32)
         XCTAssertLessThan(left[0], 12, "black at the left edge")
         XCTAssertGreaterThan(right[0], 243, "white at the right edge")
-        XCTAssertEqual(middle[0], 128, accuracy: 6, "the middle is the mean — a ramp, not a step")
+        let oklabMiddle = Int((ColorMath.mixOklab((0, 0, 0), (1, 1, 1), 0.5).r * 255).rounded())
+        XCTAssertEqual(middle[0], oklabMiddle, accuracy: 6,
+                       "the middle is the Oklab mean, 99 — a ramp, not a step, and not sRGB's 128")
         XCTAssertEqual(left[3], 255); XCTAssertEqual(right[3], 255)
         for y in [2, 32, 61] {
             XCTAssertEqual(pixel(image, 20, y), pixel(image, 20, 32),
@@ -230,6 +232,68 @@ final class FillObjectLogicTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(value, last, "the ramp never goes backwards (x = \(x))")
             last = value
         }
+    }
+
+    /// **The ramp blends in Oklab, not in sRGB** — the owner's *"is the linear gradient oklab?"*, and it
+    /// was not. Red to green is the pair the two spaces disagree about most: a straight line through
+    /// the gamma-encoded channels runs red 255 to 0 and green 0 to 255 through a dark (128, 128, 0)
+    /// olive, where Oklab keeps the lightness up through (208, 168, 0). The pixels at four positions
+    /// along the ramp are the Oklab mix at that position to within the sampling's own error, and the
+    /// middle is nowhere near the sRGB one.
+    ///
+    /// Mutation caught: drawing the two stops through a plain two-stop `CGGradient` puts (128, 128, 0)
+    /// in the middle and every assertion below goes red.
+    func testALinearGradientBlendsInOklabNotInSRGB() throws {
+        let (manager, layerIndex, _) = vectorFixture()
+        XCTAssertTrue(manager.addGradient())
+        manager.setGradientColour(.start, to: Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1))
+        manager.setGradientColour(.end, to: Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1))
+        manager.commitAllInteractiveState()
+        let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+
+        for x in [8, 20, 31, 32, 44, 56] {
+            let t = (Double(x) + 0.5) / Double(side)
+            let expected = ColorMath.mixOklab((1, 0, 0), (0, 1, 0), t)
+            let got = pixel(image, x, 32)
+            for (channel, want) in [(0, expected.r), (1, expected.g), (2, expected.b)] {
+                XCTAssertEqual(got[channel], Int((want * 255).rounded()), accuracy: 4,
+                               "x = \(x), channel \(channel): the ramp's colour at t = \(t) is the Oklab mix")
+            }
+        }
+        let middle = pixel(image, 32, 32)
+        XCTAssertGreaterThan(middle[0], 190, "the middle keeps its red up (Oklab: 208), where sRGB's has dropped to 128")
+        XCTAssertGreaterThan(middle[1], 150, "…and its green (Oklab: 168)")
+    }
+
+    /// The ramp handed to Core Graphics, without drawing it: 257 stops, the Oklab mix at each one, the
+    /// two ends exactly the two colours (the round trip is byte exact), and alpha a straight line
+    /// between the two — which is how the two-stop gradient this replaced treated it.
+    func testTheRampComponentsAreTheOklabMixAtEveryStopAndAlphaIsLinear() {
+        let start = CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1)
+        let end = CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 0.2)
+        let gradient = LinearGradientPaint(start: start, end: end, from: .zero, to: CGPoint(x: 10, y: 0))
+        let ramp = gradient.rampComponents
+        let count = LinearGradientPaint.rampStopCount
+        XCTAssertEqual(ramp.count, count * 4)
+        XCTAssertEqual(LinearGradientPaint.rampLocations.count, count)
+        XCTAssertEqual(LinearGradientPaint.rampLocations.first, 0)
+        XCTAssertEqual(LinearGradientPaint.rampLocations.last, 1)
+
+        func stop(_ i: Int) -> [Double] { ramp[(i * 4)..<(i * 4 + 4)].map(Double.init) }
+        XCTAssertEqual(stop(0)[0], 0.9, accuracy: 1.0 / 255)
+        XCTAssertEqual(stop(0)[2], 0.1, accuracy: 1.0 / 255)
+        XCTAssertEqual(stop(count - 1)[1], 0.3, accuracy: 1.0 / 255)
+        XCTAssertEqual(stop(count - 1)[2], 0.9, accuracy: 1.0 / 255)
+        for i in [1, 64, 128, 200, count - 2] {
+            let t = Double(i) / Double(count - 1)
+            let mix = ColorMath.mixOklab((0.9, 0.2, 0.1), (0.1, 0.3, 0.9), t)
+            XCTAssertEqual(stop(i)[0], mix.r, accuracy: 1e-6, "stop \(i) red")
+            XCTAssertEqual(stop(i)[1], mix.g, accuracy: 1e-6, "stop \(i) green")
+            XCTAssertEqual(stop(i)[2], mix.b, accuracy: 1e-6, "stop \(i) blue")
+            XCTAssertEqual(stop(i)[3], 1 + (0.2 - 1) * t, accuracy: 1e-6, "stop \(i) alpha is linear")
+        }
+        XCTAssertNotEqual(stop(128)[1], (0.2 + 0.3) / 2, accuracy: 0.01,
+                          "the middle is not the straight sRGB average")
     }
 
     /// **The panel's angle turns the ramp, live, and the whole session is one undo step.** 90 degrees
@@ -246,7 +310,12 @@ final class FillObjectLogicTests: XCTestCase {
         let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
         XCTAssertLessThan(pixel(image, 32, 0)[0], 12, "black at the top")
         XCTAssertGreaterThan(pixel(image, 32, side - 1)[0], 243, "white at the bottom")
-        XCTAssertEqual(pixel(image, 4, 20), pixel(image, 60, 20), "constant along a row")
+        // Within one 8-bit step: at 90 degrees `cos` is 6e-17 rather than 0, and with 257 stops a
+        // row's pixel centre can land exactly on a stop, where that is enough to tip a rounding.
+        for channel in 0..<3 {
+            XCTAssertEqual(pixel(image, 4, 20)[channel], pixel(image, 60, 20)[channel], accuracy: 1,
+                           "constant along a row (channel \(channel))")
+        }
         XCTAssertEqual(try XCTUnwrap(manager.editedGradient).angle, .pi / 2, accuracy: 1e-6)
 
         XCTAssertTrue(manager.commitGradientEdit())

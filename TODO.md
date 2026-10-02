@@ -119,12 +119,6 @@ smart shape for the gradient."*
       sizes (gradient: drag sets direction and length; the rail shows a width slider in % of canvas).
 - [ ] Reuses the smart-shape drag geometry rather than a second copy.
 
-## Linear gradient blends in Oklab
-
-**Status** — not started. *"is the linear gradient oklab?"* — it was not (a two-stop sRGB `CGGradient` in
-`VectorLayer`'s `drawGradient`); ruled 2026-10-01: **blend in Oklab**, reusing `ColorMath`'s Oklab — the
-(10a) code the gradient map already uses.
-
 ## (151) Rotation snaps to 15° with a finger down, and shows its angle
 
 **Status** — not started. *"Remember the behaviour where if a user creates a line smartshape and then
