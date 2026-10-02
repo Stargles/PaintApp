@@ -51,27 +51,30 @@ after a reboot the owner opens it from its desktop icon. A stopped streamer read
 
 ## What is left
 
-**The owner's 2026-10-01 brief, (111)–(146), is the queue** — recorded in TODO.md in work order
-(number = 110 + the owner's ask number). **Merged so far (session 46):** (117) (118) (130) the dock and
-playback survive a pan, (143) (142) (137) (141) (138) (144) (111) the small UI asks and their two
-ruled follow-ups, (129) (128) (116) (115) fill-type shapes, the gradient object, Select → Edit, font
-faces, (113) (114) fill mend and extension buffer, plus two defects found on the way (the editor
-stayed squeezed after the keyboard; taps fell through four bottom panels). **Seventeen items remain.**
+**The owner's 2026-10-01 asks, (111)–(152), are the queue** — TODO.md, in work order (111–146 are
+110 + the owner's ask number; 147–152 came in a second message the same day). **Session 46 merged**
+(117) (118) (130) (143) (142) (137) (141) (138) (144) (111) (129) (128) (116) (115) (113) (114) (121)
+(124) (145) (120) (119) (146) (134) (122) (123) (148) (150) (152), every ruled follow-up on them, the
+Oklab gradient, and defects found on the way (three UI reds bisected to this session's merges and
+fixed; the keyboard squeeze; panel touch fall-through). **The owner's iPad has `c8562ca`** (installed
+2026-10-01); everything after it is not on the device yet.
 
-**In flight**: an Opus worker on `tmp/offcanvas` — (121) outside-the-canvas as one input path, then
-(124)+(145) drawing under a transform layer on the same seam. The cap this session is one Opus *or*
-two Sonnet at once, so nothing else runs beside it. **Check `git worktree list` before trusting this.**
+**In flight**: an Opus worker on `tmp/livetransform` — (125)+(136)+(140), one live-preview mechanism
+for transform edits, plus the ruled plain-layer fast picture. The cap is one Opus *or* two Sonnet.
+**Check `git worktree list` before trusting this.**
 
-**Next, in order**: (125)+(136)+(140) one live-preview mechanism for transform edits (Opus); then
-Sonnet lanes — (119) (120) (146), (134) (135), (122) (123), (126) (127) (133), (132), (112); then
-(139) and (131) (both ruled; (131) after (128), which has merged).
+**Next, in order** (fresh Sonnet workers, two at a time — never continue a worker whose context is
+large): the text follow-ups + (147) tap-select; (149) primed Add shapes; (151) 15° rotate snap + angle;
+(135) folder Move all frames / this cel; (126) (127) (133) export and padding; (132) brush ends (recording
+in `~/PaintWork/evidence/`); (112) stream paused; then (139) and (131) (ruled). **Then the full UI suite**
+— not run this session; the taller timeline moved the dock 125 pt and may break tap-by-position tests —
+triaged by a Sonnet worker, and **one** Sonnet audit of the session's whole diff for leftover code,
+duplicated mechanisms and bolted-on fixes (the owner rejected per-item reviewers as too costly).
 
-- **Design notes for (139), (131), (124)** are at `~/PaintWork/design/survey-1001.md` (a read-only
-  survey; the rulings in TODO.md override it). The worker brief every lane reads is
-  `~/PaintWork/brief-common.md`.
-- **Evidence on disk**: `recording-20261001-002122.jsonl` ((132)) and `-002226.jsonl` ((145)) are in
-  `~/PaintWork/evidence/`.
-- **(101) is folded into (112)**.
+- **Design notes for (139), (131)** are at `~/PaintWork/design/survey-1001.md` (rulings in TODO.md
+  override it). The brief every worker reads is `~/PaintWork/brief-common.md`.
+- **Question queued for the owner**: since Scribble is now refused app-wide, should the document title
+  (and layer names) be inline editable fields again instead of tap-to-rename sheets?
 
 **Settled this pass, not to re-ask**: "Fingers Can Paint" is **off** on the owner's iPad (pencil only);
 an effect layer's bar stays up until another layer is selected; the Select menu keeps its one rule line;
