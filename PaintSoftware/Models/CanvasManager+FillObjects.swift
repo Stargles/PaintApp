@@ -67,10 +67,12 @@ extension CanvasManager {
     /// - Returns: whether a shape was laid down.
     @discardableResult
     func addSolidShape(_ shape: SolidShape) -> Bool {
+        let color = brushColor.resolvedUIColor(opacity: brushOpacity)
         guard let rect = defaultShapeRect,
               let surface = drawingSurfaceForNewObject(vectorOnly: false),
-              let landing = layDownSolidFill(shape.path(in: rect),
-                                             color: brushColor.resolvedUIColor(opacity: brushOpacity),
+              let stored = layerSpaceFill(shape.path(in: rect), paint: .solid(CodableColor(color)),
+                                          onLayerAt: surface.layerIndex),
+              let landing = layDownSolidFill(stored.path, color: color,
                                              layerIndex: surface.layerIndex, celIndex: surface.celIndex,
                                              label: shape.label) else { return false }
         if case .element(let id) = landing { raiseMoveBox(onNewElement: id) }
@@ -101,8 +103,10 @@ extension CanvasManager {
     func addGradient() -> Bool {
         guard let artwork = artworkRect,
               let surface = drawingSurfaceForNewObject(vectorOnly: true),
-              let id = placeVectorFill(CGPath(rect: artwork, transform: nil),
-                                       paint: .linearGradient(.spanning(artwork, angle: 0)),
+              let stored = layerSpaceFill(CGPath(rect: artwork, transform: nil),
+                                          paint: .linearGradient(.spanning(artwork, angle: 0)),
+                                          onLayerAt: surface.layerIndex),
+              let id = placeVectorFill(stored.path, paint: stored.paint,
                                        layerIndex: surface.layerIndex, celIndex: surface.celIndex,
                                        label: .addGradient) else { return false }
         return beginGradientEdit(elementID: id)
@@ -124,6 +128,24 @@ extension CanvasManager {
         guard layers.indices.contains(currentLayerIndex),
               let celIndex = ensureCelAtCurrentFrame(layerIndex: currentLayerIndex) else { return nil }
         return (currentLayerIndex, celIndex)
+    }
+
+    /// **What the artist sees laid down, written where the layer will show it** — the geometry of an
+    /// added object, which is made in canvas points (`defaultShapeRect`, `artworkRect`), taken through
+    /// the inverse of the pose its layer is shown through (`inkPose(forLayerID:)`, TODO (124)'s one
+    /// source), path and gradient ends together. Under a transformation layer the object is then
+    /// *shown* centred on the artwork, rather than a pose away from it; on a layer nothing poses it
+    /// is the object unchanged.
+    ///
+    /// A fill element is built only to be carried by `inLayerSpace`, the one mapping every other input
+    /// surface already writes through (a smart shape, text, a stroke), so there is no second map to
+    /// disagree with it. Nil only where a keystone sends a point through its vanishing line.
+    private func layerSpaceFill(_ path: CGPath, paint: FillPaint,
+                                onLayerAt layerIndex: Int) -> (path: CGPath, paint: FillPaint)? {
+        let drawn = VectorElement.fill(VectorFillElement(path: path, paint: paint))
+        guard case .fill(let fill)? = Self.inLayerSpace(drawn, shownThrough: inkPose(forLayerID: layers[layerIndex].id)),
+              let stored = fill.cgPath else { return nil }
+        return (stored, fill.paint)
     }
 
     /// Holds a newly added element in the Move box. **Silent on an in-between**, which is the one

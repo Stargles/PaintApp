@@ -88,7 +88,7 @@ enum SelectionEditKind: Equatable {
     /// carries the same argument for why it *does* re-point one — the hole's shape is visible). It
     /// takes a size and an opacity for that reason: both change the hole. A gradient fill takes no
     /// colour here either: its two colours are edited as a pair in the gradient panel
-    /// (`CanvasManager.editSelectedObject`), and one hue written over both would flatten it. A placed
+    /// (`CanvasManager.editSelectedObject(_:)`), and one hue written over both would flatten it. A placed
     /// image and a video frame take nothing from any of the three — neither has a colour field, a width, or an opacity,
     /// and tinting or fading a photograph is an effect (`Effect`), not a recolour.
     func current(of element: VectorElement) -> SelectionEditValue? {
@@ -185,9 +185,13 @@ struct SelectionStyle: Equatable {
     var sizeIsMixed = false
     var opacity: Double?
     var opacityIsMixed = false
-    /// **The one object the Select panel's Edit entry would open** — the topmost caught element that
-    /// has an editor of its own. Nil when the loop caught none, and the entry is then not offered.
-    var editableObject: EditableObject?
+    /// **The object each of the Select panel's Edit entries would open** — for every kind with an
+    /// editor of its own, the topmost caught element of that kind. A kind the loop caught none of is
+    /// absent, and its entry is then not offered.
+    var editableObjects: [EditableKind: UUID] = [:]
+
+    /// The kinds the loop caught an editable object of, in the order the entries stand in the panel.
+    var editableKinds: [EditableKind] { EditableKind.allCases.filter { editableObjects[$0] != nil } }
 
     /// Nothing to show: no selection, the wrong kind of cel, or a derived frame.
     static let unavailable = SelectionStyle()
@@ -219,10 +223,11 @@ struct SelectionStyle: Equatable {
             return (best, order.count > 1)
         }
         var style = SelectionStyle()
-        // Display order runs bottom to top, so the last match is the one on top — the one the artist
-        // sees, and so the one they meant when a gradient covers a text box or the other way round.
-        style.editableObject = elements.last { caught.contains($0.id) && EditableObject($0) != nil }
-            .flatMap(EditableObject.init)
+        // Display order runs bottom to top, so the last of a kind is the one on top — the one the
+        // artist sees, and so the one they meant when a loop catches two text boxes or two gradients.
+        for element in elements where caught.contains(element.id) {
+            if let kind = EditableKind(element) { style.editableObjects[kind] = element.id }
+        }
         (style.color, style.colorIsMixed) = mode(colours, colourOrder)
         (style.size, style.sizeIsMixed) = mode(sizes, sizeOrder)
         (style.opacity, style.opacityIsMixed) = mode(opacities, opacityOrder)
@@ -240,20 +245,21 @@ struct SelectionStyle: Equatable {
     }
 }
 
-/// **A kind of object that has an editor of its own**, as the Select panel's Edit entry names it.
+/// **A kind of object that has an editor of its own**, as the Select panel's Edit entries name it.
 ///
-/// One entry for every such kind, dispatched by what the object is (`CanvasManager.editSelectedObject`)
-/// — TODO (116)'s Edit Text and TODO (128)'s Edit Gradient are the same control with a different
-/// payload, so the next kind with an editor joins the enum and the entry follows.
-enum EditableObject: Equatable {
-    case text(UUID)
-    case gradient(UUID)
+/// One entry per kind (`CanvasManager.editSelectedObject(_:)`) — TODO (116)'s Edit Text and TODO
+/// (128)'s Edit Gradient — so a loop that catches both offers both, side by side, and the artist
+/// chooses by the button rather than by what happens to be on top. The next kind with an editor joins
+/// the enum and its entry follows.
+enum EditableKind: CaseIterable, Hashable {
+    case text
+    case gradient
 
     /// The element's editable kind, or nil for ink, flat fills and placed pictures.
     init?(_ element: VectorElement) {
         switch element {
-        case .text(let text): self = .text(text.id)
-        case .fill(let fill) where fill.gradient != nil: self = .gradient(fill.id)
+        case .text: self = .text
+        case .fill(let fill) where fill.gradient != nil: self = .gradient
         case .fill, .stroke, .image, .video, .stream: return nil
         }
     }
@@ -271,6 +277,14 @@ enum EditableObject: Equatable {
         switch self {
         case .text: return "Edit Text"
         case .gradient: return "Edit Gradient"
+        }
+    }
+
+    /// The entry's accessibility identifier.
+    var identifier: String {
+        switch self {
+        case .text: return "selectPanel.editTextButton"
+        case .gradient: return "selectPanel.editGradientButton"
         }
     }
 
@@ -612,28 +626,28 @@ extension CanvasManager {
 
 extension CanvasManager {
 
-    /// **The Select panel's Edit entry.** Opens the editor of the object the loop caught — a text
-    /// box's panel with its box on the canvas, or the gradient panel — and leaves the loop where it
-    /// is, since a live selection outlives the tool that made it.
+    /// **The Select panel's Edit entries.** Opens the editor for the `kind` the loop caught — a text
+    /// box's panel with its box on the canvas, or the gradient panel — on the topmost object of that
+    /// kind, and leaves the loop where it is, since a live selection outlives the tool that made it.
     ///
-    /// One function, dispatching on what the object is, so the two kinds cannot grow two doors that
-    /// disagree about what "open it for editing" settles first (`beginEditingText` and
-    /// `beginGradientEdit` both begin by settling whatever was pending).
+    /// One function, dispatching on the kind, so the two cannot grow two doors that disagree about
+    /// what "open it for editing" settles first (`beginEditingText` and `beginGradientEdit` both
+    /// begin by settling whatever was pending).
     ///
-    /// - Returns: the object opened, or nil when the loop caught nothing with an editor — the entry
-    ///   is not offered then, so this is the model refusing in case a view asks anyway.
+    /// - Returns: whether the editor opened. False when the loop caught no object of that kind — the
+    ///   entry is not offered then, so this is the model refusing in case a view asks anyway.
     @discardableResult
-    func editSelectedObject() -> EditableObject? {
-        guard let object = selectionStyle.editableObject else { return nil }
-        switch object {
-        case .text(let id):
+    func editSelectedObject(_ kind: EditableKind) -> Bool {
+        guard let id = selectionStyle.editableObjects[kind] else { return false }
+        switch kind {
+        case .text:
             // Text mode only once the session is open: it is what makes the overlay's box and the
             // panel mean anything, and an object that would not open has no use for either.
-            guard beginEditingText(elementID: id) else { return nil }
+            guard beginEditingText(elementID: id) else { return false }
             enterTextMode()
-            return object
-        case .gradient(let id):
-            return beginGradientEdit(elementID: id) ? object : nil
+            return true
+        case .gradient:
+            return beginGradientEdit(elementID: id)
         }
     }
 }

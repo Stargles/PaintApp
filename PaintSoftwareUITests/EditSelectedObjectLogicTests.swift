@@ -8,10 +8,11 @@ import UIKit
 /// real time. It also should bring up the move box for that text where I can move it"* and *"if a
 /// gradient is selected, there should be an edit gradient button like the edit text button."*
 ///
-/// What these pin is the dispatch and what each arm opens: which object the loop's catch resolves to
-/// (`SelectionStyle.editableObject`), that `editSelectedObject()` opens the text session on *that*
-/// object with the tool and the box a re-opened text has, or the gradient session on that gradient,
-/// and that the loop survives. `EditSelectedObjectUITests` drives the same thing off the screen.
+/// What these pin is the dispatch and what each arm opens: which objects the loop's catch resolves to
+/// (`SelectionStyle.editableObjects`, one per kind), that `editSelectedObject(_:)` opens the text
+/// session on the caught box with the tool and the box a re-opened text has, or the gradient session on
+/// the caught gradient, and that the loop survives. `EditSelectedObjectUITests` drives the same thing
+/// off the screen.
 @MainActor
 final class EditSelectedObjectLogicTests: XCTestCase {
 
@@ -56,30 +57,30 @@ final class EditSelectedObjectLogicTests: XCTestCase {
 
     // MARK: - What the loop catches
 
-    /// **Text caught by the loop is the editable object**, and the entry is titled for it.
+    /// **Text caught by the loop is an editable object**, and its entry is titled for it.
     func testALoopAroundATextBoxOffersEditText() throws {
         let (manager, layerIndex, vector) = vectorFixture()
         let text = textElement("Hello")
         vector.upsertText(text)
         select(manager, layerIndex, everything)
 
-        let object = try XCTUnwrap(manager.selectionStyle.editableObject)
-        XCTAssertEqual(object, .text(text.id))
-        XCTAssertEqual(object.title, "Edit Text")
-        XCTAssertEqual(object.panel, .text, "the text panel is the one it raises")
+        XCTAssertEqual(manager.selectionStyle.editableKinds, [.text])
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.text], text.id)
+        XCTAssertEqual(EditableKind.text.title, "Edit Text")
+        XCTAssertEqual(EditableKind.text.panel, .text, "the text panel is the one it raises")
     }
 
-    /// And a gradient caught by the loop offers Edit Gradient — the same control, titled for what it
-    /// will open, raising no `ActivePanel` (its card is keyed on the session).
+    /// And a gradient caught by the loop offers Edit Gradient — titled for what it will open, raising
+    /// no `ActivePanel` (its card is keyed on the session).
     func testALoopAroundAGradientOffersEditGradient() throws {
         let (manager, layerIndex, vector) = vectorFixture()
         let id = gradientFill(vector)
         select(manager, layerIndex, everything)
 
-        let object = try XCTUnwrap(manager.selectionStyle.editableObject)
-        XCTAssertEqual(object, .gradient(id))
-        XCTAssertEqual(object.title, "Edit Gradient")
-        XCTAssertEqual(object.panel, .none)
+        XCTAssertEqual(manager.selectionStyle.editableKinds, [.gradient])
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.gradient], id)
+        XCTAssertEqual(EditableKind.gradient.title, "Edit Gradient")
+        XCTAssertEqual(EditableKind.gradient.panel, .none)
     }
 
     /// **Ink, flat fills and nothing at all offer no Edit entry** — it is not a button that does
@@ -91,29 +92,67 @@ final class EditSelectedObjectLogicTests: XCTestCase {
                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
         select(manager, layerIndex, everything)
 
-        XCTAssertNil(manager.selectionStyle.editableObject, "strokes and flat fills have no editor of their own")
-        XCTAssertNil(manager.editSelectedObject(), "…and the model refuses if a view asks anyway")
+        XCTAssertTrue(manager.selectionStyle.editableKinds.isEmpty, "strokes and flat fills have no editor of their own")
+        for kind in EditableKind.allCases {
+            XCTAssertFalse(manager.editSelectedObject(kind), "…and the model refuses \(kind) if a view asks anyway")
+        }
         XCTAssertNotEqual(manager.selectedTool, .text, "a refusal leaves the tool alone")
         XCTAssertNil(manager.gradientEdit)
     }
 
-    /// **The topmost editable object wins** — the one the artist can see. A text box over a gradient
-    /// is Edit Text; a gradient painted over a text box is Edit Gradient.
-    func testTheTopmostEditableObjectIsTheOneOffered() throws {
+    /// **A loop that catches both offers both, in a fixed order, whichever is on top** — one button
+    /// each (the owner, 2026-10-01), so the entries do not swap places when the stacking does.
+    func testALoopAroundATextBoxAndAGradientOffersBothEntries() throws {
         let (manager, layerIndex, vector) = vectorFixture()
         let gradient = gradientFill(vector)
         let text = textElement("On top")
         vector.upsertText(text)
         select(manager, layerIndex, everything)
-        XCTAssertEqual(manager.selectionStyle.editableObject, .text(text.id), "text above the gradient")
+        XCTAssertEqual(manager.selectionStyle.editableKinds, [.text, .gradient], "text above the gradient")
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.text], text.id)
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.gradient], gradient)
 
         let (manager2, layerIndex2, vector2) = vectorFixture()
         let under = textElement("Underneath")
         vector2.upsertText(under)
         let over = gradientFill(vector2)
         select(manager2, layerIndex2, everything)
-        XCTAssertEqual(manager2.selectionStyle.editableObject, .gradient(over), "gradient above the text")
-        XCTAssertNotEqual(over, gradient)
+        XCTAssertEqual(manager2.selectionStyle.editableKinds, [.text, .gradient], "gradient above the text")
+        XCTAssertEqual(manager2.selectionStyle.editableObjects[.text], under.id)
+        XCTAssertEqual(manager2.selectionStyle.editableObjects[.gradient], over)
+    }
+
+    /// **Each entry opens its own editor on its own object, whatever else the loop caught.** The
+    /// gradient is on top, so a topmost-wins entry would have opened it for both.
+    func testEachEntryOpensItsOwnKindWhateverIsOnTop() throws {
+        let (manager, layerIndex, vector) = vectorFixture()
+        let text = textElement("Underneath")
+        vector.upsertText(text)
+        let gradient = gradientFill(vector)
+        select(manager, layerIndex, everything)
+
+        XCTAssertTrue(manager.editSelectedObject(.text))
+        XCTAssertEqual(manager.textEditingElementID, text.id, "Edit Text opened the text, not the gradient above it")
+        XCTAssertNil(manager.gradientEdit)
+
+        XCTAssertTrue(manager.editSelectedObject(.gradient))
+        XCTAssertEqual(manager.gradientEdit?.elementID, gradient)
+        XCTAssertNotNil(manager.selection, "the loop stays through both")
+    }
+
+    /// **Two of a kind: the entry opens the topmost of that kind** — the one the artist can see.
+    func testTwoTextBoxesOfferOneEditTextOnTheTopmost() throws {
+        let (manager, layerIndex, vector) = vectorFixture()
+        let lower = textElement("Lower", at: CGPoint(x: 10, y: 10))
+        let upper = textElement("Upper", at: CGPoint(x: 10, y: 40))
+        vector.upsertText(lower)
+        vector.upsertText(upper)
+        select(manager, layerIndex, everything)
+
+        XCTAssertEqual(manager.selectionStyle.editableKinds, [.text], "one entry for the kind, not one per box")
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.text], upper.id)
+        XCTAssertTrue(manager.editSelectedObject(.text))
+        XCTAssertEqual(manager.textEditingElementID, upper.id)
     }
 
     // MARK: - Edit Text
@@ -128,7 +167,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         select(manager, layerIndex, everything)
         let undoDepth = manager.history.undoStack.count
 
-        XCTAssertEqual(manager.editSelectedObject(), .text(text.id))
+        XCTAssertTrue(manager.editSelectedObject(.text))
 
         XCTAssertEqual(manager.selectedTool, .text, "the text tool, whose overlay is the box with its grips")
         XCTAssertTrue(manager.textGestureActive, "a live text session")
@@ -147,7 +186,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         let text = textElement("Hello")
         vector.upsertText(text)
         select(manager, layerIndex, everything)
-        XCTAssertNotNil(manager.editSelectedObject())
+        XCTAssertTrue(manager.editSelectedObject(.text))
         let undoDepth = manager.history.undoStack.count
 
         manager.updateTextString("Hello there")
@@ -174,7 +213,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         select(manager, layerIndex, everything)
         let tool = manager.selectedTool
 
-        XCTAssertEqual(manager.editSelectedObject(), .gradient(id))
+        XCTAssertTrue(manager.editSelectedObject(.gradient))
 
         XCTAssertEqual(manager.gradientEdit?.elementID, id)
         XCTAssertEqual(manager.selectedTool, tool, "the tool is not changed")
@@ -192,7 +231,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = vectorFixture()
         let id = gradientFill(vector)
         select(manager, layerIndex, everything)
-        manager.editSelectedObject()
+        manager.editSelectedObject(.gradient)
         manager.setGradientAngle(.pi / 2)
         XCTAssertTrue(manager.hasInteractiveStatePending, "an open gradient holds the autosave off")
 
@@ -221,7 +260,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = vectorFixture()
         gradientFill(vector)
         select(manager, layerIndex, everything)
-        manager.editSelectedObject()
+        manager.editSelectedObject(.gradient)
         manager.setGradientAngle(.pi)
         XCTAssertTrue(manager.canUndo, "the open edit is itself undoable")
         XCTAssertFalse(manager.canRedo)

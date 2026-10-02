@@ -83,23 +83,6 @@ the owner left the order to us. Every entry is the owner's words, then what is l
       instant picture draws the active layer plain (no blend mode, effect or mask), and the exact
       bake replaces it when it lands.
 
-## (116)/(128) follow-up: one Edit button per object kind
-
-**Status** — not started. Select → Edit (`d1dd0dd`, `EditableObject` / `editSelectedObject()`) opens the
-topmost object when a loop catches both a text box and a gradient. The owner, 2026-10-01: **one button
-each** — "Edit Text" and "Edit Gradient" side by side, each opening its own panel.
-
-- [ ] The Select panel lists one Edit button per editable kind the loop caught.
-
-## (124) follow-up: Add-menu fill objects and the wand under a transform layer
-
-**Status** — not started. Found by the worker that finished (124)'s raster arm (`4332a17`): two input
-paths still ignore the pose a layer is shown through (`CanvasManager.inkPose(forLayerID:)`, the one
-source) — **Add → Rectangle / Ellipse / Linear Gradient** (`CanvasManager+FillObjects`) lay their paths
-down unmapped, and **the magic wand on a vector layer** samples the unposed picture.
-
-- [ ] Both read through `inkPose` / `layerSpacePath` like every other input; a cold-start UI test each.
-
 ## The owner's second 2026-10-01 message — (147)–(152) and three follow-ups
 
 Sent while trying the `c8562ca` build. New asks continue the numbering at (147); fixes to items that

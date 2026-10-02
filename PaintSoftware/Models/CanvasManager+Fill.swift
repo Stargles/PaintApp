@@ -683,7 +683,10 @@ extension CanvasManager {
     /// top, into `Cel.raster`, the tier the eraser stamps. One undo step either way.
     ///
     /// - Parameters:
-    ///   - path: in canvas space, like every on-screen path.
+    ///   - path: **in the layer's own space** — where a raster cel's pixels and a vector cel's stored
+    ///     geometry are — so a loop is pulled back through `layerSpacePath` and an added object's
+    ///     geometry through `layerSpaceFill` before it arrives, and what lands is shown where it was
+    ///     made under whatever poses the layer (TODO (124)).
     ///   - color: already resolved against the brush opacity, as the fill tool resolves its own.
     /// - Returns: nil when the cel is gone.
     @discardableResult
@@ -721,9 +724,10 @@ extension CanvasManager {
     /// A vector layer's cel with no canvas gets an empty one rather than the fill landing in a tier
     /// the layer never draws.
     ///
+    /// - Parameter path: in the layer's own space — see `layDownSolidFill`.
     /// - Returns: the new element's id, or nil when the cel is gone.
     @discardableResult
-    func placeVectorFill(_ canvasPath: CGPath, paint: FillPaint, layerIndex: Int, celIndex: Int,
+    func placeVectorFill(_ path: CGPath, paint: FillPaint, layerIndex: Int, celIndex: Int,
                          label: HistoryActionLabel) -> UUID? {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex)
         else { return nil }
@@ -734,9 +738,9 @@ extension CanvasManager {
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         let elementsBefore = vectorCanvas.elements
-        // The path is canvas space — the mask is measured against the *rendered* canvas, a lasso and a
-        // shape against the screen — so this overload maps it back through the layer's transform.
-        let added = vectorCanvas.addFill(canvasSpacePath: canvasPath, paint: paint)
+        // The path is in the layer's own space; `addFill(canvasSpacePath:)` takes it the rest of the way
+        // in through the cel's own `transform`.
+        let added = vectorCanvas.addFill(canvasSpacePath: path, paint: paint)
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                    newElements: vectorCanvas.elements,
                                    layerID: layerID, celID: celID, label: label,

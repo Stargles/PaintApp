@@ -247,4 +247,106 @@ final class InkUnderTransformUITests: PaintUITestCase {
         XCTAssertTrue(inkColumns(probe, paper, row: 0.6, span: 0.81...0.89).isEmpty,
                       "the Move layer carried the dropped piece a second fifth of the paper right")
     }
+
+    // MARK: - The Add menu's objects and the wand, under the same Move layer
+
+    /// Add menu → `row`, then the new object's own chrome out of the way: a vector layer's rectangle
+    /// arrives held in the Move box (Done puts it down), a gradient arrives with its card up (Done
+    /// closes it) — `done` names the button either of them has.
+    private func addFromTheAddMenu(_ app: XCUIApplication, row: String, done: String) {
+        app.buttons["toolbar.addButton"].tap()
+        let button = app.buttons[row]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "the Add menu lists \(row)")
+        button.tap()
+        let finish = app.buttons[done]
+        XCTAssertTrue(finish.waitForExistence(timeout: 5), "\(row) raised its own chrome (\(done))")
+        finish.tap()
+        XCTAssertTrue(finish.waitForNonExistence(timeout: 5), "\(done) put the chrome away")
+    }
+
+    /// **Add → Rectangle under a moved transformation layer appears centred where the artwork is
+    /// shown** — TODO (124)'s follow-up for the Add menu. The Move layer carries what is stored on the
+    /// drawing layer a fifth of the paper right, so a rectangle stored at the artwork's centre would be
+    /// shown over 0.4–1.0 of the paper; written through the pose's inverse it is shown over 0.2–0.8,
+    /// the 60% square centred on the paper the artist is looking at.
+    func testAddRectangleUnderAMovedTransformLayerIsCentredOnTheShownArtwork() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        try moveATransformLayerAboveTheDrawing(app, canvas)
+
+        addFromTheAddMenu(app, row: "add.rectangleRow", done: "moveBar.doneButton")
+
+        let paper = paperRect(in: canvas)
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
+                                                            width: paper.width, height: paper.height * 0.2))
+        attach(canvas, "rectangle-added-under-the-moved-transform-layer")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.22...0.78).count, 330,
+                             "the rectangle is not solid across the centred square the artwork shows")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.17).isEmpty,
+                      "ink left of the centred square")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.84...0.96).isEmpty,
+                      "the Move layer carried the rectangle a fifth of the paper right of the centre it was added at")
+    }
+
+    /// **Add → Linear Gradient the same**: it covers the artwork *as shown*, so the dark end of the
+    /// ramp is at the left edge of the paper and the light end at the right. Stored unmapped, the Move
+    /// layer would show the paper's left fifth bare and the ramp 0.2 of the paper too far along.
+    func testAddLinearGradientUnderAMovedTransformLayerCoversTheShownArtwork() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        try moveATransformLayerAboveTheDrawing(app, canvas)
+
+        addFromTheAddMenu(app, row: "add.linearGradientRow", done: "gradientPanel.doneButton")
+
+        let paper = paperRect(in: canvas)
+        func red(_ x: Double, _ y: Double) -> Int {
+            Int(rgbaPixel(of: canvas, dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)?.r ?? 255)
+        }
+        attach(canvas, "gradient-added-under-the-moved-transform-layer")
+        XCTAssertLessThan(red(0.04, 0.2), 60, "the left edge of the shown artwork is not the dark end of the ramp")
+        XCTAssertGreaterThan(red(0.96, 0.2), 200, "the right edge of the shown artwork is not the light end")
+        let mid = red(0.5, 0.2)
+        XCTAssertTrue((100...160).contains(mid), "the middle of the shown artwork is not the middle of the ramp (red \(mid))")
+    }
+
+    /// **The wand on a vector layer selects the ink the artist tapped.** Two marks drawn on the
+    /// drawing layer — the one under the tap and a bystander above it — both carried a fifth of the
+    /// paper right by the Move layer. A tap with the wand on the first, *where it is shown*, then
+    /// Clear: that mark is gone and the bystander is not. Read against the unmoved picture the tap
+    /// lands on paper, the wand selects all of it, and Clear takes the bystander too.
+    func testTheMagicWandOnAVectorLayerUnderAMovedTransformLayerSelectsTheTappedInk() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let bystander = paperRect(in: canvas)
+        dragOnCanvas(app, from: onHost(bystander, 0.2, 0.3), to: onHost(bystander, 0.3, 0.3))
+        try moveATransformLayerAboveTheDrawing(app, canvas)   // draws the tapped mark at row 0.6 first
+
+        let paper = paperRect(in: canvas)
+        app.buttons["toolbar.selectButton"].tap()
+        let wand = app.buttons["selectPanel.mode.automatic"]
+        XCTAssertTrue(wand.waitForExistence(timeout: 5), "the Select panel offers the wand")
+        wand.tap()
+        let clear = app.buttons["selectPanel.clearButton"]
+        XCTAssertFalse(clear.isEnabled, "PREMISE: nothing is selected before the tap")
+        canvas.coordinate(withNormalizedOffset: onHost(paper, 0.45, 0.6)).tap()
+        let deadline = Date().addingTimeInterval(5)
+        while !clear.isEnabled, Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        XCTAssertTrue(clear.isEnabled, "the tap on the shown mark selected nothing")
+        attach(canvas, "wand-on-the-shown-mark")
+
+        clear.tap()
+        let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.2,
+                                                            width: paper.width, height: paper.height * 0.5))
+        attach(canvas, "after-clearing-the-wanded-mark")
+        XCTAssertTrue(inkColumns(probe, paper, row: 0.6, span: 0.41...0.49).isEmpty,
+                      "the mark that was tapped is still on the canvas — the wand selected something else")
+        XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.3, span: 0.41...0.49).count, 100,
+                             "the bystander mark went with it — the wand took more than the tapped mark")
+    }
 }

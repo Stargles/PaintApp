@@ -398,4 +398,82 @@ final class InkPoseLogicTests: XCTestCase {
         XCTAssertEqual(bounds.minX, 100, accuracy: 1.5, "the selection is not where the square is shown")
         XCTAssertEqual(bounds.width, 40, accuracy: 1.5)
     }
+
+    // MARK: - The Add menu's objects and the wand on a vector layer
+
+    private let slide80 = CGAffineTransform(translationX: 80, y: 0)
+
+    /// **Add → Rectangle on a vector layer is shown centred on the artwork.** The default rectangle is
+    /// made in canvas points, so it is written through the pose's inverse like every other input —
+    /// without it the stored square is centred and the Move layer then shows it 80 points right.
+    func testAnAddedRectangleOnAVectorLayerUnderAMoveLayerIsShownCentredOnTheArtwork() throws {
+        let fx = layerUnderMove(slide80)
+        XCTAssertTrue(fx.manager.addSolidShape(.rectangle))
+        let stored = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.elements.last, "no shape was laid down")
+        let onScreen = try XCTUnwrap(shown(stored, in: fx.manager, layer: fx.ink).fill?.cgPath).boundingBoxOfPath
+        let expected = try XCTUnwrap(fx.manager.defaultShapeRect)
+        XCTAssertEqual(onScreen.midX, expected.midX, accuracy: 1, "the rectangle is shown a pose away from the artwork's centre")
+        XCTAssertEqual(onScreen.midY, expected.midY, accuracy: 1)
+        XCTAssertEqual(onScreen.width, expected.width, accuracy: 1, "…and at the size it was laid down")
+    }
+
+    /// **The same on a pixel layer**, where the shape is painted into the cel's own pixels: stored 80
+    /// points left of the artwork's centre, which is where the Move layer carries it back from.
+    func testAnAddedEllipseOnARasterLayerUnderAMoveLayerIsPaintedWhereItIsShown() throws {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.size
+        manager.addLayer(name: "ink")
+        manager.addTransformLayer(name: "move")
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(box: Self.box, mappedBy: slide80), mode: .move)
+        manager.currentLayerIndex = 0
+        manager.brushColor = Color(.sRGB, red: 0, green: 0, blue: 0, opacity: 1)
+        manager.brushOpacity = 1
+
+        XCTAssertTrue(manager.addSolidShape(.ellipse))
+
+        XCTAssertTrue(storedInk(manager, 128 - 80, 128), "the ellipse was not painted where the Move layer shows it centred")
+        XCTAssertFalse(storedInk(manager, 128, 128), "the ellipse was painted at the artwork's own centre, a pose away")
+    }
+
+    /// **A gradient is carried whole**: the path *and* the two ends of its ramp go through the pose's
+    /// inverse, so shown it still spans the artwork edge to edge — under a slide, a turn and a scale
+    /// at once, where a path mapped alone would leave the ramp a pose away from its own shape.
+    func testAnAddedGradientUnderAMoveLayerIsShownSpanningTheArtworkWithItsRampIntact() throws {
+        let fx = layerUnderMove(CGAffineTransform(translationX: 30, y: 10).rotated(by: 0.3).scaledBy(x: 1.4, y: 1.4))
+        XCTAssertTrue(fx.manager.addGradient())
+        let stored = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.elements.last, "no gradient was laid down")
+        let onScreen = try XCTUnwrap(shown(stored, in: fx.manager, layer: fx.ink).fill)
+        let artwork = try XCTUnwrap(fx.manager.artworkRect)
+        let box = try XCTUnwrap(onScreen.cgPath).boundingBoxOfPath
+        XCTAssertEqual(box.minX, artwork.minX, accuracy: 1, "the gradient is not shown over the artwork")
+        XCTAssertEqual(box.width, artwork.width, accuracy: 1)
+        XCTAssertEqual(box.height, artwork.height, accuracy: 1)
+        let ramp = try XCTUnwrap(onScreen.gradient)
+        let wanted = LinearGradientPaint.spanning(artwork, angle: 0)
+        assertSame(ramp.from, wanted.from, "the ramp starts away from where it was laid down")
+        assertSame(ramp.to, wanted.to, "the ramp ends away from where it was laid down")
+    }
+
+    /// **The wand on a vector layer reads the picture the Move layer shows.** Two strokes stored on
+    /// the left and carried 80 points right; a tap on the first *where it is shown* selects that
+    /// stroke's shape. Read against the picture before the Move layer carried it, the tap lands on
+    /// paper and the wand selects all of that.
+    func testTheMagicWandOnAVectorLayerUnderAMoveLayerSelectsTheShownStroke() throws {
+        let fx = layerUnderMove(slide80)
+        let vector = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector)
+        for y: CGFloat in [100, 30] {
+            vector.addStroke(VectorStroke(brush: BrushLibrary.roundHard,
+                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 8,
+                                          opacity: 1, samples: StrokeSamples(points: [CGPoint(x: 30, y: y),
+                                                                                      CGPoint(x: 70, y: y)])))
+        }
+
+        fx.manager.finishAutomaticSelection(at: CGPoint(x: 130, y: 100))
+
+        let bounds = try XCTUnwrap(fx.manager.selection?.bounds, "the wand selected nothing")
+        XCTAssertEqual(bounds.minX, 106, accuracy: 3, "the selection is not where the stroke is shown")
+        XCTAssertEqual(bounds.maxX, 154, accuracy: 3)
+        XCTAssertEqual(bounds.height, 8, accuracy: 3, "the wand took the paper around the stroke, not the stroke")
+    }
 }

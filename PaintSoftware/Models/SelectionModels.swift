@@ -815,9 +815,18 @@ extension CanvasManager {
         // in-between outright (`TopToolbar.toggleMove`, `activeVectorMoveTarget`), and recolour and
         // clear take their vector arm on a vector layer, so none of the four can reach one today;
         // divorcing them properly is VECTOR_INTERPOLATION item 26, not this seam.
+        //
+        // **And what the artist can see includes the pose the layer is shown through** (TODO (124)):
+        // a pixel layer's tiers are resampled through it (`pose`) and a vector layer's ink is *re-posed*
+        // by the derivation, which has to be handed the container pose above it (`inheriting`) or it
+        // draws the ink at rest — the two currencies the compositor itself draws a leaf in
+        // (`RenderRequest.leafSnapshots`). Without them the tap is read against the picture before the
+        // Move layer carried it, and selects whatever is stored under the finger.
         let cel = layers[currentLayerIndex].cels[celIndex]
-        let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                       derived: derivedCelContent(for: cel, atFrame: currentFrame),
+        let derived = derivedCelContent(for: cel, atFrame: currentFrame,
+                                        inheriting: containerPose(ofLayerAt: currentLayerIndex,
+                                                                  atFrame: currentFrame))
+        let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived,
                                        pose: inkPose(forLayerID: layers[currentLayerIndex].id))
         guard let path = PixelOps.floodFillMask(image: image, point: point, tolerance: magicWandTolerance) else { return }
         finishSelection(path: path)

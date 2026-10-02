@@ -224,13 +224,14 @@ final class FillObjectUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        XCTAssertFalse(app.buttons["selectPanel.editObjectButton"].exists,
+        XCTAssertFalse(app.buttons["selectPanel.editGradientButton"].exists,
                        "with nothing selected there is no object to edit")
         dragOnCanvas(app, from: paperPoint(canvas, 0.2, 0.2), to: paperPoint(canvas, 0.8, 0.6))
 
-        let edit = app.buttons["selectPanel.editObjectButton"]
+        let edit = app.buttons["selectPanel.editGradientButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "a loop over the gradient offers an Edit entry")
         XCTAssertEqual(edit.label, "Edit Gradient", "titled for what it will open")
+        XCTAssertFalse(app.buttons["selectPanel.editTextButton"].exists, "the loop caught no text box, so no Edit Text")
         attach(app, "select-offers-edit-gradient")
         edit.tap()
 

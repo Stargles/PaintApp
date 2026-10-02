@@ -126,12 +126,13 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         attach(app, "words-placed")
 
         // A loop around the words: Edit Text is offered, titled for it.
-        XCTAssertFalse(app.buttons["selectPanel.editObjectButton"].exists, "nothing is selected yet")
+        XCTAssertFalse(app.buttons["selectPanel.editTextButton"].exists, "nothing is selected yet")
         drag(app, from: CGPoint(x: before.topLeft.x - 0.05 * host.width, y: before.topLeft.y - 0.04 * host.height),
              to: CGPoint(x: before.topLeft.x + 0.38 * host.width, y: before.topLeft.y + 0.10 * host.height))
-        let edit = app.buttons["selectPanel.editObjectButton"]
+        let edit = app.buttons["selectPanel.editTextButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "a loop around the words offers an Edit entry")
         XCTAssertEqual(edit.label, "Edit Text", "titled for what it will open")
+        XCTAssertFalse(app.buttons["selectPanel.editGradientButton"].exists, "the loop caught no gradient, so no Edit Gradient")
         attach(app, "select-offers-edit-text")
 
         // 3. Edit Text: the text panel, and the box with its grips on the canvas.
@@ -139,7 +140,7 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "Edit Text brings up the text panel")
         XCTAssertTrue(waitForTextState(app, "box", "editing"),
                       "…and the box is on the canvas, a live session on those words (text:\(readTextState(app)))")
-        XCTAssertFalse(app.buttons["selectPanel.editObjectButton"].exists, "the Select panel stood aside")
+        XCTAssertFalse(app.buttons["selectPanel.editTextButton"].exists, "the Select panel stood aside")
         attach(app, "edit-text-box-and-panel")
 
         // 4. Change it live: the size slider enlarges the words under the finger.
@@ -173,5 +174,85 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         XCTAssertEqual(final.topLeft.x, moved.topLeft.x, accuracy: 8, "committed where it was moved to")
         XCTAssertEqual(final.topLeft.y, moved.topLeft.y, accuracy: 8)
         XCTAssertGreaterThan(Double(final.ink), Double(before.ink) * 1.3, "…and at the size it was changed to")
+    }
+
+    /// **One button per kind, from a fresh document** — the owner, 2026-10-01: a loop that catches a
+    /// text box and a gradient offers *"Edit Text" and "Edit Gradient" side by side, each opening its
+    /// own panel.* A gradient over the artwork, words on top of it, a loop round the words: both
+    /// buttons are in the Select panel, Edit Gradient opens the gradient's card and not the text
+    /// panel (the words are on top, which is what a topmost-wins entry would have opened), and — with
+    /// the loop still up — Edit Text opens the words' panel with their box on the canvas.
+    func testALoopRoundTextOverAGradientOffersEditTextAndEditGradientEachOpeningItsOwnPanel() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+
+        // 1. The gradient: Add → Linear Gradient, then Done.
+        app.buttons["toolbar.addButton"].tap()
+        let gradientRow = app.buttons["add.linearGradientRow"]
+        XCTAssertTrue(gradientRow.waitForExistence(timeout: 5))
+        gradientRow.tap()
+        let gradientDone = app.buttons["gradientPanel.doneButton"]
+        XCTAssertTrue(gradientDone.waitForExistence(timeout: 5), "PREMISE: the gradient's card is up")
+        gradientDone.tap()
+        XCTAssertTrue(gradientDone.waitForNonExistence(timeout: 5), "PREMISE: …and closed")
+
+        // 2. The words, on top of it: Add → Add Text, tap, type, brush.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5))
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
+        let boxTopLeft = CGPoint(x: host.minX + 0.55 * host.width, y: host.minY + 0.30 * host.height)
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.30)).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
+        typeIntoTextBox("Hello", app, at: CGPoint(x: boxTopLeft.x + 0.01 * host.width, y: boxTopLeft.y + 0.01 * host.height))
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down (text:\(readTextState(app)))")
+        waitForTheLayoutToSettle(app, canvas, restoring: host)
+
+        // 3. Select → Rectangle, a loop round the words — which the gradient under them is under too.
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        XCTAssertFalse(app.buttons["selectPanel.editTextButton"].exists, "nothing is selected yet")
+        XCTAssertFalse(app.buttons["selectPanel.editGradientButton"].exists, "…so neither entry is offered")
+        drag(app, from: CGPoint(x: boxTopLeft.x - 0.05 * host.width, y: boxTopLeft.y - 0.04 * host.height),
+             to: CGPoint(x: boxTopLeft.x + 0.38 * host.width, y: boxTopLeft.y + 0.10 * host.height))
+
+        // 4. Both entries, side by side, each titled for what it opens.
+        let editText = app.buttons["selectPanel.editTextButton"]
+        let editGradient = app.buttons["selectPanel.editGradientButton"]
+        XCTAssertTrue(editText.waitForExistence(timeout: 5), "the loop caught the words, so Edit Text is offered")
+        XCTAssertTrue(editGradient.exists, "…and the gradient under them, so Edit Gradient is offered beside it")
+        XCTAssertEqual(editText.label, "Edit Text")
+        XCTAssertEqual(editGradient.label, "Edit Gradient")
+        XCTAssertLessThan(editText.frame.minX, editGradient.frame.minX, "Text first, then Gradient — a fixed order")
+        XCTAssertEqual(editText.frame.midY, editGradient.frame.midY, accuracy: 2, "side by side in one row")
+        attach(app, "select-offers-both-edit-entries")
+
+        // 5. Edit Gradient opens the gradient's own card on the gradient — not the words' panel.
+        editGradient.tap()
+        let angle = app.sliders["gradientPanel.angleSlider"]
+        XCTAssertTrue(angle.waitForExistence(timeout: 5), "Edit Gradient opens the gradient panel")
+        XCTAssertEqual(angle.value as? String, "0", "on the gradient that was caught")
+        XCTAssertFalse(app.buttons["textPanel.fontButton"].exists, "…and not the text panel, though the words are on top")
+        XCTAssertTrue(waitForTextState(app, "none"), "no text session was opened (text:\(readTextState(app)))")
+        attach(app, "edit-gradient-opened")
+        app.buttons["gradientPanel.doneButton"].tap()
+        XCTAssertTrue(angle.waitForNonExistence(timeout: 5))
+
+        // 6. The loop is still up. Back to Select, and Edit Text opens the words' panel and box.
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(editText.waitForExistence(timeout: 5), "the loop outlived the gradient's card")
+        editText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "Edit Text brings up the text panel")
+        XCTAssertTrue(waitForTextState(app, "box", "editing"),
+                      "…with a live session on the words (text:\(readTextState(app)))")
+        XCTAssertFalse(app.sliders["gradientPanel.angleSlider"].exists, "…and not the gradient's card")
+        attach(app, "edit-text-opened")
     }
 }

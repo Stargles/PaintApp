@@ -13,8 +13,9 @@ toolset, and a frame-by-frame animation timeline.
 - **Fill**: GPU (Metal) colour-based flood fill with adjustable threshold/gap-closing/edge-overlap,
   live drag-to-adjust before committing, and per-layer "fill reference" boundaries
 - **Select & Move**: lasso/rectangle/automatic (magic wand) selection, move/duplicate with
-  resize/rotate/mirror, and a selection-clipped paint/fill mode. A loop around a text box or a
-  gradient offers **Edit Text** / **Edit Gradient**, which opens that object's own panel live
+  resize/rotate/mirror, and a selection-clipped paint/fill mode. A loop around a text box and/or a
+  gradient offers **Edit Text** and **Edit Gradient**, one button per kind caught, each opening that
+  object's own panel live
 - **Layers**: three kinds — **raster** and **vector** hold pixels, and a **value** layer holds none.
   Plus opacity, visibility, fill-reference toggle, object (photo) layers with on-canvas transform
   handles, and groups that composite as parentheses — isolated or pass-through, with their own
