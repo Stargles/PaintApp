@@ -1779,8 +1779,10 @@ struct CanvasView: UIViewRepresentable {
             // hold after the finger lifts is the same wait reached by a move (TODO 125).
             let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
                 ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
-            // A live stream is drawn by its host, which only a live presentation has (TODO (112)).
-            let streamIsLive = !canvasManager.liveStreamLayerIndices().isEmpty
+            // A stream the laptop is still sending to is drawn by its host, which only a live
+            // presentation has (TODO (112)); once it has been still the bake is exact, and an edit's
+            // rule applies.
+            let streamIsMoving = canvasManager.liveStreamIsMoving()
             var holdsBandsOfThisFrame = false
             if case .aroundRuns? = livePicture?.cut, livePicture?.frame == canvasManager.currentFrame {
                 holdsBandsOfThisFrame = true
@@ -1790,7 +1792,7 @@ struct CanvasView: UIViewRepresentable {
                 transformEditIsLive: edit != nil,
                 bakeIsCurrent: sandwichFullKey == key,
                 livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) }, key: key, cut: cut),
-                holdsBandsOfThisFrame: holdsBandsOfThisFrame, streamIsLive: streamIsLive)
+                holdsBandsOfThisFrame: holdsBandsOfThisFrame, streamIsMoving: streamIsMoving)
             let live = presentation.activeHostDrawsItself
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour

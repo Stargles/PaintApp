@@ -56,15 +56,10 @@ the owner left the order to us. Every entry is the owner's words, then what is l
 
 ---
 
-## Rulings of 2026-10-02 on merged work — five follow-ups
+## Rulings of 2026-10-02 on merged work — four follow-ups
 
 **Status** — not started. Each is the owner's answer to a question a merged item left open.
 
-- **Stream: live, then exact when still** ((112), `f84776f`). A live stream on a compositor canvas now
-  shows the layers around it plain; the owner chose *"Live, then exact when still"* — while the laptop
-  screen moves the stream is live and plain, and once it has been still for a moment the exact
-  (effected) picture replaces it. **A posed stream stays held**, and *"no need to explain"* — delete the
-  bar's `StreamPictureNote.heldByAPose` note.
 - **Inline renaming.** Scribble is refused app-wide since (148), so the tap-to-rename sheet / alert for
   the document title and for layer (and folder) names goes whole; both are edited inline where they are
   shown.

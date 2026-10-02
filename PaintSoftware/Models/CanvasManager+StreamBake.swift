@@ -69,9 +69,9 @@ extension CanvasManager {
     /// than a rule — not moved by a pose. A live frame reaches the screen through the layer host's
     /// `StreamSurfaceView`, which draws the element where the cel's own coordinates put it; a cel the
     /// walk poses (a transformation layer above it, a Move channel of its own) is shown through a
-    /// derived picture instead, which the surface cannot sit over, and its stream holds
-    /// (`StreamPictureNote.heldByAPose`). Empty while the animation plays: the tick stands down then
-    /// (§2.9) and playback reads the bake.
+    /// derived picture instead, which the surface cannot sit over, so its stream is held and shows
+    /// the newest frame when the laptop has been still (`ScreenStreamCoordinator.settleInterval`).
+    /// Empty while the animation plays: the tick stands down then (§2.9) and playback reads the bake.
     ///
     /// **Cheap for a document with no stream**: it answers from one memoized flag per cel, which is
     /// what `ScreenStreamCoordinator.sync` already pays beside it on every canvas pass.
@@ -90,6 +90,24 @@ extension CanvasManager {
         let walk = precomputed ?? renderTreeAndPoses(atFrame: frame)
         let leaves = Set(walk.tree.leafLayerIndices)
         return candidates.filter { leaves.contains($0) && !streamIsMoved(onLayer: $0, in: walk, atFrame: frame) }
+    }
+
+    /// **Whether the laptop is still sending to a stream the canvas draws live** — a frame has landed
+    /// on one since the cel's committed content last moved (`VectorCanvas.holdsUncommittedStreamFrame`),
+    /// so the baked picture of the frame lacks it and the live pair is the picture to show. False once
+    /// the laptop has been still for `ScreenStreamCoordinator.settleInterval`: the frames are
+    /// committed, the bake of the new key is the exact picture, and the canvas rests on it as it does
+    /// after any edit (`SandwichPresentation.live`).
+    @MainActor
+    func liveStreamIsMoving(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil) -> Bool {
+        let frame = frame ?? currentFrame
+        let live = liveStreamLayerIndices(atFrame: frame, walk: precomputed)
+        guard !live.isEmpty else { return false }
+        let shownFrames = displayedFrames(atFrame: frame)
+        return live.contains { index in
+            activeCelIndex(inLayer: index, atFrame: shownFrames[index] ?? frame)
+                .flatMap { layers[index].cels[$0].vector }?.holdsUncommittedStreamFrame == true
+        }
     }
 
     @MainActor
@@ -126,18 +144,21 @@ extension CanvasManager {
         return Array(order[first ... last])
     }
 
-    /// **What the bar says about the picture on the canvas, when it is not the computer's whole
-    /// truth** — for the stream the bar is about, while it is shown and unfrozen. A frozen stream is
-    /// the exact picture (its frame is part of the document: `VectorCanvas.setStreamFrozen`) and says
-    /// nothing, and a flat canvas of ordinary layers has nothing to add.
+    /// **Whether the bar says the picture on the canvas is plain while the computer moves** — for the
+    /// stream the bar is about, while it is shown and unfrozen, on a canvas the compositor draws: a
+    /// blend mode, mask, effect or container pose anywhere in the document. A live frame cannot go
+    /// through the compositor per frame, so the canvas is drawn plain while frames keep arriving and
+    /// exact once the laptop is still. A frozen stream is the exact picture and says nothing, a flat
+    /// canvas of ordinary layers has nothing to add, and a stream a pose moves says nothing either:
+    /// it is held, and the artist is not told why.
     @MainActor
-    var activeStreamPictureNote: StreamPictureNote? {
+    var activeStreamIsPlainWhileMoving: Bool {
         guard let active = activeStreamCel, !active.element.isFrozen, !isPlaying,
-              isLayerEffectivelyVisible(active.layerIndex) else { return nil }
+              isLayerEffectivelyVisible(active.layerIndex) else { return false }
         let walk = renderTreeAndPoses(atFrame: currentFrame)
-        if streamIsMoved(onLayer: active.layerIndex, in: walk, atFrame: currentFrame) { return .heldByAPose }
+        guard !streamIsMoved(onLayer: active.layerIndex, in: walk, atFrame: currentFrame) else { return false }
         // The document's shape, not a gesture's: the note must not flicker with a stroke or a float.
-        return walk.tree.needsCompositorOnCanvas || hasContainerPoseInForce ? .drawnPlain : nil
+        return walk.tree.needsCompositorOnCanvas || hasContainerPoseInForce
     }
 
     // MARK: - The address row (STREAM.md §5.7)

@@ -439,28 +439,44 @@ longer showed until its screen next changed.
 
 **A canvas the compositor draws shows a live stream through the live pair** — TODO (112). A blend
 mode, a mask, an effect or a container pose anywhere in the document puts the canvas on a composite
-image, and a frame reaches the screen through its layer host's surface and nowhere else: the bake is
-blind to a frame by construction (`committedVersion`), and a per-tick composite MEASURED **45.8 ms on
-CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080 frame; `StreamSandwichBench`)
-and a canvas-sized image per frame is what killed the render server (§5.3's TODO (97)). Until (112) the
-canvas simply stood on whatever the last bake froze — *"pauses and refuses to update until I draw
-something"* — and the bar said *"Live picture pauses while a blend mode, mask, effect or
-transformation layer is in the document"*; a stroke un-stuck it because it was the one thing that put a
-host between the halves of a live pair, and its commit re-baked. Now **a live stream is what the pair is
-for** (`SandwichPresentation.live`, `streamIsLive`): `CanvasManager.liveHostRun` is the leaves from the
-lowest to the highest of the active layer and every live stream (`liveStreamLayerIndices`: visible,
-unfrozen, a stream on the cel shown at this frame, a leaf, not posed), the pair is cut around that run
-and those hosts draw themselves between the two halves, and the bake — which cannot carry a frame — is
-not the picture to wait for. **The price is the near picture** (owner, 2026-10-01, *"for the fast one it
-can be just the layer without any effects added"*): the layers in the run are drawn plain, and a
-blended or graded layer above it is composited onto transparency. **Freeze is the exact picture** — a
-freeze moves `committedVersion` (`VectorCanvas.setStreamFrozen`) so the bake holds the frame frozen on,
-and the canvas rests on it. The bar says what the picture is, never nothing
-(`StreamPictureNote`, `streamBar.pictureNote`): `.drawnPlain` while a live stream is on a compositor
-canvas, and `.heldByAPose` for the one thing that still cannot be drawn live — a stream a transformation
-layer or a Move channel of its own moves, which is drawn from a derived image (`presentStreamFrame`
-refuses a derived base) and updates when something else on the canvas changes. A *dimmed* reference is
-a layer opacity, which stays on the flat row and says nothing.
+image, and a frame reaches the screen through its layer host's surface and nowhere else: a tick moves
+no `committedVersion`, so the bake is blind to a frame while frames keep arriving, and a per-tick
+composite MEASURED **45.8 ms on CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a
+1920×1080 frame; `StreamSandwichBench`) and a canvas-sized image per frame is what killed the render
+server (§5.3's TODO (97)). Until (112) the canvas simply stood on whatever the last bake froze —
+*"pauses and refuses to update until I draw something"* — and the bar said *"Live picture pauses while
+a blend mode, mask, effect or transformation layer is in the document"*; a stroke un-stuck it because it
+was the one thing that put a host between the halves of a live pair, and its commit re-baked. Now **a
+stream the laptop is still sending to is what the pair is for** (`SandwichPresentation.live`,
+`streamIsMoving`): `CanvasManager.liveHostRun` is the leaves from the lowest to the highest of the
+active layer and every live stream (`liveStreamLayerIndices`: visible, unfrozen, a stream on the cel
+shown at this frame, a leaf, not posed), the pair is cut around that run and those hosts draw
+themselves between the two halves, and the bake — which lacks the frames since its key — is not the
+picture to wait for. **The price is the near picture** (owner, 2026-10-01, *"for the fast one it can be
+just the layer without any effects added"*): the layers in the run are drawn plain, and a blended or
+graded layer above it is composited onto transparency.
+
+**Then exact when still** (owner, 2026-10-02, *"Live, then exact when still"*). Once the laptop has
+sent nothing for **`ScreenStreamCoordinator.settleInterval`, 0.6 s**, the coordinator commits the
+frames its canvases hold (`settle` → `VectorCanvas.commitStreamFrames`, one move of `committedVersion`,
+not an undo step), and from there the stream is an edit like any other: the sweep dirties the cel's
+span, the pair stands until the bake of the newest picture lands, and the canvas rests on that bake —
+the exact, effected picture. The next frame goes live again; the first one after a rest publishes at
+once so the canvas leaves the bake without waiting for a second frame a still screen never sends. The
+interval is chosen against the damage-driven capture (§3): a still screen sends *nothing*, so it only
+has to outlast the gaps inside a burst of motion (~55 ms between frames at the MEASURED ~18 fps) and
+the slowest regular damage a desktop makes, Windows' 530 ms caret blink — a shorter one would flip a
+blinking caret between plain and exact twice a second, each flip an exact bake spent and discarded.
+The settle stands down while the animation plays and the app is backgrounded (a commit mid-playback
+would re-key the frames the player is reading) and is armed again by the edge out of either, like the
+tick. **A stream a transformation layer or a Move channel of its own moves is held**, not live — it is
+drawn from a derived image the surface cannot sit over (`presentStreamFrame` refuses a derived base) —
+and the bar does not say so; it catches up at the same settle, because the derived picture is keyed on
+`committedVersion` too. **Freeze commits at once**, so the frozen frame is the exact one wherever the
+compositor draws. The bar says what the picture is while the computer moves, and nothing when it is
+exact (`CanvasManager.activeStreamIsPlainWhileMoving`, `streamBar.pictureNote`): *"Blend modes, masks
+and effects show once the computer's screen is still."* A *dimmed* reference is a layer opacity, which
+stays on the flat row and says nothing.
 
 MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
 2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main
@@ -477,9 +493,9 @@ keyframe. When every stream element on the connection is frozen the client sends
 unfreeze sends `resume` (whose keyframe §3 guarantees — no second request rides with it), and an
 unfreeze on a connection that was not paused sends `keyframe`. **Freeze is not an undo step** — it is
 a viewing state like the render-resolution knob, persisted with the document — **but it commits the
-picture**: the freeze moves `committedVersion`, so the bake holds the frame frozen on (§5.3) and a
-canvas the compositor draws rests on the exact frozen picture. Bake works while frozen and bakes the
-frozen picture.
+picture**: the freeze moves `committedVersion` at once, so the bake holds the frame frozen on (§5.3)
+and a canvas the compositor draws rests on the exact frozen picture, without waiting for the settle.
+Bake works while frozen and bakes the frozen picture.
 
 **Built (stage 2), with two corrections.** *"Writes the current frame to `lastFrameFileName` at
 once"* is gone: `ProjectStore` stages a whole new package on every save and swaps it in by rename, so
@@ -585,8 +601,7 @@ canvas is on the composite. The address row opens `StreamConnectSheet` with a `S
 successful connect there is `CanvasManager.retargetStream` — host, port, label and size rewritten on
 the element in one undo step, placement and picture kept — rather than a second layer. Identifiers
 `streamBar.sourceLabel` / `stateLabel` (value: `live` · `frozen` · `connecting` · `reconnecting` ·
-`notStreaming`) / `freezeButton` / `bakeFrameButton` / `addressButton` / `pictureNote` (value
-`drawnPlain` · `heldByAPose`, §5.3).
+`notStreaming`) / `freezeButton` / `bakeFrameButton` / `addressButton` / `pictureNote` (§5.3).
 `StreamBarStateLogicTests` pins the cold-start reach, the word's precedence and the pause protocol.
 
 ### 5.8 Files (2.10)
@@ -833,7 +848,8 @@ updated to observe directly; §7's deploy step is that.
   path's existing format.
 - A bake's neighbours keep the stream element's id; only the baked cel is re-identified (§5.5).
 - A live stream on a canvas the compositor draws is drawn by its host between the two halves, the
-  layers around it plain, and the bar says so; Freeze is the exact picture (§5.3).
+  layers around it plain, while the laptop keeps sending, and the bar says so; once the laptop has
+  been still for 0.6 s the exact, effected picture replaces it (§5.3).
 - Bitrate ~6 Mbit/s, 30 fps cap, GOP 2 s — tune on measurement.
 - During playback the picture holds; on stop the next tick resumes it.
 

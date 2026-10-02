@@ -1673,7 +1673,9 @@ final class VectorCanvas {
     ///   and the render memo's, and the picture really is stale, so the memo re-walks on its next
     ///   read. `committedVersion` is what `LayerContentVersion` reads, and it stays put so
     ///   `FrameBaker.syncDirty` sees no change — a tick that moved it would dirty every frame the
-    ///   stream cel spans and re-bake them to disk thirty times a second. See `committedVersion`.
+    ///   stream cel spans and re-bake them to disk thirty times a second. The frames the bake therefore
+    ///   lacks are `holdsUncommittedStreamFrame`, and `commitStreamFrames` is the one move that puts
+    ///   them in once the laptop has been still. See `committedVersion`.
     ///   (The layer host tells the two apart too, and does not redraw its base for a frame while a
     ///   `StreamSurfaceView` presents the element — TODO (97).)
     /// - **The damage is the element's own rectangle**, declared as `.region`, so the re-walk is
@@ -1697,6 +1699,7 @@ final class VectorCanvas {
               streamFrameIndexes[id] != index else { return false }
         streamFrameIndexes[id] = index
         if stream.picture.frame !== image { stream.picture.set(image, index: index) }
+        _holdsUncommittedStreamFrame = true
         guard !_suppressedElementIDs.contains(id) else { return true }
         let footprint = Self.placedFootprint(of: stream, slack: 1)
         // An element entirely off the canvas paints no pixel, and a null region is the claim that
@@ -1712,17 +1715,46 @@ final class VectorCanvas {
     /// canvas starts empty and is told again on the next tick, which costs one region bookkeeping.
     private var streamFrameIndexes: [UUID: Int] = [:]
 
+    /// **Whether a stream frame has landed on this canvas since `committedVersion` last moved** — the
+    /// picture the cel shows is newer than the one every bake of it stands for, so the laptop is
+    /// still sending (`ScreenStreamCoordinator`'s settle interval is what decides it is not). Set by
+    /// `setStreamFrame`; cleared by every move of `committedVersion`, which is the bake catching up:
+    /// whatever moved it, the bake of the new key renders the picture as it is then.
+    var holdsUncommittedStreamFrame: Bool {
+        lock.lock(); defer { lock.unlock() }; return _holdsUncommittedStreamFrame
+    }
+    private var _holdsUncommittedStreamFrame = false
+
+    /// **The laptop has been still, so the frames this canvas holds are the cel's content now** — the
+    /// one move of `committedVersion` that no edit made, so the bake (and every cache keyed on it, and
+    /// a posed or timed derivation of the cel) renders the newest frame once, rather than on every
+    /// frame (`setStreamFrame`). Not an undo step and no picture is stale — the memo already holds the
+    /// frame, so `.region(.null)`, `setStreamFrozen`'s own proof — and the call that makes the canvas
+    /// *exact* where a frame is drawn by a layer host and the bake is blind to it.
+    ///
+    /// Returns whether anything moved: false on a canvas that holds no frame the bake lacks, which is
+    /// every canvas but one the laptop has just been sending to.
+    @discardableResult
+    func commitStreamFrames() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard _holdsUncommittedStreamFrame else { return false }
+        invalidateRenderOnly(.region(.null))
+        return true
+    }
+
     /// **Sets one stream element's `isFrozen`** — STREAM.md §5.4. A freeze is a viewing state, not an
     /// edit: the picture on the cel is exactly the picture that was there, so no pixel is stale and
     /// no memo is dropped (`.region(.null)`, `invalidateRenderOnly`'s proof of exactly that). The
     /// flag is persisted with the document and read by `ScreenStreamCoordinator.tick`, which skips a
     /// frozen element.
     ///
-    /// **A freeze does move `committedVersion`, and that is what makes it exact.** Frames arrive on
-    /// `version` alone (`setStreamFrame`), so the bake of a frame the stream spans holds whichever
-    /// picture it was last baked with — and a frozen element is drawn by the bake wherever the
-    /// compositor draws the canvas. Without the move, Freeze on such a canvas would show an older
-    /// picture than the one the artist froze on. Unfreezing changes no picture and moves nothing.
+    /// **A freeze does move `committedVersion`, at once.** Frames arrive on `version` alone
+    /// (`setStreamFrame`) and are committed when the laptop has been still (`commitStreamFrames`), so
+    /// the bake of a frame the stream spans may lack the picture the artist froze on a moment into a
+    /// burst — and a frozen element is drawn by the bake wherever the compositor draws the canvas.
+    /// Without the move, Freeze on such a canvas would show an older picture than the one the artist
+    /// froze on. Unfreezing changes no picture and moves nothing.
     ///
     /// **A freeze gives the element a `StreamPicture` of its own**, holding the frame it froze on:
     /// the box is shared with every other copy of the element — the cel on the far side of a Bake
@@ -1802,11 +1834,12 @@ final class VectorCanvas {
     ///
     /// `LayerContentVersion` reads this rather than `version`, and so do the two derived identities
     /// a vector cel can mint (`PosedCelIdentity`, `VideoCelIdentity`). That is what keeps the frame
-    /// bake key, `FrameBaker.syncDirty`'s cel stamps and the sandwich's key blind to a live stream by
-    /// construction: a stream cel spans from its frame to the end of the scene, and a key that moved
-    /// per tick would mark that whole span dirty and re-composite it to disk at the tick rate. The
-    /// baked frame of a stream cel therefore holds whichever picture the bake happened to freeze,
-    /// which is what STREAM.md §2.9 asks of playback anyway.
+    /// bake key, `FrameBaker.syncDirty`'s cel stamps and the sandwich's key blind to a *moving*
+    /// stream by construction: a stream cel spans from its frame to the end of the scene, and a key
+    /// that moved per tick would mark that whole span dirty and re-composite it to disk at the tick
+    /// rate. **Once the laptop has been still it moves once** (`commitStreamFrames`), so the bake of a
+    /// stream cel holds the picture the stream settled on — exact where a layer host cannot draw the
+    /// frame — and never one it was caught mid-way through.
     ///
     /// Identical to `version` on every canvas that has never held a stream, so nothing keyed on it
     /// behaves differently for the documents that exist today.
@@ -2329,14 +2362,18 @@ final class VectorCanvas {
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
-    /// layer's own content changed. `setTransform` and `setStreamFrame` are the only callers and the
-    /// only mutations for which that distinction is true. Caller must hold `lock`.
+    /// layer's own content changed. `setTransform` and the stream's three verbs (`setStreamFrame`,
+    /// `setStreamFrozen`, `commitStreamFrames`) are the only callers and the only mutations for which
+    /// that distinction is true. Caller must hold `lock`.
     ///
     /// `committed` is false for exactly one caller — a stream frame arriving — and is what keeps
     /// `committedVersion` still for it; see that property.
     private func invalidateRenderOnly(_ damage: Damage, committed: Bool = true) {
         version += 1
-        if committed { committedVersion += 1 }
+        if committed {
+            committedVersion += 1
+            _holdsUncommittedStreamFrame = false
+        }
         if case .region(let rect) = damage, rect.isNull {
             // **A null rectangle is a proof that no pixel of any picture this canvas holds has
             // changed, and every memo stays** — TODO (41)'s last box. `restoreDamage` answers it for

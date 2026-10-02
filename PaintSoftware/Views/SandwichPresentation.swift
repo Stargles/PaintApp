@@ -40,12 +40,16 @@ enum SandwichPresentation: String {
     /// lands. A layer above that blends is the same class of approximation as the active layer's own
     /// mode, so it takes the same rule rather than a wait of its own.
     ///
-    /// **A live stream is the other thing the pair is for, and there the bake never replaces it**
-    /// (TODO (112)). A frame reaches the screen through its layer's host, never through a composite
-    /// (`ScreenStreamCoordinator`), so on a canvas the compositor draws the host has to be the middle
-    /// of the pair or the stream stands on whatever the last bake froze — the owner's *"pauses and
-    /// refuses to update until I draw something"*, where the drawing was the one thing that put a host
-    /// there. While a stream is live the pair is the picture and the bake is not waited for.
+    /// **A stream the laptop is still sending to is the other thing the pair is for, and there the
+    /// bake does not replace it** (TODO (112)). A frame reaches the screen through its layer's host,
+    /// never through a composite (`ScreenStreamCoordinator`), so on a canvas the compositor draws the
+    /// host has to be the middle of the pair or the stream stands on whatever the last bake froze — the
+    /// owner's *"pauses and refuses to update until I draw something"*, where the drawing was the one
+    /// thing that put a host there. While frames keep arriving the pair is the picture and the bake is
+    /// not waited for. **Then exact when still** (owner, 2026-10-02): once the laptop has sent nothing
+    /// for `ScreenStreamCoordinator.settleInterval` its frames are committed, the key moves, and the
+    /// stream is an edit like any other — this pair until the bake of the newest picture lands, then
+    /// the bake.
     case live
 
     /// **A transform edit's bands** — TODO (125): the frame cut around the leaves the edit moves,
@@ -76,11 +80,13 @@ enum SandwichPresentation: String {
     /// - Otherwise a bake for this key is the whole truth, and wins.
     /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
     ///   this frame — until the bake or the live pair minted for the result replaces them.
-    /// - **A live stream keeps the canvas on the pair** whatever the bake says: a bake is the picture
-    ///   that cannot carry a frame, so it is not the picture to wait for. The pair is shown once it is
-    ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
-    ///   moment its pair is current rather than when a bake lands. A pair cut around other hosts at
-    ///   this frame (`.regrouped`) is kept on screen until the new cut's pair lands.
+    /// - **A moving stream keeps the canvas on the pair** whatever the bake says: the bake of a key
+    ///   that has not moved is the picture that lacks the frames since, so it is not the picture to
+    ///   wait for. The pair is shown once it is current, kept while it is stale, and a lifted stroke
+    ///   leaves `.midStroke` for `.live` the moment its pair is current rather than when a bake lands.
+    ///   A pair cut around other hosts at this frame (`.regrouped`) is kept on screen until the new
+    ///   cut's pair lands. Once the stream has settled none of this applies: the commit moved the key,
+    ///   and the rules below are an edit's.
     /// - Otherwise a lifted stroke stays on its pair while the pair is cut here (trap 2).
     /// - Otherwise an edit's pair is shown if it is for this key, and **kept** if it is merely stale —
     ///   one edit behind, at most, and that edit's rebuild is already on its way. Falling back to the
@@ -92,7 +98,7 @@ enum SandwichPresentation: String {
     ///   nothing.
     static func next(from current: SandwichPresentation, strokeIsLive: Bool, transformEditIsLive: Bool,
                      bakeIsCurrent: Bool, livePair: LivePairFit,
-                     holdsBandsOfThisFrame: Bool, streamIsLive: Bool) -> SandwichPresentation {
+                     holdsBandsOfThisFrame: Bool, streamIsMoving: Bool) -> SandwichPresentation {
         if strokeIsLive { return .midStroke }
         if transformEditIsLive {
             switch livePair {
@@ -101,15 +107,15 @@ enum SandwichPresentation: String {
             case .none, .regrouped: return .rest
             }
         }
-        if bakeIsCurrent, !streamIsLive { return .rest }
+        if bakeIsCurrent, !streamIsMoving { return .rest }
         if current == .moving, holdsBandsOfThisFrame { return .moving }
         switch livePair {
         case .none:
             return .rest
         case .regrouped:
-            return streamIsLive && current.activeHostDrawsItself ? current : .rest
+            return streamIsMoving && current.activeHostDrawsItself ? current : .rest
         case .stale, .current:
-            if current == .midStroke, !(streamIsLive && livePair == .current) { return .midStroke }
+            if current == .midStroke, !(streamIsMoving && livePair == .current) { return .midStroke }
             return livePair == .current || current == .live ? .live : .rest
         }
     }
@@ -126,9 +132,9 @@ enum LivePairFit: Equatable {
 
     /// **Cut for this frame around other hosts** — a layer switch, or a stream going live or frozen,
     /// moved the cut while the content stood still. The held pair is still a coherent picture of this
-    /// frame (every host it names draws itself, every other layer is in a half), so a live stream —
-    /// which has no bake to fall back on that is not a stale frame — keeps it on screen while the pair
-    /// for the new cut is minted. Everything else treats it as `.none`: the bake is the picture on hand.
+    /// frame (every host it names draws itself, every other layer is in a half), so a moving stream —
+    /// whose bake lacks its newest frames and is therefore not a picture to fall back on — keeps it on
+    /// screen while the pair for the new cut is minted. Everything else treats it as `.none`: the bake is the picture on hand.
     case regrouped
 
     /// Cut here, minted for an older key. It differs from the current picture by exactly the edits

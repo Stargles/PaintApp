@@ -69,6 +69,8 @@ class StreamUITestCase: PaintUITestCase {
 
     enum Colour: String {
         case red, green, blue
+        /// What a stream frame multiplied over black ink reads.
+        case black
 
         func matches(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
             let (r, g, b) = (Int(p.r), Int(p.g), Int(p.b))
@@ -76,6 +78,7 @@ class StreamUITestCase: PaintUITestCase {
             case .red: return r > 170 && g < 110 && b < 110
             case .green: return g > 130 && r < 110 && b < 110
             case .blue: return b > 170 && r < 110 && g < 110
+            case .black: return r < 70 && g < 70 && b < 70
             }
         }
     }
