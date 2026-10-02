@@ -383,4 +383,129 @@ final class RotationSnapUITests: PaintUITestCase {
         XCTAssertFalse(paper(Double(aside.dx), Double(aside.dy)), "…and left no dot where it rested")
     }
 
+    // MARK: - A smart-shape line's ends
+
+    /// **The two ends of a pending smart-shape line, from the seeded line** (`-uiTestSeedPendingLine`: a
+    /// vertical line from the paper's `(0.5, 0.4)` up to `(0.5, -0.06)`, in the surround above it). A
+    /// line has no knob; its ends *are* its angle, and the owner's rule is the same one — *"the angle of
+    /// the line about its other end"* — so the held end is dragged to a known bearing from the other,
+    /// and the answer is read three ways: the pill's text, the ink the line is drawn with on the glass
+    /// (a point along the snapped bearing is inked and one along the pen's own is not), and the shape
+    /// still pending. `held` is the end taken; the other is the pivot.
+    private func dragALineEnd(_ app: XCUIApplication, _ canvas: XCUIElement, held: CGPoint, pivot: CGPoint,
+                              toBearing bearing: Double, holding: CGVector?) throws -> String {
+        let host = canvas.frame.size
+        let length = hypot(held.x - pivot.x, held.y - pivot.y)
+        let target = CGPoint(x: pivot.x + length * CGFloat(cos(bearing * .pi / 180)),
+                             y: pivot.y + length * CGFloat(sin(bearing * .pi / 180)))
+        try dragWithAFingerHeldBeside(canvas, from: CGVector(dx: held.x / host.width, dy: held.y / host.height),
+                                      delta: CGVector(dx: target.x - held.x, dy: target.y - held.y),
+                                      holding: holding)
+        return readField(app, "readout:")
+    }
+
+    /// Where the seed's two ends are on the host, in host points: `start` on the paper, `end` above it.
+    private func seededLineEnds(_ canvas: XCUIElement) -> (start: CGPoint, end: CGPoint) {
+        let paper = paperRect(in: canvas)
+        let host = canvas.frame.size
+        func point(_ x: Double, _ y: Double) -> CGPoint {
+            let at = onHost(paper, x, y)
+            return CGPoint(x: at.dx * Double(host.width), y: at.dy * Double(host.height))
+        }
+        return (point(0.5, 0.4), point(0.5, -0.06))
+    }
+
+    /// Whether the line's ink reaches the point `fraction` of the way from `pivot` to where a line at
+    /// `bearing` degrees ends, `length` out — read just beside the line's centre, where the shape's blue
+    /// guide outline is drawn over the ink and is not dark.
+    private func inked(_ probe: (Double, Double) -> Bool, _ canvas: XCUIElement, pivot: CGPoint, length: CGFloat,
+                       bearing: Double, fraction: CGFloat) -> Bool {
+        let host = canvas.frame.size
+        let radians = bearing * .pi / 180
+        let along = CGPoint(x: pivot.x + length * fraction * CGFloat(cos(radians)),
+                            y: pivot.y + length * fraction * CGFloat(sin(radians)))
+        return [-5.0, 5.0].contains { side in
+            let at = CGPoint(x: along.x - CGFloat(sin(radians) * side), y: along.y + CGFloat(cos(radians) * side))
+            return probe(Double(at.x / host.width), Double(at.y / host.height))
+        }
+    }
+
+    /// **The line's start end, cold from a fresh document:** with a finger beside the drag the line lands
+    /// on the grid, with the pen alone it is the pen's own angle, and the finger that snaps it neither
+    /// pans the canvas nor draws a dot nor commits the shape.
+    func testAFingerPressedBesideALinesStartEndSnapsTheLineToARoundAngleAndTheReadoutSaysSo() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedPendingLine"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let pending = NSPredicate { _, _ in self.readField(app, "shape:") == "adjustable" }
+        wait(for: [XCTNSPredicateExpectation(predicate: pending, object: nil)], timeout: 10)
+        XCTAssertEqual(readField(app, "shape:"), "adjustable", "PREMISE: the seed leaves a line pending")
+        XCTAssertEqual(readField(app, "readout:"), "none", "no handle held, nothing read out")
+        let ends = seededLineEnds(canvas)
+        let length = hypot(ends.start.x - ends.end.x, ends.start.y - ends.end.y)
+        let transform = readTransform(app)
+        let aside = CGVector(dx: 0.12, dy: 0.62)
+
+        // 1. A finger beside the drag: the start end, dragged to 79° about the far end, is held at 75°.
+        let snapped = try dragALineEnd(app, canvas, held: ends.start, pivot: ends.end, toBearing: 79, holding: aside)
+        attachScreen("line-after-the-snapped-turn")
+        let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
+        XCTAssertEqual(snappedDegrees, 75, accuracy: 0.005, "a pen dragged to 79° with a finger beside it is held at 75°")
+        XCTAssertEqual(readField(app, "shape:"), "adjustable", "the finger neither committed the shape nor drew a dot")
+        XCTAssertEqual(readTransform(app), transform, "…and did not pan the canvas")
+        let probe = try settledProbe(canvas, window: CGRect(x: 0.0, y: 0.0, width: 1, height: 1))
+        XCTAssertTrue(inked(probe, canvas, pivot: ends.end, length: length, bearing: 75, fraction: 0.6),
+                      "the line on the glass lies along 75°")
+        XCTAssertFalse(inked(probe, canvas, pivot: ends.end, length: length, bearing: 79, fraction: 0.6),
+                       "…and not along the pen's own 79°")
+
+        // 2. The pen alone, from where the end now stands: dragged on to 86° it is at 86°, off the grid.
+        let landed = CGPoint(x: ends.end.x + length * CGFloat(cos(75 * Double.pi / 180)),
+                             y: ends.end.y + length * CGFloat(sin(75 * Double.pi / 180)))
+        let free = try dragALineEnd(app, canvas, held: landed, pivot: ends.end, toBearing: 86, holding: nil)
+        let freeDegrees = try XCTUnwrap(degrees(of: free), "the pill reads a number: \(free)")
+        XCTAssertEqual(freeDegrees, 86, accuracy: 2, "without a finger the turn is the pen's own")
+        XCTAssertGreaterThan(abs(freeDegrees - (freeDegrees / 15).rounded() * 15), 0.3, "…and is not on the grid")
+        let afterFree = try settledProbe(canvas, window: CGRect(x: 0.0, y: 0.0, width: 1, height: 1))
+        XCTAssertTrue(inked(afterFree, canvas, pivot: ends.end, length: length, bearing: freeDegrees, fraction: 0.6),
+                      "the line on the glass lies along the pen's own angle")
+        XCTAssertFalse(inked(afterFree, canvas, pivot: ends.end, length: length, bearing: 75, fraction: 0.6),
+                       "…and has left the grid angle")
+    }
+
+    /// **The line's far end — the one in the surround above the paper — is a handle that turns too:** the
+    /// finger beside it lands the line on the grid about the *start*, and the pill says the angle of the
+    /// line about that end, so the same line reads half a turn from the other handle's.
+    func testAFingerPressedBesideALinesFarEndSnapsAboutTheStartEnd() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedPendingLine"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let pending = NSPredicate { _, _ in self.readField(app, "shape:") == "adjustable" }
+        wait(for: [XCTNSPredicateExpectation(predicate: pending, object: nil)], timeout: 10)
+        XCTAssertEqual(readField(app, "shape:"), "adjustable", "PREMISE: the seed leaves a line pending")
+        let ends = seededLineEnds(canvas)
+        XCTAssertGreaterThan(ends.end.y, 40, "the far end is on the glass, under the top toolbar")
+        let length = hypot(ends.start.x - ends.end.x, ends.start.y - ends.end.y)
+        let transform = readTransform(app)
+
+        // The far end stands straight above the start (bearing −90° about the start). Dragged to −101°
+        // with a finger beside it, it is held at −105°.
+        let snapped = try dragALineEnd(app, canvas, held: ends.end, pivot: ends.start, toBearing: -101,
+                                       holding: CGVector(dx: 0.12, dy: 0.62))
+        attachScreen("line-far-end-after-the-snapped-turn")
+        let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
+        XCTAssertEqual(snappedDegrees, -105, accuracy: 0.005, "dragged to −101° with a finger beside it, held at −105°")
+        XCTAssertEqual(readField(app, "shape:"), "adjustable")
+        XCTAssertEqual(readTransform(app), transform, "…and the finger did not pan the canvas")
+        let probe = try settledProbe(canvas, window: CGRect(x: 0.0, y: 0.0, width: 1, height: 1))
+        XCTAssertTrue(inked(probe, canvas, pivot: ends.start, length: length, bearing: -105, fraction: 0.6),
+                      "the line on the glass lies along −105° about the start")
+        XCTAssertFalse(inked(probe, canvas, pivot: ends.start, length: length, bearing: -101, fraction: 0.6),
+                       "…and not along the pen's own −101°")
+    }
+
 }

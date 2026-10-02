@@ -9,8 +9,8 @@ import CoreGraphics
 ///
 /// The rule is `RotationAngle`, the smart-shape line's own 15° and nothing else; what a *joined touch*
 /// means is `PrecisionDrag`'s, and the pipelines it reaches are `ObjectTransformDrag` (both knobs on a
-/// vector Move box) and `TextFrameDrag`. The raster Move box's knob and the smart shape's knob are
-/// driven through the real overlays by `RotationSnapUITests`.
+/// vector Move box) and `TextFrameDrag`. The raster Move box's knob, the smart shape's knob and a
+/// smart-shape line's two ends are driven through the real overlays by `RotationSnapUITests`.
 final class RotationSnapLogicTests: XCTestCase {
 
     private let fifteen = CGFloat.pi / 12
@@ -46,6 +46,40 @@ final class RotationSnapLogicTests: XCTestCase {
             XCTAssertEqual(drawn, RotationAngle.snapped(radians(angle)), accuracy: 1e-9,
                            "a line drawn at \(angle)° is held at the grid angle `RotationAngle` names")
         }
+    }
+
+    /// **A line's angle is the bearing of one end from the other**, the rule a knob's `boxAngle` is for
+    /// a box: zero along +x, clockwise on screen, and the same answer whichever way the points are named.
+    func testTheBearingOfAPointIsTheAngleOfTheLineFromThePivot() {
+        let pivot = CGPoint(x: 40, y: 60)
+        for (to, expected) in [(CGPoint(x: 140, y: 60), 0), (CGPoint(x: 40, y: 160), 90),
+                               (CGPoint(x: -60, y: 60), 180), (CGPoint(x: 40, y: -40), -90),
+                               (CGPoint(x: 140, y: 160), 45)] as [(CGPoint, CGFloat)] {
+            XCTAssertEqual(degrees(RotationAngle.bearing(of: to, about: pivot)), expected, accuracy: 1e-9)
+        }
+        XCTAssertEqual(RotationAngle.bearing(of: pivot, about: CGPoint(x: 140, y: 60)), .pi, accuracy: 1e-12,
+                       "the line read from its other end is half a turn round")
+    }
+
+    /// **A line's end pulled onto the grid keeps its length and only moves round the pivot** — the
+    /// owner's *"the angle of the line about its other end"* — and a line already on the grid is
+    /// where it was.
+    func testAPointTurnedAboutAPivotLandsOnTheGridAtItsOwnDistance() {
+        let pivot = CGPoint(x: 300, y: 200)
+        for bearing in stride(from: CGFloat(-175), through: 175, by: 11) {
+            let point = CGPoint(x: pivot.x + 90 * cos(radians(bearing)), y: pivot.y + 90 * sin(radians(bearing)))
+            let landed = RotationAngle.snapped(point, about: pivot)
+            assertOnTheGrid(RotationAngle.bearing(of: landed, about: pivot), "a line end at \(bearing)°")
+            XCTAssertEqual(hypot(landed.x - pivot.x, landed.y - pivot.y), 90, accuracy: 1e-9, "the length is kept")
+            // Compared as points: ±180° are one angle, and `atan2` answers either for a point on the axis.
+            let nearest = RotationAngle.snapped(RotationAngle.bearing(of: point, about: pivot))
+            XCTAssertEqual(landed.x, pivot.x + 90 * cos(nearest), accuracy: 1e-9, "and it is the grid angle nearest the pen's own")
+            XCTAssertEqual(landed.y, pivot.y + 90 * sin(nearest), accuracy: 1e-9)
+        }
+        let onGrid = CGPoint(x: pivot.x + 50, y: pivot.y)
+        XCTAssertEqual(RotationAngle.snapped(onGrid, about: pivot).x, onGrid.x, accuracy: 1e-9)
+        XCTAssertEqual(RotationAngle.snapped(onGrid, about: pivot).y, onGrid.y, accuracy: 1e-9)
+        XCTAssertEqual(RotationAngle.snapped(pivot, about: pivot), pivot, "a point on its own pivot has no angle to land")
     }
 
     func testTheReadoutIsDegreesToTwoDecimalsInTheRangeAnArtistReads() {
@@ -110,6 +144,17 @@ final class RotationSnapLogicTests: XCTestCase {
         XCTAssertEqual(drag.point(for: p(50, 0), touchesDown: 2).x, 10, accuracy: 1e-9)
         XCTAssertTrue(drag.isPrecise)
         XCTAssertFalse(drag.snapsAngle)
+    }
+
+    /// **On a smart shape the handles that turn are the knob and the two ends of a line** — the ends
+    /// set an angle about the other end, so a finger beside one snaps it; a corner or an edge sizes.
+    func testOnlyTheKnobAndALinesEndsTurnASmartShape() {
+        typealias Kind = ShapeOverlayView.HandleKind
+        let turning: [Kind] = [.rotation, .start, .end]
+        let sizing: [Kind] = [.axisTop, .axisBottom, .axisLeft, .axisRight,
+                              .cornerTL, .cornerTR, .cornerBL, .cornerBR, .body]
+        for kind in turning { XCTAssertTrue(kind.turnsTheShape, "\(kind)") }
+        for kind in sizing { XCTAssertFalse(kind.turnsTheShape, "\(kind)") }
     }
 
     func testOnlyTheTwoKnobsTurn() {

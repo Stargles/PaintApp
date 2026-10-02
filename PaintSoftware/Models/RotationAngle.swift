@@ -23,6 +23,23 @@ enum RotationAngle {
         (angle / snapIncrement).rounded() * snapIncrement
     }
 
+    /// **The angle of the line from `pivot` to `point`**, in the canvas's own terms: zero along +x,
+    /// positive clockwise on screen. A line's end handle sets this angle about the line's other end —
+    /// the way a box's knob sets `boxAngle(forKnobAt:about:snapping:)` about the centre — and the line's
+    /// readout says it.
+    static func bearing(of point: CGPoint, about pivot: CGPoint) -> CGFloat {
+        atan2(point.y - pivot.y, point.x - pivot.x)
+    }
+
+    /// `point` turned about `pivot` onto the nearest multiple of `snapIncrement`, at the distance it
+    /// was: a line's end, pulled onto a round angle without being lengthened or shortened. A point on
+    /// its own pivot has no angle to land and stays where it is.
+    static func snapped(_ point: CGPoint, about pivot: CGPoint) -> CGPoint {
+        let landed = snapped(bearing(of: point, about: pivot))
+        let distance = hypot(point.x - pivot.x, point.y - pivot.y)
+        return CGPoint(x: pivot.x + cos(landed) * distance, y: pivot.y + sin(landed) * distance)
+    }
+
     /// **The angle a box has when its rotate knob is at `point`.** The knob stands off the box's *top*
     /// edge, so the knob straight above the centre is the box upright — angle zero — and the knob's
     /// bearing from the centre, turned a quarter, is where the box's own top points. `snapping` lands

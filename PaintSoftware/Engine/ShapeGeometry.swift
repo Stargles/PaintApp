@@ -655,12 +655,8 @@ struct ShapeGeometry: Equatable {
     var constrained: ShapeGeometry {
         switch kind {
         case .line:
-            let angle = atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x)
-            let snapped = RotationAngle.snapped(angle)
-            let distance = hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
             var result = self
-            result.endPoint = CGPoint(x: startPoint.x + cos(snapped) * distance,
-                                      y: startPoint.y + sin(snapped) * distance)
+            result.endPoint = RotationAngle.snapped(endPoint, about: startPoint)
             return result
         case .rectangle, .oval:
             let r = boundingRect

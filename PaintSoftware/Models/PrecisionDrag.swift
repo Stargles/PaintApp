@@ -8,8 +8,9 @@ import CoreGraphics
 ///
 ///  * **A handle that moves or sizes the box** (the body, a corner, an edge) gets its point slowed to a
 ///    fifth.
-///  * **A handle that turns it** (a knob) is not slowed — a turn a fifth as fast is not what an artist
-///    reaching for a round angle wants — and reports `snapsAngle` instead, which the turn rounds to
+///  * **A handle that turns it** (a knob, or either end of a smart-shape line, which turns the line
+///    about its other end) is not slowed — a turn a fifth as fast is not what an artist reaching for a
+///    round angle wants — and reports `snapsAngle` instead, which the turn rounds to
 ///    `RotationAngle.snapIncrement`.
 ///
 /// Both Move overlays take their drags from a point — `ObjectTransformOverlayView`'s raw touches and
@@ -51,7 +52,7 @@ struct PrecisionDrag {
     private var effectiveAnchor: CGPoint
     private var lastRaw: CGPoint
     private var touchBaseline: Int
-    /// Whether the handle turns the box — see the type's note. Latched at the drag's start.
+    /// Whether the handle sets the box's angle — see the type's note. Latched at the drag's start.
     private let turns: Bool
     /// Whether a touch had joined as of the last point asked for.
     private var isJoined = false
@@ -69,7 +70,7 @@ struct PrecisionDrag {
     ///   - point: where the drag began, which is also where the effective point starts.
     ///   - touchesDown: the touches on the canvas at that moment, **including the dragging one** —
     ///     the baseline everything after is measured from.
-    ///   - turns: whether the handle turns the box rather than moving or sizing it.
+    ///   - turns: whether the handle sets the box's angle rather than moving or sizing it.
     init(startingAt point: CGPoint, touchesDown: Int, turns: Bool = false) {
         rawAnchor = point
         effectiveAnchor = point

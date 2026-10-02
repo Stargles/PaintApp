@@ -39,8 +39,9 @@ import UIKit
 /// drag takes effect on the first pixel of movement rather than after a pan recognizer's ~10pt
 /// slop. The two-finger snap constraint of a shape the pen is still drawing is *not* tracked here
 /// — `CanvasView.Coordinator` counts canvas touches for that, because the second finger usually lands
-/// somewhere this view has deliberately made itself transparent to. A finger that joins the
-/// *rotation knob's* drag is read through `PrecisionDrag`, which asks the same counter.
+/// somewhere this view has deliberately made itself transparent to. A finger that joins the drag of a
+/// handle that *turns* the shape — the rotation knob, or either end of a line — is read through
+/// `PrecisionDrag`, which asks the same counter.
 final class ShapeOverlayView: CanvasPlaneView {
 
     var isActive: Bool = false {
@@ -79,11 +80,12 @@ final class ShapeOverlayView: CanvasPlaneView {
     var onBodyDragged: ((ShapeGeometry) -> Void)?
 
     /// How many touches are on the canvas right now, the dragging one included — pushed down by
-    /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins the rotation knob's drag
-    /// is what snaps the turn (`PrecisionDrag`, TODO (151)).
+    /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins the drag of a handle that
+    /// turns the shape is what snaps the turn (`PrecisionDrag`, TODO (151)).
     var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
 
-    /// The pill that says what angle the knob has the shape at (TODO (151)), pushed down by `CanvasView`.
+    /// The pill that says what angle the held handle has the shape at (TODO (151)), pushed down by
+    /// `CanvasView`.
     weak var rotationReadout: RotationReadoutView?
 
     /// Which end of a line is being dragged. Both ends used to report through one callback that
@@ -109,6 +111,13 @@ final class ShapeOverlayView: CanvasPlaneView {
         case axisTop, axisBottom, axisLeft, axisRight
         case cornerTL, cornerTR, cornerBL, cornerBR
         case body
+
+        /// Whether a drag on this handle sets the shape's angle — the rotation knob turns the shape
+        /// about its centre, and either end of a line turns the line about its other end. These are
+        /// the handles a finger joining the drag snaps to `RotationAngle.snapIncrement`
+        /// (`PrecisionDrag`, TODO (151)) and the ones the angle pill reads out; every other handle
+        /// moves or sizes.
+        var turnsTheShape: Bool { self == .rotation || self == .start || self == .end }
     }
 
     private struct HandleInfo { let kind: HandleKind; let layer: CALayer }
@@ -175,12 +184,12 @@ final class ShapeOverlayView: CanvasPlaneView {
     /// The one touch that owns the drag — a finger resting on the outline neither starts a second drag
     /// nor moves this one.
     private weak var draggingTouch: UITouch?
-    /// Only the rotation knob takes a joined touch; nil on every other handle.
+    /// Only a handle that turns the shape takes a joined touch; nil on every other handle.
     private var precision: PrecisionDrag?
-    /// Whether the rotation knob is held — the canvas's pan, pinch and rotate stand down while it is
-    /// (`CanvasView.Coordinator.assistedDragIsLive`), or the finger that snaps the turn would move the
-    /// canvas out from under it.
-    var isTurning: Bool { activeHandle == .rotation && isDragging }
+    /// Whether a handle that turns the shape is held — the canvas's pan, pinch and rotate stand down
+    /// while it is (`CanvasView.Coordinator.assistedDragIsLive`), or the finger that snaps the turn
+    /// would move the canvas out from under it.
+    var isTurning: Bool { activeHandle?.turnsTheShape == true && isDragging }
     private var isDragging: Bool {
         guard activeHandle != nil, let touch = draggingTouch else { return false }
         return touch.phase != .ended && touch.phase != .cancelled
@@ -308,7 +317,7 @@ final class ShapeOverlayView: CanvasPlaneView {
 
     private func clearHandles() {
         // The pill is shared with the other overlays, so only the one holding it takes it down.
-        if activeHandle == .rotation { rotationReadout?.hide() }
+        if activeHandle?.turnsTheShape == true { rotationReadout?.hide() }
         handles.forEach { $0.layer.removeFromSuperlayer() }
         handles.removeAll()
         activeHandle = nil
@@ -444,7 +453,7 @@ final class ShapeOverlayView: CanvasPlaneView {
         draggingTouch = touch
         activeAnchor = anchor(for: kind)
         bodyDragStart = (kind == .body) ? shape.map { ($0, point) } : nil
-        precision = kind == .rotation
+        precision = kind.turnsTheShape
             ? PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas(touch), turns: true) : nil
         showReadoutIfTurning()
     }
@@ -490,17 +499,34 @@ final class ShapeOverlayView: CanvasPlaneView {
         rotationReadout?.release()
     }
 
-    /// While the rotation knob is held, the angle the shape is at, beside the knob. Read off `shape`,
-    /// which `CanvasView.Coordinator.updateShapeOverlay` re-hands on every delta, so the pill says the
+    /// While a handle that turns the shape is held, the angle the shape is at, beside the handle: a
+    /// box's rotation about its centre, a line's bearing about its other end. Read off `shape`, which
+    /// `CanvasView.Coordinator.updateShapeOverlay` re-hands on every delta, so the pill says the
     /// shape's own angle — snap included — and never the finger's.
     private func showReadoutIfTurning() {
-        guard activeHandle == .rotation, let shape,
-              let knob = handleLayout(for: shape).first(where: { $0.kind == .rotation }) else { return }
-        rotationReadout?.show(angle: shape.rotation, knob: knob.position, centre: shape.center, in: self)
+        guard let kind = activeHandle, kind.turnsTheShape, let shape,
+              let held = handleLayout(for: shape).first(where: { $0.kind == kind }) else { return }
+        guard let pivot = lineEndPivot(for: kind, of: shape) else {
+            rotationReadout?.show(angle: shape.rotation, knob: held.position, centre: shape.center, in: self)
+            return
+        }
+        rotationReadout?.show(angle: RotationAngle.bearing(of: held.position, about: pivot),
+                              knob: held.position, centre: pivot, in: self)
+    }
+
+    /// The end of the line that a drag on `kind` holds still — the other end — or nil for any handle
+    /// that is not one of a line's two ends.
+    private func lineEndPivot(for kind: HandleKind, of shape: ShapeGeometry) -> CGPoint? {
+        switch kind {
+        case .start: return shape.endPoint
+        case .end: return shape.startPoint
+        default: return nil
+        }
     }
 
     /// The canvas point a drag on `kind` has to hold still. Nil for the rotation handle (it pivots
-    /// about the centre, which does not move) and for line endpoints (each simply follows the touch).
+    /// about the centre, which does not move) and for line endpoints (each simply follows the touch,
+    /// and `lineEndPivot` names the end that stays).
     private func anchor(for kind: HandleKind) -> CGPoint? {
         guard let shape else { return nil }
         switch kind {
@@ -520,8 +546,10 @@ final class ShapeOverlayView: CanvasPlaneView {
 
     private func report(_ kind: HandleKind, at point: CGPoint, snapsAngle: Bool) {
         switch kind {
-        case .start: onEndpointDragged?(point, .start)
-        case .end: onEndpointDragged?(point, .end)
+        case .start, .end:
+            guard let shape, let pivot = lineEndPivot(for: kind, of: shape) else { return }
+            onEndpointDragged?(snapsAngle ? RotationAngle.snapped(point, about: pivot) : point,
+                               kind == .start ? .start : .end)
         case .cornerTL: onCornerDragged?(point, .topLeft, activeAnchor)
         case .cornerTR: onCornerDragged?(point, .topRight, activeAnchor)
         case .cornerBL: onCornerDragged?(point, .bottomLeft, activeAnchor)
