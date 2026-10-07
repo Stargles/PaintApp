@@ -391,6 +391,49 @@ class PaintUITestCase: XCTestCase {
         return CGVector(dx: dx, dy: dy)
     }
 
+    // MARK: - Where the paper can be seen
+
+    /// **The top edge, in `canvas.host` fractions, of whatever stands over the lower paper right now** —
+    /// the timeline panel, and the docked card riding on it when one is up (`bottomDock.card`).
+    ///
+    /// The canvas extends *beneath* both (`BottomDock.coveredBottom`), so a host fraction below this is
+    /// the chrome's pixel, not the picture's: a probe there reads a dark card and calls it "the effect
+    /// did nothing". The panel opens 375 pt tall and a settings card stands up to ~300 pt above it, so
+    /// on a portrait iPad the middle of the host is under the card.
+    func dockTop(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
+        let host = canvas.frame
+        var top = app.otherElements["timeline.panel"].frame.minY
+        let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
+        if card.exists { top = min(top, card.frame.minY) }
+        return Double((top - host.minY) / host.height)
+    }
+
+    /// The part of the paper no chrome covers: `paperRect`, cut off where the timeline panel (and a
+    /// docked card, if one is up) begins. In host fractions, like `paperRect`.
+    func visiblePaperRect(_ app: XCUIApplication, in canvas: XCUIElement) -> CGRect {
+        var paper = paperRect(in: canvas)
+        paper.size.height = max(0, min(paper.maxY, CGFloat(dockTop(app, canvas))) - paper.minY)
+        return paper
+    }
+
+    /// **The host row to put ink on when a docked card will stand over the picture while it is read** —
+    /// a quarter of the way down the paper, which is above any card the dock builds
+    /// (`BottomDock.maxScrollHeight` caps its scrolling region) on this device. Call
+    /// `assertAboveTheDock` once the card is up: that is what makes the row *measured* rather than
+    /// believed, and what turns a future taller card into a message instead of a vacuous probe.
+    func rowAboveTheDock(_ canvas: XCUIElement) -> Double {
+        let paper = paperRect(in: canvas)
+        return Double(paper.minY + paper.height * 0.25)
+    }
+
+    /// Fails, naming `what`, when host row `dy` is under the timeline or a docked card.
+    func assertAboveTheDock(_ app: XCUIApplication, _ canvas: XCUIElement, dy: Double, _ what: String,
+                            file: StaticString = #filePath, line: UInt = #line) {
+        let top = dockTop(app, canvas)
+        XCTAssertLessThan(dy, top, "\(what): host row \(dy) is under the dock, whose top edge is at \(top) — "
+                          + "a pixel read there is the card's or the timeline's, not the picture's", file: file, line: line)
+    }
+
     /// Swipes to delete a layer panel row at the given absolute layer index, tapping the
     /// "Delete" action revealed by the swipe.
     func swipeDeleteLayerRow(_ app: XCUIApplication, layerIndex: Int) {
@@ -401,9 +444,10 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// Shared body for the off-center containment tests: draws a closed square at `squareRect` (all
-    /// coordinates normalized within `canvas.host`, chosen to sit inside the visible, non-letterboxed
-    /// canvas region), fills at `insideProbe`, and asserts the interior fills while `outsideProbe`
-    /// (a point well outside the square, still on real canvas content) stays blank.
+    /// coordinates fractions of the **visible** paper, `visiblePaperRect` — the timeline covers the
+    /// paper's lower part, so a fraction of the whole host puts a lower square's edge under the panel),
+    /// fills at `insideProbe`, and asserts the interior fills while `outsideProbe` (a point well outside
+    /// the square, still on real canvas content) stays blank.
     func runOffCenterFillContainmentTest(
         squareRect: (minX: Double, maxX: Double, minY: Double, maxY: Double),
         insideProbe: (dx: Double, dy: Double),
@@ -415,25 +459,30 @@ class PaintUITestCase: XCTestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
+        let paper = visiblePaperRect(app, in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector {
+            CGVector(dx: Double(paper.minX) + Double(paper.width) * dx, dy: Double(paper.minY) + Double(paper.height) * dy)
+        }
         let x0 = squareRect.minX, x1 = squareRect.maxX, y0 = squareRect.minY, y1 = squareRect.maxY
-        drawLine(on: canvas, from: CGVector(dx: x0, dy: y0), to: CGVector(dx: x1, dy: y0)) // top
-        drawLine(on: canvas, from: CGVector(dx: x1, dy: y0), to: CGVector(dx: x1, dy: y1)) // right
-        drawLine(on: canvas, from: CGVector(dx: x1, dy: y1), to: CGVector(dx: x0, dy: y1)) // bottom
-        drawLine(on: canvas, from: CGVector(dx: x0, dy: y1), to: CGVector(dx: x0, dy: y0)) // left
+        drawLine(on: canvas, from: at(x0, y0), to: at(x1, y0)) // top
+        drawLine(on: canvas, from: at(x1, y0), to: at(x1, y1)) // right
+        drawLine(on: canvas, from: at(x1, y1), to: at(x0, y1)) // bottom
+        drawLine(on: canvas, from: at(x0, y1), to: at(x0, y0)) // left
 
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: insideProbe.dx, dy: insideProbe.dy)), "Square's interior should still be blank paper before filling")
+        let inside = at(insideProbe.dx, insideProbe.dy), outside = at(outsideProbe.dx, outsideProbe.dy)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: inside.dx, dy: inside.dy)), "Square's interior should still be blank paper before filling")
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap() // First tap selects the fill tool; its menu stays closed.
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: insideProbe.dx, dy: insideProbe.dy)).tap()
+        canvas.coordinate(withNormalizedOffset: inside).tap()
 
-        XCTAssertTrue(waitUntilFilled(canvas, dx: insideProbe.dx, dy: insideProbe.dy), "Tapping inside the off-center square should color its interior")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: inside.dx, dy: inside.dy), "Tapping inside the off-center square should color its interior")
 
         // The discriminator: a point in the opposite quadrant, far outside the drawn square. If the fill
         // read the reference mirrored, the seed landed in open space and the fill leaked out here.
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outsideProbe.dx, dy: outsideProbe.dy)), "Fill of an off-center square must stay contained — leaking here means the reference was rasterized mirrored")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)), "Fill of an off-center square must stay contained — leaking here means the reference was rasterized mirrored")
     }
 
     /// Shared body: selects the fill tool (a single tap, which also switches the left rail's sliders to

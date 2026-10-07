@@ -1247,6 +1247,19 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         let layersButton = app.buttons["toolbar.layersButton"]
         XCTAssertTrue(layersButton.waitForExistence(timeout: 5))
 
+        // The pick reads the white paper, which is the picture and not the drawing layer: a new document
+        // picks from the layer (TODO (119)), where bare paper is a miss that leaves the colour alone. So
+        // the pick is set to read the canvas, from the switch on the colour panel's top right.
+        let colorButton = app.buttons["toolbar.colorButton"]
+        colorButton.tap()
+        let canvasMode = app.buttons["colorPanel.eyedropperMode.composite"]
+        XCTAssertTrue(canvasMode.waitForExistence(timeout: 5), "The colour panel carries the eyedropper's mode switch")
+        canvasMode.tap()
+        XCTAssertTrue(canvasMode.isSelected, "PREMISE: the eyedropper reads the canvas, paper included")
+        colorButton.tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
+                      "The colour panel must be closed before the canvas is touched")
+
         /// Opens the layer panel, reads the active layer's committed-stroke count, closes it again.
         /// The panel covers the canvas, so it is never left open across a gesture.
         func committedStrokes() -> Int? {

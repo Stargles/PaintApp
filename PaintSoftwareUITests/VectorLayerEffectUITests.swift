@@ -32,9 +32,9 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
     }
 
-    /// A column of probes through the band and past both its edges, at `dx`.
-    private func column(_ canvas: XCUIElement, dx: Double) -> [RGB] {
-        stride(from: 0.35, through: 0.65, by: 0.01).map { probe(canvas, dx: dx, dy: $0) }
+    /// A column of probes through the band and past both its edges, at `dx`, about the band's row `cy`.
+    private func column(_ canvas: XCUIElement, dx: Double, about cy: Double) -> [RGB] {
+        stride(from: cy - 0.15, through: cy + 0.15, by: 0.01).map { probe(canvas, dx: dx, dy: $0) }
     }
 
     private func setBrushColor(_ app: XCUIApplication, hex: String) {
@@ -72,11 +72,13 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
 
-        // 1.
+        // 1. On `rowAboveTheDock`: the effect's settings bar comes up over the host's middle, and a
+        // probe under it would read the bar.
+        let cy = rowAboveTheDock(canvas)
         setBrushColor(app, hex: "000000")
         setBrushSize(app, normalized: 0.9)
-        drawLine(on: canvas, from: CGVector(dx: 0.2, dy: 0.5), to: CGVector(dx: 0.8, dy: 0.5))
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The band landed")
+        drawLine(on: canvas, from: CGVector(dx: 0.2, dy: cy), to: CGVector(dx: 0.8, dy: cy))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: cy), "The band landed")
 
         // 2.
         openLayerPanel(app)
@@ -86,11 +88,11 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         openLayerPanel(app)   // toggles the rail away, so the stroke below lands on a clear canvas
         setBrushColor(app, hex: "FF0000")
         setBrushSize(app, normalized: 0.9)
-        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.35), to: CGVector(dx: 0.4, dy: 0.65))
+        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: cy - 0.15), to: CGVector(dx: 0.4, dy: cy + 0.15))
         attach(app, "1-band-and-red-blob")
 
         // 3.
-        let underBefore = column(canvas, dx: 0.4), besideBefore = column(canvas, dx: 0.6)
+        let underBefore = column(canvas, dx: 0.4, about: cy), besideBefore = column(canvas, dx: 0.6, about: cy)
         XCTAssertTrue(underBefore.contains(where: \.isBlobRed), "PREMISE: the blob's red is on the canvas before any effect: \(underBefore)")
         XCTAssertFalse(besideBefore.contains(where: \.isBlobRed), "PREMISE: …and not beside it: \(besideBefore)")
         XCTAssertTrue(besideBefore.contains { $0.sum < 100 } && besideBefore.contains { $0.sum > 600 },
@@ -114,13 +116,14 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         attach(app, "2-blur-on-the-vector-layer")
 
         // 5.
-        var underAfter = column(canvas, dx: 0.4)
+        assertAboveTheDock(app, canvas, dy: cy + 0.15, "The blur's probe columns")
+        var underAfter = column(canvas, dx: 0.4, about: cy)
         let deadline = Date().addingTimeInterval(4)
         while Date() < deadline && underAfter.contains(where: \.isBlobRed) {
             usleep(200_000)
-            underAfter = column(canvas, dx: 0.4)
+            underAfter = column(canvas, dx: 0.4, about: cy)
         }
-        let besideAfter = column(canvas, dx: 0.6)
+        let besideAfter = column(canvas, dx: 0.6, about: cy)
         XCTAssertFalse(underAfter.contains(where: \.isBlobRed),
                        "The blob's red is not composited once the layer grades — it is the stencil: \(underAfter)")
         let changedUnder = zip(underBefore, underAfter).filter { abs($0.sum - $1.sum) > 40 }.count

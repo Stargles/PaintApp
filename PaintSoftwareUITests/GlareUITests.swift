@@ -93,21 +93,24 @@ final class GlareUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
 
         // 1. A black cross, generously thick, so both probes below land on dark ink rather than paper.
+        // **Centred on `rowAboveTheDock`, not on the host's middle**: the effect's settings card stands
+        // over the middle of the host, and a probe under it reads the card.
+        let cy = rowAboveTheDock(canvas)
         setBrushColor(app, hex: "000000")
         setBrushSize(app, normalized: 0.9)
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.65, dy: 0.5))
-        drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.35), to: CGVector(dx: 0.5, dy: 0.65))
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The cross landed")
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: cy), to: CGVector(dx: 0.65, dy: cy))
+        drawLine(on: canvas, from: CGVector(dx: 0.5, dy: cy - 0.15), to: CGVector(dx: 0.5, dy: cy + 0.15))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: cy), "The cross landed")
 
-        let beforeRight = settled { probe(canvas, dx: 0.52, dy: 0.5) }
-        let beforeDiagonal = settled { probe(canvas, dx: 0.52, dy: 0.52) }
+        let beforeRight = settled { probe(canvas, dx: 0.52, dy: cy) }
+        let beforeDiagonal = settled { probe(canvas, dx: 0.52, dy: cy + 0.02) }
         XCTAssertLessThan(beforeRight.sum, 150, "PREMISE: dark ink to the right of centre before any effect: \(beforeRight)")
         XCTAssertLessThan(beforeDiagonal.sum, 150, "PREMISE: dark ink on the diagonal too: \(beforeDiagonal)")
 
         // 2. A small white blob at the very centre — the source.
         setBrushColor(app, hex: "FFFFFF")
         setBrushSize(app, normalized: 0.15)
-        drawLine(on: canvas, from: CGVector(dx: 0.495, dy: 0.5), to: CGVector(dx: 0.505, dy: 0.5))
+        drawLine(on: canvas, from: CGVector(dx: 0.495, dy: cy), to: CGVector(dx: 0.505, dy: cy))
         attach(app, "1-cross-and-blob")
 
         // 3.
@@ -148,14 +151,15 @@ final class GlareUITests: PaintUITestCase {
         attach(app, "2-glare-settings")
 
         // 6.
-        let afterRight = settled { probe(canvas, dx: 0.52, dy: 0.5) }
+        assertAboveTheDock(app, canvas, dy: cy + 0.02, "The Glare probes")
+        let afterRight = settled { probe(canvas, dx: 0.52, dy: cy) }
         XCTAssertGreaterThan(afterRight.sum - beforeRight.sum, 60, """
             The pixel to the right of the cross's centre, on the 0° axis, must brighten markedly: \
             before \(beforeRight), after \(afterRight). The model may hold the effect while the \
             compositor never applied it — this is the assertion on what is drawn.
             """)
 
-        let afterDiagonal = settled { probe(canvas, dx: 0.52, dy: 0.52) }
+        let afterDiagonal = settled { probe(canvas, dx: 0.52, dy: cy + 0.02) }
         XCTAssertLessThan(afterDiagonal.sum - beforeDiagonal.sum, 30, """
             The pixel on the diagonal, off both the 0° and 90° axes, must stay dark: before \
             \(beforeDiagonal), after \(afterDiagonal). Brightening here would mean a direction \

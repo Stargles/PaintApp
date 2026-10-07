@@ -65,8 +65,14 @@ final class MenuInterruptionUITests: PaintUITestCase {
         XCTAssertTrue(menuItem.waitForExistence(timeout: 5),
                       "PREMISE: the blend-mode Menu has to actually be open, or this measures nothing")
 
-        // The one touch that both dismisses the menu and would start the stroke.
-        dragOnCanvas(app, from: strokeStart, to: strokeEnd)
+        // The one touch that both dismisses the menu and would start the stroke. **It starts outside the
+        // menu by measurement, not by a fraction of the canvas**: the item is as wide as the menu, so
+        // sixty points left of its edge is canvas whatever the rail beside it is. (A fraction put the
+        // start ten points *inside* the menu until the left rail slimmed, and a touch on the menu's own
+        // surface is the menu's — which is what this test once measured instead of the outside touch.)
+        let item = menuItem.frame
+        let outside = CGPoint(x: item.minX - 60, y: item.midY)
+        dragInPoints(app, from: outside, to: CGPoint(x: outside.x + 40, y: outside.y + 60))
 
         let menuSurvived = menuItem.exists
         closeChrome(app)
@@ -84,11 +90,12 @@ final class MenuInterruptionUITests: PaintUITestCase {
             open blend-mode Menu — see MENU_PRESENTATION_CENSUS.md
             """)
 
-        // MEASURED 2026-08-20 on iPad Pro 13" (M4), iOS 26.5. A SwiftUI `Menu` is **not** the
-        // popover's family: its dismiss region absorbs the whole touch sequence, so the drag neither
-        // reaches the canvas nor even closes the menu. The stroke that would have been interrupted
-        // never begins. If any of these three ever changes, MENU_PRESENTATION_CENSUS.md's counts are
-        // the other place to update — the twelve UNKNOWNs are resolved SAFE on the strength of this.
+        // A touch on the menu's own surface is absorbed by it (MEASURED 2026-08-20, and again
+        // 2026-10-07 with the start moved ten points inside the menu: the menu stands, no stroke
+        // begins). A touch **outside** it is not — MEASURED 2026-10-07 on iPad Pro 13" (M4), iOS 26.5:
+        // the menu comes down, the stroke begins, UIKit's teardown cancels it, and the first stroke is
+        // gone while the canvas's wedge notice fires. That is the popover's family, and the contract
+        // below is what an outside touch has to do instead (BUGS.md, "A touch outside an open `Menu`").
         XCTAssertTrue(menuSurvived, """
             The blend-mode `Menu` came down when the artist drew beneath it. That makes it behave the \
             way this app's `.popover`s do — the outside touch is not swallowed — and the census's \

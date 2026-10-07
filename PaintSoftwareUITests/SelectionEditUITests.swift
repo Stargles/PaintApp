@@ -188,9 +188,21 @@ final class SelectionEditUITests: PaintUITestCase {
                        "no alpha slider: only the hue travels, and Opacity has its own control in the band")
         attach(app, "1-picker-open-on-the-lines-red")
 
-        // 3. Type blue while the picker is still up: the line follows it live.
+        // 3. Type blue while the picker is still up: the line follows it live. **Read where the picker
+        //    is not**: it opens beside the swatch and stands over part of the line, so the line's middle
+        //    can be the picker's own pixels — the part of the line right of the picker's frame is the
+        //    line's, and the frame is the app's own (`canvasPresentation.selectionColour`).
+        let picker = app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "the picker is a presentation the app draws, with a frame to read")
+        let host = canvas.frame
+        let lineEndX = host.minX + host.width * CGFloat(at(0.38, 0.22).dx)
+        XCTAssertLessThan(picker.frame.maxX + 12, lineEndX,
+                          "PREMISE: some of the line is clear of the picker (picker \(picker.frame), line ends at \(lineEndX))")
+        let l1Clear = CGVector(dx: Double((picker.frame.maxX + lineEndX) / 2 - host.minX) / Double(host.width),
+                               dy: at(0.25, 0.22).dy)
+        XCTAssertTrue(isRed(rgba(canvas, l1Clear)), "PREMISE: that part of the line is the line's own red")
         setHexField(app, hexField, to: "0000FF")
-        XCTAssertTrue(waitUntil(canvas, l1Mid, isBlue),
+        XCTAssertTrue(waitUntil(canvas, l1Clear, isBlue),
                       "with the picker still open the lassoed line did not turn blue — the colour is not live")
         XCTAssertTrue(isRed(rgba(canvas, l2Mid)), "the line outside the loop stayed red")
         XCTAssertTrue(hexField.exists, "PREMISE: the picker is still up while the line changed")

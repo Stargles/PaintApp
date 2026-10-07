@@ -76,10 +76,12 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // A thick bar, so the rim and the intersection are wide enough to probe.
+        // A thick bar, so the rim and the intersection are wide enough to probe — on `rowAboveTheDock`,
+        // because the settings card that comes up below stands over the host's middle.
+        let barY = rowAboveTheDock(canvas)
         setBrushSize(app, normalized: 0.6)
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The bar landed")
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: barY), to: CGVector(dx: 0.7, dy: barY))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: barY), "The bar landed")
 
         // The effect, from the + menu's Value Layer and its Blend Mode menu — scrolled, because
         // Duplicate Offset sits past the fold beside Outline.
@@ -136,8 +138,8 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         attach(app, "2-box-up")
 
         // The drag: a fifth of the canvas to the right, half the bar's length.
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: barY))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: barY))
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done takes the box down")
@@ -154,16 +156,17 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         attach(app, "4-after-the-drag")
 
         // What is drawn. Left half of the bar: the copy moved away, so it is the rim — red.
-        let rim = settled { probe(canvas, dx: 0.4, dy: 0.5) }
+        assertAboveTheDock(app, canvas, dy: barY, "The bar's probes")
+        let rim = settled { probe(canvas, dx: 0.4, dy: barY) }
         XCTAssertGreaterThan(rim.r, 180, "The rim is the effect's red: \(rim)")
         XCTAssertLessThan(rim.g, 90, "…and not white paper or grey ink: \(rim)")
         XCTAssertLessThan(rim.b, 90, "\(rim)")
         // Right half: the copy still covers it, so it is the intersection — the original black ink.
-        let intersection = settled { probe(canvas, dx: 0.65, dy: 0.5) }
+        let intersection = settled { probe(canvas, dx: 0.65, dy: barY) }
         XCTAssertLessThan(intersection.r + intersection.g + intersection.b, 180,
                           "Under Rim the intersection is left as the ink: \(intersection)")
         // Beside the bar: paper, untouched — nothing is painted outside the drawing.
-        let paper = settled { probe(canvas, dx: 0.5, dy: 0.25) }
+        let paper = settled { probe(canvas, dx: 0.5, dy: barY - 0.12) }
         XCTAssertGreaterThan(paper.r + paper.g + paper.b, 700, "The paper beside the bar is untouched: \(paper)")
     }
 }
