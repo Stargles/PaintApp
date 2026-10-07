@@ -73,9 +73,9 @@ merged but two. In order, what is next when the owner says continue:
 5. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on: `f84776f`'s C# half is merged
    uncompiled.
 
-**Owner-side, urgent as of 2026-10-07 15:14**: the re-signer FAILED — *"portal handed back the same
-profile … Xcode likely has no usable Apple ID session"*. The iPad's profile expires **2026-10-08T03:16Z**;
-the owner must sign in at Xcode → Settings → Accounts, after which the hourly retry installs `main`.
+**The re-signer's 2026-10-07 15:14 "sign in to Xcode" FAIL was a misdiagnosis** (BUGS.md, newest): Xcode
+is signed in; the portal only renews an expired profile. The iPad's profile expires 2026-10-08T03:16Z
+and the first hourly run after that should mint and install `main` — **the Mac must be awake then**.
 
 **How this session ran, for the next one**: one shared worker brief at `~/PaintWork/brief-common.md`
 (read first by every worker; it carries the owner's clean-architecture rule, including *"when a ruling
