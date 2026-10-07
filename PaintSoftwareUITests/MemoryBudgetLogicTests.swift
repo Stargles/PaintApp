@@ -539,6 +539,54 @@ final class MemoryBudgetLogicTests: XCTestCase {
         }
     }
 
+    /// **A canvas the allocator puts where a dead one stood is still evictable.**
+    ///
+    /// The registry keys on `ObjectIdentifier`, an address, and a canvas has no `deinit` hook: its
+    /// entry outlives it until a prune. The next canvas allocated at that address registered under the
+    /// dead one's key, inherited its nil owner, was pruned as dead — and held a memo no eviction could
+    /// reach. It showed up as `InterpolationModelLogicTests`' scrub test keeping a third cel, red only
+    /// in the full run, where hundreds of earlier tests had left dead entries behind.
+    ///
+    /// The address reuse is the allocator's to give, so the test asks for it and **fails if it never
+    /// comes** — a premise that quietly did not hold would pass against the defect.
+    @MainActor
+    func testACanvasAllocatedAtADeadCanvasesAddressIsStillEvictable() {
+        VectorRenderCache.removeAll()
+        defer { VectorRenderCache.removeAll() }
+
+        func canvas() -> VectorCanvas {
+            let canvas = VectorCanvas.empty(size: CGSize(width: 64, height: 64))
+            var samples = StrokeSamples(channels: .pressureOnly)
+            samples.append(VectorSample(x: 8, y: 8, pressure: 1))
+            samples.append(VectorSample(x: 56, y: 56, pressure: 1))
+            canvas.addStroke(VectorStroke(brush: Brush(name: "B", tip: .round, size: 8),
+                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                          size: 8, opacity: 1, samples: samples))
+            return canvas
+        }
+
+        var deadKeys: Set<ObjectIdentifier> = []
+        var successor: VectorCanvas?
+        for _ in 0..<64 where successor == nil {
+            autoreleasepool {
+                let dead = canvas()
+                _ = dead.render()
+                deadKeys.insert(ObjectIdentifier(dead))
+            }
+            let next = canvas()
+            if deadKeys.contains(ObjectIdentifier(next)) { successor = next }
+        }
+        guard let successor else {
+            return XCTFail("PREMISE: the allocator never put a canvas at a dead canvas's address")
+        }
+
+        _ = successor.render()
+        XCTAssertTrue(successor.hasCachedImage, "PREMISE: the successor holds a memoized render")
+        VectorRenderCache.trim(toBytes: 0)
+        XCTAssertFalse(successor.hasCachedImage,
+                       "a live canvas that registered under a dead canvas's key must still be a victim of the budget")
+    }
+
     /// **The bound scales with canvas size, which is the whole complaint against a count.**
     ///
     /// One budget, two canvases: the smaller one must hold strictly more entries. This is the

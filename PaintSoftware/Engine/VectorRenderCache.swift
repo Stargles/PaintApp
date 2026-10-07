@@ -187,12 +187,18 @@ enum VectorRenderCache {
     private static func setLocked(_ key: ObjectIdentifier, canvas: VectorCanvas, bytes: Int,
                                   touching: Bool) {
         guard bytes > 0 else { return removeLocked(key) }
-        if var existing = entries[key] {
+        // **The entry is this canvas's only if the canvas is the one it names.** `ObjectIdentifier` is
+        // an address and a canvas leaves no `deinit` hook behind, so a dead canvas's entry stays until
+        // a prune — and the next canvas the allocator puts at that address finds it under its own key.
+        // Treated as its continuation, the entry keeps the dead owner's nil reference, the next prune
+        // drops it as dead, and a live canvas holds a memo no eviction can ever reach.
+        if var existing = entries[key], existing.canvas === canvas {
             residentTotal += bytes - existing.bytes
             existing.bytes = bytes
             if touching { existing.lastUsed = clock }
             entries[key] = existing
         } else {
+            if let dead = entries[key] { residentTotal -= dead.bytes }
             if !touching { clock += 1 }
             entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock)
             residentTotal += bytes

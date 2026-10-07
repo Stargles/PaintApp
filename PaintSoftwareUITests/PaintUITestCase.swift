@@ -464,6 +464,7 @@ class PaintUITestCase: XCTestCase {
             CGVector(dx: Double(paper.minX) + Double(paper.width) * dx, dy: Double(paper.minY) + Double(paper.height) * dy)
         }
         let x0 = squareRect.minX, x1 = squareRect.maxX, y0 = squareRect.minY, y1 = squareRect.maxY
+        assertAboveTheDock(app, canvas, dy: at(x0, y1).dy, "The square's bottom edge")
         drawLine(on: canvas, from: at(x0, y0), to: at(x1, y0)) // top
         drawLine(on: canvas, from: at(x1, y0), to: at(x1, y1)) // right
         drawLine(on: canvas, from: at(x1, y1), to: at(x0, y1)) // bottom
