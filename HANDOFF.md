@@ -73,14 +73,9 @@ merged but two. In order, what is next when the owner says continue:
 5. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on: `f84776f`'s C# half is merged
    uncompiled.
 
-**Questions for the owner** (question tool, plain terms):
-- How should a layer row enter rename? Built: options panel → Rename edits in the row (a plain tap
-  must keep opening options). Alternatives: tap the selected row's name; double-tap the name; edit in
-  the options panel's header.
-- Do the other rename alerts (animation group, saved view, palette, gallery folder, brush group) go
-  inline too?
-- Select → Tap Add over a drawn loop replaces the loop with a new tapped set — right, or should taps and
-  loops combine?
+**Owner-side, urgent as of 2026-10-07 15:14**: the re-signer FAILED — *"portal handed back the same
+profile … Xcode likely has no usable Apple ID session"*. The iPad's profile expires **2026-10-08T03:16Z**;
+the owner must sign in at Xcode → Settings → Accounts, after which the hourly retry installs `main`.
 
 **How this session ran, for the next one**: one shared worker brief at `~/PaintWork/brief-common.md`
 (read first by every worker; it carries the owner's clean-architecture rule, including *"when a ruling

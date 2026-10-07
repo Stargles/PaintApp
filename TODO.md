@@ -50,10 +50,19 @@ rather than assuming it still holds.
 
 ## What is left of the owner's 2026-10-01/02 asks
 
-Of (111)–(152) and their ruled follow-ups, two items remain: the Repeat bake below and (139). Every
+Of (111)–(152) and their ruled follow-ups, three items remain: inline renaming everywhere, the Repeat
+bake and (139). Every
 other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
 
 ---
+
+## Inline renaming everywhere
+
+**Status** — not started. The title and layer/folder names went inline (`7bec67a`); the owner, 2026-10-07,
+on the renames still done through pop-up alerts — animation groups, saved views, palettes, gallery
+folders, brush groups: **"Yes, all inline"** — through the same `InlineNameField`, the alerts deleted whole.
+Also ruled, as built: a layer row enters rename from its options' Rename row; a Tap-mode Add replaces a
+drawn loop rather than combining with it.
 
 ## (131) follow-up: Bake on a Repeat layer materialises the loop
 
