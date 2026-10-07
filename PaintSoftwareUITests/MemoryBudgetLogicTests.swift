@@ -554,16 +554,16 @@ final class MemoryBudgetLogicTests: XCTestCase {
         VectorRenderCache.removeAll()
         defer { VectorRenderCache.removeAll() }
 
-        func canvas() -> VectorCanvas {
-            let canvas = VectorCanvas.empty(size: CGSize(width: 64, height: 64))
-            var samples = StrokeSamples(channels: .pressureOnly)
-            samples.append(VectorSample(x: 8, y: 8, pressure: 1))
-            samples.append(VectorSample(x: 56, y: 56, pressure: 1))
-            canvas.addStroke(VectorStroke(brush: Brush(name: "B", tip: .round, size: 8),
-                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                          size: 8, opacity: 1, samples: samples))
-            return canvas
-        }
+        // Built *with* its stroke rather than given one afterwards: `addStroke` invalidates, and an
+        // invalidation reports to the registry under the canvas's own key — which would sweep the dead
+        // canvas's entry away and leave nothing for the successor to inherit.
+        var samples = StrokeSamples(channels: .pressureOnly)
+        samples.append(VectorSample(x: 8, y: 8, pressure: 1))
+        samples.append(VectorSample(x: 56, y: 56, pressure: 1))
+        let stroke = VectorStroke(brush: Brush(name: "B", tip: .round, size: 8),
+                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                  size: 8, opacity: 1, samples: samples)
+        func canvas() -> VectorCanvas { VectorCanvas(size: CGSize(width: 64, height: 64), strokes: [stroke]) }
 
         var deadKeys: Set<ObjectIdentifier> = []
         var successor: VectorCanvas?
