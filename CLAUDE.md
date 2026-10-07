@@ -46,39 +46,52 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-09-25 at `f509d39`**, fresh device, idle machine (97.5% idle before start), no clone
-debris: **4679 tests, 4609 passed, 10 failed, 60 skipped, 53.6 min** — the first full run since
-`103d540`, 132 commits and two sessions later. **11,965.7 class-seconds across 295 classes**, so four
-clones hold **49.9 min** of ideal work against 53.6 of wall clock — a 7.1% scheduling gap, in line with
-the runs before it (10.6%, 10%, 16%). Of the ten reds, five passed clean in a serial batch on an erased
-device (`CRTScreenUITests`, `ColorWheelsUITests`, `TransformLayerModesUITests`' Rotate,
-`BrushSizeSliderUITests`, and `OptionsPanelUITests`' Bloom on a keyboard-focus refusal) and five were
-real: a leak between tests (three, below), a palette test left behind by TODO (106), and a logic test
-whose own premise search failed 1.5% of the time. **`CRTScreenUITests` and the
-`VectorLayerContentUITests` held-stroke split repeat from `8e2ffff`** — and this time the second
-has a demonstrated cause, the brush-library leak below.
+**MEASURED 2026-10-07 at `e953bb8`**, erased device, four working clones, no clone debris, machine 98%
+idle before the build: **5203 tests, 5140 passed, 3 failed, 60 skipped, 65.4 min** — the 5203
+`func test` in the source, so the count reconciles. **14,738.8 class-seconds
+across 341 classes**, so four clones hold **61.4 min** of ideal work against 65.4 of wall clock — a 6.5%
+scheduling gap, the smallest of the runs on record (10.6%, 10%, 16%, 7.1%). That is 524 tests and 46
+classes after the 2026-09-25 run (4679 tests, 53.6 min, 11,965.7 class-seconds): per test 2.56 s → 2.83 s,
+the heavier UI classes the last fortnight added. Of the three reds one is real
+(`MenuInterruptionUITests`, BUGS.md) and two (`StreamLiveUITests`' hidden-layer test and
+`RecolorUITests`' green-line test) passed clean in a serial run on an erased device, alone and together,
+and failed at 19:07 and 19:33 — outside the Release device build the owner's re-signer ran from 19:23 to
+19:27 inside the window, so clone-versus-clone contention and nothing else.
+
+**A run is only as many clones as bootstrapped, and the banner does not say.** The first run that day
+(`9b5d486`) lost one of its four runners before it connected — the xcresult carries it as a *System
+Failures* entry, *"Early unexpected exit, operation never finished bootstrapping — no restart will be
+attempted"* — and ran on three: **98.6 min** for 15,976 class-seconds, 88.8 min of ideal work at three
+clones. Nothing in `** TEST FAILED **` separates that from a slow suite. Before reading a wall clock,
+read `System Failures` in the xcresult and count the distinct `Clone N of …` in the log; a missing number
+is the tell. That run's twelve reds were also not twelve of one thing: five passed in a serial batch,
+and seven did not — five whose pixel probe sat **under the docked settings card**, which the 375 pt
+timeline lifted over the host's middle (a probe there reads the card and calls it "the effect did
+nothing"; `PaintUITestCase.rowAboveTheDock` places ink above it and `assertAboveTheDock` fails loudly
+if a card ever grows past it), an eyedropper test that read paper from a *layer* pick after TODO (119)
+made the layer the default, and the menu one.
 
 | class | seconds | tests |
 |---|---|---|
-| **`OptionsPanelUITests`** | **663.3** | 13 |
-| `BrushEditorUITests` | 555.6 | 11 |
-| `TransformLayerModesUITests` | 516.9 | 4 |
-| `LayerPanelControlsUITests` | 368.5 | 12 |
-| `SandwichCompositingUITests` | 343.7 | 10 |
-| `GraphEditorGestureUITests` | 304.6 | 5 |
-| `PerfBaselineTests` | 299.2 | 59 |
-| `SelectionAndMoveUITests` | 289.9 | 10 |
-| `BrushMenuUITests` | 289.7 | 8 |
-| `CanvasTransformFreezeUITests` | 280.9 | 8 |
+| **`BrushEditorUITests`** | **673.1** | 11 |
+| `OptionsPanelUITests` | 497.4 | 12 |
+| `InkUnderTransformUITests` | 496.9 | 11 |
+| `TransformLayerModesUITests` | 483.3 | 4 |
+| `SandwichCompositingUITests` | 342.8 | 10 |
+| `LayerPanelControlsUITests` | 335.1 | 12 |
+| `FillObjectUITests` | 300.8 | 14 |
+| `SelectionAndMoveUITests` | 274.0 | 10 |
+| `StreamLiveEngagedUITests` | 272.1 | 7 |
+| `BrushMenuUITests` | 265.8 | 9 |
 
-**`OptionsPanelUITests` is the new top, and one test is why**: 418.6 s → 663.3 s for one added test,
-`testATwoFingerCanvasTransformDoesNotCloseTheEffectSettingsBarButADrawingTouchStillDoes` (TODO (67)),
-which measured **212.0 s on its own** — a third of its class, and second only to
-`DuplicateOffsetUITests`' 223.8 s among single tests.
-The class is 22% of a clone's 49.9 min share, so it sets no floor yet; it is the "a class grows past the
-floor while nobody is looking" conclusion caught one step early, and a 212 s test is worth reading for
-a wait that runs to its timeout before it is worth splitting. `BrushEditorUITests` (578.9 → 555.6 s)
-and `TransformLayerModesUITests` (423.9 → 516.9 s) moved on unchanged tests — noise, both ways.
+Three of the ten are classes this fortnight added — `InkUnderTransformUITests` (third),
+`FillObjectUITests` and `StreamLiveEngagedUITests` — and none sets a floor: the top class is 11.2 min
+against a 61.4 min share. `StreamLiveUITests` (242 s), `TapSelectUITests` (129 s) and
+`LiveTransformEditUITests` (127 s) rank 14th, 39th and 42nd. `OptionsPanelUITests` fell from 663 s
+because (118) deleted its 212 s test; `InkUnderTransformUITests` read 411 s → 497 s between that day's two
+runs on unchanged tests — the noise this section's "read a single class's rise as a signal only when it
+repeats" rule is for. The longest single test is 162.5 s
+(`TransformLayerModesUITests.testParallaxMovesFourLayersByTheirSharesOfTheBoxDrag`).
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
