@@ -15,15 +15,28 @@ A same-profile answer while the profile is still valid is "not renewable yet", n
 the ceiling should not fire inside a valid profile's life (or should skip quietly when it does), and the
 FAIL/notification should be reserved for a same-profile answer *after* expiry.
 
-## Two UI tests red on `main`, cause unknown (2026-10-02)
 
-Found while closing session 46's last lanes; unbisected, neither caused by the lane that saw it.
+## A touch outside an open `Menu` starts a stroke the menu's teardown then cancels (2026-10-07)
 
-- `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu` — red identically on clean
-  builds of `3e53cd0` and of `7ec1987`, so older than this session's late merges.
-- `RotationSnapUITests.testThePillStandsAboveTheMoveBarWhenTheKnobIsAtItsEdge` — green at `adadb60`,
-  red on a clean build of `57b115e`: the pill reads `none` after the knob drag. Suspects: `c465d21`
-  (stream settle) and `17881f1` (placed media through the pose).
+**MEASURED** on iPad Pro 13" (M4), iOS 26.5, by `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu`
+(red since `1c85aed`, bisected `f509d39` green → `3e53cd0` red; `8cfadb1` between them does not build). Open the
+layer's blend-mode `Menu` and drag on the canvas **left of the menu**: the menu comes down, the stroke begins and
+is drawn, UIKit's teardown cancels it, the layer holds **0** strokes, the canvas's wedge notice reads *"Caught a
+canvas freeze and fixed it"*, and the next stroke commits normally. That is the owner's "the first stroke
+disappears when I start another" in a `Menu` rather than a `.popover`.
+
+**Why it read SAFE for seven weeks.** `docs/MENU_PRESENTATION_CENSUS.md` resolved the twelve `Menu` /
+`.contextMenu` sites SAFE on a drag whose start was a *fraction of the canvas*, and with the left rail 64 pt wide
+that fraction landed ten points **inside** the menu's own frame — a touch on the menu's surface, which the menu
+absorbs (re-measured: start inside the frame and the menu stands, no stroke begins). `8cfadb1` slimmed the rail
+to 44 pt, the start moved fourteen points left to just outside the menu, and the reading flipped. The test now
+starts sixty points left of the menu's *published* frame, so it measures the outside touch whatever the rail does.
+
+**What it needs, and it is a ruling rather than a patch.** A `Menu` exposes no `isPresented` for
+`CanvasPresentation` to observe, so the family cannot be covered the way the five `.popover`s were. The honest
+fixes are to draw the blend-mode picker (and the other eleven) as `AnchoredMenu`s, which the timeline's four
+already are, or to accept the loss and say so. Evidence: `~/PaintWork/evidence/diag-menu/` on the machine that
+ran it (before-drag and after-drag screenshots).
 
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
@@ -105,27 +118,6 @@ and again in the same session's Debug fast tier.
 **Do not read a red here as a finding about a branch.** The fix is presumably to perturb with something
 actually independent — a fresh `UUID` decoy per attempt rather than a capacity sweep — and to say so
 in the failure message; it is a test-only change and wants its own pass.
-
-## `InterpolationModelLogicTests`' scrub-memo test counts cels against a budget measured in bytes (2026-09-10)
-
-**MEASURED**: red inside the full suite under four parallel clones (`("3") is not equal to ("2")`),
-**passed clean in isolation** on the same binary and the same device seconds later.
-
-Its own assertion message names the reason it is fragile — *"The byte budget bounds it, and it is bytes
-rather than a count of cels"* — so the author knew the operand was a proxy. A byte budget evicts on
-memory pressure, and memory pressure under four clones is not the memory pressure of one test alone, so
-the count it is asserted against is a function of the machine as well as of the code.
-
-**The fix is to assert the thing the budget is about** — bytes held after the scrub, against the budget
-— rather than how many cels that happened to buy. Until then, read a red here the way this file already
-asks for the other two: run it alone before believing it is about a branch.
-
-**This is the third flake of the same family found in one day**, and they are all the same shape: a
-gate that cannot see them. See also `LassoFillLogicTests`' empty-fill test above and
-`FrameBakeKeyLogicTests`' digest test. **Two of the three are logic tests, which the fast tier does
-run** — so the fast tier is not blind to them by *selection*, it is blind because they only fail under
-the contention the full suite creates. That is worth stating plainly: a green fast tier is not evidence
-that a logic test is deterministic.
 
 ## `LassoFillLogicTests`' empty-fill test only passes when its siblings run first (2026-09-10)
 

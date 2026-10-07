@@ -21,6 +21,12 @@ merged 2026-08-20, and the twelve unverifiable ones were measured then too. -->
 >   recognizers under two fingers. `CanvasView.Coordinator.replaceStrandedRecognizers` replaces
 >   whatever they strand as the gesture lifts, so the canvas never stays frozen.
 >
+> - **A touch outside an open `Menu` is not swallowed — MEASURED 2026-10-07, and the SAFE verdict below
+>   holds only for a touch on the menu's own surface.** The 2026-08-20 drag started ten points inside the
+>   menu's frame (the left rail was 20 pt wider); started outside it, the stroke begins, the menu comes
+>   down, and the teardown cancels the stroke. BUGS.md has the entry; `MenuInterruptionUITests` now starts
+>   its touch sixty points outside the menu's published frame.
+>
 > Everything below is the 2026-08-18/20 sweep and its follow-ups, kept for the reasoning; where it
 > says `dismissPresentationsOverLiveCanvas` or `overlapsLiveCanvas`, both are gone.
 
