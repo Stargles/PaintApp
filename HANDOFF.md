@@ -57,21 +57,17 @@ message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deplo
 **Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
 merged but two. In order, what is next when the owner says continue:
 
-1. **The full UI suite** — not run all session (last full run `f509d39`, 2026-09-25). The timeline is
-   125 pt taller since (122), which moved the dock and has already broken tap-by-position tests twice;
-   expect more. Triage by a fresh Sonnet worker per CLAUDE.md, and **pull the per-class table first**.
-   BUGS.md's two newest reds go in the same triage.
-2. **Install on the iPad** — it has `c8562ca` (2026-10-01); everything after it is unfelt. Then ask the
-   owner how (132)'s held stroke ends feel (ink trails the pen by up to a quarter brush width) and
-   whether a live stroke's interior wants smoothing.
-3. **(131) follow-up: Repeat bake materialises the loop**, then **(139) keys, not keyframes** — ruled,
-   Opus, alone; `~/PaintWork/design/survey-1001.md` §(139) is the design starting point, but the pose
-   code has moved a lot this session (`854a727`, `2d9fdef`) — re-verify every symbol.
-4. **One Sonnet audit of the session's whole diff** (`9704384..HEAD`) for leftover code, duplicated
-   mechanisms and bolted-on fixes — report only, fixes batched into one lane. The owner rejected
-   per-item reviewers as too costly.
-5. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on: `f84776f`'s C# half is merged
-   uncompiled.
+1. **Done 2026-10-07**: the full UI suite (`e953bb8`: 5203 / 5140 / 3 / 60, 65.4 min, triaged green but
+   for the menu defect below — CLAUDE.md carries the table) and a read-only audit of the session's diff,
+   whose worklist is `~/PaintWork/design/audit-1007.md`: lanes **C1** (UI-test helpers, the dock offsets)
+   and **C2** (app-side mechanical cleanup, stale docs, the re-signer script) are in flight on
+   `tmp/cleanc1` / `tmp/cleanc2`; **C3** (the four design refactors) follows.
+2. **Then**: every menu over the canvas as an `AnchoredMenu` (ruled), inline renaming everywhere (ruled),
+   the Repeat bake, and **(139) keys, not keyframes** — Opus, alone; `~/PaintWork/design/survey-1001.md`
+   §(139) is the starting point, but the pose code moved a lot this session — re-verify every symbol.
+3. **Install on the iPad** once the re-signer has a fresh profile (it needs the old one expired first);
+   then ask how (132)'s held stroke ends feel and whether a live stroke's interior wants smoothing.
+4. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on — `f84776f`'s C# half is uncompiled.
 
 **The re-signer's 2026-10-07 15:14 "sign in to Xcode" FAIL was a misdiagnosis** (BUGS.md, newest): Xcode
 is signed in; the portal only renews an expired profile. The iPad's profile expires 2026-10-08T03:16Z
