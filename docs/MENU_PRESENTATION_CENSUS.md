@@ -31,8 +31,6 @@ it never closes its parent.
 **The one exception is the gallery**, a different screen (`ContentView` switches between the two): its
 `Menu`s and `.contextMenu`s have no canvas to cancel a stroke on, and keep the system's. `ShareLink`
 (the Actions panel's recordings, the export sheet) is the system share sheet, not a menu, and remains.
-The text panel's colour row is still a stock `ColorPicker`, a UIKit popover over the canvas that no test
-has measured against a stroke.
 
 ## Why — three measurements
 

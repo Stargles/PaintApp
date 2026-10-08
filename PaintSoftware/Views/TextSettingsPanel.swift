@@ -35,6 +35,9 @@ struct TextSettingsPanel: View {
     /// the router's (`CanvasPresentation.textFont`).
     @State private var showingFontPicker = false
 
+    /// Whether the colour picker is up — a presentation too (`CanvasPresentation.textColour`).
+    @State private var showingColourPicker = false
+
     private var typography: Typography { canvasManager.textRecipe.typography }
 
     var body: some View {
@@ -196,17 +199,37 @@ struct TextSettingsPanel: View {
 
     // MARK: - Colour
 
-    /// The recipe's colour, editable without leaving the panel.
+    /// The recipe's colour, editable without leaving the panel — a swatch that opens the app's own colour
+    /// picker (`colorPickerPopover`), with its palettes, Recent strip and eyedropper.
     ///
     /// The top toolbar's swatch edits the same value while a session is live
     /// (`CanvasManager.activeEditColor`) — two ways to one value, which is the arrangement the brush
     /// size slider already has between this kind of panel and the toolbar.
+    ///
+    /// `supportsOpacity: false`: the text's alpha is not the artist's to set (`activeEditColor` writes it
+    /// opaque).
     private var colorRow: some View {
-        ColorPicker(selection: $canvasManager.activeEditColor, supportsOpacity: false) {
+        HStack {
             Text("Colour").foregroundColor(.white)
+            Spacer()
+            Button {
+                showingColourPicker.toggle()
+            } label: {
+                canvasManager.activeEditColor
+                    .frame(width: 44, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.25), lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("\(Self.idPrefix).colorSwatch")
+            // The hex rather than the resolved `Color`, so a test can read what the swatch shows and
+            // know a pick reached the model.
+            .accessibilityValue(canvasManager.activeEditColor.hexString)
+            .colorPickerPopover(.textColour, isPresented: $showingColourPicker, canvasManager: canvasManager,
+                                color: $canvasManager.activeEditColor, supportsOpacity: false)
         }
         .padding(.horizontal)
-        .accessibilityIdentifier("\(Self.idPrefix).colorSwatch")
     }
 
     // MARK: - Alignment

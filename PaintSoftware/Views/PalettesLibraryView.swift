@@ -98,8 +98,8 @@ struct PalettesLibraryView: View {
     let currentColor: Color
     var onPick: (Color) -> Void = { _ in }
 
-    @State private var renamingPalette: Palette?
-    @State private var renameText: String = ""
+    /// The palette whose name is a field, or nil.
+    @State private var renamingPaletteID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -135,20 +135,6 @@ struct PalettesLibraryView: View {
                 .padding(.bottom, 12)
             }
         }
-        .alert("Rename Palette", isPresented: Binding(
-            get: { renamingPalette != nil },
-            set: { if !$0 { renamingPalette = nil } }
-        )) {
-            TextField("Palette name", text: $renameText)
-                .accessibilityIdentifier("colorPanel.palettes.renameField")
-            Button("Cancel", role: .cancel) { renamingPalette = nil }
-            Button("Save") {
-                if let target = renamingPalette {
-                    paletteStore.renamePalette(target, to: renameText)
-                }
-                renamingPalette = nil
-            }
-        }
     }
 
     private func paletteRow(index: Int, palette: Palette) -> some View {
@@ -156,12 +142,20 @@ struct PalettesLibraryView: View {
         let isDefault = palette.id == paletteStore.selectedPaletteID
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(palette.name)
-                    .font(.footnote.weight(.medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+                if renamingPaletteID == palette.id {
+                    InlineNameFieldView(name: palette.name, placement: .row(style: .footnote, weight: .medium),
+                                        onCommit: { paletteStore.renamePalette(palette, to: $0) },
+                                        onEndEditing: { renamingPaletteID = nil })
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("colorPanel.palettes.renameField")
+                } else {
+                    Text(palette.name)
+                        .font(.footnote.weight(.medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
+                }
 
                 if isDefault {
                     Text("Default")
@@ -189,8 +183,7 @@ struct PalettesLibraryView: View {
                 }
 
                 Button {
-                    renameText = palette.name
-                    renamingPalette = palette
+                    renamingPaletteID = palette.id
                 } label: {
                     Image(systemName: "pencil")
                         .foregroundColor(.white.opacity(0.7))

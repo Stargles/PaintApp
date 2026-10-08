@@ -118,4 +118,70 @@ final class TextSessionUITests: PaintUITestCase {
                        "the words are still there (ink \(written.ink) -> \(after.ink))")
         attachScreenshot(app, "edit-text-tap-away")
     }
+
+    /// **The text's colour is picked in the app's own colour panel, and the words being written are drawn
+    /// in it.** The Colour row of the Text panel is a swatch that raises `ColorPickerPanel` — the picker the
+    /// brush, the paper and every effect use, with its palettes, Recent strip and eyedropper — not a
+    /// system popover over the canvas. What the artist does next: the swatch reads the colour they chose,
+    /// a touch outside closes the panel, and the box is still open to keep writing in.
+    func testThePanelsColourSwatchRaisesTheAppsOwnPickerAndTheWordsTakeItsColour() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        _ = writeWords("Hello", app, canvas)
+        let words = canvasWindow(wordsWindow(in: host), in: canvas)
+
+        /// How many pixels of the words' window match `predicate`, off one screenshot.
+        func count(_ predicate: (RGBA) -> Bool) throws -> Int {
+            let pixel = try pixelProbe(canvas)
+            var hits = 0
+            for xi in 0..<320 {
+                for yi in 0..<120 where predicate(pixel(words.minX + words.width * Double(xi) / 320,
+                                                         words.minY + words.height * Double(yi) / 120)) {
+                    hits += 1
+                }
+            }
+            return hits
+        }
+        func isRedInk(_ p: RGBA) -> Bool { isRed(p) }
+        func isBlackInk(_ p: RGBA) -> Bool { isInk(p) }
+        let black = try settled { try count(isBlackInk) }
+        XCTAssertGreaterThan(black, 40, "PREMISE: the words are black on the paper")
+        XCTAssertEqual(try count(isRedInk), 0, "PREMISE: and nothing on the paper is red")
+
+        let swatch = app.buttons["textPanel.colorSwatch"]
+        XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the Text panel has a Colour swatch")
+        XCTAssertEqual((swatch.value as? String)?.uppercased(), "000000", "PREMISE: the swatch reads the words' colour")
+        swatch.tap()
+        XCTAssertTrue(canvasMenu(app, "textColour").waitForExistence(timeout: 5),
+                      "the swatch raised the app's own presentation over the canvas, not a system popover")
+        let square = app.otherElements["colorPanel.svSquare"]
+        XCTAssertTrue(square.waitForExistence(timeout: 5), "…and it is the app's colour panel")
+        XCTAssertTrue(app.buttons["colorPanel.tab.palettes"].exists, "…with its palettes")
+        attachScreenshot(app, "text-colour-panel")
+
+        // Top right of the square is full saturation and brightness, and the panel opens on hue 0.
+        dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.98, dy: 0.02))
+        // The panel covers its own swatch, so a touch that does nothing else (`tapAway`) is what closes it.
+        tapAway(app)
+        XCTAssertTrue(square.waitForNonExistence(timeout: 5), "a touch outside closes the panel again")
+        XCTAssertTrue(waitForTextState(app, "editing"), "…and the box is still open to write in (text:\(readTextState(app)))")
+
+        let value = swatch.value as? String ?? ""
+        XCTAssertEqual(value.count, 6, "the swatch reads the colour that was picked, opaque (\(value))")
+        let channels = stride(from: 0, to: 6, by: 2).map { i -> Int in
+            let start = value.index(value.startIndex, offsetBy: i)
+            return Int(value[start..<value.index(start, offsetBy: 2)], radix: 16) ?? -1
+        }
+        XCTAssertGreaterThan(channels[0], 0xE0, "…which is red (\(value))")
+        XCTAssertLessThan(max(channels[1], channels[2]), 0x20, "…with no green or blue in it (\(value))")
+        let deadline = Date().addingTimeInterval(10)
+        var red = try count(isRedInk)
+        while red <= 40, Date() < deadline { Thread.sleep(forTimeInterval: 0.4); red = try count(isRedInk) }
+        XCTAssertGreaterThan(red, 40, "the words being written are drawn in the colour that was picked (red pixels \(red))")
+        XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no longer in black")
+        attachScreenshot(app, "text-drawn-in-the-picked-colour")
+    }
 }

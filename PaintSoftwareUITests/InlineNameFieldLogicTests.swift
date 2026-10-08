@@ -1,8 +1,8 @@
 import XCTest
 import UIKit
 
-/// **A name edited where it is shown** — the rule `InlineNameField` gives the scene's title and every layer
-/// and folder row: Return or a touch elsewhere commits, an empty name or an unchanged one commits nothing,
+/// **A name edited where it is shown** — the rule `InlineNameField` gives the scene's title and every layer,
+/// folder, group, view, palette and gallery-folder name: Return or a touch elsewhere commits, an empty name or an unchanged one commits nothing,
 /// and only the trimmed text the artist typed leaves. The field is put on screen in a real window, since
 /// UIKit only lets a view become first responder there; `InlineRenameUITests` drives the same rule through
 /// the real top bar and the real rail, with the keyboard.
@@ -18,9 +18,11 @@ final class InlineNameFieldLogicTests: XCTestCase {
     }
 
     /// A field named `name`, on screen, with every callback recording into `events`.
-    private func fieldOnScreen(named name: String, events: EventLog) -> InlineNameField {
+    private func fieldOnScreen(named name: String, events: EventLog,
+                               beginsEditingWhenShown: Bool = false) -> InlineNameField {
         let root = UIViewController()
         let field = InlineNameField(frame: CGRect(x: 20, y: 40, width: 240, height: 34))
+        field.beginsEditingWhenShown = beginsEditingWhenShown
         field.name = name
         field.onCommit = { events.log.append("commit:\($0)") }
         field.onEndEditing = { events.log.append("end") }
@@ -54,6 +56,30 @@ final class InlineNameFieldLogicTests: XCTestCase {
         XCTAssertEqual(field.text, "Sky", "editing starts from the name")
         field.resignFirstResponder()
         XCTAssertEqual(events.log, ["end"], "an edit that changed nothing commits nothing")
+    }
+
+    /// **A field that exists because the artist asked to rename has the keyboard as soon as it is on screen**
+    /// — once. A field not asked to begin editing waits to be tapped.
+    func testAFieldMadeToBeginEditingTakesTheKeyboardWhenShownAndOnlyOnce() {
+        /// Lets the run loop turn — the request is honoured on the pass after the window is shown.
+        func spin(for seconds: TimeInterval, until reached: () -> Bool = { false }) {
+            let deadline = Date().addingTimeInterval(seconds)
+            while !reached(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        let waiting = fieldOnScreen(named: "Sky", events: EventLog())
+        spin(for: 0.5)
+        XCTAssertFalse(waiting.isFirstResponder, "a field that was not asked to begin editing waits for a tap")
+
+        let field = fieldOnScreen(named: "Sky", events: EventLog(), beginsEditingWhenShown: true)
+        spin(for: 2) { field.isFirstResponder }
+        XCTAssertTrue(field.isFirstResponder, "the field asked to begin editing has the keyboard once it is on a window")
+        XCTAssertFalse(field.beginsEditingWhenShown, "…and the request is spent")
+        field.resignFirstResponder()
+        let root = field.window?.rootViewController
+        field.removeFromSuperview()
+        root?.view.addSubview(field)
+        spin(for: 0.5)
+        XCTAssertFalse(field.isFirstResponder, "put back on screen after the edit, it does not take the keyboard again")
     }
 
     /// **A new name is trimmed, committed once, and shown at once**, with the end of editing after it so a

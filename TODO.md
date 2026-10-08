@@ -56,14 +56,6 @@ other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
 
 ---
 
-## Inline renaming everywhere
-
-**Status** — not started. The title and layer/folder names went inline (`7bec67a`); the owner, 2026-10-07,
-on the renames still done through pop-up alerts — animation groups, saved views, palettes, gallery
-folders, brush groups: **"Yes, all inline"** — through the same `InlineNameField`, the alerts deleted whole.
-Also ruled, as built: a layer row enters rename from its options' Rename row; a Tap-mode Add replaces a
-drawn loop rather than combining with it.
-
 ## (131) follow-up: Bake on a Repeat layer materialises the loop
 
 **Status** — not started. (131) merged (`2d9fdef`) refusing Bake on a Repeat transformation layer (Repeat

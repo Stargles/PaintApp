@@ -1728,11 +1728,9 @@ struct FolderOptionsPanel: View {
 struct ViewSelectorMenu: View {
     @ObservedObject var canvasManager: CanvasManager
     @Binding var isPresented: Bool
-    /// The preset being renamed, or nil. An index rather than an id: `renameViewPreset` and every
-    /// other mutator here already take one, and re-resolving an id to an index on Save would be a
-    /// second lookup this view has no other reason to need.
+    /// The preset whose row is a name field, or nil. An index rather than an id: `renameViewPreset` and every
+    /// other mutator here already take one.
     @State private var renamingIndex: Int?
-    @State private var draftName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1779,22 +1777,6 @@ struct ViewSelectorMenu: View {
         }
         .background(Color.black.opacity(0.95))
         .frame(width: 260, height: 300)
-        // A view is renamed in an alert; a layer, a folder and the scene's name are edited in place
-        // (`InlineNameField`).
-        .alert("Rename View", isPresented: Binding(get: { renamingIndex != nil },
-                                                    set: { if !$0 { renamingIndex = nil } })) {
-            TextField("Name", text: $draftName)
-                .accessibilityIdentifier("viewMenu.renameField")
-            Button("Cancel", role: .cancel) { renamingIndex = nil }
-            Button("Save") {
-                if let index = renamingIndex {
-                    let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty { canvasManager.renameViewPreset(at: index, to: trimmed) }
-                }
-                renamingIndex = nil
-            }
-            .accessibilityIdentifier("viewMenu.renameConfirm")
-        }
     }
 
     /// A saved view's row: the name/checkmark button `row` already drew, plus the rename and delete
@@ -1803,15 +1785,24 @@ struct ViewSelectorMenu: View {
     /// to rename or delete.
     private func presetRow(index: Int, preset: ViewPreset) -> some View {
         HStack(spacing: 4) {
-            row(name: preset.name,
-                isActive: index == canvasManager.activeViewPresetIndex,
-                identifier: "viewMenu.row.\(index)") {
-                canvasManager.selectViewPreset(at: index)
-                isPresented = false
+            if renamingIndex == index {
+                // The name is the field while the artist types (`InlineNameField`); the row's own tap,
+                // which selects the view and closes the menu, is not around it.
+                InlineNameFieldView(name: preset.name, placement: .row(style: .body),
+                                    onCommit: { canvasManager.renameViewPreset(at: index, to: $0) },
+                                    onEndEditing: { renamingIndex = nil })
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("viewMenu.renameField")
+            } else {
+                row(name: preset.name,
+                    isActive: index == canvasManager.activeViewPresetIndex,
+                    identifier: "viewMenu.row.\(index)") {
+                    canvasManager.selectViewPreset(at: index)
+                    isPresented = false
+                }
             }
 
             Button {
-                draftName = preset.name
                 renamingIndex = index
             } label: {
                 Image(systemName: "pencil")

@@ -2,66 +2,88 @@ import SwiftUI
 
 /// A sub-folder of the project tree, drawn to the same 160pt grid as `GalleryTileView` so the two
 /// interleave in one `LazyVGrid` — TODO (36).
-///
-/// The count on the tile is not decoration. A folder tile is otherwise indistinguishable from an
-/// empty one, and the artist's own framing for this feature ("projects, sequences, scenes, shots")
-/// is a tree they will navigate by memory; "12 projects" is what tells them they are in the right
-/// branch before they open it.
 struct GalleryFolderTileView: View {
     let folder: ProjectStore.ProjectFolder
+    /// Whether the tile's name is a field (`InlineNameField`) rather than text — the artist asked to
+    /// rename this folder. The tile stops being a button for as long as it is, so a tap in the name is a
+    /// caret and not an open.
+    var isRenaming: Bool
     var onOpen: () -> Void
     var onRename: () -> Void
+    var onCommitRename: (String) -> Void
+    var onEndRename: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
-        // **A `Button`, not a `VStack` with an `onTapGesture`.** The project tile next door uses the
-        // gesture form and its tests reach it through the ellipsis menu instead; a folder tile has to
-        // be tappable *as itself*, and a plain stack with an accessibility identifier on it does not
-        // appear in the element tree at all — which is what the first run of `ProjectStorageUITests`
-        // found. It is also the truer description: opening a folder is a button, and VoiceOver now
-        // says so.
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ZStack {
-                        Color.blue.opacity(0.18)
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.blue.opacity(0.9))
-                    }
-                    .frame(width: 160, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    Text(folder.name)
-                        .font(.caption)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-
-                    Text(folder.projectCount == 1 ? "1 project" : "\(folder.projectCount) projects")
-                        .font(.caption2)
-                        .foregroundColor(.gray)
+        Group {
+            if isRenaming {
+                face {
+                    InlineNameFieldView(name: folder.name, placement: .row(style: .caption1),
+                                        onCommit: onCommitRename, onEndEditing: onEndRename)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("gallery.folderRenameField")
                 }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("gallery.folderTile.\(folder.name)")
-            .overlay(alignment: .topTrailing) {
-                Menu {
+            } else {
+                // **A `Button`, not a `VStack` with an `onTapGesture`.** The project tile next door uses the
+                // gesture form and its tests reach it through the ellipsis menu instead; a folder tile has to
+                // be tappable *as itself*, and a plain stack with an accessibility identifier on it does not
+                // appear in the element tree at all — which is what the first run of `ProjectStorageUITests`
+                // found. It is also the truer description: opening a folder is a button, and VoiceOver now
+                // says so.
+                Button(action: onOpen) {
+                    face {
+                        Text(folder.name)
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("gallery.folderTile.\(folder.name)")
+                .overlay(alignment: .topTrailing) {
+                    Menu {
+                        Button("Rename…", action: onRename)
+                        Button("Delete", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white, .black.opacity(0.6))
+                            .padding(6)
+                    }
+                    .accessibilityIdentifier("gallery.folderMenu.\(folder.name)")
+                }
+                .contextMenu {
                     Button("Rename…", action: onRename)
                     Button("Delete", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.white, .black.opacity(0.6))
-                        .padding(6)
                 }
-                .accessibilityIdentifier("gallery.folderMenu.\(folder.name)")
-            }
-            .contextMenu {
-                Button("Rename…", action: onRename)
-                Button("Delete", role: .destructive, action: onDelete)
             }
         }
         .frame(width: 160)
+    }
+
+    /// The tile's picture, its name (`name` — text, or the field) and its count.
+    ///
+    /// The count on the tile is not decoration. A folder tile is otherwise indistinguishable from an
+    /// empty one, and the artist's own framing for this feature ("projects, sequences, scenes, shots")
+    /// is a tree they will navigate by memory; "12 projects" is what tells them they are in the right
+    /// branch before they open it.
+    private func face<Name: View>(@ViewBuilder name: () -> Name) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                Color.blue.opacity(0.18)
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.blue.opacity(0.9))
+            }
+            .frame(width: 160, height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            name()
+
+            Text(folder.projectCount == 1 ? "1 project" : "\(folder.projectCount) projects")
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
     }
 }
 

@@ -5,7 +5,7 @@ import SwiftUI
 /// always had), Value (H/S/B sliders), and Palettes — switched by a bottom tab bar (icon + label,
 /// Procreate's shape). **The app's only colour picker** — the brush's dropdown and every anchored
 /// swatch (canvas background, value layer, effect colour, gradient stop, recolour pair, gradient end,
-/// onion tint, selection style, through `colorPickerPopover`).
+/// onion tint, selection style, text colour, through `colorPickerPopover`).
 ///
 /// ## TODO (106), the owner's second pass — what changed and why
 /// - **The Disc type is gone**, whole: the view, the tab, `ColorPickerType.disc`, its tests and the

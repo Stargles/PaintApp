@@ -707,24 +707,18 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         let renameButton = app.buttons["viewMenu.row.0.rename"]
         XCTAssertTrue(renameButton.waitForExistence(timeout: 5), "Rename is a row of its own, not a swipe or a menu")
         renameButton.tap()
-        // **Scoped to `app.alerts`, not `app.textFields`/`app.buttons` at the app level.** SwiftUI's
-        // `.alert(_:isPresented:actions:)` bridges its content to a native `UIAlertController`, and
-        // this repo has no prior test of a rename alert's field to have already found this: a custom
-        // `.accessibilityIdentifier` on the `TextField` inside that closure does not reach the field
-        // XCUITest sees (confirmed by a screenshot showing the alert on screen, correctly titled and
-        // pre-filled, while `app.textFields["viewMenu.renameField"]` still reported no such element).
-        // The alert's own title and its buttons' visible labels are what XCUITest can actually find.
-        let alert = app.alerts["Rename View"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 5), "Rename opens the app's own text-entry alert")
-        let field = alert.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "…with one text field, pre-filled with the current name")
-        XCTAssertEqual(field.value as? String, "View 1")
-        field.tap()
-        field.typeText(" (rough)")
-        alert.buttons["Save"].firstMatch.tap()
+        // The name is edited where it is shown (`InlineNameField`): the row's name becomes a field, with
+        // the keyboard up and the whole name selected, so typing replaces it. No alert.
+        let field = app.textFields["viewMenu.renameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Rename puts the row's name into editing, in the row")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "…and opens no alert")
+        XCTAssertEqual(field.value as? String, "View 1", "the field starts on the current name")
+        attachScreenshot(app, "view-row-being-renamed")
+        field.typeText("Rough\n")
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Return ended the edit")
         XCTAssertTrue(app.buttons["viewMenu.row.0"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons["viewMenu.row.0"].label, "View 1 (rough)",
-                       "Save commits the typed name onto the same row")
+        XCTAssertEqual(app.buttons["viewMenu.row.0"].label, "Rough",
+                       "Return commits the typed name onto the same row")
 
         attachScreenshot(app, "1-view-renamed-with-visible-pencil-and-trash")
 

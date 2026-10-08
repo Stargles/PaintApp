@@ -1307,20 +1307,6 @@ Note this bound is *independent of* item (12): baking geometry into canvas space
 `1/k` blow-up, but does nothing about zoom. It is also **worse** than the blow-up it replaces —
 1,638,400 pt against the 409,600 pt a 2%-scaled layer produces.
 
-## The text panel's Colour row is a stock `ColorPicker`, the one UIKit presentation left over the canvas (2026-08-27)
-
-`TextSettingsPanel.colorRow` is SwiftUI's `ColorPicker`, which presents `UIColorPickerViewController` as
-a popover over the live canvas from the bottom bar. Every other presentation over the canvas is an
-`AnchoredMenu` (`docs/MENU_PRESENTATION_CENSUS.md`); this one has no `isPresented` for
-`CanvasPresentation` to observe, so nothing registers it or closes it centrally, and nobody has measured
-what a stroke or a two-finger drag does beneath it. One tap outside it dismissed it and placed no text
-box, which is **not** the answer — a `.popover`'s failure is a drag, where the outside touch begins a
-stroke and the teardown lands mid-sequence, and a tap cannot tell the two apart.
-
-The fix is probably not a measurement: the app's one `ColorPickerPanel` already serves every other
-swatch through `colorPickerPopover`, and the owner asked for the second stock picker to go in TODO (72).
-Left for a ruling on whether the text colour gives up the system picker's eyedropper and swatch grid.
-
 ## A vector cel holding warped text re-warps it on every invalidation, not once per commit (2026-08-26)
 
 Found reviewing ADD_TEXT.md stage 5 and **deliberately not fixed** — the fix is a cache in a budget

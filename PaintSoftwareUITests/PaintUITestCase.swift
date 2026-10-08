@@ -1112,17 +1112,12 @@ class PaintUITestCase: XCTestCase {
 
     // MARK: - Reading ink off the canvas
 
-    /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
+    /// One screenshot of the canvas, as a "what colour is at this normalized point" probe.
     ///
-    /// **Ink is *dark*, not merely "not white", and that distinction cost `DistortUITests` two runs.** The
-    /// canvas is letterboxed inside a black `canvas.host`, so a not-white test answers `true` for
-    /// every pixel of the margin — which made `inkTopLeft` return the search window's own corner, put
-    /// every subsequent gesture off the paper entirely, and read exactly like an overlay that was
-    /// ignoring touches. Both operands of a probe have to be the two things you meant to compare.
-    ///
-    /// One screenshot for the whole scan: `PaintUITestCase.rgbaPixel` takes a fresh one per call, and
-    /// the readings below are hundreds of points each.
-    func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
+    /// One screenshot for the whole scan: `rgbaPixel` takes a fresh one per call, and the readings below
+    /// are hundreds of points each. No flip, for `rgbaPixel`'s reason: the screenshot's cgImage is
+    /// top-down, so buffer row 0 is the row the artist sees at the top.
+    func pixelProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> RGBA {
         let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
         let width = image.width, height = image.height
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
@@ -1130,15 +1125,25 @@ class PaintUITestCase: XCTestCase {
                                               bitsPerComponent: 8, bytesPerRow: width * 4,
                                               space: CGColorSpaceCreateDeviceRGB(),
                                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        // No flip, for `rgbaPixel`'s reason: the screenshot's cgImage is top-down, so buffer row 0 is
-        // the row the artist sees at the top.
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return { dx, dy in
             let x = min(max(Int(dx * Double(width)), 0), width - 1)
             let y = min(max(Int(dy * Double(height)), 0), height - 1)
             let offset = y * width * 4 + x * 4
-            return buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100
+            return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
         }
+    }
+
+    /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
+    ///
+    /// **Ink is *dark*, not merely "not white", and that distinction cost `DistortUITests` two runs.** The
+    /// canvas is letterboxed inside a black `canvas.host`, so a not-white test answers `true` for
+    /// every pixel of the margin — which made `inkTopLeft` return the search window's own corner, put
+    /// every subsequent gesture off the paper entirely, and read exactly like an overlay that was
+    /// ignoring touches. Both operands of a probe have to be the two things you meant to compare.
+    func inkProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> Bool {
+        let pixel = try pixelProbe(canvas)
+        return { self.isInk(pixel($0, $1)) }
     }
 
     /// A probe taken once the canvas has stopped changing — **two consecutive readings that agree**,

@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// **A name that is edited where it is shown** — the scene's title in the top bar and a layer's or
-/// folder's name in its row, typed into where it stands rather than in a sheet or an alert (the
-/// owner, 2026-10-02). Scribble is refused app-wide (`ScribbleRefusal`), so there is no handwriting
-/// that needs a field of its own.
+/// **A name that is edited where it is shown** — the scene's title in the top bar and the name of a layer,
+/// a folder, an animation group, a saved view, a palette, a gallery folder or a brush group, typed into
+/// where it stands rather than in a sheet or an alert (the owner, 2026-10-02 and 2026-10-07: *"Yes, all
+/// inline"*). Scribble is refused app-wide (`ScribbleRefusal`), so there is no handwriting that needs a
+/// field of its own.
 ///
 /// **One rule, so every name behaves alike.**
 ///
@@ -19,9 +20,9 @@ import UIKit
 ///  * Only the name the artist typed leaves, trimmed, through `onCommit` — the model's own rename
 ///    (`renameLayer`, `renameFolder`, the scene's `projectName`) is what records it.
 ///
-/// **A `UITextField`, not a SwiftUI `TextField`, for both homes.** One of them is a table cell, and both
+/// **A `UITextField`, not a SwiftUI `TextField`, for every home.** One of them is a table cell, and all
 /// need the window-wide tap-away that no SwiftUI field offers; one component with one behaviour is the
-/// point of having it. `InlineNameFieldView` is the SwiftUI door for the top bar.
+/// point of having it. `InlineNameFieldView` is the SwiftUI door.
 final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecognizerDelegate {
 
     /// The name as the model has it. What editing starts from, and what an empty or unchanged edit
@@ -36,6 +37,11 @@ final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecogniz
     /// Editing ended, committed or not. After `onCommit`, so a caller that hides the field here finds the
     /// model already renamed.
     var onEndEditing: (() -> Void)?
+
+    /// Takes the keyboard the moment the field is on screen — for a field that only exists because the
+    /// artist asked to rename, and so has nothing to wait for. One-shot: set before the field is added to
+    /// a window.
+    var beginsEditingWhenShown = false
 
     /// Room either side of the text, so the edit background does not hug the glyphs.
     private static let inset: CGFloat = 6
@@ -66,6 +72,15 @@ final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecogniz
     var intrinsicTextWidth: CGFloat {
         ((text ?? name) as NSString).size(withAttributes: [.font: font ?? UIFont.systemFont(ofSize: 17)]).width
             + 2 * Self.inset
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, beginsEditingWhenShown else { return }
+        beginsEditingWhenShown = false
+        // After the pass that put the field on screen: a field asked for the keyboard from inside its own
+        // layout is not yet something UIKit will give it to.
+        DispatchQueue.main.async { [weak self] in self?.becomeFirstResponder() }
     }
 
     // MARK: - Editing
@@ -132,34 +147,63 @@ final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecogniz
     }
 }
 
-/// `InlineNameField` for SwiftUI — the scene's title in the top bar. The field is always on screen and
-/// shows `name`; the artist taps it and types.
+/// `InlineNameField` for SwiftUI, in the two places a name can stand.
 struct InlineNameFieldView: UIViewRepresentable {
-    let name: String
-    var onCommit: (String) -> Void
 
-    /// The floor and ceiling of the field's width. A short name stays a target a fingertip can find, and a
+    enum Placement {
+        /// The scene's title in the top bar. Always on screen showing `name`, centred, only as wide as the
+        /// name needs (`widthRange`); the artist taps it and types.
+        case title
+        /// A name in a list or a panel, **in place of its label**: the caller swaps the label for this field
+        /// when the artist asks to rename, in the label's own font (`style`, `weight`), and takes it away
+        /// again from `onEndEditing`. It has the keyboard before the artist touches it, and is as wide as the
+        /// room it is given — `.frame(maxWidth: .infinity)` is how a row hands it the rest of the line.
+        case row(style: UIFont.TextStyle, weight: UIFont.Weight = .regular)
+    }
+
+    let name: String
+    var placement: Placement = .title
+    var onCommit: (String) -> Void
+    var onEndEditing: (() -> Void)?
+
+    /// The floor and ceiling of the title's width. A short name stays a target a fingertip can find, and a
     /// long one is clipped in the bar rather than pushing the icons either side of it.
     static let widthRange: ClosedRange<CGFloat> = 120...240
-    private static let height: CGFloat = 34
+    private static let titleHeight: CGFloat = 34
+    /// What a row's field asks for when it is offered no width to speak of.
+    private static let idealRowWidth: CGFloat = 160
 
     func makeUIView(context: Context) -> InlineNameField {
         let field = InlineNameField()
-        field.textAlignment = .center
-        field.font = .preferredFont(forTextStyle: .body)
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        switch placement {
+        case .title:
+            field.textAlignment = .center
+            field.font = .preferredFont(forTextStyle: .body)
+        case .row(let style, let weight):
+            field.textAlignment = .left
+            field.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
+            field.beginsEditingWhenShown = true
+        }
         return field
     }
 
     func updateUIView(_ field: InlineNameField, context: Context) {
         field.name = name
         field.onCommit = onCommit
+        field.onEndEditing = onEndEditing
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView field: InlineNameField, context: Context) -> CGSize? {
-        let ceiling = min(Self.widthRange.upperBound, proposal.width ?? Self.widthRange.upperBound)
-        let wanted = min(max(field.intrinsicTextWidth + 24, Self.widthRange.lowerBound), ceiling)
-        return CGSize(width: wanted, height: Self.height)
+        switch placement {
+        case .title:
+            let ceiling = min(Self.widthRange.upperBound, proposal.width ?? Self.widthRange.upperBound)
+            let wanted = min(max(field.intrinsicTextWidth + 24, Self.widthRange.lowerBound), ceiling)
+            return CGSize(width: wanted, height: Self.titleHeight)
+        case .row:
+            let offered = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? Self.idealRowWidth
+            return CGSize(width: offered, height: max(ceil(field.font?.lineHeight ?? 0) + 12, 28))
+        }
     }
 }

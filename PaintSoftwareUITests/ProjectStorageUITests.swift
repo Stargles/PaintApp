@@ -162,27 +162,16 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(rename.waitForExistence(timeout: 10), "the folder's own menu offers a rename")
         rename.tap()
 
-        let alert = app.alerts["Rename Folder"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 10), "and it opens prefilled for editing")
-        let field = alert.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        // The name is edited where it is shown (`InlineNameField`): the tile's name becomes a field with the
+        // whole name selected, so typing replaces it. No alert.
+        let field = app.textFields["gallery.folderRenameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "and the tile's name becomes a field, in the tile")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "with no alert")
         XCTAssertEqual(field.value as? String, "Untitled Scene",
                        "the field starts on the current name, so a rename is an edit rather than a "
                        + "retype — which is also what proves the tile passed its own folder in")
-        field.tap()
-        // Backspace rather than the edit menu's "Select All": which element type that menu's items
-        // arrive as has changed across iOS versions (`menuItems` on some, `buttons` on others), and a
-        // test that has to guess is a test that reds for the wrong reason. Deleting one character per
-        // character of the value is version-independent, and a `tap` on an alert field puts the caret
-        // after the text.
-        for _ in 0..<("Untitled Scene".count + 2) { field.typeText(XCUIKeyboardKey.delete.rawValue) }
-        // An empty `UITextField` reports its *placeholder* as `value`, not "" — so "Name" here means
-        // empty. Either answer is the empty field; the old name is what must be gone.
-        XCTAssertTrue(["", "Name"].contains(field.value as? String ?? ""),
-                      "the field is empty before the new name is typed, but reads "
-                      + "\(String(describing: field.value))")
-        field.typeText("Rooftop Chase")
-        alert.buttons.matching(identifier: "Rename").firstMatch.tap()
+        attachScreenshot(app, "folder-tile-being-renamed")
+        field.typeText("Rooftop Chase\n")
 
         XCTAssertTrue(app.buttons["gallery.folderTile.Rooftop Chase"].waitForExistence(timeout: 10),
                       "the grid redraws under the new name")

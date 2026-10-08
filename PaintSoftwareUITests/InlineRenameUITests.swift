@@ -1,10 +1,13 @@
 import XCTest
 
-/// **A name is edited where it is shown** — the scene's title in the top bar and a layer's or folder's name
-/// in its row, from a fresh document, the artist's way. Scribble is refused app-wide (`ScribbleRefusal`),
-/// so there is no rename sheet or alert to open: tap, type, Return — or
-/// touch anywhere else — and an empty name puts the old one back. `InlineNameFieldLogicTests` holds the
-/// rule; this drives it through the real top bar and the real rail, with the real keyboard.
+/// **A name is edited where it is shown** — the scene's title in the top bar, a layer's or folder's name
+/// in its row, a palette's and a brush group's in the panel that lists them, from a fresh document, the
+/// artist's way. (A saved view, an animation group and a gallery folder are driven in
+/// `LayerPanelControlsUITests`, `AnimationGroupMembershipUITests` and `ProjectStorageUITests`, each
+/// beside the rest of what that feature does.) Scribble is refused app-wide (`ScribbleRefusal`), so
+/// there is no rename sheet or alert to open: tap, type, Return — or touch anywhere else — and an empty
+/// name puts the old one back. `InlineNameFieldLogicTests` holds the rule; this drives it through the
+/// real top bar, the real rail and the real panels, with the real keyboard.
 ///
 /// What the artist does next, at every step: the name is on screen as typed, the options panel that offered
 /// Rename is out of the way, and one undo takes a layer's old name back.
@@ -128,6 +131,74 @@ final class InlineRenameUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Background"].waitForExistence(timeout: 5),
                       "the folder's row carries the new name")
         XCTAssertFalse(app.staticTexts["layerPanel.folder.Folder 1"].exists, "…and not the old one beside it")
+    }
+
+    // MARK: - A palette's name
+
+    /// **Rename on a palette edits its name in its own row of the Palettes tab**: the pencil turns the
+    /// name into a field with the whole name selected, Return commits, and an emptied name puts the old
+    /// one back. What the artist does next: the palette is listed under the name they typed.
+    func testAPalettesNameIsEditedInItsRowOfThePalettesTab() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-resetPalettes")
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        app.buttons["toolbar.colorButton"].tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5), "PREMISE: the colour panel is up")
+        app.buttons["colorPanel.tab.palettes"].tap()
+        let pencil = app.buttons["colorPanel.palettes.row.0.rename"]
+        XCTAssertTrue(pencil.waitForExistence(timeout: 5), "PREMISE: the Palettes tab lists the seeded palettes")
+        XCTAssertTrue(app.staticTexts["Spectrum"].exists, "PREMISE: the first is Spectrum")
+        let editor = app.textFields["colorPanel.palettes.renameField"]
+        XCTAssertFalse(editor.exists, "PREMISE: no row is being edited")
+
+        pencil.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), "the pencil put the palette's name into editing, in its row")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "…with no alert")
+        XCTAssertEqual(text(of: editor), "Spectrum", "the field starts on the current name")
+        XCTAssertLessThan(abs(editor.frame.midY - pencil.frame.midY), 20, "…on the row's own line (field \(editor.frame), pencil \(pencil.frame))")
+        attachScreenshot(app, "palette-row-being-renamed")
+        editor.typeText("Dusk\n")
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 5), "Return ended the edit")
+        XCTAssertTrue(app.staticTexts["Dusk"].waitForExistence(timeout: 5), "the row shows the new name")
+        XCTAssertFalse(app.staticTexts["Spectrum"].exists, "…and not the old one beside it")
+
+        // An emptied name reverts.
+        pencil.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.typeText(XCUIKeyboardKey.delete.rawValue)
+        tapAway(app)
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Dusk"].exists, "emptied and left: the name it had comes back")
+    }
+
+    // MARK: - A brush group's name
+
+    /// **Rename on the open brush group edits the title in the panel's header**: the chevron's menu offers
+    /// Rename, the title becomes a field with the whole name selected, and Return commits — the group's
+    /// row in the left column and the header both carry the new name.
+    func testABrushGroupsNameIsEditedInThePanelsHeader() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        openBrushLibrary(app)
+        let editor = app.textFields["brushPanel.renameField"]
+        XCTAssertFalse(editor.exists, "PREMISE: nothing is being edited")
+        XCTAssertTrue(app.buttons["brushPanel.group.Basics"].exists, "PREMISE: the library opens on Basics")
+
+        tapWhenHittable(app.buttons["brushPanel.groupMenu"], "The open group's chevron")
+        let rename = app.buttons["brushPanel.renameGroup"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5), "the group's menu offers Rename")
+        rename.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), "Rename put the group's title into editing, in the header")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "…with no alert")
+        XCTAssertEqual(text(of: editor), "Basics", "the field starts on the current name")
+        attachScreenshot(app, "brush-group-being-renamed")
+        editor.typeText("Everyday\n")
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 5), "Return ended the edit")
+        XCTAssertTrue(app.buttons["brushPanel.group.Everyday"].waitForExistence(timeout: 5),
+                      "the group's row in the left column carries the new name")
+        XCTAssertFalse(app.buttons["brushPanel.group.Basics"].exists, "…and not the old one beside it")
+        XCTAssertTrue(app.buttons["brushPanel.groupMenu"].waitForExistence(timeout: 5),
+                      "…and the header is the group's menu again, under its new name")
     }
 
     // MARK: - A row the keyboard would cover

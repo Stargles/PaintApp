@@ -38,7 +38,9 @@ struct GalleryView: View {
     @State private var showingUnrecoverableAlert = false
     @State private var showingStorage = false
     @State private var showingNewFolder = false
-    @State private var folderBeingRenamed: ProjectStore.ProjectFolder?
+    /// The folder whose tile shows its name as a field (`InlineNameField`), by `ProjectFolder.id`.
+    @State private var renamingFolderID: String?
+    /// The name typed into the New Folder alert.
     @State private var folderNameField = ""
     @State private var folderError: String?
     @State private var locationProblem: String? = ProjectLocation.status.problem
@@ -158,14 +160,7 @@ struct GalleryView: View {
                             }
                             .accessibilityIdentifier("gallery.newCanvasButton")
 
-                            ForEach(folders) { folder in
-                                GalleryFolderTileView(
-                                    folder: folder,
-                                    onOpen: { path.append(folder.name); refresh() },
-                                    onRename: { beginRename(folder) },
-                                    onDelete: { folderPendingDeletion = folder }
-                                )
-                            }
+                            ForEach(folders, content: folderTile)
 
                             ForEach(projects) { project in
                                 GalleryTileView(
@@ -254,16 +249,6 @@ struct GalleryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Folders can hold projects and other folders — a sequence, a scene, a shot.")
-        }
-        .alert("Rename Folder", isPresented: Binding(
-            get: { folderBeingRenamed != nil },
-            set: { if !$0 { folderBeingRenamed = nil } }
-        )) {
-            TextField("Name", text: $folderNameField)
-                .accessibilityIdentifier("gallery.folderRenameField")
-            Button("Rename") { commitRename() }
-                .accessibilityIdentifier("gallery.commitRenameButton")
-            Button("Cancel", role: .cancel) { folderBeingRenamed = nil }
         }
         .alert("Delete this project?", isPresented: Binding(
             get: { projectPendingDeletion != nil },
@@ -360,16 +345,21 @@ struct GalleryView: View {
         }
     }
 
-    private func beginRename(_ folder: ProjectStore.ProjectFolder) {
-        folderNameField = folder.name
-        folderBeingRenamed = folder
+    private func folderTile(_ folder: ProjectStore.ProjectFolder) -> some View {
+        GalleryFolderTileView(
+            folder: folder,
+            isRenaming: renamingFolderID == folder.id,
+            onOpen: { path.append(folder.name); refresh() },
+            onRename: { renamingFolderID = folder.id },
+            onCommitRename: { rename(folder, to: $0) },
+            onEndRename: { renamingFolderID = nil },
+            onDelete: { folderPendingDeletion = folder }
+        )
     }
 
-    private func commitRename() {
-        guard let folder = folderBeingRenamed else { return }
-        folderBeingRenamed = nil
+    private func rename(_ folder: ProjectStore.ProjectFolder, to name: String) {
         do {
-            try ProjectStore.renameFolder(at: folder.url, to: folderNameField)
+            try ProjectStore.renameFolder(at: folder.url, to: name)
             refresh()
         } catch {
             folderError = error.localizedDescription

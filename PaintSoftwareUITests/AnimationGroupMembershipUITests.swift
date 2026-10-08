@@ -351,14 +351,15 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         XCTAssertTrue(rename.waitForExistence(timeout: 5), "Rename Group is offered")
         rename.tap()
         XCTAssertTrue(menu.waitForNonExistence(timeout: 5), "picking the row closes the menu")
-        // Scoped to the alert: a SwiftUI alert's field does not carry its own identifier to XCUITest
-        // (`LayerUITests`' view rename has the measurement).
-        let alert = app.alerts["Rename Group"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 5), "…and the rename alert is up")
-        let field = alert.textFields.firstMatch
-        field.tap()
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 24) + "Wing")
-        alert.buttons["Save"].firstMatch.tap()
+        // The name is edited where it is shown (`InlineNameField`): the header's name becomes a field with the
+        // whole name selected, so typing replaces it.
+        let field = app.textFields["timeline.graphChannels.nameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "…and the group's name is a field in its header")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "…with no alert")
+        XCTAssertEqual(field.value as? String, "Group 1", "the field starts on the current name")
+        attachScreenshot(app, "animation-group-being-renamed")
+        field.typeText("Wing\n")
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Return ended the edit")
         let renamedRow = app.descendants(matching: .any)["timeline.graphChannels.reveal.\(groupID)"]
         let renamed = expectation(for: NSPredicate(format: "label CONTAINS 'Wing'"), evaluatedWith: renamedRow)
         wait(for: [renamed], timeout: 5)

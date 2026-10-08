@@ -108,6 +108,9 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// custom font: this list exists so every family is shown in itself.
     case textFont
 
+    /// The text panel's Colour swatch: the app's one colour picker on the text's own colour.
+    case textColour
+
     // MARK: - The Select panel
 
     /// The Select panel's Colour swatch — TODO (42)'s picker. Brackets a selection edit over its

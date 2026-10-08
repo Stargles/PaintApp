@@ -66,8 +66,8 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     /// panel is rebuilt on every `activePanel` switch, and opening onto the group holding whatever is
     /// selected is a better answer than remembering where the artist last was.
     @State private var openGroupID: UUID?
-    @State private var renamingGroup: BrushGroup?
-    @State private var renameText = ""
+    /// The group whose title in the header is a name field, or nil.
+    @State private var renamingGroupID: UUID?
 
     private var brush: Brush { canvasManager[keyPath: spec.selectedBrush] }
 
@@ -91,17 +91,6 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
         // Without this the window would be stranded on screen with nothing left to lower it.
         .onDisappear { canvasManager.sizePreview.dismiss() }
         .onAppear { openGroupID = library.groupToOpen(forSelected: brush.id)?.id }
-        .alert("Rename Group", isPresented: Binding(get: { renamingGroup != nil },
-                                                    set: { if !$0 { renamingGroup = nil } })) {
-            TextField("Name", text: $renameText)
-                .accessibilityIdentifier("\(spec.idPrefix).renameField")
-            Button("Cancel", role: .cancel) { renamingGroup = nil }
-            Button("Rename") {
-                if let group = renamingGroup { library.renameGroup(group.id, to: renameText) }
-                renamingGroup = nil
-            }
-            .accessibilityIdentifier("\(spec.idPrefix).renameConfirm")
-        }
     }
 
     // MARK: - The menu
@@ -124,32 +113,19 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     /// The chevron is not decoration: it opens the **open group's own** menu, which is where rename
     /// and reordering live. A library whose groups could not be renamed or ordered would be a list
     /// the artist cannot organise, which is the half of §2.16 that is not "make your own".
+    ///
+    /// **Rename edits the title where it stands** (`InlineNameField`): the chevron's menu gives way to the
+    /// name as a field for as long as the artist types.
     private var header: some View {
         HStack(spacing: 6) {
-            CanvasMenu(.brushGroupMenu, canvasManager: canvasManager, identifier: "\(spec.idPrefix).groupMenu") {
-                MenuItem("Rename…", systemImage: "pencil", identifier: "\(spec.idPrefix).renameGroup") {
-                    renameText = openGroup?.name ?? ""
-                    renamingGroup = openGroup
-                }
-                MenuItem("Move Up", systemImage: "arrow.up") { if let id = openGroup?.id { library.moveGroup(id, by: -1) } }
-                MenuItem("Move Down", systemImage: "arrow.down") { if let id = openGroup?.id { library.moveGroup(id, by: 1) } }
-                if library.groups.count > 1 {
-                    MenuItem("Delete Group", systemImage: "trash", role: .destructive) {
-                        guard let id = openGroup?.id else { return }
-                        library.removeGroup(id)
-                        openGroupID = library.groups.first?.id
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(openGroup?.name ?? spec.title)
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                }
+            if let group = openGroup, group.id == renamingGroupID {
+                InlineNameFieldView(name: group.name, placement: .row(style: .headline, weight: .semibold),
+                                    onCommit: { library.renameGroup(group.id, to: $0) },
+                                    onEndEditing: { renamingGroupID = nil })
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("\(spec.idPrefix).renameField")
+            } else {
+                groupMenu
             }
 
             Spacer(minLength: 4)
@@ -190,6 +166,34 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// The open group's title with its chevron, and the menu they raise: rename, reorder, delete.
+    private var groupMenu: some View {
+        CanvasMenu(.brushGroupMenu, canvasManager: canvasManager, identifier: "\(spec.idPrefix).groupMenu") {
+            MenuItem("Rename…", systemImage: "pencil", identifier: "\(spec.idPrefix).renameGroup") {
+                renamingGroupID = openGroup?.id
+            }
+            MenuItem("Move Up", systemImage: "arrow.up") { if let id = openGroup?.id { library.moveGroup(id, by: -1) } }
+            MenuItem("Move Down", systemImage: "arrow.down") { if let id = openGroup?.id { library.moveGroup(id, by: 1) } }
+            if library.groups.count > 1 {
+                MenuItem("Delete Group", systemImage: "trash", role: .destructive) {
+                    guard let id = openGroup?.id else { return }
+                    library.removeGroup(id)
+                    openGroupID = library.groups.first?.id
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(openGroup?.name ?? spec.title)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
     }
 
     private var groupColumn: some View {

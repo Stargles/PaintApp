@@ -95,11 +95,9 @@ struct AnimationTimeline: View {
     @State private var pendingPoseBake: (layerIndex: Int, celIndex: Int, cels: Int)?
 
     // Press-and-hold reorder state for the pinned name column.
-    /// The animation group the rename alert is open on, and the text field's draft — the shape
-    /// `ViewSelectorMenu`'s rename alert uses, and `@State` for the reason the popovers just above are:
-    /// there is no rule about it that the model has to be able to see.
-    @State private var renamingAnimationGroup: AnimationGroup?
-    @State private var animationGroupDraftName = ""
+    /// The animation group whose header in the channel list is a name field, and `@State` for the reason the
+    /// popovers just above are: there is no rule about it that the model has to be able to see.
+    @State private var renamingAnimationGroupID: UUID?
     @State private var draggingRowID: UUID?
     @State private var dragTranslation: CGFloat = 0
     @State private var dragOffsetRows: Int = 0
@@ -1128,21 +1126,6 @@ struct AnimationTimeline: View {
             .padding(.vertical, 6)
         }
         .frame(maxHeight: 300)
-        .alert("Rename Group", isPresented: Binding(get: { renamingAnimationGroup != nil },
-                                                    set: { if !$0 { renamingAnimationGroup = nil } })) {
-            TextField("Name", text: $animationGroupDraftName)
-                .accessibilityIdentifier("timeline.graphChannels.nameField")
-            Button("Cancel", role: .cancel) { renamingAnimationGroup = nil }
-            Button("Save") {
-                if let group = renamingAnimationGroup {
-                    // Through the writer, never by writing `displayName` here: it is where the empty
-                    // name is refused and where the one undo step is recorded, and a view that wrote
-                    // the field would have neither.
-                    canvasManager.renameAnimationGroup(group.id, to: animationGroupDraftName)
-                }
-                renamingAnimationGroup = nil
-            }
-        }
     }
 
     /// The group's header: a chevron that folds, a box that takes every channel under it, and a body
@@ -1180,43 +1163,48 @@ struct AnimationTimeline: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
             .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
-            // **Not a `Button`**, because this row is also pressed and held (below), and a `Button` runs
-            // its action when the finger lifts however long it was held — a rename would have
-            // raised the Move box and closed the list under it.
-            HStack(spacing: 6) {
-                // **An animation group's tag colour, shown for the first time.** §3.4 calls it
-                // *"the swatch this group is drawn in when the timeline or a channel list names
-                // it"*, and until now nothing drew it — the swatch on a *channel* row is the
-                // band's curve colour, which is a different thing keyed on a different input. A
-                // generated colour nothing shows is a field that cannot be checked; a group with
-                // no tag (the whole cel's Move, a grade) draws none rather than a grey stand-in.
-                if let tag = canvasManager.animationGroup(named: group.navigation)?.tagColor {
-                    Circle()
-                        .fill(Color(red: tag.red, green: tag.green, blue: tag.blue)
-                            .opacity(tag.alpha))
-                        .frame(width: 8, height: 8)
+            let animationGroup = canvasManager.animationGroup(named: group.navigation)
+            if let animationGroup, animationGroup.id == renamingAnimationGroupID {
+                // **Its name is the field while the artist types**, with none of the row's gestures around
+                // it: a tap in the field is a caret, not a reveal that raises the Move box and closes
+                // the list. The writer, never `displayName`, is where the empty name is refused and the
+                // one undo step is recorded.
+                HStack(spacing: 6) {
+                    tagDot(of: animationGroup)
+                    InlineNameFieldView(name: animationGroup.displayName,
+                                        placement: .row(style: .caption1, weight: .semibold),
+                                        onCommit: { canvasManager.renameAnimationGroup(animationGroup.id, to: $0) },
+                                        onEndEditing: { renamingAnimationGroupID = nil })
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("timeline.graphChannels.nameField")
                 }
-                Text(group.name).font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { revealGraphChannel(group.navigation) }
-            .opacity(group.navigation == nil ? 0.4 : 1)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("timeline.graphChannels.reveal.\(group.id)")
-            // **Rename lives behind a long press rather than on the row**, for the reason the row's
-            // three buttons are three buttons: the row already means fold / filter / reveal, and a
-            // fourth target would leave no space that means "reveal" any more. A group whose name is
-            // generated is the only thing here worth renaming — a grade's header is named by the
-            // effect the artist picked, and the whole cel's Move is named by what it is.
-            .canvasContextMenu(.graphGroupMenu, canvasManager: canvasManager,
-                               isEnabled: canvasManager.animationGroup(named: group.navigation) != nil) {
-                if let animationGroup = canvasManager.animationGroup(named: group.navigation) {
-                    MenuItem("Rename Group", systemImage: "pencil",
-                             identifier: "timeline.graphChannels.rename.\(group.id)") {
-                        animationGroupDraftName = animationGroup.displayName
-                        renamingAnimationGroup = animationGroup
+            } else {
+                // **Not a `Button`**, because this row is also pressed and held (below), and a `Button` runs
+                // its action when the finger lifts however long it was held — a rename would have
+                // raised the Move box and closed the list under it.
+                HStack(spacing: 6) {
+                    tagDot(of: animationGroup)
+                    Text(group.name).font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { revealGraphChannel(group.navigation) }
+                .opacity(group.navigation == nil ? 0.4 : 1)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("timeline.graphChannels.reveal.\(group.id)")
+                // **Rename lives behind a long press rather than on the row**, for the reason the row's
+                // three buttons are three buttons: the row already means fold / filter / reveal, and a
+                // fourth target would leave no space that means "reveal" any more. A group whose name is
+                // generated is the only thing here worth renaming — a grade's header is named by the
+                // effect the artist picked, and the whole cel's Move is named by what it is.
+                .canvasContextMenu(.graphGroupMenu, canvasManager: canvasManager,
+                                   isEnabled: animationGroup != nil) {
+                    if let animationGroup {
+                        MenuItem("Rename Group", systemImage: "pencil",
+                                 identifier: "timeline.graphChannels.rename.\(group.id)") {
+                            renamingAnimationGroupID = animationGroup.id
+                        }
                     }
                 }
             }
@@ -1224,6 +1212,20 @@ struct AnimationTimeline: View {
         .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+    }
+
+    /// **An animation group's tag colour, shown for the first time.** §3.4 calls it *"the swatch this group
+    /// is drawn in when the timeline or a channel list names it"*, and until now nothing drew it — the
+    /// swatch on a *channel* row is the band's curve colour, which is a different thing keyed on a
+    /// different input. A generated colour nothing shows is a field that cannot be checked; a group with
+    /// no tag (the whole cel's Move, a grade) draws none rather than a grey stand-in.
+    @ViewBuilder
+    private func tagDot(of animationGroup: AnimationGroup?) -> some View {
+        if let tag = animationGroup?.tagColor {
+            Circle()
+                .fill(Color(red: tag.red, green: tag.green, blue: tag.blue).opacity(tag.alpha))
+                .frame(width: 8, height: 8)
+        }
     }
 
     /// **The click that raises the Move box** — §11.7's second ruling, wired here and decided in
