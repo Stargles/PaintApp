@@ -206,11 +206,10 @@ extension CanvasManager {
     /// What the layer held on those frames is replaced: a drawing across a run's edge is cut there
     /// (`splitCel`), a drawing inside goes, and a run the loop showed nothing in is left empty.
     ///
-    /// **Every copy is taken before the first run is carved.** Carving cuts and drops the very cels a
-    /// later run copies from (a source held across a cycle's end is cut at it), and a cut half keeps
-    /// only its own keys — so copying afterwards would copy the cut cel and lose the tail of its
-    /// animation. `copyTiers` is the one place a copy of a drawing is made (a derived cel is flattened to
-    /// the still it shows, a pose comes with the drawing), so a replayed drawing is a duplicated one.
+    /// **Every copy is taken before the first run is carved.** `copyTiers` is the one place a copy of a
+    /// drawing is made — a derived cel is flattened to the still it shows, from the drawings it refers to,
+    /// and a pose comes with the drawing — so a replayed drawing is a duplicated one; and carving can drop
+    /// a cel a later run's source refers to.
     private func replay(_ loop: LoopBake, onLayerID layerID: UUID) {
         guard let at = layers.firstIndex(where: { $0.id == layerID }) else { return }
         let held = layers[at].cels
@@ -463,9 +462,9 @@ extension CanvasManager {
     ///
     /// - A **still** is one picture whatever frame is read, so the same cel on consecutive frames is one
     ///   run. A cel a pose channel moves is read at its own frames, so its run carries the offset and is
-    ///   copied with its keys whole — which is exact only when the run starts at the cel's first frame
-    ///   (a loop that begins partway into an animated drawing would need the keys cut there, and Split
-    ///   Drawing re-eases the segment it cuts), so that case is left as it was.
+    ///   copied with its keys whole — which is exact only when the run starts at the cel's first frame,
+    ///   and when no cut passes through an animated drawing (Split Drawing re-eases the segment it cuts),
+    ///   so those cases are left as they were: Bake Animation turns the motion into drawings first.
     /// - A **video or stream** cannot be copied, and is left as it was.
     /// - A layer under **another Repeat** is read at a frame the walk composes twice; it is left as it
     ///   was, bake the nearer Repeat first.
@@ -533,6 +532,14 @@ extension CanvasManager {
                           run.frames.lowerBound + run.replay.offset != source.startFrame {
                     leftover = .animatedDrawing
                 }
+            }
+            // A cut through an animated drawing re-eases the segment it cuts (`TransformTrack.split`), so
+            // the frames either side of the cut would no longer move as they did.
+            let edges = loop.runs.flatMap { [$0.frames.lowerBound, $0.frames.upperBound] }
+            if layer.cels.contains(where: { cel in
+                Self.changesWithItsOwnFrame(cel) && edges.contains { cel.startFrame < $0 && $0 < cel.endFrame }
+            }) {
+                leftover = .animatedDrawing
             }
             if let leftover {
                 plan.leftovers.append(BakeLeftover(name: layer.name, reason: leftover))

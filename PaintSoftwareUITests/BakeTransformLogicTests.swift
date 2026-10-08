@@ -589,6 +589,24 @@ final class BakeTransformLogicTests: XCTestCase {
         guard case .bakedWithLeftovers? = manager.notice?.kind else { return XCTFail("The leftover is said") }
     }
 
+    /// **An animated drawing held across a cycle's end would have to be cut there**, and a cut re-eases
+    /// the segment it passes through — so it is left as it was, and said so, rather than written out
+    /// moving a little differently.
+    func testAnAnimatedDrawingHeldAcrossTheLoopIsLeftAsItWas() throws {
+        let manager = document()
+        let sprite = addDrawings(manager, "Sprite", blocks: [(0, 12)])
+        let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
+        manager.layers[index(sprite, manager)].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .bezier),
+                .init(frame: 11, pose: moved, interpolation: .bezier)], step: 1)]
+        let loop = addLoop(manager, period: 4)
+
+        XCTAssertEqual(manager.bakeLayer(id: loop),
+                       .refused(.nothingToBake([CanvasManager.BakeLeftover(name: "Sprite", reason: .animatedDrawing)])))
+        XCTAssertEqual(manager.layers[index(sprite, manager)].cels.count, 1, "Not cut")
+    }
+
     /// **Exact, or refused.** An opacity that fades in over the first cycle repeats with the loop, and
     /// a drawing cannot carry it — baking would play the fade once and quietly change the picture.
     func testALoopThatRepeatsMoreThanDrawingsIsRefused() throws {
