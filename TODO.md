@@ -50,14 +50,14 @@ rather than assuming it still holds.
 
 ## What is left of the owner's 2026-10-01/02 asks
 
-Of (111)–(152) and their ruled follow-ups, one item remains: (139) below. Every other one merged in
-session 46 (`git log` and HANDOFF.md carry what each did).
+Of (111)–(152) and their ruled follow-ups, only (139) remains. Every other one merged in session 46
+(`git log` and HANDOFF.md carry what each did).
 
 ---
 
 ## (139) Keys, not keyframes — every channel component independent
 
-**Status** — ruled, not started. *"An update has to be done to the graph editor and key
+**Status** — ruled; in flight on `tmp/keys` (Opus, 2026-10-08). *"An update has to be done to the graph editor and key
 framing. First off, remove all notion of keyframes, everything should just be keys. Lets say we have a
 move option. The X and Y and rotation etc components keys should be fully independent from each
 other."* KEYFRAMES.md §2.26–§2.28 (the keyframe-mark workflow) and §2.5 (a transform key stores a quad)

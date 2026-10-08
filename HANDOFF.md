@@ -57,6 +57,37 @@ message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deplo
 **Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
 merged but two. In order, what is next when the owner says continue:
 
+1. **Done 2026-10-07/08**: the full UI suite (`e953bb8`: 5203 / 5140 / 3 / 60, 65.4 min — CLAUDE.md carries
+   the table); a read-only audit of the session's diff (`~/PaintWork/design/audit-1007.md`) and all of its
+   cleanup lanes — C1 test helpers + one dock-aware rule, C1b honest `waitForPixel` + `check-ui-helpers.py`,
+   C2 app-side mechanics + docs + the re-signer, C3a one `HandleDrag` / `ToolReturnPath` / sandwich input,
+   C3b one edit-session core / colour-slot accessor / topmost walk; every menu over the canvas an
+   `AnchoredMenu`; inline renaming everywhere + the text colour on the app's panel; the Repeat bake and its
+   partial case.
+2. **In flight: (139) keys, not keyframes** — Opus alone on `tmp/keys`. **After it**: a full UI suite on the
+   final tree (the session has merged ~25 commits since `e953bb8`), then an iPad install.
+3. **Ask the owner** how (132)'s held stroke ends feel on the installed build and whether a live stroke's
+   interior wants smoothing.
+4. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on — `f84776f`'s C# half is uncompiled.
+
+**The owner's iPad has `fe036df`** (Release, installed by the re-signer 2026-09-30; profile to
+2026-10-08T03:16Z).
+**Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
+slept 2026-09-20 → 23, the profile lapsed, and iOS asked the owner to re-trust the developer. The
+certificate itself has not changed since 2026-07-20.
+
+**The laptop streamer was started by hand 2026-09-24 22:34** and has no autostart (TODO (99), as asked);
+after a reboot the owner opens it from its desktop icon. A stopped streamer reads on the iPad as a
+**timeout** ("did not answer … asleep, off, or not on this network"), not a refusal — docs/STREAM.md §5.9.
+
+## What is left
+
+**Paused by the owner on 2026-10-02** after the last two lanes merged — *"pause for now until i give you a
+message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deploy`, no `tmp/*` branches.
+
+**Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
+merged but two. In order, what is next when the owner says continue:
+
 1. **Done 2026-10-07**: the full UI suite (`e953bb8`: 5203 / 5140 / 3 / 60, 65.4 min, triaged green but
    for the menu defect below — CLAUDE.md carries the table) and a read-only audit of the session's diff,
    whose worklist is `~/PaintWork/design/audit-1007.md`: lanes **C1** (UI-test helpers, the dock offsets)
