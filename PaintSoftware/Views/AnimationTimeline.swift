@@ -446,7 +446,7 @@ struct AnimationTimeline: View {
         switch timelineMenu?.menu {
         case .block(let layerIndex, let celIndex, let frame):
             if canvasManager.layers.indices.contains(layerIndex) {
-                menuList {
+                MenuList {
                     // Copy only snapshots the block's content onto the clipboard — it doesn't touch
                     // the timeline. Pasting it somewhere else happens from the target empty slot's
                     // own menu.
@@ -505,7 +505,7 @@ struct AnimationTimeline: View {
             }
 
         case .gap(let layerIndex, let frame):
-            menuList {
+            MenuList {
                 menuButton("Add Drawing", icon: "plus.square") {
                     canvasManager.selectLayer(layerIndex)
                     canvasManager.addCel(layerIndex: layerIndex, startFrame: frame, frameCount: 1)
@@ -532,7 +532,7 @@ struct AnimationTimeline: View {
             }
 
         case .loop(let frame):
-            menuList {
+            MenuList {
                 menuButton("Set Loop Start", icon: "arrow.right.to.line") { canvasManager.setLoopStart(frame) }
                 menuButton("Set Loop End", icon: "arrow.left.to.line") { canvasManager.setLoopEnd(frame) }
                 if canvasManager.hasLoopBoundary {
@@ -564,7 +564,7 @@ struct AnimationTimeline: View {
         // components share, since there is no per-component version of it to remove.
         case .graphNode(let target, let parameterID, let frame):
             let isPose = PoseChannelID.isPose(parameterID: parameterID)
-            menuList {
+            MenuList {
                 // Offered only where there is something to reset — an authored tangent rather than a
                 // derived one — which is `Clear Loop Range`'s rule on the arm above. It is also the
                 // only way back out of `.free` once a handle has been dragged, so its absence on an
@@ -651,11 +651,9 @@ struct AnimationTimeline: View {
     /// **VIDEO.md §2.5's Adjust Speed**, shown only on a block that holds a video — so an ordinary
     /// block's menu is exactly the menu it was.
     ///
-    /// **Flat rows rather than a nested `Menu`**, which is a deliberate refusal rather than a
-    /// simplification: this popover is hand-built out of a `VStack` (`menuList`) under
-    /// `.presentationCompactAdaptation(.popover)`, so a SwiftUI `Menu` here would be a presentation
-    /// inside a presentation — a shape nothing else in this app uses and nothing in the fast tier
-    /// could pin, since this file is not compiled into `PaintSoftwareUITests`.
+    /// **Flat rows rather than a nested menu**, a deliberate refusal rather than a simplification:
+    /// every menu in this app is a list of rows (`MenuList`) and the current choice is ticked, so a
+    /// submenu would be a shape nothing else uses.
     ///
     /// **The list and the arithmetic both live on `CanvasManager`** for that same reason:
     /// `videoSpeedChoices` is a static there and `frameForFrameVideoSpeed` computes §2.3's setting
@@ -675,15 +673,15 @@ struct AnimationTimeline: View {
                 .padding(.top, 8)
                 .padding(.bottom, 2)
             ForEach(CanvasManager.videoSpeedChoices, id: \.self) { choice in
-                menuButton(Self.speedTitle(choice),
-                           icon: Self.isSameSpeed(current, choice) ? "checkmark" : "speedometer") {
+                menuButton(Self.speedTitle(choice), icon: "speedometer",
+                           isSelected: Self.isSameSpeed(current, choice)) {
                     canvasManager.setVideoSpeed(layerIndex: layerIndex, celIndex: celIndex, to: choice)
                 }
             }
             if let frameForFrame = canvasManager.frameForFrameVideoSpeed(layerIndex: layerIndex,
                                                                         celIndex: celIndex) {
-                menuButton("Frame for Frame",
-                           icon: Self.isSameSpeed(current, frameForFrame) ? "checkmark" : "film.stack") {
+                menuButton("Frame for Frame", icon: "film.stack",
+                           isSelected: Self.isSameSpeed(current, frameForFrame)) {
                     canvasManager.setVideoSpeed(layerIndex: layerIndex, celIndex: celIndex,
                                                 to: frameForFrame)
                 }
@@ -703,30 +701,11 @@ struct AnimationTimeline: View {
     /// depended on that would simply never appear.
     private static func isSameSpeed(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
 
-    private func menuList<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
-            .padding(.vertical, 6)
-            .frame(minWidth: 190)
-    }
-
-    private func menuButton(_ title: String, icon: String, role: ButtonRole? = nil,
+    /// A row of the timeline's menus, named `timeline.menu.<title>` for the suite.
+    private func menuButton(_ title: String, icon: String, role: ButtonRole? = nil, isSelected: Bool = false,
                             action: @escaping () -> Void) -> some View {
-        Button(role: role) {
-            action()
-            timelineMenu = nil
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).frame(width: 20)
-                Text(title)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundColor(role == .destructive ? .red : .primary)
-        .accessibilityIdentifier("timeline.menu.\(title)")
+        MenuItem(title, systemImage: icon, isSelected: isSelected, role: role,
+                 identifier: "timeline.menu.\(title)", action: action)
     }
 
     // MARK: - Resizing
@@ -1201,42 +1180,44 @@ struct AnimationTimeline: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
             .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
-            Button(action: { revealGraphChannel(group.navigation) }) {
-                HStack(spacing: 6) {
-                    // **An animation group's tag colour, shown for the first time.** §3.4 calls it
-                    // *"the swatch this group is drawn in when the timeline or a channel list names
-                    // it"*, and until now nothing drew it — the swatch on a *channel* row is the
-                    // band's curve colour, which is a different thing keyed on a different input. A
-                    // generated colour nothing shows is a field that cannot be checked; a group with
-                    // no tag (the whole cel's Move, a grade) draws none rather than a grey stand-in.
-                    if let tag = canvasManager.animationGroup(named: group.navigation)?.tagColor {
-                        Circle()
-                            .fill(Color(red: tag.red, green: tag.green, blue: tag.blue)
-                                .opacity(tag.alpha))
-                            .frame(width: 8, height: 8)
-                    }
-                    Text(group.name).font(.caption.weight(.semibold))
-                    Spacer(minLength: 0)
+            // **Not a `Button`**, because this row is also pressed and held (below), and a `Button` runs
+            // its action when the finger lifts however long it was held — a rename would have
+            // raised the Move box and closed the list under it.
+            HStack(spacing: 6) {
+                // **An animation group's tag colour, shown for the first time.** §3.4 calls it
+                // *"the swatch this group is drawn in when the timeline or a channel list names
+                // it"*, and until now nothing drew it — the swatch on a *channel* row is the
+                // band's curve colour, which is a different thing keyed on a different input. A
+                // generated colour nothing shows is a field that cannot be checked; a group with
+                // no tag (the whole cel's Move, a grade) draws none rather than a grey stand-in.
+                if let tag = canvasManager.animationGroup(named: group.navigation)?.tagColor {
+                    Circle()
+                        .fill(Color(red: tag.red, green: tag.green, blue: tag.blue)
+                            .opacity(tag.alpha))
+                        .frame(width: 8, height: 8)
                 }
-                .contentShape(Rectangle())
+                Text(group.name).font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .disabled(group.navigation == nil)
+            .contentShape(Rectangle())
+            .onTapGesture { revealGraphChannel(group.navigation) }
+            .opacity(group.navigation == nil ? 0.4 : 1)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("timeline.graphChannels.reveal.\(group.id)")
             // **Rename lives behind a long press rather than on the row**, for the reason the row's
             // three buttons are three buttons: the row already means fold / filter / reveal, and a
             // fourth target would leave no space that means "reveal" any more. A group whose name is
             // generated is the only thing here worth renaming — a grade's header is named by the
             // effect the artist picked, and the whole cel's Move is named by what it is.
-            .contextMenu {
+            .canvasContextMenu(.graphGroupMenu, canvasManager: canvasManager,
+                               isEnabled: canvasManager.animationGroup(named: group.navigation) != nil) {
                 if let animationGroup = canvasManager.animationGroup(named: group.navigation) {
-                    Button {
+                    MenuItem("Rename Group", systemImage: "pencil",
+                             identifier: "timeline.graphChannels.rename.\(group.id)") {
                         animationGroupDraftName = animationGroup.displayName
                         renamingAnimationGroup = animationGroup
-                    } label: {
-                        Label("Rename Group", systemImage: "pencil")
                     }
-                    .accessibilityIdentifier("timeline.graphChannels.rename.\(group.id)")
                 }
             }
         }

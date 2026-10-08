@@ -1748,16 +1748,8 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         XCTAssertTrue(valueRow.waitForExistence(timeout: 5))
         valueRow.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        // `scrollMenuTo`'s own note: the menu's `CollectionView` only realizes cells near the
-        // current scroll position, so a header past the first few groups does not exist in the
-        // accessibility tree until swept into view the same way an effect entry does.
-        let collection = app.collectionViews.firstMatch
+        // Every header is in the menu's tree at once, whether or not it is in view.
         for title in BlendMode.menuGroupTitles + ["Colour", "Blur & Light", "Stylise", "Guides"] {
-            for _ in 0..<10 {
-                if app.staticTexts[title].exists { break }
-                guard collection.exists else { break }
-                collection.swipeUp()
-            }
             XCTAssertTrue(app.staticTexts[title].exists,
                           "The value layer's merged menu should show a \"\(title)\" header")
         }

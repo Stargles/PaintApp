@@ -126,16 +126,15 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     /// the artist cannot organise, which is the half of §2.16 that is not "make your own".
     private var header: some View {
         HStack(spacing: 6) {
-            Menu {
-                Button("Rename…") {
+            CanvasMenu(.brushGroupMenu, canvasManager: canvasManager, identifier: "\(spec.idPrefix).groupMenu") {
+                MenuItem("Rename…", systemImage: "pencil", identifier: "\(spec.idPrefix).renameGroup") {
                     renameText = openGroup?.name ?? ""
                     renamingGroup = openGroup
                 }
-                .accessibilityIdentifier("\(spec.idPrefix).renameGroup")
-                Button("Move Up") { if let id = openGroup?.id { library.moveGroup(id, by: -1) } }
-                Button("Move Down") { if let id = openGroup?.id { library.moveGroup(id, by: 1) } }
+                MenuItem("Move Up", systemImage: "arrow.up") { if let id = openGroup?.id { library.moveGroup(id, by: -1) } }
+                MenuItem("Move Down", systemImage: "arrow.down") { if let id = openGroup?.id { library.moveGroup(id, by: 1) } }
                 if library.groups.count > 1 {
-                    Button("Delete Group", role: .destructive) {
+                    MenuItem("Delete Group", systemImage: "trash", role: .destructive) {
                         guard let id = openGroup?.id else { return }
                         library.removeGroup(id)
                         openGroupID = library.groups.first?.id
@@ -152,11 +151,10 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
                         .foregroundColor(.white.opacity(0.7))
                 }
             }
-            .accessibilityIdentifier("\(spec.idPrefix).groupMenu")
 
             Spacer(minLength: 4)
 
-            Menu {
+            CanvasMenu(.brushAddMenu, canvasManager: canvasManager, identifier: "\(spec.idPrefix).addButton") {
                 // **§7.1's first arm of the `+`, and it is the one the library made possible.** The
                 // owner: *"the create brush right now makes you import a brush, but this library
                 // feature opens up the possibility of just taking you straight to the edit menu of a
@@ -172,18 +170,16 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
                 // is §2.20's second tap. The editor edits *the selection*, so selecting it is what
                 // makes "straight to the edit menu of a default brush" true rather than sending the
                 // artist to the settings of whatever they had before.
-                Button("Create Manually") {
+                MenuItem("Create Manually", systemImage: "paintbrush.pointed", identifier: "\(spec.idPrefix).createManually") {
                     let made = library.createBrush(inGroup: openGroup?.id)
                     openGroupID = library.group(containingBrush: made.id)?.id ?? openGroupID
                     spec.selectPreset(canvasManager, made)
                     onEditBrush()
                 }
-                .accessibilityIdentifier("\(spec.idPrefix).createManually")
                 addMenuItems()
-                Button("New Group") {
+                MenuItem("New Group", systemImage: "folder.badge.plus", identifier: "\(spec.idPrefix).newGroup") {
                     openGroupID = library.addGroup().id
                 }
-                .accessibilityIdentifier("\(spec.idPrefix).newGroup")
             } label: {
                 Image(systemName: "plus")
                     .font(.body.weight(.semibold))
@@ -191,7 +187,6 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
-            .accessibilityIdentifier("\(spec.idPrefix).addButton")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -210,7 +205,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
         // **The menu's own "I am on screen" element, and it is on the `ScrollView` deliberately.**
         // An identifier on the enclosing `VStack` is *inherited* by descendants rather than making a
         // container element of its own: it produced no `otherElements` node at all, and it silently
-        // overwrote the two `Menu`s' identifiers, so `addButton` and `groupMenu` were both
+        // overwrote the two menu buttons' identifiers, so `addButton` and `groupMenu` were both
         // unreachable while looking perfectly correct in the source. A `ScrollView` carries one.
         .accessibilityIdentifier("\(spec.idPrefix).groupList")
     }
@@ -273,38 +268,39 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     /// know which tap they were about to make.
     private func brushRow(_ candidate: Brush) -> some View {
         let isSelected = candidate.id == brush.id
-        return Button {
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(candidate.name)
+                .font(.caption2)
+                .foregroundColor(isSelected ? .blue : .white)
+                .lineLimit(1)
+            BrushPreviewRow(brush: candidate)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.white.opacity(0.18) : Color.clear)
+        .contentShape(Rectangle())
+        // Not a `Button`, because the row is also pressed and held: a `Button` runs its action when the
+        // finger lifts however long it was held, so offering Favourites would also have selected it.
+        .onTapGesture {
             if isSelected {
                 onEditBrush()
             } else {
                 spec.selectPreset(canvasManager, candidate)
             }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.name)
-                    .font(.caption2)
-                    .foregroundColor(isSelected ? .blue : .white)
-                    .lineLimit(1)
-                BrushPreviewRow(brush: candidate)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.white.opacity(0.18) : Color.clear)
-            .contentShape(Rectangle())
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("\(spec.idPrefix).brush.\(candidate.name)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         // **Press and hold, because a tap is already two verbs** (select, then edit — §2.20). The one
         // action on the menu is the Favourites list's own: it is the same brush from a second place
         // (`BrushGroup`'s doc), so there is nothing to confirm and nothing it can lose.
-        .contextMenu {
+        .canvasContextMenu(.brushRowMenu, canvasManager: canvasManager) {
             let isFavourite = library.isFavourite(candidate.id)
-            Button {
+            MenuItem(isFavourite ? "Remove from Favourites" : "Add to Favourites",
+                     systemImage: isFavourite ? "star.slash" : "star") {
                 library.setFavourite(candidate.id, !isFavourite)
-            } label: {
-                Label(isFavourite ? "Remove from Favourites" : "Add to Favourites",
-                      systemImage: isFavourite ? "star.slash" : "star")
             }
         }
     }

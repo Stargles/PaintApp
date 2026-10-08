@@ -87,7 +87,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                       "PREMISE: the node landed in the panel")
         app.buttons["layerPanel.folder.Mix 1.options"].tap()
         app.buttons["layerOptions.mixModeButton"].tap()
-        let colorWheels = scrollMenuTo(app, identifier: "layerOptions.mixMode.colourwheels")
+        let colorWheels = app.buttons["layerOptions.mixMode.colourwheels"]
         XCTAssertTrue(colorWheels.waitForExistence(timeout: 5), "PREMISE: the menu lists Colour Wheels")
         colorWheels.tap()
         let openKnobs = app.buttons["layerOptions.nodeEffectSettings"]

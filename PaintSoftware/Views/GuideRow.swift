@@ -153,13 +153,13 @@ struct GuideRow: View {
     /// pull about. Collapsing them into a single "Use" would make the artist find out which one they
     /// got by editing it — the same reason Generate and Reproject are two buttons.
     private func fetchMenu(from linkable: [GuideStroke]) -> some View {
-        Menu {
+        CanvasMenu(.guideFetchMenu, canvasManager: canvasManager, identifier: "interpolate.guideFetch") {
             ForEach(Array(linkable.enumerated()), id: \.element.id) { index, guide in
-                Menu("Guide from elsewhere \(index + 1)") {
-                    Button("Link — edits propagate") {
+                MenuSection("Guide from elsewhere \(index + 1)") {
+                    MenuItem("Link — edits propagate", systemImage: "link") {
                         canvasManager.linkGuideStroke(id: guide.id)
                     }
-                    Button("Duplicate — independent copy") {
+                    MenuItem("Duplicate — independent copy", systemImage: "plus.square.on.square") {
                         canvasManager.duplicateGuideStroke(id: guide.id)
                     }
                 }
@@ -167,7 +167,7 @@ struct GuideRow: View {
         } label: {
             Label("Fetch", systemImage: "plus.circle")
                 .font(.caption)
+                .foregroundColor(.accentColor)
         }
-        .accessibilityIdentifier("interpolate.guideFetch")
     }
 }

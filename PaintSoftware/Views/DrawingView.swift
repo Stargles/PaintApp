@@ -986,7 +986,8 @@ struct DrawingView: View {
             // session's colour picker, which is what makes `TopToolbar.toggle`'s no-bake conditional
             // mean anything. See `CanvasManager.activeEditColor`.
             ColorPickerPanel(color: $canvasManager.activeEditColor,
-                             eyedropperMode: $canvasManager.eyedropperMode)
+                             eyedropperMode: $canvasManager.eyedropperMode,
+                             canvasManager: canvasManager)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         case .text:

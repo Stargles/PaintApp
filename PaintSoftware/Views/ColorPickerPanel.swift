@@ -66,6 +66,10 @@ struct ColorPickerPanel: View {
     /// every inbound colour opaque. See `applyHSBA`.
     var supportsOpacity: Bool = true
 
+    /// For the swatch grids' Delete menu, which registers as a presentation like any other
+    /// (`CanvasPresentation.paletteSwatchMenu`).
+    let canvasManager: CanvasManager
+
     /// The app-wide palette library. Shared so edits persist across the panel being rebuilt each
     /// time it's reopened.
     @ObservedObject var paletteStore: PaletteStore = .shared
@@ -458,8 +462,8 @@ struct ColorPickerPanel: View {
                 Text(palette.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
-                PaletteSwatchGrid(paletteStore: paletteStore, palette: palette, currentColor: currentColor,
-                                  idPrefix: "colorPanel", onPick: selectSwatch)
+                PaletteSwatchGrid(paletteStore: paletteStore, canvasManager: canvasManager, palette: palette,
+                                  currentColor: currentColor, idPrefix: "colorPanel", onPick: selectSwatch)
             }
         }
     }
@@ -467,7 +471,8 @@ struct ColorPickerPanel: View {
     // MARK: - Palettes tab (item 3)
 
     private var palettesTab: some View {
-        PalettesLibraryView(paletteStore: paletteStore, currentColor: currentColor, onPick: selectSwatch)
+        PalettesLibraryView(paletteStore: paletteStore, canvasManager: canvasManager, currentColor: currentColor,
+                            onPick: selectSwatch)
     }
 
     // MARK: - Colour state
@@ -582,7 +587,8 @@ extension View {
                             onDismiss: (() -> Void)? = nil) -> some View {
         canvasPresentation(presentation, isPresented: isPresented, canvasManager: canvasManager,
                            onPresent: onPresent, onDismiss: onDismiss) {
-            ColorPickerPanel(color: color, supportsOpacity: supportsOpacity).sizedForPopover()
+            ColorPickerPanel(color: color, supportsOpacity: supportsOpacity, canvasManager: canvasManager)
+                .sizedForPopover()
         }
     }
 }

@@ -60,38 +60,44 @@ struct MotionGroupRow: View {
     /// rather than hidden: a group with nothing in it is one to tag into or delete, and hiding it
     /// would make it unreachable rather than tidy.
     private func chip(for chip: CanvasManager.MotionGroupChip) -> some View {
-        Button {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(Color(chip.group.tagColor.uiColor))
+                .frame(width: 10, height: 10)
+                .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
+            Text(chip.group.displayName)
+                .font(.caption.weight(chip.isArmed ? .semibold : .regular))
+            Text("\(chip.strokeCount)")
+                .font(.caption2.monospacedDigit())
+                .foregroundColor(.white.opacity(0.55))
+            if chip.isHidden {
+                Image(systemName: "eye.slash").font(.caption2)
+            }
+            badge(for: chip.group.mode)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(chip.isArmed ? Color.accentColor.opacity(0.35) : Color.white.opacity(0.08)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(chip.isArmed ? Color.accentColor : Color.clear, lineWidth: 1.5))
+        .opacity(chip.isHidden ? 0.45 : 1)
+        .foregroundColor(.white)
+        // Not a `Button`, because the chip is also pressed and held: a `Button` runs its action when
+        // the finger lifts however long it was held, so opening the menu would also have armed it.
+        .contentShape(Rectangle())
+        .onTapGesture {
             note = nil
             canvasManager.toggleArmedMotionGroup(chip.id)
-        } label: {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(Color(chip.group.tagColor.uiColor))
-                    .frame(width: 10, height: 10)
-                    .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
-                Text(chip.group.displayName)
-                    .font(.caption.weight(chip.isArmed ? .semibold : .regular))
-                Text("\(chip.strokeCount)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundColor(.white.opacity(0.55))
-                if chip.isHidden {
-                    Image(systemName: "eye.slash").font(.caption2)
-                }
-                badge(for: chip.group.mode)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(chip.isArmed ? Color.accentColor.opacity(0.35) : Color.white.opacity(0.08)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(chip.isArmed ? Color.accentColor : Color.clear, lineWidth: 1.5))
-            .opacity(chip.isHidden ? 0.45 : 1)
-            .foregroundColor(.white)
         }
-        .buttonStyle(.plain)
-        .contextMenu { menu(for: chip) }
+        .canvasContextMenu(.motionGroupMenu, canvasManager: canvasManager) { menu(for: chip) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        // Armed is drawn (a filled chip with an outline) and is said here too, so a test and VoiceOver
+        // read the same fact the artist sees.
+        .accessibilityAddTraits(chip.isArmed ? .isSelected : [])
         .accessibilityIdentifier("interpolate.group.\(chip.id.uuidString)")
     }
 
@@ -124,22 +130,23 @@ struct MotionGroupRow: View {
 
     @ViewBuilder
     private func menu(for chip: CanvasManager.MotionGroupChip) -> some View {
-        Button(chip.isHidden ? "Show" : "Hide") {
-            canvasManager.toggleMotionGroupHidden(chip.id)
-        }
-        Button("Solo") { canvasManager.soloMotionGroup(chip.id) }
-        Divider()
+        MenuItem(chip.isHidden ? "Show" : "Hide", systemImage: chip.isHidden ? "eye" : "eye.slash") { canvasManager.toggleMotionGroupHidden(chip.id) }
+        MenuItem("Solo", systemImage: "scope") { canvasManager.soloMotionGroup(chip.id) }
+        MenuDivider()
         // The mode is per group (rough *and* clean, chosen per group), so it belongs on the chip and
         // nowhere else.
-        Picker("Interpolation", selection: Binding(
-            get: { chip.group.mode },
-            set: { canvasManager.setMotionGroupMode($0, forGroup: chip.id) })) {
-                Text("Auto").tag(GroupInterpolation.auto)
-                Text("Clean (falls back to cross-fade)").tag(GroupInterpolation.clean)
-                Text("Cross-fade").tag(GroupInterpolation.crossFade)
-            }
-        Divider()
-        Button("Delete Group", role: .destructive) {
+        MenuSection("Interpolation") {
+            MenuChoices(values: [GroupInterpolation.auto, .clean, .crossFade], selected: chip.group.mode,
+                        title: { mode in
+                            switch mode {
+                            case .auto: return "Auto"
+                            case .clean: return "Clean (falls back to cross-fade)"
+                            case .crossFade: return "Cross-fade"
+                            }
+                        }) { canvasManager.setMotionGroupMode($0, forGroup: chip.id) }
+        }
+        MenuDivider()
+        MenuItem("Delete Group", systemImage: "trash", role: .destructive) {
             canvasManager.removeMotionGroup(chip.id)
         }
     }

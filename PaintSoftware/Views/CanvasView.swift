@@ -3922,13 +3922,14 @@ struct CanvasView: UIViewRepresentable {
         /// instance, built by the same code, works on the very next touch.
         ///
         /// **What strands them is a UIKit presentation torn down under a live two-finger gesture**,
-        /// and the app cannot stop UIKit doing it: a `Menu` or `.contextMenu` over the canvas
+        /// and the app cannot stop UIKit doing it: a popover, `Menu` or `.contextMenu` over the canvas
         /// dismisses itself when two fingers land outside it, and whatever recognizers it had bound
-        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), reproduces
+        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), reproduced
         /// as exactly that — the Blend Mode / Effect menu open over a value layer, then a two-finger
-        /// pan (`CanvasTransformFreezeUITests`). The editor's own presentations are no longer UIKit ones
-        /// (`CanvasPresentation`), which removes the commonest cause; this is what makes every cause,
-        /// including the ones not yet met, cost the artist nothing.
+        /// pan (`CanvasTransformFreezeUITests`). Nothing the editor raises is a UIKit presentation any
+        /// more (`CanvasPresentation`), which removes every cause the app itself brings about; this is
+        /// what makes the ones left — the system share sheet, the text panel's stock colour picker, a
+        /// cause not yet met — cost the artist nothing.
         ///
         /// Tells the action recorder, which saves its last ninety seconds: a repair is the moment the
         /// freeze *would* have happened, and the ring holds how it came about.

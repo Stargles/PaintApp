@@ -204,6 +204,9 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedPendingRectangle` — TODO (151)'s smart shape with
         // a rotate knob, for the same reason.
         UITestSeeds.seedPendingRectangleIfRequested(into: canvasManager)
+        // Inert unless an XCUITest passed `-uiTestSeedGuidedIntervals` — two interpolated intervals with
+        // an arc on the first, which is what the interpolate bar's Fetch has to offer the second.
+        UITestSeeds.seedGuidedIntervalsIfRequested(into: canvasManager)
         onCreated()
     }
 }

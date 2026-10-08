@@ -42,6 +42,7 @@
 		7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */; };
 		0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */; };
 		4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */; };
+		EAF767EEA58AAA23EDF0E106 /* CanvasMenuFamiliesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FE2EF0DCA14EB6B86249A3E /* CanvasMenuFamiliesUITests.swift */; };
 		AC81597BCB670B7074038991 /* PaintSoftware/Views/AnchoredMenuGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */; };
 		A294C0D1404FCC75CF0BE14F /* AnchoredMenuLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */; };
 		2E14DBD492313FD0989FA1BB /* TextFontListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127FAEBA9BC32A0606957932 /* TextFontListUITests.swift */; };
@@ -612,6 +613,7 @@
 		C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleCodingLogicTests.swift; sourceTree = "<group>"; };
 		CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeInterruptionLogicTests.swift; sourceTree = "<group>"; };
 		37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuInterruptionUITests.swift; sourceTree = "<group>"; };
+		2FE2EF0DCA14EB6B86249A3E /* CanvasMenuFamiliesUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "CanvasMenuFamiliesUITests.swift"; sourceTree = "<group>"; };
 		1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/AnchoredMenuGeometry.swift; sourceTree = "<group>"; };
 		E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnchoredMenuLogicTests.swift; sourceTree = "<group>"; };
 		127FAEBA9BC32A0606957932 /* TextFontListUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextFontListUITests.swift; sourceTree = "<group>"; };
@@ -1266,6 +1268,7 @@
 				C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */,
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
+				2FE2EF0DCA14EB6B86249A3E /* CanvasMenuFamiliesUITests.swift */,
 				E3CC3CB379FFCE09FCA0E536 /* AnchoredMenuLogicTests.swift */,
 				127FAEBA9BC32A0606957932 /* TextFontListUITests.swift */,
 				7186549102F48EFD65C89E17 /* EditSelectedObjectUITests.swift */,
@@ -1971,6 +1974,7 @@
 				7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */,
 				0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */,
 				4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */,
+				EAF767EEA58AAA23EDF0E106 /* CanvasMenuFamiliesUITests.swift in Sources */,
 				AC81597BCB670B7074038991 /* PaintSoftware/Views/AnchoredMenuGeometry.swift in Sources */,
 				A294C0D1404FCC75CF0BE14F /* AnchoredMenuLogicTests.swift in Sources */,
 				2E14DBD492313FD0989FA1BB /* TextFontListUITests.swift in Sources */,

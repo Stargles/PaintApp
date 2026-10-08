@@ -466,6 +466,65 @@ enum UITestSeeds {
         canvasManager.endInteractiveShape()
     }
 
+    /// **Two interpolated intervals with an arc drawn on the first** — `-uiTestSeedGuidedIntervals`,
+    /// the document the interpolate bar's Fetch needs before it has anything to offer, and whose
+    /// two-colour keyframes are what its motion-group chips need.
+    ///
+    /// Fetch lists the guides that other intervals own, so reaching it takes keyframes at frames 0, 8
+    /// and 16, an in-between generated onto each interval, a guide drawn on the first, and the playhead
+    /// on the second — five cels, four reference toggles, two Generates and a guide stroke, across the
+    /// timeline and the canvas. It is the same document `InterpolationGuideLogicTests.twoIntervals`
+    /// builds for the model tier, stated through the same verbs, so what a test then does with it is
+    /// the artist's: open Fetch, pick Link or Duplicate, watch the guide join the frame. Left in
+    /// interpolate mode on the second in-between.
+    static func seedGuidedIntervalsIfRequested(into canvasManager: CanvasManager) {
+        guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedGuidedIntervals"),
+              let size = canvasManager.canvasSize else { return }
+        let layer = canvasManager.layers.count - 1
+        let cels = (0..<5).map {
+            Cel(id: UUID(), startFrame: $0 * 4, frameCount: 4, raster: .empty(size: size),
+                vector: .empty(size: size))
+        }
+        canvasManager.layers[layer].cels = cels
+        var brush = canvasManager.selectedBrush
+        brush.size = size.height / 32
+        // An L at each keyframe, moved right from one to the next — its two arms in two colours, which
+        // is what Tag by Colour needs to make a group of each.
+        func arm(_ from: CGPoint, _ to: CGPoint, _ colour: CodableColor) -> VectorStroke {
+            VectorStroke(id: UUID(), brush: brush, color: colour, size: brush.size, opacity: 1,
+                         samples: StrokeSamples([VectorSample(x: from.x, y: from.y, pressure: 1),
+                                                 VectorSample(x: to.x, y: to.y, pressure: 1)],
+                                                channels: .pressureOnly))
+        }
+        let black = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let red = CodableColor(red: 0.8, green: 0, blue: 0, alpha: 1)
+        for (index, left) in [(0, 0.10), (2, 0.40), (4, 0.70)] {
+            let corner = CGPoint(x: size.width * (left + 0.2), y: size.height * 0.30)
+            cels[index].vector?.addStroke(arm(CGPoint(x: size.width * left, y: corner.y), corner, black))
+            cels[index].vector?.addStroke(arm(corner, CGPoint(x: corner.x, y: corner.y + size.width * 0.2), red))
+        }
+        canvasManager.enterInterpolateMode()
+        canvasManager.currentLayerIndex = layer
+        func references(_ pair: [Cel]) {
+            for cel in pair {
+                canvasManager.toggleInterpolationReference(celID: cel.id, inLayer: canvasManager.layers[layer].id)
+            }
+        }
+        references([cels[0], cels[2]])
+        _ = canvasManager.interpolate(mode: .generate, layerIndex: layer, celIndex: 1)
+        canvasManager.currentFrame = 4
+        let arc = [CGPoint(x: size.width * 0.2, y: size.height * 0.6),
+                   CGPoint(x: size.width * 0.5, y: size.height * 0.45),
+                   CGPoint(x: size.width * 0.8, y: size.height * 0.6)]
+        _ = canvasManager.recordGuideStroke(samples: arc.enumerated().map {
+            TimedSample(point: $1, pressure: 1, time: TimeInterval($0) * 0.01)
+        })
+        references([cels[0], cels[2]])   // swap the pair over to the second interval
+        references([cels[2], cels[4]])
+        _ = canvasManager.interpolate(mode: .generate, layerIndex: layer, celIndex: 3)
+        canvasManager.currentFrame = 12
+    }
+
     /// One flat frame in `DecodedFrame`'s own layout (BGRA, premultiplied, opaque) — the same
     /// construction `PaintSoftwareUITests/CanvasManagerTestSupport.swift`'s `writeGreyClip` uses for
     /// the logic tier, duplicated rather than shared because that file is test-only and this one

@@ -264,19 +264,14 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         if app.buttons["toolbar.layersButton"].isSelected { app.buttons["toolbar.layersButton"].tap() }
     }
 
-    /// Picks an effect from the open options panel's Blend Mode / Effect menu, scrolling the menu
-    /// until the entry is on screen — the catalogue sits below every blend mode.
+    /// Picks an effect from the open options panel's Blend Mode / Effect menu — the catalogue sits
+    /// below every blend mode, and the tap scrolls the menu to it.
     private func pickLayerEffect(_ app: XCUIApplication, _ slug: String) {
         let modeButton = app.buttons["layerOptions.blendModeButton"]
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "PREMISE: the options panel's Blend Mode row is on screen")
         modeButton.tap()
         let item = app.buttons["layerOptions.blendMode.\(slug)"]
-        let menu = app.collectionViews.firstMatch
-        for _ in 0..<12 where !(item.exists && item.isHittable) {
-            guard menu.exists else { break }
-            menu.swipeUp(velocity: .slow)
-        }
-        XCTAssertTrue(item.isHittable, "PREMISE: the \(slug) entry is reachable in the effect menu")
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "PREMISE: the \(slug) entry is in the effect menu")
         item.tap()
     }
 

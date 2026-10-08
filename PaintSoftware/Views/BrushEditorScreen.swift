@@ -60,7 +60,7 @@ struct BrushEditorScreen: View {
 
     /// **§2.26's two collections, read once rather than per frame.**
     ///
-    /// `BrushAssetLibrary.items(in:)` lists a directory, and a `Menu`'s content is rebuilt on every
+    /// `BrushAssetLibrary.items(in:)` lists a directory, and a menu's content is rebuilt on every
     /// pass of the enclosing body — which during a slider drag is dozens a second. Held in state and
     /// refreshed where the collection can actually have changed: on appear, and after an import.
     @State private var tipItems: [BrushAssetItem] = []
@@ -123,8 +123,8 @@ struct BrushEditorScreen: View {
                 openedOpacity = canvasManager[keyPath: spec.opacity]
             }
         }
-        // Raised from a `Menu` item, so it cannot be a `PhotosPicker` button itself — a menu row is
-        // not a place a picker can present from. `BrushSettingsPanel`'s tip importer does the same
+        // Raised from a menu row, so it cannot be a `PhotosPicker` button itself — the row goes away
+        // with its menu the moment it is tapped. `BrushSettingsPanel`'s tip importer does the same
         // dance for the same reason.
         .photosPicker(isPresented: $isPickingAsset, selection: $assetPickerItem, matching: .images)
         .onChange(of: assetPickerItem) { _, newItem in
@@ -217,7 +217,7 @@ struct BrushEditorScreen: View {
     /// **The tip picker** — BRUSH.md §2.26, the owner: *"their dab sprites should have the ability to
     /// be changed, as well as texture."*
     ///
-    /// A `Menu` rather than a grid of swatches, and that is a size decision rather than a taste one:
+    /// A menu rather than a grid of swatches, and that is a size decision rather than a taste one:
     /// this column is 228 points wide inside a `ScrollView`, and a scrolling grid there is a third
     /// nested scroll surface — the same fight §7.2 already lost when it tried to drag-reorder modules.
     /// Each row carries the tip's own mask as its icon, so the collection is browsed by picture and
@@ -228,24 +228,23 @@ struct BrushEditorScreen: View {
                 .font(.caption).foregroundColor(.white.opacity(0.5))
             HStack(spacing: 8) {
                 assetThumbnail(of: brush.tip.textureRef)
-                Menu {
+                CanvasMenu(.brushEditorMenu, canvasManager: canvasManager, identifier: "\(idPrefix).tipPicker",
+                           value: tipName) {
                     // **Round is not in the collection and could not be.** A `BrushTip` is either the
                     // procedural disc or a picture (see `BrushTip`); the collection holds pictures, so
                     // the one option that is not one is written here.
-                    Button("Round") { setTip(.round) }
-                        .accessibilityIdentifier("\(idPrefix).tipOption.round")
-                    ForEach(tipItems) { item in
-                        assetMenuRow(item) { setTip(.stamp(item.ref)) }
-                            .accessibilityIdentifier("\(idPrefix).tipOption.\(item.id)")
+                    MenuItem("Round", isSelected: brush.tip == .round, identifier: "\(idPrefix).tipOption.round") {
+                        setTip(.round)
                     }
-                    Divider()
-                    Button("Import Tip…") { beginImport(.tip) }
-                        .accessibilityIdentifier("\(idPrefix).importTip")
+                    ForEach(tipItems) { item in
+                        assetMenuRow(item, isSelected: brush.tip == .stamp(item.ref),
+                                     identifier: "\(idPrefix).tipOption.\(item.id)") { setTip(.stamp(item.ref)) }
+                    }
+                    MenuDivider()
+                    MenuItem("Import Tip…", identifier: "\(idPrefix).importTip") { beginImport(.tip) }
                 } label: {
                     pickerLabel(tipName)
                 }
-                .accessibilityIdentifier("\(idPrefix).tipPicker")
-                .accessibilityValue(tipName)
                 Spacer(minLength: 0)
             }
             Text(tipDescription)
@@ -270,21 +269,19 @@ struct BrushEditorScreen: View {
                 .font(.caption).foregroundColor(.white.opacity(0.5))
             HStack(spacing: 8) {
                 assetThumbnail(of: brush.texture?.mask)
-                Menu {
-                    Button("None") { setTexture(nil) }
-                        .accessibilityIdentifier("\(idPrefix).textureOption.none")
+                CanvasMenu(.brushEditorMenu, canvasManager: canvasManager,
+                           identifier: "\(idPrefix).texturePicker", value: textureName) {
+                    MenuItem("None", isSelected: brush.texture == nil,
+                             identifier: "\(idPrefix).textureOption.none") { setTexture(nil) }
                     ForEach(textureItems) { item in
-                        assetMenuRow(item) { setTextureMask(item.ref) }
-                            .accessibilityIdentifier("\(idPrefix).textureOption.\(item.id)")
+                        assetMenuRow(item, isSelected: brush.texture?.mask == item.ref,
+                                     identifier: "\(idPrefix).textureOption.\(item.id)") { setTextureMask(item.ref) }
                     }
-                    Divider()
-                    Button("Import Texture…") { beginImport(.texture) }
-                        .accessibilityIdentifier("\(idPrefix).importTexture")
+                    MenuDivider()
+                    MenuItem("Import Texture…", identifier: "\(idPrefix).importTexture") { beginImport(.texture) }
                 } label: {
                     pickerLabel(textureName)
                 }
-                .accessibilityIdentifier("\(idPrefix).texturePicker")
-                .accessibilityValue(textureName)
                 Spacer(minLength: 0)
             }
 
@@ -311,16 +308,17 @@ struct BrushEditorScreen: View {
         }
     }
 
-    /// One row of a collection: the bitmap beside its name. `Label` rather than a bare `Text` so the
-    /// picture is what an artist scans and the name is what a test names.
-    private func assetMenuRow(_ item: BrushAssetItem, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label {
-                Text(item.name)
-            } icon: {
-                if let mask = BrushTextureStore.mask(for: item.ref) {
-                    Image(uiImage: UIImage(cgImage: mask)).renderingMode(.template)
-                }
+    /// One row of a collection: the bitmap beside its name, so the collection is browsed by picture
+    /// and read by name.
+    private func assetMenuRow(_ item: BrushAssetItem, isSelected: Bool, identifier: String,
+                              action: @escaping () -> Void) -> some View {
+        MenuItem(item.name, isSelected: isSelected, identifier: identifier, action: action) {
+            if let mask = BrushTextureStore.mask(for: item.ref) {
+                Image(uiImage: UIImage(cgImage: mask))
+                    .resizable()
+                    .renderingMode(.template)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 24, height: 24)
             }
         }
     }
@@ -607,9 +605,10 @@ struct BrushEditorScreen: View {
                            count: row.modules.count)
             }
 
-            Menu {
+            CanvasMenu(.brushEditorMenu, canvasManager: canvasManager,
+                       identifier: "\(idPrefix).addModule.\(rowID)") {
                 ForEach(BrushModuleKind.allCases) { kind in
-                    Button(kind.displayName) {
+                    MenuItem(kind.displayName, identifier: "\(idPrefix).addModule.\(rowID).\(kind.rawValue)") {
                         edit { brush in
                             guard brush.modulations.rows.indices.contains(index) else { return }
                             var row = brush.modulations.rows[index]
@@ -617,14 +616,12 @@ struct BrushEditorScreen: View {
                             brush.modulations.replace(at: index, with: row)
                         }
                     }
-                    .accessibilityIdentifier("\(idPrefix).addModule.\(rowID).\(kind.rawValue)")
                 }
             } label: {
                 Label("Add module", systemImage: "plus.circle")
                     .font(.caption)
                     .foregroundColor(.blue)
             }
-            .accessibilityIdentifier("\(idPrefix).addModule.\(rowID)")
         }
         .padding(12)
         .background(Color.white.opacity(0.05))
@@ -828,17 +825,15 @@ struct BrushEditorScreen: View {
 
     private func inputPicker(selection: BrushInputKind, identifier: String,
                              onPick: @escaping (BrushInputKind) -> Void) -> some View {
-        Menu {
-            ForEach(BrushInputKind.allCases) { kind in
-                Button(kind.displayName) { onPick(kind) }
-                    .accessibilityIdentifier("\(identifier).\(kind.rawValue)")
-            }
+        CanvasMenu(.brushEditorMenu, canvasManager: canvasManager, identifier: identifier,
+                   value: selection.displayName) {
+            MenuChoices(values: Array(BrushInputKind.allCases), selected: selection, title: \.displayName,
+                        identifier: { "\(identifier).\($0.rawValue)" }, onSelect: onPick)
         } label: {
             pickerLabel(selection.displayName)
         }
-        .accessibilityIdentifier(identifier)
-        .accessibilityValue(selection.displayName)
     }
+
     private func pickerLabel(_ text: String) -> some View {
         HStack(spacing: 4) {
             Text(text).font(.caption)

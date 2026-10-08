@@ -223,13 +223,14 @@ final class AnchoredMenuLogicTests: XCTestCase {
     private let tintPicker = CGRect(x: 575, y: 380, width: 300, height: 420)
 
     /// **A touch on a nested picker does not close the menu it was raised from**, though it lands
-    /// outside that menu's frame — the case `CanvasPresentation.parent` exists for. Before the router
+    /// outside that menu's frame — the case `Placement.parent` exists for. Before the router
     /// asked about every open menu at once, the timeline carried a hand-written guard for exactly
     /// this pair, and the next nested presentation would have needed another.
     func testATouchOnANestedPickerKeepsTheMenuItHangsOff() {
         let open: [CanvasPresentation: Placement] = [
             .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
-            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil,
+                                                parent: .onionSkinOptions),
         ]
         let onThePickerOnly = CGPoint(x: 590, y: 400)
         XCTAssertFalse(onionMenu.contains(onThePickerOnly), "PREMISE: the point is outside the onion menu")
@@ -242,7 +243,8 @@ final class AnchoredMenuLogicTests: XCTestCase {
     func testATouchOnTheParentClosesOnlyTheNestedPicker() {
         let open: [CanvasPresentation: Placement] = [
             .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
-            .onionNextTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+            .onionNextTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil,
+                                            parent: .onionSkinOptions),
         ]
         XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: 700, y: 1100), open: open),
                        [.onionNextTintColour])
@@ -253,7 +255,8 @@ final class AnchoredMenuLogicTests: XCTestCase {
     func testATouchOutsideEverythingClosesEveryOpenMenu() {
         let open: [CanvasPresentation: Placement] = [
             .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
-            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil),
+            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil,
+                                                parent: .onionSkinOptions),
             .layerViewSelector: Placement(menuFrame: CGRect(x: 800, y: 80, width: 260, height: 300),
                                           toggleControlFrame: CGRect(x: 900, y: 40, width: 80, height: 30)),
         ]
@@ -282,5 +285,47 @@ final class AnchoredMenuLogicTests: XCTestCase {
         ]
         XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: toggle.midX, y: toggle.midY), open: open), [],
                        "the toggle's own tap is left to the toggle, and an unmeasured menu is not yet dismissable")
+    }
+
+    /// **Nesting is followed all the way up.** A swatch's Delete menu inside a colour picker inside the
+    /// onion menu: a touch on the Delete menu, which overhangs the picker, which overhangs the menu,
+    /// keeps all three.
+    func testATouchOnAMenuKeepsEveryAncestorOfIt() {
+        let swatchMenu = CGRect(x: 560, y: 300, width: 190, height: 50)
+        let open: [CanvasPresentation: Placement] = [
+            .onionSkinOptions: Placement(menuFrame: onionMenu, toggleControlFrame: nil),
+            .onionPreviousTintColour: Placement(menuFrame: tintPicker, toggleControlFrame: nil,
+                                                parent: .onionSkinOptions),
+            .paletteSwatchMenu: Placement(menuFrame: swatchMenu, toggleControlFrame: nil,
+                                          parent: .onionPreviousTintColour),
+        ]
+        let onTheSwatchMenuOnly = CGPoint(x: 570, y: 320)
+        XCTAssertFalse(tintPicker.contains(onTheSwatchMenuOnly), "PREMISE: outside the picker")
+        XCTAssertFalse(onionMenu.contains(onTheSwatchMenuOnly), "PREMISE: and outside the menu")
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: onTheSwatchMenuOnly, open: open), [])
+    }
+
+    /// A parent that is not open (it was closed first, or the child outlived a frame of it) shelters
+    /// nothing and costs nothing: the rule asks `open` and finds no entry.
+    func testAParentThatIsNotOpenIsIgnored() {
+        let open: [CanvasPresentation: Placement] = [
+            .paletteSwatchMenu: Placement(menuFrame: CGRect(x: 560, y: 300, width: 190, height: 50),
+                                          toggleControlFrame: nil, parent: .valueLayerColour),
+        ]
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: 10, y: 10), open: open),
+                       [.paletteSwatchMenu])
+        XCTAssertEqual(AnchoredMenuDismissal.presentationsToDismiss(touchAt: CGPoint(x: 600, y: 320), open: open), [])
+    }
+
+    // MARK: - How tall a list may grow
+
+    /// A scrolling menu stays a menu: three fifths of the room, so the control it hangs off and the
+    /// canvas around it are still in view.
+    func testAListScrollsBeyondThreeFifthsOfTheRoom() {
+        let bounds = CGRect(x: 0, y: 0, width: 1032, height: 1376)
+        XCTAssertEqual(AnchoredMenuPlacement.scrollableHeight(in: bounds), 826)
+        XCTAssertLessThan(AnchoredMenuPlacement.scrollableHeight(in: CGRect(x: 0, y: 0, width: 1376, height: 1032)),
+                          AnchoredMenuPlacement.scrollableHeight(in: bounds),
+                          "a shorter screen allows a shorter list")
     }
 }

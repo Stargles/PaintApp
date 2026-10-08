@@ -7,8 +7,8 @@ import XCTest
 /// Done → the picture.
 ///
 /// `DuplicateOffsetEffectLogicTests` owns the arithmetic. What it cannot say, and what this file is
-/// for: that the effect is **in the menu at all** (it is past the fold of the Blend Mode menu, which
-/// XCUITest only realises by scrolling the collection view — `scrollMenuTo`'s reason); that the
+/// for: that the effect is **in the menu at all** (it is past the fold of the Blend Mode menu, so the
+/// tap has to scroll to it); that the
 /// settings bar puts the region picker, the blend picker, the colour swatch and **Adjust Box** on
 /// screen and that the swatch opens a picker whose fields are reachable by name (the
 /// container-identifier stomp `06e4e2e` records); that Adjust Box raises the *Move* box with its
@@ -53,7 +53,7 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let item = scrollMenuTo(app, identifier: "layerOptions.blendMode.duplicateoffset")
+        let item = app.buttons["layerOptions.blendMode.duplicateoffset"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu must list Duplicate Offset")
         item.tap()
 

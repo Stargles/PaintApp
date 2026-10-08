@@ -53,11 +53,10 @@ final class PassiveTouchDownObserver: UIGestureRecognizer {
 /// shape of the freeze this replaced. This one is installed when the editor reaches a window and is
 /// removed only when the editor leaves it.
 ///
-/// **Touches outside the app's own content are not "outside the menu".** A `Menu` raised from inside
-/// a presented picker (the palette menu in `ColorPickerPanel`), an alert, a sheet and the keyboard
-/// are all drawn by UIKit outside the root view controller's view; a touch on one of them is a touch
-/// on something the presentation raised or sits under, and closing the presentation for it would
-/// tear down the picker the artist is still using.
+/// **Touches outside the app's own content are not "outside the menu".** An alert, a sheet, the
+/// photo picker, the share sheet and the keyboard are all drawn by UIKit outside the root view
+/// controller's view; a touch on one of them is a touch on something the presentation raised or sits
+/// under, and closing the presentation for it would tear down the panel the artist is still using.
 final class AnchoredMenuRouter {
     private var open: [CanvasPresentation: (placement: AnchoredMenuDismissal.Placement, dismiss: () -> Void)] = [:]
 
@@ -82,6 +81,19 @@ extension EnvironmentValues {
     /// The editor's `AnchoredMenuRouter`, provided once by `View.canvasPresentationHost`. Nil outside
     /// the editor, where there is no canvas and no anchored menu.
     @Entry var anchoredMenuRouter: AnchoredMenuRouter?
+
+    /// The presentation whose content this view is part of — set by `AnchoredMenu` on everything it
+    /// draws, and read where a presentation is declared, so a menu raised from inside another one
+    /// knows what it sits in (`AnchoredMenuDismissal.Placement.parent`) with nothing written down.
+    @Entry var enclosingPresentation: CanvasPresentation?
+
+    /// Closes the `AnchoredMenu` this view is drawn in. A row of a menu calls it once it has acted,
+    /// which is how a `Menu`'s row behaves and how the timeline's always did.
+    @Entry var dismissAnchoredMenu: () -> Void = {}
+
+    /// How tall a list of rows may be here before it scrolls — `AnchoredMenuPlacement.scrollableHeight`
+    /// of the room the menu has, provided by the `AnchoredMenu` that draws it.
+    @Entry var anchoredMenuScrollableHeight: CGFloat = 480
 }
 
 /// Hangs the router's one observer on the window for as long as it is in the hierarchy.
@@ -147,8 +159,9 @@ struct AnchoredMenuRouterHost: UIViewRepresentable {
 
 /// A menu drawn **inside the app's own view hierarchy**, hung off `anchor`.
 ///
-/// Every presentation over the canvas is one of these: the timeline's menus since TODO (39), and
-/// every other `CanvasPresentation` since TODO (110) (`View.canvasPresentationHost`). The owner's
+/// Every presentation over the canvas is one of these: the timeline's menus since TODO (39), every
+/// other `CanvasPresentation` since TODO (110) (`View.canvasPresentationHost`), and every menu —
+/// pull-down or press-and-hold — through `CanvasMenu`. The owner's
 /// ruling on 2026-09-06 is why it is this rather than `UIPopoverPresentationController
 /// .passthroughViews`: passthrough would have let the drag through while leaving the menu standing
 /// over a track that had scrolled out from under it, and a cel menu names a *specific block*.
@@ -160,6 +173,10 @@ struct AnchoredMenu<Content: View>: View {
 
     /// Which presentation this is — what the router files its placement under.
     let presentation: CanvasPresentation
+
+    /// The presentation this one was declared inside, if any — see `EnvironmentValues
+    /// .enclosingPresentation`. The router keeps the parent open for as long as this is touched.
+    var parent: CanvasPresentation?
 
     /// The control or block this hangs off, in global coordinates.
     let anchor: CGRect
@@ -189,6 +206,9 @@ struct AnchoredMenu<Content: View>: View {
             let placed = AnchoredMenuPlacement.frame(anchor: anchor, menuSize: measured, bounds: bounds)
 
             content()
+                .environment(\.enclosingPresentation, presentation)
+                .environment(\.dismissAnchoredMenu, onDismiss)
+                .environment(\.anchoredMenuScrollableHeight, AnchoredMenuPlacement.scrollableHeight(in: bounds))
                 .fixedSize()
                 .background(
                     GeometryReader { menu in
@@ -222,7 +242,8 @@ struct AnchoredMenu<Content: View>: View {
                 .accessibilityIdentifier(identifier)
                 // Measured before placed: `placed` is empty-sized until `measured` arrives, which is
                 // the state `AnchoredMenuDismissal` reads as "not laid out yet".
-                .onChange(of: AnchoredMenuDismissal.Placement(menuFrame: placed, toggleControlFrame: toggleControl),
+                .onChange(of: AnchoredMenuDismissal.Placement(menuFrame: placed, toggleControlFrame: toggleControl,
+                                                              parent: parent),
                           initial: true) { _, placement in
                     router?.place(presentation, placement, dismiss: onDismiss)
                 }

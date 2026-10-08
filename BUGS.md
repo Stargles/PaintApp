@@ -4,28 +4,6 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## A touch outside an open `Menu` starts a stroke the menu's teardown then cancels (2026-10-07)
-
-**MEASURED** on iPad Pro 13" (M4), iOS 26.5, by `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu`
-(red since `1c85aed`, bisected `f509d39` green → `3e53cd0` red; `8cfadb1` between them does not build). Open the
-layer's blend-mode `Menu` and drag on the canvas **left of the menu**: the menu comes down, the stroke begins and
-is drawn, UIKit's teardown cancels it, the layer holds **0** strokes, the canvas's wedge notice reads *"Caught a
-canvas freeze and fixed it"*, and the next stroke commits normally. That is the owner's "the first stroke
-disappears when I start another" in a `Menu` rather than a `.popover`.
-
-**Why it read SAFE for seven weeks.** `docs/MENU_PRESENTATION_CENSUS.md` resolved the twelve `Menu` /
-`.contextMenu` sites SAFE on a drag whose start was a *fraction of the canvas*, and with the left rail 64 pt wide
-that fraction landed ten points **inside** the menu's own frame — a touch on the menu's surface, which the menu
-absorbs (re-measured: start inside the frame and the menu stands, no stroke begins). `8cfadb1` slimmed the rail
-to 44 pt, the start moved fourteen points left to just outside the menu, and the reading flipped. The test now
-starts sixty points left of the menu's *published* frame, so it measures the outside touch whatever the rail does.
-
-**What it needs, and it is a ruling rather than a patch.** A `Menu` exposes no `isPresented` for
-`CanvasPresentation` to observe, so the family cannot be covered the way the five `.popover`s were. The honest
-fixes are to draw the blend-mode picker (and the other eleven) as `AnchoredMenu`s, which the timeline's four
-already are, or to accept the loss and say so. Evidence: `~/PaintWork/evidence/diag-menu/` on the machine that
-ran it (before-drag and after-drag screenshots).
-
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main
@@ -941,17 +919,6 @@ looked at again on 2026-08-30 and left again. The reasoning, so the next reader 
 So the honest answer is that a taller stack wants a taller panel, the drag is one gesture, and this
 stays a note rather than a fix until the owner says the drag grates.
 
-## The effects menu only exposes its first few items to XCUITest (2026-08-30) — FIXED 2026-09-11
-
-Not a bug in the app, confirmed: `swipeUp()` called on the menu's own `CollectionView` (not a
-coordinate, not a cell) does scroll it and does realize further cells. `PaintUITestCase
-.scrollMenuTo(_:identifier:maxSwipes:)` is the fix on the test side — found first as
-`OptionsPanelUITests`' own private helper, then lifted here after the catalogue's growth pushed
-Recolour past the same window and `RecolorUITests` had grown a second, inline copy of the same
-scroll rather than reusing it. Any test reaching an entry past the menu's early rows must call this
-first; a bare `app.buttons["layerOptions.blendMode.…"]` (or `.mixMode.…`) query with no preceding
-scroll is a latent copy of this failure, since the catalogue only grows.
-
 ## A popover whose host view disappears re-presents itself when the host comes back (2026-08-29)
 
 `CanvasPresentationModifier.close()` (`Views/CanvasPresentationModifier.swift:95-98`) removes the
@@ -1340,42 +1307,19 @@ Note this bound is *independent of* item (12): baking geometry into canvas space
 `1/k` blow-up, but does nothing about zoom. It is also **worse** than the blow-up it replaces —
 1,638,400 pt against the 409,600 pt a 2%-scaled layer produces.
 
-## `TextSettingsPanel` grew three presentations the census says it doesn't have (2026-08-27)
+## The text panel's Colour row is a stock `ColorPicker`, the one UIKit presentation left over the canvas (2026-08-27)
 
-Found running `tools/presentation-census.sh` while closing out session 69 — not a report, just the
-routine check. It prints **14** unregisterable presentations; `MENU_PRESENTATION_CENSUS.md`'s
-"SETTLED SAFE" list names twelve and, at line 119-121, says outright: *"The five panels `SelectPanel`,
-`TextSettingsPanel`, `StrokeSettingsPanel`, `MaskTuningSection` and `InterpolatePanel` contain no
-presentations at all."* That sentence is now false. Add Text's later stages gave
-`TextSettingsPanel.swift` three presentations the census never saw: the font-family `Menu` (`:115`),
-the face `Menu` (`:150`), and a stock `ColorPicker` (`:202`).
+`TextSettingsPanel.colorRow` is SwiftUI's `ColorPicker`, which presents `UIColorPickerViewController` as
+a popover over the live canvas from the bottom bar. Every other presentation over the canvas is an
+`AnchoredMenu` (`docs/MENU_PRESENTATION_CENSUS.md`); this one has no `isPresented` for
+`CanvasPresentation` to observe, so nothing registers it or closes it centrally, and nobody has measured
+what a stroke or a two-finger drag does beneath it. One tap outside it dismissed it and placed no text
+box, which is **not** the answer — a `.popover`'s failure is a drag, where the outside touch begins a
+stroke and the teardown lands mid-sequence, and a tap cannot tell the two apart.
 
-The two `Menu`s are almost certainly safe by the census's own finding — `MenuInterruptionUITests`
-measured that a SwiftUI `Menu`'s dismiss region absorbs the whole touch sequence and never passes a
-drag through to the canvas, which is what makes every other `Menu` in the app SAFE rather than
-BROKEN. Nobody has run that measurement against these two specifically.
-
-The `ColorPicker` is the more interesting one: it is the first stock `ColorPicker` in the app whose
-*parent* is not itself a registered presentation. The other stock `ColorPicker` (`OnionSkinPanel.swift:326`)
-sits inside a popover that is a `CanvasPresentation` case (`showOnionSkinOptions`) — a registered,
-`isPresented`-bound presentation the census could reason about. `TextSettingsPanel` is reached through
-`activePanel` (`DrawingView.swift:399`), the same top-level mechanism the census calls safe for the
-*panel's own* teardown (line 114-116) — but the `ColorPicker`'s own system presentation, once it is
-open, is a second thing on top of that, with no `isPresented` binding to register and nothing measured
-about whether a stroke can start under it the way `.popover` demonstrably could before the 2026-08-20
-fix.
-
-Not fixed here — it needs the same kind of measurement `MenuInterruptionUITests` already did for
-`Menu`, not a guess.
-
-**Half of this is now done, 2026-08-27.** `MENU_PRESENTATION_CENSUS.md` no longer says the panel
-contains no presentations; the correction went in with the change that moved the panel to a bottom bar,
-because that change made the sentence's *other* half stale too. What is still open is the measurement,
-and moving the panel did not alter it: the `ColorPicker` opened over live canvas from the top-leading
-dropdown and opens over live canvas from the bottom bar, so it is the same hazard at a different anchor.
-One tap outside it dismissed it and placed no text box, which is worth knowing and is **not** the answer
-— `.popover`'s failure mode is a drag, and a tap cannot tell the two apart. The two `Menu`s were spot-
-checked the same way and behaved as the census's `Menu` finding predicts.
+The fix is probably not a measurement: the app's one `ColorPickerPanel` already serves every other
+swatch through `colorPickerPopover`, and the owner asked for the second stock picker to go in TODO (72).
+Left for a ruling on whether the text colour gives up the system picker's eyedropper and swatch grid.
 
 ## A vector cel holding warped text re-warps it on every invalidation, not once per commit (2026-08-26)
 

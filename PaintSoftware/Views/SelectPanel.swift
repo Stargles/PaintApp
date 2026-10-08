@@ -587,12 +587,11 @@ struct SelectPanel: View {
     /// `fixedSize` column on the left and the destinations scroll horizontally beside it, so the band
     /// costs one row however many groups the document has.
     ///
-    /// **Chips rather than a `Picker` or a `Menu`, and each alternative fails on something real.** A
+    /// **Chips rather than a `Picker` or a menu, and each alternative fails on something real.** A
     /// segmented `Picker` needs the current value to be one of its segments and this one can honestly
     /// be *Mixed* — a loop may hold ink from two groups, and the edit is still perfectly well defined
-    /// for it. A `Menu` is a system presentation over a live canvas, which is the family
-    /// MENU_PRESENTATION_CENSUS.md found seven defects in, and it would hide every destination behind
-    /// a tap for no gain at the two-or-three groups a document actually has.
+    /// for it. A menu would hide every destination behind a tap for no gain at the two-or-three
+    /// groups a document actually has.
     ///
     /// **The readout is a *value*, not just a label.** `selectionAnimationGroupName` resolves what the
     /// loop has caught, so an XCUITest asserting on it goes red if the control stops resolving —

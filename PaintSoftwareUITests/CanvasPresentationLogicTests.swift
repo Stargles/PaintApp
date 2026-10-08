@@ -5,64 +5,16 @@ import Combine
 /// the canvas is a UIKit presentation**, and **a canvas touch closes the panels, not the
 /// presentations** — those close through `AnchoredMenuRouter`, on any outside touch.
 ///
-/// **This file is written to fail on omission**, the way `ToolLogicTests` is. `parent` is an
-/// exhaustive `switch` with no `default:`, so a case added later cannot compile without stating
-/// whether it is nested; `testEveryPresentationStatesItsParent` closes the other half — the compiler
-/// accepts any answer, and a nested picker answered `nil` would close its own parent mid-pick.
-///
-/// **And `testNoPopoverIsDeclaredAnywhereInTheApp` closes what the type cannot.** Swift cannot forbid
-/// a standard-library modifier, so the guarantee is a test-time one: the test reads the app's real
-/// source files off the host filesystem, located from `#filePath`, and fails naming the file and
-/// line. A `.popover` over this canvas is the canvas freeze — `CanvasPresentation`'s header — and it
-/// is `tools/presentation-census.sh` promoted into the suite, so it runs whether or not anybody
-/// remembers to run that.
+/// **`testNoPopoverIsDeclaredAnywhereInTheApp` and `testNoSystemMenuIsDeclaredOverTheCanvas` close
+/// what the type cannot.** Swift cannot forbid a standard-library modifier, so the guarantee is a
+/// test-time one: the tests read the app's real source files off the host filesystem, located from
+/// `#filePath`, and fail naming the file and line. A `.popover` or a `Menu` over this canvas is the
+/// canvas freeze or the stroke that closes it and is lost — `CanvasPresentation`'s header — and it is
+/// `tools/presentation-census.sh` promoted into the suite, so it runs whether or not anybody remembers
+/// to run that.
 final class CanvasPresentationLogicTests: XCTestCase {
 
     // MARK: - The closed set
-
-    /// Every case's parent, stated once, here — keyed by `rawValue` because the raw values are what
-    /// the action recorder writes into a capture, and a table keyed by them fails loudly if one is
-    /// renamed. Adding a case without adding it below fails the count assertion.
-    private let expectedParent: [String: String?] = [
-        "timelineSlotMenu": nil,
-        "onionSkinOptions": nil,
-        "interpolateOptions": nil,
-        "graphChannelList": nil,
-        "frameRateOptions": nil,
-        "layerViewSelector": nil,
-        "canvasBackgroundColour": nil,
-        "valueLayerColour": nil,
-        "gradientStartColour": nil,
-        "gradientEndColour": nil,
-        "effectOutlineColour": nil,
-        "effectGradientStopColour": nil,
-        "effectRecolorColour": nil,
-        "effectBloomColour": nil,
-        "effectDuplicateOffsetColour": nil,
-        "effectGuideColour": nil,
-        "textFont": nil,
-        "selectionColour": nil,
-        // The only nesting: `ColorPickerPanel` hung off a swatch inside the ~250 pt onion menu.
-        "onionPreviousTintColour": "onionSkinOptions",
-        "onionNextTintColour": "onionSkinOptions",
-    ]
-
-    func testEveryPresentationStatesItsParent() {
-        XCTAssertEqual(CanvasPresentation.allCases.count, expectedParent.count, """
-            A case has been added to `CanvasPresentation` without an entry in `expectedParent`. \
-            Decide whether the new presentation is raised from inside another one — a touch on it \
-            must not close the one it sits in — then say so in `CanvasPresentation.parent` and in \
-            the table above.
-            """)
-        for presentation in CanvasPresentation.allCases {
-            guard let expected = expectedParent[presentation.rawValue] else {
-                XCTFail("\(presentation.rawValue) has no stated parent — see the message on the count assertion")
-                continue
-            }
-            XCTAssertEqual(presentation.parent?.rawValue, expected,
-                           "\(presentation.rawValue).parent must be \(expected ?? "nil")")
-        }
-    }
 
     /// The raw values are the recording vocabulary and `id` is derived from them, so a rename is not
     /// free even though the compiler treats it as such.
@@ -157,6 +109,33 @@ final class CanvasPresentationLogicTests: XCTestCase {
             """)
     }
 
+    /// **No SwiftUI `Menu`, `.contextMenu` or `.confirmationDialog` may be declared over the canvas.**
+    ///
+    /// UIKit presents all three and tears them down itself, and the teardown cancels the touch that
+    /// closed them: a stroke begun outside an open `Menu` was drawn and then lost, and the canvas
+    /// announced a freeze it had repaired (BUGS.md, 2026-10-07). A menu over the canvas is
+    /// `CanvasMenu` / `canvasContextMenu`, which `CanvasPresentationHost` draws and
+    /// `AnchoredMenuRouter` closes without consuming the touch.
+    ///
+    /// **The gallery is exempt, by name**: it is a different screen (`ContentView` switches between
+    /// the two), so no canvas exists for a menu there to cancel a stroke on.
+    func testNoSystemMenuIsDeclaredOverTheCanvas() throws {
+        let appSources = try repositoryRoot().appendingPathComponent("PaintSoftware", isDirectory: true)
+        let pattern = try NSRegularExpression(pattern: #"(^|[^A-Za-z0-9_.])Menu\s*[({]|\.contextMenu\b|\.confirmationDialog\b|\.pickerStyle\(\.menu\)"#)
+        let offenders = try codeLines(under: appSources, matching: pattern)
+            .filter { !$0.hasPrefix("Gallery") }
+
+        XCTAssertEqual(offenders, [], """
+            A system menu is declared over the canvas:
+
+            \(offenders.joined(separator: "\n"))
+
+            Use `CanvasMenu` (tap to open) or `.canvasContextMenu` (press and hold) with a case in \
+            `CanvasPresentation`. A SwiftUI `Menu` is torn down by UIKit under the touch that closes \
+            it, which cancels the stroke that touch began.
+            """)
+    }
+
     /// The assertion that stops the test above passing because it read nothing. A path typo, a moved
     /// directory or a sandbox that silently returns an empty enumerator all produce an empty offender
     /// list, which is indistinguishable from a clean tree — the green-sweep trap, exactly. So the same
@@ -171,8 +150,20 @@ final class CanvasPresentationLogicTests: XCTestCase {
         XCTAssertTrue(declarations.contains { $0.hasPrefix("LayerPanel.swift:") }, """
             The scan found no `.canvasPresentation(` declaration in `LayerPanel.swift`, where the Views \
             menu and two colour pickers are declared — so it is not reading code lines at all, and the \
-            test above passes for the wrong reason. Found: \(declarations)
+            tests above pass for the wrong reason. Found: \(declarations)
             """)
+
+        // The menu scan is a regular expression, which has its own ways to read nothing: it has to
+        // find `CanvasMenu(` where the add-layer menu is declared, and must not mistake it for `Menu(`.
+        let canvasMenu = try NSRegularExpression(pattern: #"CanvasMenu\("#)
+        let menus = try codeLines(under: appSources, matching: canvasMenu)
+        XCTAssertTrue(menus.contains { $0.hasPrefix("LayerPanel.swift:") }, "the scan cannot see `CanvasMenu(`: \(menus)")
+        let bare = try NSRegularExpression(pattern: #"(^|[^A-Za-z0-9_.])Menu\s*[({]"#)
+        func matches(_ text: String) -> Bool {
+            bare.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+        }
+        XCTAssertFalse(matches("CanvasMenu(.layerAddMenu,"), "the system-menu pattern must not match `CanvasMenu(`")
+        XCTAssertTrue(matches("Menu {"), "…and must match a bare `Menu {`")
     }
 
     // MARK: - Source-tree helpers
@@ -195,13 +186,24 @@ final class CanvasPresentationLogicTests: XCTestCase {
 
     /// `file:line: text` for every non-comment line under `directory` containing `needle`.
     private func codeLines(under directory: URL, containing needle: String) throws -> [String] {
+        try codeLines(under: directory) { $0.contains(needle) }
+    }
+
+    /// …matching `pattern`.
+    private func codeLines(under directory: URL, matching pattern: NSRegularExpression) throws -> [String] {
+        try codeLines(under: directory) { pattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+    }
+
+    /// `file:line: text` for every line under `directory` that is code (not a comment) and satisfies
+    /// `isOffender`.
+    private func codeLines(under directory: URL, where isOffender: (String) -> Bool) throws -> [String] {
         var found: [String] = []
         for file in try swiftFiles(under: directory) {
             let contents = try String(contentsOf: file, encoding: .utf8)
             for (offset, line) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.hasPrefix("//") || trimmed.hasPrefix("*") { continue }
-                guard trimmed.contains(needle) else { continue }
+                guard isOffender(trimmed) else { continue }
                 found.append("\(file.lastPathComponent):\(offset + 1): \(trimmed)")
             }
         }

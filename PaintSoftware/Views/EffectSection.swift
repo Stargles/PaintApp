@@ -135,7 +135,23 @@ enum EffectCatalog {
 
 // MARK: - Menu sections
 
-/// The Effects half of an operation menu — `Section`s of effect names, tick beside the current one,
+/// The blend-mode half of an operation menu — `MenuSection`s by family, a tick beside `selected`,
+/// each row named `<identifierPrefix>.<raw value>` for the suite.
+///
+/// Shared by the layer's Blend Mode row, the folder's, the node's Operation row and the Duplicate
+/// Offset effect's, which differ in which sections they offer and in what is ticked and nothing else.
+@ViewBuilder
+func blendMenuSections(_ sections: [(title: String, modes: [BlendMode])], selected: BlendMode?,
+                       identifierPrefix: String, onSelect: @escaping (BlendMode) -> Void) -> some View {
+    ForEach(sections.indices, id: \.self) { index in
+        MenuSection(sections[index].title) {
+            MenuChoices(values: sections[index].modes, selected: selected, title: \.displayName,
+                        identifier: { "\(identifierPrefix).\($0.rawValue)" }, onSelect: onSelect)
+        }
+    }
+}
+
+/// The Effects half of an operation menu — `MenuSection`s of effect names, tick beside the current one,
 /// each headed by `EffectCatalog.groupTitles` (TODO (66)).
 ///
 /// Shared by the value layer's Mode menu and the node's Operation menu, which is the whole reason it
@@ -146,18 +162,13 @@ enum EffectCatalog {
 func effectMenuSections(current: Effect?, identifierPrefix: String,
                         onSelect: @escaping (Effect) -> Void) -> some View {
     ForEach(EffectCatalog.groups.indices, id: \.self) { groupIndex in
-        Section(EffectCatalog.groupTitles[groupIndex]) {
+        MenuSection(EffectCatalog.groupTitles[groupIndex]) {
             ForEach(EffectCatalog.groups[groupIndex], id: \.displayName) { prototype in
-                Button {
+                MenuItem(prototype.displayName,
+                         isSelected: EffectCatalog.isCurrent(prototype, given: current),
+                         identifier: "\(identifierPrefix).\(effectMenuSlug(prototype))") {
                     onSelect(EffectCatalog.resolve(prototype, given: current))
-                } label: {
-                    if EffectCatalog.isCurrent(prototype, given: current) {
-                        Label(prototype.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(prototype.displayName)
-                    }
                 }
-                .accessibilityIdentifier("\(identifierPrefix).\(effectMenuSlug(prototype))")
             }
         }
     }
@@ -391,17 +402,10 @@ struct EffectSettingsBar: View {
         case .posterize(var params):
             slider("posterize.levels")
             pickerRow("Screen", current: params.screen.rawValue.capitalized, identifier: "screen") {
-                ForEach(Effect.Screen.allCases, id: \.self) { screen in
-                    Button {
-                        params.screen = screen; onChange(.posterize(params))
-                    } label: {
-                        if screen == params.screen {
-                            Label(screen.rawValue.capitalized, systemImage: "checkmark")
-                        } else {
-                            Text(screen.rawValue.capitalized)
-                        }
-                    }
-                    .accessibilityIdentifier("effectSettings.screen.\(screen.rawValue)")
+                MenuChoices(values: Array(Effect.Screen.allCases), selected: params.screen,
+                            title: { $0.rawValue.capitalized },
+                            identifier: { "effectSettings.screen.\($0.rawValue)" }) { screen in
+                    params.screen = screen; onChange(.posterize(params))
                 }
             }
             if params.screen != .none {
@@ -511,19 +515,12 @@ struct EffectSettingsBar: View {
             // left, which a stored name would the moment one moved (`Effect.CRTScreen`'s doc).
             // One undo step per pick, bracketed like Reroll Grain: a pick is one act, not a drag.
             pickerRow("Preset", current: params.preset?.rawValue ?? "Custom", identifier: "crtPreset") {
-                ForEach(Effect.CRTScreen.Preset.allCases, id: \.self) { preset in
-                    Button {
-                        onEditBegan()
-                        onChange(.crtScreen(Effect.CRTScreen.preset(preset)))
-                        onEditEnded()
-                    } label: {
-                        if preset == params.preset {
-                            Label(preset.rawValue, systemImage: "checkmark")
-                        } else {
-                            Text(preset.rawValue)
-                        }
-                    }
-                    .accessibilityIdentifier("effectSettings.crtPreset.\(preset.rawValue.lowercased())")
+                MenuChoices(values: Array(Effect.CRTScreen.Preset.allCases), selected: params.preset,
+                            title: { $0.rawValue },
+                            identifier: { "effectSettings.crtPreset.\($0.rawValue.lowercased())" }) { preset in
+                    onEditBegan()
+                    onChange(.crtScreen(Effect.CRTScreen.preset(preset)))
+                    onEditEnded()
                 }
             }
             slider("crtScreen.scanlines")
@@ -545,44 +542,22 @@ struct EffectSettingsBar: View {
                 params.color = picked; onChange(.duplicateOffset(params))
             }
             pickerRow("Region", current: params.region.displayName, identifier: "region") {
-                ForEach(Effect.DuplicateOffset.Region.allCases, id: \.self) { region in
-                    Button {
-                        onEditBegan()
-                        params.region = region; onChange(.duplicateOffset(params))
-                        onEditEnded()
-                    } label: {
-                        if region == params.region {
-                            Label(region.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(region.displayName)
-                        }
-                    }
-                    .accessibilityIdentifier("effectSettings.region.\(region.rawValue)")
+                MenuChoices(values: Array(Effect.DuplicateOffset.Region.allCases), selected: params.region,
+                            title: \.displayName,
+                            identifier: { "effectSettings.region.\($0.rawValue)" }) { region in
+                    onEditBegan()
+                    params.region = region; onChange(.duplicateOffset(params))
+                    onEditEnded()
                 }
             }
             // The layer blend modes, in the layer panel's own groups and order — every one but Clip
             // to Below, which is a mask and not a blend (`BlendMode.clipToBelow`'s doc).
             pickerRow("Blend Mode", current: params.blendMode.displayName, identifier: "blendMode") {
-                ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
-                    let modes = BlendMode.menuGroups[groupIndex].filter { $0 != .clipToBelow }
-                    if !modes.isEmpty {
-                        Section {
-                            ForEach(modes, id: \.self) { mode in
-                                Button {
-                                    onEditBegan()
-                                    params.blendMode = mode; onChange(.duplicateOffset(params))
-                                    onEditEnded()
-                                } label: {
-                                    if mode == params.blendMode {
-                                        Label(mode.displayName, systemImage: "checkmark")
-                                    } else {
-                                        Text(mode.displayName)
-                                    }
-                                }
-                                .accessibilityIdentifier("effectSettings.blendMode.\(mode.rawValue)")
-                            }
-                        }
-                    }
+                blendMenuSections(BlendMode.blendingMenuSections, selected: params.blendMode,
+                                  identifierPrefix: "effectSettings.blendMode") { mode in
+                    onEditBegan()
+                    params.blendMode = mode; onChange(.duplicateOffset(params))
+                    onEditEnded()
                 }
             }
             slider("duplicateOffset.opacity")
@@ -601,17 +576,10 @@ struct EffectSettingsBar: View {
             // TODO (63). The type first, `CRTScreen`'s preset row exactly — it decides which of the
             // rows below are shown, so it has to be read before them.
             pickerRow("Type", current: params.type.displayName, identifier: "glareType") {
-                ForEach(Effect.Glare.GlareType.allCases, id: \.self) { type in
-                    Button {
-                        onEditBegan(); params.type = type; onChange(.glare(params)); onEditEnded()
-                    } label: {
-                        if type == params.type {
-                            Label(type.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(type.displayName)
-                        }
-                    }
-                    .accessibilityIdentifier("effectSettings.glareType.\(type.rawValue)")
+                MenuChoices(values: Array(Effect.Glare.GlareType.allCases), selected: params.type,
+                            title: \.displayName,
+                            identifier: { "effectSettings.glareType.\($0.rawValue)" }) { type in
+                    onEditBegan(); params.type = type; onChange(.glare(params)); onEditEnded()
                 }
             }
             slider("glare.threshold")
@@ -639,17 +607,10 @@ struct EffectSettingsBar: View {
             // TODO (88). The mode first — `Glare`'s type row exactly — since it decides which of
             // the rows below are shown; then the mode's own knobs, then what every mode shares.
             pickerRow("Mode", current: params.mode.displayName, identifier: "guideMode") {
-                ForEach(Effect.Guide.Mode.allCases, id: \.self) { mode in
-                    Button {
-                        onEditBegan(); params.mode = mode; onChange(.guide(params)); onEditEnded()
-                    } label: {
-                        if mode == params.mode {
-                            Label(mode.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(mode.displayName)
-                        }
-                    }
-                    .accessibilityIdentifier("effectSettings.guideMode.\(mode.rawValue)")
+                MenuChoices(values: Array(Effect.Guide.Mode.allCases), selected: params.mode,
+                            title: \.displayName,
+                            identifier: { "effectSettings.guideMode.\($0.rawValue)" }) { mode in
+                    onEditBegan(); params.mode = mode; onChange(.guide(params)); onEditEnded()
                 }
             }
             switch params.mode {
@@ -813,8 +774,9 @@ struct EffectSettingsBar: View {
     }
 
     private func pickerRow<Content: View>(_ label: String, current: String, identifier: String,
-                                          @ViewBuilder content: () -> Content) -> some View {
-        Menu {
+                                          @ViewBuilder content: @escaping () -> Content) -> some View {
+        CanvasMenu(.effectOptionMenu, canvasManager: canvasManager,
+                   identifier: "effectSettings.\(identifier)Button", value: current) {
             content()
         } label: {
             HStack(spacing: 8) {
@@ -829,8 +791,6 @@ struct EffectSettingsBar: View {
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
-        .accessibilityIdentifier("effectSettings.\(identifier)Button")
-        .accessibilityValue(current)
     }
 
     private func actionRow(_ label: String, systemImage: String, identifier: String,

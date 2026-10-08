@@ -9,6 +9,11 @@ import Foundation
 /// that lives as long as the editor does and asks `AnchoredMenuDismissal.presentationsToDismiss`
 /// which of the open ones a touch just left.
 ///
+/// **That includes every menu.** A pull-down or a long-press menu is a case here too, drawn by
+/// `CanvasMenu` / `canvasContextMenu` — never a SwiftUI `Menu` or `.contextMenu`, which UIKit presents
+/// and whose teardown cancels the stroke that closed it (`CanvasPresentationLogicTests` fails if one
+/// is written anywhere over the canvas).
+///
 /// A `.popover` cannot sit over this canvas. It presents behind a screen-covering
 /// `_UIPassthroughGateGestureRecognizer` that UIKit binds to the same touches as `canvas.pan`,
 /// `canvas.pinch` and `canvas.rotation`, and whenever that gate is removed while a two-finger gesture
@@ -110,25 +115,51 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// the picker's life is the drag and its dismissal is the one undo step.
     case selectionColour
 
-    var id: String { rawValue }
+    // MARK: - Menus
+    //
+    // One case per kind of control that raises a menu, not per call site: two of one kind are never
+    // open at once, because opening the second is a touch outside the first.
 
-    /// **The presentation this one is raised from inside, if any** — so a touch on it does not also
-    /// close the one it sits in.
-    ///
-    /// Exhaustive with no `default:`: a case added later cannot compile until it says whether it is
-    /// nested. The two onion tint pickers are the only nested ones — `ColorPickerPanel` is 300 pt
-    /// wide and hangs off a swatch in the ~250 pt onion menu, so a touch on the picker necessarily
-    /// falls outside the menu's own frame and would close it, and the picker with it, mid-pick.
-    var parent: CanvasPresentation? {
-        switch self {
-        case .onionPreviousTintColour, .onionNextTintColour:
-            return .onionSkinOptions
-        case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
-             .frameRateOptions, .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
-             .gradientStartColour, .gradientEndColour,
-             .effectOutlineColour, .effectGradientStopColour, .effectRecolorColour, .effectBloomColour,
-             .effectDuplicateOffsetColour, .effectGuideColour, .textFont, .selectionColour:
-            return nil
-        }
-    }
+    /// The layer panel's "+": which kind of layer, folder or node to add.
+    case layerAddMenu
+
+    /// The Blend Mode / Effect / Operation row of a layer's or folder's options — the same list of
+    /// blend modes with the effect catalogue below it, wherever it is asked.
+    case layerBlendMenu
+
+    /// A transformation layer's Mode row.
+    case transformModeMenu
+
+    /// A choice inside an effect's settings bar — a preset, a region, a type, a mode.
+    case effectOptionMenu
+
+    /// The interpolate panel's Fetch: link or duplicate a guide from another frame.
+    case guideFetchMenu
+
+    /// Press and hold on a motion-group chip: show, solo, interpolation, delete.
+    case motionGroupMenu
+
+    /// Press and hold on an animation group in the graph editor's channel list: rename.
+    case graphGroupMenu
+
+    /// The brush panel's open-group chevron: rename, reorder or delete the group.
+    case brushGroupMenu
+
+    /// The brush panel's "+": create or import a brush, or add a group.
+    case brushAddMenu
+
+    /// Press and hold on a brush in the brush panel: favourites.
+    case brushRowMenu
+
+    /// The text panel's Style row: the face within the family.
+    case textFaceMenu
+
+    /// Press and hold on a palette swatch: delete it. The colour picker's swatch grid is drawn inside a
+    /// dozen other presentations, so this is the menu that is most often nested.
+    case paletteSwatchMenu
+
+    /// A choice or an add inside the full-screen brush editor — tip, texture, input, module.
+    case brushEditorMenu
+
+    var id: String { rawValue }
 }

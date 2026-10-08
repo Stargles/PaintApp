@@ -25,8 +25,8 @@ final class ColorWheelsUITests: PaintUITestCase {
     /// 1. A dark grey stroke (`1A1A1A`, Oklab `L` ≈ 0.22, Shadows weight ≈ 0.6) and a light grey
     ///    stroke (`E6E6E6`, `L` ≈ 0.92, Shadows weight exactly 0), thick enough that every probe
     ///    below lands inside them.
-    /// 2. `+` → Value Layer → its row → Blend Mode → **Colour Wheels** (`scrollMenuTo`, since the
-    ///    menu is pages long) → Effect Settings.
+    /// 2. `+` → Value Layer → its row → Blend Mode → **Colour Wheels** (pages down the menu; the
+    ///    tap scrolls to it) → Effect Settings.
     /// 3. **Four wheels are on the bar at once**: for each of Shadows, Midtones, Highlights and
     ///    Global a disc, a dot, a luminance slider, a strength slider and a reset, each by its own
     ///    identifier. The title reads "Colour Wheels".
@@ -75,7 +75,7 @@ final class ColorWheelsUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let item = scrollMenuTo(app, identifier: "layerOptions.blendMode.colourwheels")
+        let item = app.buttons["layerOptions.blendMode.colourwheels"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu must list Colour Wheels")
         item.tap()
 

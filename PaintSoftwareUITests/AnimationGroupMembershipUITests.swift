@@ -32,7 +32,8 @@ import XCTest
 /// other.
 ///
 /// A small class on purpose — CLAUDE.md's cost model distributes per test *class*, and the file is
-/// named for the class so a triage selector built from either name resolves.
+/// named for the class so a triage selector built from either name resolves. Its second test reuses the
+/// first one's fixture for the channel list's rename menu.
 final class AnimationGroupMembershipUITests: PaintUITestCase {
 
     // MARK: - Reading the canvas
@@ -288,5 +289,78 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
             D1 is still travelling to the right at the far frame, so it is still following the group \
             it left — x was %.3f before the edit and is %.3f after.
             """, farBefore.minX, farAfter.minX))
+    }
+
+    // MARK: - The channel list's rename menu
+
+    /// **Pressing and holding a group in the graph editor's channel list raises Rename Group**, and the
+    /// menu is the app's own, hung off a row of a list that is itself a menu.
+    ///
+    /// The group exists only because a Move on vector ink minted it, so the fixture is the first half
+    /// of the journey above — two marks, a keyframe, a Move, a second keyframe — and the rest is the
+    /// channel list. A touch on the list's own fold chevron then closes the rename menu **and folds the
+    /// group** while the list stays up: the nesting rule (`Placement.parent`) and "still acts" in one
+    /// touch, since the chevron is outside the menu and inside the list.
+    func testPressingAndHoldingAGroupInTheChannelListRenamesItAndATouchInTheListClosesTheMenu() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+
+        setBrushSize(app, normalized: 0.75)
+        // Two marks, and only the first moved: a Move that carried every drawing on the cel would be the
+        // whole cel's own Move, which is no group.
+        dragOnCanvas(app, from: onHost(paper, 0.14, 0.12), to: onHost(paper, 0.26, 0.24))
+        dragOnCanvas(app, from: onHost(paper, 0.62, 0.12), to: onHost(paper, 0.74, 0.24))
+        markKeyframe(app, onCelAt: 0.04)
+        scrub(app, toCelFraction: 0.95)
+        selectRectangle(app, paper, from: (0.08, 0.06), to: (0.32, 0.30))
+        moveSelection(app, paper, from: (0.20, 0.18), by: (0.25, 0))
+        markKeyframe(app, onCelAt: 0.95)
+        clearTheCanvasOfChrome(app)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let channels = app.buttons["timeline.graphChannelsButton"]
+        XCTAssertTrue(channels.waitForExistence(timeout: 5), "PREMISE: the graph band is open")
+        channels.tap()
+        // The list opens with the whole cel's own Move, which is no animation group and has no menu;
+        // the group the Move minted is the one named "Group 1".
+        let header = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH 'timeline.graphChannels.reveal.' AND label CONTAINS 'Group 1'")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5), "PREMISE: the Move minted Group 1, and the list names it")
+        let groupID = header.identifier.replacingOccurrences(of: "timeline.graphChannels.reveal.", with: "")
+        header.press(forDuration: 1.0)
+        let menu = canvasMenu(app, "graphGroupMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "pressing and holding the group raises the app's own menu")
+        XCTAssertTrue(app.descendants(matching: .any)["timeline.anchoredMenu.graphChannelList"].exists,
+                      "…over the channel list, which stays up")
+        attachScreenshot(app, "graph-group-rename-menu")
+
+        // A touch inside the list and outside the menu: the chevron.
+        let fold = app.buttons["timeline.graphChannels.fold.\(groupID)"]
+        XCTAssertEqual(fold.value as? String, "expanded", "PREMISE")
+        fold.tap()
+        XCTAssertTrue(menu.waitForNonExistence(timeout: 5), "a touch in the list closes the rename menu")
+        XCTAssertEqual(fold.value as? String, "collapsed", "…and the touch still folded the group")
+        XCTAssertTrue(header.exists, "…and the list it was raised from is still up")
+
+        // And the menu does what it says.
+        header.press(forDuration: 1.0)
+        let rename = app.buttons["timeline.graphChannels.rename.\(groupID)"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5), "Rename Group is offered")
+        rename.tap()
+        XCTAssertTrue(menu.waitForNonExistence(timeout: 5), "picking the row closes the menu")
+        // Scoped to the alert: a SwiftUI alert's field does not carry its own identifier to XCUITest
+        // (`LayerUITests`' view rename has the measurement).
+        let alert = app.alerts["Rename Group"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "…and the rename alert is up")
+        let field = alert.textFields.firstMatch
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 24) + "Wing")
+        alert.buttons["Save"].firstMatch.tap()
+        let renamedRow = app.descendants(matching: .any)["timeline.graphChannels.reveal.\(groupID)"]
+        let renamed = expectation(for: NSPredicate(format: "label CONTAINS 'Wing'"), evaluatedWith: renamedRow)
+        wait(for: [renamed], timeout: 5)
     }
 }

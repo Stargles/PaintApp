@@ -126,19 +126,15 @@ struct LayerPanel: View {
                 ViewSelectorMenu(canvasManager: canvasManager, isPresented: $showViewSelector)
             }
 
-            Menu {
-                Button {
+            CanvasMenu(.layerAddMenu, canvasManager: canvasManager, identifier: "layerPanel.addButton") {
+                MenuItem("Raster Layer", systemImage: "square.on.square",
+                         identifier: "layerPanel.addRasterButton") {
                     closingOptions { canvasManager.addLayer() }
-                } label: {
-                    Label("Raster Layer", systemImage: "square.on.square")
                 }
-                .accessibilityIdentifier("layerPanel.addRasterButton")
-                Button {
+                MenuItem("Vector Layer", systemImage: "scribble.variable",
+                         identifier: "layerPanel.addVectorButton") {
                     closingOptions { canvasManager.addVectorLayer() }
-                } label: {
-                    Label("Vector Layer", systemImage: "scribble.variable")
                 }
-                .accessibilityIdentifier("layerPanel.addVectorButton")
                 // §4.5's value layer arrives from the same menu the two drawable kinds do — it is a
                 // leaf in the stack like any other, and the only thing that separates it is that a
                 // stroke has nowhere to land (`Layer.hasNoDrawingSurface`, which `CanvasView`
@@ -150,12 +146,10 @@ struct LayerPanel: View {
                 // here would be a second way to create the same kind, differing only in which mode
                 // it arrived in — and the artist who wanted the other mode would have to delete the
                 // layer and add it again rather than flipping the picker that is already there.
-                Button {
+                MenuItem("Value Layer", systemImage: "paintpalette",
+                         identifier: "layerPanel.addValueButton") {
                     closingOptions { canvasManager.addValueLayer() }
-                } label: {
-                    Label("Value Layer", systemImage: "paintpalette")
                 }
-                .accessibilityIdentifier("layerPanel.addValueButton")
                 // **The transformation layer is its own entry, because it is its own kind** —
                 // TRANSFORM_LAYER.md §2 ruling 2. It was the value layer's third mode from KEYFRAMES
                 // §4.4 until 2026-09-11, reached by adding a Value Layer and picking Transform from
@@ -163,12 +157,10 @@ struct LayerPanel: View {
                 // what is beneath adds a *Transform Layer* and its panel is about transforming. The
                 // glyph is the toolbar's own Move glyph, which `moveRow` already borrows for the
                 // same reason: the layer and the button do one thing.
-                Button {
+                MenuItem("Transform Layer", systemImage: "arrow.up.and.down.and.arrow.left.and.right",
+                         identifier: "layerPanel.addTransformButton") {
                     closingOptions { canvasManager.addTransformLayer() }
-                } label: {
-                    Label("Transform Layer", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
                 }
-                .accessibilityIdentifier("layerPanel.addTransformButton")
                 // `activeContainerID` on these two and not on the four above, which is not an
                 // oversight: `addLayer`/`addVectorLayer`/`addValueLayer`/`addTransformLayer` resolve
                 // the container themselves (`newLayerPlacement`), because inserting *above the
@@ -177,37 +169,24 @@ struct LayerPanel: View {
                 // `activeContainerID`'s doc for why they were left that way — so the inheritance has
                 // to be spelled out here or a folder created while the artist works inside a group
                 // lands at the top level instead of beside them.
-                Button {
+                MenuItem("Folder", systemImage: "folder", identifier: "layerPanel.addFolderButton") {
                     closingOptions { canvasManager.addFolder(parentFolderID: canvasManager.activeContainerID) }
-                } label: {
-                    Label("Folder", systemImage: "folder")
                 }
-                .accessibilityIdentifier("layerPanel.addFolderButton")
                 // §4.3: a compositor node arrives from the same menu a folder does, because it *is*
                 // one — a folder whose children are its inputs. It arrives empty, like a folder, and
                 // is filled the same way: drag things into it, bottom child first.
-                Button {
+                MenuItem("Mix Node", systemImage: "camera.filters", identifier: "layerPanel.addMixNodeButton") {
                     closingOptions {
                         canvasManager.addCompositorNode(op: .mix(.normal),
                                                         parentFolderID: canvasManager.activeContainerID)
                     }
-                } label: {
-                    Label("Mix Node", systemImage: "camera.filters")
                 }
-                .accessibilityIdentifier("layerPanel.addMixNodeButton")
             } label: {
                 Image(systemName: "plus")
                     .font(.title3)
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
             }
-            // **No `primaryAction:`, deliberately.** It used to claim a plain tap for
-            // `addVectorLayer`, which made the menu reachable only by press-and-hold — an affordance
-            // nothing on screen advertised, and the owner's complaint: the "+" spawned a kind they
-            // had not asked for and the list of kinds was hidden behind a gesture. Without the
-            // closure SwiftUI's default `Menu` behaviour applies and any tap opens the list, so the
-            // kind is always a deliberate pick and the long-press is no longer load-bearing.
-            .accessibilityIdentifier("layerPanel.addButton")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -421,7 +400,7 @@ struct LayerOptionsPanel: View {
         // the layer already has rather than the answer to what the layer *is* — and where there is
         // no grade for it to conflict with, so it needs none of the merged row's rules.
         if !canvasManager.layers[index].kind.carriesEffect, canvasManager.layers[index].kind.holdsPixels {
-            blendModeRow(current: canvasManager.layers[index].blendMode) { mode in
+            blendModeRow(canvasManager: canvasManager, current: canvasManager.layers[index].blendMode) { mode in
                 canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
             }
 
@@ -485,7 +464,7 @@ struct LayerOptionsPanel: View {
     /// `BlendMode.rawValue` collides with. `nodeOperationRow` argues the same choice from the other
     /// direction, where the op identifiers were the ones already in the tests.
     ///
-    /// Full `BlendMode.menuGroups`, unlike `compositorOpModeGroups`: Clip to Below is meaningless on a
+    /// Full `BlendMode.menuSections`, unlike `BlendMode.blendingMenuSections`: Clip to Below is meaningless on a
     /// node whose operands are named slots, but a value layer sits in an ordinary stack with something
     /// under it, so the implicit source resolves and the mode means what it says.
     ///
@@ -506,51 +485,27 @@ struct LayerOptionsPanel: View {
     private func blendOrEffectRow(index: Int) -> some View {
         let effect = canvasManager.layers[index].layerEffect
         let blend = canvasManager.layers[index].blendMode
-        return Menu {
-            ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
-                Section(BlendMode.menuGroupTitles[groupIndex]) {
-                    ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
-                        Button {
-                            canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
-                        } label: {
-                            // Ticked only while no grade is set. `blendMode` still holds whatever was
-                            // last picked underneath an effect, and a checkmark beside a mode the
-                            // renderer is currently ignoring would be the panel disagreeing with the
-                            // canvas — `nodeOperationRow` makes this same argument about `compositorOp`.
-                            if effect == nil, mode == blend {
-                                Label(mode.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(mode.displayName)
-                            }
-                        }
-                        .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
-                    }
-                }
+        return CanvasMenu(.layerBlendMenu, canvasManager: canvasManager,
+                          identifier: "layerOptions.blendModeButton",
+                          // The grade's slug while grading, the blend's raw value otherwise — the same
+                          // multi-vocabulary value `nodeOperationRow` reports, so a test can read which
+                          // of the two answers is live.
+                          value: effect.map(effectMenuSlug) ?? blend.rawValue) {
+            // Ticked only while no grade is set. `blendMode` still holds whatever was last picked
+            // underneath an effect, and a checkmark beside a mode the renderer is currently ignoring
+            // would be the panel disagreeing with the canvas — `nodeOperationRow` makes this same
+            // argument about `compositorOp`.
+            blendMenuSections(BlendMode.menuSections, selected: effect == nil ? blend : nil,
+                              identifierPrefix: "layerOptions.blendMode") { mode in
+                canvasManager.setLayerBlendMode(layerIndex: index, to: mode)
             }
             effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
                 canvasManager.setLayerEffect(layerIndex: index, to: picked)
             }
         } label: {
-            HStack(spacing: 8) {
-                Text(effect != nil ? "Effect" : "Blend Mode")
-                    .foregroundColor(.white)
-                Spacer()
-                Text(effect?.displayName ?? blend.displayName)
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.gray)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            PullDownLabel(title: effect != nil ? "Effect" : "Blend Mode",
+                          value: effect?.displayName ?? blend.displayName)
         }
-        .accessibilityIdentifier("layerOptions.blendModeButton")
-        // The grade's slug while grading, the blend's raw value otherwise — the same multi-vocabulary
-        // value `nodeOperationRow` reports, so a test can read which of the two answers is live.
-        .accessibilityValue(effect.map(effectMenuSlug) ?? blend.rawValue)
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the
@@ -668,57 +623,26 @@ struct LayerOptionsPanel: View {
 }
 
 /// The blend-mode picker shared by `LayerOptionsPanel` and `FolderOptionsPanel` (§7's Tier 1) — a
-/// `Menu` grouped by `BlendMode.menuGroups`'s sections (darkening / lightening / contrast together),
+/// menu grouped by `BlendMode.menuGroups`'s sections (darkening / lightening / contrast together),
 /// the same pull-down idiom the layer panel's own "+" button already uses (`LayerPanel.header`)
-/// rather than a new control for fourteen cases. `Section` gives SwiftUI's native inline dividers
-/// between groups for free, matching what `menuGroups` is *for* — no hand-drawn rule needed here the
-/// way the panel's own rows use one.
+/// rather than a new control for fourteen cases.
 ///
 /// `current`'s raw value rides as the button's `accessibilityValue` — stable across a `displayName`
 /// wording change, unlike reading the visible label back — so a UI test can confirm a pick stuck
 /// after the panel closes and reopens, the same way `layerOptions.passThroughToggle` does.
 ///
-/// **It no longer serves §4.3's Mix node.** It used to, through `title`/`identifier`/`groups`
-/// parameters, back when a node's op was a `BlendMode` and nothing else. A node's op is now a blend
-/// *or* a grade (`FolderOptionsPanel.nodeOperationRow`), and the two must be picked from one list
-/// because each clears the other — so that row builds its own `Menu` and this one went back to being
-/// the plain layer/folder blend picker it started as. The parameters went with it: a defaulted
-/// parameter no call site overrides is a claim about flexibility that has stopped being true.
-private func blendModeRow(current: BlendMode, onSelect: @escaping (BlendMode) -> Void) -> some View {
-    Menu {
-        ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
-            Section(BlendMode.menuGroupTitles[groupIndex]) {
-                ForEach(BlendMode.menuGroups[groupIndex], id: \.self) { mode in
-                    Button {
-                        onSelect(mode)
-                    } label: {
-                        if mode == current {
-                            Label(mode.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(mode.displayName)
-                        }
-                    }
-                    .accessibilityIdentifier("layerOptions.blendMode.\(mode.rawValue)")
-                }
-            }
-        }
+/// **It does not serve §4.3's Mix node**, whose op is a blend *or* a grade
+/// (`FolderOptionsPanel.nodeOperationRow`): the two must be picked from one list because each clears
+/// the other, so that row builds its own.
+private func blendModeRow(canvasManager: CanvasManager, current: BlendMode,
+                          onSelect: @escaping (BlendMode) -> Void) -> some View {
+    CanvasMenu(.layerBlendMenu, canvasManager: canvasManager, identifier: "layerOptions.blendModeButton",
+               value: current.rawValue) {
+        blendMenuSections(BlendMode.menuSections, selected: current,
+                          identifierPrefix: "layerOptions.blendMode", onSelect: onSelect)
     } label: {
-        HStack(spacing: 8) {
-            Text("Blend Mode").foregroundColor(.white)
-            Spacer()
-            Text(current.displayName)
-                .font(.caption)
-                .foregroundColor(.gray)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.gray)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
+        PullDownLabel(title: "Blend Mode", value: current.displayName)
     }
-    .accessibilityIdentifier("layerOptions.blendModeButton")
-    .accessibilityValue(current.rawValue)
 }
 
 /// A node's "Effect Settings ▸" row — `maskRow`'s shape for `maskMenu`'s reason: Levels is five
@@ -792,7 +716,7 @@ private func moveRow(caption: String, identifier: String, onMove: @escaping () -
     .accessibilityIdentifier(identifier)
 }
 
-/// **A transform layer's mode picker** — TRANSFORM_LAYER.md §5's five modes. A `Menu` on a row with a
+/// **A transform layer's mode picker** — TRANSFORM_LAYER.md §5's five modes. A menu on a row with a
 /// title, the live value in the caption and a checkmark on the pick — `blendOrEffectRow`'s shape.
 /// Each mode was listed only once its stage landed: a row that is offered and does nothing is
 /// CLAUDE.md's *"refusal with no notice"* wearing a menu.
@@ -801,43 +725,15 @@ private func moveRow(caption: String, identifier: String, onMove: @escaping () -
 /// `layerOptions.transformMode.<mode>`) and the value it reports is the mode's raw name.
 private func transformModeRow(canvasManager: CanvasManager, target: KeyframeTarget) -> some View {
     let current = canvasManager.transformLayerMode(of: target) ?? .move
-    return Menu {
-        ForEach(TransformLayerMode.allCases) { mode in
-            Button {
-                canvasManager.setTransformLayerMode(target, to: mode)
-            } label: {
-                if mode == current {
-                    Label(mode.displayName, systemImage: "checkmark")
-                } else {
-                    Text(mode.displayName)
-                }
-            }
-            .accessibilityIdentifier("layerOptions.transformMode.\(mode.rawValue)")
+    return CanvasMenu(.transformModeMenu, canvasManager: canvasManager,
+                      identifier: "layerOptions.transformModeButton", value: current.rawValue) {
+        MenuChoices(values: Array(TransformLayerMode.allCases), selected: current, title: \.displayName,
+                    identifier: { "layerOptions.transformMode.\($0.rawValue)" }) { mode in
+            canvasManager.setTransformLayerMode(target, to: mode)
         }
     } label: {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Mode").foregroundColor(.white)
-                Text(current.caption)
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                    .lineLimit(2)
-            }
-            Spacer()
-            Text(current.displayName)
-                .font(.caption)
-                .foregroundColor(.gray)
-                .lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.gray)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
+        PullDownLabel(title: "Mode", value: current.displayName, caption: current.caption)
     }
-    .accessibilityIdentifier("layerOptions.transformModeButton")
-    .accessibilityValue(current.rawValue)
 }
 
 /// **The one row the picked mode needs, and nothing for Move** — TODO (64). The mode's own rows
@@ -1323,19 +1219,6 @@ private struct ParallaxItemsSection: View {
     }
 }
 
-/// The picker's list with "Clip to Below" dropped, for a compositor op — paired with its own header
-/// (TODO (66)) rather than plain `[[BlendMode]]`, since dropping the one-mode Clip group after
-/// zipping titles on by index would otherwise misalign every title after it.
-///
-/// That mode is not a blend at all (§7): it is the mask machinery with an *implicit* source, the
-/// entry one step down in the same container. A Mix's operands are two named slots rather than a
-/// stack with something under them, so there is nothing for the implicit source to resolve to — the
-/// pick would silently mean "normal" and read as a mode that quietly does nothing.
-private let compositorOpModeGroups: [(title: String, modes: [BlendMode])] =
-    zip(BlendMode.menuGroupTitles, BlendMode.menuGroups)
-        .map { (title: $0, modes: $1.filter { $0 != .clipToBelow }) }
-        .filter { !$0.modes.isEmpty }
-
 /// One row of an options menu's action list — shared by `LayerOptionsPanel` and
 /// `FolderOptionsPanel` so the two menus render identically.
 private func optionsAction(_ title: String, systemImage: String, identifier: String,
@@ -1581,7 +1464,7 @@ struct FolderOptionsPanel: View {
                 // the Mix Mode above, and pins its output to Normal. Not offered where it cannot be
                 // honoured, which is the same rule the slot version of this guard was applying.
                 if folder?.isCompositorNode != true {
-                    blendModeRow(current: canvasManager.folders[index].blendMode) { mode in
+                    blendModeRow(canvasManager: canvasManager, current: canvasManager.folders[index].blendMode) { mode in
                         canvasManager.setFolderBlendMode(folderID, to: mode)
                     }
 
@@ -1784,51 +1667,27 @@ struct FolderOptionsPanel: View {
     private func nodeOperationRow(folder: LayerFolder?) -> some View {
         let effect = folder?.effect
         let mixMode: BlendMode? = { if case .mix(let mode)? = folder?.compositorOp { return mode }; return nil }()
-        return Menu {
+        return CanvasMenu(.layerBlendMenu, canvasManager: canvasManager,
+                          identifier: "layerOptions.mixModeButton",
+                          value: effect.map(effectMenuSlug) ?? mixMode?.rawValue ?? "stack") {
             // The blend groups keep their own sections (TODO (66) gave every one of them the header
             // `BlendMode.menuGroupTitles` names — darkening, lightening, contrast, …) and the effect
             // groups below are sections too, headed by `EffectCatalog.groupTitles`.
-            ForEach(compositorOpModeGroups.indices, id: \.self) { groupIndex in
-                Section(compositorOpModeGroups[groupIndex].title) {
-                    ForEach(compositorOpModeGroups[groupIndex].modes, id: \.self) { mode in
-                        Button {
-                            canvasManager.setMixBlendMode(folderID, to: mode)
-                        } label: {
-                            // Ticked only while no grade is set: `compositorOp` still says `.mix`
-                            // under an effect for exactly as long as nothing has reshaped it, and a
-                            // checkmark beside a blend that is not what the node does would be the
-                            // panel disagreeing with the render.
-                            if effect == nil, mode == mixMode {
-                                Label(mode.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(mode.displayName)
-                            }
-                        }
-                        .accessibilityIdentifier("layerOptions.mixMode.\(mode.rawValue)")
-                    }
-                }
+            //
+            // Ticked only while no grade is set: `compositorOp` still says `.mix` under an effect for
+            // exactly as long as nothing has reshaped it, and a checkmark beside a blend that is not
+            // what the node does would be the panel disagreeing with the render.
+            blendMenuSections(BlendMode.blendingMenuSections, selected: effect == nil ? mixMode : nil,
+                              identifierPrefix: "layerOptions.mixMode") { mode in
+                canvasManager.setMixBlendMode(folderID, to: mode)
             }
             effectMenuSections(current: effect, identifierPrefix: "layerOptions.mixMode") { picked in
                 canvasManager.setNodeEffect(folderID, to: picked)
             }
         } label: {
-            HStack(spacing: 8) {
-                Text("Operation").foregroundColor(.white)
-                Spacer()
-                Text(effect?.displayName ?? mixMode?.displayName ?? "Stack")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.gray)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            PullDownLabel(title: "Operation",
+                          value: effect?.displayName ?? mixMode?.displayName ?? "Stack")
         }
-        .accessibilityIdentifier("layerOptions.mixModeButton")
-        .accessibilityValue(effect.map(effectMenuSlug) ?? mixMode?.rawValue ?? "stack")
     }
 
     private func header(for index: Int) -> some View {

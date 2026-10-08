@@ -34,35 +34,6 @@ final class CRTScreenUITests: PaintUITestCase {
         return total / Double(count)
     }
 
-    /// **Scrolls the mode menu until `identifier` can be tapped.** The value layer's mode menu lists
-    /// every blend mode and every effect — four pages of rows on an iPad — and SwiftUI realises only
-    /// the rows near the viewport, so an entry near the end of the catalogue does not *exist* in the
-    /// accessibility tree until the menu is scrolled. Computer Screen is the last entry (the third
-    /// catalogue group ends with it), which is why this test is the first to need a scroll where
-    /// `RecolorUITests` — Recolour sits on the first page — needed none.
-    ///
-    /// **The drag is anchored by geometry, not by `isHittable`.** MEASURED on the way here: the menu
-    /// is a `CollectionView` whose frame is the whole content height inside a 520pt clip, and XCUITest
-    /// reports a row *below the clip* as hittable, so "the last hittable row" was Recolour at
-    /// y ≈ 1457 — on the canvas — and a flick from it dismissed the menu and the layer panel with it.
-    /// `swipeUp()` on a row inside the menu scrolled nothing either. What scrolls it is a press-and-drag
-    /// from a row a few hundred points down the visible list to the row at its top.
-    private func revealMenuItem(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
-        let item = app.buttons[identifier]
-        let entries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'layerOptions.blendMode.'"))
-        for _ in 0..<10 where !(item.exists && item.isHittable) {
-            let rows = entries.allElementsBoundByIndex.filter(\.exists).sorted { $0.frame.minY < $1.frame.minY }
-            guard let top = rows.first else { break }
-            // A row about 300pt below the top is inside the menu's window whatever the device; the
-            // drag spans that distance and scrolls by about it.
-            guard let anchor = rows.last(where: { $0.frame.minY <= top.frame.minY + 300 }), anchor != top else { break }
-            anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: top.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
-            _ = item.waitForExistence(timeout: 1)
-        }
-        return item
-    }
-
     /// Polls `meanOfColumn` until `predicate` holds or `timeout` elapses — the composite lands a beat
     /// after the model changes, off the main thread.
     @discardableResult
@@ -119,9 +90,9 @@ final class CRTScreenUITests: PaintUITestCase {
         XCTAssertTrue(modeButton.waitForExistence(timeout: 5), "A value layer's Blend Mode row chooses its mode")
         modeButton.tap()
         XCTAssertTrue(app.buttons["layerOptions.blendMode.normal"].waitForExistence(timeout: 5), "The mode menu is open")
-        let screenItem = revealMenuItem(app, "layerOptions.blendMode.computerscreen")
+        let screenItem = app.buttons["layerOptions.blendMode.computerscreen"]
         XCTAssertTrue(screenItem.waitForExistence(timeout: 5),
-                      "Computer Screen is in the effect catalogue, so it is in the mode menu — at the end, after a scroll")
+                      "Computer Screen is in the effect catalogue, so it is in the mode menu — at the very end of it")
         screenItem.tap()
 
         let title = app.staticTexts["layerOptions.subMenuTitle"]

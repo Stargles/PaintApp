@@ -44,9 +44,8 @@ struct FontFace: Equatable, Hashable, Identifiable {
 /// A titled section of the font picker — "System", "Serif", "Sans", "Mono", "Display", or a pack's
 /// own name — holding the families that belong in it.
 ///
-/// The picker UI is a grouped native `Menu` with `Section`s and a checkmark on the current value:
-/// the `blendModeRow` / `BlendMode.menuGroups` idiom (`LayerPanel.swift:590-`), which is this app's
-/// answer for "many named options" and already the one the artist has met.
+/// The picker UI is `FontFamilyList`, an `AnchoredMenu` (`CanvasPresentation.textFont`) with a section
+/// per group and a checkmark on the current family, each name drawn in its own face.
 struct FontFamilyGroup: Equatable, Identifiable {
     var title: String
     var families: [String]

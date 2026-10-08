@@ -23,8 +23,8 @@ final class GlareUITests: PaintUITestCase {
     ///    rather than lightening.
     /// 2. A small white blob at the centre of the cross — the source bright enough to clear the
     ///    default 0.75 threshold.
-    /// 3. `+` → Value Layer → its row → Blend Mode → **Glare**, scrolled into view (past Duplicate
-    ///    Offset and Chromatic Aberration, `scrollMenuTo`'s reason) → Effect Settings.
+    /// 3. `+` → Value Layer → its row → Blend Mode → **Glare**, scrolled to by the tap (past
+    ///    Duplicate Offset and Chromatic Aberration) → Effect Settings.
     /// 4. **The type picker lists all three shipped looks and reads "Streaks"** — the catalogue's own
     ///    default — and picking Streaks again is one tap.
     /// 5. Streaks down to two directions (0°/90°, Simple Star's own pair) and the reach turned up, so
@@ -74,7 +74,7 @@ final class GlareUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let glareItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.glare")
+        let glareItem = app.buttons["layerOptions.blendMode.glare"]
         XCTAssertTrue(glareItem.waitForExistence(timeout: 5), "The Blend Mode menu must list Glare")
         glareItem.tap()
 

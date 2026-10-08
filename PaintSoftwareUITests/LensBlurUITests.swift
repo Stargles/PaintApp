@@ -62,7 +62,7 @@ final class LensBlurUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let lensItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.lensblur")
+        let lensItem = app.buttons["layerOptions.blendMode.lensblur"]
         XCTAssertTrue(lensItem.waitForExistence(timeout: 5), "The Blend Mode menu must list Lens Blur")
         lensItem.tap()
 

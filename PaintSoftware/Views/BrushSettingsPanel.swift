@@ -39,9 +39,10 @@ struct BrushSettingsPanel: View {
             accessory: { importErrorRow },
             addMenuItems: { importButton }
         )
-        // The picker is raised from a `Menu` item, so it cannot be the `PhotosPicker` button itself —
-        // a menu row is not a place a picker can present from. The flag is the whole of that
-        // indirection; everything past `loadTransferable` is exactly what it was.
+        // The picker is raised from a menu row, so it cannot be the `PhotosPicker` button itself — the
+        // row goes away with its menu the moment it is tapped, and a picker presented from a view
+        // that has gone has nowhere to stand. The flag is the whole of that indirection; everything
+        // past `loadTransferable` is exactly what it was.
         .photosPicker(isPresented: $isPickingCustomBrush, selection: $customBrushPickerItem, matching: .images)
         .onChange(of: customBrushPickerItem) { _, newItem in
             Task { await importCustomBrush(newItem) }
@@ -51,12 +52,10 @@ struct BrushSettingsPanel: View {
     // MARK: - Custom brush import
 
     private var importButton: some View {
-        Button {
+        MenuItem("Import Custom Brush", systemImage: "plus.square.dashed",
+                 identifier: "brushPanel.importCustomBrush") {
             isPickingCustomBrush = true
-        } label: {
-            Label("Import Custom Brush", systemImage: "plus.square.dashed")
         }
-        .accessibilityIdentifier("brushPanel.importCustomBrush")
     }
 
     @ViewBuilder

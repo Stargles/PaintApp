@@ -313,7 +313,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let sobelItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.sobel")
+        let sobelItem = app.buttons["layerOptions.blendMode.sobel"]
         XCTAssertTrue(sobelItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Sobel")
         sobelItem.tap()
 
@@ -367,7 +367,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let bloomItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.bloom")
+        let bloomItem = app.buttons["layerOptions.blendMode.bloom"]
         XCTAssertTrue(bloomItem.waitForExistence(timeout: 5), "The Blend Mode menu should list Bloom")
         bloomItem.tap()
 
@@ -389,9 +389,9 @@ final class OptionsPanelUITests: PaintUITestCase {
         // Bloom's fifth row — `EffectSettingsBar`'s own rows sit in a real `ScrollView` capped at
         // `BottomDock.maxScrollHeight` (`ContentHeightCap`), and TODO (60) is what pushed Bloom's row
         // count from four to five; the swatch can now land below the visible card exactly the way
-        // Curves' and a many-stop Gradient Map's later rows already do. `scrollMenuTo`'s reasoning
-        // applies again: `exists` is true the moment the row is laid out, whether or not it is
-        // presently scrolled into view, so wait for `isHittable` and nudge the scroll view first.
+        // Curves' and a many-stop Gradient Map's later rows already do. `exists` is true the moment the
+        // row is laid out, whether or not it is presently scrolled into view, so wait for `isHittable`
+        // and nudge the scroll view first.
         if !colorSwatch.isHittable {
             app.scrollViews.containing(.slider, identifier: "effectSettings.intensity").firstMatch.swipeUp()
         }
@@ -435,7 +435,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let gradientItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.gradientmap")
+        let gradientItem = app.buttons["layerOptions.blendMode.gradientmap"]
         XCTAssertTrue(gradientItem.waitForExistence(timeout: 5),
                       "The Blend Mode menu should list Gradient Map")
         gradientItem.tap()
@@ -524,7 +524,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         app.buttons["layerOptions.blendModeButton"].tap()
-        let posterizeItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.posterize")
+        let posterizeItem = app.buttons["layerOptions.blendMode.posterize"]
         XCTAssertTrue(posterizeItem.waitForExistence(timeout: 5), "The menu should list Posterize")
         posterizeItem.tap()
         app.buttons["layerOptions.close"].tap()
@@ -535,7 +535,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let ditherItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.dither")
+        let ditherItem = app.buttons["layerOptions.blendMode.dither"]
         XCTAssertTrue(ditherItem.waitForExistence(timeout: 5), "The menu should list Dither")
         ditherItem.tap()
 
@@ -600,7 +600,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.blendModeButton"].tap()
         XCTAssertFalse(app.buttons["layerOptions.blendMode.huecolorize"].exists,
                        "TODO (65): Hue Colorize must no longer be a separate menu entry")
-        let hsvShiftItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.hsvshift")
+        let hsvShiftItem = app.buttons["layerOptions.blendMode.hsvshift"]
         XCTAssertTrue(hsvShiftItem.waitForExistence(timeout: 5), "The menu should list HSV Shift")
         hsvShiftItem.tap()
 
@@ -641,7 +641,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         // The same lazily-realised menu as above: a row past the blend-mode groups and their
         // headers is not in the tree until the menu is scrolled to it, so a bare
         // `waitForExistence` here read as "the entry vanished" when it was merely off-screen.
-        let hsvShiftRow = scrollMenuTo(app, identifier: "layerOptions.blendMode.hsvshift")
+        let hsvShiftRow = app.buttons["layerOptions.blendMode.hsvshift"]
         XCTAssertTrue(hsvShiftRow.waitForExistence(timeout: 5),
                       "The merged HSV Shift entry must still be in the menu while colorized")
         hsvShiftRow.tap()

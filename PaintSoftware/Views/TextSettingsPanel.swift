@@ -125,7 +125,7 @@ struct TextSettingsPanel: View {
         Button {
             showingFontPicker.toggle()
         } label: {
-            menuLabel(title: "Font", value: canvasManager.textRecipe.font.familyName)
+            PullDownLabel(title: "Font", value: canvasManager.textRecipe.font.familyName, verticalPadding: 6)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("\(Self.idPrefix).fontButton")
@@ -154,31 +154,27 @@ struct TextSettingsPanel: View {
         let font = canvasManager.textRecipe.font
         let faces = FontLibrary.shared.faces(inFamily: font.familyName, packID: font.packID)
         if faces.count > 1 {
-            Menu {
-                ForEach(faces) { face in
-                    Button {
-                        canvasManager.textRecipe.font = face.descriptor
-                        canvasManager.textRecipeDidChange()
-                    } label: {
-                        if face.postScriptName == font.faceName {
-                            Label(face.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(face.displayName)
-                        }
-                    }
-                    .accessibilityIdentifier("textPanel.face.\(face.postScriptName)")
+            let current = currentFace(of: faces)
+            CanvasMenu(.textFaceMenu, canvasManager: canvasManager, identifier: "\(Self.idPrefix).faceButton",
+                       value: current?.displayName ?? "Regular") {
+                MenuChoices(values: faces, selected: current,
+                            title: \.displayName,
+                            identifier: { "textPanel.face.\($0.postScriptName)" }) { face in
+                    canvasManager.textRecipe.font = face.descriptor
+                    canvasManager.textRecipeDidChange()
                 }
             } label: {
-                menuLabel(title: "Style", value: currentFaceDisplayName(faces))
+                PullDownLabel(title: "Style", value: current?.displayName ?? "Regular", verticalPadding: 6)
             }
-            .accessibilityIdentifier("\(Self.idPrefix).faceButton")
-            .accessibilityValue(currentFaceDisplayName(faces))
         }
     }
 
-    private func currentFaceDisplayName(_ faces: [FontFace]) -> String {
+    /// The face in force: the one the font names, or — a font that names none — the family's Regular,
+    /// which is what the row has always said it was. Ticked and named from this one answer, so the
+    /// menu and its row cannot disagree.
+    private func currentFace(of faces: [FontFace]) -> FontFace? {
         let font = canvasManager.textRecipe.font
-        return faces.first { $0.postScriptName == font.faceName }?.displayName ?? "Regular"
+        return faces.first { $0.postScriptName == font.faceName } ?? faces.first { $0.displayName == "Regular" }
     }
 
     /// Picking a family keeps the traits the artist already chose and finds the nearest face in the
@@ -292,23 +288,6 @@ struct TextSettingsPanel: View {
                 .accessibilityIdentifier("\(Self.idPrefix).\(idSuffix)")
         }
         .padding(.horizontal)
-    }
-
-    private func menuLabel(title: String, value: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title).foregroundColor(.white)
-            Spacer()
-            Text(value)
-                .font(.caption)
-                .foregroundColor(.gray)
-                .lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.gray)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
     }
 
     /// Every typography slider goes through here, so every one of them re-resolves the font and

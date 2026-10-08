@@ -3,7 +3,7 @@ import SwiftUI
 /// The swatch grid every picker tab shows for one palette — the type tabs' "selected palette" section
 /// (item 2) and `PalettesLibraryView`'s per-palette row (item 3) are both this, just with a different
 /// `idPrefix` and always exactly one shared `PaletteStore`/model underneath. Tapping a filled swatch
-/// picks it; long-pressing one offers to delete it (`.contextMenu`, which is itself a long-press).
+/// picks it; long-pressing one offers to delete it (`canvasContextMenu`).
 /// Long-pressing an *empty* cell adds the current colour (Procreate's behaviour) — the leading empty
 /// cell also answers a plain tap, since it is the one call sites relied on as a visible "+" button
 /// before this existed, and there is no reason a long-press-only affordance should be less
@@ -13,6 +13,7 @@ import SwiftUI
 /// so there is always somewhere obvious to long-press.
 struct PaletteSwatchGrid: View {
     @ObservedObject var paletteStore: PaletteStore
+    let canvasManager: CanvasManager
     let palette: Palette
     let currentColor: Color
     let idPrefix: String
@@ -40,11 +41,9 @@ struct PaletteSwatchGrid: View {
                     .accessibilityIdentifier("\(idPrefix).swatch.\(index)")
                     .accessibilityValue(swatch.hex)
                     .onTapGesture { onPick(swatch.color) }
-                    .contextMenu {
-                        Button(role: .destructive) {
+                    .canvasContextMenu(.paletteSwatchMenu, canvasManager: canvasManager) {
+                        MenuItem("Delete Swatch", systemImage: "trash", role: .destructive) {
                             paletteStore.removeColor(swatch, from: palette)
-                        } label: {
-                            Label("Delete Swatch", systemImage: "trash")
                         }
                     }
             }
@@ -95,6 +94,7 @@ struct PaletteSwatchGrid: View {
 /// palette is "active"; only this tab's own button does).
 struct PalettesLibraryView: View {
     @ObservedObject var paletteStore: PaletteStore
+    let canvasManager: CanvasManager
     let currentColor: Color
     var onPick: (Color) -> Void = { _ in }
 
@@ -213,8 +213,8 @@ struct PalettesLibraryView: View {
                 .accessibilityIdentifier("\(idPrefix).delete")
             }
 
-            PaletteSwatchGrid(paletteStore: paletteStore, palette: palette, currentColor: currentColor,
-                              idPrefix: idPrefix, onPick: onPick)
+            PaletteSwatchGrid(paletteStore: paletteStore, canvasManager: canvasManager, palette: palette,
+                              currentColor: currentColor, idPrefix: idPrefix, onPick: onPick)
         }
     }
 }

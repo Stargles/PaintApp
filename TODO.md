@@ -64,15 +64,6 @@ folders, brush groups: **"Yes, all inline"** — through the same `InlineNameFie
 Also ruled, as built: a layer row enters rename from its options' Rename row; a Tap-mode Add replaces a
 drawn loop rather than combining with it.
 
-## Every menu over the canvas is an `AnchoredMenu`
-
-**Status** — not started. A drag that starts outside an open SwiftUI `Menu` (the blend-mode picker and
-about eleven others) closes it and the stroke is cancelled — the first stroke is lost and the canvas says
-"Caught a canvas freeze and fixed it" (BUGS.md; `MenuInterruptionUITests.testDrawingStraightThroughAnOpen
-BlendModeMenu` is red on it). The timeline's four menus are already `AnchoredMenu`s, which (110) made the
-one rule. Ruled 2026-10-07: **the same menu type everywhere** — convert the remaining system `Menu`s, so a
-touch outside closes the menu and still draws.
-
 ## (131) follow-up: Bake on a Repeat layer materialises the loop
 
 **Status** — not started. (131) merged (`2d9fdef`) refusing Bake on a Repeat transformation layer (Repeat

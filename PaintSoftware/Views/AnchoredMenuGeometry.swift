@@ -21,6 +21,13 @@ enum AnchoredMenuPlacement {
     /// the screen clear of the status bar, and one clamped sideways from looking cut off.
     static let margin: CGFloat = 8
 
+    /// How tall a menu of rows may grow before it scrolls — three fifths of the room, so a long list
+    /// (the blend modes and the effect catalogue run to sixty rows) stays a menu hung off its control
+    /// rather than a sheet that covers the canvas it was opened over.
+    static func scrollableHeight(in bounds: CGRect) -> CGFloat {
+        (bounds.height * 0.6).rounded()
+    }
+
     /// The menu's frame, in the same coordinate space as `anchor` and `bounds`.
     ///
     /// - Parameters:
@@ -96,6 +103,10 @@ enum AnchoredMenuDismissal {
     struct Placement: Equatable {
         var menuFrame: CGRect
         var toggleControlFrame: CGRect?
+        /// **The presentation this one is drawn inside, if any** — read off the view hierarchy where it
+        /// is declared (`EnvironmentValues.enclosingPresentation`), not off a table, so a menu raised
+        /// from inside any other menu is nested without anybody having said so.
+        var parent: CanvasPresentation?
     }
 
     /// **Which of the open menus a touch that has just landed takes down** — `shouldDismiss` applied
@@ -103,10 +114,10 @@ enum AnchoredMenuDismissal {
     /// cannot: nesting.
     ///
     /// A menu survives the touch if `shouldDismiss` says so for it, **or if any menu raised from
-    /// inside it survives** (`CanvasPresentation.parent`, followed all the way up). The onion tint
-    /// picker is the case that needs it: it is wider than the onion menu it hangs off, so a touch on
-    /// the picker lands outside the menu's frame, and asked alone the menu would close — taking the
-    /// picker down mid-pick.
+    /// inside it survives** (`Placement.parent`, followed all the way up). The onion tint picker is the
+    /// case that needs it: it is wider than the onion menu it hangs off, so a touch on the picker lands
+    /// outside the menu's frame, and asked alone the menu would close — taking the picker down
+    /// mid-pick.
     static func presentationsToDismiss(touchAt point: CGPoint,
                                        open: [CanvasPresentation: Placement]) -> Set<CanvasPresentation> {
         var kept = Set(open.compactMap { presentation, placement in
@@ -114,10 +125,9 @@ enum AnchoredMenuDismissal {
                           toggleControlFrame: placement.toggleControlFrame) ? nil : presentation
         })
         for survivor in kept {
-            var ancestor = survivor.parent
-            while let next = ancestor {
-                kept.insert(next)
-                ancestor = next.parent
+            var ancestor = open[survivor]?.parent
+            while let next = ancestor, kept.insert(next).inserted {
+                ancestor = open[next]?.parent
             }
         }
         return Set(open.keys).subtracting(kept)

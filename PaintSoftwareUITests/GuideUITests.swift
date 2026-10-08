@@ -57,7 +57,7 @@ final class GuideUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let guideItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.guide")
+        let guideItem = app.buttons["layerOptions.blendMode.guide"]
         XCTAssertTrue(guideItem.waitForExistence(timeout: 5), "The Blend Mode menu must list Guide")
         guideItem.tap()
 

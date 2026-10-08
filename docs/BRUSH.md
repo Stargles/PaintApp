@@ -1922,12 +1922,14 @@ it showing. MEASURED both ways on the simulator. `ToolsAndSelectionUITests`'
 `testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview` drives this screen's Size slider and is
 unchanged, which is the pin that the window still comes up.
 
-**It needs no entry in `CanvasPresentation`, and being a layer is the reason.**
-[MENU_PRESENTATION_CENSUS.md](MENU_PRESENTATION_CENSUS.md)'s registry exists for *system*
-presentations, whose teardown can interrupt a stroke drawn underneath them. This one covers the canvas
-completely and opaquely, so no touch reaches a stroke while it is up and there is nothing for
-`dismissPresentationsOverLiveCanvas()` to close. `activePanel` is left on `.brush` throughout, so
-`CanvasTouchOwner` is fed the value it always was.
+**It needs no entry in `CanvasPresentation` for itself, and being a layer is the reason.**
+[MENU_PRESENTATION_CENSUS.md](MENU_PRESENTATION_CENSUS.md)'s registry exists for presentations that sit
+over a live canvas, whose dismissal must not cost the artist the stroke that closes them. This one
+covers the canvas completely and opaquely, so no touch reaches the canvas while it is up. Its own
+pickers — tip, texture, input, module — are a different matter: they are menus over a surface that takes
+strokes (the pad), so they are `CanvasPresentation.brushEditorMenu`, drawn by the same host as every
+other menu. `activePanel` is left on `.brush` throughout, so `CanvasTouchOwner` is fed the value it
+always was.
 
 Three columns, and the middle one is §2.24's own shape rather than a category list:
 

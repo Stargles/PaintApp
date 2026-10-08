@@ -124,7 +124,7 @@ final class LayerBakeUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "Setup: the value layer is the second row")
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let blur = scrollMenuTo(app, identifier: "layerOptions.blendMode.gaussianblur")
+        let blur = app.buttons["layerOptions.blendMode.gaussianblur"]
         XCTAssertTrue(blur.waitForExistence(timeout: 5), "The Blend Mode menu lists the effects")
         blur.tap()
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "Setup: the drawing is a vector layer")

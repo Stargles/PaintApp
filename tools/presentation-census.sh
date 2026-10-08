@@ -1,18 +1,21 @@
 #!/bin/bash
 # The thirty-second check behind MENU_PRESENTATION_CENSUS.md.
 #
-# Every dismissible presentation in this app is one of three things:
+# Every presentation over the canvas is drawn by the app, in its own hierarchy, as an `AnchoredMenu`:
 #
-#   1. declared through `View.canvasPresentation` (or its drawing-less twin), with a case in
-#      `CanvasPresentation` — drawn in the app's own hierarchy as an `AnchoredMenu`, safe;
-#   2. a `.popover`, anywhere — this script FAILS on one. A UIKit popover over the canvas is torn
-#      down under a live two-finger gesture and strands the canvas recognizers (TODO (110));
-#   3. a `Menu` / `.contextMenu` / `ShareLink`, which UIKit presents itself — listed here so the
-#      count stays honest.
+#   1. declared through `View.canvasPresentation` (a colour picker, a list, a panel), or through
+#      `CanvasMenu` / `canvasContextMenu` (a menu), with a case in `CanvasPresentation` — drawn by
+#      `canvasPresentationHost`, or by `AnimationTimeline`'s layer, and closed by `AnchoredMenuRouter`;
+#   2. never a `.popover`, which this script FAILS on: a UIKit popover over the canvas is torn down
+#      under a live two-finger gesture and strands the canvas recognizers (TODO (110));
+#   3. never a SwiftUI `Menu`, `.contextMenu` or `.confirmationDialog`, which this script FAILS on
+#      outside the gallery: UIKit tears them down under the touch that closes them, and the teardown
+#      cancels the stroke that touch began.
 #
-# `CanvasPresentationLogicTests.testNoPopoverIsDeclaredAnywhereInTheApp` is case 2 again as a real
-# gate: it runs in the fast tier whether or not anybody remembers this script. This stays because it
-# answers in a second, from a shell, with no simulator.
+# `CanvasPresentationLogicTests.testNoPopoverIsDeclaredAnywhereInTheApp` and
+# `testNoSystemMenuIsDeclaredOverTheCanvas` are cases 2 and 3 again as real gates: they run in the fast
+# tier whether or not anybody remembers this script. This stays because it answers in a second, from a
+# shell, with no simulator.
 #
 # Usage: tools/presentation-census.sh          (from the repo root or anywhere inside it)
 
@@ -48,13 +51,26 @@ echo "$sites"
 echo "$(echo "$sites" | awk -F: '{n += $2} END {print n}') call sites, $cases cases in CanvasPresentation."
 
 echo
-echo "== 3. Presentations with no binding to register — MENU_PRESENTATION_CENSUS.md's 12 =="
-# The gallery screen mounts no canvas (ContentView is a `switch screen`), so its menus are not in the
-# census's twelve and are excluded here for the same reason.
-unbindable=$(code_grep '(^|[^A-Za-z0-9_])Menu \{|\.contextMenu|ShareLink\(' \
-             | grep -v "^$app/Views/Gallery")
-echo "$unbindable"
+echo "== 3. SwiftUI Menu, .contextMenu, .confirmationDialog anywhere over the canvas =="
+# The gallery is a different screen (ContentView is a `switch screen`), so no canvas exists for a menu
+# there to cancel a stroke on; its menus are exempt for that reason and no other.
+menus=$(code_grep '(^|[^A-Za-z0-9_.])Menu[[:space:]]*[({]|\.contextMenu\b|\.confirmationDialog\b|\.pickerStyle\(\.menu\)' \
+        | grep -v "^$app/Views/Gallery")
+if [ -n "$menus" ]; then
+    echo "$menus"
+    echo
+    echo "FAIL: a system menu over the canvas is torn down by UIKit under the touch that closes it, which"
+    echo "cancels the stroke that touch began. Use CanvasMenu (tap to open) or .canvasContextMenu (press"
+    echo "and hold) with a case in CanvasPresentation."
+    exit 1
+fi
+echo "none — every menu over the canvas is a CanvasMenu or a canvasContextMenu."
+
 echo
-echo "$(echo "$unbindable" | grep -c .) sites found. The census counts 12: its twelfth is the nested"
-echo "Picker inside MotionGroupRow's .contextMenu, a submenu of a site already listed above."
-echo "See MENU_PRESENTATION_CENSUS.md for what a stroke under each of these actually does."
+echo "== 4. Menus declared =="
+echo "$(code_grep '(^|[^A-Za-z0-9_.])CanvasMenu\(' | wc -l | tr -d ' ') CanvasMenu, $(code_grep '\.canvasContextMenu\(' | wc -l | tr -d ' ') canvasContextMenu."
+
+echo
+echo "== 5. UIKit presentations that remain =="
+# Not menus, and modal rather than anchored: the system share sheet. Listed so the count stays honest.
+echo "$(code_grep 'ShareLink\(')"

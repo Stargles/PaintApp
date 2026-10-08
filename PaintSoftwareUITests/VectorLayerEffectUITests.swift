@@ -71,7 +71,7 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         app.buttons["layerOptions.blendModeButton"].tap()
-        let blurItem = scrollMenuTo(app, identifier: "layerOptions.blendMode.gaussianblur")
+        let blurItem = app.buttons["layerOptions.blendMode.gaussianblur"]
         XCTAssertTrue(blurItem.waitForExistence(timeout: 5), "A vector layer's Blend Mode menu must list the effects")
         blurItem.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]

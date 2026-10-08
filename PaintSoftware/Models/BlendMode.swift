@@ -129,6 +129,21 @@ enum BlendMode: String, Codable, Equatable, CaseIterable {
     /// as its own section before it had a name.
     static let menuGroupTitles = ["Normal", "Darken", "Lighten", "Contrast", "Inversion", "Component/HSL", "Clip"]
 
+    /// The picker's sections: each family under its title.
+    static let menuSections: [(title: String, modes: [BlendMode])] =
+        zip(menuGroupTitles, menuGroups).map { (title: $0, modes: $1) }
+
+    /// The same sections without Clip to Below — for a pick that has no implicit source to resolve
+    /// to, where that mode would silently mean "normal" and read as one that quietly does nothing.
+    ///
+    /// Filtered per section, with the title carried along, rather than dropped from the flat list:
+    /// removing the one-mode Clip group after zipping titles on by index would misalign every title
+    /// after it.
+    static let blendingMenuSections: [(title: String, modes: [BlendMode])] =
+        menuSections
+            .map { (title: $0.title, modes: $0.modes.filter { $0 != .clipToBelow }) }
+            .filter { !$0.modes.isEmpty }
+
     /// Whether this mode is anything other than plain source-over.
     ///
     /// Reads better than `!= .normal` at the call sites that matter — `RenderNode.needsOwnBuffer` and

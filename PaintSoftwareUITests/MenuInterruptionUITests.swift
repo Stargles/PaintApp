@@ -1,29 +1,19 @@
 import XCTest
 
-/// **The measurement `MENU_PRESENTATION_CENSUS.md` asks for**, and the only thing that separates its
-/// twelve UNKNOWNs from twelve more BROKENs.
+/// **What a touch outside an open menu does to the stroke it starts.**
 ///
-/// The census established that a `.popover` here does *not* swallow the touch that dismisses it: the
-/// touch lands outside, the popover starts tearing down, and the same touch goes on to start a
-/// stroke — so the teardown arrives in the middle of a live touch sequence. Seven popovers were
-/// broken that way. Twelve other presentations (`Menu`, `.contextMenu`, the stock `ColorPicker`,
-/// `ShareLink`) present through a different UIKit path — `UIContextMenuInteraction`/`UIMenu` rather
-/// than `UIPopoverPresentationController` — and **nothing in this repo had ever verified which way
-/// that path behaves.** Reading the source cannot answer it; only a touch can.
-///
-/// So this class does the one thing that answers it: opens a blend-mode `Menu` on the layer rail and
-/// draws a stroke straight through it, in the shape of `CanvasTransformFreezeUITests`, which does the
-/// same for the popover case.
-///
-/// **The discriminator is whether the stroke happens at all.** If the menu swallows the touch, no
-/// stroke is drawn, no sequence is interrupted, and the twelve were never broken. If the touch passes
-/// through, the twelve are the popover's family and were broken for the popover's reason.
+/// A menu raised over the canvas has to close on the touch that lands outside it **and** let that touch
+/// do what it was going to do. A SwiftUI `Menu` did the first and wrecked the second: UIKit's teardown
+/// cancelled the stroke the same touch had begun, so the first stroke was drawn, then lost, and the
+/// canvas's wedge detector announced a freeze it had repaired (BUGS.md, 2026-10-07). Every menu is an
+/// `AnchoredMenu` now (`CanvasMenu`), closed by `AnchoredMenuRouter` without consuming the touch, and
+/// this class pins it with the layer's blend-mode menu — the one the owner met it in — and the
+/// timeline's four, which were the first to be anchored.
 ///
 /// **Read the marker, not the raster count.** A new canvas's one layer is a *vector* layer (PLAN §8),
-/// so `readLayerStrokeCount` — which reads the raster tier — is 0 no matter what is drawn. An earlier
-/// draft of this class used it, measured 0 through an open menu, and would have reported "menus are
-/// safe" from a fixture that could not have said anything else. `testTheSameStrokeWithNoMenuOpen…`
-/// below is the control that caught it, and is why it exists.
+/// so `readLayerStrokeCount` — which reads the raster tier — is 0 no matter what is drawn.
+/// `testTheSameStrokeWithNoMenuOpenCommitsNormally` is the control that caught a draft of this class
+/// counting the wrong tier.
 ///
 /// Its own class because `xcodebuild` distributes parallel work per test *class* (see CLAUDE.md), and
 /// this one is short.
@@ -37,18 +27,20 @@ final class MenuInterruptionUITests: PaintUITestCase {
     private let secondStrokeStart = CGVector(dx: 0.28, dy: 0.62)
     private let secondStrokeEnd = CGVector(dx: 0.42, dy: 0.70)
 
-    /// THE MEASUREMENT. Open the layer's blend-mode `Menu`, leave it alone, and draw through it.
+    /// THE DEFECT. Open the layer's blend-mode menu, leave it alone, and draw straight through it: the
+    /// one touch both closes the menu and draws.
     ///
-    /// Four readings, each a separate finding:
+    /// Five readings, each a separate finding:
     ///
-    /// 1. **Does the menu even come down?** A `.popover` is dismissed *by* the outside touch. If a
-    ///    `Menu` is not, the artist's touch never reaches the canvas and there is no interruption to
-    ///    have.
-    /// 2. **Did the stroke reach the canvas?** The layer row's `.vector` marker counts committed
-    ///    `.paint` strokes.
-    /// 3. **Did the next stroke destroy it?** "when the user then starts another stroke, the first
-    ///    stroke disappears" — the symptom, in the owner's words.
-    /// 4. **Is the canvas still alive?** The original freeze: all three transform recognizers wait on
+    /// 1. **Is the menu an `AnchoredMenu` in the app's own hierarchy?** The premise — a UIKit menu
+    ///    would put a `PopoverDismissRegion` behind it instead.
+    /// 2. **Does the touch close it?** A menu left standing over a canvas that is being drawn on is the
+    ///    popover-with-passthrough outcome the owner ruled against.
+    /// 3. **Did the stroke reach the canvas, and stay?** The layer row's `.vector` marker counts
+    ///    committed `.paint` strokes. This is the reading that was 0.
+    /// 4. **Did the canvas say it had to repair itself?** The flight recorder's badge is the app's
+    ///    own announcement that a recogniser was stranded; a clean stroke raises none.
+    /// 5. **Is the canvas still alive?** The original freeze: all three transform recognizers wait on
     ///    the stroke recognizer failing, so one stranded without `reset()` kills pan/pinch/rotate for
     ///    the life of the drawing view.
     func testDrawingStraightThroughAnOpenBlendModeMenu() throws {
@@ -63,60 +55,58 @@ final class MenuInterruptionUITests: PaintUITestCase {
         openBlendModeMenu(app)
         let menuItem = app.buttons["layerOptions.blendMode.multiply"]
         XCTAssertTrue(menuItem.waitForExistence(timeout: 5),
-                      "PREMISE: the blend-mode Menu has to actually be open, or this measures nothing")
+                      "PREMISE: the blend-mode menu has to actually be open, or this measures nothing")
+        XCTAssertTrue(canvasMenu(app, "layerBlendMenu").exists, """
+            The blend-mode menu has to be a presentation drawn by `CanvasPresentationHost`. If this is \
+            missing while its rows are present, the menu is being presented some other way again — a \
+            SwiftUI `Menu`, whose teardown cancels the stroke that closes it.
+            """)
+        XCTAssertFalse(app.otherElements["PopoverDismissRegion"].exists,
+                       "a UIKit presentation is up behind the menu, so it is not an `AnchoredMenu`")
 
-        // The one touch that both dismisses the menu and would start the stroke. **It starts outside the
-        // menu by measurement, not by a fraction of the canvas**: the item is as wide as the menu, so
-        // sixty points left of its edge is canvas whatever the rail beside it is. (A fraction put the
-        // start ten points *inside* the menu until the left rail slimmed, and a touch on the menu's own
-        // surface is the menu's — which is what this test once measured instead of the outside touch.)
+        // The one touch that both closes the menu and starts the stroke. **It starts outside the menu
+        // by measurement, not by a fraction of the canvas**: the row is as wide as the menu, so sixty
+        // points left of its edge is canvas whatever the rail beside it is.
         let item = menuItem.frame
         let outside = CGPoint(x: item.minX - 60, y: item.midY)
         dragInPoints(app, from: outside, to: CGPoint(x: outside.x + 40, y: outside.y + 60))
 
-        let menuSurvived = menuItem.exists
+        // **Read at once, and nothing waited for.** The artist's next touch comes at once, and the old
+        // failure lived in the gap before UIKit had finished tearing the menu down: waiting for the
+        // menu to settle first made the same defect read as a stroke that landed.
+        let menuStillUp = menuItem.exists
         closeChrome(app)
 
         let afterFirst = paintStrokes(app)
 
-        // Reading 3: the reported symptom is that the *next* stroke is what makes the first vanish.
+        // The reported symptom is that the *next* stroke is what makes the first vanish.
         dragOnCanvas(app, from: secondStrokeStart, to: secondStrokeEnd)
         let afterSecond = paintStrokes(app)
 
-        // Reading 4, and the one contract that has to hold whichever way the others come out: a menu
-        // may legitimately swallow its own dismiss touch, but nothing may leave the canvas dead.
+        XCTAssertFalse(menuStillUp,
+                       "the touch outside the menu closes it — a menu left up over a canvas being drawn on is wrong")
+        XCTAssertFalse(app.staticTexts["recorder.flightNotice"].waitForExistence(timeout: 2), """
+            The canvas announced a freeze it had repaired. A stroke drawn through an open menu stranded \
+            a recogniser, which is what a menu torn down by UIKit under the touch does.
+            """)
         assertPinchMovesCanvas(app, canvas, """
             THE FREEZE: two-finger pinch/pan/rotate stopped working after a stroke drawn through an \
-            open blend-mode Menu — see MENU_PRESENTATION_CENSUS.md
+            open blend-mode menu
             """)
 
-        // A touch on the menu's own surface is absorbed by it (MEASURED 2026-08-20, and again
-        // 2026-10-07 with the start moved ten points inside the menu: the menu stands, no stroke
-        // begins). A touch **outside** it is not — MEASURED 2026-10-07 on iPad Pro 13" (M4), iOS 26.5:
-        // the menu comes down, the stroke begins, UIKit's teardown cancels it, and the first stroke is
-        // gone while the canvas's wedge notice fires. That is the popover's family, and the contract
-        // below is what an outside touch has to do instead (BUGS.md, "A touch outside an open `Menu`").
-        XCTAssertTrue(menuSurvived, """
-            The blend-mode `Menu` came down when the artist drew beneath it. That makes it behave the \
-            way this app's `.popover`s do — the outside touch is not swallowed — and the census's \
-            twelve UNKNOWNs are twelve more of the same defect. `CanvasPresentation` cannot cover \
-            them: a `Menu` exposes no `isPresented` binding for the modifier to observe, so the fix \
-            would have to be a different mechanism.
+        XCTAssertEqual(afterFirst, 1, """
+            The stroke that closed the menu was lost. The touch that dismisses a menu has to do what it \
+            was going to do — draw — and not be cancelled by the menu's teardown.
             """)
-        XCTAssertEqual(afterFirst, 0, """
-            A stroke drawn through an open `Menu` reached the canvas. The menu is therefore not \
-            swallowing the touch, and the census's twelve UNKNOWNs are BROKEN — update its counts.
-            """)
-        XCTAssertEqual(afterSecond, 1, """
-            The stroke drawn after the menu was gone did not commit. Whatever a menu does to the \
-            touch that lands beneath it, the *next* touch has to draw normally — a menu that left \
-            the canvas refusing strokes would be the owner's onion-skin symptom in a new place.
+        XCTAssertEqual(afterSecond, 2, """
+            The stroke drawn after the menu was gone did not commit, or it took the first with it — \
+            "when the user then starts another stroke, the first stroke disappears".
             """)
     }
 
     /// The control, and it is what stops the test above passing for the wrong reason. Identical,
-    /// except the menu is dismissed first — so "the menu ate the touch" means something only if the
-    /// very same stroke, through the very same fixture, commits when no menu is open.
+    /// except the menu is dismissed first — so "the stroke landed through the menu" means something
+    /// only if the very same stroke, through the very same fixture, commits when no menu is open.
     ///
     /// **It has already earned its keep once**: the first draft of this class counted raster strokes
     /// on a vector layer, so it measured 0 either way, and this test is what said so.
@@ -130,7 +120,7 @@ final class MenuInterruptionUITests: PaintUITestCase {
         openBlendModeMenu(app)
         let item = app.buttons["layerOptions.blendMode.multiply"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "PREMISE: the menu has to open")
-        dismissMenu(app)
+        tapAway(app)
         XCTAssertTrue(item.waitForNonExistence(timeout: 5), "PREMISE: and be closed again before this stroke")
         closeChrome(app)
 
@@ -138,7 +128,7 @@ final class MenuInterruptionUITests: PaintUITestCase {
 
         XCTAssertEqual(paintStrokes(app), 1, """
             The identical stroke has to commit with no menu open. If it does not, the fixture is not \
-            drawing on the canvas at all and the measurement above means nothing.
+            drawing on the canvas at all and the test above means nothing.
             """)
     }
 
@@ -274,7 +264,8 @@ final class MenuInterruptionUITests: PaintUITestCase {
 
     // MARK: - Fixture
 
-    /// An `AnchoredMenu` by the case it carries. Queried across every element type rather than as
+    /// One of the timeline's own menus by the case it carries (it draws them itself, under a different
+    /// identifier from the ones `canvasMenu` finds). Queried across every element type rather than as
     /// `otherElements`, because what XCUITest calls an accessibility container is SwiftUI's business
     /// and not something this test should be pinning.
     private func anchoredMenu(_ app: XCUIApplication, _ presentation: String) -> XCUIElement {
@@ -318,7 +309,7 @@ final class MenuInterruptionUITests: PaintUITestCase {
         Thread.sleep(forTimeInterval: 0.5)
     }
 
-    /// Opens the layer rail, the first layer's options panel, and its blend-mode `Menu` — the pull-down
+    /// Opens the layer rail, the first layer's options panel, and its blend-mode menu — the pull-down
     /// `LayerUITests.testSettingLayerBlendModeShowsOnRowAndPersists` already drives, stopped one tap
     /// earlier so the menu is left standing.
     private func openBlendModeMenu(_ app: XCUIApplication) {
@@ -332,24 +323,12 @@ final class MenuInterruptionUITests: PaintUITestCase {
         picker.tap()
     }
 
-    /// Closes an open `Menu` without activating anything in it. UIKit puts a full-screen dismiss
-    /// region behind it, the same as it does behind a popover; tapping it is the only way to decline
-    /// the menu, since any tap aimed at the app would land on whatever is underneath once it goes.
-    private func dismissMenu(_ app: XCUIApplication) {
-        let dismissRegion = app.otherElements["PopoverDismissRegion"]
-        if dismissRegion.waitForExistence(timeout: 2) {
-            dismissRegion.tap()
-        } else {
-            app.otherElements["timeline.ruler"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        }
-    }
-
     /// Everything the fixture opened, shut again, so a reading is taken against a bare canvas. The
     /// rail and its options panel overlay the canvas, which is why `vectorMarkerViaPanel` exists in
     /// the base class with the same warning; a pinch or a stroke aimed through open chrome measures
     /// the chrome.
     private func closeChrome(_ app: XCUIApplication) {
-        if app.buttons["layerOptions.blendMode.multiply"].exists { dismissMenu(app) }
+        if app.buttons["layerOptions.blendMode.multiply"].exists { tapAway(app) }
         let close = app.buttons["layerOptions.close"]
         if close.exists { close.tap() }
         hideLayerPanel(app)
