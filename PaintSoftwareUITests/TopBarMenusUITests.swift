@@ -69,8 +69,7 @@ final class TopBarMenusUITests: PaintUITestCase {
     /// right of all those icons)."* (It sat at the top left under TODO (102), above the canvas rather
     /// than at the bottom of the animation bar.)
     ///
-    /// **It is a button that opens a rename sheet, not a live `TextField` anchored in the bar** — see
-    /// `TopToolbar.sceneNameButton`.
+    /// **It is an `InlineNameField`, edited where it stands** — see `TopToolbar.sceneNameField`.
     /// `ProjectStorageUITests.testRetitlingAProjectInTheEditorRenamesItsTileAndItStillOpens` is the
     /// existing coverage that the rename itself still works end to end.
     ///

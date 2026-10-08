@@ -6,9 +6,8 @@ import Foundation
 /// presses their finger, it snaps in 15 degree increments? make it so the user can also do that when
 /// rotating any rotate node. Also have a degree indicator when a rotate node is selected."*
 ///
-/// The smart-shape line had the rule first, written inline in `ShapeGeometry.constrained`; it is here
-/// now and the line asks this like every knob does, so the increment is one number and a snapped line
-/// and a snapped box can never disagree about what a round angle is.
+/// The smart-shape line and every rotate knob ask this, so the increment is one number and a snapped
+/// line and a snapped box can never disagree about what a round angle is.
 ///
 /// Angles are radians, the way every model stores them, and a rotation is **positive clockwise on
 /// screen** — the canvas's y axis points down, which is also what `CGAffineTransform(rotationAngle:)`

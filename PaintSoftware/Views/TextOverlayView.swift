@@ -196,7 +196,6 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         isActive = false
         isHidden = true
         isUserInteractionEnabled = false
-        if textView.isFirstResponder { textView.resignFirstResponder() }
         textView.text = ""
         glyphLayer.contents = nil
         ghostLayer.contents = nil

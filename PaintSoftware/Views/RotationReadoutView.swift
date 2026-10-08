@@ -97,9 +97,9 @@ final class RotationReadoutView: UIView {
     ///
     /// The pill stands off the knob along the line from `box` through it, so it is on the side the
     /// box is not and the pen that holds the knob is not covering it. When that side has no room — a
-    /// knob at the edge of `visible`, which is where the pill used to be clamped on top of the knob or
-    /// hidden under the timeline — it takes the box's side of the knob instead; and whichever it
-    /// ends on is held inside `visible` by `edgeInset`. A knob on its own centre has no side to be on:
+    /// knob at the edge of `visible`, where the pill would sit on top of the knob or under the
+    /// timeline — it takes the box's side of the knob instead; and whichever it ends on is held
+    /// inside `visible` by `edgeInset`. A knob on its own centre has no side to be on:
     /// above it.
     static func centre(forKnob knob: CGPoint, awayFrom box: CGPoint, pillSize size: CGSize,
                        within visible: CGRect) -> CGPoint {

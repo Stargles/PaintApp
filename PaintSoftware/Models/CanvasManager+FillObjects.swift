@@ -81,15 +81,16 @@ extension CanvasManager {
         return beginGradientEdit(elementID: id)
     }
 
-    // MARK: - Shared by the two
+    // MARK: - Shared by every added object
 
     /// The cel an added object lands on, minting what it needs: the active layer when it can take the
-    /// object, otherwise a fresh vector layer (a separate, preceding undo step — `insertImage`'s
-    /// precedent). Settles whatever was pending first, which is what a canvas edit does.
+    /// object, otherwise a fresh vector layer (a separate, preceding undo step). Settles whatever was
+    /// pending first, which is what a canvas edit does. The one answer for a shape, a gradient and a
+    /// picture (`placeImage`, `insertImage`).
     ///
-    /// `vectorOnly` is for the gradient, which exists only as a vector element; a shape also lands
-    /// on a raster layer, through the fill tool's raster arm.
-    private func drawingSurfaceForNewObject(vectorOnly: Bool) -> (layerIndex: Int, celIndex: Int)? {
+    /// `vectorOnly` is for the gradient and the picture, which exist only as vector elements; a shape
+    /// also lands on a raster layer, through the fill tool's raster arm.
+    func drawingSurfaceForNewObject(vectorOnly: Bool) -> (layerIndex: Int, celIndex: Int)? {
         beginCanvasEdit()
         guard canvasSize != nil else { return nil }
         let usable = vectorOnly ? activeLayerKind == .vector : (activeLayerKind?.holdsPixels ?? false)
@@ -224,18 +225,6 @@ extension CanvasManager {
                                    swap: .rewritesInPlace([session.elementID]))
         celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
         return true
-    }
-
-    /// Throws the session's changes away: the list the artist found goes back and nothing is
-    /// recorded. For a caller that must leave the document exactly as it was.
-    func cancelGradientEdit() {
-        guard let session = gradientEdit else { return }
-        gradientEdit = nil
-        defer { refreshUndoRedoState() }
-        guard session.applied else { return }
-        session.vectorCanvas.restoreElements(session.elementsBefore, changedInk: nil,
-                                             rewriting: [session.elementID])
-        celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
     }
 }
 

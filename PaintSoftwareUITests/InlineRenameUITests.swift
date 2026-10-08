@@ -2,7 +2,7 @@ import XCTest
 
 /// **A name is edited where it is shown** — the scene's title in the top bar and a layer's or folder's name
 /// in its row, from a fresh document, the artist's way. Scribble is refused app-wide (`ScribbleRefusal`),
-/// so the tap-to-rename sheet and the rename alerts had no work left and are gone: tap, type, Return — or
+/// so there is no rename sheet or alert to open: tap, type, Return — or
 /// touch anywhere else — and an empty name puts the old one back. `InlineNameFieldLogicTests` holds the
 /// rule; this drives it through the real top bar and the real rail, with the real keyboard.
 ///

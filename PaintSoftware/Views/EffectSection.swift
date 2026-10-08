@@ -317,8 +317,7 @@ struct EffectSettingsBar: View {
             }
         }
         // **The width and the card chrome are `DrawingView`'s** — `BottomDock.width(in:)` and
-        // `.bottomDockCard(width:)`, one definition for the four docked panels (TODO item (49)).
-        // This file used to spell a 560 of its own and paint its own rounded rectangle.
+        // `.bottomDockCard(width:)`, one definition for every docked panel (TODO item (49)).
         //
         // **No identifier on that card.** An accessibility identifier on a container propagates to its
         // descendants and beats their own — the mistake `MaskTuningSection` records at the foot of its
@@ -892,28 +891,13 @@ struct EffectSettingsBar: View {
             // The bracket is `onPresent`/`onDismiss` rather than `.onChange(of: showingColorPicker)`
             // for `LayerOptionsPanel.valueColorRow`'s reason: `.onChange` is silent when the *host*
             // is deleted with the picker still up, which is what a canvas touch does to this whole
-            // rail. This panel used to carry a hand-written `.onDisappear` to catch that; the
-            // modifier runs `onDismiss` however the presentation ends, so it no longer needs one —
-            // and must not have one, since two of them would close the bracket twice.
-            .canvasPresentation(presentation, isPresented: $showingColorPicker,
+            // rail. The modifier runs `onDismiss` however the presentation ends, so this panel
+            // needs no `.onDisappear` — and must not have one, since two of them would close the
+            // bracket twice.
+            .colorPickerPopover(presentation, isPresented: $showingColorPicker,
                                 canvasManager: canvasManager,
-                                onPresent: onEditBegan, onDismiss: onEditEnded) {
-                // **No `.accessibilityIdentifier` on this view — found live, not in review.** One
-                // here stamps that identifier onto *every* descendant XCUITest can see, silently
-                // replacing `ColorPickerPanel`'s own (`colorPanel.hexField`, `colorPanel.svSquare`,
-                // …) with the one string, on every element: the swatch tap starts working, the panel
-                // visibly opens, and then nothing inside it is reachable by the name it actually
-                // carries. `layerPanel.canvasColorButton`'s picker (`LayerPanel.swift`) has no such
-                // wrapper and is what a cold-start XCUITest for TODO (60) reached for by name after
-                // this row's own identifier turned up nothing — `testTheCanvasColourRowOpensTheSame
-                // PickerTheBrushUses` is the proof the panel's identifiers are otherwise intact.
-                // `LayerPanel.swift`'s value-layer swatch and this file's gradient-stop swatch wrap
-                // `ColorPickerPanel` the same broken way and were never driven this deep either — out
-                // of scope here, flagged instead of touched.
-                ColorPickerPanel(color: Binding(get: { color.color }, set: { change($0.effectColor) }))
-                    .frame(width: ColorPickerPanel.popoverSize.width,
-                           height: ColorPickerPanel.popoverSize.height)
-            }
+                                color: Binding(get: { color.color }, set: { change($0.effectColor) }),
+                                onPresent: onEditBegan, onDismiss: onEditEnded)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -1357,32 +1341,22 @@ struct GradientStopsEditor: View {
             // close *and* an open, and a single observer would see one transition where there are
             // two. Every row carries the same `CanvasPresentation` case: only one can be open at a
             // time, since `colorPickerIndex` is one optional index.
-            .canvasPresentation(.effectGradientStopColour,
+            // `supportsOpacity: false` — a stop's alpha is not the artist's to set, since
+            // `Effect.gradientTable` maps luminance to an opaque colour.
+            .colorPickerPopover(.effectGradientStopColour,
                                 isPresented: Binding(get: { colorPickerIndex == index },
                                                      set: { if !$0 { colorPickerIndex = nil } }),
                                 canvasManager: canvasManager,
-                                onPresent: onEditBegan, onDismiss: onEditEnded) {
-                // `supportsOpacity: false` — a stop's alpha is not the artist's to set, since
-                // `Effect.gradientTable` maps luminance to an opaque colour. This is the one
-                // capability the stock `ColorPicker` had that unifying on `ColorPickerPanel` would
-                // have dropped, so the panel grew the same flag rather than the flag being lost.
-                // **No `.accessibilityIdentifier` on this view** — `colorRow`'s fix (`06e4e2e`), the
-                // same bug this file's own header now flags twice over. One here stamps that
-                // identifier onto every descendant XCUITest can see, replacing `ColorPickerPanel`'s
-                // own (`colorPanel.hexField`, …) with the one string. The swatch button above already
-                // carries `effectSettings.gradientStop.\(index).color`.
-                ColorPickerPanel(color: Binding(
-                    get: { stops[index].color.color },
-                    set: { picked in
-                        guard stops.indices.contains(index) else { return }
-                        var updated = stops
-                        updated[index].color = picked.effectColor
-                        onChange(updated)
-                    }
-                ), supportsOpacity: false)
-                .frame(width: ColorPickerPanel.popoverSize.width,
-                       height: ColorPickerPanel.popoverSize.height)
-            }
+                                color: Binding(
+                                    get: { stops[index].color.color },
+                                    set: { picked in
+                                        guard stops.indices.contains(index) else { return }
+                                        var updated = stops
+                                        updated[index].color = picked.effectColor
+                                        onChange(updated)
+                                    }),
+                                supportsOpacity: false,
+                                onPresent: onEditBegan, onDismiss: onEditEnded)
 
             Slider(value: Binding(
                 get: { stops.indices.contains(index) ? stops[index].position : 0 },
@@ -1535,26 +1509,18 @@ struct RecolorEntriesEditor: View {
         // The hex, for the reason `colorRow` gives: it survives the panel closing and reopening, so
         // a test can confirm a pick reached the model rather than only the button it landed on.
         .accessibilityValue(colour.color.hexString)
-        .canvasPresentation(.effectRecolorColour,
+        // `supportsOpacity: false` for `GradientStopsEditor`'s reason: an entry's alpha is not the
+        // artist's to set — the from end is matched on colour alone and the to end is laid down at
+        // the pixel's own coverage.
+        .colorPickerPopover(.effectRecolorColour,
                             isPresented: Binding(get: { colorPicker.map { $0.index == index && $0.end == end } ?? false },
                                                  set: { if !$0 { colorPicker = nil } }),
                             canvasManager: canvasManager,
-                            onPresent: onEditBegan, onDismiss: onEditEnded) {
-            // `supportsOpacity: false` for `GradientStopsEditor`'s reason: an entry's alpha is not
-            // the artist's to set — the from end is matched on colour alone and the to end is laid
-            // down at the pixel's own coverage.
-            // **No `.accessibilityIdentifier` on this view** — the same `colorRow` bug (`06e4e2e`)
-            // found a third time while sweeping this file for TODO's small-defects batch, 2026-09-11.
-            // One here would stamp that identifier onto every descendant XCUITest can see, replacing
-            // `ColorPickerPanel`'s own (`colorPanel.hexField`, …). The swatch button above already
-            // carries `effectSettings.recolorEntry.\(index).\(end)`.
-            ColorPickerPanel(color: Binding(
-                get: { color(index, end).color },
-                set: { picked in write(index, end, picked.effectColor) }
-            ), supportsOpacity: false)
-            .frame(width: ColorPickerPanel.popoverSize.width,
-                   height: ColorPickerPanel.popoverSize.height)
-        }
+                            color: Binding(
+                                get: { color(index, end).color },
+                                set: { picked in write(index, end, picked.effectColor) }),
+                            supportsOpacity: false,
+                            onPresent: onEditBegan, onDismiss: onEditEnded)
     }
 
     /// Arms the eyedropper for this swatch. **Selected while armed for exactly this swatch**, so the

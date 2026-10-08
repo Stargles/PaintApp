@@ -3,10 +3,9 @@ import SwiftUI
 /// TODO (73)'s overhaul, taken further by TODO (106)'s second pass: picker *types* — Triangle (a hue
 /// ring with an HSL triangle inside, Paint Tool SAI/Krita's), Square (the ring+square this picker
 /// always had), Value (H/S/B sliders), and Palettes — switched by a bottom tab bar (icon + label,
-/// Procreate's shape). **Still the app's only colour picker** — the seven call sites (brush, canvas
-/// background, value layer, effect colour, gradient stop, onion tint, selection style) are untouched
-/// by (106) exactly as they were by (73): the public surface (`color`, `supportsOpacity`, `.shared`
-/// `paletteStore`, `popoverSize`) is unchanged, so none of them changed.
+/// Procreate's shape). **The app's only colour picker** — the brush's dropdown and every anchored
+/// swatch (canvas background, value layer, effect colour, gradient stop, recolour pair, gradient end,
+/// onion tint, selection style, through `colorPickerPopover`).
 ///
 /// ## TODO (106), the owner's second pass — what changed and why
 /// - **The Disc type is gone**, whole: the view, the tab, `ColorPickerType.disc`, its tests and the
@@ -75,10 +74,15 @@ struct ColorPickerPanel: View {
     /// only *reads* it (recording happens at the stroke, in `CanvasManager.strokeEnded`).
     @ObservedObject private var historyStore: ColorHistoryStore = .shared
 
-    /// The frame the popover call sites give this panel — anchored presentations, which have an arrow
+    /// The frame `colorPickerPopover` gives this panel — anchored presentations, which have an arrow
     /// and a keyboard to share the screen with, so the Recent strip and the palette scroll in the room
     /// left under the controls.
-    static let popoverSize = CGSize(width: 300, height: 560)
+    private static let popoverSize = CGSize(width: 300, height: 560)
+
+    /// This panel at `popoverSize`.
+    fileprivate func sizedForPopover() -> some View {
+        frame(width: Self.popoverSize.width, height: Self.popoverSize.height)
+    }
 
     /// **How tall the top-toolbar dropdown may grow** (`DrawingView.panelMaxHeight`) — tall enough that
     /// the Recent strip and the whole selected palette are in view without a scroll. The owner,
@@ -110,7 +114,7 @@ struct ColorPickerPanel: View {
     ///
     /// TODO (106): *"Make the color picker itself as big as possible within the GUI (the diameter of
     /// the circle is just under the width of the tab)"* — `popoverSize.width` (300) is that width,
-    /// unchanged since (73) so the panel still fits every one of its seven call sites; 280 is "just
+    /// unchanged since (73) so the panel still fits every one of its call sites; 280 is "just
     /// under" it. The band is ~11% of the radius (140), inside the reference's ~10-12% range and much
     /// thinner than (73)'s quarter of it, so the inner shape gets what the thinner band gives back.
     private static let ringDiameter: CGFloat = 280
@@ -551,6 +555,34 @@ extension Eyedropper.Mode {
         switch self {
         case .layer: return "The eyedropper picks the colour an object was painted in, on whichever layer it is, ignoring effects and blend modes above it."
         case .composite: return "The eyedropper picks the colour you see on the canvas, effects and blend modes included."
+        }
+    }
+}
+
+extension View {
+    /// **A colour picker hung off this view** — `canvasPresentation` drawing a `ColorPickerPanel` at
+    /// its popover size, the one way an anchored picker is built. Every swatch in the
+    /// app that opens one (the canvas background, a value layer, an effect colour, a gradient stop or
+    /// end, an onion tint, the selection style) goes through it, so none of them restates the size or
+    /// the presentation wiring.
+    ///
+    /// **Nothing here, and nothing the caller adds around it, may carry an `.accessibilityIdentifier`.**
+    /// One on the presented view stamps that identifier onto every descendant XCUITest can see,
+    /// silently replacing the panel's own (`colorPanel.hexField`, `colorPanel.svSquare`, …): the swatch
+    /// tap works, the panel opens, and nothing inside it is reachable by the name it carries. The
+    /// swatch button itself carries the identifier that names the control.
+    ///
+    /// `supportsOpacity: false` for a colour whose alpha is not the artist's to set.
+    func colorPickerPopover(_ presentation: CanvasPresentation,
+                            isPresented: Binding<Bool>,
+                            canvasManager: CanvasManager,
+                            color: Binding<Color>,
+                            supportsOpacity: Bool = true,
+                            onPresent: (() -> Void)? = nil,
+                            onDismiss: (() -> Void)? = nil) -> some View {
+        canvasPresentation(presentation, isPresented: isPresented, canvasManager: canvasManager,
+                           onPresent: onPresent, onDismiss: onDismiss) {
+            ColorPickerPanel(color: color, supportsOpacity: supportsOpacity).sizedForPopover()
         }
     }
 }

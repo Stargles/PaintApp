@@ -83,6 +83,33 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
                        "The float must carry the picture that was just imported, and nothing else")
     }
 
+    /// **Where an import lands is `drawingSurfaceForNewObject`'s answer, the one a shape and a gradient
+    /// take**: an empty frame on the active vector layer gets a block spawned on that layer rather than a
+    /// second vector layer, and a layer that cannot hold the picture (a raster one) gets a fresh vector
+    /// layer for it.
+    func testAnImportLandsOnTheActiveVectorLayerOrOnAFreshOneWhereItCannot() {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        manager.layers[manager.currentLayerIndex].cels = []
+        let layersBefore = manager.layers.count
+
+        XCTAssertTrue(manager.insertImage(photo()))
+
+        XCTAssertEqual(manager.layers.count, layersBefore,
+                       "an empty frame on a vector layer is that layer's own block to spawn, not a reason for a second layer")
+        XCTAssertEqual(activeVector(manager)?.images.count, 1)
+
+        manager.addLayer()
+        XCTAssertEqual(manager.activeLayerKind, .raster, "setup: a raster layer is active")
+        let withRaster = manager.layers.count
+
+        XCTAssertTrue(manager.insertImage(photo(.green)))
+
+        XCTAssertEqual(manager.layers.count, withRaster + 1, "a raster layer cannot hold a picture: a vector layer is added")
+        XCTAssertEqual(manager.activeLayerKind, .vector)
+        XCTAssertEqual(activeVector(manager)?.images.count, 1)
+    }
+
     /// **The box is around the picture, not around the drawing.** The failure this catches is a
     /// plausible mis-fix — reaching for `beginVectorWholeCelMove`, which also produces a float and
     /// also passes the test above's "is something floating" reading if that were all it asked.

@@ -906,39 +906,36 @@ struct DrawingView: View {
     /// Height reserved for the top toolbar so the rail never sits on top of it.
     private static let topToolbarClearance: CGFloat = 56
 
-    /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
-    /// gallery/actions icons are leading; brush/fill/layers/color are trailing.
-    ///
-    /// **`.text` is no longer one of these.** It used to be the one leading-aligned *tool* panel,
-    /// because it has no toolbar icon to sit under and dropping it on the leading side kept it near the
-    /// Actions row that opened it. As of 2026-08-27 it docks at the bottom instead (`bottomDock`) and
-    /// this function never sees it.
-    /// How tall a dropdown may grow.
-    ///
-    /// **The brushes menu gets more, and the owner asked for it**: *"The select brush menu could be a
-    /// bit bigger … or at least extended downwards so I can see more brushes."* 420 shows about six
-    /// rows; 640 shows about eleven, which is what their reference has on screen at once.
+    /// How tall a dropdown may grow, by what it holds.
     ///
     /// A number rather than "fill the space", and that is the structural limit worth stating: this
     /// card is positioned inside a `ZStack` with a 60-point top inset and the timeline claims the
     /// bottom of the same stack, so a panel told to fill would run under it. The stack's own height
     /// is not available here — the `GeometryReader` that has it wraps the toolbar/timeline column,
     /// not this branch — so making the menu grow to *exactly* the room available would mean moving
-    /// the panel inside that reader, which changes the layout of every other dropdown. 640 clears
-    /// the timeline at its default height on every iPad this runs on, and it is the cheap half of
-    /// the ask the owner explicitly allowed: *"If the implementation of that is costly, then its
-    /// alright."*
+    /// the panel inside that reader, which changes the layout of every other dropdown. The tallest
+    /// clears the timeline at its default height on every iPad this runs on.
+    private enum DropdownHeight {
+        /// Every menu without a long list: about six rows of the brushes menu.
+        static let menu: CGFloat = 420
+        /// **The brushes menu gets more, and the owner asked for it**: *"The select brush menu could be
+        /// a bit bigger … or at least extended downwards so I can see more brushes."* About eleven
+        /// rows, which is what their reference has on screen at once.
+        static let brushes: CGFloat = 640
+        /// The colour picker's own measure of how much it needs.
+        static let colour = ColorPickerPanel.dropdownHeight
+    }
+
     private var panelMaxHeight: CGFloat {
         switch activePanel {
-        case .brush, .eraser: return 640
-        // TODO (73): the panel's own constant rather than a sixth hand-typed number — this file
-        // already argued against that shape once, for the popover call sites this dropdown isn't one
-        // of, which keep `popoverSize`.
-        case .color: return ColorPickerPanel.dropdownHeight
-        default: return 420
+        case .brush, .eraser: return DropdownHeight.brushes
+        case .color: return DropdownHeight.colour
+        default: return DropdownHeight.menu
         }
     }
 
+    /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
+    /// gallery/actions icons are leading; brush/fill/layers/color are trailing.
     private var panelAlignment: Alignment {
         switch activePanel {
         // Actions/Add/Settings' icons are on the leading side, next to Gallery/Select/Move;

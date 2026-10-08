@@ -159,12 +159,12 @@ final class ScribbleRefusalLogicTests: XCTestCase {
     }
 
     /// A `UIAlertController`'s text fields — what every `.alert` with a `TextField` in this app
-    /// (Rename Layer, Rename Folder, New Folder, Rename Palette, …) is made of, and what no
+    /// (Rename View, Rename Folder, New Folder, Rename Palette, …) is made of, and what no
     /// representable could ever stand in for.
     func testAnAlertsTextFieldCarriesTheRefusal() {
         let root = UIViewController()
         let window = onScreenWindow(root: root)
-        let alert = UIAlertController(title: "Rename Layer", message: nil, preferredStyle: .alert)
+        let alert = UIAlertController(title: "Rename View", message: nil, preferredStyle: .alert)
         alert.addTextField { $0.placeholder = "Name" }
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         root.present(alert, animated: false)
@@ -185,7 +185,7 @@ final class ScribbleRefusalLogicTests: XCTestCase {
             @State var shown = true
             @State var name = ""
             var body: some View {
-                Color.clear.alert("Rename Layer", isPresented: $shown) {
+                Color.clear.alert("Rename View", isPresented: $shown) {
                     TextField("Name", text: $name)
                     Button("OK") {}
                 }

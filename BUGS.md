@@ -4,18 +4,6 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## The re-signer's calendar ceiling fires before the portal will renew, and blames Xcode (2026-10-07)
-
-`~/PaintApp/deploy/resign.sh` ran on its 5-day calendar ceiling at 2026-10-07 15:10 with the profile still
-valid for 8 h; the free-account portal handed back the **same** profile, and the daemon logged *"FAIL —
-portal handed back the same profile … Xcode likely has no usable Apple ID session; sign in"* and notified
-the owner — who found Xcode signed in. MEASURED from the log: on 2026-09-30 the portal minted a new
-profile only once the old one had **expired** (23:15 run, −6485 s), so an early run cannot advance it.
-A same-profile answer while the profile is still valid is "not renewable yet", not a sign-in failure:
-the ceiling should not fire inside a valid profile's life (or should skip quietly when it does), and the
-FAIL/notification should be reserved for a same-profile answer *after* expiry.
-
-
 ## A touch outside an open `Menu` starts a stroke the menu's teardown then cancels (2026-10-07)
 
 **MEASURED** on iPad Pro 13" (M4), iOS 26.5, by `MenuInterruptionUITests.testDrawingStraightThroughAnOpenBlendModeMenu`

@@ -435,6 +435,28 @@ final class BrushTableLogicTests: XCTestCase {
             + "the document opens on another device with strokes drawn by a brush that draws nothing")
     }
 
+    /// **An imported brush's name never repeats a standing one** (`DefaultName`'s rule): importing,
+    /// deleting the first and importing again numbers the new brush past the survivor, where a count of
+    /// the custom brushes gave a second "Custom 2".
+    func testImportedBrushNamesAreNumberedPastTheHighestStanding() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        let stamp = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).image { ctx in
+            ctx.cgContext.setFillColor(UIColor.black.cgColor)
+            ctx.cgContext.fill(CGRect(x: 8, y: 0, width: 16, height: 32))
+        }
+        let first = try manager.importCustomBrush(from: stamp)
+        let second = try manager.importCustomBrush(from: stamp)
+        XCTAssertEqual([first.name, second.name], ["Custom 1", "Custom 2"])
+
+        manager.customBrushes.removeAll { $0.id == first.id }
+        let third = try manager.importCustomBrush(from: stamp)
+
+        XCTAssertEqual(third.name, "Custom 3", "one past the highest standing, so it cannot repeat \"Custom 2\"")
+    }
+
     /// And the other half of the union: a custom brush the artist imported but has **not** drawn with
     /// is in no stroke's table, is in the palette `manifest.json` persists, and still has to travel or
     /// the picker comes back pointing at a file that is not there. Neither population subsumes the

@@ -62,7 +62,7 @@ final class ViewPresetCharacterizationTests: XCTestCase {
                        "The child is hidden by the group, not by its own flag — and it is its own flag the preset stores, so restoring this view hides the group and leaves the child as it was")
     }
 
-    func testViewNamesAreNumberedFromTheCurrentCountAndDoNotRenumberOnDelete() {
+    func testViewNamesNeverRepeatAndDoNotRenumberOnDelete() {
         let manager = CanvasFixture.manager(layerCount: 2)
         manager.addViewPreset()
         manager.addViewPreset()
@@ -74,8 +74,9 @@ final class ViewPresetCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.viewPresets.map(\.name), ["View 2", "View 3"],
                        "Names are assigned once at creation; deleting does not renumber the survivors")
         manager.addViewPreset()
-        XCTAssertEqual(manager.viewPresets.map(\.name), ["View 2", "View 3", "View 3"],
-                       "…so the next view can collide with an existing name. Current behavior, pinned as-is")
+        XCTAssertEqual(manager.viewPresets.map(\.name), ["View 2", "View 3", "View 4"],
+                       "…and the next view is numbered one past the highest standing (`DefaultName`), "
+                       + "so it cannot take a name a survivor already has")
     }
 
     // MARK: - Switching

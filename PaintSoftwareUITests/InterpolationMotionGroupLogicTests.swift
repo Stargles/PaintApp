@@ -501,6 +501,29 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertTrue(manager.motionGroups.isEmpty)
     }
 
+    /// **A name is never handed out twice** (`DefaultName`'s rule): tagging again after the first
+    /// groups stand numbers the new ones past them, where a count of the batch gave a second "Colour 1".
+    func testTaggingByColourTwiceNeverRepeatsAGroupName() throws {
+        let manager = manager()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 4, raster: .empty(size: size),
+                      vector: .empty(size: size))
+        manager.layers[1].cels = [cel]
+        let red = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let blue = CodableColor(red: 0, green: 0, blue: 1, alpha: 1)
+        for (index, points) in rectangleBody(at: CGPoint(x: 40, y: 60)).enumerated() {
+            cel.vector?.addStroke(stroke(points, color: index < 2 ? red : blue))
+        }
+        let ref = CelRef(layerID: manager.layers[1].id, celID: cel.id)
+
+        let first = manager.tagMotionGroupsByStrokeColour(in: [ref])
+        let second = manager.tagMotionGroupsByStrokeColour(in: [ref])
+
+        XCTAssertEqual(first.map(\.displayName), ["Colour 1", "Colour 2"])
+        XCTAssertEqual(second.map(\.displayName), ["Colour 3", "Colour 4"],
+                       "the second batch is numbered past the first, not from 1 again")
+    }
+
     /// One colour is not a grouping — it is the whole-frame group the drawing already had, and
     /// minting a single artist-facing object for it would say nothing. The refusal lives in the model
     /// rather than in the button, so every caller gets it.

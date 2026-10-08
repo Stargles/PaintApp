@@ -79,13 +79,10 @@ struct GradientSettingsPanel: View {
             // The hex rather than the resolved `Color`, so a test can read what the swatch shows and
             // know a pick reached the model.
             .accessibilityValue(color?.color.hexString ?? "")
-            .canvasPresentation(presentation, isPresented: isPresented, canvasManager: canvasManager) {
-                ColorPickerPanel(color: Binding(
-                    get: { color?.color ?? .black },
-                    set: { canvasManager.setGradientColour(end, to: $0) }))
-                    .frame(width: ColorPickerPanel.popoverSize.width,
-                           height: ColorPickerPanel.popoverSize.height)
-            }
+            .colorPickerPopover(presentation, isPresented: isPresented, canvasManager: canvasManager,
+                                color: Binding(
+                                    get: { color?.color ?? .black },
+                                    set: { canvasManager.setGradientColour(end, to: $0) }))
         }
     }
 

@@ -186,9 +186,10 @@ extension LayerKind {
     }
 }
 
-/// **The one rule for the number in an automatic name** — `Layer 3`, `Raster 1`, `Folder 2`, `Mix 1`.
-/// A layer takes it through `LayerKind.nextDefaultName` and a folder through
-/// `CanvasManager.defaultFolderName`, so the two cannot count differently.
+/// **The one rule for the number in an automatic name** — `Layer 3`, `Raster 1`, `Folder 2`, `Mix 1`,
+/// `View 2`, `Group 1`, `Colour 3`, `Custom 1`. A layer takes it through `LayerKind.nextDefaultName`
+/// and a folder through `CanvasManager.defaultFolderName`; a view, an animation or motion group and
+/// an imported brush call `next` directly. None of them can count differently.
 ///
 /// **One more than the highest `<stem> N` already in use, not a count of the things of the kind**,
 /// so a name is never handed out twice while a higher one stands: with `Layer 1` and `Layer 2`,

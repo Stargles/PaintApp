@@ -223,7 +223,7 @@ extension CanvasManager {
         let height = Int(canvasSize.height.rounded())
         // The tap is in canvas points and the flood runs in the layer's own space, where its
         // references are drawn and where the fill lands — TODO (124).
-        let seed = inkPose(forLayerID: layers[layerIndex].id)?.inverse?.applied(to: point) ?? point
+        let seed = layerSpacePoint(point, forLayerID: layers[layerIndex].id)
         let seedX = min(max(Int(seed.x.rounded(.down)), 0), width - 1)
         let seedY = min(max(Int(seed.y.rounded(.down)), 0), height - 1)
         let window = FillWindow.bucket(around: CGPoint(x: seedX, y: seedY), in: canvasSize,
@@ -526,8 +526,7 @@ extension CanvasManager {
     /// there would resume adjusting instead of starting a new one.
     func isPointInPendingFill(at canvasPoint: CGPoint) -> Bool {
         // The fill lives in its layer's own space — `beginInteractiveFill`'s pull-back.
-        let point = fillGestureLayerID.flatMap { inkPose(forLayerID: $0) }?.inverse?.applied(to: canvasPoint)
-            ?? canvasPoint
+        let point = fillGestureLayerID.map { layerSpacePoint(canvasPoint, forLayerID: $0) } ?? canvasPoint
         guard fillGestureActive, let render = fillLastRender, render.window.rect.contains(point) else { return false }
         let pixel = render.window.workingPixel(of: point)
         return render.bytes[(pixel.y * render.window.workingWidth + pixel.x) * 4 + 3] >= fillHalfCoverageAlpha

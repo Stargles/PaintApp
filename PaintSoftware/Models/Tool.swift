@@ -21,12 +21,7 @@ enum Tool: String, Codable, CaseIterable {
 
     /// Place and edit a live text object on the canvas. Entered from the Add menu's "Add Text"
     /// row rather than from a toolbar icon — see `AddMenu` — because the toolbar's slots are spoken
-    /// for and text is reached once per drawing, not once per stroke.
-    ///
-    /// **Inert as of this commit**: the mode can be entered and left, and nothing yet happens on a
-    /// canvas touch. `ADD_TEXT.md` stage 1 is what fills it in; this case exists first and alone so
-    /// the shared plumbing it needs (`ActivePanel.text`, the `activePanel` binding into
-    /// `AddMenu`) lands where it can be bisected to.
+    /// for and text is reached once per drawing, not once per stroke. `ADD_TEXT.md` has the session.
     case text
 
     /// **An object the Add menu primed, waiting for the pen** — TODO (149). Tapping Rectangle,

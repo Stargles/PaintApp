@@ -170,6 +170,13 @@ extension CanvasManager {
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
 
+        // The outline is in canvas points (it was dragged there), pulled into the layer's own space
+        // through the pose it was drawn under — so a shape drawn on a posed layer lands where the
+        // preview showed it. Both tiers take the same pull-back: a raster cel's pixels are the
+        // layer's own too.
+        guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
+                                                            shownThrough: drawnUnder) else { return }
+
         if layers[layerIndex].kind == .vector {
             // A vector layer's cel should always have a VectorCanvas, but stamping into the cel's
             // raster if it somehow doesn't would paint into a buffer a vector layer never displays —
@@ -178,12 +185,7 @@ extension CanvasManager {
                 layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
             }
             if let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
-                guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
-                                                                    shownThrough: drawnUnder) else { return }
                 let elementsBefore = vectorCanvas.elements
-                // The shape outline is in canvas points (it was dragged there), pulled into the
-                // layer's own space through the pose it was drawn under — so a shape drawn on a
-                // posed layer lands where the preview showed it.
                 vectorCanvas.addStroke(canvasSpaceStroke: stroke)
                 // **The whole display list, not the `strokes` bucket**, which is
                 // `registerVectorElementsUndo`'s own argument: `addFill` and `upsertText` append, so
@@ -214,9 +216,6 @@ extension CanvasManager {
             }
         }
 
-        // The raster tier takes the same pull-back as the vector one: its pixels are the layer's own.
-        guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
-                                                            shownThrough: drawnUnder) else { return }
         stampShapeIntoRaster(stroke, raster: layers[layerIndex].cels[celIndex].raster,
                              layerID: layerID, celID: celID)
         scheduleThumbnailRegen(layerID: layerID, celID: celID)

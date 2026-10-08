@@ -16,7 +16,7 @@ extension CanvasManager {
             for layer in layers { vis[layer.id] = layer.isVisible }
             var folderVis: [UUID: Bool] = [:]
             for folder in folders { folderVis[folder.id] = folder.isVisible }
-            let preset = ViewPreset(id: UUID(), name: "View \(viewPresets.count + 1)",
+            let preset = ViewPreset(id: UUID(), name: DefaultName.next(stem: "View", among: viewPresets.map(\.name)),
                                     layerVisibility: vis, folderVisibility: folderVis)
             viewPresets.append(preset)
             activeViewPresetIndex = viewPresets.count - 1

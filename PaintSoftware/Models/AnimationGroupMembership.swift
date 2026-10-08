@@ -284,11 +284,7 @@ extension CanvasManager {
         // cannot leave a group nothing is in and nothing can reach. Its id is a real destination
         // immediately — a fresh group has no track on this cel, so `resolvedPoseMap` answers the
         // identity for it, which is the correct compensation for joining a group that is not animated.
-        let minted: AnimationGroup? = assignment == .newGroup
-            ? AnimationGroup(displayName: "Group \(animationGroups.count + 1)",
-                             tagColor: Self.animationGroupPalette[
-                                 animationGroups.count % Self.animationGroupPalette.count])
-            : nil
+        let minted: AnimationGroup? = assignment == .newGroup ? mintedAnimationGroup() : nil
         let destination: UUID?
         switch assignment {
         case .none: destination = nil

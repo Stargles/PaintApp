@@ -94,7 +94,7 @@ extension CanvasManager {
         if layers[layerIndex].kind == .vector,
            let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
            let existing = vectorCanvas.topmostText(
-               atCanvasPoint: textGestureInkPose?.inverse?.applied(to: canvasPoint) ?? canvasPoint) {
+               atCanvasPoint: Self.layerSpacePoint(canvasPoint, shownThrough: textGestureInkPose)) {
             reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
             return
         }
@@ -352,8 +352,8 @@ extension CanvasManager {
 
     /// **The keyboard goes first, from here, and not as a side effect of the overlay being hidden.**
     /// Ending the session flips `textGestureActive`, SwiftUI re-runs `CanvasView.updateUIView`, and
-    /// the overlay's `deactivate()` hides the editor — which makes UIKit resign its first responder
-    /// *inside SwiftUI's own update pass*. The keyboard goes, but the editor's keyboard avoidance is
+    /// the overlay's `deactivate()` hides the editor — which, with the editor still first responder,
+    /// makes UIKit resign it *inside SwiftUI's own update pass*. The keyboard goes, but the editor's keyboard avoidance is
     /// never told to relay out: MEASURED, the canvas host stays at the height the keyboard pushed it to
     /// (973 pt against 1356) until the next touch, while the same dismissal from a timer callback, outside
     /// any SwiftUI pass, left it at full height every time. Resigning here, in the action that ends the
@@ -364,6 +364,42 @@ extension CanvasManager {
     private func dropTheKeyboardBeforeTheSessionEnds() {
         guard textIsFocused else { return }
         textFocusResigner?()
+    }
+
+    /// What a text session was when it ended: the layer and cel it was placed on, the object a
+    /// re-edit reopened (nil for a new box), the pose the layer was shown through when the box was
+    /// placed, and the draft — read after the keyboard dropped, so the last keystrokes are in it.
+    private struct EndedTextSession {
+        let layerID: UUID?
+        let celID: UUID?
+        let editingID: UUID?
+        let inkPose: PoseMap?
+        let recipe: TextRecipe
+        let frame: TextFrame
+    }
+
+    /// **The one way out of a text session** — `commitInteractiveText` and `cancelInteractiveText`
+    /// differ only in what they do with what was typed. Drops the keyboard, takes the gesture down
+    /// (before `settle` runs, so a canvas edit inside it cannot commit the session again), forgets the
+    /// session's identity, runs `settle` on what it was, then tells observers once it has finished.
+    private func endTextSession(settling settle: (EndedTextSession) -> Void) {
+        dropTheKeyboardBeforeTheSessionEnds()
+        textGestureActive = false
+        textFingerDown = false
+        textIsFocused = false
+        textHandleDrag = nil
+        let ended = EndedTextSession(layerID: textGestureLayerID, celID: textGestureCelID,
+                                     editingID: textEditingElementID, inkPose: textGestureInkPose,
+                                     recipe: textRecipe, frame: textFrame)
+        textGestureLayerID = nil
+        textGestureCelID = nil
+        textGestureInkPose = nil
+        textEditingElementID = nil
+        defer {
+            objectWillChange.send()
+            refreshUndoRedoState()
+        }
+        settle(ended)
     }
 
     /// Bakes the draft into the target cel's raster and registers one undo step for the whole
@@ -384,30 +420,19 @@ extension CanvasManager {
     /// would be a step the artist has to press through to get back to real work.
     func commitInteractiveText() {
         guard textGestureActive else { return }
-        dropTheKeyboardBeforeTheSessionEnds()
-        textGestureActive = false
-        textFingerDown = false
-        textIsFocused = false
-        textHandleDrag = nil
-        let layerID = textGestureLayerID
-        let celID = textGestureCelID
-        let editingID = textEditingElementID
-        let shown = VectorTextElement(id: editingID ?? UUID(), recipe: textRecipe, frame: textFrame)
-        let drawnUnder = textGestureInkPose
-        defer {
-            textGestureLayerID = nil
-            textGestureCelID = nil
-            textGestureInkPose = nil
-            textEditingElementID = nil
-            objectWillChange.send()
-            refreshUndoRedoState()
-        }
+        endTextSession(settling: bakeText)
+    }
+
+    /// `commitInteractiveText`'s body, run once the session is over: lands the draft where its kind of
+    /// layer keeps text.
+    private func bakeText(_ ended: EndedTextSession) {
+        let shown = VectorTextElement(id: ended.editingID ?? UUID(), recipe: ended.recipe, frame: ended.frame)
         // The session's box and type in the layer's own space, so the layer's render puts them back
         // where the artist set them.
-        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: drawnUnder)?.text else { return }
+        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: ended.inkPose)?.text else { return }
         let recipe = drawn.recipe
         let frame = drawn.frame
-        guard let layerID, let celID, let canvasSize,
+        guard let layerID = ended.layerID, let celID = ended.celID, let canvasSize,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
 
@@ -416,7 +441,7 @@ extension CanvasManager {
         // there is no fallback between them. A vector layer keeps a real element; a raster layer
         // gets pixels.
         if layers[layerIndex].kind == .vector {
-            commitTextToVector(recipe: recipe, frame: frame, editingID: editingID,
+            commitTextToVector(recipe: recipe, frame: frame, editingID: ended.editingID,
                                layerIndex: layerIndex, celIndex: celIndex, layerID: layerID, celID: celID)
             return
         }
@@ -601,24 +626,13 @@ extension CanvasManager {
     /// mid-edit leaving a committed object permanently invisible.
     func cancelInteractiveText() {
         guard textGestureActive else { return }
-        dropTheKeyboardBeforeTheSessionEnds()
-        textGestureActive = false
-        textFingerDown = false
-        textIsFocused = false
-        textHandleDrag = nil
-        if let layerID = textGestureLayerID, let celID = textGestureCelID,
-           textEditingElementID != nil,
-           let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
-           let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
+        endTextSession { ended in
+            guard let layerID = ended.layerID, let celID = ended.celID, ended.editingID != nil,
+                  let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+                  let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
+                  let vectorCanvas = layers[layerIndex].cels[celIndex].vector else { return }
             vectorCanvas.editingElementID = nil
             celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }
-        textEditingElementID = nil
-        textGestureLayerID = nil
-        textGestureCelID = nil
-        textGestureInkPose = nil
-        objectWillChange.send()
-        refreshUndoRedoState()
     }
 }

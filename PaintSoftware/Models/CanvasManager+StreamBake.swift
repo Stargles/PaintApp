@@ -99,13 +99,12 @@ extension CanvasManager {
     /// committed, the bake of the new key is the exact picture, and the canvas rests on it as it does
     /// after any edit (`SandwichPresentation.live`).
     @MainActor
-    func liveStreamIsMoving(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil) -> Bool {
-        let frame = frame ?? currentFrame
-        let live = liveStreamLayerIndices(atFrame: frame, walk: precomputed)
+    func liveStreamIsMoving() -> Bool {
+        let live = liveStreamLayerIndices()
         guard !live.isEmpty else { return false }
-        let shownFrames = displayedFrames(atFrame: frame)
+        let shownFrames = displayedFrames(atFrame: currentFrame)
         return live.contains { index in
-            activeCelIndex(inLayer: index, atFrame: shownFrames[index] ?? frame)
+            activeCelIndex(inLayer: index, atFrame: shownFrames[index] ?? currentFrame)
                 .flatMap { layers[index].cels[$0].vector }?.holdsUncommittedStreamFrame == true
         }
     }

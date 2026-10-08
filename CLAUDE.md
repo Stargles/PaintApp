@@ -816,11 +816,16 @@ identifier" — has two causes, and `devicectl list devices` tells them apart. A
 name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
 
 Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
-(hourly, as root; due when the last-installed profile is expired or within 1h of expiring, with an
-unconditional 5-day ceiling as a fallback if profile tracking itself ever breaks — not a fixed
-5-day timer as before, since that let a profile die mid-interval on 2026-09-12. Verifies each build
-actually advanced the profile's expiry before installing, and refuses if Xcode has no usable Apple
-ID session — see BUGS.md). Log: `~/.config/paintapp/resign.log`.
+(hourly, as root; due when the last-installed profile is expired or within 1h of expiring — not a
+fixed timer, since that let a profile die mid-interval on 2026-09-12. Verifies each build actually
+advanced the profile's expiry before installing. **The portal mints a new profile only once the old
+one has expired** (MEASURED 2026-09-23 and 09-30), so a same-profile answer while the profile is
+still valid is a quiet SKIP that wakes the Mac just after expiry; only a same-profile answer *after*
+expiry FAILs and notifies, because it means Xcode has no usable Apple ID session. There is no
+calendar ceiling: it fired inside a valid profile on 2026-10-07 and reported that as a missing
+session.) The script is `~/PaintApp/deploy/resign.sh`, outside git; `--dry-run` with
+`RESIGN_FAKE_NOW`, `RESIGN_STATE_FILE` and `RESIGN_FIXTURE_OLD_EXPIRATION`/`_NEW_EXPIRATION` proves
+the decision logic with no build. Log: `~/.config/paintapp/resign.log`.
 
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.

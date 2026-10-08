@@ -498,12 +498,12 @@ final class BrushEngineLogicTests: XCTestCase {
 
     // MARK: - Display list: importing two images (owner report 7)
     //
-    // `addImageToActiveVectorLayer` used to hard-code every import to the canvas centre with no
-    // cascade, so a second image landed exactly on the first — same stored `position`, same `fit` for
-    // same-aspect images — and nothing in the app could separate them afterwards: Move only carries the
-    // whole cel, and `splitForLassoMove` (below) selects an image purely by its stored centre, so two
-    // bit-identical centres can never be told apart by any loop. The import cascades by a step of canvas
-    // points per picture already on the cel (`CanvasManager.addedImageElement`), and
+    // Every import is centred on the canvas, so without a cascade a second image would land exactly on
+    // the first — same stored `position`, same `fit` for same-aspect images — and nothing in the app
+    // could separate them afterwards: Move only carries the whole cel, and `splitForLassoMove` (below)
+    // selects an image purely by its stored centre, so two bit-identical centres can never be told
+    // apart by any loop. The import cascades by a step of canvas points per picture already on the
+    // cel (`CanvasManager.addedImageElement`), and
     // `VectorCanvas.addImage(canvasSpaceElement:)` maps the canvas-space centre through
     // `_transform.inverted()` before storing (storage is local, like every other element on this
     // canvas), under the one lock acquisition that reads `_transform`.
@@ -523,8 +523,8 @@ final class BrushEngineLogicTests: XCTestCase {
     /// the second image unrecoverable.
     func testAddingTwoImagesToAVectorLayerPlacesThemAtDistinctPositions() throws {
         let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
-        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.red)))
-        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.green)))
+        XCTAssertTrue(fx.manager.insertImage(solidImage(.red)))
+        XCTAssertTrue(fx.manager.insertImage(solidImage(.green)))
         let images = fx.vector.images
         XCTAssertEqual(images.count, 2, "Setup: both imports should have landed")
 
@@ -564,8 +564,8 @@ final class BrushEngineLogicTests: XCTestCase {
     /// second behind — which is only possible at all because the two centres are no longer identical.
     func testALassoLoopAroundOneImageDoesNotSelectTheOther() throws {
         let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
-        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.red)))
-        XCTAssertTrue(fx.manager.addImageToActiveVectorLayer(solidImage(.green)))
+        XCTAssertTrue(fx.manager.insertImage(solidImage(.red)))
+        XCTAssertTrue(fx.manager.insertImage(solidImage(.green)))
         let first = fx.vector.images[0], second = fx.vector.images[1]
         XCTAssertNotEqual(first.transform.position, second.transform.position, "Setup: see the distinct-positions test above")
 
@@ -582,7 +582,7 @@ final class BrushEngineLogicTests: XCTestCase {
     }
 
     /// Undo removes the second import; redo must put back the very same element at the very same
-    /// cascaded offset, not reconstruct a fresh one. `addImageToActiveVectorLayer` binds `element` once
+    /// cascaded offset, not reconstruct a fresh one. `insertImage` binds `element` once
     /// from `VectorCanvas.addImage(canvasSpaceElement:)`'s return value, outside both closures, so redo
     /// replays that captured value — recomputing the cascade inside the redo closure instead (from the
     /// cel's live image count, read at redo time rather than at the moment of the original import) would
@@ -592,8 +592,8 @@ final class BrushEngineLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer()
         manager.currentLayerIndex = 0
-        XCTAssertTrue(manager.addImageToActiveVectorLayer(solidImage(.red)))
-        XCTAssertTrue(manager.addImageToActiveVectorLayer(solidImage(.green)))
+        XCTAssertTrue(manager.insertImage(solidImage(.red)))
+        XCTAssertTrue(manager.insertImage(solidImage(.green)))
 
         guard let celIdx = manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame),
               let vector = manager.layers[0].cels[celIdx].vector else {

@@ -559,56 +559,29 @@ final class CanvasManager: ObservableObject {
         return layers[currentLayerIndex].kind
     }
 
-    /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit,
-    /// cascaded off whatever is already there), participating in the layer's overall transform.
-    /// Returns false if the active layer isn't a vector layer (`insertImage` below falls back to
-    /// creating one). Shapes and video slot in here the same way in future.
-    @discardableResult
-    func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
-        importedImageElement(image) != nil
-    }
-
-    /// `addImageToActiveVectorLayer`'s whole body, returning **which element arrived** rather than
-    /// merely whether one did — the one thing `insertImage` needs and a `Bool` cannot carry.
-    ///
-    /// The public method above stays a `Bool` because that is what its callers ask of it: "did this
-    /// layer take the image". Only the import verb needs the identity, and it needs it to put a Move
-    /// box around exactly the picture that just landed (TODO item (34)); reaching for the last
-    /// element of `vector.images` instead would be a guess about ordering that
-    /// `VectorCanvas.insertionIndex(forKind:in:)` is free to change.
-    private func importedImageElement(_ image: UIImage) -> VectorImageElement? {
-        guard let canvasSize, image.size.width > 0, image.size.height > 0 else { return nil }
-        let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
-        return addedImageElement(image, centre: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
-                                 fit: fit, cascading: true)
-    }
-
-    /// **A picture, laid on the active vector layer exactly where the artist dragged it out** — Add →
-    /// Insert Photo's placement (TODO (149)): centred on `centre`, `width` canvas points across, upright.
-    /// No cascade and no Move box, which are the centred import's own answers to "the artist did not
-    /// say where". A layer that cannot take it (a raster, value or transform layer) gets a fresh vector
-    /// layer first, a separate preceding undo step, as `insertImage` does.
+    /// **A picture, laid on a vector layer exactly where the artist dragged it out** — Add → Insert
+    /// Photo's placement (TODO (149)): centred on `centre`, `width` canvas points across, upright. No
+    /// cascade and no Move box, which are the centred import's own answers to "the artist did not say
+    /// where". A layer that cannot take it gets a fresh vector layer first
+    /// (`drawingSurfaceForNewObject`), a separate preceding undo step, as `insertImage` does.
     ///
     /// - Returns: whether the picture landed.
     @discardableResult
     func placeImage(_ image: UIImage, centre: CGPoint, width: CGFloat) -> Bool {
-        guard image.size.width > 0, image.size.height > 0 else { return false }
-        func place() -> VectorImageElement? {
-            addedImageElement(image, centre: centre, fit: width / image.size.width, cascading: false)
-        }
-        if place() != nil { return true }
-        addVectorLayer()
-        return place() != nil
+        guard image.size.width > 0, image.size.height > 0,
+              let surface = drawingSurfaceForNewObject(vectorOnly: true) else { return false }
+        return addedImageElement(image, centre: centre, fit: width / image.size.width,
+                                 cascading: false, onCelAt: surface) != nil
     }
 
     /// Canvas points between a freshly-imported picture and the one before it — see
     /// `addedImageElement`.
     private static let importCascadeStep: CGFloat = 24
 
-    /// The shared body of the two verbs above: the picture is made in canvas points, carried into the
-    /// layer's own space (`placedInLayerSpace` — so under a pose it is *shown* where it was put, as a
-    /// primed rectangle is), and added to the active vector cel, with the one undo step that takes it
-    /// back and the refresh. Nil when the active layer is not a vector layer or has no cel to put it in.
+    /// The shared body of the two verbs above and below: the picture is made in canvas points, carried
+    /// into the layer's own space (`placedInLayerSpace` — so under a pose it is *shown* where it was
+    /// put, as a primed rectangle is), and added to the vector cel `surface` names, with the one undo
+    /// step that takes it back and the refresh. Nil when that cel holds no vector canvas.
     ///
     /// **A centred import cascades**, `importCascadeStep` canvas points per picture already on the cel,
     /// so a second import does not land exactly on top of the first. Without it two images centred on
@@ -619,26 +592,22 @@ final class CanvasManager: ObservableObject {
     /// what makes undo → redo re-place the same element at the same offset instead of drifting on a
     /// later import. A picture the artist dragged out has already been told apart from its neighbours
     /// by being put there.
-    private func addedImageElement(_ image: UIImage, centre: CGPoint, fit: CGFloat,
-                                   cascading: Bool) -> VectorImageElement? {
-        beginCanvasEdit()
-        guard canvasSize != nil, layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].kind == .vector,
-              let celIdx = displayedCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              let vector = layers[currentLayerIndex].cels[celIdx].vector else { return nil }
+    private func addedImageElement(_ image: UIImage, centre: CGPoint, fit: CGFloat, cascading: Bool,
+                                   onCelAt surface: (layerIndex: Int, celIndex: Int)) -> VectorImageElement? {
+        guard let vector = layers[surface.layerIndex].cels[surface.celIndex].vector else { return nil }
         let imagesBefore = vector.images
         let cascade = cascading ? CGFloat(imagesBefore.count) * Self.importCascadeStep : 0
         let drawn = VectorImageElement(image: image,
                                        transform: LayerTransform(position: CGPoint(x: centre.x + cascade,
                                                                                    y: centre.y + cascade),
                                                                  scale: fit, rotation: 0))
-        let shown = placedInLayerSpace(.image(drawn), onLayerAt: currentLayerIndex).image ?? drawn
+        let shown = placedInLayerSpace(.image(drawn), onLayerAt: surface.layerIndex).image ?? drawn
         let element = vector.addImage(canvasSpaceElement: shown)
-        scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
+        scheduleThumbnailRegen(layerIndex: surface.layerIndex, celIndex: surface.celIndex)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()
-        let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIdx].id
+        let layerID = layers[surface.layerIndex].id
+        let celID = layers[surface.layerIndex].cels[surface.celIndex].id
         recordUndo(label: .insertImage, cost: Self.approximateImageCost(image), undo: { [weak self] in
             vector.images = imagesBefore
             vector.bumpVersion()
@@ -654,27 +623,22 @@ final class CanvasManager: ObservableObject {
     /// Inserts a picture from the pasteboard as a movable vector element — images are always vector
     /// content (resolution-independent, move/rotate/scale with the rest of that layer's transform),
     /// never raster pixels. Adds to the active layer if it's already a vector layer; otherwise creates
-    /// a fresh vector layer first (a separate, preceding undo step — see `addVectorLayer`). Replaces
-    /// the old dedicated "object layer" concept (a whole layer pinned to one image).
+    /// a fresh vector layer first (a separate, preceding undo step — see `addVectorLayer`), scaled to
+    /// fit 80% of the canvas and cascaded off whatever the cel already holds.
     ///
-    /// **Add → Insert Photo no longer comes through here**: the artist says where and how big by
-    /// dragging it out (`placeImage`, TODO (149)). A paste has no gesture to read a place from, which
-    /// is why it is still centred and held in the Move box.
+    /// Add → Insert Photo does not come through here: the artist says where and how big by dragging it
+    /// out (`placeImage`, TODO (149)). A paste has no gesture to read a place from, which is why it is
+    /// centred and held in the Move box.
     ///
     /// **The picture arrives already held** — TODO item (34), the owner's *"when you import images
     /// they appear in the center of the canvas with no move box. Make them have the move box."* The
-    /// import centres the image on the canvas, which is almost never where the artist wants it, and
-    /// until now the only route to moving it was to put the Select tool on, draw a loop around it and
-    /// press Move. The box is Move's own — `beginVectorMove(ofElementIDs:)` is
-    /// `beginVectorChannelMove`'s lift with the set named directly — so every nudge, knob, mirror and
-    /// commit after this is the path a lassoed piece already takes, and the import records its own
-    /// undo step before the lift the way any edit before a Move does.
-    ///
-    /// **Here rather than in `addImageToActiveVectorLayer`, and that seam is the decision.** The box
-    /// belongs to the artist's *import*, not to "put this image on that layer": the second is a
-    /// primitive that a future paste or drop path may want to call several times, and a lift per call
-    /// would settle the previous one at each step. **TODO (104) gave this its Paste caller** —
-    /// `ActionsMenu`'s Paste row, which reads a `UIImage` off `UIPasteboard.general`.
+    /// import centres the image on the canvas, which is almost never where the artist wants it. The box
+    /// is Move's own — `beginVectorMove(ofElementIDs:)` is `beginVectorChannelMove`'s lift with the set
+    /// named directly — so every nudge, knob, mirror and commit after this is the path a lassoed piece
+    /// already takes, and the import records its own undo step before the lift the way any edit before
+    /// a Move does. The lift belongs to this verb and not to `addedImageElement`, which `placeImage`
+    /// shares and which a future drop path may want to call several times: a lift per call would settle
+    /// the previous one at each step.
     ///
     /// **Silent on an in-between**, which is the one frame where Move refuses. `beginVectorMove`
     /// routes through `activeVectorMoveTarget()`, which raises `.cannotMoveDerivedFrame` when it
@@ -682,12 +646,12 @@ final class CanvasManager: ObservableObject {
     /// that succeeded. So the lift is only attempted where it can succeed; the image still lands.
     @discardableResult
     func insertImage(_ image: UIImage) -> Bool {
-        var element = importedImageElement(image)
-        if element == nil {
-            addVectorLayer()
-            element = importedImageElement(image)
-        }
-        guard let element else { return false }
+        guard let canvasSize, image.size.width > 0, image.size.height > 0,
+              let surface = drawingSurfaceForNewObject(vectorOnly: true) else { return false }
+        let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
+        guard let element = addedImageElement(image,
+                                              centre: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                                              fit: fit, cascading: true, onCelAt: surface) else { return false }
         if !activeCelIsInBetween { beginVectorMove(ofElementIDs: [element.id]) }
         return true
     }
@@ -1310,7 +1274,7 @@ final class CanvasManager: ObservableObject {
     /// but the photo picker is on this side of the line now.
     @discardableResult
     func importCustomBrush(from image: UIImage) throws -> Brush {
-        let brush = Brush(name: "Custom \(customBrushes.count + 1)",
+        let brush = Brush(name: DefaultName.next(stem: "Custom", among: customBrushes.map(\.name)),
                           tip: try BrushTipImport.importTip(from: image),
                           size: 24, dab: BrushDabSettings(spacing: 0.12))
         addCustomBrush(brush)
@@ -4365,8 +4329,8 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Renames a folder. Used by the layer options popover, and the one place a folder's
-    /// `hasCustomName` is set — `renameLayer`'s twin.
+    /// Renames a folder. Called with what the artist typed into the row's `InlineNameField`, and the
+    /// one place a folder's `hasCustomName` is set — `renameLayer`'s twin.
     func renameFolder(_ folderID: UUID, to name: String) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
         withStructureUndo(label: .renameFolder) {

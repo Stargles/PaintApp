@@ -639,13 +639,11 @@ final class StrokeCanvasView: CanvasPlaneView {
             : layerID.flatMap { canvasManager?.inkPose(forLayerID: $0) }.flatMap { $0.inverse == nil ? nil : $0 }
         gestureIsLive = true
         applyPose(pose)
-        let scale = pose.flatMap { pose in
-            pose.inverse?.applied(to: canvasPoint).flatMap { pose.homography.localScale(at: $0) }
+        let scale = pose.flatMap {
+            $0.homography.localScale(at: CanvasManager.layerSpacePoint(canvasPoint, shownThrough: $0))
         } ?? 1
         gestureBrushSize = scale > 0 ? brushSize / scale : brushSize
-        gestureClipPath = selectionClipPath.flatMap { clip in
-            pose.flatMap { $0.inverse?.mapped(clip) } ?? clip
-        }
+        gestureClipPath = selectionClipPath.map { CanvasManager.layerSpacePath($0, shownThrough: pose) }
     }
 
     /// The gesture is over: the space goes back to the one the canvas shows the layer in.

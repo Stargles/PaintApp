@@ -778,6 +778,20 @@ final class TransformChannelLogicTests: XCTestCase {
                        "One press, because `animationGroups` is inside the structure snapshot")
     }
 
+    /// **A minted group's name never repeats a standing one** (`DefaultName`'s rule): with "Group 2"
+    /// the survivor of a deleted "Group 1", the next group is "Group 3", where a count gave a second
+    /// "Group 2" — two rows in the channel list differing by nothing.
+    func testAMintedAnimationGroupIsNumberedPastTheHighestStanding() {
+        let manager = CanvasManager()
+        manager.canvasSize = CanvasFixture.canvasSize
+        let tag = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        manager.animationGroups = [AnimationGroup(displayName: "Group 2", tagColor: tag)]
+
+        XCTAssertEqual(manager.mintedAnimationGroup().displayName, "Group 3")
+        manager.animationGroups = []
+        XCTAssertEqual(manager.mintedAnimationGroup().displayName, "Group 1")
+    }
+
     /// **An empty name is refused rather than stored.** `poseChannelName`'s fallback covers a group
     /// that is *missing*, not one that is blank, so a blank name would draw an unpickable row — which
     /// is `renameLayer`'s own rule reached one type over.

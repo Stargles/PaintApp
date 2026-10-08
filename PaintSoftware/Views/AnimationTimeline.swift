@@ -96,7 +96,7 @@ struct AnimationTimeline: View {
 
     // Press-and-hold reorder state for the pinned name column.
     /// The animation group the rename alert is open on, and the text field's draft — the shape
-    /// `LayerPanel`'s own rename alert uses, and `@State` for the reason the popovers just above are:
+    /// `ViewSelectorMenu`'s rename alert uses, and `@State` for the reason the popovers just above are:
     /// there is no rule about it that the model has to be able to see.
     @State private var renamingAnimationGroup: AnimationGroup?
     @State private var animationGroupDraftName = ""

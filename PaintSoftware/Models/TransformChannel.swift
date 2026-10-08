@@ -289,8 +289,26 @@ extension CanvasManager {
     /// is cut, cleared or filled inside it in the layer's pixels is what the artist drew round. The
     /// path itself where nothing poses the layer, and where the pose cannot be inverted (a layer
     /// collapsed to a line, which shows nothing to draw round).
+    static func layerSpacePath(_ canvasPath: CGPath, shownThrough pose: PoseMap?) -> CGPath {
+        pose?.inverse?.mapped(canvasPath) ?? canvasPath
+    }
+
+    /// **A point the artist put on the canvas, in the layer's own space** — `layerSpacePath`'s answer
+    /// for a touch: a fill's seed, a hit test against the fill's pixels, a text box's placement, the
+    /// spot a brush's size is measured at. The point itself where nothing poses the layer, and where
+    /// the pose cannot carry it back.
+    static func layerSpacePoint(_ canvasPoint: CGPoint, shownThrough pose: PoseMap?) -> CGPoint {
+        pose?.inverse?.applied(to: canvasPoint) ?? canvasPoint
+    }
+
+    /// `layerSpacePath(_:shownThrough:)` through the pose layer `id` is shown through right now.
     func layerSpacePath(_ canvasPath: CGPath, forLayerID id: UUID) -> CGPath {
-        inkPose(forLayerID: id)?.inverse?.mapped(canvasPath) ?? canvasPath
+        Self.layerSpacePath(canvasPath, shownThrough: inkPose(forLayerID: id))
+    }
+
+    /// `layerSpacePoint(_:shownThrough:)` through the pose layer `id` is shown through right now.
+    func layerSpacePoint(_ canvasPoint: CGPoint, forLayerID id: UUID) -> CGPoint {
+        Self.layerSpacePoint(canvasPoint, shownThrough: inkPose(forLayerID: id))
     }
 
     /// **Geometry the artist made in canvas points, written into a layer the canvas shows through

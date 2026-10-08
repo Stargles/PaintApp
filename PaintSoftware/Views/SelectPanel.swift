@@ -347,25 +347,21 @@ struct SelectPanel: View {
         // test can read what the swatch opens on. "Mixed" is a value too — it is what the loop says.
         .accessibilityValue(style.color.map { Color(red: $0.red, green: $0.green, blue: $0.blue).hexString
                                                   + (style.colorIsMixed ? " mixed" : "") } ?? "none")
-        .canvasPresentation(.selectionColour, isPresented: $showingColourPicker,
+        .colorPickerPopover(.selectionColour, isPresented: $showingColourPicker,
                             canvasManager: canvasManager,
+                            color: Binding(
+                                get: {
+                                    let colour = canvasManager.selectionStyle.color
+                                    return colour.map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? .black
+                                },
+                                set: { picked in
+                                    let c = picked.rgbaComponents
+                                    canvasManager.previewSelectionEdit(.color(CodableColor(red: c.r, green: c.g,
+                                                                                          blue: c.b, alpha: 1)))
+                                }),
+                            supportsOpacity: false,
                             onPresent: { canvasManager.beginSelectionEdit(.color) },
-                            onDismiss: { canvasManager.commitSelectionEdit() }) {
-            // No `.accessibilityIdentifier` on this view — `EffectSettingsBar.colorRow` found live
-            // that one here stamps the identifier onto every descendant and hides the panel's own.
-            ColorPickerPanel(color: Binding(
-                get: {
-                    let colour = canvasManager.selectionStyle.color
-                    return colour.map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? .black
-                },
-                set: { picked in
-                    let c = picked.rgbaComponents
-                    canvasManager.previewSelectionEdit(.color(CodableColor(red: c.r, green: c.g,
-                                                                          blue: c.b, alpha: 1)))
-                }), supportsOpacity: false)
-                .frame(width: ColorPickerPanel.popoverSize.width,
-                       height: ColorPickerPanel.popoverSize.height)
-        }
+                            onDismiss: { canvasManager.commitSelectionEdit() })
     }
 
     /// One of the two sliders. Touch-down opens the session, every value write previews, lift

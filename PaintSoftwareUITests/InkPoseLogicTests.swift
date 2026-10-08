@@ -72,6 +72,33 @@ final class InkPoseLogicTests: XCTestCase {
                    "the pen's point is not pulled back to where the ink has to be stored")
     }
 
+    /// **The pull-back family answers a point and a path the way it answers an element**: through the
+    /// inverse of the pose the layer is shown through — and with the point or path itself where nothing
+    /// poses the layer, or where the pose cannot be inverted (a layer collapsed to a line).
+    func testThePullBackFamilyCarriesAPointAndAPathBackThroughTheInverse() {
+        let fx = layerUnderMove(CGAffineTransform(translationX: 40, y: -12))
+        let id = fx.manager.layers[fx.ink].id
+        let square = CGPath(rect: CGRect(x: 100, y: 100, width: 10, height: 10), transform: nil)
+
+        assertSame(fx.manager.layerSpacePoint(CGPoint(x: 100, y: 100), forLayerID: id), CGPoint(x: 60, y: 112),
+                   "the pen's point is not pulled back to where the ink is stored")
+        let pulled = fx.manager.layerSpacePath(square, forLayerID: id).boundingBox
+        assertSame(pulled.origin, CGPoint(x: 60, y: 112), "the loop is not pulled back to the stored ink")
+        XCTAssertEqual(pulled.size, CGSize(width: 10, height: 10))
+
+        let bare = CanvasManager()
+        bare.canvasSize = Self.size
+        bare.addVectorLayer()
+        let bareID = bare.layers[0].id
+        assertSame(bare.layerSpacePoint(CGPoint(x: 100, y: 100), forLayerID: bareID), CGPoint(x: 100, y: 100),
+                   "nothing poses this layer, so the point is already in its space")
+        XCTAssertEqual(bare.layerSpacePath(square, forLayerID: bareID).boundingBox, square.boundingBox)
+
+        let collapsed = PoseMap.affine(CGAffineTransform(scaleX: 0, y: 0))
+        assertSame(CanvasManager.layerSpacePoint(CGPoint(x: 5, y: 5), shownThrough: collapsed), CGPoint(x: 5, y: 5),
+                   "a pose that cannot be inverted leaves the point where it is")
+    }
+
     /// **Two transformation layers stacked**: the lower one moves the ink and the upper one carries
     /// the result — inner first. A turn and a slide do not commute, so the reversed order maps the
     /// test point somewhere else entirely.

@@ -199,15 +199,13 @@ struct OnionSkinPanel: View {
         // .testTheCanvasColourRowOpensTheSamePickerTheBrushUses`): the hex read back is what proves a
         // pick reached this side's own binding rather than the other side's or the brush's.
         .accessibilityValue(settings.tint(on: side).swiftUIColor.hexString)
-        .canvasPresentation(side == .previous ? .onionPreviousTintColour : .onionNextTintColour,
+        // `supportsOpacity: false`: a tint's alpha is not the artist's to set
+        // (`OnionSkinFrame.composite` always draws it through `.sourceIn` at the *slot's* opacity,
+        // not the tint's own).
+        .colorPickerPopover(side == .previous ? .onionPreviousTintColour : .onionNextTintColour,
                             isPresented: side == .previous ? $showPreviousTintPicker : $showNextTintPicker,
-                            canvasManager: canvasManager) {
-            // `supportsOpacity: false`, same as the picker it replaced: a tint's alpha was never the
-            // artist's to set (`OnionSkinFrame.composite` always draws it through `.sourceIn` at the
-            // *slot's* opacity, not the tint's own), so this keeps that rather than quietly reopening it.
-            ColorPickerPanel(color: tintColorBinding(side), supportsOpacity: false)
-                .frame(width: ColorPickerPanel.popoverSize.width, height: ColorPickerPanel.popoverSize.height)
-        }
+                            canvasManager: canvasManager,
+                            color: tintColorBinding(side), supportsOpacity: false)
     }
 
     private func tintColorBinding(_ side: OnionSkinSettings.Side) -> Binding<Color> {

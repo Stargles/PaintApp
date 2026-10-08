@@ -12,10 +12,13 @@ toolset, and a frame-by-frame animation timeline.
   custom brush import, and a matching Eraser tool with its own settings
 - **Fill**: GPU (Metal) colour-based flood fill with adjustable threshold/gap-closing/edge-overlap,
   live drag-to-adjust before committing, and per-layer "fill reference" boundaries
-- **Select & Move**: lasso/rectangle/automatic (magic wand) selection, move/duplicate with
-  resize/rotate/mirror, and a selection-clipped paint/fill mode. A loop around a text box and/or a
-  gradient offers **Edit Text** and **Edit Gradient**, one button per kind caught, each opening that
-  object's own panel live
+- **Select & Move**: lasso/rectangle/automatic (magic wand) selection, a **Tap** mode that selects
+  whatever object you tap, move/duplicate with resize/rotate/mirror, and a selection-clipped
+  paint/fill mode. A loop around a text box and/or a gradient (or a tap on one) offers **Edit Text**
+  and **Edit Gradient**, one button per kind caught, each opening that object's own panel live. A
+  turn on any rotate knob shows its angle in a pill beside it, and a finger laid on the glass during
+  a pen drag makes the drag a fifth as fast (**precision touch**) or, on a rotate knob, snaps the
+  turn to 15° steps
 - **Layers**: three kinds — **raster** and **vector** hold pixels, and a **value** layer holds none.
   Plus opacity, visibility, fill-reference toggle, object (photo) layers with on-canvas transform
   handles, and groups that composite as parentheses — isolated or pass-through, with their own
@@ -76,8 +79,10 @@ toolset, and a frame-by-frame animation timeline.
   value layer, effect colour, gradient stop, onion tint and selection style all open the same panel,
   and the only thing that varies between call sites is whether opacity is offered. Plus an
   **eyedropper** on the side rail: select
-  it, tap the canvas, and the colour under the tap becomes the brush colour. It samples the composite
-  (what is on screen, paper included) and reverts to the previous tool
+  it, tap the canvas, and the colour under the tap becomes the brush colour. A switch at the picker's
+  top right chooses **Layer** (the default: the object under the tap in the colour it was painted,
+  on whichever layer it is) or **Canvas** (what is on screen, effects and paper included); it
+  reverts to the previous tool
 - **Gallery**: a project browser with thumbnails, backed by on-disk project packages
 - **Saving**: automatic — a few seconds after you stop editing, and every half minute while you
   do not stop — as well as when you leave to the gallery or the app goes to the background. Each
@@ -182,8 +187,9 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    colour, an effect's colour, a gradient stop, the onion tint and the selection style, differing
    only in whether it offers opacity.
 4. Or take a colour off the artwork: tap the eyedropper below the side rail's opacity slider, then
-   tap the canvas. It samples the **composite** — what you can actually see, paper included — and
-   hands the canvas back to the tool you were using.
+   tap the canvas. In **Layer** mode (the default) it takes the colour the object under the tap was
+   painted in; in **Canvas** mode it takes what you can actually see, effects and paper included. Either
+   way it hands the canvas back to the tool you were using.
 5. Draw with your finger or Apple Pencil (toggle "Apple Pencil only" in the side rail if you want to
    ignore accidental finger/palm touches while drawing with a Pencil). The toggle gates **strokes and
    the fill tool alike**, and the lasso and the eyedropper with them; two-finger pan/zoom/rotate
@@ -206,9 +212,13 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
    — after which your choice sticks through the eye icon.
 
 ### Select & Move
-1. Pick a selection mode (lasso, rectangle, or automatic/magic-wand) from the Select bar.
-2. Draw a selection, then Move/Duplicate/Fill/Clear it, or switch to the Move tool to drag/resize/
-   rotate/mirror the selected (or, with no selection, the whole) layer content.
+1. Pick a selection mode (lasso, rectangle, automatic/magic-wand, or Tap) from the Select bar.
+2. Draw a selection — or, in Tap mode, tap an object (text opens its editor, a gradient its panel);
+   Single/Add/Subtract chooses how a tap meets what is already selected — then Move/Duplicate/Fill/
+   Clear it, or switch to the Move tool to drag/resize/rotate/mirror the selected (or, with no
+   selection, the whole) layer content. While you drag a handle with the pen, a finger on the canvas
+   slows the drag to a fifth; on a rotate knob it snaps the turn to 15° steps, and the angle shows in
+   a pill beside the knob. A smart-shape line snaps the same way.
 3. "Paint Outside Selection" (off by default) controls whether strokes/fills can spill past the
    selection boundary.
 
@@ -261,7 +271,10 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 3. Drag a cel's edges to resize its frame range; scrub the ruler or press Play to preview.
 
 ### Canvas
-- **Actions menu**: Cut/Copy/Paste a selection, flip horizontal/vertical, export.
+- **Actions menu**: Cut/Copy/Paste a selection, flip horizontal/vertical, export. The export sheet
+  makes a video or one frame as a PNG; **Save to Photos** is the primary action, beside the share
+  sheet and Send to Computer, and **Include Padding** (off by default) adds the canvas's padding
+  margin around the artwork.
 - **Settings menu**: resize the canvas, adjust canvas padding (a drawable margin around the artwork),
   bake precise strokes, fingers-can-paint, render resolution.
 - **Add menu**: insert a photo/video, stream a computer's screen, add text, or add a solid
@@ -274,7 +287,9 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
   primed row again, or pick another tool, to put it down. A rectangle, ellipse or gradient is an object of
   the fill tool's own kind; a gradient is an object in a vector layer, not a layer of its own. The text
   panel's font list shows every family set in itself.
-- The document name is editable in the middle of the top bar.
+- The document name is typed into where it stands in the middle of the top bar, and a layer's or
+  folder's name in its row (its options menu's Rename puts the row into editing): Return or a touch
+  anywhere else commits, and an empty name puts the old one back.
 - **Pinch** to zoom, **two-finger rotate/drag** to rotate/pan the canvas.
 
 ## Troubleshooting

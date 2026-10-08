@@ -299,7 +299,8 @@ extension CanvasManager {
         var created: [MotionGroup] = []
         for index in representatives.indices {
             let slot = motionGroups.count + index
-            created.append(MotionGroup(displayName: "Colour \(index + 1)",
+            let names = (motionGroups + created).map(\.displayName)
+            created.append(MotionGroup(displayName: DefaultName.next(stem: "Colour", among: names),
                                        tagColor: Self.motionGroupPalette[slot % Self.motionGroupPalette.count]))
         }
 
@@ -971,7 +972,8 @@ extension CanvasManager {
                 continue
             }
             let index = existing.count + invented.count
-            let group = MotionGroup(displayName: "Group \(index + 1)",
+            let names = (existing + invented).map(\.displayName)
+            let group = MotionGroup(displayName: DefaultName.next(stem: "Group", among: names),
                                     tagColor: motionGroupPalette[index % motionGroupPalette.count])
             claimed.insert(group.id)
             invented.append(group)

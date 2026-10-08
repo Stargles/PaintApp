@@ -4,7 +4,7 @@ import Combine
 /// App-wide history of the last colours actually used to paint — TODO item (73)'s history row, shown
 /// on every picker type tab beside the selected palette (see `ColorPickerPanel`).
 ///
-/// **"Actually used to paint", not "ever opened in the picker".** The seven call sites of
+/// **"Actually used to paint", not "ever opened in the picker".** The call sites of
 /// `ColorPickerPanel` cover the brush, the canvas paper, a value layer's flat colour, an effect's
 /// colour and a gradient stop — most of which are never applied to the canvas with a stroke.
 /// Recording on every colour the picker merely *shows* would flood this list with paper and gradient

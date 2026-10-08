@@ -246,12 +246,9 @@ struct LayerPanel: View {
             // The brush's picker, not a second one — this row is the owner's report ("the canvas
             // color changer is different than the color changer for the brush"). See
             // `ColorPickerPanel`, which grew a `Binding<Color>` for exactly this.
-            .canvasPresentation(.canvasBackgroundColour, isPresented: $showBackgroundColorPicker,
-                                canvasManager: canvasManager) {
-                ColorPickerPanel(color: $canvasManager.canvasBackgroundColor)
-                    .frame(width: ColorPickerPanel.popoverSize.width,
-                           height: ColorPickerPanel.popoverSize.height)
-            }
+            .colorPickerPopover(.canvasBackgroundColour, isPresented: $showBackgroundColorPicker,
+                                canvasManager: canvasManager,
+                                color: $canvasManager.canvasBackgroundColor)
 
             Text("Canvas")
                 .foregroundColor(.white)
@@ -595,11 +592,11 @@ struct LayerOptionsPanel: View {
             // **`onPresent`/`onDismiss` rather than `.onChange(of: showingValueColorPicker)`, and
             // that is the point of the modifier.** `.onChange` does not fire when the *host* is
             // deleted with the picker still up — which is what a canvas touch does to this whole
-            // rail — so this bracket used to need a hand-written `.onDisappear` on the panel to
-            // catch that case. Somebody had to know to write it; the modifier now runs `onDismiss`
-            // however the presentation ends, so nobody does.
-            .canvasPresentation(.valueLayerColour, isPresented: $showingValueColorPicker,
+            // rail — while `onDismiss` runs however the presentation ends, so the bracket needs no
+            // `.onDisappear` of its own.
+            .colorPickerPopover(.valueLayerColour, isPresented: $showingValueColorPicker,
                                 canvasManager: canvasManager,
+                                color: valueColorBinding(index: index),
                                 onPresent: {
                                     guard let index = layerIndex,
                                           canvasManager.layers.indices.contains(index) else { return }
@@ -615,18 +612,7 @@ struct LayerOptionsPanel: View {
                                         canvasManager.commitStructureGesture(label: .valueLayerColor)
                                     }
                                     fillWhenPickerOpened = nil
-                                }) {
-                // **No `.accessibilityIdentifier` on this view** — `EffectSettingsBar.colorRow`'s
-                // fix (`06e4e2e`), the same bug reached through a second door. One here stamps that
-                // identifier onto every descendant XCUITest can see, silently replacing
-                // `ColorPickerPanel`'s own (`colorPanel.hexField`, `colorPanel.svSquare`, …) with the
-                // one string: the popover opens, and nothing inside it is reachable by the name it
-                // actually carries. `layerOptions.valueColorButton` above already identifies the
-                // control that opens it.
-                ColorPickerPanel(color: valueColorBinding(index: index))
-                    .frame(width: ColorPickerPanel.popoverSize.width,
-                           height: ColorPickerPanel.popoverSize.height)
-            }
+                                })
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -1934,9 +1920,8 @@ struct ViewSelectorMenu: View {
         }
         .background(Color.black.opacity(0.95))
         .frame(width: 260, height: 300)
-        // The layer/folder rename alert verbatim — same title shape, same field identifier suffix,
-        // same Cancel/Save pair — so a view's rename looks like every other rename in the app rather
-        // than inventing a fourth spelling of "type a new name".
+        // A view is renamed in an alert; a layer, a folder and the scene's name are edited in place
+        // (`InlineNameField`).
         .alert("Rename View", isPresented: Binding(get: { renamingIndex != nil },
                                                     set: { if !$0 { renamingIndex = nil } })) {
             TextField("Name", text: $draftName)

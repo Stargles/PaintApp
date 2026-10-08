@@ -747,15 +747,21 @@ extension CanvasManager {
         let elements = vector.elements
         guard !moved.isEmpty, elements.contains(where: { moved.contains($0.id) }) else { return nil }
 
-        let group = AnimationGroup(displayName: "Group \(animationGroups.count + 1)",
-                                   tagColor: Self.animationGroupPalette[
-                                       animationGroups.count % Self.animationGroupPalette.count])
+        let group = mintedAnimationGroup()
         animationGroups.append(group)
         vector.elements = elements.map {
             moved.contains($0.id) ? $0.taggedForAnimation(group.id) : $0
         }
         vector.bumpVersion()
         return .group(group.id)
+    }
+
+    /// **The one place an animation group is born** — the next free `Group N` (`DefaultName`'s rule)
+    /// and the next swatch in the cycle. A value, not yet in the registry: a caller that can still
+    /// refuse appends it only once it will not.
+    func mintedAnimationGroup() -> AnimationGroup {
+        AnimationGroup(displayName: DefaultName.next(stem: "Group", among: animationGroups.map(\.displayName)),
+                       tagColor: Self.animationGroupPalette[animationGroups.count % Self.animationGroupPalette.count])
     }
 
     /// Tag colours for freshly minted animation groups, cycled by creation order. Hand-picked for

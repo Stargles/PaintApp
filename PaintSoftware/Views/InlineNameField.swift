@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 /// **A name that is edited where it is shown** — the scene's title in the top bar and a layer's or
-/// folder's name in its row. The owner, 2026-10-02: Scribble is refused app-wide (`ScribbleRefusal`), so
-/// the tap-to-rename sheet and the rename alerts, which only existed to give handwriting a field of its
-/// own, go; a name is typed into where it stands.
+/// folder's name in its row, typed into where it stands rather than in a sheet or an alert (the
+/// owner, 2026-10-02). Scribble is refused app-wide (`ScribbleRefusal`), so there is no handwriting
+/// that needs a field of its own.
 ///
 /// **One rule, so every name behaves alike.**
 ///
