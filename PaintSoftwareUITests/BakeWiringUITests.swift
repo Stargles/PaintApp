@@ -53,8 +53,9 @@ final class BakeWiringUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         setBlendMode(app, layerIndex: 0, to: "multiply")
-        XCTAssertEqual(sandwichState(app), "rest",
-                       "Setup: a blending leaf is the document Core Animation cannot draw")
+        XCTAssertNotNil(waitForSandwich(app, "rest"),
+                        "Setup: a blending leaf is the document Core Animation cannot draw, and the "
+                        + "frame's bake has to land before the canvas rests on it")
 
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
         let afterFirst = waitForSandwich(app, "rest")
